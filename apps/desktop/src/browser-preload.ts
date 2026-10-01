@@ -1,5 +1,7 @@
 import type { IpcRenderer } from "electron";
 import {
+  BROWSER_ACT,
+  BROWSER_SAVE,
   BROWSER_ALLOW_SITE,
   BROWSER_ALLOWED_SITES,
   BROWSER_DRIVE,
@@ -50,6 +52,8 @@ export const makeBrowserBridge = (
         ipc.invoke(BROWSER_SNAPSHOT, { webContentsId, screenshot: options.screenshot }),
       waitFor: (webContentsId, condition) =>
         ipc.invoke(BROWSER_WAIT_FOR, { webContentsId, ...condition }),
+      act: (webContentsId, action) => ipc.invoke(BROWSER_ACT, { webContentsId, action }),
+      save: (webContentsId, urls) => ipc.invoke(BROWSER_SAVE, { webContentsId, urls: [...urls] }),
       drive: (webContentsId, driving) =>
         ipc.invoke(BROWSER_DRIVE, {
           webContentsId,

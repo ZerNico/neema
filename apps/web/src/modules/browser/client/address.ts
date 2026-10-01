@@ -35,3 +35,6 @@ export function hostOf(url: string): string | null {
     return null;
   }
 }
+
+/** What a page is called before and after it names itself. */
+export const pageTitle = (title: string, url: string) => title || hostOf(url) || "New tab";

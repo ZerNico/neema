@@ -3,6 +3,7 @@ import {
   Archive02Icon,
   Brain02Icon,
   ComputerIcon,
+  LaptopPhoneSyncIcon,
   PlugSocketIcon,
   UserCircleIcon,
 } from "@hugeicons/core-free-icons";
@@ -31,8 +32,14 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
   {
     to: "/settings/devices",
     label: "Devices",
-    icon: ComputerIcon,
+    icon: LaptopPhoneSyncIcon,
     matchPrefix: "/settings/devices",
+  },
+  {
+    to: "/settings/computer",
+    label: "This computer",
+    icon: ComputerIcon,
+    matchPrefix: "/settings/computer",
   },
   {
     to: "/settings/archived",

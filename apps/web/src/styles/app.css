@@ -287,10 +287,15 @@ html[data-panel-resizing] webview {
   pointer-events: none !important;
 }
 
-/* Interactive children opt out individually, leaving the row's gaps draggable. */
+/* Interactive children opt out individually, leaving the row's gaps draggable.
+   Panel tabs opt out through one box over the strip's visible part instead
+   (`data-tab-strip-hit`): Electron ignores clipping, so a tab scrolled out of
+   the strip would still block dragging over the header (electron/electron#40610),
+   and tabs inherit their list's region, so nothing in the list declares one. */
 .desktop-header :is(button, a, input, select, textarea, [role="button"], [tabindex]),
 .desktop-header [data-slot="dropdown-menu-trigger"],
-.desktop-panel-strip :is(button, a, [role="button"], [role="tab"], [tabindex], [data-panel-tab]),
+.desktop-panel-strip [data-tab-strip-hit],
+.desktop-panel-strip :is(button, a, [role="button"], [tabindex]):not([role="tablist"] *),
 .desktop-titlebar-corner :is(button, a, [role="button"], [tabindex]) {
   -webkit-app-region: no-drag;
   app-region: no-drag;

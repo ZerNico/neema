@@ -8,20 +8,22 @@ import {
   Folder01Icon,
   FolderSearchIcon,
   FolderTransferIcon,
-  Globe02Icon,
-  Layers01Icon,
   NoInternetIcon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
-  Timer01Icon,
-  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
-import type { ApprovalChoice, PendingKind } from "~/modules/desktop/client/approvals.ts";
-import { deletePathsOf } from "~/modules/desktop/tool-schema.ts";
+import { BROWSER_ACTIVITY } from "~/modules/browser/ui/browser-activity.ts";
+import { isBrowserTool, type BrowserToolName } from "~/modules/browser/tool-schema.ts";
+import {
+  allowsBlanket,
+  type ApprovalChoice,
+  type PendingKind,
+} from "~/modules/desktop/client/approvals.ts";
+import { deletePathsOf, stringArg as text } from "~/modules/desktop/tool-schema.ts";
 import { useLocalFilePreview } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/card.tsx";
@@ -38,7 +40,7 @@ import { activityRowClassName } from "./activity-row.ts";
 
 const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
 
-const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
+const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconSvgElement> = {
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
@@ -51,18 +53,15 @@ const ICONS: Record<DesktopToolActivity["name"], IconSvgElement> = {
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
-  browser_tabs: Layers01Icon,
-  browser_open: Globe02Icon,
-  browser_navigate: Globe02Icon,
-  browser_snapshot: ViewIcon,
-  browser_wait_for: Timer01Icon,
 };
 
-const text = (value: unknown) => (typeof value === "string" ? value : "");
+const iconOf = (name: DesktopToolActivity["name"]) =>
+  isBrowserTool(name) ? BROWSER_ACTIVITY[name].icon : ICONS[name];
 
 /** The argument a reader would want to see: the path, the pattern, the command. */
 const argText = (activity: DesktopToolActivity) => {
   const args = activity.args ?? {};
+  if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].arg(args);
   switch (activity.name) {
     case "run_command":
       return text(args.command);
@@ -75,14 +74,6 @@ const argText = (activity: DesktopToolActivity) => {
       return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
     case "delete_local_file":
       return deletePathsOf(args).join("\n");
-    case "browser_open":
-    case "browser_navigate":
-      return text(args.url) || text(args.action);
-    case "browser_snapshot":
-    case "browser_wait_for":
-      return text(args.tab);
-    case "browser_tabs":
-      return "";
     default:
       return text(args.path);
   }
@@ -110,6 +101,8 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
 
 /** Names the thing acted on, never the machinery that acted. */
 const runningLabel = (activity: DesktopToolActivity) => {
+  if (isBrowserTool(activity.name))
+    return BROWSER_ACTIVITY[activity.name].running(activity.args ?? {});
   const what = argText(activity);
   switch (activity.name) {
     case "list_folder":
@@ -140,16 +133,6 @@ const runningLabel = (activity: DesktopToolActivity) => {
       return what ? `Running ${what}` : "Running a program";
     case "request_network_access":
       return what ? `Requesting network access to ${what}` : "Requesting network access";
-    case "browser_tabs":
-      return "Looking at the browser tabs";
-    case "browser_open":
-      return what ? `Opening ${what}` : "Opening a page";
-    case "browser_navigate":
-      return what ? `Going to ${what}` : "Navigating a tab";
-    case "browser_snapshot":
-      return "Reading the page";
-    case "browser_wait_for":
-      return "Waiting for the page";
   }
 };
 
@@ -207,14 +190,10 @@ const approvalTitle = (
   kind: PendingKind,
   roots: ReadonlyArray<{ name: string; path: string }>,
 ) => {
+  if (kind === "site") return "Open this site in the browser";
+  if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask;
   switch (kind) {
     case "read":
-      if (activity.name.startsWith("browser_"))
-        return activity.name === "browser_tabs"
-          ? "Look at the browser tabs"
-          : activity.name === "browser_navigate"
-            ? "Move this browser tab"
-            : "Read this page";
       return activity.name === "list_folder"
         ? "List this folder"
         : activity.name === "find_files" || activity.name === "search_files"
@@ -224,8 +203,6 @@ const approvalTitle = (
       return "Run a program on this computer";
     case "network":
       return "Allow network access on this computer";
-    case "site":
-      return "Open this site in the browser";
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
@@ -283,8 +260,8 @@ function SiteChoices({ decide }: { decide: (choice: ApprovalChoice) => void }) {
   return (
     <>
       <p className="text-muted-foreground text-xs">
-        “Always” applies to every Work chat on this desktop. You can remove it in Settings ›
-        Devices.
+        “Always” applies to every Work chat on this computer. You can remove it in Settings › This
+        computer.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={() => decide("allow")}>
@@ -305,10 +282,16 @@ function SiteChoices({ decide }: { decide: (choice: ApprovalChoice) => void }) {
 }
 
 const blanketLabel = (kind: PendingKind) =>
-  kind === "command" ? "Let it run programs for this chat" : "Let it change files for this chat";
+  kind === "command"
+    ? "Let it run programs for this chat"
+    : kind === "browser-action"
+      ? "Let it use the browser for this chat"
+      : "Let it change files for this chat";
 
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
+  /** The live call's arguments, which may hold what the transcript never stores. */
+  readonly args?: Readonly<Record<string, unknown>> | null;
   readonly decide: (choice: ApprovalChoice) => void;
 }
 
@@ -330,14 +313,20 @@ function ApprovalCard({
   roots: ReadonlyArray<{ name: string; path: string }>;
 }) {
   const listed = activity.name === "delete_local_file" ? deletePathsOf(activity.args) : [];
-  const what = listed.length > 1 ? "" : argText(activity);
+  // A site question may come from a click: the address is what is asked about.
+  const what =
+    approval.kind === "site"
+      ? text(activity.args?.url)
+      : listed.length > 1
+        ? ""
+        : argText(activity);
   return (
     // Same rhythm as the clarification card: py-4 on the shell, px-4 inside.
     <Card className="mb-3 gap-0 py-4">
       <CardContent className="flex min-w-0 flex-col gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <HugeiconsIcon
-            icon={ICONS[activity.name]}
+            icon={iconOf(activity.name)}
             strokeWidth={2}
             className="size-4 shrink-0"
             aria-hidden
@@ -353,7 +342,8 @@ function ApprovalCard({
         ) : null}
         {approval.kind === "network" ? (
           <p className="text-muted-foreground text-xs">
-            Applies to all Work chats on this desktop. You can remove access in Settings › Devices.
+            Applies to all Work chats on this computer. You can remove access in Settings › This
+            computer.
           </p>
         ) : null}
         {approval.kind === "site" ? (
@@ -361,15 +351,13 @@ function ApprovalCard({
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>
-              {approval.kind === "network" ? "Allow for this desktop" : "Allow"}
+              {approval.kind === "network" ? "Allow on this computer" : "Allow"}
             </Button>
             <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
               Deny
             </Button>
             {/* Deletes and network destinations are always asked about individually. */}
-            {approval.kind !== "delete" &&
-            approval.kind !== "network" &&
-            approval.kind !== "read" ? (
+            {allowsBlanket(approval.kind) ? (
               <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
                 {blanketLabel(approval.kind)}
               </Button>
@@ -403,8 +391,16 @@ export function DesktopActivityBlock({
   // offering a machine it cannot reach. Nothing is read until this is called.
   const preview = useLocalFilePreview(previewablePath(activity));
   if (running && approval)
-    return <ApprovalCard activity={activity} approval={approval} roots={roots} />;
-  const detail = activity.result?.detail ?? "";
+    return (
+      <ApprovalCard
+        activity={approval.args ? { ...activity, args: { ...approval.args } } : activity}
+        approval={approval}
+        roots={roots}
+      />
+    );
+  // A browser result's detail is written for the model (tab handles, outlines,
+  // what to call next); its line already says what happened to the page.
+  const detail = isBrowserTool(activity.name) ? "" : (activity.result?.detail ?? "");
   const violations = activity.result?.violations ?? [];
   const label = activity.result?.summary ?? runningLabel(activity);
 
@@ -413,7 +409,7 @@ export function DesktopActivityBlock({
   const face = (
     <>
       <HugeiconsIcon
-        icon={ICONS[activity.name]}
+        icon={iconOf(activity.name)}
         strokeWidth={2}
         className="size-4 shrink-0"
         aria-hidden

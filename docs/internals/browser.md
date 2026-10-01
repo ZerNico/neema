@@ -72,8 +72,28 @@ panel is resized every `webview` ignores the pointer.
 
 A browser tab is restorable with its address as stored data. `BrowserPanelOwner` in the
 chat view brings a tab back as a discarded page, and the page loads when shown. Closing
-the tab in the panel ends its page. Temporary chats keep no tab. Outside the desktop app,
-restored browser tabs are closed, since nothing can show them.
+the tab in the panel ends its page. A tab in an in-memory profile (a temporary chat's) is
+not restorable, read off its partition, since nothing of it survives. Which chats are
+temporary is recorded in the store, by the chat view and by each browser call's `meta`,
+so every new tab of a chat picks the same profile. Outside the desktop app, restored
+browser tabs are closed, since nothing can show them.
+
+In the desktop app, a web link clicked in the conversation or the panel opens as a tab of the
+chat on screen rather than in the computer's browser: the panel keeps the person in the app and
+shows the real address, so rendered markdown skips its leave-the-app question there. A setting
+under This computer makes the computer's browser the default instead; ⌘ or Ctrl asks for the
+other. Plain links are caught where they are clicked, limited to `data-web-links="panel"`
+containers so links on other pages (an integration's sign-in) keep opening outside. Markdown
+links are buttons that open through Streamdown's link check, so its dialog
+(`~/ui/link-safety.tsx`) is where the browser layer's opener takes over.
+
+The app menu's View items (reload, developer tools, zoom) are written out in `main.ts` rather
+than Electron's `viewMenu` role: a role acts on whatever has focus, which after a click into a
+page is that page, so reloading the app would reload the page instead.
+
+Hovering a link shows its address at the page's bottom corner, as a browser does. The
+webview reports it (`update-target-url`), and the store places that line over the page with
+the page's own geometry, since the page is drawn above everything in the panel.
 
 A tab shows the page's favicon. Main sees each guest's favicon URL, fetches it in the
 page's own session (so logged-in and intranet sites work) and hands the page a small
@@ -94,10 +114,10 @@ bridge:
 - past eight live pages, the least recently shown are discarded: the element goes, the
   address stays
 
-The chat on screen and a page playing sound are never frozen or discarded.
-`browserTabs.hold(conversation)` keeps a chat's live pages fully running. Holds outrank
-the cap, but a hold alone never reloads a discarded page; the call that needs the page
-does.
+The chat on screen and a page playing sound are never frozen or discarded. A chat with
+an answer running on this desktop is held (`browserTabs.setHeld`, from the Work
+snapshot): its live pages run fully. Holds outrank the cap, but a hold alone never
+reloads a discarded page; the call that needs the page does.
 
 A renderer reload is one big discard: tabs come back from their addresses, and logins
 survive in the partition.
@@ -105,12 +125,28 @@ survive in the partition.
 ## The model's browser tools
 
 In Work chats, the model gets `browser_tabs`, `browser_open`, `browser_navigate`,
-`browser_snapshot` and `browser_wait_for`. They are desktop tools: the same family, envelope,
+`browser_snapshot` and `browser_wait_for` to read and move, and `browser_click`, `browser_type`,
+`browser_press`, `browser_scroll`, `browser_select` and `browser_evaluate` to act. They are desktop tools: the same family, envelope,
 `ExternalCompletion` wait and result shape as the file tools. Only two things differ: they are
 offered when the sending app reports `desktopBrowser`, meaning its shell has the bridge's
-`agent` surface, and the page runs them itself (`browser/client/execute-browser.ts`) rather than
-through the Work RPC. A screenshot travels as `result.file`, so it reaches only the next model
-round, only for a vision model, and is never stored.
+`agent` surface, whatever folders the chat has, and the page runs them itself (`browser/client/execute-browser.ts`) rather than
+through the Work RPC. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
+([files](files.md#files-into-tools)), shown to a vision model and offered by reference. The
+user sees one only when the snapshot is taken with `share`, which attaches it to the answer
+and stores it with the chat; the result's first line tells the model which happened, since a
+model that sees a picture assumes the reader does too. With `save` the page writes it into the
+chat's workspace on the computer instead, through the Work bridge, so it never reaches the
+server. Like t3code, the tool set stays small: one snapshot tool with a few flags, no
+full-page mode, rather than a tool per way of looking.
+
+The transcript is for people who never see the tools. A run of browser calls is one row, like
+the web and knowledge rows (`chat/ui/browser-activity-block.tsx`, sharing their
+`useRunDisclosure`): its header names the sites browsed, and it opens onto the steps in plain
+words (`browser/wording.ts`), an element named by what the outline said it was, never `t1`
+or `e12`, with each page linked where the run reached it. Results carry that page as structured
+`page` data for this; their detail is written for the model and never shown. A step waiting on
+the user keeps its approval card under the row. The hint tells the model to keep its handles
+out of its replies too.
 
 - **Tabs** are named `t1`, `t2`, … per chat, kept with the tab's stored data. A tab opened by a
   call remembers that call, so a replayed call finds it instead of opening another. A tab the
@@ -120,16 +156,22 @@ round, only for a vision model, and is never stored.
   thawed by the hold every chat with a live attempt gets.
 - **Reading:** `browser_snapshot` is the accessibility tree from the DevTools protocol, outlined
   by `browser/snapshot.ts` with references like `[e12]` for interactive elements. Those
-  references are kept per tab for later actions. A hidden page may not paint, so a screenshot
-  can be missing, and the result says so.
+  references are kept per tab for later actions. A page that has not painted can fail a
+  capture or never answer one, so each try is bounded and retried, then the protocol renders a
+  frame on demand. If none yields a picture, the result says so.
+- **Scrolling:** `browser_scroll` moves the page, or a scrollable element by reference, by exact
+  pixels with `scrollBy`, and reports how far down it ended up. Never wheel events: those
+  scroll whatever is under the pointer. Clicking and typing scroll their element into view.
 - **Waiting:** `browser_wait_for` checks fixed code in an isolated world, with the text as a
   JSON literal. Nothing from the page or the model runs.
 
 ### Sites
 
-Opening an address is the `"site"` approval kind, decided per call and per registrable domain
-(`browser/site-grants.ts`, `tldts` with private suffixes, so `alice.github.io` is not
-`bob.github.io`).
+Opening an address is the `"site"` approval kind, decided per call and per registrable domain.
+A navigation without one (back, forward, reload) stays where the tab is, so it is a read;
+`approvalKind` takes the call's arguments for this, on the server and in the page alike.
+Domains come from `browser/site-grants.ts` (`tldts` with private suffixes, so
+`alice.github.io` is not `bob.github.io`).
 
 - **Pre-approved:** the server pre-approves an address the generation's URL authority holds,
   meaning one from the user's text or earlier sources, never from assistant prose. It says so
@@ -141,10 +183,76 @@ Opening an address is the `"site"` approval kind, decided per call and per regis
   site.
 - **Storage:** grants live on the machine in `browser-sites.json`, per server origin. Like
   folder and network grants, the server never learns which sites a person trusts. "Always"
-  sites are listed and removable in Settings › Devices.
+  sites are listed and removable in Settings › This computer. The machine never learns that a chat
+  was deleted, so per-chat grants are kept for the 500 chats granted to most recently.
 
 While a call drives a tab, main gates its page: a `will-navigate` or main-frame `will-redirect`
 to a site neither allowed for the chat nor the one this call was allowed to open is cancelled,
-and the call reports it so the model has to ask. Without this, a page could lead an approved
+and main hands the call the address it stopped. The call then asks the person itself, with the
+same site card on its own row, and the page goes on to that address if they allow it, so a
+link the model clicks needs no second call. A refusal is the call's result. Without this, a page could lead an approved
 visit anywhere, including to an address carrying what it read. The person's own browsing is
 never gated.
+
+### Acting on a page
+
+Actions go to main as one `act` call. Main resolves a reference from the tab's latest outline to
+its DOM node, scrolls it into view and clicks its centre with trusted mouse events. The keyboard
+never goes through the protocol: in a `<webview>`, `Input.insertText` and key events go to
+whatever holds the window's focus, which typed the model's text into the app's own message box
+and sent it. Typing runs the page's own editing command on the field, with the text as an
+argument, and a key press is dispatched as key events inside the page, doing what the key does
+(submitting a form, deleting, moving focus) there too. A click by coordinates is mapped from the last screenshot's pixels through its recorded
+scale. References and that scale are dropped on every main-frame navigation, and a stale one
+says "take a new snapshot" rather than clicking whatever is there now.
+
+- **Replays:** each action remembers its call id per tab in main, so a replayed call returns
+  the first result instead of acting twice. An action that failed to reach the page is
+  forgotten, so its replay may try again.
+- **One at a time:** a tab runs one call at a time. An action is several protocol steps, and two
+  interleaved would type into each other's fields; they would also share the tab's one gate.
+- **Driving:** every action runs driven, through the same navigation gate as a page load, with
+  the site the page is already on allowed too: being there was allowed one way or another
+  (once, from the user's text, or by the person). A click that leads somewhere unapproved is
+  stopped and reported, so the model has to ask. The gate comes off whatever happens, but only
+  once main is done acting, since an action still running after Stop may yet navigate. An
+  action's result is kept as soon as main returns it, so a slow load afterwards never makes a
+  click that happened look like one that did not, which the model would repeat.
+- **Code:** `browser_evaluate` runs the model's expression in an isolated world, with a
+  10-second limit and a capped JSON result labelled as data. It sees the DOM but none of the
+  page's scripts. At the limit, if the page cannot answer a trivial expression, its thread is
+  busy and the script is terminated through the DevTools protocol, since a loop would keep the
+  tab from every later call. Otherwise the code is only waiting and is left alone: terminating
+  then would end the page's own next script instead.
+- **Approvals:** click, type, press, select and evaluate are the `"browser-action"` kind with
+  change semantics. They ask under manual and automatic approval, and run under "reads and
+  changes" or after "Let it use the browser for this chat". Scrolling is a read. The card shows
+  the code it is asked to run, and names an element by what the tab's last outline said it was
+  (`link "Learn more"`), which the page remembers per tab and address, not by its reference.
+- **Secrets:** what `browser_type` types reaches only the call the page runs; the tool row and
+  the live chunks never hold it, flagged or not, because a model that forgets `sensitive`
+  would otherwise store a password before the page could refuse it. An approval card reads
+  the text from the waiting call in memory, masked when `sensitive`. A password field refuses
+  text not marked `sensitive`, and a field a secret went into reads as masked in every later
+  snapshot of that page. The prompt tells the model to type a secret only when the user gave
+  it for that site, and to ask with `ask_user` for logins and captchas.
+- **Indicator:** from an answer's first call in a tab until the answer stops running, a frame is
+  laid over the page (an element of its own: the page paints over its element's edges, and its
+  box runs to the window's) and a "Working on …" note with the composer's Stop takes the address row's place
+  at its height, so it neither flickers between calls nor moves the page. The chat's sidebar row shows a globe in
+  place of its spinner.
+
+`browser_save` is how the model saves files it finds: given their addresses, main fetches them
+with the tab's own session and lands them in the chat's workspace. From main no page's
+cross-origin rules apply, and files behind the user's logins come too. It runs driven, through
+the same gate as navigation: the tab's site and the chat's allowed sites are fetched at once, and
+for any other the call asks the user mid-call and fetches what they allow. Clicking download
+links one by one was the alternative, and cross-site links navigate instead of downloading.
+
+A file a driven page downloads (a link the model clicks, or one `browser_evaluate` starts) lands
+in the chat's Work workspace, never in a dialog over the app, and the call reports where. Main
+claims a download for the chat while its call drives the tab and afterwards until the person
+next clicks or types in that tab (ten minutes at most), since a click starts one a moment later
+and a script may after it returned; releasing the tab waits for downloads under way. Downloads the person starts keep the Save dialog. This is how t3code lets
+an agent save what it finds; our version writes into the workspace, where files and commands
+can use it.

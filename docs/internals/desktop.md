@@ -439,7 +439,7 @@ level, without a blanket option. The connected web app is trusted to relay that
 decision to the desktop, which validates the exact hostname. Canonical hostnames
 are persisted as a JSON array in the local profile. Each grant affects new proxy
 connections across all its chats and connected servers,
-and can be removed in Settings › Devices. Command auto-approval never grants
+and can be removed in Settings › This computer. Command auto-approval never grants
 network access. The model must explicitly run or retry its command. Existing tunnels
 are not torn down by revocation. Commands from different chats run concurrently;
 start, reset and the Windows install wait for running commands to drain, while
@@ -504,7 +504,8 @@ confirmation rather than one per file. An allowed command can also delete
 files; this is not a deletion safeguard. Conversation-scoped
 blanket edit grants never cover commands or deletes, and manual reads have no
 blanket grant. Opening a site in the embedded browser is its own "site" kind,
-decided per registrable domain and never covered by a blanket grant; see
+decided per registrable domain and never covered by a blanket grant; acting on a
+page is the "browser-action" kind, with change semantics. See
 [the embedded browser](browser.md). These decisions outlive route changes but not
 the authenticated execution host. Approval cards remain actionable while generation is streaming,
 because the handler is waiting rather than finished.
@@ -515,14 +516,16 @@ Full local file bytes are transient. Text reads and JS search pull a bounded
 prefix from disk rather than buffering the whole file; edits refuse a file
 larger than a write. Images and PDFs become model file parts where supported,
 with server extraction fallback; persisted tool rows and chunks retain only
-bounded summaries. `import_local_file` is the same read under the same consent,
+bounded summaries. Every returned file also becomes a `local` working file of the
+attempt that tools can take and `publish_file` can deliver ([files](files.md#files-into-tools)).
+`import_local_file` is the same read under the same consent,
 but its bytes are for server tools rather than the model. `readBinary` names its purpose,
 `view` or `import`, on every call, and only an import admits Office files: a PNG, JPEG,
 PowerPoint or Excel workbook becomes a `local` working file of the attempt, and the model
 gets only its `working:` reference, so presentation or spreadsheet tools can place or open it. It is never stored and dies with
-the attempt; the way back to disk is publishing and `save_to_workspace`. The import
-rewrites the very part the continuation replays, which is why the generic desktop
-byte-stripping skips it. The page's result is untrusted: summary, detail and file
+the attempt; the way back to disk is publishing and `save_to_workspace`. The result
+handler rewrites the very part the continuation replays, dropping the bytes and adding the
+reference, before anything can show the file to the model. The page's result is untrusted: summary, detail and file
 bytes are capped at one attachment's size and classified once, like any stored file, in the
 server function that accepts them,
 before they reach the model or process memory; the generation loop only checks

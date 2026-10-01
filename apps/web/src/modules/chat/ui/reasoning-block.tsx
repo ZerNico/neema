@@ -13,6 +13,7 @@ import {
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 import { activityRowClassName } from "./activity-row.ts";
+import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
 /**
  * ChatGPT-style thinking section above an assistant answer.
@@ -83,6 +84,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
           className={cn(disclosureBodyRailClassName, "max-h-56 overflow-y-auto leading-relaxed")}
         >
           <Streamdown
+            linkSafety={LINK_SAFETY}
             mode={active ? "streaming" : "static"}
             parseIncompleteMarkdown
             plugins={markdownPlugins}

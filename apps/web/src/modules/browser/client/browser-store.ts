@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { BrowserLifecycle } from "@chat/desktop-rpc";
+import type { BrowserLifecycle, DesktopBrowser } from "@chat/desktop-rpc";
 
 /** The parts of Electron's `<webview>` element the page uses. */
 export interface WebviewElement extends HTMLElement {
@@ -22,6 +22,13 @@ export interface BrowserTab {
   readonly openedBy: string | null;
   /** When the model last asked for it to be shown; the panel follows newer requests. */
   readonly revealAt: number;
+  /** The call acting through the tab right now; the page is gated while set. */
+  readonly driving: { readonly messageId: string; readonly generationId: string } | null;
+  /**
+   * The answer that has acted in the tab and is still running, so the panel
+   * shows it steadily (and offers Stop) rather than flickering per call.
+   */
+  readonly usedBy: { readonly messageId: string; readonly generationId: string } | null;
   /** The chat the page belongs to, or `page:<path>` for a page that is not one. */
   readonly owner: string;
   readonly partition: string;
@@ -60,15 +67,28 @@ let tabs: ReadonlyMap<string, BrowserTab> = new Map();
 const listeners = new Set<() => void>();
 const webviews = new Map<string, WebviewElement>();
 const placements = new Map<string, Placement>();
+// The hovered link's address under each page, laid over it like the page itself.
+const statuses = new Map<string, HTMLElement>();
+// The frame drawn over a page an answer works in: the page paints over anything
+// drawn on its own element, and its box runs to the window's edge.
+const frames = new Map<string, HTMLElement>();
 const shown = new Set<string>();
-const holds = new Map<string, number>();
-// Chats with an answer running on this desktop, from the Work snapshot.
-let attemptHolds: ReadonlySet<string> = new Set();
-const temporaryOwners = new Set<string>();
+
+/** What the store knows about the chats that own pages, apart from the pages. */
+export interface BrowserOwners {
+  /** Chats with an answer running on this desktop, whose pages stay fully alive. */
+  readonly held: ReadonlySet<string>;
+  /** Temporary chats, which browse in memory and keep no tabs. */
+  readonly temporary: ReadonlySet<string>;
+}
+let owners: BrowserOwners = { held: new Set(), temporary: new Set() };
 
 const emit = () => {
   for (const listener of listeners) listener();
 };
+
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+  a.size === b.size && [...a].every((item) => b.has(item));
 
 const commit = (next: Map<string, BrowserTab>) => {
   tabs = next;
@@ -89,6 +109,8 @@ const blank = (id: string, input: TabInput, live: boolean): BrowserTab => ({
     input.label && !labelTaken(input.owner, input.label) ? input.label : nextLabel(input.owner),
   openedBy: input.openedBy ?? null,
   revealAt: 0,
+  driving: null,
+  usedBy: null,
   owner: input.owner,
   partition: input.partition,
   url: input.url,
@@ -120,6 +142,25 @@ const apply = (id: string) => {
   const visible = shown.has(id);
   element.style.visibility = visible ? "visible" : "hidden";
   element.style.pointerEvents = visible ? "auto" : "none";
+  const frame = frames.get(id);
+  if (frame) {
+    if (placement) {
+      frame.style.left = `${placement.left}px`;
+      frame.style.top = `${placement.top}px`;
+      frame.style.width = `${placement.width}px`;
+      frame.style.height = `${placement.height}px`;
+    }
+    frame.style.visibility = visible ? "visible" : "hidden";
+  }
+  const status = statuses.get(id);
+  if (!status) return;
+  // At the page's bottom left, as a browser shows it, never wider than most of it.
+  if (placement) {
+    status.style.left = `${placement.left}px`;
+    status.style.top = `${placement.top + placement.height}px`;
+    status.style.maxWidth = `${Math.round(placement.width * 0.7)}px`;
+  }
+  status.style.visibility = visible ? "visible" : "hidden";
 };
 
 const labelTaken = (owner: string, label: string) =>
@@ -172,6 +213,22 @@ export const browserTabs = {
     } else webviews.delete(id);
   },
 
+  /** The element showing a hovered link's address over the page, or null as it goes. */
+  attachStatus(id: string, element: HTMLElement | null) {
+    if (element) {
+      statuses.set(id, element);
+      apply(id);
+    } else statuses.delete(id);
+  },
+
+  /** The frame over a page an answer works in, or null as it goes. */
+  attachFrame(id: string, element: HTMLElement | null) {
+    if (element) {
+      frames.set(id, element);
+      apply(id);
+    } else frames.delete(id);
+  },
+
   /** Where the tab's slot is, or null when nothing shows it. */
   place(id: string, placement: Placement | null) {
     const was = shown.has(id);
@@ -188,28 +245,39 @@ export const browserTabs = {
   },
   visible: (): ReadonlySet<string> => shown,
 
-  /** Keeps a chat's pages fully alive until released; counted, so holds nest. */
-  hold(owner: string) {
-    holds.set(owner, (holds.get(owner) ?? 0) + 1);
-    commit(new Map(tabs));
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const count = (holds.get(owner) ?? 1) - 1;
-      if (count > 0) holds.set(owner, count);
-      else holds.delete(owner);
-      commit(new Map(tabs));
-    };
-  },
-  held: (): ReadonlySet<string> => new Set([...holds.keys(), ...attemptHolds]),
+  owners: () => owners,
   /** Replaces the chats held because an answer of theirs is running here. */
-  setAttemptHolds(owners: ReadonlySet<string>) {
-    if (owners.size === attemptHolds.size && [...owners].every((owner) => attemptHolds.has(owner)))
-      return;
-    attemptHolds = owners;
-    commit(new Map(tabs));
+  setHeld(held: ReadonlySet<string>) {
+    if (sameSet(held, owners.held)) return;
+    owners = { ...owners, held };
+    // A chat whose answer stopped running is no longer using its pages.
+    const next = new Map(tabs);
+    let changed = false;
+    for (const tab of tabs.values())
+      if (tab.usedBy && !held.has(tab.owner)) {
+        next.set(tab.id, { ...tab, usedBy: null });
+        changed = true;
+      }
+    if (changed) commit(next);
+    else emit();
   },
+  /**
+   * Records whether a chat is temporary, as its view or a call of its answer
+   * says, so every new tab of it picks the same profile.
+   */
+  setTemporary(owner: string, temporary: boolean) {
+    if (temporary === owners.temporary.has(owner)) return;
+    const next = new Set(owners.temporary);
+    if (temporary) next.add(owner);
+    else next.delete(owner);
+    owners = { ...owners, temporary: next };
+    emit();
+  },
+  /** The profile a new tab of this owner browses in. */
+  partitionFor: (
+    browser: Pick<DesktopBrowser, "partition" | "temporaryPartition">,
+    owner: string,
+  ) => (owners.temporary.has(owner) ? browser.temporaryPartition(owner) : browser.partition),
   /** Asks the panel to show the tab, which it does when its chat is on screen. */
   reveal(id: string) {
     const tab = tabs.get(id);
@@ -241,15 +309,6 @@ export const browserTabs = {
       signal?.addEventListener("abort", abort, { once: true });
     });
   },
-
-  /** Told by the chat view, so a new tab knows which profile and whether to keep it. */
-  describe(owner: string, { temporary }: { temporary: boolean }) {
-    if (temporary === temporaryOwners.has(owner)) return;
-    if (temporary) temporaryOwners.add(owner);
-    else temporaryOwners.delete(owner);
-    commit(new Map(tabs));
-  },
-  isTemporary: (owner: string) => temporaryOwners.has(owner),
 };
 
 export function useBrowserTab(id: string): BrowserTab | null {
@@ -262,4 +321,8 @@ export function useBrowserTab(id: string): BrowserTab | null {
 
 export function useBrowserTabs(): ReadonlyMap<string, BrowserTab> {
   return useSyncExternalStore(browserTabs.subscribe, browserTabs.all, browserTabs.all);
+}
+
+export function useBrowserOwners(): BrowserOwners {
+  return useSyncExternalStore(browserTabs.subscribe, browserTabs.owners, browserTabs.owners);
 }

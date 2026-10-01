@@ -743,10 +743,10 @@ function makeChatService() {
             defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
               ? input.desktopFolders
               : null;
-          const desktopCommands =
-            defaults.mode === "work" && desktopFolderEntries !== null && !!input.desktopCommands;
-          const desktopBrowser =
-            defaults.mode === "work" && desktopFolderEntries !== null && !!input.desktopBrowser;
+          // What the sending app could do, kept for Work alone: these flags are
+          // the one place the stream learns whether a machine tool is offered.
+          const desktopCommands = defaults.mode === "work" && !!input.desktopCommands;
+          const desktopBrowser = defaults.mode === "work" && !!input.desktopBrowser;
           if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
             return yield* new WorkDesktopRequired();
           // Re-stamped on every attempt, retry included: the banner must

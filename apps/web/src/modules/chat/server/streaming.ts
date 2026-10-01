@@ -1,5 +1,5 @@
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
-import { DESKTOP_TIMEOUTS, approvalKind, isBrowserTool } from "~/modules/desktop/tool-schema.ts";
+import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
@@ -156,7 +156,11 @@ import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
-import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
+import {
+  BROWSER_TOOLS_SYSTEM_HINT,
+  isBrowserTool,
+  shownBrowserArgs,
+} from "~/modules/browser/tool-schema.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -250,6 +254,25 @@ const PREVIEW_FEEDBACK_LIMITS = { slides: 256, bytes: 128 * 1024 * 1024 } as con
  * type. Stated here once rather than at every row that stores a result.
  */
 const json = (value: unknown) => value as JsonValue;
+
+/**
+ * The first line of a machine tool's result that returned a file: its
+ * reference, and whether the user sees it. Only a shared screenshot or a
+ * published file ever reaches them.
+ */
+const returnedLine = (
+  name: string,
+  reference: string,
+  shared: { readonly attachment: unknown } | { readonly reason: string } | null,
+) => {
+  if (name !== "browser_snapshot")
+    return `Returned file ${reference}: for other tools, or publish_file to give it to the user, who cannot see it otherwise.`;
+  if (shared === null)
+    return `Screenshot ${reference}: only you see it. To show the user, take it with share.`;
+  return "attachment" in shared
+    ? `Screenshot ${reference}: shared with the user, attached to your answer.`
+    : `Screenshot ${reference}: it could not be shared (${shared.reason}); only you see it.`;
+};
 /** Same boundary for a decoded Prompt: its content is already message-shaped. */
 const promptMessages = (prompt: { content: unknown }) =>
   prompt.content as ReadonlyArray<Prompt.MessageEncoded>;
@@ -259,17 +282,6 @@ const promptMessages = (prompt: { content: unknown }) =>
 // full cause goes to the server log instead (see finalize).
 const shortErrorMessage = (error: unknown): string =>
   String(error).split("\n", 1)[0]!.slice(0, 200);
-
-// A local read that produced bytes carries them in the result. They go to the
-// model as a file part on the round, never as base64 inside the tool result,
-// which would be megabytes of text the model cannot look at anyway.
-const withoutDesktopFile = (part: Response.AnyPart): Response.AnyPart => {
-  if (part.type !== "tool-result") return part;
-  const result = part.result as { file?: unknown } | null;
-  if (!result || typeof result !== "object" || !("file" in result)) return part;
-  const { file: _dropped, ...rest } = result;
-  return { ...part, result: rest, encodedResult: rest };
-};
 
 /**
  * Runs assistant generations detached from any HTTP request, persists chunks
@@ -919,29 +931,22 @@ export class StreamEngine extends Context.Service<
             }
             return ready;
           };
-          // Offered only when the machine that sent this message said a folder
-          // was attached, so a browser tab never sees these names.
+          // Machine tools wait for the page that sent the attempt to run them.
+          const rowIdFor = (providerCallId: string) =>
+            Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
+              Effect.map((row) => row?.rowId),
+            );
+          // Offered only when the machine that sent this message reported its
+          // folders (a Work attempt always has the app's workspace), so a
+          // browser tab never sees these names.
           const desktopTools =
             config.desktopFolders && permissions.work
-              ? prepareDesktopTools({
-                  rowIdFor: (providerCallId) =>
-                    Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
-                      Effect.map((row) => row?.rowId),
-                    ),
-                  commands: config.desktopCommands ?? false,
-                })
+              ? prepareDesktopTools({ rowIdFor, commands: config.desktopCommands ?? false })
               : null;
-          // Work attempts from an app that can embed pages; they run in the
-          // sending app's own tabs, through the same path as the file tools.
+          // Work attempts from an app that can embed pages, attached folder or
+          // not; they run in the sending app's own tabs.
           const browserTools =
-            config.desktopFolders && permissions.work && config.desktopBrowser
-              ? prepareBrowserTools({
-                  rowIdFor: (providerCallId) =>
-                    Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
-                      Effect.map((row) => row?.rowId),
-                    ),
-                })
-              : null;
+            permissions.work && config.desktopBrowser ? prepareBrowserTools({ rowIdFor }) : null;
           // The checklist is an agent preference. Retry and edit start from a
           // clean list: a completed step is a claim about work this attempt did.
           // Resume continues that same work, so it keeps the last accepted list.
@@ -1134,8 +1139,12 @@ export class StreamEngine extends Context.Service<
             ? prepareCustomTools(customToolManifests, customToolRuntime, toolFiles?.resolve)
             : undefined;
           // Drafts exist only where an editor is offered, and so does delivery.
+          // Machine tools return files too (screenshots, reads, imports), which
+          // only publishing delivers.
           const publishFileTool =
-            officeTools.length || customTools ? preparePublishFileTool(workingFiles) : undefined;
+            officeTools.length || customTools || desktopTools || browserTools
+              ? preparePublishFileTool(workingFiles)
+              : undefined;
           // Fixed for the whole answer: it sits ahead of this answer's rounds,
           // so changing it between rounds would uncache every round after it.
           // Names are file data, so they are quoted rather than trusted as policy.
@@ -1990,10 +1999,64 @@ export class StreamEngine extends Context.Service<
             const turnFiles: Array<Prompt.UserMessagePartEncoded> = [];
             previewTurnFiles = turnFiles;
             const turnStartOffset = assembled.length;
+            // One fenced registration for every file an answer delivers (a
+            // publish, a custom tool's output, a shared screenshot): the
+            // attachment and its file chunk land together, under the fence.
+            const deliverFile = (
+              file: { name: string; mediaType: string; bytes: Uint8Array },
+              toolCallId: string,
+              inTransaction?: (
+                tx: DbTx,
+                owner: GenerationIdentity,
+              ) => Effect.Effect<ReadonlyArray<string>>,
+            ) =>
+              Effect.gen(function* () {
+                if (!fence || Option.isNone(imageAttachments))
+                  return { reason: "File delivery is unavailable." } as const;
+                yield* flush;
+                const accepted = yield* writer.withPermits(1)(
+                  acceptGeneratedFile(imageAttachments.value, {
+                    fence,
+                    fileName: file.name,
+                    mediaType: file.mediaType,
+                    bytes: file.bytes,
+                    origin: { toolCallId },
+                    ...(inTransaction
+                      ? { inTransaction: (tx: DbTx) => inTransaction(tx, fence) }
+                      : {}),
+                    textOffset: assembled.length,
+                    turnIndex: turn,
+                    callIndex,
+                    eventIndex: seq + 1,
+                    seq: seq + 1,
+                  }).pipe(
+                    Effect.tap((delivered) =>
+                      Effect.gen(function* () {
+                        seq += 1;
+                        yield* PubSub.publish(pubsub, {
+                          kind: "chunk",
+                          messageId: input.messageId,
+                          runId: fence.generationId,
+                          seq,
+                          chunkKind: "file",
+                          delta: JSON.stringify(delivered),
+                        });
+                      }),
+                    ),
+                    Effect.uninterruptible,
+                    Effect.result,
+                  ),
+                );
+                return accepted._tag === "Success"
+                  ? ({ attachment: accepted.success.attachment } as const)
+                  : ({ reason: accepted.failure.reason } as const);
+              });
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
             // The argument summary an integration row showed at start, for its result.
             const integrationSummaries = new Map<string, string | null>();
+            // Snapshots asked to show their screenshot to the user, by provider call id.
+            const sharedSnapshots = new Set<string>();
             turnCallRows.clear();
             let providerOutputStarted = false;
             const currentReminderPrompt = () => reminderPrompt(!toolRoundsLeft);
@@ -2039,26 +2102,21 @@ export class StreamEngine extends Context.Service<
                           part.type === "tool-call" &&
                             (part.name === "save_memory" || part.name === "update_plan")
                             ? { ...part, params: {} }
-                            : part.type === "tool-result" &&
-                                Schema.is(DesktopToolName)(part.name) &&
-                                // An import's handler rewrites this very part below.
-                                part.name !== "import_local_file"
-                              ? withoutDesktopFile(part)
-                              : part.type === "tool-result" && part.name === "update_plan"
-                                ? {
-                                    ...part,
-                                    encodedResult:
-                                      (part.result as PlanToolResult).outcome === "updated"
-                                        ? {
-                                            outcome: "updated",
-                                            message:
-                                              "The current checklist is in the trailing reminder.",
-                                          }
-                                        : part.encodedResult,
-                                  }
-                                : redactDocumentPart(
-                                    redactAgentDraftPart(redactScheduleDraftPart(part)),
-                                  ),
+                            : part.type === "tool-result" && part.name === "update_plan"
+                              ? {
+                                  ...part,
+                                  encodedResult:
+                                    (part.result as PlanToolResult).outcome === "updated"
+                                      ? {
+                                          outcome: "updated",
+                                          message:
+                                            "The current checklist is in the trailing reminder.",
+                                        }
+                                      : part.encodedResult,
+                                }
+                              : redactDocumentPart(
+                                  redactAgentDraftPart(redactScheduleDraftPart(part)),
+                                ),
                         );
                       }
                       switch (part.type) {
@@ -2166,6 +2224,9 @@ export class StreamEngine extends Context.Service<
                               ? Schema.decodeUnknownOption(AskUserParams)(args)
                               : null;
                           const textOffset = assembled.length;
+                          const shownArgs = shownBrowserArgs(part.name, args);
+                          if (part.name === "browser_snapshot" && args.share === true)
+                            sharedSnapshots.add(part.id);
                           yield* repo.insertToolCall({
                             id: rowId,
                             messageId: input.messageId,
@@ -2193,7 +2254,7 @@ export class StreamEngine extends Context.Service<
                                   ? askArgs && Option.isSome(askArgs)
                                     ? json(askArgs.value)
                                     : {}
-                                  : (args as JsonValue),
+                                  : (shownArgs as JsonValue),
                           });
                           if (family === "research") {
                             // The handler cannot learn its own row id: the
@@ -2289,7 +2350,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }
                                 : {}),
-                              timeoutMs: approvalKind(part.name as DesktopToolName)
+                              timeoutMs: approvalKind(part.name as DesktopToolName, args)
                                 ? DESKTOP_TIMEOUTS.command
                                 : DESKTOP_TIMEOUTS.quick,
                             });
@@ -2307,7 +2368,7 @@ export class StreamEngine extends Context.Service<
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
-                              args,
+                              args: shownArgs,
                             });
                             return;
                           }
@@ -2650,87 +2711,106 @@ export class StreamEngine extends Context.Service<
                                     detail: "The computer did not report a usable result.",
                                     truncated: false,
                                   };
-                            // An import is bytes for tools, not for the model to
-                            // look at: it becomes this attempt's working file and
-                            // the model is told the reference to pass on.
-                            if (part.name === "import_local_file") {
-                              const imported = result.ok ? result.file : undefined;
-                              const created = yield* Effect.try({
-                                try: () => {
-                                  if (!imported) throw new Error(result.detail);
-                                  return workingFiles.create({
-                                    bytes: new Uint8Array(Buffer.from(imported.base64, "base64")),
-                                    name: imported.name,
-                                    mediaType: imported.mediaType,
-                                    owner: "local",
-                                  });
-                                },
-                                catch: (error) =>
-                                  error instanceof Error ? error.message : "Could not import it.",
-                              }).pipe(Effect.result);
-                              const { file: _bytes, ...rest } = result;
-                              const answer: DesktopToolResult =
-                                created._tag === "Success"
+                            // Every file a machine tool returns becomes a working
+                            // file of this attempt, for other tools and for
+                            // publish_file, the only way one is stored. Anything
+                            // but an import is also shown to the model when it can
+                            // take that kind (docs/internals/files.md).
+                            const returned = result.ok ? result.file : undefined;
+                            const imported = part.name === "import_local_file";
+                            const created = returned
+                              ? yield* Effect.try({
+                                  try: () =>
+                                    workingFiles.create({
+                                      bytes: new Uint8Array(Buffer.from(returned.base64, "base64")),
+                                      name: returned.name,
+                                      mediaType: returned.mediaType,
+                                      owner: "local",
+                                      capture: !imported,
+                                    }),
+                                  catch: (error) =>
+                                    error instanceof Error ? error.message : "Could not keep it.",
+                                }).pipe(
+                                  Effect.map((file) => ({ reference: formatFileRef(file.ref) })),
+                                  Effect.catch((failure) => Effect.succeed({ failure })),
+                                )
+                              : null;
+                            // A screenshot the model asked to show is delivered at
+                            // once, like any file the answer publishes.
+                            const shared =
+                              returned && sharedSnapshots.delete(part.id)
+                                ? yield* deliverFile(
+                                    {
+                                      name: returned.name,
+                                      mediaType: returned.mediaType,
+                                      bytes: new Uint8Array(Buffer.from(returned.base64, "base64")),
+                                    },
+                                    rowId,
+                                  )
+                                : null;
+                            const { file: _bytes, ...rest } = result;
+                            const answer: DesktopToolResult =
+                              created && "reference" in created
+                                ? {
+                                    ...rest,
+                                    // First, not after a page's long outline: read there
+                                    // and kept in the row's excerpt.
+                                    detail: `${returnedLine(part.name, created.reference, shared)}\n${rest.detail}`,
+                                  }
+                                : created && imported
                                   ? {
-                                      ...rest,
-                                      detail: `${rest.detail}\nReference for other tools: ${formatFileRef(created.success.ref)}`,
+                                      v: 1,
+                                      ok: false,
+                                      summary: "That file could not be imported",
+                                      detail: created.failure,
+                                      truncated: false,
                                     }
-                                  : result.ok
+                                  : imported && result.ok
                                     ? {
                                         v: 1,
                                         ok: false,
                                         summary: "That file could not be imported",
-                                        detail: created.failure,
+                                        detail: result.detail,
                                         truncated: false,
                                       }
-                                    : rest;
-                              Object.assign(part, { result: answer, encodedResult: answer });
-                              const stored = forTranscript(answer);
-                              yield* repo.completeToolCall({
-                                id: rowId,
-                                result: json(stored),
-                                status: answer.ok ? "complete" : "error",
-                                ...(answer.ok
-                                  ? {}
-                                  : {
-                                      error: { code: "DesktopToolFailed", message: answer.summary },
-                                    }),
-                              });
-                              yield* pushToolChunk({
-                                v: 1,
-                                family: "desktop",
-                                phase: "result",
-                                callId: rowId,
-                                name: part.name,
-                                result: stored,
-                              });
-                              return;
-                            }
-                            // Only a read shows the model bytes, and only a kind it can take.
-                            if (result.file && attachmentKind(result.file.mediaType) !== "file") {
+                                    : created
+                                      ? {
+                                          ...rest,
+                                          detail: `${rest.detail}\n(It could not be kept for other tools or publishing: ${created.failure})`,
+                                        }
+                                      : rest;
+                            // The bytes leave the result first, so nothing below can
+                            // leave them in the prompt as text: the file part is
+                            // their only route to the model.
+                            Object.assign(part, { result: answer, encodedResult: answer });
+                            if (
+                              returned &&
+                              !imported &&
+                              attachmentKind(returned.mediaType) !== "file"
+                            )
                               turnFiles.push(
                                 yield* fileForModel(promptDeps.parser, {
-                                  fileName: result.file.name,
-                                  mediaType: result.file.mediaType,
-                                  bytes: Buffer.from(result.file.base64, "base64"),
+                                  ...(created && "reference" in created
+                                    ? { id: created.reference }
+                                    : {}),
+                                  fileName: returned.name,
+                                  mediaType: returned.mediaType,
+                                  bytes: Buffer.from(returned.base64, "base64"),
                                   vision: model?.capabilities.vision ?? false,
                                   files: model?.capabilities.files ?? false,
                                 }),
                               );
-                            }
+                            const stored = forTranscript(answer);
                             // The model reads the full detail through the
                             // prompt; the row and the chunk keep an excerpt.
-                            // The bytes never reach the row or the transcript:
-                            // the file part above is their only route in.
-                            const stored = forTranscript(result);
                             yield* repo.completeToolCall({
                               id: rowId,
                               result: json(stored),
-                              status: result.ok ? "complete" : "error",
-                              ...(result.ok
+                              status: answer.ok ? "complete" : "error",
+                              ...(answer.ok
                                 ? {}
                                 : {
-                                    error: { code: "DesktopToolFailed", message: result.summary },
+                                    error: { code: "DesktopToolFailed", message: answer.summary },
                                   }),
                             });
                             yield* pushToolChunk({
@@ -2808,8 +2888,6 @@ export class StreamEngine extends Context.Service<
                             if (pending) {
                               if (part.isFailure) {
                                 error = "File publication was interrupted.";
-                              } else if (!fence || Option.isNone(imageAttachments)) {
-                                error = "File delivery is unavailable.";
                               } else if (
                                 pending.file.source !== undefined &&
                                 !(toolFiles && (yield* toolFiles.authorize(pending.file.source)))
@@ -2817,47 +2895,17 @@ export class StreamEngine extends Context.Service<
                                 error =
                                   "The file this draft was opened from is no longer available.";
                               } else {
-                                yield* flush;
-                                const accepted = yield* writer.withPermits(1)(
-                                  acceptGeneratedFile(imageAttachments.value, {
-                                    fence,
-                                    fileName: pending.name,
-                                    mediaType: pending.file.mediaType,
-                                    bytes: pending.file.bytes,
-                                    origin: { toolCallId: rowId },
-                                    // Delivered and no longer a draft, in one commit.
-                                    ...(keptFiles
-                                      ? {
-                                          inTransaction: (tx: DbTx) =>
-                                            keptFiles.consume(tx, fence, pending.ref.id),
-                                        }
-                                      : {}),
-                                    textOffset: assembled.length,
-                                    turnIndex: turn,
-                                    callIndex,
-                                    eventIndex: seq + 1,
-                                    seq: seq + 1,
-                                  }).pipe(
-                                    Effect.tap((file) =>
-                                      Effect.gen(function* () {
-                                        seq += 1;
-                                        yield* PubSub.publish(pubsub, {
-                                          kind: "chunk",
-                                          messageId: input.messageId,
-                                          runId: fence.generationId,
-                                          seq,
-                                          chunkKind: "file",
-                                          delta: JSON.stringify(file),
-                                        });
-                                      }),
-                                    ),
-                                    Effect.uninterruptible,
-                                    Effect.result,
-                                  ),
+                                const delivered = yield* deliverFile(
+                                  { ...pending.file, name: pending.name },
+                                  rowId,
+                                  // Delivered and no longer a draft, in one commit.
+                                  keptFiles
+                                    ? (tx, owner) => keptFiles.consume(tx, owner, pending.ref.id)
+                                    : undefined,
                                 );
-                                if (accepted._tag === "Success")
-                                  attachmentId = accepted.success.attachment.id;
-                                else error = accepted.failure.reason;
+                                if ("attachment" in delivered)
+                                  attachmentId = delivered.attachment.id;
+                                else error = delivered.reason;
                               }
                               workingFiles.finishPublish(pending.ref, attachmentId);
                             }
@@ -3124,61 +3172,26 @@ export class StreamEngine extends Context.Service<
                                   );
                                 continue;
                               }
-                              if (!fence || Option.isNone(imageAttachments)) {
-                                errors.push(`${item.name}: file delivery is unavailable.`);
-                                outcomes.push({ error: "File delivery is unavailable." });
+                              const stored = yield* deliverFile(item, rowId);
+                              if ("reason" in stored) {
+                                errors.push(`${item.name}: ${stored.reason}`);
+                                outcomes.push({ error: stored.reason });
                                 continue;
                               }
-                              yield* flush;
-                              const stored = yield* writer.withPermits(1)(
-                                acceptGeneratedFile(imageAttachments.value, {
-                                  fence,
-                                  fileName: item.name,
-                                  mediaType: item.mediaType,
-                                  bytes: item.bytes,
-                                  origin: { toolCallId: rowId },
-                                  textOffset: assembled.length,
-                                  turnIndex: turn,
-                                  callIndex,
-                                  eventIndex: seq + 1,
-                                  seq: seq + 1,
-                                }).pipe(
-                                  Effect.tap((file) =>
-                                    Effect.gen(function* () {
-                                      seq += 1;
-                                      yield* PubSub.publish(pubsub, {
-                                        kind: "chunk",
-                                        messageId: input.messageId,
-                                        runId: fence.generationId,
-                                        seq,
-                                        chunkKind: "file",
-                                        delta: JSON.stringify(file),
-                                      });
-                                    }),
-                                  ),
-                                  Effect.uninterruptible,
-                                  Effect.result,
-                                ),
-                              );
-                              if (stored._tag === "Failure") {
-                                errors.push(`${item.name}: ${stored.failure.reason}`);
-                                outcomes.push({ error: stored.failure.reason });
-                                continue;
-                              }
-                              fileIds.push(stored.success.attachment.id);
+                              fileIds.push(stored.attachment.id);
                               outcomes.push({
-                                attachmentId: stored.success.attachment.id,
+                                attachmentId: stored.attachment.id,
                                 ref: formatFileRef({
                                   kind: "attachment",
-                                  id: stored.success.attachment.id,
+                                  id: stored.attachment.id,
                                 }),
                               });
                               if (item.showModel)
                                 turnFiles.push(
                                   yield* fileForModel(promptDeps.parser, {
-                                    id: stored.success.attachment.id,
+                                    id: stored.attachment.id,
                                     fileName: item.name,
-                                    mediaType: stored.success.attachment.mediaType,
+                                    mediaType: stored.attachment.mediaType,
                                     bytes: item.bytes,
                                     vision: model?.capabilities.vision ?? false,
                                     files: model?.capabilities.files ?? false,

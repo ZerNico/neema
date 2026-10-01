@@ -204,7 +204,9 @@ export function VirtualMessageList({
   }, [firstIndex, onReachStart]);
 
   return (
-    <div className="relative h-full min-h-0">
+    // Web links clicked in the conversation open as panel tabs on desktop
+    // (`browser/ui/browser-host.tsx`).
+    <div className="relative h-full min-h-0" data-web-links="panel">
       {/* stable both-edges keeps centered content aligned with the composer,
           which sits outside this scroll container (no scrollbar offset).
           The mask fades the last bit of content out right above the composer

@@ -64,7 +64,14 @@ const clip = (value: string) =>
  */
 export function serializeAxTree(
   nodes: ReadonlyArray<AxNode>,
-  maxChars = SNAPSHOT_MAX_CHARS,
+  {
+    maxChars = SNAPSHOT_MAX_CHARS,
+    secrets = new Set<number>(),
+  }: {
+    maxChars?: number;
+    /** Nodes a secret was typed into: their value is masked, their content skipped. */
+    secrets?: ReadonlySet<number>;
+  } = {},
 ): { text: string; truncated: boolean; refs: Map<string, number> } {
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const refs = new Map<string, number>();
@@ -109,13 +116,14 @@ export function serializeAxTree(
       return value === true || value === "true" || value === "mixed";
     });
     const level = role === "heading" ? text(props.get("level")) : "";
-    const value = clip(text(node.value?.value));
+    const secret = node.backendDOMNodeId !== undefined && secrets.has(node.backendDOMNodeId);
+    const value = secret ? "••••••••" : clip(text(node.value?.value));
     push(
       `${"  ".repeat(depth)}- ${ref ? `[${ref}] ` : ""}${role}${level ? ` ${level}` : ""}` +
         `${name ? ` "${name}"` : ""}${value ? `: ${value}` : ""}` +
         `${states.length > 0 ? ` (${states.join(", ")})` : ""}`,
     );
-    for (const child of children) visit(child, depth + 1, name);
+    if (!secret) for (const child of children) visit(child, depth + 1, name);
   };
 
   for (const node of nodes)

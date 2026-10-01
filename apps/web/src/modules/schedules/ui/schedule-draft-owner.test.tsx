@@ -79,7 +79,8 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
-  useRouterState: () => "/chat/conversation",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/conversation" }, matches: [] }),
   useBlocker: () => {},
 }));
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => environment.mobile }));
@@ -279,7 +280,7 @@ describe("conversation-owned schedule draft", () => {
         data: { draftId: "draft-1", expectedRevision: 2 },
       }),
     );
-    expect(await screen.findByText("Schedule saved")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
     expect(screen.getByRole("link", { name: "Open schedule" })).toHaveAttribute(
       "href",
       "/schedules/saved-schedule",

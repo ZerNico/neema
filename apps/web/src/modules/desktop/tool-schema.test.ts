@@ -108,9 +108,14 @@ describe("approvalKind", () => {
   it("asks for nothing when a chat's own file is saved into the workspace", () => {
     // The workspace is app-owned and a drop lands there unasked; the copy
     // never overwrites, so there is nothing for a person to weigh.
-    expect(approvalKind("save_to_workspace")).toBeNull();
-    expect(approvalKind("write_local_file")).toBe("edit");
-    expect(approvalKind("request_network_access")).toBe("network");
+    expect(approvalKind("save_to_workspace", {})).toBeNull();
+    expect(approvalKind("write_local_file", {})).toBe("edit");
+    expect(approvalKind("request_network_access", {})).toBe("network");
+    // Only a navigation with an address is a new site; back and reload stay put.
+    expect(approvalKind("browser_navigate", { url: "https://a.test" })).toBe("site");
+    expect(approvalKind("browser_navigate", { action: "back" })).toBeNull();
+    expect(approvalKind("browser_scroll", {})).toBeNull();
+    expect(approvalKind("browser_click", {})).toBe("browser-action");
   });
 });
 

@@ -70,11 +70,11 @@ describe("DesktopActivityBlock", () => {
       />,
     );
     expect(screen.getByText("example.com")).toBeInTheDocument();
-    expect(screen.getByText(/Applies to all Work chats on this desktop/)).toHaveTextContent(
-      "You can remove access in Settings › Devices.",
+    expect(screen.getByText(/Applies to all Work chats on this computer/)).toHaveTextContent(
+      "You can remove access in Settings › This computer.",
     );
     expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Allow for this desktop" }));
+    await userEvent.click(screen.getByRole("button", { name: "Allow on this computer" }));
     expect(decide).toHaveBeenLastCalledWith("allow");
     await userEvent.click(screen.getByRole("button", { name: "Deny" }));
     expect(decide).toHaveBeenLastCalledWith("deny");

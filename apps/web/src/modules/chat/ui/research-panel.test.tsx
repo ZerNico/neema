@@ -14,7 +14,10 @@ import { AppMotionProvider } from "~/ui/motion.tsx";
 
 // The panel closes on navigation; these tests render outside a router.
 const environment = vi.hoisted(() => ({ pathname: "/chat/test" }));
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => environment.pathname }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: environment.pathname }, matches: [] }),
+}));
 beforeEach(() => {
   environment.pathname = "/chat/test";
 });

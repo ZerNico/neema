@@ -56,13 +56,17 @@ describe("browserTabs", () => {
     expect(webview.style).toMatchObject({ left: "1px", visibility: "visible" });
   });
 
-  it("counts holds per chat", () => {
-    const first = browserTabs.hold("c1");
-    const second = browserTabs.hold("c1");
-    first();
-    first();
-    expect(browserTabs.held().has("c1")).toBe(true);
-    second();
-    expect(browserTabs.held().has("c1")).toBe(false);
+  it("notifies when a chat is held or found temporary, and only then", () => {
+    let calls = 0;
+    const stop = browserTabs.subscribe(() => calls++);
+    browserTabs.setHeld(new Set(["c1"]));
+    browserTabs.setHeld(new Set(["c1"]));
+    browserTabs.setTemporary("c2", true);
+    browserTabs.setTemporary("c2", true);
+    stop();
+    expect(calls).toBe(2);
+    expect(browserTabs.owners()).toEqual({ held: new Set(["c1"]), temporary: new Set(["c2"]) });
+    browserTabs.setHeld(new Set());
+    browserTabs.setTemporary("c2", false);
   });
 });

@@ -20,6 +20,7 @@ import { conversationQuery, conversationsInfiniteQuery } from "../client/queries
 import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
 import { createTitleRevealRegistry } from "./conversation-title.tsx";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
+import { useBrowsingChats } from "~/modules/browser/client/use-browsing-chats.ts";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
 import { groupConversationsByDate } from "./conversation-groups.ts";
 import { NeemaGlyph } from "~/ui/brand.tsx";
@@ -183,6 +184,7 @@ function ConversationList() {
   // One registry for the whole shell: rows come and go with refetches, the
   // record of which titles already played their reveal must not.
   const [revealRegistry] = useState(createTitleRevealRegistry);
+  const browsing = useBrowsingChats();
   const [mountedAt] = useState(Date.now);
   const rowMotion = collapseMotion(useAppReducedMotion());
   const actions = useConversationActions();
@@ -245,6 +247,7 @@ function ConversationList() {
                       >
                         <ConversationStatusTitle
                           generating={conversation.generating}
+                          browsing={browsing.has(conversation.id)}
                           branched={!!conversation.branchedFrom}
                           scheduled={conversation.scheduled}
                           conversationId={conversation.id}

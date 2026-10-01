@@ -42,7 +42,8 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
-  useRouterState: () => "/",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/" }, matches: [] }),
 }));
 vi.stubGlobal(
   "matchMedia",

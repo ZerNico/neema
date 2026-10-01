@@ -6,7 +6,7 @@ import type { WorkingFiles, WorkingFileRef, WorkingFileSnapshot } from "./workin
 
 const tool = Tool.make("publish_file", {
   description:
-    "Deliver an exact working-file revision as one final downloadable attachment. Use the working reference returned by an editing tool. An unpublished draft stays in this chat for a later answer but is not delivered until published. Finished one-shot custom exports deliver themselves and do not need this call.",
+    "Deliver an exact working-file revision as one final downloadable attachment. Use the working reference returned by an editing tool, or by a tool on the user's computer (a browser screenshot, a file read or imported). An unpublished draft from an editor stays in this chat for a later answer; one from the computer ends with this answer. Neither is delivered until published. Finished one-shot custom exports deliver themselves and do not need this call.",
   parameters: Schema.Struct({
     ref: advertisedParameter({ type: "string" }),
     name: advertisedParameter({ type: "string" }),

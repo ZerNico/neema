@@ -40,6 +40,7 @@ import {
   type SkillFinding,
 } from "../package.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
 const TextEditor = lazy(() => import("./text-editor.tsx"));
 const noFindings: SkillFinding[] = [];
@@ -55,7 +56,13 @@ const previewComponents = {
 export function SkillPreview({ content }: { content: string }) {
   return (
     <div className="min-w-0 break-words p-5">
-      <Streamdown mode="static" plugins={previewPlugins} components={previewComponents} skipHtml>
+      <Streamdown
+        linkSafety={LINK_SAFETY}
+        mode="static"
+        plugins={previewPlugins}
+        components={previewComponents}
+        skipHtml
+      >
         {content}
       </Streamdown>
     </div>

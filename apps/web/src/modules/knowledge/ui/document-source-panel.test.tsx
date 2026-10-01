@@ -11,7 +11,10 @@ import { DocumentSourcePanel } from "./document-source-panel.tsx";
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("../server/functions.ts", () => ({ readKnowledgeDocument: mocks.read }));
 vi.mock("~/ui/use-mobile.ts", () => ({ useIsMobile: () => false }));
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/test" }, matches: [] }),
+}));
 const source: DocumentSource = {
   kind: "document",
   index: 1,

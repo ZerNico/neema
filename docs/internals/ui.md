@@ -301,4 +301,7 @@ false`), so a page body is written against data already there. This includes loc
 - `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line transcript summary row,
   sitting beside `disclosureTriggerClassName` — a message stacks both. Chat disclosures use
   `~/ui/disclosure.tsx` for measured-height/opacity animation, reduced-motion and hidden-until-found
-  handling; keep each consumer's open state, timers and scroll behavior local.
+  handling; keep each consumer's open state and scroll behavior local. A row for a run of calls
+  (web, knowledge, browser) opens through `useRunDisclosure`: while a call runs or the row is
+  still the newest part of a streaming answer, then a moment after. Without the second rule it
+  would close while the model decides its next call and reopen when it makes it.

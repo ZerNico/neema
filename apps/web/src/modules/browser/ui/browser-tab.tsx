@@ -1,30 +1,35 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useDetailPanel, useDetailPanelTabs } from "~/ui/detail-panel.tsx";
-import { browserTabs, useBrowserTab, useBrowserTabs } from "../client/browser-store.ts";
+import {
+  browserTabs,
+  useBrowserOwners,
+  useBrowserTab,
+  useBrowserTabs,
+} from "../client/browser-store.ts";
 import { useBrowserOwner } from "../client/owner.ts";
 import { useDesktopBrowser } from "../client/use-desktop-browser.ts";
 import { useSettledLoading } from "../client/use-settled-loading.ts";
 import { BROWSER_TAB_PREFIX, browserTabRequest } from "./browser-request.tsx";
 
 /** Keeps one browser tab's panel entry in step with its page. */
-function BrowserTabOwner({ id, restorable }: { id: string; restorable: boolean }) {
+function BrowserTabOwner({ id }: { id: string }) {
   const panel = useDetailPanel();
   const tab = useBrowserTab(id);
   const url = tab?.url;
   const title = tab?.title;
   const label = tab?.label;
   const favicon = tab?.favicon ?? null;
+  const partition = tab?.partition;
   const busy = useSettledLoading(tab?.loading ?? false);
   const request = useMemo(
     () =>
-      url === undefined || title === undefined
+      url === undefined || title === undefined || partition === undefined
         ? null
         : browserTabRequest(
-            { id, url, title, favicon, ...(label ? { label } : {}) },
-            restorable,
+            { id, url, title, partition, favicon, ...(label ? { label } : {}) },
             busy,
           ),
-    [id, url, title, label, favicon, restorable, busy],
+    [id, url, title, label, favicon, partition, busy],
   );
   useEffect(() => {
     if (request) panel.refresh(request);
@@ -48,7 +53,8 @@ export function BrowserPanelOwner() {
   const tabs = useDetailPanelTabs();
   const owner = useBrowserOwner();
   const pages = useBrowserTabs();
-  const temporary = browserTabs.isTemporary(owner);
+  // Subscribed so a chat found temporary restores into its in-memory profile.
+  const temporary = useBrowserOwners().temporary.has(owner);
   const mine = useMemo(() => tabs.filter((tab) => tab.id.startsWith(BROWSER_TAB_PREFIX)), [tabs]);
   // This owner's browser tabs on the last pass: one missing since was closed here.
   const seen = useRef<{ owner: string; ids: ReadonlySet<string> } | null>(null);
@@ -82,7 +88,7 @@ export function BrowserPanelOwner() {
       if (previous?.has(page.id)) browserTabs.remove(page.id);
       // Opened by the model while this chat was elsewhere: listed, not selected.
       else {
-        panel.append(browserTabRequest(page, !temporary));
+        panel.append(browserTabRequest(page));
         listed.add(page.id);
       }
     }
@@ -95,16 +101,12 @@ export function BrowserPanelOwner() {
     for (const page of pages.values()) {
       if (page.owner !== owner || page.revealAt <= mark.since) continue;
       mark.since = page.revealAt;
-      panel.open(browserTabRequest(page, !temporary));
+      panel.open(browserTabRequest(page));
     }
-  }, [owner, pages, panel, temporary]);
+  }, [owner, pages, panel]);
 
   if (!browser) return null;
   return mine.map((tab) => (
-    <BrowserTabOwner
-      key={tab.id}
-      id={tab.id.slice(BROWSER_TAB_PREFIX.length)}
-      restorable={!temporary}
-    />
+    <BrowserTabOwner key={tab.id} id={tab.id.slice(BROWSER_TAB_PREFIX.length)} />
   ));
 }

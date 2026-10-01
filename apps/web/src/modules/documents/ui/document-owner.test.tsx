@@ -31,7 +31,8 @@ vi.mock("./rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
 }));
 vi.mock("@tanstack/react-router", () => ({
-  useRouterState: () => "/chat/conversation",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/conversation" }, matches: [] }),
   useBlocker: (options: typeof blocker.current) => {
     blocker.current = options;
   },

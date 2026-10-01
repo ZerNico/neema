@@ -5,7 +5,10 @@ import { DetailPanelProvider } from "~/ui/detail-panel.tsx";
 import { CitationChip } from "./citation-chip.tsx";
 
 // The detail panel reads the current path; nothing here navigates.
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/test" }, matches: [] }),
+}));
 
 const source = {
   kind: "web" as const,

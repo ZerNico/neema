@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { BrowserFavicon, BrowserOpenTab, DesktopBrowser } from "@chat/desktop-rpc";
 import { useEffect, type ReactNode } from "react";
@@ -54,6 +55,7 @@ const desktop = {
 } satisfies DesktopBrowser;
 
 let panel: DetailPanelApi;
+const queryClient = new QueryClient();
 function Probe() {
   const api = useDetailPanel();
   useEffect(() => {
@@ -69,16 +71,18 @@ function TemporaryChat() {
 
 function Harness({ children, temporary = false }: { children?: ReactNode; temporary?: boolean }) {
   return (
-    <AppMotionProvider>
-      <DetailPanelProvider newTab={browserNewTab}>
-        <Probe />
-        <BrowserHost />
-        <BrowserPanelOwner />
-        {temporary ? <TemporaryChat /> : null}
-        {children}
-        <DetailPanelRail />
-      </DetailPanelProvider>
-    </AppMotionProvider>
+    <QueryClientProvider client={queryClient}>
+      <AppMotionProvider>
+        <DetailPanelProvider newTab={browserNewTab}>
+          <Probe />
+          <BrowserHost />
+          <BrowserPanelOwner />
+          {temporary ? <TemporaryChat /> : null}
+          {children}
+          <DetailPanelRail />
+        </DetailPanelProvider>
+      </AppMotionProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -96,7 +100,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   for (const id of browserTabs.all().keys()) browserTabs.remove(id);
-  browserTabs.describe("c1", { temporary: false });
+  browserTabs.setTemporary("c1", false);
 });
 
 const webviews = () => [...document.querySelectorAll("webview")];
@@ -152,6 +156,89 @@ describe("browser tabs", () => {
     act(() => panel.closeTab(`${BROWSER_TAB_PREFIX}kept`));
     expect(browserTabs.get("kept")).toBeNull();
     expect(webviews()).toHaveLength(0);
+  });
+
+  it("tells the shell how a hidden page should run, only when that changes", () => {
+    const hidden = browserTabs.open({
+      owner: "c2",
+      partition: desktop.partition,
+      url: "https://elsewhere.test/",
+    });
+    render(<Harness />);
+    act(() => browserTabs.update(hidden.id, { webContentsId: 7 }));
+    expect(desktop.setLifecycle).toHaveBeenCalledWith(7, "background");
+    act(() => browserTabs.update(hidden.id, { title: "Elsewhere" }));
+    expect(desktop.setLifecycle).toHaveBeenCalledTimes(1);
+    // An answer of that chat running here keeps its page fully alive.
+    act(() => browserTabs.setHeld(new Set(["c2"])));
+    expect(desktop.setLifecycle).toHaveBeenLastCalledWith(7, "active");
+    act(() => browserTabs.setHeld(new Set()));
+    expect(desktop.setLifecycle).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows a hovered link's address over the page, as a browser does", () => {
+    render(<Harness />);
+    act(() => panel.newTab());
+    fireEvent.change(screen.getByPlaceholderText("Search or enter an address"), {
+      target: { value: "https://a.test" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText("Search or enter an address"));
+    const [webview] = webviews();
+    act(() => {
+      webview!.dispatchEvent(
+        Object.assign(new Event("update-target-url"), { url: "https://b.test/x" }),
+      );
+    });
+    expect(screen.getByText("https://b.test/x")).toBeInTheDocument();
+    act(() => {
+      webview!.dispatchEvent(Object.assign(new Event("update-target-url"), { url: "" }));
+    });
+    expect(screen.queryByText("https://b.test/x")).not.toBeInTheDocument();
+  });
+
+  it("puts a steady working note in place of the address row while an answer uses the tab", () => {
+    render(<Harness />);
+    act(() => panel.newTab());
+    fireEvent.change(screen.getByPlaceholderText("Search or enter an address"), {
+      target: { value: "https://a.test" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText("Search or enter an address"));
+    const [tab] = [...browserTabs.all().values()];
+    act(() => browserTabs.update(tab!.id, { usedBy: { messageId: "m1", generationId: "g1" } }));
+    expect(screen.getByRole("status")).toHaveTextContent("Working on a.test");
+    // Framed over the page, since the page paints over its own element's edges.
+    expect(document.querySelector(".border-primary.fixed")).not.toBeNull();
+    expect(screen.queryByPlaceholderText("Search or enter an address")).not.toBeInTheDocument();
+    act(() => browserTabs.update(tab!.id, { usedBy: null }));
+    expect(screen.getByPlaceholderText("Search or enter an address")).toBeInTheDocument();
+    expect(document.querySelector(".border-primary.fixed")).toBeNull();
+  });
+
+  it("opens a web link clicked in the conversation as a panel tab, and ⌘ asks for the browser", () => {
+    render(
+      <Harness>
+        <div data-web-links="panel">
+          <a href="https://linked.test/page" target="_blank" rel="noreferrer">
+            Linked
+          </a>
+        </div>
+        <a href="https://elsewhere.test/" target="_blank" rel="noreferrer">
+          Settings link
+        </a>
+      </Harness>,
+    );
+    fireEvent.click(screen.getByText("Linked"));
+    expect([...browserTabs.all().values()].map((tab) => tab.url)).toEqual([
+      "https://linked.test/page",
+    ]);
+    expect(screen.getByRole("tab", { name: "linked.test" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // A modifier asks for the other place; links outside the conversation are not touched.
+    fireEvent.click(screen.getByText("Linked"), { metaKey: true });
+    fireEvent.click(screen.getByText("Settings link"));
+    expect(browserTabs.all().size).toBe(1);
   });
 
   it("keeps another chat's pages when this chat's tabs change", () => {

@@ -1,5 +1,10 @@
 import { LIMITS, WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { Schema } from "effect";
+import {
+  BROWSER_TOOL_NAMES,
+  browserApprovalKind,
+  isBrowserTool,
+} from "~/modules/browser/tool-schema.ts";
 
 /**
  * Shapes for the tools that run on the user's own machine.
@@ -9,21 +14,6 @@ import { Schema } from "effect";
  * shape here crosses an untrusted hop in both directions and is decoded on
  * arrival rather than assumed.
  */
-
-/**
- * The embedded browser's tools run on the same machine through the same path,
- * so they are desktop tools too; only their offer and their executor differ.
- */
-export const BROWSER_TOOL_NAMES = [
-  "browser_tabs",
-  "browser_open",
-  "browser_navigate",
-  "browser_snapshot",
-  "browser_wait_for",
-] as const;
-export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
-export const isBrowserTool = (name: string): name is BrowserToolName =>
-  (BROWSER_TOOL_NAMES as ReadonlyArray<string>).includes(name);
 
 export const DESKTOP_TOOL_NAMES = [
   "list_folder",
@@ -53,9 +43,13 @@ export type DesktopToolName = typeof DesktopToolName.Type;
  * the chat already holds into the app-owned workspace asks for nothing
  * either: it never overwrites, and a drop lands there without a prompt too.
  */
-export type ApprovalKind = "edit" | "delete" | "command" | "network" | "site";
+export type ApprovalKind = "edit" | "delete" | "command" | "network" | "site" | "browser-action";
 
-export const approvalKind = (name: DesktopToolName): ApprovalKind | null => {
+export const approvalKind = (
+  name: DesktopToolName,
+  args: Readonly<Record<string, unknown>>,
+): ApprovalKind | null => {
+  if (isBrowserTool(name)) return browserApprovalKind(name, args);
   switch (name) {
     case "write_local_file":
     case "edit_local_file":
@@ -67,11 +61,6 @@ export const approvalKind = (name: DesktopToolName): ApprovalKind | null => {
       return "command";
     case "request_network_access":
       return "network";
-    // Opening a page somewhere new; the page decides per call whether the site
-    // is already allowed, and a navigation without an address is only a read.
-    case "browser_open":
-    case "browser_navigate":
-      return "site";
     default:
       return null;
   }
@@ -115,8 +104,22 @@ export const DesktopToolResult = Schema.Struct({
   file: Schema.optionalKey(
     Schema.Struct({ mediaType: Schema.String, base64: Schema.String, name: Schema.String }),
   ),
+  /** The web page a browser call left its tab on, for the transcript to link. */
+  page: Schema.optionalKey(Schema.Struct({ url: Schema.String, title: Schema.String })),
 });
 export type DesktopToolResult = typeof DesktopToolResult.Type;
+
+const PAGE_URL_CHARS = 2_048;
+const PAGE_TITLE_CHARS = 300;
+
+/** A page as the transcript may keep it: a web address and a capped title, else nothing. */
+export const storablePage = (
+  page: DesktopToolResult["page"],
+): NonNullable<DesktopToolResult["page"]> | undefined => {
+  if (!page || page.url.length > PAGE_URL_CHARS || !/^https?:\/\//i.test(page.url))
+    return undefined;
+  return { url: page.url, title: storable(page.title).slice(0, PAGE_TITLE_CHARS) };
+};
 
 /**
  * What the transcript keeps of a result.
@@ -141,22 +144,26 @@ export const DESKTOP_RESULT_DETAIL_CHARS = LIMITS.readChars;
  */
 export const storable = (text: string) => text.replaceAll("\u0000", "");
 
-export const forTranscript = (result: DesktopToolResult): DesktopToolResult => ({
-  v: 1,
-  ok: result.ok,
-  summary: storable(result.summary).slice(0, TRANSCRIPT_SUMMARY_CHARS),
-  // A file's bytes are dropped here, which is the whole reason this exists.
-  detail: storable(result.detail).slice(0, TRANSCRIPT_DETAIL_CHARS),
-  truncated: result.truncated || result.detail.length > TRANSCRIPT_DETAIL_CHARS,
-  ...(result.violations && result.violations.length > 0
-    ? {
-        violations: result.violations
-          .map((item) => storable(item).slice(0, TRANSCRIPT_VIOLATION_CHARS))
-          .filter((item) => item !== "")
-          .slice(0, TRANSCRIPT_VIOLATIONS),
-      }
-    : {}),
-});
+export const forTranscript = (result: DesktopToolResult): DesktopToolResult => {
+  const page = storablePage(result.page);
+  return {
+    v: 1,
+    ok: result.ok,
+    summary: storable(result.summary).slice(0, TRANSCRIPT_SUMMARY_CHARS),
+    // A file's bytes are dropped here, which is the whole reason this exists.
+    detail: storable(result.detail).slice(0, TRANSCRIPT_DETAIL_CHARS),
+    truncated: result.truncated || result.detail.length > TRANSCRIPT_DETAIL_CHARS,
+    ...(result.violations && result.violations.length > 0
+      ? {
+          violations: result.violations
+            .map((item) => storable(item).slice(0, TRANSCRIPT_VIOLATION_CHARS))
+            .filter((item) => item !== "")
+            .slice(0, TRANSCRIPT_VIOLATIONS),
+        }
+      : {}),
+    ...(page ? { page } : {}),
+  };
+};
 
 /** Why a call never produced a result. Each is something the model can act on. */
 export const desktopFailure = (summary: string, detail: string): DesktopToolResult => ({
@@ -166,6 +173,15 @@ export const desktopFailure = (summary: string, detail: string): DesktopToolResu
   detail,
   truncated: false,
 });
+
+export const desktopSuccess = (
+  summary: string,
+  detail: string,
+  extra: Partial<DesktopToolResult> = {},
+): DesktopToolResult => ({ v: 1, ok: true, summary, detail, truncated: false, ...extra });
+
+/** A string argument as the model sent it, or empty for anything else. */
+export const stringArg = (value: unknown) => (typeof value === "string" ? value : "");
 
 /**
  * How long a handler waits for the machine before telling the model it did not

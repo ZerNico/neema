@@ -2,6 +2,7 @@ import type { AssistantFile } from "../assistant-output.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
+  DesktopToolActivity,
   OfficeActivity,
   ToolActivity,
   ToolFileActivity,
@@ -10,6 +11,7 @@ import type {
   SkillToolActivity,
 } from "../client/use-message-stream.ts";
 import { isOfficeActivity } from "../client/use-message-stream.ts";
+import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 
 /**
  * A message the person steered into this answer while it ran. It belongs to
@@ -40,6 +42,8 @@ export type AssistantBodyPart =
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
+  /** A run of browser calls, one row like the web's: the steps and pages behind it. */
+  | { kind: "browser"; key: string; activities: DesktopToolActivity[] }
   | WorkingFilePart
   | {
       kind: "tool";
@@ -183,6 +187,15 @@ export function projectAssistantBody({
         parts.push({
           kind: "web",
           key: `web-${item.activity.callId}`,
+          activities: [item.activity],
+        });
+    } else if (item.activity.family === "desktop" && isBrowserTool(item.activity.name)) {
+      const last = parts.at(-1);
+      if (last?.kind === "browser") last.activities.push(item.activity);
+      else
+        parts.push({
+          kind: "browser",
+          key: `browser-${item.activity.callId}`,
           activities: [item.activity],
         });
     } else if (item.activity.family === "skill") {

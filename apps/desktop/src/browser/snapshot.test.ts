@@ -54,6 +54,24 @@ describe("serializeAxTree", () => {
     ]);
   });
 
+  it("never reads back a value a secret was typed into", () => {
+    const { text } = serializeAxTree(
+      [
+        ...page.filter((entry) => entry.nodeId !== "6"),
+        node("6", "textbox", "Search", {
+          parentId: "1",
+          backendDOMNodeId: 42,
+          value: { value: "cats" },
+          childIds: ["6t"],
+        }),
+        node("6t", "StaticText", "cats", { parentId: "6" }),
+      ],
+      { secrets: new Set([42]) },
+    );
+    expect(text).toContain('textbox "Search": ••••••••');
+    expect(text).not.toContain("cats");
+  });
+
   it("cuts a long page short and says so", () => {
     const many: AxNode[] = [
       node("r", "RootWebArea", "", { childIds: Array.from({ length: 50 }, (_, i) => `p${i}`) }),
@@ -61,7 +79,7 @@ describe("serializeAxTree", () => {
         node(`p${i}`, "paragraph", `Paragraph number ${i}`, { parentId: "r" }),
       ),
     ];
-    const { text, truncated } = serializeAxTree(many, 300);
+    const { text, truncated } = serializeAxTree(many, { maxChars: 300 });
     expect(truncated).toBe(true);
     expect(text.length).toBeLessThan(360);
     expect(text.endsWith("this outline was cut short)")).toBe(true);

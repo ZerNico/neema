@@ -6,6 +6,7 @@ import { markdownReferenceLinks } from "./markdown-reference-links.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 import { stripUndefinedCitationMarkers } from "../citation-markers.ts";
+import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
 export type MarkdownComponents = NonNullable<ComponentProps<typeof Streamdown>["components"]>;
 
@@ -58,6 +59,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
   );
   return (
     <Streamdown
+      linkSafety={LINK_SAFETY}
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
       plugins={markdownPlugins}

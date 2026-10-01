@@ -5,7 +5,6 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
 import type { ToolPageStatus, WebToolActivity } from "../client/use-message-stream.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import {
@@ -18,10 +17,10 @@ import {
 } from "~/ui/disclosure.tsx";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
+import { useRunDisclosure } from "./use-run-disclosure.ts";
 
 const QUERY_LIMIT = 2;
 const PAGE_LIMIT = 3;
-const COLLAPSE_DELAY_MS = 800;
 
 const urlKey = (raw: string): string => {
   try {
@@ -149,41 +148,17 @@ export function ToolActivityBlock({
   activities,
   usedSources,
   onViewSources,
+  live = false,
 }: {
   activities: WebToolActivity[];
+  /** The newest part of a streaming answer, which keeps the row open. */
+  live?: boolean;
   /** Indexes the message lists as sources; absent counts every hit. */
   usedSources?: ReadonlySet<number>;
   onViewSources?: () => void;
 }) {
   const anyRunning = activities.some((activity) => activity.status === "running");
-  // Keep the disclosure open briefly across the tiny gap between a completed
-  // search call and the next page-read call. Without the grace period, fast
-  // research sequences visibly collapse and reopen between model turns.
-  const [previousRunning, setPreviousRunning] = useState(anyRunning);
-  const [graceOpen, setGraceOpen] = useState(anyRunning);
-  if (previousRunning !== anyRunning) {
-    setPreviousRunning(anyRunning);
-    if (anyRunning) setGraceOpen(true);
-  }
-  useEffect(() => {
-    if (anyRunning || !graceOpen) return;
-
-    const timeout = window.setTimeout(() => setGraceOpen(false), COLLAPSE_DELAY_MS);
-    return () => window.clearTimeout(timeout);
-  }, [anyRunning, graceOpen]);
-
-  // A manual choice applies to its current phase. Carry a manual collapse into
-  // the completion grace period so finishing never reopens something the user
-  // explicitly closed.
-  const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);
-  const manuallyCollapsedWhileRunning =
-    override?.during === true && override.value === false && !anyRunning;
-  const expanded =
-    override !== null && override.during === anyRunning
-      ? override.value
-      : manuallyCollapsedWhileRunning
-        ? false
-        : anyRunning || graceOpen;
+  const { expanded, onOpenChange } = useRunDisclosure(anyRunning || live);
 
   if (activities.length === 0) return null;
 
@@ -231,11 +206,7 @@ export function ToolActivityBlock({
     (onViewSources !== undefined && sourceCount > 0);
 
   return (
-    <Disclosure
-      open={expanded}
-      onOpenChange={(next) => setOverride({ during: anyRunning, value: next })}
-      className="mb-2"
-    >
+    <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>

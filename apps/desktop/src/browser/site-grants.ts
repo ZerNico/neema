@@ -1,7 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getDomain, getHostname } from "tldts";
+import { serialWrites, writeJsonAtomic } from "../json-file.ts";
+
+// The machine never learns that a chat was deleted, so per-chat grants are kept
+// for the chats granted to most recently and the oldest fall away.
+const CHATS_KEPT = 500;
 
 /**
  * The site a grant covers: the registrable domain, so mail.google.com and
@@ -77,23 +81,13 @@ export async function loadSiteGrants(directory: string): Promise<SiteGrants> {
   } catch {
     // Nothing allowed yet, or a damaged file: either way, everything asks.
   }
-  let writes = Promise.resolve();
-  const save = (change: (current: Store) => Store) => {
-    const next = writes.then(async () => {
+  const queue = serialWrites();
+  const save = (change: (current: Store) => Store) =>
+    queue(async () => {
       const updated = change(structuredClone(store));
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      const temporary = join(directory, `.browser-sites-${randomUUID()}.tmp`);
-      try {
-        await writeFile(temporary, JSON.stringify(updated), { flag: "wx", mode: 0o600 });
-        await rename(temporary, file);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      await writeJsonAtomic(file, updated);
       store = updated;
     });
-    writes = next.catch(() => {});
-    return next;
-  };
   return {
     allowed: (origin, conversationId, url) => {
       const site = siteOf(url);
@@ -112,7 +106,11 @@ export async function loadSiteGrants(directory: string): Promise<SiteGrants> {
           current.always[origin] = [...sites];
         } else {
           const chats = (current.chats[origin] ??= {});
-          chats[conversationId] = [...new Set(chats[conversationId] ?? []).add(site)];
+          const sites = new Set(chats[conversationId] ?? []).add(site);
+          // Re-inserted last, so key order is the order chats were granted to.
+          delete chats[conversationId];
+          chats[conversationId] = [...sites];
+          for (const stale of Object.keys(chats).slice(0, -CHATS_KEPT)) delete chats[stale];
         }
         return current;
       });

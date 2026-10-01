@@ -142,7 +142,11 @@ describe("app-owned Work execution", () => {
       expect(deps.execute).not.toHaveBeenCalled();
       controller.decide("network", "allow-rest");
       await completed;
-      expect(deps.execute).toHaveBeenCalledExactlyOnceWith(first, expect.any(Number));
+      expect(deps.execute).toHaveBeenCalledExactlyOnceWith(
+        first,
+        expect.any(Number),
+        expect.any(Function),
+      );
       expect(controller.pending("a").get("next-network")).toBe("network");
       const subsequent = snapshot({ ...next, callId: "future-network" });
       subsequent.settings[0]!.approval = approval;
@@ -216,7 +220,7 @@ describe("app-owned Work execution", () => {
     controller.decide("next", "allow-rest");
     await completed;
     expect(deps.execute).toHaveBeenCalledTimes(1);
-    expect(deps.execute).toHaveBeenCalledWith(next, expect.any(Number));
+    expect(deps.execute).toHaveBeenCalledWith(next, expect.any(Number), expect.any(Function));
     expect(deps.cancel).toHaveBeenCalledWith("old");
   });
 
@@ -376,6 +380,43 @@ describe("browser sites", () => {
       expect([...controller.pending("a")]).toEqual([["two", "site"]]);
     }
   });
+
+  it.each([
+    ["allow-site", true, "chat"],
+    ["allow", true, null],
+    ["deny", false, null],
+  ] as const)(
+    "asks while a call runs about a site it was led to: %s",
+    async (choice, allowed, scope) => {
+      const answer = deferred<boolean>();
+      const allowSite = vi.fn(async () => {});
+      const execute: WorkDependencies["execute"] = async (_call, _ms, askSite) => {
+        answer.resolve(await askSite("https://led.test/page"));
+        return result;
+      };
+      const { controller, completed } = setup({ execute, allowSite });
+      const click = { ...call("click"), name: "browser_click", args: { tab: "t1", ref: "e1" } };
+      controller.reconcile({
+        ...snapshot(click),
+        settings: [{ conversationId: "a", title: "a", approval: "skip" }],
+      });
+      await vi.waitFor(() => expect([...controller.pending("a")]).toEqual([["click", "site"]]));
+      // The card asks about the address the click led to.
+      expect(controller.args("click")).toMatchObject({ url: "https://led.test/page" });
+      controller.decide("click", choice);
+      expect(await answer.promise).toBe(allowed);
+      await completed;
+      expect(controller.pending("a").size).toBe(0);
+      if (scope)
+        expect(allowSite).toHaveBeenCalledWith(
+          expect.objectContaining({
+            args: expect.objectContaining({ url: "https://led.test/page" }),
+          }),
+          scope,
+        );
+      else expect(allowSite).not.toHaveBeenCalled();
+    },
+  );
 
   it("never lets allow-rest cover a site", async () => {
     const { controller, deps } = setup({ siteAllowed: async () => false });

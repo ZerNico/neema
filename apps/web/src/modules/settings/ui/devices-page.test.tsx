@@ -82,61 +82,15 @@ describe("describeSession", () => {
 });
 
 describe("DevicesPage", () => {
-  it("hides machine-local network permissions in the browser", () => {
+  it("keeps to the account, even in the desktop app: this computer's settings live apart", async () => {
+    Reflect.set(globalThis, "__chatDesktop", { network: { list: vi.fn(), revoke: vi.fn() } });
     renderPage();
-    expect(screen.queryByText("Network access")).not.toBeInTheDocument();
-  });
-
-  it("lists website hosts below desktop pairing and revokes only after confirming", async () => {
-    const user = userEvent.setup();
-    const list = vi
-      .fn()
-      .mockResolvedValue([{ host: "example.com" }, { host: "other.example.com" }]);
-    const revoke = vi.fn().mockResolvedValue(undefined);
-    Reflect.set(globalThis, "__chatDesktop", { network: { list, revoke } });
-    renderPage();
-
-    expect(await screen.findByText("example.com")).toBeInTheDocument();
-    expect(screen.getByText("other.example.com")).toBeInTheDocument();
-    expect(
-      screen.getByText("Websites you’ve allowed Work to access from this desktop."),
-    ).toBeInTheDocument();
+    await screen.findByText("This device");
     expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
       "Devices",
       "Signed in",
       "Add a desktop",
-      "Network access",
     ]);
-    expect(list).toHaveBeenCalledTimes(1);
-    await user.click(screen.getAllByRole("button", { name: "Remove access" })[0]!);
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Remove access to example.com?");
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(revoke).not.toHaveBeenCalled();
-
-    await user.click(screen.getAllByRole("button", { name: "Remove access" })[1]!);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove access" }),
-    );
-    await waitFor(() => expect(revoke).toHaveBeenCalledWith("other.example.com"));
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
-
-    await user.click(screen.getAllByRole("button", { name: "Remove access" })[0]!);
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove access" }),
-    );
-    await waitFor(() => expect(revoke).toHaveBeenLastCalledWith("example.com"));
-  });
-
-  it("offers a retry when the network grant list fails", async () => {
-    const user = userEvent.setup();
-    const list = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
-    Reflect.set(globalThis, "__chatDesktop", { network: { list, revoke: vi.fn() } });
-    renderPage();
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load network access.");
-    await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("No websites allowed yet.")).toBeInTheDocument();
   });
 
   it("lists every session, marks this device and offers revoke only for the others", async () => {

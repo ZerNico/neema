@@ -1,0 +1,148 @@
+import { ArrowDown01Icon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { BROWSER_ACTIVITY } from "~/modules/browser/ui/browser-activity.ts";
+import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
+import {
+  Disclosure,
+  DisclosureContent,
+  DisclosureTrigger,
+  disclosureBodyRailClassName,
+  disclosureChevronMotionClassName,
+  disclosureTriggerClassName,
+} from "~/ui/disclosure.tsx";
+import { cn } from "~/ui/utils";
+import type { DesktopToolActivity } from "../client/use-message-stream.ts";
+import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
+import { Favicon, hostOf } from "./favicon.tsx";
+import { useRunDisclosure } from "./use-run-disclosure.ts";
+
+type Page = { url: string; title: string };
+
+// "example.com", "example.com and iana.org", "example.com and 2 other sites".
+const sitesPhrase = (sites: ReadonlyArray<string>) =>
+  sites.length <= 2 ? sites.join(" and ") : `${sites[0]} and ${sites.length - 1} other sites`;
+
+const lineOf = (activity: DesktopToolActivity) =>
+  activity.result?.summary ??
+  (isBrowserTool(activity.name)
+    ? BROWSER_ACTIVITY[activity.name].running(activity.args ?? {})
+    : "");
+
+function PageLink({ page }: { page: Page }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 pl-6">
+      <Favicon url={page.url} />
+      <a
+        href={page.url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="hover:text-foreground min-w-0 truncate transition-colors"
+        title={page.url}
+      >
+        {page.title.trim() || hostOf(page.url)}
+      </a>
+      <span className="text-muted-foreground/70 hidden shrink-0 text-xs sm:inline">
+        {hostOf(page.url)}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * One collapsed row for a run of browser calls, like the web and knowledge
+ * rows: the header says what happened in a few words, the disclosure lists the
+ * steps as a person would put them, with each page linked as it was reached. A
+ * step waiting on the user keeps its approval card below the row.
+ */
+export function BrowserActivityBlock({
+  activities,
+  approvals,
+  live = false,
+}: {
+  activities: DesktopToolActivity[];
+  /** The newest part of a streaming answer, which keeps the row open. */
+  live?: boolean;
+  approvals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
+}) {
+  const running = activities.find((activity) => activity.status === "running");
+  const waiting = activities.find(
+    (activity) => activity.status === "running" && approvals?.has(activity.callId),
+  );
+  const { expanded, onOpenChange } = useRunDisclosure(running !== undefined || live);
+  if (activities.length === 0) return null;
+
+  const sites = [
+    ...new Set(
+      activities.flatMap((activity) => {
+        const url = activity.result?.page?.url;
+        return url ? [hostOf(url)] : [];
+      }),
+    ),
+  ];
+  const failed = activities.filter((activity) => activity.status === "error").length;
+  const headerLabel = waiting
+    ? "Waiting for you"
+    : running
+      ? lineOf(running)
+      : failed === activities.length
+        ? "Couldn’t use the browser"
+        : sites.length > 0
+          ? `Browsed ${sitesPhrase(sites)}`
+          : "Used the browser";
+
+  // A page is linked where the run first reached it, not on every step there.
+  const steps: Array<{ activity: DesktopToolActivity; reached: Page | null }> = [];
+  for (const activity of activities) {
+    const page = activity.result?.page ?? null;
+    const previous = steps.findLast((step) => step.activity.result?.page)?.activity.result?.page;
+    steps.push({ activity, reached: page && page.url !== previous?.url ? page : null });
+  }
+  const approval = waiting ? approvals?.get(waiting.callId) : undefined;
+  return (
+    <>
+      <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
+        <DisclosureTrigger className={disclosureTriggerClassName}>
+          <HugeiconsIcon icon={Globe02Icon} strokeWidth={2} className="size-4" aria-hidden />
+          <span className={cn("min-w-0 truncate", running && !waiting && "text-shimmer")}>
+            {headerLabel}
+          </span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            strokeWidth={2}
+            className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
+          />
+        </DisclosureTrigger>
+        <DisclosureContent>
+          <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
+            {steps.map(({ activity, reached }) => {
+              const icon = isBrowserTool(activity.name)
+                ? BROWSER_ACTIVITY[activity.name].icon
+                : Globe02Icon;
+              return (
+                <li key={activity.callId} className="flex min-w-0 flex-col gap-1">
+                  <span
+                    className={cn(
+                      "flex min-w-0 items-center gap-2",
+                      activity.status === "error" && "text-destructive",
+                      activity.status === "running" && "text-shimmer",
+                    )}
+                  >
+                    <HugeiconsIcon
+                      icon={icon}
+                      strokeWidth={2}
+                      className="size-4 shrink-0"
+                      aria-hidden
+                    />
+                    <span className="min-w-0 truncate">{lineOf(activity)}</span>
+                  </span>
+                  {reached ? <PageLink page={reached} /> : null}
+                </li>
+              );
+            })}
+          </ol>
+        </DisclosureContent>
+      </Disclosure>
+      {waiting && approval ? <DesktopActivityBlock activity={waiting} approval={approval} /> : null}
+    </>
+  );
+}

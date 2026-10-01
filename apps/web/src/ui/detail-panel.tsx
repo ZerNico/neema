@@ -1,16 +1,10 @@
 import {
-  Cancel01Icon,
-  File01Icon,
   PanelRightCloseIcon,
   PanelRightIcon,
   PanelRightOpenIcon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
-import { RestrictToHorizontalAxis } from "@dnd-kit/abstract/modifiers";
-import { RestrictToElement } from "@dnd-kit/dom/modifiers";
-import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
-import { isSortable, useSortable } from "@dnd-kit/react/sortable";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useRouterState } from "@tanstack/react-router";
 import * as m from "motion/react-m";
 import {
@@ -25,19 +19,37 @@ import {
   useRef,
   useState,
 } from "react";
-import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import { PanelTitlebar } from "~/ui/desktop-chrome.tsx";
+import { DetailPanelTabStrip } from "~/ui/detail-panel-strip.tsx";
 import {
   DETAIL_PANEL_MIN,
   DETAIL_PANEL_STEP,
   detailPanelMax,
   useDetailPanelWidth,
 } from "~/ui/detail-panel-width.ts";
+import {
+  appendTab,
+  closeTab,
+  hidePanel,
+  moveTab,
+  openTab,
+  refreshTab,
+  releaseTab,
+  replaceTab,
+  restoredState,
+  selectTab,
+  showPanel,
+  storedScope,
+  tabSummary,
+  type DetailPanelApi,
+  type DetailPanelRequest,
+  type DetailPanelTabSummary,
+} from "~/ui/detail-panel-state.ts";
 import { readPanelScope, writePanelScope, type StoredPanelScope } from "~/ui/detail-panel-tabs.ts";
 import { MotionSwap, useAppReducedMotion } from "~/ui/motion";
 import { EmptyState, ListSkeleton } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { useIsMobile } from "~/ui/use-mobile";
 import { cn } from "~/ui/utils";
@@ -49,144 +61,16 @@ declare module "@tanstack/react-router" {
   }
 }
 
-export interface DetailPanelRequest {
-  /** Identity of the content. Refreshing the same id preserves body state. */
-  id: string;
-  title: string;
-  /** Snapshotted like the body; live owners refresh both after committing data. */
-  subtitle?: ReactNode;
-  /**
-   * Pinned under the tab strip, outside the scroller. The shell owns this
-   * region so a body never has to position itself against padding it does not
-   * control.
-   */
-  actions?: ReactNode;
-  /** Props are snapshotted at open time, then updated by re-open or refresh. */
-  body: ReactNode;
-  /** Shown in the tab strip; a generic file otherwise. */
-  icon?: IconSvgElement;
-  /** An image in place of `icon`, such as a page's favicon as a `data:` URL. */
-  iconSrc?: string;
-  /** The tab shows a spinner in place of its icon, as a browser tab does while loading. */
-  busy?: boolean;
-  /**
-   * The tab outlives navigation and restarts. Only for content an owner can
-   * rebuild from the id and `data`: until it refreshes, the tab shows a pending body.
-   */
-  restorable?: boolean;
-  /** Small strings stored with a restorable tab, such as a browser tab's address. */
-  data?: Readonly<Record<string, string>>;
-  /** The body takes the whole area, unpadded and unscrolled: a browser page. */
-  fill?: boolean;
-}
-
-export interface DetailPanelApi {
-  /** Adds the tab if it is new, selects it and shows the panel. */
-  open: (request: DetailPanelRequest) => void;
-  /** Updates the tab with this id wherever it is; never adds, selects or shows one. */
-  refresh: (request: DetailPanelRequest) => void;
-  select: (id: string) => void;
-  /** Removes the tab and selects a neighbour; the panel hides with its last tab. */
-  closeTab: (id: string) => void;
-  /**
-   * The owner unmounted. A restorable tab keeps its place with a pending body,
-   * since the same owner may come straight back; any other tab closes.
-   */
-  release: (id: string) => void;
-  /** Keeps every tab, so the header toggle brings them back. */
-  hide: () => void;
-  /** Shows the panel, on a new tab when it has none. */
-  show: () => void;
-  newTab: () => void;
-  /** Adds the tab last if it is new, without selecting or showing anything. */
-  append: (request: DetailPanelRequest) => void;
-  /** Puts `request` where tab `id` is, selected, as a new tab becomes a page. */
-  replaceTab: (id: string, request: DetailPanelRequest) => void;
-  /** Moves the tab to `index` in the strip, clamped to its ends. */
-  moveTab: (id: string, index: number) => void;
-}
-
-interface PanelTab {
-  id: string;
-  title: string;
-  icon?: IconSvgElement;
-  restorable: boolean;
-  data?: Readonly<Record<string, string>>;
-  /** Null for a restored tab whose owner has not refreshed it yet. */
-  request: DetailPanelRequest | null;
-}
-
-interface PanelState {
-  scope: string;
-  tabs: ReadonlyArray<PanelTab>;
-  activeId: string | null;
-  visible: boolean;
-}
-
-export interface DetailPanelTabSummary {
-  id: string;
-  title: string;
-  icon?: IconSvgElement;
-  iconSrc?: string;
-  busy?: boolean;
-  data?: Readonly<Record<string, string>>;
-}
+export type {
+  DetailPanelApi,
+  DetailPanelRequest,
+  DetailPanelTabSummary,
+} from "~/ui/detail-panel-state.ts";
 
 interface TabsView {
   tabs: ReadonlyArray<DetailPanelTabSummary>;
   activeId: string | null;
   visible: boolean;
-}
-
-const tabOf = (request: DetailPanelRequest): PanelTab => ({
-  id: request.id,
-  title: request.title,
-  ...(request.icon ? { icon: request.icon } : {}),
-  restorable: request.restorable === true,
-  ...(request.data ? { data: request.data } : {}),
-  request,
-});
-
-function withoutTab(state: PanelState, id: string): PanelState {
-  const index = state.tabs.findIndex((tab) => tab.id === id);
-  if (index < 0) return state;
-  const tabs = state.tabs.toSpliced(index, 1);
-  if (state.activeId !== id) return { ...state, tabs };
-  // Like a browser: the tab to the right takes its place, else the one before.
-  const next = tabs[index] ?? tabs[index - 1];
-  return next
-    ? { ...state, tabs, activeId: next.id }
-    : { ...state, tabs, activeId: null, visible: false };
-}
-
-function restoredState(userId: string | undefined, scope: string, mobile: boolean): PanelState {
-  const stored = userId ? readPanelScope(userId, scope) : null;
-  const tabs = (stored?.tabs ?? []).map(({ id, title, data }): PanelTab => {
-    const tab: PanelTab = { id, title, restorable: true, request: null };
-    if (data) tab.data = data;
-    return tab;
-  });
-  const first = tabs[0];
-  if (!stored || !first) return { scope, tabs: [], activeId: null, visible: false };
-  return {
-    scope,
-    tabs,
-    activeId: tabs.some((tab) => tab.id === stored.activeId) ? stored.activeId : first.id,
-    // A phone shows the panel over the page, so never by itself.
-    visible: stored.visible && !mobile,
-  };
-}
-
-function storedScope(state: PanelState): StoredPanelScope | null {
-  const tabs = state.tabs
-    .filter((tab) => tab.restorable)
-    .map(({ id, title, data }) => (data ? { id, title, data } : { id, title }));
-  if (tabs.length === 0) return null;
-  return {
-    tabs,
-    activeId: tabs.some((tab) => tab.id === state.activeId) ? state.activeId : null,
-    visible: state.visible,
-  };
 }
 
 // Actions are split from state so that opening or closing the panel doesn't
@@ -268,17 +152,18 @@ export function DetailPanelProvider({
   });
   // A page can opt out, like the new-chat page: sending navigates away from it,
   // so a tab opened there would be left behind.
-  const available = Boolean(
-    useRouterState({
-      select: (s) => s.matches[s.matches.length - 1]?.staticData?.detailPanel !== false,
-    }),
-  );
+  const available = useRouterState({
+    select: (s) => s.matches[s.matches.length - 1]?.staticData?.detailPanel !== false,
+  });
   const mobile = useIsMobile();
-  const [state, setState] = useState(() => restoredState(userId, scope, mobile));
+  const restore = () => restoredState(userId ? readPanelScope(userId, scope) : null, scope, mobile);
+  const [state, setState] = useState(restore);
   // Derived during render, so no effect is needed and the previous page's tabs
   // never render against the new one.
-  if (state.scope !== scope) setState(restoredState(userId, scope, mobile));
+  if (state.scope !== scope) setState(restore());
 
+  // Serialized so a refresh that changes nothing stored writes nothing; the
+  // string is the memo key, and the effect writes what it stands for.
   const stored = useMemo(() => JSON.stringify(storedScope(state)), [state]);
   useEffect(() => {
     if (userId) writePanelScope(userId, state.scope, JSON.parse(stored) as StoredPanelScope | null);
@@ -294,96 +179,41 @@ export function DetailPanelProvider({
 
   const api = useMemo<DetailPanelApi>(() => {
     const before = (action: PanelAction) => beforeAction.current?.(action);
-    // Content opens beside what it came from; a new tab goes last, as in a browser.
-    const open = (request: DetailPanelRequest, last = false) => {
-      before({ type: "open", id: request.id });
-      setState((current) => {
-        const index = current.tabs.findIndex((tab) => tab.id === request.id);
-        const active = current.tabs.findIndex((tab) => tab.id === current.activeId);
-        const tabs =
-          index >= 0
-            ? current.tabs.with(index, tabOf(request))
-            : current.tabs.toSpliced(
-                last || active < 0 ? current.tabs.length : active + 1,
-                0,
-                tabOf(request),
-              );
-        return { ...current, tabs, activeId: request.id, visible: true };
-      });
-    };
+    const newTabOf = () => newTabRequest(newTab);
     return {
-      open: (request) => open(request),
-      refresh: (request) =>
-        setState((current) => {
-          const index = current.tabs.findIndex((tab) => tab.id === request.id);
-          return index < 0
-            ? current
-            : { ...current, tabs: current.tabs.with(index, tabOf(request)) };
-        }),
+      open: (request) => {
+        before({ type: "open", id: request.id });
+        setState((current) => openTab(current, request));
+      },
+      refresh: (request) => setState((current) => refreshTab(current, request)),
       select: (id) => {
         before({ type: "open", id });
-        setState((current) =>
-          current.tabs.some((tab) => tab.id === id)
-            ? { ...current, activeId: id, visible: true }
-            : current,
-        );
+        setState((current) => selectTab(current, id));
       },
       closeTab: (id) => {
         before({ type: "close", id });
-        setState((current) => withoutTab(current, id));
+        setState((current) => closeTab(current, id));
       },
       release: (id) => {
         before({ type: "close", id });
-        setState((current) => {
-          const index = current.tabs.findIndex((tab) => tab.id === id);
-          const tab = current.tabs[index];
-          if (!tab) return current;
-          if (!tab.restorable) return withoutTab(current, id);
-          return { ...current, tabs: current.tabs.with(index, { ...tab, request: null }) };
-        });
+        setState((current) => releaseTab(current, id));
       },
       hide: () => {
         before({ type: "close" });
-        setState((current) => (current.visible ? { ...current, visible: false } : current));
+        setState(hidePanel);
       },
-      show: () =>
-        setState((current) => {
-          if (current.visible) return current;
-          if (current.tabs.length === 0) {
-            const tab = tabOf(newTabRequest(newTab));
-            return { ...current, tabs: [tab], activeId: tab.id, visible: true };
-          }
-          const activeId = current.tabs.some((tab) => tab.id === current.activeId)
-            ? current.activeId
-            : (current.tabs[0]?.id ?? null);
-          return { ...current, activeId, visible: true };
-        }),
-      newTab: () => open(newTabRequest(newTab), true),
-      append: (request) =>
-        setState((current) =>
-          current.tabs.some((tab) => tab.id === request.id)
-            ? current
-            : { ...current, tabs: [...current.tabs, tabOf(request)] },
-        ),
+      show: () => setState((current) => showPanel(current, newTabOf)),
+      newTab: () => {
+        const request = newTabOf();
+        before({ type: "open", id: request.id });
+        setState((current) => openTab(current, request, true));
+      },
+      append: (request) => setState((current) => appendTab(current, request)),
       replaceTab: (id, request) => {
         before({ type: "open", id: request.id });
-        setState((current) => {
-          const index = current.tabs.findIndex((tab) => tab.id === id);
-          if (index < 0) return current;
-          const tabs = current.tabs
-            .with(index, tabOf(request))
-            .filter((tab, position) => position === index || tab.id !== request.id);
-          return { ...current, tabs, activeId: request.id, visible: true };
-        });
+        setState((current) => replaceTab(current, id, request));
       },
-      moveTab: (id, index) =>
-        setState((current) => {
-          const from = current.tabs.findIndex((tab) => tab.id === id);
-          const tab = current.tabs[from];
-          const to = Math.min(Math.max(index, 0), current.tabs.length - 1);
-          if (!tab || from === to) return current;
-          return { ...current, tabs: current.tabs.toSpliced(from, 1).toSpliced(to, 0, tab) };
-        }),
+      moveTab: (id, index) => setState((current) => moveTab(current, id, index)),
     };
     // `newTab` is a stable function in practice; a new one rebuilds the actions.
   }, [newTab]);
@@ -400,14 +230,7 @@ export function DetailPanelProvider({
   );
   const tabsView = useMemo<TabsView>(
     () => ({
-      tabs: state.tabs.map(({ id, title, icon, data, request }) => {
-        const summary: DetailPanelTabSummary = { id, title };
-        if (icon) summary.icon = icon;
-        if (data) summary.data = data;
-        if (request?.iconSrc) summary.iconSrc = request.iconSrc;
-        if (request?.busy) summary.busy = true;
-        return summary;
-      }),
+      tabs: state.tabs.map(tabSummary),
       activeId: state.activeId,
       visible: state.visible,
     }),
@@ -539,208 +362,13 @@ function usePanelPresentation() {
   return { ...presentation, open: selected !== null, finishExit };
 }
 
-// dnd-kit will not start a drag from a button inside the dragged element, and a
-// tab is mostly its button. Only the close button keeps a press to itself.
-const TAB_SENSORS = [
-  PointerSensor.configure({
-    preventActivation: (event) =>
-      event.target instanceof Element && event.target.closest("[data-tab-close]") !== null,
-  }),
-];
-
-// Along the strip only, and never past either end of the tab list.
-const TAB_MODIFIERS = [
-  RestrictToHorizontalAxis,
-  RestrictToElement.configure({
-    element: (operation) => operation.source?.element?.closest("[role=tablist]") ?? null,
-  }),
-];
-
-/**
- * One button per tab, with roving focus: Tab enters on the selected one, arrows
- * move and select, Alt+Shift+arrows move the tab itself. Dragging sorts with
- * dnd-kit, whose other tabs slide aside as one passes them; its keyboard sensor
- * is left out because it would take Enter and Space, which select a tab.
- */
-function DetailPanelTabStrip({ ids }: { ids: { tab: (index: number) => string; panel: string } }) {
-  const panel = useDetailPanel();
-  const { tabs, activeId, visible } = useContext(DetailPanelTabsContext);
-  const buttons = useRef(new Map<string, HTMLButtonElement>());
-  const onKeyDown = (event: KeyboardEvent, index: number) => {
-    const tab = tabs[index];
-    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (tab && step !== 0 && event.altKey && event.shiftKey) {
-      event.preventDefault();
-      panel.moveTab(tab.id, index + step);
-      return;
-    }
-    const target =
-      step !== 0
-        ? tabs[(index + step + tabs.length) % tabs.length]
-        : event.key === "Home"
-          ? tabs[0]
-          : event.key === "End"
-            ? tabs.at(-1)
-            : undefined;
-    if (!target) return;
-    event.preventDefault();
-    panel.select(target.id);
-    buttons.current.get(target.id)?.focus();
-  };
-  const reducedMotion = useAppReducedMotion();
-  // A tab opened or selected past the strip's edge is scrolled into view, as a
-  // browser does; the strip only scrolls sideways, so nothing else moves.
-  useEffect(() => {
-    if (!visible || activeId === null) return;
-    buttons.current.get(activeId)?.parentElement?.scrollIntoView?.({
-      block: "nearest",
-      inline: "nearest",
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
-  }, [activeId, visible, reducedMotion]);
-  const register = useCallback((id: string, element: HTMLButtonElement | null) => {
-    if (element) buttons.current.set(id, element);
-    else buttons.current.delete(id);
-  }, []);
+function TabStrip({ ids }: { ids: { tab: (index: number) => string; panel: string } }) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      <DragDropProvider
-        sensors={TAB_SENSORS}
-        modifiers={TAB_MODIFIERS}
-        onDragEnd={(event) => {
-          const { source } = event.operation;
-          if (event.canceled || !isSortable(source)) return;
-          if (source.index !== source.initialIndex) panel.moveTab(String(source.id), source.index);
-        }}
-      >
-        <div
-          role="tablist"
-          aria-label="Panel tabs"
-          className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
-          // The strip only scrolls sideways, so a plain wheel scrolls it sideways.
-          onWheel={(event) => {
-            if (Math.abs(event.deltaY) > Math.abs(event.deltaX))
-              event.currentTarget.scrollLeft += event.deltaY;
-          }}
-        >
-          {tabs.map((tab, index) => (
-            <PanelTab
-              key={tab.id}
-              tab={tab}
-              index={index}
-              id={ids.tab(index)}
-              panelId={ids.panel}
-              selected={visible && tab.id === activeId}
-              focusable={visible ? tab.id === activeId : index === 0}
-              register={register}
-              onKeyDown={onKeyDown}
-            />
-          ))}
-        </div>
-      </DragDropProvider>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={panel.newTab}
-              aria-label="New tab"
-              className="text-muted-foreground"
-            />
-          }
-        >
-          <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-        </TooltipTrigger>
-        <TooltipContent>New tab</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
-function PanelTab({
-  tab,
-  index,
-  id,
-  panelId,
-  selected,
-  focusable,
-  register,
-  onKeyDown,
-}: {
-  tab: DetailPanelTabSummary;
-  index: number;
-  id: string;
-  panelId: string;
-  selected: boolean;
-  focusable: boolean;
-  register: (id: string, element: HTMLButtonElement | null) => void;
-  onKeyDown: (event: KeyboardEvent, index: number) => void;
-}) {
-  const panel = useDetailPanel();
-  const { ref, isDragging } = useSortable({ id: tab.id, index });
-  return (
-    <div
-      ref={ref}
-      data-panel-tab=""
-      className={cn(
-        // The ring is inset: the strip scrolls sideways, which clips anything
-        // drawn outside a tab.
-        "group/tab ring-ring/50 flex h-8 max-w-48 min-w-0 shrink-0 items-center gap-0.5 rounded-md pr-0.5 ring-inset transition-colors has-[[role=tab]:focus-visible]:ring-2",
-        selected
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-        isDragging && "bg-muted text-foreground shadow-sm",
-      )}
-    >
-      <button
-        type="button"
-        role="tab"
-        id={id}
-        aria-selected={selected}
-        {...(selected ? { "aria-controls": panelId } : {})}
-        tabIndex={focusable ? 0 : -1}
-        ref={(element) => {
-          register(tab.id, element);
-          return () => register(tab.id, null);
-        }}
-        className="flex h-full min-w-0 items-center gap-1.5 pl-2 text-sm outline-none"
-        onClick={() => panel.select(tab.id)}
-        onAuxClick={(event) => {
-          if (event.button !== 1) return;
-          event.preventDefault();
-          panel.closeTab(tab.id);
-        }}
-        onKeyDown={(event) => onKeyDown(event, index)}
-      >
-        {tab.busy ? (
-          <Spinner aria-hidden className="size-4 shrink-0" />
-        ) : tab.iconSrc ? (
-          <img src={tab.iconSrc} alt="" className="size-4 shrink-0 rounded-sm" />
-        ) : (
-          <HugeiconsIcon
-            icon={tab.icon ?? File01Icon}
-            strokeWidth={2}
-            className="size-4 shrink-0"
-            aria-hidden
-          />
-        )}
-        <span className="truncate">{tab.title}</span>
-      </button>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={() => panel.closeTab(tab.id)}
-        aria-label={`Close ${tab.title}`}
-        data-tab-close=""
-        className={cn(
-          "text-muted-foreground",
-          !selected && "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
-        )}
-      >
-        <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-      </Button>
-    </div>
+    <DetailPanelTabStrip
+      panel={useDetailPanel()}
+      view={useContext(DetailPanelTabsContext)}
+      ids={ids}
+    />
   );
 }
 
@@ -982,6 +610,10 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   return (
     <m.aside
       ref={root}
+      // Things laid over the rail from outside it follow its animation by this.
+      data-panel-rail=""
+      // Web links clicked here open as panel tabs (`browser/ui/browser-host.tsx`).
+      data-web-links="panel"
       aria-label={request.title}
       aria-hidden={!open || undefined}
       inert={!open || undefined}
@@ -1006,11 +638,11 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
     >
       {overlay ? (
         <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
-          <DetailPanelTabStrip ids={ids} />
+          <TabStrip ids={ids} />
         </div>
       ) : (
         <PanelTitlebar>
-          <DetailPanelTabStrip ids={ids} />
+          <TabStrip ids={ids} />
           <PanelToggleSpace />
         </PanelTitlebar>
       )}
@@ -1090,6 +722,24 @@ export function useDetailPanelReconciler(prefix: string, liveIds: ReadonlyArray<
     for (const id of tabIds)
       if (id.startsWith(prefix) && !live.has(id.slice(prefix.length))) panel.closeTab(id);
   }, [panel, prefix, liveIds, tabIds]);
+}
+
+/**
+ * Keeps one tab current from the page's own data, open or not, so a restored
+ * tab gets its body back; null means its item is gone, which closes it. For
+ * owners that render one of these per tab of their kind.
+ */
+export function useDetailPanelTabContent(id: string, request: DetailPanelRequest | null) {
+  const panel = useDetailPanel();
+  useEffect(() => {
+    if (request) panel.refresh(request);
+    else panel.closeTab(id);
+  }, [panel, id, request]);
+}
+
+/** Whether the page on screen has a panel at all (the new-chat page does not). */
+export function useDetailPanelAvailable(): boolean {
+  return useContext(DetailPanelAvailableContext);
 }
 
 /** Every tab on this page with its stored data, for owners restoring theirs. */

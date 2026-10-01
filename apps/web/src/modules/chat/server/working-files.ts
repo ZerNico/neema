@@ -50,6 +50,12 @@ interface Entry {
   kept?: KeptWorkingFile;
   state: "working" | "publishing" | "published";
   attachmentId?: string;
+  /**
+   * Returned by a tool on the user's computer as it went (a screenshot, a file
+   * it read): cheap to take again, so it neither counts against the answer's
+   * files nor holds room another file needs.
+   */
+  capture?: boolean;
   /** Not yet kept at this revision, so a later answer needs it saved. */
   changed: boolean;
 }
@@ -93,6 +99,8 @@ export const createWorkingFiles = (
   let created = 0;
   let attemptBytes = 0;
   let disposed = false;
+  // Captures dropped to make room, so their reference says so.
+  const dropped = new Set<string>();
 
   const alive = () => {
     if (disposed) throw new Error("This working-file attempt has ended.");
@@ -100,6 +108,8 @@ export const createWorkingFiles = (
   const current = (ref: WorkingFileRef) => {
     alive();
     const entry = entries.get(ref.id);
+    if (!entry && dropped.has(ref.id))
+      throw new Error("This file was dropped to make room for newer ones. Take it again.");
     if (!entry) throw new Error("This working file is not available in this attempt.");
     if (entry.ref.revision !== ref.revision)
       throw new Error(`Working file revision conflict: current revision is ${entry.ref.revision}.`);
@@ -116,6 +126,18 @@ export const createWorkingFiles = (
   const account = (oldSize: number, newSize: number) => {
     attemptBytes += newSize - oldSize;
     processBytes += newSize - oldSize;
+  };
+  // Oldest first, only captures still unpublished, until `size` more bytes fit.
+  const makeRoom = (size: number) => {
+    for (const entry of entries.values()) {
+      const fits =
+        attemptBytes + size <= LIMITS.attemptBytes && processBytes + size <= LIMITS.processBytes;
+      if (fits) return;
+      if (!entry.capture || entry.state !== "working") continue;
+      account(entry.bytes?.length ?? 0, 0);
+      entries.delete(entry.ref.id);
+      dropped.add(entry.ref.id);
+    }
   };
   const snapshot = (entry: Entry): WorkingFileSnapshot => {
     if (!entry.bytes) throw new Error("This working file has not been loaded yet.");
@@ -138,10 +160,13 @@ export const createWorkingFiles = (
       bytes: Uint8Array;
       owner: WorkingFileOwner;
       source?: string;
+      capture?: boolean;
     }): WorkingFileSnapshot {
       alive();
-      if (created >= LIMITS.files)
+      if (!input.capture && created >= LIMITS.files)
         throw new Error("This answer has reached its working-file count limit.");
+      if (input.bytes.length > 0 && input.bytes.length <= LIMITS.fileBytes)
+        makeRoom(input.bytes.length);
       ensureSpace(0, input.bytes.length);
       const entry: Entry = {
         ...contents(input),
@@ -150,9 +175,10 @@ export const createWorkingFiles = (
         ...(input.source === undefined ? {} : { source: input.source }),
         state: "working",
         changed: true,
+        ...(input.capture ? { capture: true } : {}),
       };
       entries.set(entry.ref.id, entry);
-      created += 1;
+      if (!input.capture) created += 1;
       account(0, input.bytes.length);
       return snapshot(entry);
     },
@@ -246,8 +272,9 @@ export const createWorkingFiles = (
       if (entry?.ref.revision === ref.revision) entry.changed = false;
     },
     unfinished(): ReadonlyArray<{ ref: WorkingFileRef; name: string }> {
+      // A capture is no work in progress: nothing reminds the model to publish it.
       return [...entries.values()]
-        .filter((entry) => entry.state !== "published")
+        .filter((entry) => entry.state !== "published" && !entry.capture)
         .map((entry) => ({ ref: entry.ref, name: entry.name }));
     },
     dispose(): void {

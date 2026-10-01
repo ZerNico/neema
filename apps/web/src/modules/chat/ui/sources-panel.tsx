@@ -3,14 +3,19 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { collectSources, selectAnswerSources } from "./citations.ts";
 import { NO_INHERITED_SOURCES } from "./inherited-sources.ts";
 import type { DisplayMessage } from "./message-list.tsx";
-import { useDetailPanel, useDetailPanelTabIds, type DetailPanelRequest } from "~/ui/detail-panel";
+import {
+  useDetailPanel,
+  useDetailPanelTabContent,
+  useDetailPanelTabIds,
+  type DetailPanelRequest,
+} from "~/ui/detail-panel";
 
 function SourceRow({ source }: { source: ToolSource }) {
   if (source.kind === "document") return <DocumentSourceRow source={source} />;
@@ -117,7 +122,6 @@ export function SourcesPanelOwner({ messages }: { messages: ReadonlyArray<Displa
 }
 
 function SourcesTabOwner({ id, message }: { id: string; message: DisplayMessage | undefined }) {
-  const panel = useDetailPanel();
   const sources = message
     ? selectAnswerSources(
         message.content,
@@ -138,10 +142,7 @@ function SourcesTabOwner({ id, message }: { id: string; message: DisplayMessage 
         : null,
     [messageId, held.sources],
   );
-  useEffect(() => {
-    if (request) panel.refresh(request);
-    else panel.closeTab(id);
-  }, [panel, id, request]);
+  useDetailPanelTabContent(id, request);
   return null;
 }
 

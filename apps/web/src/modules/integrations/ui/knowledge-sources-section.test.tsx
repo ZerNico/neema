@@ -17,7 +17,11 @@ vi.mock("../server/functions.ts", () => ({
   removeKnowledgeSource: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("@tanstack/react-router", () => ({ Link: () => null, useRouterState: () => "/knowledge" }));
+vi.mock("@tanstack/react-router", () => ({
+  Link: () => null,
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/knowledge" }, matches: [] }),
+}));
 
 const source: KnowledgeSourceView = {
   id: "source-1",

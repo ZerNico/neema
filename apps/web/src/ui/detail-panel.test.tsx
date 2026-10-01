@@ -651,35 +651,23 @@ describe("tabs", () => {
     expect(press(screen.getByRole("button", { name: "Close a" }))).toBeUndefined();
   });
 
+  it("leaves no-drag to one box over the strip, so tabs scrolled out never block the header", () => {
+    render(<Harness />);
+    for (const id of ["a", "b"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
+    const list = screen.getByRole("tablist");
+    const hit = list.parentElement!.querySelector("[data-tab-strip-hit]");
+    // A sibling after the list, sized by the list's visible box, never an ancestor of a tab.
+    expect(hit?.parentElement).toBe(list.parentElement);
+    expect(list.contains(hit)).toBe(false);
+    expect(hit).toHaveClass("pointer-events-none");
+  });
+
   it("adds a new tab last, wherever the selected tab is", () => {
     render(<Harness />);
     for (const id of ["a", "b"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
     act(() => panel.select("a"));
     fireEvent.click(screen.getByRole("button", { name: "New tab" }));
     expect(order()).toEqual(["a", "b", "New tab"]);
-  });
-
-  it("scrolls the strip sideways with a plain wheel", () => {
-    render(<Harness />);
-    act(() => panel.open({ id: "a", title: "a", body: <p>a</p> }));
-    const strip = screen.getByRole("tablist");
-    fireEvent.wheel(strip, { deltaY: 40 });
-    expect(strip.scrollLeft).toBe(40);
-  });
-
-  it("scrolls a newly selected tab into view", () => {
-    const scrolled: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this);
-    };
-    try {
-      render(<Harness />);
-      for (const id of ["a", "b"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));
-      expect(scrolled.at(-1)).toBe(screen.getByRole("tab", { name: "b" }).parentElement);
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
   });
 
   it("moves the focused tab with Alt+Shift+arrows, keeping it selected", () => {

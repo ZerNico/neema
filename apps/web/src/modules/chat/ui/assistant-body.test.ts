@@ -35,7 +35,36 @@ const compaction = (
   status: "complete",
 });
 
+const desktop = (callId: string, name: string, callIndex: number): ToolActivity => ({
+  family: "desktop",
+  name: name as Extract<ToolActivity, { family: "desktop" }>["name"],
+  callId,
+  textOffset: 0,
+  turnIndex: 0,
+  callIndex,
+  status: "complete",
+});
+
 describe("projectAssistantBody", () => {
+  it("joins a run of browser calls into one row, apart from other desktop calls", () => {
+    const result = projectAssistantBody({
+      content: "",
+      streaming: false,
+      tools: [
+        desktop("open", "browser_open", 0),
+        desktop("click", "browser_click", 1),
+        desktop("read", "read_local_file", 2),
+        desktop("shot", "browser_snapshot", 3),
+      ],
+      compactions: [],
+    });
+    expect(
+      result.parts.map((part) =>
+        part.kind === "browser" ? part.activities.map((activity) => activity.callId) : part.kind,
+      ),
+    ).toEqual([["open", "click"], "tool", ["shot"]]);
+  });
+
   it("alternates original text and every activity family, including same-round post-tool text", () => {
     const content = "Intro. Search done. Memory done. Question done.";
     const result = projectAssistantBody({

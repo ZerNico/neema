@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { createWorkingFiles, type KeptWorkingFile } from "./working-files.ts";
 
@@ -94,6 +95,31 @@ describe("generation working files", () => {
     expect(() => files.create(note("extra"))).toThrow("count limit");
     files.dispose();
     expect(() => files.read(keptFiles[0]!.ref)).toThrow("attempt has ended");
+  });
+
+  it("lets captures from the computer neither count nor crowd out other files", () => {
+    const files = workspace();
+    const capture = (size: number) =>
+      files.create({
+        name: "shot.png",
+        mediaType: "image/png",
+        bytes: new Uint8Array(size).fill(1),
+        owner: "local",
+        capture: true,
+      });
+    // Past the eight-file cap, captures still come.
+    for (let index = 0; index < 8; index++) files.create(note(`draft ${index}`));
+    const oldest = capture(MAX_ATTACHMENT_BYTES);
+    const survivor = capture(MAX_ATTACHMENT_BYTES);
+    capture(MAX_ATTACHMENT_BYTES);
+    // A fourth full-size file only fits once the oldest capture makes room.
+    const newest = capture(MAX_ATTACHMENT_BYTES);
+    expect(() => files.read(oldest.ref)).toThrow("dropped to make room");
+    expect(files.read(survivor.ref).ref).toEqual(survivor.ref);
+    expect(files.read(newest.ref).ref).toEqual(newest.ref);
+    // Nothing reminds the model to publish a capture, and none is kept.
+    expect(files.unfinished().map((file) => file.name)).not.toContain("shot.png");
+    expect(files.changes().map((file) => file.owner)).not.toContain("local");
   });
 
   it("continues a kept file, loading its bytes once and reporting what changed", async () => {

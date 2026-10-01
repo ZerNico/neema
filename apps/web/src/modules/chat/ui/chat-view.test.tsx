@@ -136,7 +136,8 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => navigate,
-  useRouterState: () => "/chat/c1",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/c1" }, matches: [] }),
   useBlocker: vi.fn(),
 }));
 

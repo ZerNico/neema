@@ -23,7 +23,10 @@ import { FileReferenceContext } from "./file-reference.tsx";
 const inheritedFrom = (sources: ToolSource[]) => inheritSources([sources, []])[1]!;
 
 // The panel closes on navigation; the citation tests render outside a router.
-vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/chat/test" }));
+vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/test" }, matches: [] }),
+}));
 
 // The editor needs an upload handle; these tests only exercise the empty state.
 const idleUploads = (): AttachmentUploads => ({

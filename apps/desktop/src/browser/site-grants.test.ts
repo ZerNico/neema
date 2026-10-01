@@ -43,6 +43,22 @@ describe("site grants", () => {
     expect(reloaded.allowed(origin, "c2", "https://github.com")).toBe(false);
   });
 
+  it("forgets the chats granted to longest ago, keeping a chat granted to again", async () => {
+    const grants = await loadSiteGrants(directory);
+    await grants.allow(origin, "first", "https://a.test", "chat");
+    await grants.allow(origin, "second", "https://a.test", "chat");
+    await Promise.all(
+      Array.from({ length: 498 }, (_, index) =>
+        grants.allow(origin, `c${index}`, "https://a.test", "chat"),
+      ),
+    );
+    await grants.allow(origin, "first", "https://b.test", "chat");
+    await grants.allow(origin, "last", "https://a.test", "chat");
+    expect(grants.allowed(origin, "first", "https://a.test")).toBe(true);
+    expect(grants.allowed(origin, "second", "https://a.test")).toBe(false);
+    expect(grants.allowed(origin, "last", "https://a.test")).toBe(true);
+  });
+
   it("grants nothing from a damaged file", async () => {
     await writeFile(join(directory, "browser-sites.json"), "{not json");
     const grants = await loadSiteGrants(directory);

@@ -212,7 +212,7 @@ function DraftSession<S extends Record<string, unknown>>({
     shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
     enableBeforeUnload: controller.unpersisted,
   });
-  // Resting states only, in the panel subtitle as in the transcript widget:
+  // Resting states only, in the transcript widget:
   // autosave runs on every pause in typing, and narrating it ("pending",
   // "keeping…") flickers faster than anyone can read. Failures still surface
   // through the form's own error line.
@@ -226,14 +226,16 @@ function DraftSession<S extends Record<string, unknown>>({
     () => ({
       id,
       // The title names the draft: several can exist and the panel shows one.
+      // No status line in the panel: the save button says it, like the editor
+      // page's (disabled once saved, with the "Saved" flash), and the
+      // transcript widget names it.
       title: controller.draft ? name : `${ui.Noun} draft`,
-      subtitle: status,
       icon: ui.icon,
       restorable: true,
       actions: <DraftActions ui={ui} controller={controller} formId={formId(id)} />,
       body: <DraftBody ui={ui} controller={controller} formId={formId(id)} />,
     }),
-    [controller, id, name, status, ui],
+    [controller, id, name, ui],
   );
   useEffect(() => {
     panel.refresh(request);
@@ -318,9 +320,16 @@ function DraftActions<S extends Record<string, unknown>>({
   const draft = controller.draft;
   if (!draft) return null;
   const target = draft.targetId;
+  // One row, in the editor page's order (the flash, other actions, the save
+  // last), with what saving does beside it, below it when the panel is narrow.
   return (
     <div className="space-y-2">
-      <FormActions>
+      <FormActions className="justify-end">
+        <p className="text-muted-foreground min-w-40 flex-1 text-xs">
+          {target ? ui.copy.saveEffect : ui.copy.createEffect}
+        </p>
+        <SaveStatus justSaved={justSaved} />
+        {target ? ui.targetActions?.(target) : null}
         <PendingButton
           type="submit"
           form={id}
@@ -332,12 +341,7 @@ function DraftActions<S extends Record<string, unknown>>({
             {target ? "Save changes" : `Create ${ui.noun}`}
           </SaveLabel>
         </PendingButton>
-        <SaveStatus justSaved={justSaved} />
-        {target ? ui.targetActions?.(target) : null}
       </FormActions>
-      <p className="text-muted-foreground text-xs">
-        {target ? ui.copy.saveEffect : ui.copy.createEffect}
-      </p>
       {controller.error ? <FieldError>{controller.error}</FieldError> : null}
     </div>
   );

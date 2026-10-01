@@ -81,7 +81,8 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
-  useRouterState: () => "/chat/conversation",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/conversation" }, matches: [] }),
   useBlocker: (options: typeof blocker.current) => {
     blocker.current = options;
   },
@@ -294,7 +295,8 @@ describe("conversation-owned agent draft", () => {
       data: { draftId: "draft-1", expectedRevision: 2, changes: { name: "My writer" } },
     });
     expect(saveAgentDraft).not.toHaveBeenCalled();
-    expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
+    // Not saved yet: the button still offers to create it.
+    expect(screen.getByRole("button", { name: "Create agent" })).toBeEnabled();
   });
 
   it("persists partial draft values without treating autosave as an agent save", async () => {
@@ -374,7 +376,8 @@ describe("conversation-owned agent draft", () => {
     await fixture();
     await screen.findByRole("textbox", { name: "Name" });
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
-    expect(await screen.findByText("Agent saved")).toBeVisible();
+    // Saved is said by the button, as on the editor page.
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
     expect(screen.queryByText("Draft changes pending")).not.toBeInTheDocument();
     expect(patchAgentDraft).not.toHaveBeenCalled();
   });
@@ -401,9 +404,8 @@ describe("conversation-owned agent draft", () => {
         data: { draftId: "draft-1", expectedRevision: 2 },
       }),
     );
-    expect(await screen.findByText("Agent saved")).toBeVisible();
     // The button confirms in place, and waits for the next edit.
-    expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeDisabled();
   });
 
   it("blocks dependent actions and navigation after failed draft persistence without losing input", async () => {

@@ -6464,6 +6464,8 @@ describe("local tools on the user's machine", () => {
     readonly args: Record<string, unknown>;
     /** What the server decided about the call, as the page receives it. */
     readonly meta?: ExternalOperation["meta"];
+    /** The arguments the page runs with, which the start chunk may show redacted. */
+    readonly operationArgs?: Record<string, unknown> | undefined;
   }
   const fakeBridge = (messageId: string, answer: (call: DesktopCall) => unknown) =>
     Effect.gen(function* () {
@@ -6482,7 +6484,12 @@ describe("local tools on the user's machine", () => {
               );
               if (!envelope || envelope.family !== "desktop" || envelope.phase !== "start") return;
               const owned = yield* external.inspect(envelope.callId);
-              const call = { name: envelope.name, args: { ...envelope.args }, meta: owned?.meta };
+              const call = {
+                name: envelope.name,
+                args: { ...envelope.args },
+                meta: owned?.meta,
+                ...(envelope.name.startsWith("browser_") ? { operationArgs: owned?.args } : {}),
+              };
               seen.push(call);
               yield* Deferred.succeed(first, call);
               const reply = answer(call);
@@ -6834,7 +6841,7 @@ describe("local tools on the user's machine", () => {
         authoringFinish(),
       );
     };
-    const sendWith = (content: string, desktopBrowser: boolean) =>
+    const sendWith = (content: string, desktopBrowser: boolean, folders = [folder]) =>
       runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
@@ -6847,7 +6854,7 @@ describe("local tools on the user's machine", () => {
             attachmentIds: [],
             fromDesktop: true,
             desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            ...(folders.length > 0 ? { desktopFolders: folders } : {}),
             desktopBrowser,
           }),
         ),
@@ -6883,6 +6890,75 @@ describe("local tools on the user's machine", () => {
         ["https://elsewhere.test/", false],
       ]);
       expect(seen[0]?.meta?.temporary).toBe(false);
+      // A Work attempt gets the browser whatever folders it reports.
+      const folderless = await sendWith("Just the browser", true, []);
+      await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          Stream.runDrain(engine.subscribe(folderless.assistantMessageId, 0)),
+        ),
+      );
+      expect(offered.at(-1)).toContain("browser_open");
+      expect(offered.at(-1)).not.toContain("list_folder");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("hands typed text to the page alone, never to the row or the chunks, flag or not", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      // No `sensitive`: a model that forgets it must not leak the password either.
+      if (round === 1)
+        return authoringTool(input, "browser_type", {
+          tab: "t1",
+          ref: "e2",
+          text: "hunter2",
+        });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Signed in." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const sent = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Sign me in with hunter2",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopFolders: [folder],
+            desktopBrowser: true,
+          }),
+        ),
+      );
+      const outcome = await runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(sent.assistantMessageId, () => ({
+            v: 1,
+            ok: true,
+            summary: "Typed a secret into e2 in t1",
+            detail: "t1",
+            truncated: false,
+          }));
+          yield* Fiber.join(bridge.fiber);
+          const rows = yield* (yield* Db)
+            .select({ args: messageToolCalls.arguments })
+            .from(messageToolCalls)
+            .where(eq(messageToolCalls.messageId, sent.assistantMessageId));
+          return { seen: bridge.seen, rows };
+        }),
+      );
+      expect(outcome.seen[0]?.operationArgs?.text).toBe("hunter2");
+      expect(outcome.seen[0]?.args).toEqual({ tab: "t1", ref: "e2" });
+      expect(JSON.stringify(outcome.rows)).not.toContain("hunter2");
     } finally {
       authoringScript = null;
     }
@@ -6960,6 +7036,90 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
+  it("shares a screenshot only when the model asks to", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const png = generatedPng.toString("base64");
+    // Answer one only looks; answer two shows the user what it sees. Decided
+    // from the prompt, since side generations (a title) call the model too.
+    authoringScript = (input) => {
+      const prompt = JSON.stringify(input.prompt);
+      const showing = prompt.includes("Show me the page");
+      const done = showing
+        ? prompt.includes("shared with the user")
+        : prompt.includes("Screenshot working:");
+      if (input.toolkit?.tools?.browser_snapshot && !done)
+        return authoringTool(input, "browser_snapshot", {
+          tab: "t1",
+          screenshot: true,
+          ...(showing ? { share: true } : {}),
+        });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Here it is." }),
+        authoringFinish(),
+      );
+    };
+    const send = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: visionModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            fromDesktop: true,
+            desktopExecutorId: "desktop-test-session",
+            desktopBrowser: true,
+          }),
+        ),
+      );
+    const answered = (messageId: string) =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const bridge = yield* fakeBridge(messageId, () => ({
+            v: 1,
+            ok: true,
+            summary: "Read Example",
+            detail: "t1: Example",
+            truncated: false,
+            file: { mediaType: "image/png", base64: png, name: "a.test screenshot.png" },
+          }));
+          yield* Fiber.join(bridge.fiber);
+          return yield* loadConversationDetail(seed.userId, seed.conversation.id);
+        }),
+      );
+    try {
+      const looked = await send("Look at the page");
+      const first = await answered(looked.assistantMessageId);
+      expect(
+        first.attachments.filter((row) => row.messageId === looked.assistantMessageId),
+      ).toEqual([]);
+      // Never kept for a later answer either: the page changes, so it takes another.
+      expect(first.workingFiles).toEqual([]);
+
+      const shown = await send("Show me the page");
+      const second = await answered(shown.assistantMessageId);
+      expect(
+        second.attachments
+          .filter((row) => row.messageId === shown.assistantMessageId)
+          .map((row) => row.mediaType),
+      ).toEqual(["image/png"]);
+      // The model is told, in the row a reload shows too, that the user sees it.
+      expect(
+        JSON.stringify(
+          second.toolCalls.filter(
+            (row) =>
+              row.messageId === shown.assistantMessageId && row.toolName === "browser_snapshot",
+          ),
+        ),
+      ).toContain("shared with the user");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
   it("imports a local file as a working reference for tools, never as bytes the model sees or the row keeps", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];
@@ -7014,7 +7174,9 @@ describe("local tools on the user's machine", () => {
       }>;
       const toolResults = JSON.stringify(second.filter((message) => message.role === "tool"));
       // The model is told a reference for its tools, and is not shown the picture.
-      expect(toolResults).toMatch(/Reference for other tools: working:[0-9a-f-]+@1/);
+      expect(toolResults).toMatch(
+        /Returned file working:[0-9a-f-]+@1: for other tools, or publish_file to give it to the user/,
+      );
       expect(
         second.some(
           (message) =>

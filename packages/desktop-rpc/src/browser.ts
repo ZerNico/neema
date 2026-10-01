@@ -10,6 +10,8 @@ export const BROWSER_FAVICON = "chat-desktop:browser-favicon" as const;
 export const BROWSER_SNAPSHOT = "chat-desktop:browser-snapshot" as const;
 export const BROWSER_WAIT_FOR = "chat-desktop:browser-wait-for" as const;
 export const BROWSER_DRIVE = "chat-desktop:browser-drive" as const;
+export const BROWSER_ACT = "chat-desktop:browser-act" as const;
+export const BROWSER_SAVE = "chat-desktop:browser-save" as const;
 export const BROWSER_SITE_ALLOWED = "chat-desktop:browser-site-allowed" as const;
 export const BROWSER_ALLOW_SITE = "chat-desktop:browser-allow-site" as const;
 export const BROWSER_ALLOWED_SITES = "chat-desktop:browser-allowed-sites" as const;
@@ -45,6 +47,62 @@ export interface BrowserSnapshot {
 }
 
 /**
+ * One thing done to a page as the person. `callId` makes a replayed call
+ * return the first result instead of acting twice; `secret` allows typing into
+ * a password field, which anything else is refused.
+ */
+export type BrowserAction =
+  | {
+      readonly kind: "click";
+      readonly callId: string;
+      readonly ref?: string;
+      readonly x?: number;
+      readonly y?: number;
+    }
+  | {
+      readonly kind: "type";
+      readonly callId: string;
+      readonly ref: string;
+      readonly text: string;
+      readonly clear: boolean;
+      readonly submit: boolean;
+      readonly secret: boolean;
+    }
+  | { readonly kind: "press"; readonly callId: string; readonly key: string }
+  | {
+      readonly kind: "scroll";
+      readonly callId: string;
+      /** Pixels; positive scrolls down and right. */
+      readonly deltaX: number;
+      readonly deltaY: number;
+      /** A scrollable element to scroll instead of the page. */
+      readonly ref?: string;
+    }
+  | {
+      readonly kind: "select";
+      readonly callId: string;
+      readonly ref: string;
+      readonly value: string;
+    }
+  | { readonly kind: "evaluate"; readonly callId: string; readonly expression: string };
+
+export type BrowserActionResult =
+  | { readonly ok: true; readonly value?: string; readonly truncated?: boolean }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | "stale-ref"
+        | "no-screenshot"
+        | "password-field"
+        | "not-select"
+        | "no-option"
+        | "bad-key"
+        | "not-editable"
+        | "script-error";
+      readonly message: string;
+    };
+
+/**
  * What the model's browser tools need from main: reading a page through the
  * DevTools protocol, waiting on it, gating where a driven page may go, and the
  * sites a person has allowed. Absent from shells that predate it, which is
@@ -59,12 +117,30 @@ export interface DesktopBrowserAgent {
   /**
    * Marks a tab as driven for one call, or clears it with null. While driven, a
    * navigation of its page to a site neither allowed for the chat nor the site
-   * of an address in `allow` is cancelled; clearing returns the site it stopped.
+   * of an address in `allow` is cancelled; clearing returns the first address it stopped,
+   * and where in the chat's workspace the files its page downloaded meanwhile were saved.
    */
   drive(
     webContentsId: number,
     driving: { conversationId: string; allow: ReadonlyArray<string> } | null,
-  ): Promise<{ blocked: string | null }>;
+  ): Promise<{ blocked: string | null; saved: ReadonlyArray<string> }>;
+  act(webContentsId: number, action: BrowserAction): Promise<BrowserActionResult>;
+  /**
+   * Fetches files with the tab's own session into the driving chat's workspace,
+   * each where it landed or why not. Only addresses the tab's gate lets through.
+   */
+  save(
+    webContentsId: number,
+    urls: ReadonlyArray<string>,
+  ): Promise<
+    ReadonlyArray<{
+      url: string;
+      path?: string;
+      error?: string;
+      /** Its site is not allowed for the chat; the caller may ask the user and try again. */
+      blocked?: true;
+    }>
+  >;
   siteAllowed(conversationId: string, url: string): Promise<boolean>;
   allowSite(conversationId: string, url: string, scope: "chat" | "always"): Promise<void>;
   /** Sites allowed in every chat on this desktop, for Settings › Devices. */

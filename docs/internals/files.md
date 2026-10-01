@@ -52,8 +52,10 @@ uses exact IDs from the current conversation's message-linked attachment metadat
 including unloaded history and live generated files. Pending queue files are not
 eligible. Labels come from stored metadata, not model prose; missing targets are
 inert. The authenticated file endpoint remains the authority for bytes. Bare names,
-code and image embeds are not references, and ordinary web links retain Streamdown's
-link confirmation.
+code and image embeds are not references, and ordinary web links keep the question
+before leaving the app, asked with the app's own dialog (`~/ui/link-safety.tsx`, shared by every
+`<Streamdown>`). In the desktop app they open as side-panel tabs instead; see
+[browser](browser.md).
 
 A branch records attachment aliases from historical IDs to its cloned IDs inside the
 clone transaction. Inherited aliases flatten through that clone map and drop targets
@@ -79,13 +81,18 @@ An answer's attempt owns a bounded working-file workspace in memory. Files retur
 `delivery: "working"` are private revisioned drafts, not delivered files; exact
 `working:<id>@<revision>` references let later tools read or replace them. Their type is
 classified from the bytes like any stored file. Each working file names its owner (one
-custom tool module, the presentation, [spreadsheet](spreadsheets.md) or [Word](word.md) tools, or a desktop
-import), and only its owner may
+custom tool module, the presentation, [spreadsheet](spreadsheets.md) or [Word](word.md) tools, or the
+computer), and only its owner may
 revise it. An answer may create eight drafts; the kept ones it continues do not count.
+Every file a tool on the user's computer returns (an import, a file it read, a browser
+screenshot) is a `local` draft too, so other tools can take it and `publish_file` can deliver
+it, which (with a screenshot shared as it is taken) is the only way one is ever stored. All but imports are captures: cheap to take
+again, so they do not count toward the eight, and when the answer runs out of room the oldest
+unpublished capture is dropped, its reference then saying to take it again.
 `publish_file` seals an exact revision and registers one attachment; a second publish of a
 file already being published is refused, and one already published names its attachment. A
-custom tool's `delivery: "publish"` registers its output during that call through the same
-fenced path. Publishing alone consumes the answer's five-file, 40 MiB output budget. Every
+custom tool's `delivery: "publish"` and a `browser_snapshot` with `share` register their file
+during that call through the same fenced path, one `deliverFile` in the stream for all three. Publishing alone consumes the answer's five-file, 40 MiB output budget. Every
 chat has one 128 tool-round ceiling, a guard against runaway loops rather than a budget,
 then a final tools-off response.
 
@@ -107,9 +114,11 @@ loads bytes only when a tool touches them, and re-checks that the sender can sti
 chat or project file a draft was opened from before loading or publishing it. That check
 reads metadata only, so a project version stays publishable after newer versions land.
 References reach the model in one trailing notice fixed for the whole answer, since it sits
-ahead of the answer's own rounds in the cached prompt; names in it are quoted as data. Imports
-from the computer are never kept: they are the person's local files, re-importable, and a
-kept draft opened from one drops that source.
+ahead of the answer's own rounds in the cached prompt; names in it are quoted as data. Files
+from the computer are never kept: they are the person's local files or pages, re-readable,
+and a kept draft opened from one drops that source. A later answer sees a capture only once
+published, as the answer's attachment in history; otherwise it takes a new one, since a page
+changes.
 
 The bytes are an attachment the row claims, owned through its answer like the answer's own
 attachments, so releasing an answer's files releases its drafts and deleting the chat

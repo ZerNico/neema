@@ -923,7 +923,11 @@ export function ChatView({
       new Map(
         [...desktopApprovals.pending].map(([callId, kind]) => [
           callId,
-          { kind, decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice) },
+          {
+            kind,
+            args: desktopApprovals.args(callId),
+            decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice),
+          },
         ]),
       ),
     [desktopApprovals],

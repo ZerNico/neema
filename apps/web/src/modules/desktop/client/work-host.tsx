@@ -33,8 +33,13 @@ import {
 } from "~/modules/chat/server/functions.ts";
 import { readDesktopBrowser } from "@chat/desktop-rpc";
 import { browserTabs } from "~/modules/browser/client/browser-store.ts";
-import { cancelBrowserCall, executeBrowserTool } from "~/modules/browser/client/execute-browser.ts";
-import { DesktopToolName, desktopFailure, isBrowserTool } from "../tool-schema.ts";
+import {
+  cancelBrowserCall,
+  describeTarget,
+  executeBrowserTool,
+} from "~/modules/browser/client/execute-browser.ts";
+import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
+import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
 import { type ApprovalChoice, type PendingKind } from "./approvals.ts";
 import { sendFieldsFor, useDesktop } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
@@ -139,44 +144,58 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       const browser = readDesktopBrowser();
       return browser?.agent ? { browser, agent: browser.agent } : null;
     };
+    // A site call's address, with the desktop that decides about it.
+    const siteCall = (call: { args: Readonly<Record<string, unknown>> }) => {
+      const agent = agentBrowser()?.agent;
+      const { url } = call.args;
+      return agent && typeof url === "string" ? { agent, url } : null;
+    };
     return new WorkController({
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
-      execute: (call, remainingMs) => {
-        if (isBrowserTool(call.name)) {
-          const embedded = agentBrowser();
-          return embedded
-            ? executeBrowserTool(
-                { ...call, name: call.name },
-                remainingMs,
-                embedded.browser,
-                embedded.agent,
-              )
-            : Promise.resolve(
-                desktopFailure("No browser here", "This desktop app cannot use a browser."),
-              );
-        }
-        return Schema.is(DesktopToolName)(call.name)
-          ? Effect.runPromise(
-              executeDesktopTool(client, call.conversationId, remainingMs, {
-                callId: call.callId,
-                name: call.name,
-                args: call.args,
-              }),
-            )
-          : Promise.resolve(desktopFailure("That did not run", "Unknown local tool."));
+      execute: (call, remainingMs, askSite) => {
+        const { name } = call;
+        if (!Schema.is(DesktopToolName)(name))
+          return Promise.resolve(desktopFailure("That did not run", "Unknown local tool."));
+        if (!isBrowserTool(name))
+          return Effect.runPromise(
+            executeDesktopTool(client, call.conversationId, remainingMs, {
+              callId: call.callId,
+              name,
+              args: call.args,
+            }),
+          );
+        const embedded = agentBrowser();
+        return embedded
+          ? executeBrowserTool({ ...call, name }, remainingMs, {
+              ...embedded,
+              askSite,
+              saveToWorkspace: (file) =>
+                Effect.runPromise(
+                  Effect.map(
+                    client.saveToWorkspace({
+                      callId: call.callId,
+                      conversationId: call.conversationId,
+                      fileName: file.name,
+                      base64: file.base64,
+                    }),
+                    (receipt) => receipt.path,
+                  ),
+                ),
+            })
+          : Promise.resolve(
+              desktopFailure("No browser here", "This desktop app cannot use a browser."),
+            );
       },
       siteAllowed: (call) => {
-        const agent = agentBrowser()?.agent;
-        const url = call.args.url;
-        return agent && typeof url === "string"
-          ? agent.siteAllowed(call.conversationId, url)
+        const site = siteCall(call);
+        return site
+          ? site.agent.siteAllowed(call.conversationId, site.url)
           : Promise.resolve(false);
       },
       allowSite: (call, scope) => {
-        const agent = agentBrowser()?.agent;
-        const url = call.args.url;
-        return agent && typeof url === "string"
-          ? agent.allowSite(call.conversationId, url, scope)
+        const site = siteCall(call);
+        return site
+          ? site.agent.allowSite(call.conversationId, site.url, scope)
           : Promise.resolve();
       },
       complete: async (call, token, result) => {
@@ -256,7 +275,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       return;
     }
     // A chat whose answer is running here keeps its pages fully alive.
-    browserTabs.setAttemptHolds(
+    browserTabs.setHeld(
       new Set(work.data?.attempts.map((attempt) => attempt.conversationId) ?? []),
     );
     if (host.controller && work.data)
@@ -336,6 +355,12 @@ export function useWorkApprovals(conversationId: string) {
     () => ({
       pending: controller?.pending(conversationId) ?? new Map<string, PendingKind>(),
       decide: (callId: string, choice: ApprovalChoice) => controller?.decide(callId, choice),
+      args: (callId: string) => {
+        const args = controller?.args(callId) ?? null;
+        // A browser action names an element by reference; the card says what it is.
+        const target = args && describeTarget(conversationId, args);
+        return target && args ? { ...args, target } : args;
+      },
       /** The controller's change counter, so this value is new exactly when its contents are. */
       revision,
     }),

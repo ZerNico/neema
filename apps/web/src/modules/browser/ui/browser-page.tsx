@@ -6,7 +6,12 @@ import {
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useMutation } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
+import { stopGeneration } from "~/modules/chat/server/functions.ts";
+import { toastError } from "~/ui/error-toast.ts";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 import { useDetailPanel, type DetailPanelRequest } from "~/ui/detail-panel.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
@@ -21,8 +26,9 @@ import { useSettledLoading } from "../client/use-settled-loading.ts";
 /**
  * Where the page shows. The page itself lives in the host's layer and is laid
  * over this box, so the box reports its rectangle: on resize, and every frame
- * until it has held still a while, which covers the panel opening, the phone
- * overlay sliding in and the rail being dragged.
+ * until it has held still a while. The rail opening or closing moves the box
+ * without resizing it, so its animation, which rewrites the rail's style every
+ * frame, starts the same tracking.
  */
 export function BrowserSlot({ id }: { id: string }) {
   const box = useRef<HTMLDivElement>(null);
@@ -55,10 +61,14 @@ export function BrowserSlot({ id }: { id: string }) {
     settle();
     const observer = new ResizeObserver(settle);
     observer.observe(element);
+    const rail = element.closest("[data-panel-rail]");
+    const animated = new MutationObserver(settle);
+    if (rail) animated.observe(rail, { attributes: true, attributeFilter: ["style"] });
     window.addEventListener("resize", settle);
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      animated.disconnect();
       window.removeEventListener("resize", settle);
       browserTabs.place(id, null);
     };
@@ -159,12 +169,50 @@ function AddressBar({
   );
 }
 
+/**
+ * Says the answer is working in this tab, and stops it: the composer's Stop,
+ * from here. It stands in for the address row at the same height, for as long
+ * as the answer runs, so the page below never moves.
+ */
+function DrivingNote({
+  conversationId,
+  driving,
+  url,
+}: {
+  conversationId: string;
+  driving: { messageId: string; generationId: string };
+  url: string;
+}) {
+  const stop = useMutation({
+    mutationFn: () => stopGeneration({ data: { conversationId, ...driving } }),
+    onError: (error) => toastError("Couldn’t stop the answer.", error),
+  });
+  return (
+    <div className="text-muted-foreground flex h-8 items-center gap-2 px-2 text-sm" role="status">
+      <Spinner aria-hidden className="size-3.5" />
+      <span className="min-w-0 flex-1 truncate">
+        {hostOf(url) ? `Working on ${hostOf(url)}` : "Working in this tab"}
+      </span>
+      <PendingButton
+        size="xs"
+        variant="outline"
+        pending={stop.isPending}
+        onClick={() => stop.mutate()}
+      >
+        Stop
+      </PendingButton>
+    </div>
+  );
+}
+
 export function BrowserChrome({ id }: { id: string }) {
   const tab = useBrowserTab(id);
   const browser = useDesktopBrowser();
   if (!tab) return null;
   const webview = () => browserTabs.webview(id);
-  return (
+  return tab.usedBy ? (
+    <DrivingNote conversationId={tab.owner} driving={tab.usedBy} url={tab.url} />
+  ) : (
     <AddressBar
       url={tab.url}
       loading={tab.loading}
@@ -196,7 +244,7 @@ export function NewTabBar({
 }: {
   tabId: string;
   /** How a page becomes a tab; passed in, since that module renders this one. */
-  toRequest: (tab: BrowserTab, restorable: boolean) => DetailPanelRequest;
+  toRequest: (tab: BrowserTab) => DetailPanelRequest;
 }) {
   const browser = useDesktopBrowser();
   const panel = useDetailPanel();
@@ -208,13 +256,12 @@ export function NewTabBar({
       loading={false}
       autoFocus
       onNavigate={(url) => {
-        const temporary = browserTabs.isTemporary(owner);
         const tab = browserTabs.open({
           owner,
-          partition: temporary ? browser.temporaryPartition(owner) : browser.partition,
+          partition: browserTabs.partitionFor(browser, owner),
           url,
         });
-        panel.replaceTab(tabId, toRequest(tab, !temporary));
+        panel.replaceTab(tabId, toRequest(tab));
       }}
     />
   );

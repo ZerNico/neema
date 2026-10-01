@@ -26,7 +26,8 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
 vi.mock("@tanstack/react-router", () => ({
   Link: () => null,
   useNavigate: () => vi.fn(),
-  useRouterState: () => "/chat/c1",
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
+    select({ location: { pathname: "/chat/c1" }, matches: [] }),
   useBlocker: vi.fn(),
 }));
 vi.mock("./composer.tsx", () => ({ Composer: () => null }));

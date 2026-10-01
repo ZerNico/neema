@@ -69,6 +69,7 @@ import {
 import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
+import { BrowserActivityBlock } from "./browser-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
@@ -670,6 +671,9 @@ const AssistantBody = memo(function AssistantBody({
     ),
   );
   return parts.map((part, index) => {
+    // The newest thing in a streaming answer: a run of calls stays open while
+    // it is, rather than closing between one call and the model's next.
+    const live = streaming && index === parts.length - 1;
     if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
@@ -690,6 +694,7 @@ const AssistantBody = memo(function AssistantBody({
         <ToolActivityBlock
           key={part.key}
           activities={part.activities}
+          live={live}
           usedSources={usedIndexes}
           {...(!streaming && onOpenSources ? { onViewSources: onOpenSources } : {})}
         />
@@ -698,8 +703,17 @@ const AssistantBody = memo(function AssistantBody({
     if (part.kind === "skill")
       return <SkillActivityBlock key={part.key} activities={part.activities} />;
     if (part.kind === "knowledge") {
-      return <KnowledgeActivityBlock key={part.key} activities={part.activities} />;
+      return <KnowledgeActivityBlock key={part.key} activities={part.activities} live={live} />;
     }
+    if (part.kind === "browser")
+      return (
+        <BrowserActivityBlock
+          key={part.key}
+          activities={part.activities}
+          live={live}
+          approvals={message.desktopApprovals}
+        />
+      );
     if (part.kind === "compaction") {
       return (
         <CompactionBlock

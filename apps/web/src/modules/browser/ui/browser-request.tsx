@@ -1,7 +1,7 @@
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import type { DetailPanelRequest, NewTabContent } from "~/ui/detail-panel.tsx";
 import { PanelEmptyState } from "~/ui/detail-panel.tsx";
-import { hostOf } from "../client/address.ts";
+import { pageTitle } from "../client/address.ts";
 import { BrowserChrome, BrowserSlot, NewTabBar } from "./browser-page.tsx";
 
 /**
@@ -11,22 +11,28 @@ import { BrowserChrome, BrowserSlot, NewTabBar } from "./browser-page.tsx";
 export const BROWSER_TAB_PREFIX = "browser:";
 
 /**
- * A browser page as a panel tab. Restorable unless its chat is temporary, with
- * the address as its stored data, so a restart brings the tab back discarded
- * and it loads again when shown.
+ * A browser page as a panel tab, with its address as the stored data. Kept
+ * across restarts, and brought back discarded, unless its profile lives in
+ * memory (a temporary chat's), which has nothing to come back to.
  */
 export function browserTabRequest(
-  tab: { id: string; url: string; title: string; label?: string; favicon?: string | null },
-  restorable: boolean,
+  tab: {
+    id: string;
+    url: string;
+    title: string;
+    partition: string;
+    label?: string;
+    favicon?: string | null;
+  },
   busy = false,
 ): DetailPanelRequest {
   return {
     id: `${BROWSER_TAB_PREFIX}${tab.id}`,
-    title: tab.title || hostOf(tab.url) || "New tab",
+    title: pageTitle(tab.title, tab.url),
     icon: Globe02Icon,
     ...(tab.favicon ? { iconSrc: tab.favicon } : {}),
     busy,
-    restorable,
+    restorable: tab.partition.startsWith("persist:"),
     data: tab.label ? { url: tab.url, label: tab.label } : { url: tab.url },
     fill: true,
     actions: <BrowserChrome id={tab.id} />,

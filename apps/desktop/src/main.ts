@@ -10,6 +10,7 @@ import {
   shell,
   Tray,
   type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
 } from "electron";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -38,15 +39,6 @@ import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import {
-  BROWSER_ALLOW_SITE,
-  BROWSER_ALLOWED_SITES,
-  BROWSER_DRIVE,
-  BROWSER_LIFECYCLE,
-  BROWSER_OPEN_EXTERNAL,
-  BROWSER_REVOKE_SITE,
-  BROWSER_SITE_ALLOWED,
-  BROWSER_SNAPSHOT,
-  BROWSER_WAIT_FOR,
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
   NETWORK_REVOKE,
@@ -59,6 +51,7 @@ import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import { browserProfile } from "./browser/profile.ts";
 import { browserUserAgent } from "./browser/user-agent.ts";
 import { loadSiteGrants, type SiteGrants } from "./browser/site-grants.ts";
+import { registerBrowserIpc } from "./browser/ipc.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
@@ -380,6 +373,15 @@ const openMainWindow = (origin: string) => {
       profile,
       () => toOrigin(window.webContents.getURL()) === origin,
       (conversationId, url) => siteGrants?.allowed(origin, conversationId, url) ?? false,
+      // A file the model's page downloaded, into that chat's workspace on this machine.
+      (conversationId, fileName, bytes) =>
+        runtime.runPromise(
+          Effect.flatMap(WorkspaceRegistry, (workspaces) =>
+            Effect.map(workspaces.landFile(conversationId, fileName, bytes), (landed) =>
+              join(workspaces.path(conversationId), landed.name),
+            ),
+          ),
+        ),
     ),
   );
 
@@ -487,28 +489,37 @@ else if (!devReload) {
   else app.setAsDefaultProtocolClient(SIGN_IN_SCHEME);
 }
 
-// The model's browser tools. Same checks as the rest: the configured origin's
-// main frame only, and every value decoded here rather than trusted.
-const browserOf = (event: IpcMainInvokeEvent) => {
-  if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
-  const browser = windowBrowsers.get(mainWindow);
-  if (!browser) throw new Error("No browser in this window.");
-  return browser;
+// The View menu acts on the app window itself. Electron's own roles act on
+// whatever has focus, which can be a page in the side panel's browser, so
+// reloading or opening developer tools would reach that page instead.
+const windowContents = () => (BrowserWindow.getFocusedWindow() ?? mainWindow)?.webContents;
+const zoom = (step: number | null) => {
+  const contents = windowContents();
+  if (contents) contents.setZoomLevel(step === null ? 0 : contents.getZoomLevel() + step);
 };
-const grantsFor = (event: IpcMainInvokeEvent) => {
-  if (!isRemoteSender(event) || !serverOrigin || !siteGrants)
-    throw new Error("Not allowed from this page.");
-  return { grants: siteGrants, origin: serverOrigin };
-};
-const record = (payload: unknown) =>
-  payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-const idOf = (input: Record<string, unknown>) => {
-  if (typeof input.webContentsId !== "number") throw new Error("Invalid browser tab.");
-  return input.webContentsId;
-};
-const textOf = (value: unknown, label: string) => {
-  if (typeof value !== "string" || value.length > 4096) throw new Error(`Invalid ${label}.`);
-  return value;
+const viewMenu = (): MenuItemConstructorOptions => {
+  return {
+    label: "View",
+    submenu: [
+      { label: "Reload", accelerator: "CmdOrCtrl+R", click: () => windowContents()?.reload() },
+      {
+        label: "Force Reload",
+        accelerator: "Shift+CmdOrCtrl+R",
+        click: () => windowContents()?.reloadIgnoringCache(),
+      },
+      {
+        label: "Toggle Developer Tools",
+        accelerator: process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
+        click: () => windowContents()?.toggleDevTools(),
+      },
+      { type: "separator" },
+      { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: () => zoom(null) },
+      { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => zoom(0.5) },
+      { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => zoom(-0.5) },
+      { type: "separator" },
+      { role: "togglefullscreen" },
+    ],
+  };
 };
 
 void app.whenReady().then(async () => {
@@ -534,7 +545,7 @@ void app.whenReady().then(async () => {
     Menu.buildFromTemplate([
       { label: "neema", submenu: actions },
       { role: "editMenu" },
-      { role: "viewMenu" },
+      viewMenu(),
       { role: "windowMenu" },
     ]),
   );
@@ -579,78 +590,23 @@ void app.whenReady().then(async () => {
     if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
     await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
   });
-  ipcMain.handle(BROWSER_LIFECYCLE, async (event, payload: unknown) => {
-    if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
-    const input = (payload ?? {}) as { webContentsId?: unknown; state?: unknown };
-    const { webContentsId, state } = input;
-    if (
-      typeof webContentsId !== "number" ||
-      (state !== "active" && state !== "background" && state !== "frozen")
-    )
-      throw new Error("Invalid browser tab state.");
-    await windowBrowsers.get(mainWindow)?.setLifecycle(webContentsId, state);
-  });
-  ipcMain.handle(BROWSER_SNAPSHOT, (event, payload: unknown) => {
-    const input = record(payload);
-    return browserOf(event).snapshot(idOf(input), { screenshot: input.screenshot === true });
-  });
-  ipcMain.handle(BROWSER_WAIT_FOR, (event, payload: unknown) => {
-    const input = record(payload);
-    return browserOf(event).waitFor(idOf(input), {
-      ...(input.text === undefined ? {} : { text: textOf(input.text, "text") }),
-      ...(input.urlIncludes === undefined
-        ? {}
-        : { urlIncludes: textOf(input.urlIncludes, "address") }),
-      timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : 0,
-    });
-  });
-  ipcMain.handle(BROWSER_DRIVE, (event, payload: unknown) => {
-    const input = record(payload);
-    const driving = record(input.driving);
-    return browserOf(event).drive(
-      idOf(input),
-      input.driving === null
-        ? null
-        : {
-            conversationId: textOf(driving.conversationId, "chat"),
-            allow: Array.isArray(driving.allow)
-              ? driving.allow.map((url) => textOf(url, "address"))
-              : [],
-          },
-    );
-  });
-  ipcMain.handle(BROWSER_SITE_ALLOWED, (event, payload: unknown) => {
-    const input = record(payload);
-    const { grants, origin } = grantsFor(event);
-    return grants.allowed(
-      origin,
-      textOf(input.conversationId, "chat"),
-      textOf(input.url, "address"),
-    );
-  });
-  ipcMain.handle(BROWSER_ALLOW_SITE, async (event, payload: unknown) => {
-    const input = record(payload);
-    const { grants, origin } = grantsFor(event);
-    if (input.scope !== "chat" && input.scope !== "always") throw new Error("Invalid scope.");
-    await grants.allow(
-      origin,
-      textOf(input.conversationId, "chat"),
-      textOf(input.url, "address"),
-      input.scope,
-    );
-  });
-  ipcMain.handle(BROWSER_ALLOWED_SITES, (event) => {
-    const { grants, origin } = grantsFor(event);
-    return grants.always(origin);
-  });
-  ipcMain.handle(BROWSER_REVOKE_SITE, async (event, site: unknown) => {
-    const { grants, origin } = grantsFor(event);
-    await grants.revoke(origin, textOf(site, "site"));
-  });
-  ipcMain.handle(BROWSER_OPEN_EXTERNAL, async (event, url: unknown) => {
+  // Same checks as the rest: the configured origin's main frame only.
+  const fromPage = (event: IpcMainInvokeEvent) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    if (typeof url !== "string" || !isSafeExternalUrl(url)) throw new Error("Not a web address.");
-    await shell.openExternal(url);
+  };
+  registerBrowserIpc({
+    page: fromPage,
+    guests: (event) => {
+      fromPage(event);
+      const browser = mainWindow && windowBrowsers.get(mainWindow);
+      if (!browser) throw new Error("No browser in this window.");
+      return browser;
+    },
+    grants: (event) => {
+      fromPage(event);
+      if (!serverOrigin || !siteGrants) throw new Error("Not allowed from this page.");
+      return { grants: siteGrants, origin: serverOrigin };
+    },
   });
   ipcMain.handle(RECOVERY_RETRY, async (event) => {
     if (!isPageSender(event, mainWindow?.webContents, (url) => url === recoveryUrl) || !mainWindow)

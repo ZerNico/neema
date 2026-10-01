@@ -6,7 +6,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type {
   KnowledgeToolActivity,
   SkillToolActivity,
@@ -16,7 +16,12 @@ import type {
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
 import { Favicon, hostOf } from "./favicon.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
-import { useDetailPanel, useDetailPanelTabIds, type DetailPanelRequest } from "~/ui/detail-panel";
+import {
+  useDetailPanel,
+  useDetailPanelTabContent,
+  useDetailPanelTabIds,
+  type DetailPanelRequest,
+} from "~/ui/detail-panel";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
@@ -329,7 +334,6 @@ function ResearchTabOwner({
   id: string;
   messages: ReadonlyArray<DisplayMessage>;
 }) {
-  const panel = useDetailPanel();
   const message = messages.find((candidate) =>
     candidate.toolActivities.some(
       (activity) =>
@@ -360,9 +364,6 @@ function ResearchTabOwner({
     return researchPanelRequest(messageId, activity, webActivities);
   }, [messageId, activities, id]);
 
-  useEffect(() => {
-    if (request) panel.refresh(request);
-    else panel.closeTab(id);
-  }, [panel, id, request]);
+  useDetailPanelTabContent(id, request);
   return null;
 }

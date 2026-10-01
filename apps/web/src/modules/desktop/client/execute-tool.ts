@@ -3,11 +3,14 @@ import { DesktopError, type DesktopClient } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import type { BrowserToolName } from "~/modules/browser/tool-schema.ts";
 import {
   DesktopToolResult,
   desktopFailure,
   DESKTOP_TIMEOUTS,
   deletePathsOf,
+  stringArg,
+  type DesktopToolName,
 } from "../tool-schema.ts";
 
 const asResult = (
@@ -139,14 +142,16 @@ export const executeDesktopTool = (
   conversationId: string,
   /** What is left of the server's deadline for this call when execution starts. */
   remainingMs: number,
-  activity: Pick<Extract<ToolActivity, { family: "desktop" }>, "name" | "args" | "callId">,
+  // The page runs browser calls in its own tabs (`modules/browser/client`).
+  activity: Pick<Extract<ToolActivity, { family: "desktop" }>, "args" | "callId"> & {
+    readonly name: Exclude<DesktopToolName, BrowserToolName>;
+  },
 ): Effect.Effect<DesktopToolResult> => {
   const args = activity.args ?? {};
-  const str = (value: unknown) => (typeof value === "string" ? value : "");
-  const path = str(args.path);
-  const text = str(args.text);
-  const command = str(args.command);
-  const pattern = str(args.pattern);
+  const path = stringArg(args.path);
+  const text = stringArg(args.text);
+  const command = stringArg(args.command);
+  const pattern = stringArg(args.pattern);
 
   const call = (): Effect.Effect<DesktopToolResult, DesktopError> => {
     switch (activity.name) {
@@ -167,7 +172,7 @@ export const executeDesktopTool = (
             callId: activity.callId,
             conversationId,
             pattern,
-            ...(str(args.glob) ? { glob: str(args.glob) } : {}),
+            ...(stringArg(args.glob) ? { glob: stringArg(args.glob) } : {}),
           }),
           (hits) => ({
             v: 1 as const,
@@ -186,8 +191,8 @@ export const executeDesktopTool = (
             callId: activity.callId,
             conversationId,
             path,
-            old: str(args.old),
-            new: str(args.new),
+            old: stringArg(args.old),
+            new: stringArg(args.new),
             all: args.all === true,
           }),
           (receipt) => ({
@@ -203,8 +208,8 @@ export const executeDesktopTool = (
           client.movePath({
             callId: activity.callId,
             conversationId,
-            from: str(args.from),
-            to: str(args.to),
+            from: stringArg(args.from),
+            to: stringArg(args.to),
           }),
           (receipt) => ({
             v: 1 as const,
@@ -320,7 +325,7 @@ export const executeDesktopTool = (
           }),
         );
       case "save_to_workspace": {
-        const attachmentId = str(args.attachmentId);
+        const attachmentId = stringArg(args.attachmentId);
         if (!attachmentId)
           return Effect.succeed(desktopFailure("Nothing to save", "No attachment id was named."));
         return Effect.flatMap(fetchAttachment(attachmentId), (file) =>
@@ -342,7 +347,7 @@ export const executeDesktopTool = (
         );
       }
       case "request_network_access": {
-        const host = str(args.host);
+        const host = stringArg(args.host);
         if (!host)
           return Effect.succeed(desktopFailure("No website named", "Name a website host."));
         return Effect.map(
@@ -356,13 +361,6 @@ export const executeDesktopTool = (
           }),
         );
       }
-      // The page runs these in its own tabs (`modules/browser/client`), never here.
-      case "browser_tabs":
-      case "browser_open":
-      case "browser_navigate":
-      case "browser_snapshot":
-      case "browser_wait_for":
-        return Effect.succeed(desktopFailure("That did not run", "Browser tools run in the page."));
       case "run_command": {
         // A slow approval has already eaten into the server's wait; what is
         // left, minus the trip back, is all the command may take.

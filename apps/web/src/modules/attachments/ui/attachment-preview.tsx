@@ -20,6 +20,7 @@ import { PresentationPreview } from "./presentation-preview.tsx";
 import { PreviewAction } from "./preview-action.tsx";
 import { SpreadsheetPreview } from "./spreadsheet-preview.tsx";
 import { WordPreview } from "./word-preview.tsx";
+import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
 /** Each Office family's preview; the compiler keeps the table complete. */
 const OFFICE_PREVIEWS = {
@@ -215,6 +216,7 @@ function TextPreview({
         // uploaded file cannot inject markup here.
         <div className="max-h-[65vh] overflow-auto">
           <Streamdown
+            linkSafety={LINK_SAFETY}
             mode="static"
             plugins={markdownPlugins}
             className="space-y-3 text-sm [&_pre]:overflow-x-auto"

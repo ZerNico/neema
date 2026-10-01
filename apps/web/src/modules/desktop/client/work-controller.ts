@@ -9,7 +9,12 @@ import {
   type DesktopToolName,
   type DesktopToolResult,
 } from "../tool-schema.ts";
-import type { ApprovalChoice, PendingKind } from "./approvals.ts";
+import {
+  allowsBlanket,
+  firstDecision,
+  type ApprovalChoice,
+  type PendingKind,
+} from "./approvals.ts";
 
 export interface WorkSnapshot {
   attempts: ExternalOwner[];
@@ -22,8 +27,16 @@ export interface WorkSnapshot {
 }
 export interface WorkDependencies {
   claim(call: ExternalOperation): Promise<string | null>;
-  /** Runs the call locally; `remainingMs` is what is left of the server's deadline. */
-  execute(call: ExternalOperation, remainingMs: number): Promise<DesktopToolResult>;
+  /**
+   * Runs the call locally; `remainingMs` is what is left of the server's
+   * deadline. `askSite` asks the person, while the call runs, about a site it
+   * was led to, such as a link a click followed.
+   */
+  execute(
+    call: ExternalOperation,
+    remainingMs: number,
+    askSite: (url: string) => Promise<boolean>,
+  ): Promise<DesktopToolResult>;
   complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
   cancel(callId: string): void;
   changed(): void;
@@ -39,6 +52,8 @@ interface Entry {
   permitted?: boolean;
   /** A site call waiting to learn whether its site is already allowed. */
   checking?: boolean;
+  /** A running call asking about a site it was led to; answered by `decide`. */
+  asking?: { url: string; answer: (allowed: boolean) => void } | undefined;
   result?: DesktopToolResult;
   busy: boolean;
   delivered?: boolean;
@@ -75,24 +90,18 @@ export class WorkController {
       if (!entry) {
         const settings = snapshot.settings.find((s) => s.conversationId === call.conversationId);
         if (!settings) continue;
-        const named = approvalKind(call.name as DesktopToolName);
-        // A browser navigation without an address only moves within its tab.
-        const kind = named === "site" && typeof call.args.url !== "string" ? null : named;
-        const granted = this.grants.get(call.conversationId)?.has(kind ?? "read");
-        // A site is decided per address: the server may have vouched for it,
-        // else the desktop knows whether it is allowed, which takes a moment.
-        const checking = kind === "site" && !call.meta?.preauthorized;
-        const permitted =
-          kind === "site"
-            ? !checking
-            : kind === "network" || kind === "delete"
-              ? false
-              : kind === null
-                ? settings.approval !== "manual"
-                : settings.approval === "skip" || granted;
+        const kind = approvalKind(call.name as DesktopToolName, call.args);
+        const decision = firstDecision(
+          kind,
+          settings.approval,
+          this.grants.get(call.conversationId)?.has(kind ?? "read") ?? false,
+          call.meta?.preauthorized === true,
+        );
+        const permitted = decision === "run";
+        const checking = decision === "check-site";
         entry = {
           call,
-          pending: permitted || checking ? null : (kind ?? "read"),
+          pending: decision === "ask" ? (kind ?? "read") : null,
           busy: false,
           retries: 0,
           ...(permitted ? { permitted: true } : {}),
@@ -118,6 +127,16 @@ export class WorkController {
     );
   }
 
+  /**
+   * A waiting call's arguments as the model sent them. Held in memory only, so
+   * an approval card can show what is never stored, like text to be typed.
+   */
+  args(callId: string): Readonly<Record<string, unknown>> | null {
+    const entry = this.entries.get(callId);
+    if (!entry || entry.pending === null) return null;
+    return entry.asking ? { ...entry.call.args, url: entry.asking.url } : entry.call.args;
+  }
+
   attention() {
     return this.snapshot.settings
       .map((s) => ({ ...s, pending: this.pending(s.conversationId).size }))
@@ -130,13 +149,9 @@ export class WorkController {
     for (const [id, entry] of this.entries) if (entry.call.expiresAt <= Date.now()) this.cancel(id);
     const entry = this.entries.get(callId);
     if (!entry || entry.pending === null) return;
+    if (entry.asking) return this.answerSite(entry, choice);
     const kind = entry.pending;
-    const blanket =
-      choice === "allow-rest" &&
-      kind !== "delete" &&
-      kind !== "network" &&
-      kind !== "read" &&
-      kind !== "site";
+    const blanket = choice === "allow-rest" && allowsBlanket(kind);
     if (kind === "site" && (choice === "allow-site" || choice === "allow-always")) {
       // Once remembered, other calls of this chat waiting on a site ask again;
       // the ones for the same site now find it allowed.
@@ -146,6 +161,7 @@ export class WorkController {
           if (
             other === entry ||
             other.pending !== "site" ||
+            other.asking !== undefined ||
             other.call.conversationId !== entry.call.conversationId
           )
             continue;
@@ -210,7 +226,9 @@ export class WorkController {
       }
       if (!entry.result) {
         entry.result = entry.permitted
-          ? await this.deps.execute(entry.call, entry.call.expiresAt - Date.now())
+          ? await this.deps.execute(entry.call, entry.call.expiresAt - Date.now(), (url) =>
+              this.askSite(entry, url),
+            )
           : desktopFailure(
               "You declined that",
               "The user declined this. Do not try it again in another form.",
@@ -239,9 +257,40 @@ export class WorkController {
     }
   }
 
+  private askSite(entry: Entry, url: string) {
+    return new Promise<boolean>((answer) => {
+      if (!this.live(entry)) return answer(false);
+      entry.asking = { url, answer };
+      entry.pending = "site";
+      this.deps.changed();
+    });
+  }
+
+  /**
+   * Answers a running call's question about a site. Nothing new runs: the call
+   * is still running and goes on with the answer.
+   */
+  private answerSite(entry: Entry, choice: ApprovalChoice) {
+    const asking = entry.asking;
+    if (!asking) return;
+    entry.asking = undefined;
+    entry.pending = null;
+    if (choice === "allow-site" || choice === "allow-always") {
+      const call = { ...entry.call, args: { ...entry.call.args, url: asking.url } };
+      void (
+        this.deps.allowSite?.(call, choice === "allow-always" ? "always" : "chat") ??
+        Promise.resolve()
+      )
+        .catch(this.deps.error)
+        .finally(() => asking.answer(true));
+    } else asking.answer(choice === "allow");
+    this.deps.changed();
+  }
+
   private cancel(callId: string) {
     const entry = this.entries.get(callId);
     if (!entry) return;
+    entry.asking?.answer(false);
     clearTimeout(entry.deadline);
     clearTimeout(entry.retry);
     this.entries.delete(callId);

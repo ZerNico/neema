@@ -1,6 +1,5 @@
 import { ArrowDown01Icon, File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
 import type { KnowledgeToolActivity } from "../client/use-message-stream.ts";
 import {
   Disclosure,
@@ -11,8 +10,8 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { useRunDisclosure } from "./use-run-disclosure.ts";
 
-const COLLAPSE_DELAY_MS = 900;
 const QUERY_LIMIT = 6;
 
 const quotedQueries = (queries: ReadonlyArray<string>): string => {
@@ -28,28 +27,16 @@ const quotedQueries = (queries: ReadonlyArray<string>): string => {
  * choice sticks. Reads and listings are counted rather than itemised, since their
  * targets are opaque version ids.
  */
-export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeToolActivity[] }) {
+export function KnowledgeActivityBlock({
+  activities,
+  live = false,
+}: {
+  activities: KnowledgeToolActivity[];
+  /** The newest part of a streaming answer, which keeps the row open. */
+  live?: boolean;
+}) {
   const anyRunning = activities.some((activity) => activity.status === "running");
-  const [previousRunning, setPreviousRunning] = useState(anyRunning);
-  const [graceOpen, setGraceOpen] = useState(anyRunning);
-  if (previousRunning !== anyRunning) {
-    setPreviousRunning(anyRunning);
-    if (anyRunning) setGraceOpen(true);
-  }
-  useEffect(() => {
-    if (anyRunning || !graceOpen) return;
-    const timeout = window.setTimeout(() => setGraceOpen(false), COLLAPSE_DELAY_MS);
-    return () => window.clearTimeout(timeout);
-  }, [anyRunning, graceOpen]);
-  const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);
-  const manuallyCollapsedWhileRunning =
-    override?.during === true && override.value === false && !anyRunning;
-  const expanded =
-    override !== null && override.during === anyRunning
-      ? override.value
-      : manuallyCollapsedWhileRunning
-        ? false
-        : anyRunning || graceOpen;
+  const { expanded, onOpenChange } = useRunDisclosure(anyRunning || live);
 
   if (activities.length === 0) return null;
 
@@ -86,11 +73,7 @@ export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeTo
   const hasDetails = queries.length > 0 || reads.length > 0 || listings.length > 0 || failed > 0;
 
   return (
-    <Disclosure
-      open={expanded}
-      onOpenChange={(next) => setOverride({ during: anyRunning, value: next })}
-      className="mb-2"
-    >
+    <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
         <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>

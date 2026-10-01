@@ -7,6 +7,7 @@ import {
   desktopFailure,
   storable,
   type DesktopToolResult,
+  storablePage,
 } from "../tool-schema.ts";
 
 const SUMMARY_CHARS = 1_024;
@@ -47,6 +48,7 @@ export const acceptDesktopToolResult = (result: DesktopToolResult): DesktopToolR
     .map((item) => storable(item).slice(0, VIOLATION_CHARS))
     .filter((item) => item !== "")
     .slice(0, VIOLATIONS);
+  const page = storablePage(result.page);
   const file = result.file ? acceptFile(result.file) : undefined;
   if (result.file && !file)
     return desktopFailure(
@@ -64,5 +66,6 @@ export const acceptDesktopToolResult = (result: DesktopToolResult): DesktopToolR
       result.detail.length > DESKTOP_RESULT_DETAIL_CHARS,
     ...(violations.length > 0 ? { violations } : {}),
     ...(file ? { file } : {}),
+    ...(page ? { page } : {}),
   };
 };
