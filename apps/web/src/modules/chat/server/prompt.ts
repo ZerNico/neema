@@ -59,6 +59,25 @@ export interface PromptDeps {
 
 export const PDF_TEXT_LABEL = "Text extracted from attached PDF";
 
+/** The most of one file's text a prompt carries; a quarter of a small window. */
+export const inlineTextCharsFor = (contextLength: number | null | undefined) =>
+  Math.min(
+    60_000,
+    Math.floor((contextLength && contextLength > 0 ? contextLength : 64_000) * 4 * 0.25),
+  );
+
+/**
+ * A long file's start and end, with the cut marked and the way to the rest
+ * named. Inlining it whole made one large CSV or log fail the turn outright.
+ */
+export const fitFileText = (text: string, limit: number, file: { id: string }) => {
+  if (text.length <= limit) return text;
+  const head = Math.floor(limit * 0.7);
+  const tail = limit - head;
+  const omitted = text.length - head - tail;
+  return `${text.slice(0, head)}\n\n[… ${omitted.toLocaleString("en-US")} of ${text.length.toLocaleString("en-US")} characters omitted. read_attachment with attachment id ${JSON.stringify(file.id)} reads any range or searches the whole file …]\n\n${text.slice(-tail)}`;
+};
+
 /**
  * What a model without vision reads where an answer's own image was. The
  * image stays in the chat; only this model cannot see it, and it must not
@@ -103,8 +122,11 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     expandAssistantTurns?: boolean;
     /** Steers by the answer they were delivered into; see `HistorySteer`. */
     steers?: ReadonlyMap<string, ReadonlyArray<HistorySteer>>;
+    /** The most of one file's text to inline; see `inlineTextCharsFor`. */
+    inlineTextChars?: number;
   },
 ) {
+  const inlineLimit = input.inlineTextChars ?? inlineTextCharsFor(null);
   // Citation markers stay in history whether or not this attempt has web
   // tools: rendering history per toggle rewrote every earlier answer, and so
   // the cached prefix, each time search was switched. The trailing reminder
@@ -204,7 +226,11 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       if (kind === "file") {
         parts.push({
           type: "text",
-          text: yield* opaqueFileText(row, () => loadBytes(row)),
+          text: yield* opaqueFileText(
+            row,
+            () => loadBytes(row),
+            (text) => fitFileText(text, inlineLimit, row),
+          ),
         });
         continue;
       }
@@ -222,7 +248,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
         type: "text",
         text: buildTextFence({
           fileName: row.fileName,
-          text,
+          text: fitFileText(text, inlineLimit, row),
           ...(kind === "pdf" ? { label: PDF_TEXT_LABEL } : {}),
         }),
       });
@@ -271,7 +297,11 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
               type: "text",
               text: input.deferAssistantBytes
                 ? describeFile(row)
-                : yield* opaqueFileText(row, () => loadBytes(row)),
+                : yield* opaqueFileText(
+                    row,
+                    () => loadBytes(row),
+                    (text) => fitFileText(text, inlineLimit, row),
+                  ),
             };
             return part;
           }
@@ -295,7 +325,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
             type: "text",
             text: buildTextFence({
               fileName: row.fileName,
-              text,
+              text: fitFileText(text, inlineLimit, row),
               ...(kind === "pdf" ? { label: PDF_TEXT_LABEL } : {}),
             }),
           };

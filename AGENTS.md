@@ -134,7 +134,7 @@ skipped one on purpose.
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
   schedule-draft, document, project-file, desktop, custom, integration, presentation,
-  spreadsheet, word, tool-file, tool-load.
+  spreadsheet, word, tool-file, tool-load, attachment.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it. The toolkit loop never learns the difference.

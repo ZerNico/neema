@@ -184,6 +184,7 @@ import {
   buildHistoryMessages,
   loadResumedImages,
   RESUME_REMINDER,
+  inlineTextCharsFor,
   resumeFirstTurn,
   resumedRounds,
   type HistorySteer,
@@ -191,6 +192,8 @@ import {
 } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { buildFixedPrefix } from "./system-prompt.ts";
+import { attachmentReadActivity, prepareAttachmentReader } from "./attachment-reader.ts";
+import { hasFileText } from "~/modules/attachments/server/file-text.ts";
 import {
   isAdvertised,
   lazyFamilyOfTool,
@@ -1254,6 +1257,25 @@ export class StreamEngine extends Context.Service<
               : null;
           // Offered by name only until loaded; see `tool-load.ts`. The set grows
           // through the answer and never shrinks within it.
+          // A file too long to inline, or one summarized away, stays readable
+          // by id; only files linked to this conversation's messages are.
+          const conversationFiles = yield* promptDeps.attachments.listWithBlobsForMessages([
+            ...completed.map((message) => message.id),
+            ...ownSteers.map((steer) => steer.id),
+          ]);
+          const attachmentReader = conversationFiles.some(
+            (file) =>
+              ["text", "pdf"].includes(attachmentKind(file.mediaType)) ||
+              hasFileText(file.fileName),
+          )
+            ? prepareAttachmentReader({
+                deps: promptDeps,
+                find: (attachmentId) =>
+                  Effect.succeed(
+                    conversationFiles.find((file) => file.id === attachmentId) ?? null,
+                  ),
+              })
+            : undefined;
           const offeredLazy = LazyToolFamily.literals.filter((family) =>
             family === "agent-draft"
               ? permissions.agentsCreate
@@ -1292,6 +1314,7 @@ export class StreamEngine extends Context.Service<
           };
           const commonGroups = [
             ...(toolLoad ? [toolLoad] : []),
+            ...(attachmentReader ? [attachmentReader] : []),
             ...(permissions.agentsCreate ? [authoring.group] : []),
             ...(permissions.schedules ? [scheduleAuthoring.group] : []),
             ...(permissions.documents ? [documents.group] : []),
@@ -1439,6 +1462,7 @@ export class StreamEngine extends Context.Service<
             deferAssistantBytes: true,
             messages: plainHistory,
             modelSupportsFiles: model?.capabilities.files ?? false,
+            inlineTextChars: inlineTextCharsFor(model?.contextLength),
           });
           const plainById = new Map(
             plainHistory.map((message, index) => [message.id, plainMessages[index]!]),
@@ -1458,6 +1482,7 @@ export class StreamEngine extends Context.Service<
                       deferAssistantBytes: true,
                       expandAssistantTurns: true,
                       modelSupportsFiles: model?.capabilities.files ?? false,
+                      inlineTextChars: inlineTextCharsFor(model?.contextLength),
                       ...(model
                         ? {
                             modelIdentity: {
@@ -1843,6 +1868,7 @@ export class StreamEngine extends Context.Service<
                       steers: steersByAnswer,
                       loadedBytes,
                       modelSupportsFiles: model?.capabilities.files ?? false,
+                      inlineTextChars: inlineTextCharsFor(model?.contextLength),
                       modelSupportsVision: model?.capabilities.vision ?? false,
                       ...(model
                         ? {
@@ -1892,6 +1918,7 @@ export class StreamEngine extends Context.Service<
                 messages: ownSteers,
                 loadedBytes,
                 modelSupportsFiles: model?.capabilities.files ?? false,
+                inlineTextChars: inlineTextCharsFor(model?.contextLength),
                 modelSupportsVision: model?.capabilities.vision ?? false,
               })
             : [];
@@ -2284,40 +2311,44 @@ export class StreamEngine extends Context.Service<
                           const family =
                             part.name === "load_tools" && toolLoad
                               ? "tool-load"
-                              : Schema.is(AgentDraftToolName)(part.name)
-                                ? "agent-draft"
-                                : Schema.is(ScheduleDraftToolName)(part.name)
-                                  ? "schedule-draft"
-                                  : Schema.is(DocumentToolName)(part.name)
-                                    ? "document"
-                                    : Schema.is(ProjectFileToolName)(part.name)
-                                      ? "project-file"
-                                      : Schema.is(DesktopToolName)(part.name)
-                                        ? "desktop"
-                                        : part.name === "save_memory"
-                                          ? "memory"
-                                          : part.name === "ask_user"
-                                            ? "ask"
-                                            : part.name === "update_plan"
-                                              ? "plan"
-                                              : part.name === "publish_file" && publishFileTool
-                                                ? "tool-file"
-                                                : officeFamilyOf(part.name)
-                                                  ? officeFamilyOf(part.name)!.family
-                                                  : Schema.is(SkillToolName)(part.name)
-                                                    ? "skill"
-                                                    : Schema.is(KnowledgeToolName)(part.name)
-                                                      ? "knowledge"
-                                                      : part.name === "deep_research"
-                                                        ? "research"
-                                                        : part.name === "web_search" ||
-                                                            part.name === "read_url"
-                                                          ? "web"
-                                                          : customToolNames.has(part.name)
-                                                            ? "custom"
-                                                            : integrationTools?.names.has(part.name)
-                                                              ? "integration"
-                                                              : null;
+                              : part.name === "read_attachment" && attachmentReader
+                                ? "attachment"
+                                : Schema.is(AgentDraftToolName)(part.name)
+                                  ? "agent-draft"
+                                  : Schema.is(ScheduleDraftToolName)(part.name)
+                                    ? "schedule-draft"
+                                    : Schema.is(DocumentToolName)(part.name)
+                                      ? "document"
+                                      : Schema.is(ProjectFileToolName)(part.name)
+                                        ? "project-file"
+                                        : Schema.is(DesktopToolName)(part.name)
+                                          ? "desktop"
+                                          : part.name === "save_memory"
+                                            ? "memory"
+                                            : part.name === "ask_user"
+                                              ? "ask"
+                                              : part.name === "update_plan"
+                                                ? "plan"
+                                                : part.name === "publish_file" && publishFileTool
+                                                  ? "tool-file"
+                                                  : officeFamilyOf(part.name)
+                                                    ? officeFamilyOf(part.name)!.family
+                                                    : Schema.is(SkillToolName)(part.name)
+                                                      ? "skill"
+                                                      : Schema.is(KnowledgeToolName)(part.name)
+                                                        ? "knowledge"
+                                                        : part.name === "deep_research"
+                                                          ? "research"
+                                                          : part.name === "web_search" ||
+                                                              part.name === "read_url"
+                                                            ? "web"
+                                                            : customToolNames.has(part.name)
+                                                              ? "custom"
+                                                              : integrationTools?.names.has(
+                                                                    part.name,
+                                                                  )
+                                                                ? "integration"
+                                                                : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -2391,6 +2422,19 @@ export class StreamEngine extends Context.Service<
                               phase: "start",
                               callId: rowId,
                               name: "publish_file",
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            return;
+                          }
+                          if (family === "attachment") {
+                            yield* pushToolChunk({
+                              v: 1,
+                              family,
+                              phase: "start",
+                              callId: rowId,
+                              name: "read_attachment",
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                               textOffset,
@@ -3059,6 +3103,35 @@ export class StreamEngine extends Context.Service<
                             });
                             return;
                           }
+                          if (part.name === "read_attachment") {
+                            if (isPreliminary) return;
+                            // The text went to the model; the row keeps which part was read.
+                            const activity = part.isFailure
+                              ? { ok: false, error: "The file could not be read." }
+                              : attachmentReadActivity(part.result);
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: activity.ok ? "complete" : "error",
+                              ...(activity.ok
+                                ? {}
+                                : {
+                                    error: {
+                                      code: "AttachmentReadFailed",
+                                      message: activity.error ?? "The file could not be read.",
+                                    },
+                                  }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "attachment",
+                              phase: "result",
+                              callId: rowId,
+                              name: "read_attachment",
+                              ...activity,
+                            });
+                            return;
+                          }
                           if (part.name === "load_tools") {
                             if (isPreliminary) return;
                             const decoded = Schema.decodeUnknownOption(LoadToolsResult)(
@@ -3715,6 +3788,7 @@ export class StreamEngine extends Context.Service<
                 messages: steered,
                 loadedBytes,
                 modelSupportsFiles: model?.capabilities.files ?? false,
+                inlineTextChars: inlineTextCharsFor(model?.contextLength),
                 modelSupportsVision: model?.capabilities.vision ?? false,
               });
               activeRounds = [

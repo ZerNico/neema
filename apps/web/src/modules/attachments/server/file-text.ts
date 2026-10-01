@@ -146,6 +146,8 @@ export function fileText(fileName: string, bytes: Uint8Array, maxChars = FILE_TE
 export const opaqueFileText = <E, R>(
   file: { id?: string; fileName: string; size: number },
   bytes: () => Effect.Effect<Uint8Array, E, R>,
+  /** Shortens long text for the prompt; the whole file stays readable by tool. */
+  fit: (text: string) => string = (text) => text,
 ) =>
   Effect.gen(function* () {
     if (!hasFileText(file.fileName)) return describeFile(file);
@@ -154,7 +156,7 @@ export const opaqueFileText = <E, R>(
       ? describeFile(file)
       : buildTextFence({
           fileName: file.fileName,
-          text,
+          text: fit(text),
           label: `Attached file${file.id ? ` (id ${file.id})` : ""}, text only`,
         });
   });

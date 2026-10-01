@@ -61,6 +61,7 @@ import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
 import { ProjectFileActivityRow } from "./project-file-activity-row.tsx";
 import {
   SaveToProjectActions,
@@ -778,6 +779,8 @@ const AssistantBody = memo(function AssistantBody({
       return <DocumentActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "project-file")
       return <ProjectFileActivityRow key={part.key} activity={part.activity} />;
+    if (part.activity.family === "attachment")
+      return <AttachmentActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "custom") {
       return (
         <CustomToolActivityBlock

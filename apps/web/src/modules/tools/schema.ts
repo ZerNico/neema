@@ -16,6 +16,7 @@ import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
 import { PlanStep } from "./plan-schema.ts";
 import { ToolLoadEnvelope } from "./tool-load-schema.ts";
+import { AttachmentToolEnvelope } from "~/modules/chat/attachment-tool-schema.ts";
 import { Source, WebSource } from "./source-schema.ts";
 export { Source, WebSource, DocumentSource } from "./source-schema.ts";
 
@@ -207,6 +208,7 @@ const desktopEnvelopeFields = {
 export const ToolChunkEnvelope = Schema.Union([
   ToolFileEnvelope,
   ToolLoadEnvelope,
+  AttachmentToolEnvelope,
   PresentationToolEnvelope,
   SpreadsheetToolEnvelope,
   WordToolEnvelope,

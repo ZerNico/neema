@@ -137,6 +137,7 @@ import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
+import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -333,6 +334,19 @@ export function toActivity(row: {
       callIndex: row.callIndex,
       status: row.status === "running" ? "running" : steps ? "complete" : "error",
       ...(steps ? { steps } : {}),
+    };
+  }
+  if (row.toolName === "read_attachment") {
+    const read = Option.getOrNull(Schema.decodeUnknownOption(AttachmentReadActivity)(row.result));
+    return {
+      family: "attachment",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "running" ? "running" : read?.ok ? "complete" : "error",
+      ...(read ? { read } : {}),
     };
   }
   if (row.toolName === "load_tools") {

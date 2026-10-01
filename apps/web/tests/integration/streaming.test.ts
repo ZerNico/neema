@@ -521,6 +521,57 @@ describe("conversational agent authoring", () => {
     return { ...seed, conversation };
   });
 
+  it("inlines a long file's ends and lets the model read or search the rest", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const body = Array.from({ length: 12_000 }, (_, i) => `row ${i}, value ${i * 7}`).join("\n");
+    const file = await runtime.runPromise(uploadText(seed.userId, "big.csv", body));
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "read_attachment", {
+          attachmentId: file.id,
+          pattern: "row 9876,",
+        });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Found it." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId, conversationId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "What is row 9876?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [file.id],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      const first = JSON.stringify(prompts[0]!.prompt);
+      expect(first).toContain("characters omitted");
+      expect(first).not.toContain("row 9876,");
+      expect(Object.keys(prompts[0]!.toolkit!.tools)).toContain("read_attachment");
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("row 9876, value 69132");
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const read = detail.toolCalls.find((call) => call.toolName === "read_attachment");
+      expect(read?.result).toMatchObject({
+        ok: true,
+        fileName: "big.csv",
+        mode: "search",
+        matches: 1,
+      });
+      expect(JSON.stringify(read?.result)).not.toContain("69132");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("keeps an answer's prompt prefix byte-stable across its rounds", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];

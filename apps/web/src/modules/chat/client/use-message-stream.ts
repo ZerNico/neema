@@ -50,6 +50,7 @@ import { ToolFileEnvelope } from "../tool-file-schema.ts";
 import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
 import { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -65,6 +66,12 @@ export interface PlanToolActivity extends ToolActivityBase {
   family: "plan";
   /** The latest accepted list; absent until one lands or when the call failed. */
   steps?: ReadonlyArray<PlanStep>;
+}
+
+export interface AttachmentToolActivity extends ToolActivityBase {
+  family: "attachment";
+  /** Which file and part; the text itself only ever reached the model. */
+  read?: AttachmentReadActivity;
 }
 
 export interface ToolLoadActivity extends ToolActivityBase {
@@ -223,6 +230,7 @@ export type ToolActivity =
   | AskToolActivity
   | PlanToolActivity
   | ToolLoadActivity
+  | AttachmentToolActivity
   | ResearchToolActivity
   | KnowledgeToolActivity
   | SkillToolActivity;
@@ -368,6 +376,7 @@ export function applyToolChunk(
     e.family !== "ask" &&
     e.family !== "plan" &&
     e.family !== "tool-load" &&
+    e.family !== "attachment" &&
     e.family !== "research" &&
     e.family !== "knowledge" &&
     e.family !== "skill" &&
@@ -729,6 +738,28 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.phase === "start" ? "running" : questions ? "complete" : "error",
       ...(questions ? { questions } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  if (family === "attachment") {
+    if (e.name !== "read_attachment" || (e.phase !== "start" && e.phase !== "result")) return tools;
+    if (existing && e.phase === "start") return tools;
+    const read =
+      e.phase === "result"
+        ? Option.getOrNull(Schema.decodeUnknownOption(AttachmentReadActivity)(e))
+        : null;
+    const next: AttachmentToolActivity = {
+      family: "attachment",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : read?.ok ? "complete" : "error",
+      ...(read ? { read } : {}),
     };
     return index === -1
       ? [...tools, next]

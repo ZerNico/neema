@@ -990,8 +990,9 @@ describe("StreamEngine foreground saved memory", () => {
     const result = await runGeneration(false, true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
+    // The attached file also makes the chat's files readable by id.
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      [...DOCUMENT_TOOLS, "ask_user", "save_memory"],
+      ["read_attachment", ...DOCUMENT_TOOLS, "ask_user", "save_memory"],
     ]);
     expect(gatewayState.calls[0]?.prompt).toContain(
       "When the save_memory tool is available, call it once",

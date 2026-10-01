@@ -27,7 +27,12 @@ declared type, and only the kinds we understand are shown or handed to a model.
 ## What the model sees
 
 - Images and PDFs go as bytes when the model takes them, PDFs as extracted text otherwise,
-  text as a fenced block: unchanged.
+  text as a fenced block. Text past `inlineTextCharsFor` (a quarter of the window, at most
+  60k characters) is inlined as its start and end around a marked cut: a whole large CSV or
+  log failed the turn outright. Any text, PDF or Office file linked to the conversation's
+  messages stays readable through `read_attachment`, by range or by searching its lines,
+  which is also how a file summarized out of history is read again by id. The tool's row
+  keeps which file and part were read, never the text.
 - An image a person attached is refused for a model without vision, at send and when a
   retry, edit or resume switches to one: the message is about that image. An image an
   answer produced is not: such a model reads `imageStandIn` in its place, a line saying it
