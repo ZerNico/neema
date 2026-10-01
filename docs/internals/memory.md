@@ -5,7 +5,7 @@ Memory saves are model-invoked (`save_memory`), gated separately in ordinary cha
 ## Chat saves
 
 - `save_memory` availability requires the person's memory grant as well as the admin/user auto-save settings, independent of attachments, knowledge, skills or web activity. The same [feature policy](feature-policy.md) guards memory reads and manual settings writes. There is no per-save confirmation; the handler permits one attempt per generation and subsequent model turns omit the tool after that attempt. A [resumed](resume.md) answer whose earlier attempt already tried is offered no second one. Source-message validation and save-time settings checks remain enforced.
-- `conversation-context.ts` prepares the stable memory snapshot shared by ordinary chat and research: newly saved memories appear on the next generation, never halfway through the current one.
+- `conversation-context.ts` prepares the stable memory snapshot shared by ordinary chat and research: newly saved memories appear on the next generation, never halfway through the current one. Policy and records are system role in the stable prefix, as ChatGPT and Claude place memory; records are framed as background data about the user and JSON-quoted per line, so none can forge the block.
 
 ## Research saves
 

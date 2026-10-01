@@ -27,8 +27,9 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   project inside its transaction, like an agent, and snapshots `resolvedProject` beside the
   answer. Lost access fails the turn with a message saying so; it never quietly drops the
   project's instructions.
-- Project instructions enter the prompt as a user-role `<project-instructions>` block after
-  application policy and before an agent's instructions, which refine them.
+- Project instructions are a system-role `<project-instructions>` block after application
+  policy and memory, and before an agent's instructions, which refine them. Editors are
+  other people, so the block steers answers but grants nothing; see `system-prompt.ts`.
 - A branch keeps the project while its owner may still use it, and leaves it otherwise.
 - Deleting a project deletes its documents, files and memory; its chats become ordinary
   chats and keep their messages.

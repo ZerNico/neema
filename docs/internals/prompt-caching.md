@@ -8,8 +8,10 @@ the whole input again on every turn.
 
 ## Layout
 
-- Stable, in order: the tool list, the system messages and memory, the agent's instructions,
-  then retained history (skill replays included, see [skills](skills.md)).
+- Stable, in order: the tool list, then one run of system messages (base policy, tool
+  policies, memory, project and agent instructions, all built in `system-prompt.ts`), then
+  retained history (skill replays included, see [skills](skills.md)). A compaction summary
+  sits between them as a user-role block.
 - Rebuilt per request, after history: draft, document and knowledge data, skill catalogue,
   the runtime clock, reminders. Anything per turn belongs here, never earlier.
 - History renders the same whatever the attempt is offered: citation markers stay in

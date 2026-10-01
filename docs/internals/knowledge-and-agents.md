@@ -103,7 +103,9 @@ whatever agent the conversation is associated with.
   selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
   An agent's integrations likewise grant nothing: each sender uses their own connection, and
   a sender without one is simply not offered the tools.
-  Agent instructions enter the prompt as a user-role block after application policies.
+  Agent instructions are a system-role `<agent-instructions>` block after application policy
+  and memory, behind one line saying they cannot override that policy and grant nothing.
+  Their own closing tag is neutralized; see `system-prompt.ts`.
 
 ## Collections and documents
 

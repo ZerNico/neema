@@ -1559,7 +1559,6 @@ export class StreamEngine extends Context.Service<
             agentAuthoring: permissions.agentsCreate,
             documents: permissions.documents,
             knowledge: !!knowledgeSession,
-            askUser: !!askTools,
             web: webTools ? webTools.tools : null,
             integrations: integrationTools
               ? [

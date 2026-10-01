@@ -17,14 +17,16 @@ export type CitableSource = SourceReference & {
  */
 export const webToolsSystemHint = (tools: { search: boolean; reader: boolean }): string =>
   [
+    // When to reach for each tool; what they take and return is in their own
+    // descriptions, so it is not repeated here.
     tools.search
-      ? "Use web_search to look up current information. It returns snippets only, not page content. Start with one focused query. Use several queries in one call only when the request is broad, ambiguous, comparative, or genuinely multi-part."
+      ? "Use web_search for current information. Start with one focused query. Use several queries in one call only when the request is broad, ambiguous, comparative, or genuinely multi-part."
       : "",
     tools.search && tools.reader
-      ? "When the answer needs full-page evidence, use read_url to open the most relevant results."
+      ? "Search results are snippets: when the answer needs full-page evidence, use read_url to open the most relevant results."
       : "",
-    tools.reader
-      ? "Use read_url to open one or more HTTP(S) URLs in a single call. It accepts URLs from user messages and web_search results in this conversation. Never invent a URL."
+    !tools.search && tools.reader
+      ? "Use read_url to open pages the person points you to when the answer needs their content."
       : "",
     WEB_TOOLS_HINT_BODY,
   ]

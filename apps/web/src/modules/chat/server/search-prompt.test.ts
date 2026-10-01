@@ -31,21 +31,18 @@ describe("webToolsSystemHint", () => {
   it("does not direct search-only requests to an unavailable reader", () => {
     const hint = webToolsSystemHint({ search: true, reader: false });
     expect(hint).toContain("Use web_search");
-    expect(hint).toContain("returns snippets only, not page content");
     expect(hint).not.toContain("read_url");
   });
 
-  it("limits read_url to user and search-result URLs", () => {
+  it("points the reader at pages the person names when search is off", () => {
     const hint = webToolsSystemHint({ search: false, reader: true });
-    expect(hint).toContain("URLs from user messages and web_search results");
-    expect(hint).toContain("Never invent a URL");
-    expect(hint).toContain("one or more HTTP(S) URLs in a single call");
-    expect(hint).not.toContain("Use web_search to look up");
+    expect(hint).toContain("pages the person points you to");
+    expect(hint).not.toContain("web_search");
   });
 
   it("defaults to one focused query and reserves multi-query search for broad requests", () => {
     const hint = webToolsSystemHint({ search: true, reader: true });
-    expect(hint).toContain("returns snippets only, not page content");
+    expect(hint).toContain("Search results are snippets");
     expect(hint).toContain("Start with one focused query");
     expect(hint).toContain("Use several queries in one call only when");
     expect(hint).toContain("broad, ambiguous, comparative, or genuinely multi-part");
