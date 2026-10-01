@@ -150,7 +150,7 @@ describe("research panel", () => {
       callId: "k-1",
       runId: "run-1",
       taskId: "task-1",
-      name: "list_documents",
+      name: "list_knowledge_documents",
       status: "complete",
       summary: {
         targets: [],
@@ -165,7 +165,7 @@ describe("research panel", () => {
       callId: "k-2",
       runId: "run-1",
       taskId: "task-2",
-      name: "read_document",
+      name: "read_knowledge_document",
       status: "running",
     };
     const strayRun: KnowledgeToolActivity = { ...reading, callId: "k-3", runId: "other-run" };

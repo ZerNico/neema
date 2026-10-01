@@ -10,7 +10,7 @@ export const KNOWLEDGE_TOOL_LIMITS = {
   /**
    * Characters of a chunk a search hit carries. ~200 tokens: enough to judge
    * relevance and cite, small enough that up to twelve hits fit one result.
-   * The full chunk is one read_document call away, at the exact range.
+   * The full chunk is one read_knowledge_document call away, at the exact range.
    */
   searchExcerptChars: 800,
 } as const;
@@ -92,9 +92,9 @@ export const summarizeKnowledgeResult = (
 });
 
 export const KnowledgeToolName = Schema.Literals([
-  "list_documents",
+  "list_knowledge_documents",
   "search_knowledge",
-  "read_document",
+  "read_knowledge_document",
   "knowledge_context",
 ]);
 export const KnowledgeActivityResult = Schema.Struct({

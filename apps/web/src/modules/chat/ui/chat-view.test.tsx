@@ -2534,7 +2534,7 @@ it("hydrates document source activities only from an explicit knowledge envelope
   };
   const row = {
     id: "read",
-    toolName: "read_document",
+    toolName: "read_knowledge_document",
     turnIndex: 0,
     callIndex: 0,
     textOffset: 4,

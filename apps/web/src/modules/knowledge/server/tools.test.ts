@@ -73,17 +73,17 @@ describe("selected knowledge tools", () => {
         ];
         const first = yield* setup({ manifest });
         const handlers = first.group.handlers;
-        const page = yield* handlers.list_documents({});
+        const page = yield* handlers.list_knowledge_documents({});
         expect(page.documents).toHaveLength(20);
         expect(page.totalCount).toBe(25);
-        const last = yield* handlers.list_documents({ cursor: page.nextCursor! });
+        const last = yield* handlers.list_knowledge_documents({ cursor: page.nextCursor! });
         expect(last.documents).toHaveLength(5);
         expect(last.documents[4]).toMatchObject({ status: "pending", versionId: null });
         expect(last.nextCursor).toBeNull();
         const second = yield* setup({ manifest });
-        expect((yield* second.group.handlers.list_documents({ cursor: page.nextCursor! })).ok).toBe(
-          false,
-        );
+        expect(
+          (yield* second.group.handlers.list_knowledge_documents({ cursor: page.nextCursor! })).ok,
+        ).toBe(false);
         expect(knowledgeResultTokens(page)).toBeLessThan(KNOWLEDGE_TOOL_LIMITS.resultTokens);
       }),
   );
@@ -98,7 +98,7 @@ describe("selected knowledge tools", () => {
             throw new Error("must not read");
           }),
       });
-      const result = yield* tools.group.handlers.read_document({
+      const result = yield* tools.group.handlers.read_knowledge_document({
         documents: [request(1), { ...request(2), versionId: "guessed" }],
       });
       expect(result.ok).toBe(false);
@@ -113,7 +113,7 @@ describe("selected knowledge tools", () => {
     () =>
       Effect.gen(function* () {
         const tools = yield* setup();
-        const result = yield* tools.group.handlers.read_document({
+        const result = yield* tools.group.handlers.read_knowledge_document({
           documents: [request(1, 16_000), request(2, 16_000)],
         });
         expect(result.passages).toHaveLength(1);
@@ -165,7 +165,9 @@ describe("selected knowledge tools", () => {
             nextOffset: input.maxChars,
           }),
       });
-      const result = yield* tools.group.handlers.read_document({ documents: [request(1, 16_000)] });
+      const result = yield* tools.group.handlers.read_knowledge_document({
+        documents: [request(1, 16_000)],
+      });
       expect(result.passages[0]!.content.length).toBeGreaterThan(0);
       expect(result.passages[0]!.content.length).toBeLessThan(16_000);
       expect(result.sources[0]!.endOffset).toBe(result.passages[0]!.content.length);
@@ -201,7 +203,7 @@ describe("selected knowledge tools", () => {
       expect(result.mode).toBe("lexical");
       expect(result.degradedReason).toBe("Semantic search unavailable.");
       // A hit is a bounded excerpt of its chunk, so twelve of them fit one
-      // result; the exact range is what read_document continues from.
+      // result; the exact range is what read_knowledge_document continues from.
       expect(result.sources[0]).toMatchObject({
         kind: "document",
         read: false,
@@ -228,7 +230,7 @@ describe("selected knowledge tools", () => {
             return { mode: "lexical" as const, degradedReason: null, passages: [] };
           }),
       });
-      for (let i = 0; i < 63; i++) yield* tools.group.handlers.list_documents({});
+      for (let i = 0; i < 63; i++) yield* tools.group.handlers.list_knowledge_documents({});
       const refused = yield* tools.group.handlers.search_knowledge({ queries: ["one", "two"] });
       expect(refused.ok).toBe(false);
       expect(tools.remaining()).toBe(0);
@@ -260,7 +262,7 @@ describe("selected knowledge tools", () => {
           }),
       });
       const result = yield* tools.group.handlers
-        .read_document({ documents: [request(1)] })
+        .read_knowledge_document({ documents: [request(1)] })
         .pipe(Effect.result);
       expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "KnowledgeNotAvailable" } });
       expect(JSON.stringify(result)).not.toContain("private body");

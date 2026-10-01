@@ -45,7 +45,7 @@ describe("knowledge activity block", () => {
       }),
       activity({ summary: summary({ targets: ["Barrierefreiheit"], passagesReturned: 6 }) }),
       activity({
-        name: "read_document",
+        name: "read_knowledge_document",
         summary: summary({ targets: ["v1"], passagesReturned: 2 }),
       }),
     ]);
@@ -68,7 +68,9 @@ describe("knowledge activity block", () => {
   });
 
   it("counts a listing without pretending it read anything", () => {
-    show([activity({ name: "list_documents", summary: summary({ documentsListed: 8 }) })]);
+    show([
+      activity({ name: "list_knowledge_documents", summary: summary({ documentsListed: 8 }) }),
+    ]);
     fireEvent.click(screen.getByRole("button", { name: /Listed documents/ }));
     expect(screen.getByText("Listed 8 documents")).toBeInTheDocument();
   });

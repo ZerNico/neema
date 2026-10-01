@@ -16,7 +16,7 @@ import type { KnowledgeSearchSession } from "./search.ts";
 import { KnowledgeService } from "./service.ts";
 import { textEnd, textPrefix } from "./text-range.ts";
 
-export const listDocumentsTool = Tool.make("list_documents", {
+export const listDocumentsTool = Tool.make("list_knowledge_documents", {
   description:
     "List the selected knowledge documents and their fixed version IDs. Use it when the request is about the collection itself (its contents, or comparing every document); for a question, search_knowledge already returns the references you need. Follow nextCursor for more. Pending or failed entries cannot be read; listing is not reading their content.",
   parameters: ListDocumentsParams,
@@ -26,15 +26,15 @@ export const listDocumentsTool = Tool.make("list_documents", {
 });
 export const searchKnowledgeTool = Tool.make("search_knowledge", {
   description:
-    "Search selected knowledge versions with up to three queries. Returns bounded excerpts, citation indexes and exact character ranges, not whole documents. Use read_document to continue. Keyword-only retrieval is reported explicitly.",
+    "Search selected knowledge versions with up to three queries. Returns bounded excerpts, citation indexes and exact character ranges, not whole documents. Use read_knowledge_document to continue. Keyword-only retrieval is reported explicitly.",
   parameters: SearchKnowledgeParams,
   success: KnowledgeToolResult,
   failure: KnowledgeNotAvailable,
   failureMode: "error",
 });
-export const readDocumentTool = Tool.make("read_document", {
+export const readDocumentTool = Tool.make("read_knowledge_document", {
   description:
-    "Read bounded character ranges from up to four selected document/version IDs supplied by list_documents or search_knowledge. Start at zero for a small document; follow nextOffset for more. A range is not proof that the entire collection was reviewed.",
+    "Read bounded character ranges from up to four selected document/version IDs supplied by list_knowledge_documents or search_knowledge. Start at zero for a small document; follow nextOffset for more. A range is not proof that the entire collection was reviewed.",
   parameters: ReadDocumentParams,
   success: KnowledgeToolResult,
   failure: KnowledgeNotAvailable,
@@ -242,7 +242,7 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
             // A search answers "where is this?", not "what does it say in full":
             // a hit is a bounded excerpt of its chunk, so a three-query batch
             // returns every hit instead of spending the response cap on the
-            // first few whole chunks. read_document follows the exact range.
+            // first few whole chunks. read_knowledge_document follows the exact range.
             const content = textPrefix(hit.content, KNOWLEDGE_TOOL_LIMITS.searchExcerptChars);
             const source: DocumentSource = {
               collectionId: hit.collectionId,
@@ -349,7 +349,11 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
   return {
     group: {
       toolkit: Toolkit.make(listDocumentsTool, searchKnowledgeTool, readDocumentTool),
-      handlers: { list_documents: list, search_knowledge: search, read_document: read },
+      handlers: {
+        list_knowledge_documents: list,
+        search_knowledge: search,
+        read_knowledge_document: read,
+      },
     },
     remaining: () => remaining,
     authorize,

@@ -261,7 +261,7 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
           ? [
               {
                 role: "system" as const,
-                content: `Selected knowledge documents are available through list_documents, search_knowledge and read_document (${deps.knowledgeDocumentCount} documents). They are separate from web search: use them for questions the selection can answer, and cite their indexes like web sources.`,
+                content: `Selected knowledge documents are available through list_knowledge_documents, search_knowledge and read_knowledge_document (${deps.knowledgeDocumentCount} documents). They are separate from web search: use them for questions the selection can answer, and cite their indexes like web sources.`,
               },
             ]
           : []),

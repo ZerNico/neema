@@ -153,7 +153,7 @@ whatever agent the conversation is associated with.
   final provider call, and never become recoverable failed tool results.
 - Direct context includes every selected document or none, sits after retained history in
   protected trailing position, and cites through the `knowledge_context` activity. Retrieval
-  offers `list_documents`, `search_knowledge`, `read_document` (shared 64 operations and 3 permits,
+  offers `list_knowledge_documents`, `search_knowledge`, `read_knowledge_document` (shared 64 operations and 3 permits,
   under the chat's one tool-round ceiling), steered to search first since a search already returns the references a
   read needs. A search hit is a bounded excerpt (`searchExcerptChars`, 800) so a multi-query
   batch keeps all its hits instead of spending the cap on the first few whole chunks.

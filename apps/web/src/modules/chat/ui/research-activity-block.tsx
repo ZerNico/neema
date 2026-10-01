@@ -40,7 +40,7 @@ const currentDetail = (webActivities: ReadonlyArray<ResearchStepActivity>): stri
   if (!latest) return null;
   if (latest.family === "skill") return `Using ${latest.skillName} guidance`;
   if (latest.family === "knowledge")
-    return latest.name === "list_documents"
+    return latest.name === "list_knowledge_documents"
       ? "Listing documents"
       : latest.name === "search_knowledge"
         ? "Searching knowledge"

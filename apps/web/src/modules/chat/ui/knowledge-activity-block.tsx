@@ -41,8 +41,8 @@ export function KnowledgeActivityBlock({
   if (activities.length === 0) return null;
 
   const searches = activities.filter((activity) => activity.name === "search_knowledge");
-  const reads = activities.filter((activity) => activity.name === "read_document");
-  const listings = activities.filter((activity) => activity.name === "list_documents");
+  const reads = activities.filter((activity) => activity.name === "read_knowledge_document");
+  const listings = activities.filter((activity) => activity.name === "list_knowledge_documents");
   const queries = [...new Set(searches.flatMap((activity) => activity.summary?.targets ?? []))];
   const excerpts = searches.reduce(
     (total, activity) => total + (activity.summary?.passagesReturned ?? 0),
@@ -60,7 +60,7 @@ export function KnowledgeActivityBlock({
   const headerLabel = running
     ? running.name === "search_knowledge"
       ? "Searching documents…"
-      : running.name === "read_document"
+      : running.name === "read_knowledge_document"
         ? "Reading documents…"
         : "Listing documents…"
     : allFailed

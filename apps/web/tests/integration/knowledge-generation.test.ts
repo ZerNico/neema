@@ -361,7 +361,7 @@ describe("knowledge-backed generations", () => {
       ["Termination", "Either party may terminate with notice."],
     ]);
     script = (input) => {
-      expect(input.toolkit?.tools["read_document"]).toBeUndefined();
+      expect(input.toolkit?.tools["read_knowledge_document"]).toBeUndefined();
       expect(input.toolkit?.tools["save_memory"]).toBeDefined();
       return Stream.make(text("Invoices are due in thirty days [^1]."), finish());
     };
@@ -402,7 +402,7 @@ describe("knowledge-backed generations", () => {
     script = (input) => {
       expect(promptText(input.prompt)).toContain("Selected knowledge requires retrieval");
       expect(input.toolkit?.tools["search_knowledge"]).toBeDefined();
-      expect(input.toolkit?.tools["read_document"]).toBeDefined();
+      expect(input.toolkit?.tools["read_knowledge_document"]).toBeDefined();
       expect(input.toolkit?.tools["save_memory"]).toBeDefined();
       return Stream.make(text("Retrieval is available."), finish());
     };
@@ -420,11 +420,11 @@ describe("knowledge-backed generations", () => {
     ]);
     script = (input, calls) => {
       if (calls === 1) {
-        expect(input.toolkit?.tools["list_documents"]).toBeDefined();
-        return tool(input, "list_documents", {});
+        expect(input.toolkit?.tools["list_knowledge_documents"]).toBeDefined();
+        return tool(input, "list_knowledge_documents", {});
       }
       if (calls === 2)
-        return tool(input, "read_document", {
+        return tool(input, "read_knowledge_document", {
           documents: [
             {
               documentId: documents[1]!.documentId,
@@ -441,7 +441,10 @@ describe("knowledge-backed generations", () => {
     expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
     expect(await configRow(sent.assistantMessageId)).toMatchObject({ knowledge_mode: "retrieval" });
     const calls = await toolCalls(sent.assistantMessageId);
-    expect(calls.map((call) => call.tool_name)).toEqual(["list_documents", "read_document"]);
+    expect(calls.map((call) => call.tool_name)).toEqual([
+      "list_knowledge_documents",
+      "read_knowledge_document",
+    ]);
     expect(calls.every((call) => call.status === "complete")).toBe(true);
     const read = calls[1]!.result as {
       family: string;
@@ -1561,12 +1564,12 @@ describe("knowledge-backed generations", () => {
           : tool(input, "finish_research", {});
       if (phase === "worker") {
         workerPrompts.push(promptText(input.prompt));
-        expect(input.toolkit?.tools["read_document"]).toBeDefined();
+        expect(input.toolkit?.tools["read_knowledge_document"]).toBeDefined();
         expect(input.toolkit?.tools["search_knowledge"]).toBeDefined();
         const rounds = input.prompt.content.filter((message) => message.role === "tool").length;
         if (rounds === 0) return tool(input, "web_search", { queries: ["notice period"] });
         if (rounds === 1)
-          return tool(input, "read_document", {
+          return tool(input, "read_knowledge_document", {
             documents: [
               {
                 documentId: documents[0]!.documentId,
@@ -1596,7 +1599,7 @@ describe("knowledge-backed generations", () => {
         `select tool_name, status, research_task_id is not null as task, result from message_tool_calls where message_id = '${sent.assistantMessageId}' order by turn_index, call_index`,
       )
     ).rows;
-    const read = calls.find((call) => call.tool_name === "read_document");
+    const read = calls.find((call) => call.tool_name === "read_knowledge_document");
     expect(read).toMatchObject({ status: "complete", task: true });
     const result = read!.result as { family: string; sources: Array<Record<string, unknown>> };
     expect(result.family).toBe("knowledge");

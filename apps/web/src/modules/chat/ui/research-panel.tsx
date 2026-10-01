@@ -90,7 +90,7 @@ const describe = (activity: ResearchStepActivity): { verb: string; items: Activi
     const count = activity.summary?.passagesReturned ?? 0;
     const documents = activity.summary?.documentsListed ?? 0;
     // Targets are opaque version ids: name what happened, not the handle.
-    return activity.name === "list_documents"
+    return activity.name === "list_knowledge_documents"
       ? {
           verb: running ? "Listing documents" : "Listed documents",
           items: running ? [] : [{ key: "count", label: `${documents} documents` }],
