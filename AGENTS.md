@@ -351,7 +351,8 @@ Differs from most Effect 3 material online.
   summary and source list only.
 - Every web tool returns `WebToolResult`, so persistence, envelopes and the
   citations UI are written once. `read_url` is the only path through
-  `PageExtractor`; `url-safety.ts` is the SSRF boundary and the SearXNG base URL
+  `PageExtractor`, which reads HTML, JSON, CSV and Markdown, and PDFs through the
+  document parser; `url-safety.ts` is the SSRF boundary and the SearXNG base URL
   is exempt by design. After that check, callers must `fetchPinned` the returned
   addresses: a second DNS lookup would reopen rebinding.
 - `web_search` caches per generation by query, time range and language; failures

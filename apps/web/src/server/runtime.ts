@@ -82,7 +82,12 @@ const ReposLayer = Layer.mergeAll(
   ScheduleRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
-  Layer.provideMerge(Layer.mergeAll(SearchBackend.searxngLayer, PageExtractor.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      SearchBackend.searxngLayer,
+      PageExtractor.layer.pipe(Layer.provide(DocumentParser.layer)),
+    ),
+  ),
 );
 const CustomToolsLayer = CustomToolBuilder.layer.pipe(
   Layer.provideMerge(CustomToolInstaller.layer),

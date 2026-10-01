@@ -23,7 +23,8 @@ const DISALLOWED_REASON =
 export const urlReaderTool = Tool.make("read_url", {
   description:
     "Open and read one or more URLs from user messages or web_search results. Fetches the pages " +
-    "in parallel and returns extracted main content as markdown. Never invent a URL.",
+    "in parallel and returns their main content as markdown; PDFs, JSON, CSV and Markdown files " +
+    "are read too. Never invent a URL.",
   parameters: UrlReadParams,
   success: WebToolResult,
   failureMode: "return",
