@@ -244,9 +244,9 @@ the list. A live probe (`PROBE_GOOGLE_FONTS=1`) checks the catalogue against Goo
 Fetched faces sit in `presentation_fonts` beside uploads, marked `google`, and are a cache:
 an edit touches `last_used_at` (at most daily), and a sweep drops those unused for fourteen
 days by the database clock; the next use fetches again. Their tmpdir files are left for the
-system to clean. They count against no upload quota and are not listed to admins. For one
-family and style an upload wins, then a skill's face, then Google's, and an upload owns its
-whole family, so a deck never mixes an admin's Regular with Google's Bold. Every face
+system to clean. They count against no upload quota and are not listed to admins. A family comes from one source:
+an upload owns it, else a loaded skill's faces, else Google's, so a deck never mixes two
+designs under one name. Every face
 handed to the renderer is opened for each slide and becomes a glyph fallback, so a job
 gets only the faces its deck and operations name (`font-usage.ts`). A render that meets a
 catalogue family with no face reports it, and the processor fetches it in the background:

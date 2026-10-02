@@ -18,13 +18,21 @@ const missingFonts = (result: unknown): readonly string[] =>
   Array.isArray(result) ? ((result[0] as { missingFonts?: string[] })?.missingFonts ?? []) : [];
 
 /**
- * One face per family and style: an upload keeps its name, a loaded skill's
- * face comes next, and a fetched Google face only fills what neither supplies.
+ * A family comes from one source, so a deck never mixes two designs under one
+ * name: an upload owns it, else a loaded skill's faces, else Google's. Within
+ * that source, one face per style.
  */
 export const withFaces = (stored: readonly FontFace[], extra: readonly FontFace[] = []) => {
+  const all = [...stored, ...extra];
+  const owner = new Map<string, number>();
+  for (const face of all) {
+    const family = face.family.toLowerCase();
+    owner.set(family, Math.min(owner.get(family) ?? Infinity, rank[face.source]));
+  }
   const chosen = new Map<string, FontFace>();
-  for (const face of [...stored, ...extra].toSorted((a, b) => rank[a.source] - rank[b.source]))
-    if (!chosen.has(faceKey(face))) chosen.set(faceKey(face), face);
+  for (const face of all)
+    if (rank[face.source] === owner.get(face.family.toLowerCase()) && !chosen.has(faceKey(face)))
+      chosen.set(faceKey(face), face);
   return [...chosen.values()];
 };
 
