@@ -518,6 +518,7 @@ describe("branching a conversation", () => {
         const { blobId } = yield* attach(userId, answer.id, [
           { fileName: "deck.pptx", position: 0 },
           { fileName: "export.csv", position: 1 },
+          { fileName: "totals.csv", position: 2 },
         ]);
         const delivered = yield* attachmentRepo.listWithBlobsForMessages([answer.id]);
         const idOf = (name: string) => delivered.find((file) => file.fileName === name)!.id;
@@ -543,6 +544,7 @@ describe("branching a conversation", () => {
           workingFileId,
           attachmentId: idOf("deck.pptx"),
         });
+        yield* call("create_file", { ok: true, attachmentId: idOf("totals.csv") });
         yield* call("custom_exporter__csv", {
           family: "custom",
           version: 1,
@@ -588,6 +590,10 @@ describe("branching a conversation", () => {
     expect(result.calls.find((row) => row.toolName === "publish_file")?.result).toMatchObject({
       ok: true,
       attachmentId: copyOf("deck.pptx"),
+    });
+    expect(result.calls.find((row) => row.toolName === "create_file")?.result).toEqual({
+      ok: true,
+      attachmentId: copyOf("totals.csv"),
     });
     expect(
       result.calls.find((row) => row.toolName === "custom_exporter__csv")?.result,

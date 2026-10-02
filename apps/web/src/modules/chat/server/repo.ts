@@ -180,7 +180,8 @@ const withClonedFileIds = (
     const cloneId = cloned.get(id);
     return cloneId ? [cloneId] : [];
   };
-  if (toolName === "publish_file") {
+  // Both deliver a file under the same activity shape; a copy points at the branch's own.
+  if (toolName === "publish_file" || toolName === "create_file") {
     const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ToolFileActivity)(result));
     if (stored?.attachmentId) {
       const next = { ...result };
