@@ -27,7 +27,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { resolveAttemptSkills } from "~/modules/chat/server/effective-config.ts";
-import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { StreamEngine, type StreamEvent } from "~/modules/chat/server/streaming.ts";
 import type {
   Memory,
   SaveModelMemoryInput,
@@ -594,6 +594,13 @@ const toolEnvelopes = (events: Awaited<ReturnType<typeof runGeneration>>["events
       : [],
   );
 
+/** A replay reports when each chunk was written; otherwise it is the live stream. */
+const withoutWriteTimes = (events: Iterable<StreamEvent>) =>
+  Array.from(events, (event) => {
+    if (event.kind !== "chunk") return event;
+    const { at: _at, ...rest } = event;
+    return rest;
+  });
 describe("StreamEngine durable clarification handoff", () => {
   it("finishes a tool-only question without another model call and replays its persisted result", async () => {
     gatewayState.askOnFirstCall = true;
@@ -638,7 +645,9 @@ describe("StreamEngine durable clarification handoff", () => {
         const db = yield* Db;
         return {
           message: yield* repo.getMessage(result.turn.assistant.id),
-          replay: yield* engine.subscribe(result.turn.assistant.id, 1).pipe(Stream.runCollect),
+          replay: withoutWriteTimes(
+            yield* engine.subscribe(result.turn.assistant.id, 1).pipe(Stream.runCollect),
+          ),
           ledger: yield* db
             .select()
             .from(usageEvents)
@@ -678,7 +687,7 @@ describe("StreamEngine durable clarification handoff", () => {
         const repo = yield* ChatRepo;
         const engine = yield* StreamEngine;
         const message = yield* repo.getMessage(result.turn.assistant.id);
-        const replay = Array.from(
+        const replay = withoutWriteTimes(
           yield* engine.subscribe(result.turn.assistant.id, 0).pipe(Stream.runCollect),
         );
         return { message, replay };

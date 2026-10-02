@@ -386,6 +386,8 @@ export const INTERRUPTED_MESSAGE = "The response was interrupted before it finis
 
 export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
+/** A persisted chunk with the time it was written, which a replay reports as its own. */
+export type StoredChunk = ChunkRow & { createdAt: Date };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
  */
@@ -1050,7 +1052,7 @@ export class ChatRepo extends Context.Service<
       messageId: string,
       chunks: ReadonlyArray<{ seq: number; kind: ChunkKind; delta: string }>,
     ): Effect.Effect<void>;
-    chunksAfter(messageId: string, afterSeq: number): Effect.Effect<ChunkRow[]>;
+    chunksAfter(messageId: string, afterSeq: number): Effect.Effect<StoredChunk[]>;
     /** The message's highest chunk seq, 0 when it has none. */
     lastChunkSeq(messageId: string): Effect.Effect<number>;
     insertToolCall(input: {
@@ -3232,6 +3234,7 @@ export class ChatRepo extends Context.Service<
               seq: messageChunks.seq,
               kind: messageChunks.kind,
               delta: messageChunks.delta,
+              createdAt: messageChunks.createdAt,
             })
             .from(messageChunks)
             .where(and(eq(messageChunks.messageId, messageId), gt(messageChunks.seq, afterSeq)))

@@ -629,3 +629,12 @@ describe("a deck edit still being written", () => {
     expect(applyToolActivityChunk([], "writing", "{")).toEqual([]);
   });
 });
+
+describe("a replayed call's timing", () => {
+  it("is stamped with the time its chunk was written, not when a reload replays it", () => {
+    const written = Date.now() - 40_000;
+    const tools = applyToolActivityChunk([], "tool", start, written);
+    expect(tools[0]).toMatchObject({ callId: "c1", startedAt: written });
+    expect(tools[0]).not.toHaveProperty("completedAt");
+  });
+});

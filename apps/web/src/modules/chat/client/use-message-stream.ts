@@ -288,6 +288,8 @@ type Action =
       kind: "chunk";
       chunkKind: Exclude<ChunkKind, "text" | "reasoning">;
       delta: string;
+      /** The server's time for the chunk, so a replayed call keeps its start. */
+      at?: number;
     }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
@@ -1135,18 +1137,24 @@ export const applyToolActivityChunk = (
   tools: ReadonlyArray<ToolActivity>,
   kind: "tool" | "writing",
   delta: string,
+  at = Date.now(),
 ): ToolActivity[] =>
   kind === "writing"
     ? applyWritingChunk(tools, delta)
     : stampToolTimes(
         tools,
         applyToolChunk(startsCall(delta) ? withoutWriting(tools) : [...tools], delta),
-        Date.now(),
+        at,
       );
 
 type StateChunkKind = Extract<Action, { kind: "chunk" }>["chunkKind"];
 
-function applyChunk(state: StreamState, kind: StateChunkKind, delta: string): StreamState {
+function applyChunk(
+  state: StreamState,
+  kind: StateChunkKind,
+  delta: string,
+  at?: number,
+): StreamState {
   switch (kind) {
     case "file":
       return { ...state, files: applyFileChunk(state.files, delta) };
@@ -1156,7 +1164,7 @@ function applyChunk(state: StreamState, kind: StateChunkKind, delta: string): St
       return { ...state, steers: applySteerChunk(state.steers, delta) };
     case "writing":
     case "tool":
-      return { ...state, tools: applyToolActivityChunk(state.tools, kind, delta) };
+      return { ...state, tools: applyToolActivityChunk(state.tools, kind, delta, at) };
   }
 }
 
@@ -1171,7 +1179,7 @@ function reducer(state: StreamState, action: Action): StreamState {
         status: "streaming",
       };
     case "chunk":
-      return applyChunk(state, action.chunkKind, action.delta);
+      return applyChunk(state, action.chunkKind, action.delta, action.at);
     case "done":
       return { ...state, tools: withoutWriting(state.tools), status: action.status };
   }
@@ -1277,12 +1285,19 @@ export function useMessageStream(
         kind?: ChunkKind;
         delta: string;
         runId?: string;
+        at?: number;
       };
       if (!acceptsRun(data.runId) || !live.claim(data.seq)) return;
       const chunkKind = data.kind ?? "text";
       if (chunkKind === "writing" && isStaleWriting(data.delta, runId)) return;
       if (chunkKind === "text" || chunkKind === "reasoning") live.append(chunkKind, data.delta);
-      else dispatch({ kind: "chunk", chunkKind, delta: data.delta });
+      else
+        dispatch({
+          kind: "chunk",
+          chunkKind,
+          delta: data.delta,
+          ...(data.at === undefined ? {} : { at: data.at }),
+        });
       if (data.kind === "tool") {
         const activity = applyToolChunk([], data.delta, "document").at(0);
         if (activity?.family === "document" && activity.result?.documentId)

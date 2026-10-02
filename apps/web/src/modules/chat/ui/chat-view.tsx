@@ -224,6 +224,28 @@ export const sendReservedWorkspaceTurn = async (input: {
   return activated;
 };
 
+const epoch = (value: Date | string | null | undefined) =>
+  value ? new Date(value).getTime() || undefined : undefined;
+
+/**
+ * A row's activity with the times it records, so a reloaded answer, still
+ * streaming or settled, says how long it worked rather than restarting its clock.
+ */
+const timedActivity = (
+  row: Parameters<typeof toActivity>[0] & {
+    startedAt?: Date | string | null;
+    completedAt?: Date | string | null;
+  },
+): ToolActivity => {
+  const startedAt = epoch(row.startedAt);
+  const completedAt = epoch(row.completedAt);
+  return {
+    ...toActivity(row),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+  } as ToolActivity;
+};
+
 /**
  * Durable message_tool_calls row → the same family-discriminated shape used by
  * live chunks. The tool name is the durable discriminator; old web rows never
@@ -800,7 +822,7 @@ export function ChatView({
     // Seed tool activity from durable rows; live envelopes upsert on top.
     const durableTools = data.toolCalls
       .filter((t) => t.messageId === streamingMessage.id)
-      .map(toActivity);
+      .map(timedActivity);
     // Starts can land between snapshots. Replay explicit anchors for every
     // family; terminal durable activities ignore older progress in the reducer.
     // A deck edit still being written replays too, until its call starts.
@@ -809,7 +831,7 @@ export function ChatView({
         chunk.kind === "tool" ||
         (chunk.kind === "writing" &&
           !isStaleWriting(chunk.delta, streamingMessage.generationId ?? null))
-          ? applyToolActivityChunk(current, chunk.kind, chunk.delta)
+          ? applyToolActivityChunk(current, chunk.kind, chunk.delta, epoch(chunk.createdAt))
           : current,
       durableTools,
     );
@@ -1583,17 +1605,8 @@ export function ChatView({
   // stream chunk and must not rescan the flat list per message.
   const toolCallsByMessage = useMemo(() => {
     const grouped = new Map<string, ToolActivity[]>();
-    // Settled rows carry their own timing, so a reloaded answer still says how long it worked.
-    const time = (value: Date | string | null | undefined) =>
-      value ? new Date(value).getTime() || undefined : undefined;
     for (const row of data.toolCalls) {
-      const startedAt = time(row.startedAt);
-      const completedAt = time(row.completedAt);
-      const activity = {
-        ...toActivity(row),
-        ...(startedAt === undefined ? {} : { startedAt }),
-        ...(completedAt === undefined ? {} : { completedAt }),
-      } as ToolActivity;
+      const activity = timedActivity(row);
       const list = grouped.get(row.messageId);
       if (list) list.push(activity);
       else grouped.set(row.messageId, [activity]);

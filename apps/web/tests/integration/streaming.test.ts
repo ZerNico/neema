@@ -5138,7 +5138,15 @@ describe("generated image streaming", () => {
             .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
             .pipe(Stream.runCollect),
         );
-        expect(live).toEqual(replay);
+        // A replay reports when each chunk was written; otherwise it is the live stream.
+        expect(live).toEqual(
+          replay.map((event) => {
+            if (event.kind !== "chunk") return event;
+            expect(event.at).toEqual(expect.any(Number));
+            const { at: _at, ...rest } = event;
+            return rest;
+          }),
+        );
         expect(
           live.filter((event) => event.kind === "chunk").map((event) => event.chunkKind),
         ).toEqual(["text", "file", "text"]);

@@ -220,6 +220,8 @@ export interface ChunkEvent {
   readonly seq: number;
   readonly chunkKind: ChunkKind;
   readonly delta: string;
+  /** When it was written; absent on a live chunk, which is sent as it happens. */
+  readonly at?: number;
 }
 
 export interface DoneEvent {
@@ -4055,6 +4057,7 @@ export class StreamEngine extends Context.Service<
                 seq: c.seq,
                 chunkKind: c.kind,
                 delta: c.delta,
+                at: c.createdAt.getTime(),
               })),
             );
 
