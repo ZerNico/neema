@@ -998,6 +998,11 @@ const samePrefixInstruction = (summary: SamePrefixSummary) =>
     .filter(Boolean)
     .join("\n");
 
+/** Both summary attempts together, at most; the answer waits on them. */
+const SUMMARY_DEADLINE = Duration.seconds(90);
+const MIN_FALLBACK_MS = 10_000;
+const REASONING_HEADROOM = 16_000;
+
 // Never fails: a summary the model would not write is a fallback, not an
 // error. The caller drops turns instead and the answer still streams.
 const summarizeRange = Effect.fn("chat.summarizeRange")(function* (
@@ -1018,16 +1023,30 @@ const summarizeRange = Effect.fn("chat.summarizeRange")(function* (
   if (range.aged.length === 0) return null;
   const summaryTokens = range.summaryTokens ?? COMPACTION_CONFIG.summaryMaxOutputTokens;
   const scaleUp = summaryTokens / COMPACTION_CONFIG.summaryMaxOutputTokens;
+  // One budget for both attempts: this runs before the answer's first token,
+  // so a fallback after a timeout gets only what is left, never a fresh wait.
+  const budgetMs = Math.min(
+    Duration.toMillis(SUMMARY_DEADLINE),
+    Duration.toMillis(COMPACTION_CONFIG.summaryTimeout) * scaleUp,
+  );
+  const started = Date.now();
+  const remaining = () => budgetMs - (Date.now() - started);
   const run = (prompt: Prompt.Prompt, sameAs?: SideGenerationRequest) =>
     deps.gateway
       .generateText({
         modelId: input.modelId,
         prompt,
-        maxOutputTokens: summaryTokens,
+        // The same-prefix request keeps the chat's reasoning setting, since
+        // changing it would miss the cache; where reasoning counts against
+        // output, it gets room of its own so it cannot leave the summary empty.
+        maxOutputTokens:
+          sameAs?.reasoningEffort && sameAs.reasoningEffort !== "none"
+            ? summaryTokens + REASONING_HEADROOM
+            : summaryTokens,
         ...(sameAs ? { sameAs } : {}),
       })
       .pipe(
-        Effect.timeout(Duration.times(COMPACTION_CONFIG.summaryTimeout, Math.min(4, scaleUp))),
+        Effect.timeout(Duration.millis(Math.max(0, remaining()))),
         Effect.map((result) => ({
           ...result,
           summary: sanitizeSummary(
@@ -1086,6 +1105,8 @@ const summarizeRange = Effect.fn("chat.summarizeRange")(function* (
     maxTranscriptChars: maxInputTokens * COMPACTION_CONFIG.charsPerToken,
   });
   if (estimatePromptTokens(prompt.content) > maxInputTokens) return null;
+  // Too little time left to write a summary; the caller drops turns instead.
+  if (remaining() < MIN_FALLBACK_MS) return null;
   return yield* run(prompt);
 });
 

@@ -1337,4 +1337,30 @@ describe("a history summary over the chat's own prompt", () => {
         expect(JSON.stringify(decision.injectedMessages)).toContain("flat");
       }),
     ));
+
+  it("leaves reasoning room of its own beside the summary, so it cannot use the allowance up", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const limits: Array<number | undefined> = [];
+        const h = harness();
+        const generateText = vi.fn((call: { maxOutputTokens?: number }) => {
+          limits.push(call.maxOutputTokens);
+          return Effect.succeed({ text: "brief", usage, finishMetadata: undefined });
+        });
+        const deps = { ...h.deps, gateway: { generateText } } as CompactionDeps;
+        const messages = history(24).map((message, index) =>
+          Object.assign(message, { createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)) }),
+        );
+        for (const reasoningEffort of ["high", "none"] as const)
+          yield* prepareCompactedHistory(
+            deps,
+            request(messages, {
+              fixedPrefix: [{ role: "system", content: "policy" }],
+              summaryRequest: { toolChoice: "auto", cacheKey: "conv-1", reasoningEffort },
+            }),
+          );
+        expect(limits).toHaveLength(2);
+        expect(limits[0]! - limits[1]!).toBe(16_000);
+      }),
+    ));
 });

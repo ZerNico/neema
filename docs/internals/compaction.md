@@ -30,8 +30,12 @@ touched: compaction only shapes what one attempt sends (`chat/server/compaction.
   prompt (tools, system, retained history, with the same cache points) followed by a request
   naming the first message that stays verbatim. It repeats the chat's tool choice, reasoning
   setting and cache key, since Anthropic uncaches the tools and system on a changed
-  `tool_choice`, and no call the model makes is run. When that prompt does not fit the
-  window, or the call fails, the older flattened summary prompt runs instead. Titles, which
+  `tool_choice`, and no call the model makes is run. Kept reasoning gets 16k output tokens
+  of its own, so a model that counts it against output cannot spend the summary's
+  allowance. When that prompt does not fit the window, or the call fails, the older
+  flattened summary prompt runs instead. Both share one deadline (30 s scaled with the
+  summary size, at most 90 s), since the answer's first token waits on them; a fallback
+  with under 10 s left is skipped and turns are dropped instead. Titles, which
   share nothing with the chat's cache, use the admin's utility model; compaction never does.
 - **Kept beside the summary, with its checkpoint:** the person's own messages from the
   summarized turns, verbatim and newest first within about 5% of the window, and every file
