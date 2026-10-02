@@ -324,7 +324,9 @@ false`), so a page body is written against data already there. This includes loc
   "Working" with a running clock while the step rows below name the detail; the separate
   "Thinking…" line is not drawn under it, and the header never switches to "Thinking" between
   calls, which read as stalled. The clock starts at the first call's recorded start, which a
-  reload replays with each chunk's own time. Once the answer moves on it folds into what it
+  reload replays with each chunk's own time. Every tool time is the server's clock, and the
+  running timer reads against it too (each stream frame and snapshot says what the server's
+  clock reads), so a skewed browser clock cannot shift it. Once the answer moves on it folds into what it
   did ("Searched the web and read 2 pages"), each kind of step once and at most three. No
   header counts failed steps: one the model retried or worked around is not news for the
   reader, and a count read as alarming. A failed call is marked in its step's list, a step

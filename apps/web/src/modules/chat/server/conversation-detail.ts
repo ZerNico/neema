@@ -238,6 +238,8 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     window: { anchorId: messages[0]?.id ?? null, olderCursor },
     latestMachineAttempt,
     pendingChunks,
+    // The server's clock when the snapshot was taken, for reading its times.
+    serverTime: Date.now(),
     branchedFrom,
     schedule,
     agent: defaults.agent

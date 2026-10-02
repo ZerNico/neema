@@ -35,7 +35,11 @@ import {
 import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
 import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
-import { applyFileChunk, integrationActivityFromRow } from "../client/use-message-stream.ts";
+import {
+  applyFileChunk,
+  integrationActivityFromRow,
+  learnServerClock,
+} from "../client/use-message-stream.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
@@ -732,6 +736,10 @@ export function ChatView({
     enabled: head.window.olderCursor !== null && historyWanted === head.window.anchorId,
   });
   const data = useMemo(() => withHistory(head, history.data?.pages), [head, history.data]);
+  // The snapshot's times are the server's; running timers read them against its clock.
+  useEffect(() => {
+    if (head.serverTime) learnServerClock(head.serverTime, dataUpdatedAt);
+  }, [head.serverTime, dataUpdatedAt]);
   useBrowserChat(conversationId, data.conversation.temporary);
   const { hasNextPage, isFetching: loadingOlder, fetchNextPage } = history;
   const loadOlder = useCallback(() => {

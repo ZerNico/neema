@@ -4,6 +4,8 @@ import {
   applyCompactionChunk,
   applyToolActivityChunk,
   applyToolChunk,
+  learnServerClock,
+  serverNow,
   type CompactionActivity,
   type ToolActivity,
 } from "./use-message-stream.ts";
@@ -636,5 +638,16 @@ describe("a replayed call's timing", () => {
     const tools = applyToolActivityChunk([], "tool", start, written);
     expect(tools[0]).toMatchObject({ callId: "c1", startedAt: written });
     expect(tools[0]).not.toHaveProperty("completedAt");
+  });
+});
+
+describe("the server's clock", () => {
+  it("reads elapsed time against the server, whatever the browser's clock says", () => {
+    const local = Date.now();
+    // The server runs a minute behind this browser.
+    learnServerClock(local - 60_000, local);
+    expect(Math.abs(serverNow() - (Date.now() - 60_000))).toBeLessThan(1000);
+    learnServerClock(Date.now());
+    expect(Math.abs(serverNow() - Date.now())).toBeLessThan(1000);
   });
 });

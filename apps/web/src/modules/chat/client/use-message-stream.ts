@@ -1106,6 +1106,19 @@ const startsCall = (delta: string) => {
 };
 
 /**
+ * Tool times are the server's clock: a live chunk is stamped as it is sent, a
+ * replayed one and a stored row with when they were written. Elapsed time is
+ * read against the server's clock too, so a skewed browser clock cannot
+ * shift a running timer after a reload. Learned from each stream frame and
+ * conversation snapshot.
+ */
+let clockOffset = 0;
+export const learnServerClock = (serverTime: number, receivedAt = Date.now()) => {
+  clockOffset = receivedAt - serverTime;
+};
+export const serverNow = () => Date.now() - clockOffset;
+
+/**
  * Keeps each call's timing across a chunk: the family reducers rebuild their
  * activity without it, so it is carried over, then a new call is stamped
  * started and one that just settled stamped completed.
@@ -1137,7 +1150,7 @@ export const applyToolActivityChunk = (
   tools: ReadonlyArray<ToolActivity>,
   kind: "tool" | "writing",
   delta: string,
-  at = Date.now(),
+  at = serverNow(),
 ): ToolActivity[] =>
   kind === "writing"
     ? applyWritingChunk(tools, delta)
@@ -1286,7 +1299,9 @@ export function useMessageStream(
         delta: string;
         runId?: string;
         at?: number;
+        sentAt?: number;
       };
+      if (data.sentAt !== undefined) learnServerClock(data.sentAt);
       if (!acceptsRun(data.runId) || !live.claim(data.seq)) return;
       const chunkKind = data.kind ?? "text";
       if (chunkKind === "writing" && isStaleWriting(data.delta, runId)) return;

@@ -48,6 +48,8 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
                 delta: event.delta,
                 // A replayed tool call keeps its own start, so a reload's clock agrees.
                 at: event.at ?? Date.now(),
+                // The server's clock now, so the client can read `at` against it.
+                sentAt: Date.now(),
                 ...(event.runId ? { runId: event.runId } : {}),
               })
             : sseFrame("done", {

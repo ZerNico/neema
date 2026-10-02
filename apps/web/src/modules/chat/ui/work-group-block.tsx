@@ -9,7 +9,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
-import type { ToolActivity } from "../client/use-message-stream.ts";
+import { serverNow, type ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkPart, WorkStep } from "./assistant-body.ts";
 import { ActivityChevron } from "./activity-face.tsx";
 import { useRunDisclosure } from "./use-run-disclosure.ts";
@@ -168,10 +168,10 @@ const workStart = (steps: ReadonlyArray<WorkStep>) => {
 
 /** A clock that ticks once a second while `running`; elapsed from `since`. */
 function useElapsed(since: number, running: boolean) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(serverNow);
   useEffect(() => {
     if (!running) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => setNow(serverNow()), 1000);
     return () => window.clearInterval(timer);
   }, [running]);
   return Math.max(0, now - since);
@@ -221,7 +221,7 @@ export function WorkGroupBlock({
   const { expanded, onOpenChange } = useRunDisclosure(running);
   // Reasoning alone has no recorded start; the clock then starts when this
   // row first appears, which is when the work became visible.
-  const [mountedAt] = useState(() => Date.now());
+  const [mountedAt] = useState(serverNow);
   const elapsed = useElapsed(workStart(part.steps) ?? mountedAt, running);
   // No failure count here: a step the model retried or worked around is not
   // news for the reader, and counting it read as alarming. Each step's own row
