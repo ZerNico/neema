@@ -52,6 +52,8 @@ const finishTool = Tool.make("finish_research", {
 export const ResearchCoordinatorTools = Toolkit.make(dispatchTool, finishTool);
 export const runResearch = Effect.fn("research.investigate")(function* (input: {
   brief: string;
+  /** The language the person writes in; the task titles they see use it. */
+  language?: string | undefined;
   execution: InvestigationExecution;
 }) {
   const {
@@ -118,6 +120,7 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
       ...knowledgePolicy,
       ...skillContext(),
       { role: "system", content: prompts.coordinatorPolicy },
+      { role: "system", content: prompts.titleLanguage(input.language) },
     ];
     const original = currentEvidence();
     const raw = original.map((block) => `${block.label}\n${block.text}`).join("\n\n");

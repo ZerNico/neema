@@ -33,8 +33,11 @@ export type ResearchToolResult = typeof ResearchToolResult.Type;
 
 const researchTool = Tool.make("deep_research", {
   description:
-    "Investigate a question across the web with a team of workers and return their evidence for you to answer from. Write the brief yourself: state what to find out and what would settle it, in a few sentences, since the workers never see this conversation. Use it for questions needing several sources or current information, not for something you already know or one page you could read. It returns evidence and sources, never prose: you write the answer. It cannot ask the person anything, so resolve a consequential ambiguity with ask_user before calling it.",
-  parameters: Schema.Struct({ brief: Schema.optionalKey(Schema.String) }),
+    "Investigate a question across the web with a team of workers and return their evidence for you to answer from. Write the brief yourself: state what to find out and what would settle it, in a few sentences, since the workers never see this conversation. Use it for questions needing several sources or current information, not for something you already know or one page you could read. It returns evidence and sources, never prose: you write the answer. It cannot ask the person anything, so resolve a consequential ambiguity with ask_user before calling it. Set language to the language the person writes in (for example German): the progress they watch uses it.",
+  parameters: Schema.Struct({
+    brief: Schema.optionalKey(Schema.String),
+    language: Schema.optionalKey(Schema.String),
+  }),
   success: ResearchToolResult,
 });
 
@@ -178,7 +181,15 @@ export const prepareResearchTool = (input: {
         text: () => Effect.die(new Error("deep_research does not write answer prose")),
         getTextOffset: () => 0,
       });
-      return yield* runResearch({ brief, execution: execution.investigation });
+      const language =
+        typeof raw === "object" && raw !== null
+          ? (raw as { language?: unknown }).language
+          : undefined;
+      return yield* runResearch({
+        brief,
+        ...(typeof language === "string" ? { language } : {}),
+        execution: execution.investigation,
+      });
     }).pipe(Effect.scoped);
 
     // The heartbeat is scoped rather than raced: closing the scope interrupts

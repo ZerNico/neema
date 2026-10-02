@@ -139,6 +139,8 @@ let hostAsks = 0;
 let hostReadsAlongside = false;
 /** Text the host writes before its research call, in the same model turn. */
 let hostPreamble = "";
+/** The person's language the host passes along, when a test sets one. */
+let hostLanguage: string | undefined;
 let hostDraft = false;
 let hostDraftTurns = 0;
 const HOLD_URL = "https://hold.example/wait";
@@ -307,7 +309,7 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
         hostCallsMade++;
         const research = {
           name: "deep_research",
-          params: { brief: hostBrief },
+          params: { brief: hostBrief, ...(hostLanguage ? { language: hostLanguage } : {}) },
           id: "host-research",
         };
         const calls = hostReadsAlongside
@@ -562,6 +564,7 @@ beforeEach(async () => {
   hostAsks = 0;
   hostReadsAlongside = false;
   hostPreamble = "";
+  hostLanguage = undefined;
   hostDraft = false;
   hostDraftTurns = 0;
   readerGate = null;
@@ -788,6 +791,15 @@ describe("deep research as a tool call", () => {
     expect(rows.find((row) => row.toolName === "deep_research")?.textOffset).toBe(
       hostPreamble.length,
     );
+  });
+
+  it("asks the coordinator for task titles in the person's language", async () => {
+    hostLanguage = "German";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const coordinator = requests.find((request) => phaseOf(request) === "coordinator");
+    expect(JSON.stringify(coordinator?.prompt)).toContain('Write each task title in \\"German\\"');
   });
 
   it("keeps a sibling call running when the run beside it finalizes", async () => {
