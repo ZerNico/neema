@@ -485,7 +485,8 @@ describe("MessageBubble chronological body", () => {
     rerender(
       <MessageBubble message={{ ...base, content: "", toolActivities: [edit, check, failed] }} />,
     );
-    expect(screen.getByText("1 step failed")).toBeInTheDocument();
+    // A failed step is marked in the step list, never announced on the line.
+    expect(screen.queryByText(/step failed/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Presentation draft/ }));
     expect(screen.getByText("Couldn’t apply an edit")).toBeInTheDocument();
     expect(screen.getByLabelText("Failed")).toBeInTheDocument();

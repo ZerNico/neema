@@ -63,7 +63,7 @@ describe("a run of work", () => {
     expect(screen.getByRole("button", { name: /^Working · \d+s/ })).toBeInTheDocument();
   });
 
-  it("folds into what it did once settled, and never hides a failure", () => {
+  it("folds into what it did once settled, without counting steps the model worked around", () => {
     renderGroup(
       group(
         call("a", { startedAt: 1_000, completedAt: 20_000 }),
@@ -77,9 +77,7 @@ describe("a run of work", () => {
       ),
       false,
     );
-    const header = screen.getByRole("button", {
-      name: /^Searched the web and ran a command\s?· 1 failed/,
-    });
+    const header = screen.getByRole("button", { name: "Searched the web and ran a command" });
     expect(header).toHaveAttribute("aria-expanded", "false");
   });
 

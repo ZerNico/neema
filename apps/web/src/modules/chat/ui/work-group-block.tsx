@@ -223,7 +223,10 @@ export function WorkGroupBlock({
   // row first appears, which is when the work became visible.
   const [mountedAt] = useState(() => Date.now());
   const elapsed = useElapsed(workStart(part.steps) ?? mountedAt, running);
-  const failed = calls.filter((call) => call.status === "error").length;
+  // No failure count here: a step the model retried or worked around is not
+  // news for the reader, and counting it read as alarming. Each step's own row
+  // marks a failure, and the answer says when one mattered.
+
   // A decision is never folded away: a step parked on the person holds the
   // line open and says so, whatever it was collapsed to.
   const [integrationWaiting, setIntegrationWaiting] = useState(false);
@@ -252,12 +255,6 @@ export function WorkGroupBlock({
         <span className={cn("min-w-0 truncate", running && !waiting && "text-shimmer")}>
           {label}
         </span>
-        {/* Counted, not alarming: a read the model worked around is no failure of the answer. */}
-        {failed > 0 ? (
-          <span className="-ml-0.5 shrink-0">
-            · {failed === 1 ? "1 failed" : `${failed} failed`}
-          </span>
-        ) : null}
         <ActivityChevron open={expanded || waiting} />
       </DisclosureTrigger>
       <DisclosureContent>

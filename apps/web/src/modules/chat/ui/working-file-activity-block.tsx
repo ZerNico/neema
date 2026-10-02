@@ -263,22 +263,14 @@ function rowLabels(
     return {
       live,
       primary: edits ? `Working on ${words.noun}` : `Reading ${words.noun}`,
+      // A failed step is the model's to retry, not news for the reader: the
+      // line keeps naming the work, and the step list marks the failure.
       secondary:
-        current.status === "error"
-          ? "A step failed"
-          : // "Reading presentation · Reading slides" says one thing twice.
-            !edits && current.name === words.inspect
-            ? null
-            : runningLabel(current, drafted, words),
+        // "Reading presentation · Reading slides" says one thing twice.
+        !edits && current.name === words.inspect ? null : runningLabel(current, drafted, words),
     };
   }
-  const failed = steps.filter((step) => step.status === "error").length;
-  return {
-    live,
-    primary: settledLabel(part, state, edits, words),
-    secondary:
-      failed && !state.published ? `${failed} ${failed === 1 ? "step" : "steps"} failed` : null,
-  };
+  return { live, primary: settledLabel(part, state, edits, words), secondary: null };
 }
 
 /**
