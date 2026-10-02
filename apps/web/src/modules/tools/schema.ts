@@ -30,15 +30,39 @@ const researchMaxSearchQueries = Schema.optionalKey(
 
 /**
  * Non-secret configuration for the web_search tool row (tools.config jsonb).
+ * Where results come from is the ordered `search_providers` list.
  */
 export const WebSearchConfig = Schema.Struct({
-  backend: Schema.Literals(["searxng"]),
-  baseUrl: Schema.String.check(Schema.isMinLength(1)),
   maxResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(20)),
   // Older rows omit this and use the shared default; no backfill is needed.
   researchMaxSearchQueries,
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
+
+const HOSTED_SEARCH_PROVIDER_KINDS = [
+  "tavily",
+  "brave",
+  "exa",
+  "serper",
+  "jina",
+  "langsearch",
+] as const;
+export const SEARCH_PROVIDER_KINDS = ["searxng", ...HOSTED_SEARCH_PROVIDER_KINDS] as const;
+export const SearchProviderKind = Schema.Literals(SEARCH_PROVIDER_KINDS);
+export type SearchProviderKind = typeof SearchProviderKind.Type;
+const HostedSearchProviderKind = Schema.Literals(HOSTED_SEARCH_PROVIDER_KINDS);
+
+const BaseUrl = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000));
+
+/**
+ * A provider's kind with its non-secret settings. Only SearXNG has any: the
+ * hosted kinds have fixed endpoints and need just an API key.
+ */
+export const SearchProviderSettings = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("searxng"), baseUrl: BaseUrl }),
+  Schema.Struct({ kind: HostedSearchProviderKind }),
+]);
+export type SearchProviderSettings = typeof SearchProviderSettings.Type;
 
 /**
  * Non-secret configuration for the document_parser tool row. `kind` on the
@@ -73,8 +97,8 @@ const ReadableUrl = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLengt
  */
 export const WebSearchParams = Schema.Struct({
   queries: Schema.Array(SearchQuery).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
-  // Only one of the configured search engines filters by date, so a dated
-  // search is answered by that engine alone and loses the others' results.
+  // Not every provider or engine filters by date, so a dated search reaches
+  // fewer of them and usually returns fewer results.
   timeRange: Schema.optionalKey(
     Schema.Literals(["day", "month", "year"]).annotate({
       description:
@@ -344,10 +368,6 @@ export type UpdateMemoryToolInput = typeof UpdateMemoryToolInput.Type;
 
 export const UpdateWebSearchToolInput = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
-  baseUrl: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
-  // empty string = keep existing secret; clearSecret removes it
-  secret: Schema.optionalKey(Schema.String),
-  clearSecret: Schema.optionalKey(Schema.Boolean),
   maxResults: Schema.optionalKey(WebSearchConfig.fields.maxResults),
   researchMaxSearchQueries: WebSearchConfig.fields.researchMaxSearchQueries,
 });
@@ -366,9 +386,39 @@ export const UpdateUrlReaderToolInput = Schema.Struct({
 });
 export type UpdateUrlReaderToolInput = typeof UpdateUrlReaderToolInput.Type;
 
-export const TestSearchConnectionInput = Schema.Struct({
-  baseUrl: Schema.String.check(Schema.isMinLength(1)),
-  // empty = use stored secret
-  secret: Schema.optionalKey(Schema.String),
+const ProviderLabel = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80));
+const ProviderSecret = Schema.String.check(Schema.isMaxLength(4000));
+
+export const CreateSearchProviderInput = Schema.Struct({
+  settings: SearchProviderSettings,
+  label: ProviderLabel,
+  secret: Schema.optionalKey(ProviderSecret),
 });
-export type TestSearchConnectionInput = typeof TestSearchConnectionInput.Type;
+export type CreateSearchProviderInput = typeof CreateSearchProviderInput.Type;
+
+export const UpdateSearchProviderInput = Schema.Struct({
+  id: Schema.String,
+  label: Schema.optionalKey(ProviderLabel),
+  enabled: Schema.optionalKey(Schema.Boolean),
+  // The kind cannot change; a different kind is a different provider.
+  settings: Schema.optionalKey(SearchProviderSettings),
+  // empty string = keep the existing secret; clearSecret removes it
+  secret: Schema.optionalKey(ProviderSecret),
+  clearSecret: Schema.optionalKey(Schema.Boolean),
+});
+export type UpdateSearchProviderInput = typeof UpdateSearchProviderInput.Type;
+
+export const SearchProviderOrderInput = Schema.Struct({
+  ids: Schema.Array(Schema.String).check(Schema.isMaxLength(100)),
+});
+
+/**
+ * Tests a saved provider, or the form being edited. A draft with an `id` and
+ * an empty secret uses that provider's stored secret.
+ */
+export const TestSearchProviderInput = Schema.Struct({
+  id: Schema.optionalKey(Schema.String),
+  settings: SearchProviderSettings,
+  secret: Schema.optionalKey(ProviderSecret),
+});
+export type TestSearchProviderInput = typeof TestSearchProviderInput.Type;

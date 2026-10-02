@@ -1,10 +1,12 @@
 import { and, eq, ne } from "drizzle-orm";
-import { Context, Effect, Layer, Schema, type Redacted } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { KnowledgeSearchConfig } from "~/modules/knowledge/schema.ts";
 import { DocumentParserConfig, UrlReaderConfig, WebSearchConfig } from "../schema.ts";
+import { loadEnabledSearchProviders } from "./search-provider-repo.ts";
+import type { SearchProviderSnapshot } from "./search-providers/types.ts";
 
 type ToolRow = typeof tools.$inferSelect;
 /**
@@ -27,12 +29,13 @@ export class ToolsRepo extends Context.Service<
   {
     getTool(name: string): Effect.Effect<PublicTool | null>;
     /**
-     * Internal: decoded web_search config + decrypted secret, for execution.
+     * Internal: decoded web_search config and the enabled providers in order,
+     * with decrypted secrets, for execution.
      */
     getWebSearch(): Effect.Effect<{
       enabled: boolean;
       config: WebSearchConfig;
-      secret: Redacted.Redacted<string> | null;
+      providers: ReadonlyArray<SearchProviderSnapshot>;
     } | null>;
     /**
      * Internal: decoded document_parser row (no secret) for the parser service.
@@ -96,8 +99,8 @@ export class ToolsRepo extends Context.Service<
           const row = yield* getRow("web_search");
           if (!row) return null;
           const config = yield* decodeWebSearchConfig(row.config).pipe(Effect.orDie);
-          const secret = row.secretCiphertext ? yield* cipher.decrypt(row.secretCiphertext) : null;
-          return { enabled: row.enabled, config, secret };
+          const providers = yield* loadEnabledSearchProviders(db, cipher);
+          return { enabled: row.enabled, config, providers };
         }),
 
         getDocumentParser: Effect.fn("ToolsRepo.getDocumentParser")(function* () {

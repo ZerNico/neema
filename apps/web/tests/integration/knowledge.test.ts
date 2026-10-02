@@ -69,6 +69,7 @@ let batchSizes: number[] = [];
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  probeChatModel: () => Effect.die("no model probes in these tests"),
   generateText: () => Effect.die("unused"),
   streamChat: () => Effect.die("unused") as never,
   embed: (input: {

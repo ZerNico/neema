@@ -154,7 +154,8 @@ export const UpdateGroupMemberSharingInput = Schema.Struct({
   }),
 });
 
-export const ProbeEmbeddingDimensionsInput = Schema.Struct({
+/** A model on a provider, saved or not yet; what the probes below need. */
+export const ProbeModelInput = Schema.Struct({
   providerId: Schema.String,
   modelKey: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
 });

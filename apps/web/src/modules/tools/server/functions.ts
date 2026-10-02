@@ -4,14 +4,18 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
-  TestSearchConnectionInput,
+  CreateSearchProviderInput,
+  SearchProviderOrderInput,
+  TestSearchProviderInput,
   UpdateDocumentParserToolInput,
   UpdateMemoryToolInput,
   UpdateUrlReaderToolInput,
+  UpdateSearchProviderInput,
   UpdateWebSearchToolInput,
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchBackend } from "./search.ts";
+import { SearchProviderRepo, type InvalidSearchProvider } from "./search-provider-repo.ts";
+import { SearchProviders } from "./search-providers/chain.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor } from "./web-search.ts";
 
@@ -52,7 +56,7 @@ export const updateWebSearchTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateWebSearchToolInput))
   .handler(({ data }) => {
-    const { enabled, secret, clearSecret, ...config } = data;
+    const { enabled, ...config } = data;
     const configPatch = Object.fromEntries(
       Object.entries(config).filter(([, v]) => v !== undefined),
     );
@@ -61,35 +65,106 @@ export const updateWebSearchTool = createServerFn({ method: "POST" })
         repo.updateTool("web_search", {
           ...(enabled !== undefined ? { enabled } : {}),
           ...(Object.keys(configPatch).length > 0 ? { config: configPatch } : {}),
-          // empty string = keep the existing secret
-          ...(secret ? { secret } : {}),
-          ...(clearSecret ? { clearSecret } : {}),
         }),
       ),
     );
   });
 
-export const testSearchConnection = createServerFn({ method: "POST" })
+const badRequest = (error: InvalidSearchProvider) =>
+  Effect.die(new Response(error.reason, { status: 400 }));
+
+/**
+ * Providers in order with what this process last saw of each: health is
+ * process memory and belongs to one version of a provider.
+ */
+export const listSearchProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .validator(standard(TestSearchConnectionInput))
+  .handler(() =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const providers = yield* (yield* SearchProviderRepo).list();
+        const health = yield* (yield* SearchProviders).status();
+        return providers.map((provider) => {
+          const status = health.find(
+            (entry) =>
+              entry.providerId === provider.id && entry.version === provider.updatedAt.getTime(),
+          );
+          return {
+            ...provider,
+            lastSuccessAt: status?.lastSuccessAt ?? null,
+            lastError: status?.lastError ?? null,
+            coolingDownUntil: status?.coolingDownUntil ?? null,
+          };
+        });
+      }),
+    ),
+  );
+
+export const createSearchProvider = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(CreateSearchProviderInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      SearchProviderRepo.use((repo) => repo.create(data)).pipe(
+        Effect.catchTag("InvalidSearchProvider", badRequest),
+      ),
+    ),
+  );
+
+export const updateSearchProvider = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateSearchProviderInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      SearchProviderRepo.use((repo) => repo.update(data)).pipe(
+        Effect.catchTag("InvalidSearchProvider", badRequest),
+      ),
+    ),
+  );
+
+export const deleteSearchProvider = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(Schema.Struct({ id: Schema.String })))
+  .handler(({ data }) =>
+    runtime.runPromise(SearchProviderRepo.use((repo) => repo.remove(data.id))),
+  );
+
+export const setSearchProviderOrder = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(SearchProviderOrderInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      SearchProviderRepo.use((repo) => repo.setOrder(data.ids)).pipe(
+        Effect.catchTag("InvalidSearchProvider", badRequest),
+      ),
+    ),
+  );
+
+export const testSearchProvider = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(TestSearchProviderInput))
   .handler(({ data }) =>
     runtime.runPromise(
       Effect.gen(function* () {
-        const backend = yield* SearchBackend;
-        const repo = yield* ToolsRepo;
-        // Empty secret field = test with the stored secret (if any).
-        const secret = data.secret
-          ? Redacted.make(data.secret)
-          : ((yield* repo.getWebSearch())?.secret ?? null);
+        const repo = yield* SearchProviderRepo;
+        const stored = data.id ? yield* repo.snapshot(data.id) : null;
+        // An empty secret field tests with the stored one.
+        const secret = data.secret ? Redacted.make(data.secret) : (stored?.secret ?? null);
         const started = Date.now();
-        const result = yield* backend.test({ baseUrl: data.baseUrl, secret });
+        const result = yield* (yield* SearchProviders).test({
+          id: data.id ?? "draft",
+          label: "draft",
+          version: 0,
+          settings: data.settings,
+          secret,
+        });
         return {
           ok: true as const,
           resultCount: result.resultCount,
           latencyMs: Date.now() - started,
         };
       }).pipe(
-        Effect.catchTag("SearchBackendError", (e) =>
+        Effect.catchTag("SearchProviderError", (e) =>
           Effect.succeed({ ok: false as const, error: e.message }),
         ),
       ),

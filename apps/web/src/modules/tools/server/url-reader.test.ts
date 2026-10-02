@@ -3,7 +3,12 @@ import { Effect, Layer, Stream } from "effect";
 import type { Toolkit } from "effect/unstable/ai";
 import { PageExtractionError, PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchBackend, type SearchHit } from "./search.ts";
+import { SearchProviders } from "./search-providers/chain.ts";
+import type { SearchHit } from "./search-providers/types.ts";
+import {
+  fakeSearchProviders as fakeProviders,
+  testSearchProvider as searxng,
+} from "../../../../tests/fixtures/search-providers.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
 import { prepareWebTools, mergeToolGroups } from "./toolset.ts";
 import { createUrlAuthority } from "./url-authority.ts";
@@ -11,8 +16,6 @@ import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
 const searchConfig = {
-  backend: "searxng" as const,
-  baseUrl: "http://localhost:8081",
   maxResults: 5,
 };
 
@@ -22,7 +25,8 @@ const FakeRepo = (readerEnabled: boolean) =>
     ToolsRepo.of({
       getTool: () => Effect.succeed(null),
       getKnowledgeSearch: () => Effect.succeed(null),
-      getWebSearch: () => Effect.succeed({ enabled: true, config: searchConfig, secret: null }),
+      getWebSearch: () =>
+        Effect.succeed({ enabled: true, config: searchConfig, providers: [searxng] }),
       getDocumentParser: () => Effect.succeed(null),
       getUrlReader: () =>
         Effect.succeed({ enabled: readerEnabled, config: { perPageCharCap: 20_000 } }),
@@ -34,11 +38,9 @@ const FakeRepo = (readerEnabled: boolean) =>
 const hit = (url: string): SearchHit => ({ url, title: `Title of ${url}`, snippet: "snippet" });
 
 const FakeBackend = Layer.succeed(
-  SearchBackend,
-  SearchBackend.of({
-    kind: "fake",
+  SearchProviders,
+  fakeProviders({
     search: () => Effect.succeed([hit("https://effect.website"), hit("https://drizzle.team")]),
-    test: () => Effect.succeed({ resultCount: 0 }),
   }),
 );
 

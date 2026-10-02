@@ -6,6 +6,7 @@ import {
   urlReaderToolQuery,
   webSearchToolQuery,
 } from "~/modules/tools/ui/tools-page.tsx";
+import { searchProvidersQuery } from "~/modules/tools/ui/search-providers.tsx";
 import { presentationFontsQuery } from "~/modules/presentations/ui/presentation-fonts.tsx";
 
 export const Route = createFileRoute("/_app/admin/tools")({
@@ -13,6 +14,7 @@ export const Route = createFileRoute("/_app/admin/tools")({
     Promise.all([
       context.queryClient.ensureQueryData(memoryToolQuery),
       context.queryClient.ensureQueryData(webSearchToolQuery),
+      context.queryClient.ensureQueryData(searchProvidersQuery),
       context.queryClient.ensureQueryData(urlReaderToolQuery),
       context.queryClient.ensureQueryData(presentationFontsQuery),
       context.queryClient.ensureQueryData(officeFilesToolQuery),

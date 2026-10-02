@@ -15,7 +15,7 @@ import {
   GroupIdInput,
   GroupMemberInput,
   ModelIdInput,
-  ProbeEmbeddingDimensionsInput,
+  ProbeModelInput,
   ProviderIdInput,
   RenameGroupInput,
   UpdateDefaultModelOrderInput,
@@ -297,13 +297,38 @@ export const listModelAccess = createServerFn({ method: "GET" })
  */
 export const probeEmbeddingDimensions = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
-  .validator(standard(ProbeEmbeddingDimensionsInput))
+  .validator(standard(ProbeModelInput))
   .handler(({ data }) =>
     runtime.runPromise(
       AiGateway.use((gateway) => gateway.probeEmbeddingDimensions(data)).pipe(
         Effect.map((result) => ({ ok: true as const, dimensions: result.dimensions })),
         Effect.catchTags({
           ProviderUnreachable: (error) =>
+            Effect.succeed({ ok: false as const, error: error.message }),
+          ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found." }),
+        }),
+      ),
+    ),
+  );
+
+/**
+ * One short request to a chat model before it is saved, so a wrong model ID
+ * or key shows up in the dialog instead of in someone's first chat.
+ */
+export const testChatModel = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(ProbeModelInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const started = Date.now();
+        const { reply } = yield* (yield* AiGateway).probeChatModel(data);
+        return { ok: true as const, reply, latencyMs: Date.now() - started };
+      }).pipe(
+        Effect.catchTags({
+          ProviderUnreachable: (error) =>
+            Effect.succeed({ ok: false as const, error: error.message }),
+          ProviderContextOverflow: (error) =>
             Effect.succeed({ ok: false as const, error: error.message }),
           ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found." }),
         }),

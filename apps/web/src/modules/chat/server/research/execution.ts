@@ -130,7 +130,12 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   modelId: string;
   userId: string;
   /** The `deep_research` row this run answers, and the ordinals it renders under. */
-  call: { readonly rowId: string; readonly turnIndex: number; readonly callIndex: number };
+  call: {
+    readonly rowId: string;
+    readonly turnIndex: number;
+    readonly callIndex: number;
+    readonly textOffset?: number;
+  };
   startedAt: number;
   emit: (event: ToolChunkEnvelope) => Effect.Effect<void>;
   emitCompaction: (event: CompactionChunkEnvelope) => Effect.Effect<void>;
@@ -210,7 +215,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           phase: "progress",
           turnIndex: deps.call.turnIndex,
           callIndex: deps.call.callIndex,
-          textOffset: 0,
+          textOffset: deps.call.textOffset ?? 0,
           progress: snapshot,
         });
         lastSnapshot = encoded;
@@ -242,7 +247,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     phase: "start",
     turnIndex: deps.call.turnIndex,
     callIndex: deps.call.callIndex,
-    textOffset: 0,
+    textOffset: deps.call.textOffset ?? 0,
     progress,
   });
   yield* update();

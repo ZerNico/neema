@@ -236,6 +236,7 @@ const questionRound = (input: GatewayInput, id: string): Stream.Stream<ChatStrea
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  probeChatModel: () => Effect.die("no model probes in these tests"),
   // These suites never embed; a call here means the code under test grew a
   // provider dependency the fake was not asked to model.
   embed: () => Effect.die("unexpected embed call"),

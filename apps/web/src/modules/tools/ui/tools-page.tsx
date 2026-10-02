@@ -7,25 +7,17 @@ import {
 } from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
 import { Schema } from "effect";
-import { useState } from "react";
 import { toast } from "sonner";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { OptionalMark, useAppForm } from "~/ui/form/app-form.tsx";
+import { useAppForm } from "~/ui/form/app-form.tsx";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
-import { PendingButton } from "~/ui/pending-button.tsx";
-import { Badge } from "~/ui/primitives/badge";
-import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
-import { cn } from "~/ui/utils";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
   getMemoryTool,
   getOfficeFilesTool,
   getUrlReaderTool,
   getWebSearchTool,
-  testSearchConnection,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -33,6 +25,7 @@ import {
 } from "../server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { PresentationFontsRow } from "~/modules/presentations/ui/presentation-fonts.tsx";
+import { SearchProviderRows } from "./search-providers.tsx";
 
 export const memoryToolQuery = queryOptions({
   queryKey: ["admin", "tools", "memory"],
@@ -54,13 +47,7 @@ export const officeFilesToolQuery = queryOptions({
   queryFn: () => getOfficeFilesTool(),
 });
 
-type TestResult =
-  | { ok: true; resultCount: number; latencyMs: number }
-  | { ok: false; error: string };
-
 const WebSearchForm = Schema.Struct({
-  baseUrl: Schema.String.check(Schema.isMinLength(1, { message: "Enter the base URL." })),
-  secret: Schema.String,
   maxResults: integerBetween(1, 20),
   researchMaxSearchQueries: integerBetween(RESEARCH_SEARCH_BUDGET.min, RESEARCH_SEARCH_BUDGET.max),
 });
@@ -126,10 +113,7 @@ function MemorySection() {
 
 function WebSearchSection() {
   const { data: tool } = useSuspenseQuery(webSearchToolQuery);
-  const confirm = useConfirm();
   const invalidate = useInvalidateTools("web-search");
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-
   const config = (tool?.config ?? {}) as Partial<WebSearchConfig>;
 
   const toggle = useMutation({
@@ -138,26 +122,9 @@ function WebSearchSection() {
     onError: (error) => toastError("Could not update web search.", error),
   });
 
-  const clearSecret = useMutation({
-    mutationFn: () => updateWebSearchTool({ data: { clearSecret: true } }),
-    onSuccess: invalidate,
-    onError: (error) => toastError("Could not clear the secret.", error),
-  });
-
-  const test = useMutation({
-    mutationFn: (input: { baseUrl: string; secret: string }) =>
-      testSearchConnection({
-        data: { baseUrl: input.baseUrl, ...(input.secret ? { secret: input.secret } : {}) },
-      }),
-    onSuccess: (result) => setTestResult(result),
-    onError: (error) => toastError("Could not test the connection.", error),
-  });
-
   const { justSaved, markSaved } = useSaveStatus();
   const form = useAppForm({
     defaultValues: {
-      baseUrl: config.baseUrl ?? "",
-      secret: "",
       maxResults: String(config.maxResults ?? 8),
       researchMaxSearchQueries: String(
         config.researchMaxSearchQueries ?? RESEARCH_SEARCH_BUDGET.default,
@@ -168,10 +135,8 @@ function WebSearchSection() {
       try {
         await updateWebSearchTool({
           data: {
-            baseUrl: value.baseUrl,
             maxResults: Number(value.maxResults),
             researchMaxSearchQueries: Number(value.researchMaxSearchQueries),
-            ...(value.secret ? { secret: value.secret } : {}),
           },
         });
       } catch {
@@ -179,7 +144,7 @@ function WebSearchSection() {
         return;
       }
       markSaved();
-      form.reset({ ...value, secret: "" });
+      form.reset(value);
       await invalidate();
     },
   });
@@ -199,7 +164,8 @@ function WebSearchSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Web search</span>
             <span className="text-muted-foreground text-xs">
-              SearXNG returns titles and snippets. Every chat model can use web search.
+              Returns titles and snippets from the providers below. Every chat model can use web
+              search.
             </span>
           </div>
           <Switch
@@ -210,11 +176,9 @@ function WebSearchSection() {
           />
         </ListRow>
 
+        <SearchProviderRows onChanged={invalidate} />
+
         <ListRow className="flex-col items-stretch gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Backend</span>
-            <Badge variant="outline">SearXNG</Badge>
-          </div>
           <form
             noValidate
             className="flex flex-col gap-3"
@@ -223,55 +187,6 @@ function WebSearchSection() {
               void form.handleSubmit();
             }}
           >
-            <form.AppField name="baseUrl">
-              {(field) => (
-                <field.TextField label="Base URL" type="url" placeholder="http://localhost:8081" />
-              )}
-            </form.AppField>
-            <form.Field name="secret">
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor={field.name}>
-                    Bearer secret <OptionalMark />
-                  </FieldLabel>
-                  <div className="flex gap-2">
-                    <Input
-                      id={field.name}
-                      name={field.name}
-                      type="password"
-                      autoComplete="off"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      className="flex-1"
-                    />
-                    {tool.secretConfigured ? (
-                      <PendingButton
-                        size="sm"
-                        variant="destructive"
-                        pending={clearSecret.isPending}
-                        onClick={async () => {
-                          const confirmed = await confirm({
-                            title: "Clear the stored secret?",
-                            description:
-                              "Web search will connect without a secret until a new one is saved.",
-                            confirmLabel: "Clear",
-                          });
-                          if (confirmed) clearSecret.mutate();
-                        }}
-                      >
-                        Clear
-                      </PendingButton>
-                    ) : null}
-                  </div>
-                  <FieldDescription>
-                    {tool.secretConfigured
-                      ? "A secret is stored. Leave empty to keep it."
-                      : "Optional."}
-                  </FieldDescription>
-                </Field>
-              )}
-            </form.Field>
             <form.Field
               name="maxResults"
               validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1, 20)) }}
@@ -280,9 +195,9 @@ function WebSearchSection() {
                 <NumberField
                   field={field}
                   label="Max results per query"
+                  description="Some providers return at most ten per request."
                   min={1}
                   max={20}
-                  className="max-w-48"
                 />
               )}
             </form.Field>
@@ -303,16 +218,6 @@ function WebSearchSection() {
                 />
               )}
             </form.Field>
-            {testResult ? (
-              <p
-                role="status"
-                className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
-              >
-                {testResult.ok
-                  ? `Connection ok, ${testResult.resultCount} results in ${testResult.latencyMs}ms.`
-                  : `Could not connect: ${testResult.error}`}
-              </p>
-            ) : null}
             <FormActions>
               <form.AppForm>
                 <form.SubmitButton size="sm">
@@ -320,22 +225,6 @@ function WebSearchSection() {
                 </form.SubmitButton>
               </form.AppForm>
               <SaveStatus justSaved={justSaved} />
-              <form.Subscribe selector={(s) => [s.values.baseUrl, s.values.secret] as const}>
-                {([baseUrl, secret]) => (
-                  <PendingButton
-                    size="sm"
-                    variant="outline"
-                    pending={test.isPending}
-                    disabled={!baseUrl.trim()}
-                    onClick={() => {
-                      setTestResult(null);
-                      test.mutate({ baseUrl, secret });
-                    }}
-                  >
-                    Test connection
-                  </PendingButton>
-                )}
-              </form.Subscribe>
             </FormActions>
           </form>
         </ListRow>

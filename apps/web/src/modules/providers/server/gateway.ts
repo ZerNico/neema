@@ -18,6 +18,7 @@ import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import {
+  EMPTY_CAPABILITIES,
   REASONING_EFFORTS,
   type ModelCapabilities,
   type ModelPricing,
@@ -26,17 +27,9 @@ import {
   type ReasoningEffortFormat,
 } from "../model-config.ts";
 import { HermesCallableTools, withHermesTools } from "./hermes-tools.ts";
-import { ProviderRepo } from "./repo.ts";
+import { ProviderRepo, type ProviderWithKey } from "./repo.ts";
 import { extractThinkTags } from "./think-extractor.ts";
-
-/** `Retry-After` as seconds or an HTTP date, in milliseconds; null when absent or unreadable. */
-export const parseRetryAfter = (header: string | undefined, now = Date.now()): number | null => {
-  if (!header) return null;
-  const seconds = Number(header.trim());
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
-  const at = Date.parse(header);
-  return Number.isNaN(at) ? null : Math.max(0, at - now);
-};
+import { parseRetryAfter } from "~/server/retry-after.ts";
 
 /**
  * What an embedding answer's status means for the queue: a rate limit pauses
@@ -369,6 +362,89 @@ export interface EmbeddingResult {
   readonly inputTokens: number | null;
 }
 
+// Separate from the stored-model lookup so a model can be tried before it is saved.
+const buildModelLayer = (
+  provider: ProviderWithKey,
+  model: { providerId: string; modelKey: string; capabilities: ModelCapabilities },
+  config?: {
+    max_tokens?: number;
+    reasoningEffort?: ReasoningEffort | null;
+    cacheKey?: string;
+  },
+  imageOutput = false,
+) => {
+  const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
+  const { reasoningEffort, cacheKey, ...requestConfig } = config ?? {};
+  const reasoningFormat: ReasoningEffortFormat =
+    provider.kind === "openrouter" ? "nested" : provider.reasoningEffortFormat;
+  const adapter = OpenRouterLanguageModel.model(model.modelKey, {
+    ...requestConfig,
+    ...(reasoningEffort && reasoningFormat === "nested"
+      ? { reasoning: { effort: reasoningEffort } }
+      : reasoningEffort && reasoningFormat === "flat"
+        ? { reasoning_effort: reasoningEffort }
+        : {}),
+    ...(actualImageOutput
+      ? { modalities: ["text", "image"] as const }
+      : provider.kind === "openrouter"
+        ? { modalities: ["text"] as const }
+        : {}),
+    // One key per conversation keeps OpenRouter on the provider holding
+    // its cache and helps OpenAI route to it. Unknown fields on strict
+    // OpenAI-compatible servers are rejected, so nobody else gets them.
+    ...(cacheKey && provider.kind === "openrouter"
+      ? { session_id: cacheKey, prompt_cache_key: cacheKey }
+      : {}),
+  }).pipe(
+    Layer.provide(
+      OpenRouterClient.layer({
+        apiKey: provider.apiKey,
+        apiUrl: provider.baseUrl,
+      }),
+    ),
+    Layer.provide(FetchHttpClient.layer),
+  );
+  // `capabilities.tools` means native tool calling. Without it the
+  // Hermes polyfill sits between the adapter and the toolkit loop:
+  // adapter → hermes → think extraction (in streamChat/generateText).
+  const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
+  return {
+    providerId: model.providerId,
+    layer,
+    imageOutput: actualImageOutput,
+    explicitCache: explicitCacheModel(provider.kind, model.modelKey),
+  };
+};
+
+type SideGeneration = { text: string; usage: Response.Usage; finishMetadata: unknown };
+
+/** Folds a tool-free model turn into its text, usage and finish metadata. */
+const collectSideGeneration = (stream: Stream.Stream<ChatStreamPart, unknown, never>) =>
+  Stream.runFoldEffect(
+    stream,
+    (): SideGeneration => ({
+      text: "",
+      // Zeroed rather than absent: a provider that never sends usage
+      // bills nothing instead of failing the side generation.
+      usage: new Response.Usage({ inputTokens: {}, outputTokens: {} }),
+      finishMetadata: undefined,
+    }),
+    (acc: SideGeneration, part): Effect.Effect<SideGeneration, unknown> => {
+      switch (part.type) {
+        case "text-delta":
+          return Effect.succeed({ ...acc, text: acc.text + part.delta });
+        case "finish":
+          return Effect.succeed({ ...acc, usage: part.usage, finishMetadata: part.metadata });
+        // Same treatment as the streaming path: the provider's own
+        // payload, classified like any other transport failure.
+        case "error":
+          return Effect.fail(part.error);
+        default:
+          return Effect.succeed(acc);
+      }
+    },
+  );
+
 /**
  * Talks to configured AI providers: model catalog for admin autocomplete, and
  * streaming chat completions for generation.
@@ -444,6 +520,14 @@ export class AiGateway extends Context.Service<
       providerId: string;
       modelKey: string;
     }): Effect.Effect<{ dimensions: number }, ProviderUnreachable | ModelNotFound>;
+    /** Asks a model that may not be saved yet for one short reply. */
+    probeChatModel(input: {
+      providerId: string;
+      modelKey: string;
+    }): Effect.Effect<
+      { reply: string },
+      ProviderUnreachable | ProviderContextOverflow | ModelNotFound
+    >;
     embed(input: {
       modelId: string;
       inputs: ReadonlyArray<string>;
@@ -550,48 +634,7 @@ export class AiGateway extends Context.Service<
         if (!model) return yield* new ModelNotFound({ modelId });
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
-
-        const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
-        const { reasoningEffort, cacheKey, ...requestConfig } = config ?? {};
-        const reasoningFormat: ReasoningEffortFormat =
-          provider.kind === "openrouter" ? "nested" : provider.reasoningEffortFormat;
-        const adapter = OpenRouterLanguageModel.model(model.modelKey, {
-          ...requestConfig,
-          ...(reasoningEffort && reasoningFormat === "nested"
-            ? { reasoning: { effort: reasoningEffort } }
-            : reasoningEffort && reasoningFormat === "flat"
-              ? { reasoning_effort: reasoningEffort }
-              : {}),
-          ...(actualImageOutput
-            ? { modalities: ["text", "image"] as const }
-            : provider.kind === "openrouter"
-              ? { modalities: ["text"] as const }
-              : {}),
-          // One key per conversation keeps OpenRouter on the provider holding
-          // its cache and helps OpenAI route to it. Unknown fields on strict
-          // OpenAI-compatible servers are rejected, so nobody else gets them.
-          ...(cacheKey && provider.kind === "openrouter"
-            ? { session_id: cacheKey, prompt_cache_key: cacheKey }
-            : {}),
-        }).pipe(
-          Layer.provide(
-            OpenRouterClient.layer({
-              apiKey: provider.apiKey,
-              apiUrl: provider.baseUrl,
-            }),
-          ),
-          Layer.provide(FetchHttpClient.layer),
-        );
-        // `capabilities.tools` means native tool calling. Without it the
-        // Hermes polyfill sits between the adapter and the toolkit loop:
-        // adapter → hermes → think extraction (in streamChat/generateText).
-        const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
-        return {
-          providerId: model.providerId,
-          layer,
-          imageOutput: actualImageOutput,
-          explicitCache: explicitCacheModel(provider.kind, model.modelKey),
-        };
+        return buildModelLayer(provider, model, config, imageOutput);
       });
 
       // One place decides which provider rejections are recoverable, so chat
@@ -714,8 +757,6 @@ export class AiGateway extends Context.Service<
           }),
         );
 
-      type SideGeneration = { text: string; usage: Response.Usage; finishMetadata: unknown };
-
       // Folded from the streaming endpoint, not `LanguageModel.generateText`:
       // its response schema requires `system_fingerprint`, which plain
       // OpenAI-compatible servers omit, so one-shot decode fails where
@@ -761,34 +802,49 @@ export class AiGateway extends Context.Service<
           // and none of them runs here anyway.
         ) as Stream.Stream<ChatStreamPart, unknown, never>;
 
-        return yield* Stream.runFoldEffect(
-          stream,
-          (): SideGeneration => ({
-            text: "",
-            // Zeroed rather than absent: a provider that never sends usage
-            // bills nothing instead of failing the side generation.
-            usage: new Response.Usage({ inputTokens: {}, outputTokens: {} }),
-            finishMetadata: undefined,
-          }),
-          (acc: SideGeneration, part): Effect.Effect<SideGeneration, unknown> => {
-            switch (part.type) {
-              case "text-delta":
-                return Effect.succeed({ ...acc, text: acc.text + part.delta });
-              case "finish":
-                return Effect.succeed({
-                  ...acc,
-                  usage: part.usage,
-                  finishMetadata: part.metadata,
-                });
-              // Same treatment as the streaming path: the provider's own
-              // payload, classified below like any other transport failure.
-              case "error":
-                return Effect.fail(part.error);
-              default:
-                return Effect.succeed(acc);
-            }
+        return yield* collectSideGeneration(stream).pipe(
+          Effect.mapError(requestError(providerId, input.prompt)),
+        );
+      });
+
+      /**
+       * One short request to a model that may not be saved yet, so an admin can
+       * see the provider answers for that model ID before adding it. One tiny
+       * billable request; admin-only.
+       */
+      const probeChatModel = Effect.fn("AiGateway.probeChatModel")(function* (input: {
+        providerId: string;
+        modelKey: string;
+      }) {
+        const provider = yield* repo.getProviderWithKey(input.providerId);
+        if (!provider?.enabled) return yield* new ModelNotFound({ modelId: input.providerId });
+        const modelKey = input.modelKey.trim();
+        if (!modelKey || modelKey.length > 200)
+          return yield* new ProviderUnreachable({
+            providerId: provider.id,
+            message: "invalid model key",
+            diagnostic: { kind: "InvalidRequestError" },
+          });
+        // Room for a reasoning model to think before it says OK.
+        const { layer } = buildModelLayer(
+          provider,
+          {
+            providerId: provider.id,
+            modelKey,
+            capabilities: { ...EMPTY_CAPABILITIES, tools: true },
           },
-        ).pipe(Effect.mapError(requestError(providerId, input.prompt)));
+          { max_tokens: 512 },
+        );
+        const prompt = Prompt.make("Reply with the single word OK.");
+        const stream = extractThinkTags(LanguageModel.streamText({ prompt })).pipe(
+          Stream.provide(layer),
+          Stream.provideService(HermesCallableTools, new Set<string>()),
+        ) as Stream.Stream<ChatStreamPart, unknown, never>;
+        const result = yield* collectSideGeneration(stream).pipe(
+          Effect.timeout(Duration.seconds(60)),
+          Effect.mapError(requestError(provider.id, prompt)),
+        );
+        return { reply: result.text.trim().slice(0, 200) };
       });
 
       const probeEmbeddingDimensions = Effect.fn("AiGateway.probeEmbeddingDimensions")(
@@ -1082,6 +1138,7 @@ export class AiGateway extends Context.Service<
       return AiGateway.of({
         fetchCatalog,
         probeEmbeddingDimensions,
+        probeChatModel,
         streamChat,
         generateText,
         // Shared by indexing and query requests, not one semaphore per caller.

@@ -31,7 +31,8 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { SearchBackend } from "~/modules/tools/server/search.ts";
+import { SearchProviders } from "~/modules/tools/server/search-providers/chain.ts";
+import { fakeSearchProviders } from "../fixtures/search-providers.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
@@ -74,6 +75,7 @@ let hold: { reached: Deferred.Deferred<void>; release: Deferred.Deferred<void> }
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  probeChatModel: () => Effect.die("no model probes in these tests"),
   embed: () => Effect.die("unexpected embed call"),
   generateText: () =>
     Effect.succeed({
@@ -100,14 +102,15 @@ const FakeGateway = Layer.succeed(AiGateway, {
 
 // Research requires enabled search and reader tools; the backend returns one
 // evidence hit so workers have a web source beside the knowledge ones.
-const FakeSearchBackend = Layer.succeed(SearchBackend, {
-  kind: "fake",
-  search: () =>
-    Effect.succeed([
-      { url: "https://evidence.example/source", title: "Evidence", snippet: "A web finding" },
-    ]),
-  test: () => Effect.succeed({ resultCount: 1 }),
-});
+const FakeSearchBackend = Layer.succeed(
+  SearchProviders,
+  fakeSearchProviders({
+    search: () =>
+      Effect.succeed([
+        { url: "https://evidence.example/source", title: "Evidence", snippet: "A web finding" },
+      ]),
+  }),
+);
 const FakeReader = Layer.succeed(UrlReaderExecutor, {
   availability: () => Effect.succeed({ configured: true, enabled: true }),
   handler: () =>
@@ -325,6 +328,10 @@ beforeAll(async () => {
 
   await run(
     ToolsRepo.use((tools) => tools.updateTool("web_search", { enabled: true, config: {} })),
+  );
+  // The executor offers web_search only with an enabled provider.
+  await exec(
+    `insert into search_providers (id, kind, label, position, config) values ('test-provider', 'searxng', 'Test', 0, '{"baseUrl":"http://localhost:8081"}')`,
   );
   const providerId = uuidv7();
   smallModelId = uuidv7();

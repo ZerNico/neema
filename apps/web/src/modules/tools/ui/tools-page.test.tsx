@@ -10,10 +10,15 @@ import {
   getMemoryTool,
   getUrlReaderTool,
   getWebSearchTool,
-  testSearchConnection,
+  createSearchProvider,
+  deleteSearchProvider,
+  listSearchProviders,
+  setSearchProviderOrder,
+  testSearchProvider,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
+  updateSearchProvider,
   updateWebSearchTool,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -24,7 +29,12 @@ vi.mock("../server/functions.ts", () => ({
   getWebSearchTool: vi.fn(),
   getUrlReaderTool: vi.fn(),
   getDocumentParserTool: vi.fn(),
-  testSearchConnection: vi.fn(),
+  listSearchProviders: vi.fn(),
+  createSearchProvider: vi.fn(),
+  updateSearchProvider: vi.fn(),
+  deleteSearchProvider: vi.fn(),
+  setSearchProviderOrder: vi.fn(),
+  testSearchProvider: vi.fn(),
   updateMemoryTool: vi.fn(),
   updateWebSearchTool: vi.fn(),
   updateUrlReaderTool: vi.fn(),
@@ -72,17 +82,45 @@ const tool = (
   ...extra,
 });
 
+type Provider = Awaited<ReturnType<typeof listSearchProviders>>[number];
+const searchProvider = (
+  id: string,
+  settings: Provider["settings"],
+  extra: Partial<Provider> = {},
+): Provider => ({
+  id,
+  label: id,
+  settings,
+  enabled: true,
+  position: 0,
+  secretConfigured: settings.kind !== "searxng",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  lastSuccessAt: null,
+  lastError: null,
+  coolingDownUntil: null,
+  ...extra,
+});
+const defaultProviders = [
+  searchProvider("Home SearXNG", { kind: "searxng", baseUrl: "http://searx" }),
+  searchProvider("Tavily", { kind: "tavily" }),
+];
+
 const renderPage = ({
-  webSearch = tool("web_search", { backend: "searxng", baseUrl: "http://searx", maxResults: 8 }),
+  webSearch = tool("web_search", { maxResults: 8 }),
   officeFiles = tool("office_files", {}),
+  providers = defaultProviders,
 }: {
   webSearch?: ReturnType<typeof tool> | null;
   officeFiles?: ReturnType<typeof tool> | null;
+  providers?: Provider[];
 } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const memory = tool("memory", {});
   vi.mocked(getMemoryTool).mockResolvedValue(memory);
   vi.mocked(getWebSearchTool).mockResolvedValue(webSearch);
+  vi.mocked(listSearchProviders).mockResolvedValue(providers);
+  client.setQueryData(["admin", "tools", "search-providers"], providers);
   vi.mocked(getUrlReaderTool).mockResolvedValue(tool("read_url", { perPageCharCap: 12000 }));
   vi.mocked(getDocumentParserTool).mockResolvedValue(
     tool("document_parser", { maxChars: 120000, maxPages: 200 }),
@@ -139,7 +177,7 @@ describe("ToolsPage", () => {
 
     await waitFor(() =>
       expect(updateWebSearchTool).toHaveBeenCalledWith({
-        data: { baseUrl: "http://searx", maxResults: 5, researchMaxSearchQueries: 80 },
+        data: { maxResults: 5, researchMaxSearchQueries: 80 },
       }),
     );
     const [save] = saveButtons();
@@ -156,12 +194,7 @@ describe("ToolsPage", () => {
     const pending = deferred<unknown>();
     vi.mocked(updateWebSearchTool).mockReturnValue(pending.promise as never);
     renderPage({
-      webSearch: tool("web_search", {
-        backend: "searxng",
-        baseUrl: "http://searx",
-        maxResults: 8,
-        researchMaxSearchQueries: 40,
-      }),
+      webSearch: tool("web_search", { maxResults: 8, researchMaxSearchQueries: 40 }),
     });
     const cap = screen.getByLabelText("Search queries per research run");
     expect(cap).toHaveValue(40);
@@ -169,7 +202,7 @@ describe("ToolsPage", () => {
     await user.type(cap, "60{Enter}");
     await waitFor(() =>
       expect(updateWebSearchTool).toHaveBeenCalledWith({
-        data: { baseUrl: "http://searx", maxResults: 8, researchMaxSearchQueries: 60 },
+        data: { maxResults: 8, researchMaxSearchQueries: 60 },
       }),
     );
     const [save] = saveButtons();
@@ -177,12 +210,7 @@ describe("ToolsPage", () => {
     expect(save).toHaveAttribute("aria-busy", "true");
     expect(save).toHaveTextContent("Save");
     vi.mocked(getWebSearchTool).mockResolvedValue(
-      tool("web_search", {
-        backend: "searxng",
-        baseUrl: "http://searx",
-        maxResults: 8,
-        researchMaxSearchQueries: 60,
-      }),
+      tool("web_search", { maxResults: 8, researchMaxSearchQueries: 60 }),
     );
     pending.resolve(undefined);
     await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
@@ -248,51 +276,116 @@ describe("ToolsPage", () => {
     expect(saveButtons()).toHaveLength(1);
   });
 
-  it("keeps the Test connection label while testing and colours the result", async () => {
+  it("tests a provider from its dialog, keeping the label while testing", async () => {
     const user = userEvent.setup();
     const pending = deferred<{ ok: true; resultCount: number; latencyMs: number }>();
-    vi.mocked(testSearchConnection).mockReturnValue(pending.promise as never);
+    vi.mocked(testSearchProvider).mockReturnValue(pending.promise as never);
     renderPage();
 
-    const test = screen.getByRole("button", { name: "Test connection" });
+    await user.click(screen.getByRole("button", { name: "Edit Home SearXNG" }));
+    const dialog = await screen.findByRole("dialog");
+    const test = within(dialog).getByRole("button", { name: "Test" });
     await user.click(test);
+    expect(testSearchProvider).toHaveBeenCalledWith({
+      data: { id: "Home SearXNG", settings: { kind: "searxng", baseUrl: "http://searx" } },
+    });
     expect(test).toHaveAttribute("aria-busy", "true");
-    expect(test.querySelector('[data-slot="spinner"]')).toBeInTheDocument();
-    expect(test).toHaveTextContent("Test connection");
+    expect(test).toHaveTextContent("Test");
 
     pending.resolve({ ok: true, resultCount: 3, latencyMs: 42 });
-    const status = (await screen.findByText("Connection ok, 3 results in 42ms.")).closest(
-      '[role="status"]',
-    );
-    expect(status).toHaveTextContent("Connection ok, 3 results in 42ms.");
+    const status = await within(dialog).findByRole("status");
+    expect(status).toHaveTextContent("Works: 3 results in 42ms.");
     expect(status).toHaveClass("text-success");
   });
 
-  it("asks before clearing a stored secret", async () => {
+  it("adds a SearXNG provider", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateWebSearchTool).mockResolvedValue(undefined as never);
+    vi.mocked(createSearchProvider).mockResolvedValue(undefined as never);
+    renderPage({ providers: [] });
+    expect(screen.getByText("Add a provider to turn on web search.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = await screen.findByRole("dialog");
+    const add = within(dialog).getByRole("button", { name: "Add provider" });
+    expect(add).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("Base URL"), "http://localhost:8081");
+    await user.click(add);
+
+    await waitFor(() =>
+      expect(createSearchProvider).toHaveBeenCalledWith({
+        data: { label: "SearXNG", settings: { kind: "searxng", baseUrl: "http://localhost:8081" } },
+      }),
+    );
+  });
+
+  it("keeps a stored key when a hosted provider is saved with the key field empty", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateSearchProvider).mockResolvedValue(undefined as never);
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Edit Tavily" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("API key")).toHaveAttribute("placeholder", "Unchanged");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateSearchProvider).toHaveBeenCalledWith({
+        data: { id: "Tavily", label: "Tavily", settings: { kind: "tavily" } },
+      }),
+    );
+  });
+
+  it("saves the whole order when a provider moves", async () => {
+    const user = userEvent.setup();
+    vi.mocked(setSearchProviderOrder).mockResolvedValue(undefined as never);
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "Move Home SearXNG up" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Move Tavily up" }));
+
+    await waitFor(() =>
+      expect(setSearchProviderOrder).toHaveBeenCalledWith({
+        data: { ids: ["Tavily", "Home SearXNG"] },
+      }),
+    );
+  });
+
+  it("asks before removing a provider", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteSearchProvider).mockResolvedValue(undefined as never);
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Remove Tavily" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent("Remove Tavily?");
+    expect(deleteSearchProvider).not.toHaveBeenCalled();
+    await user.click(within(confirm).getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(deleteSearchProvider).toHaveBeenCalledWith({ data: { id: "Tavily" } }),
+    );
+  });
+
+  it("says when a provider is being tried last and turns one off", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateSearchProvider).mockResolvedValue(undefined as never);
     renderPage({
-      webSearch: tool(
-        "web_search",
-        { backend: "searxng", baseUrl: "http://searx", maxResults: 8 },
-        { secretConfigured: true },
-      ),
+      providers: [
+        searchProvider(
+          "Tavily",
+          { kind: "tavily" },
+          {
+            lastError: { reason: "quota", message: "credits used up", at: 0 },
+            coolingDownUntil: new Date(2026, 9, 2, 14, 5).getTime(),
+          },
+        ),
+      ],
     });
 
-    await user.click(screen.getByRole("button", { name: "Clear" }));
-    expect(updateWebSearchTool).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Clear the stored secret?");
-
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(updateWebSearchTool).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Clear" }));
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Clear" }),
-    );
+    expect(screen.getByText(/Credits used up, tried last until/)).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "Tavily enabled" }));
     await waitFor(() =>
-      expect(updateWebSearchTool).toHaveBeenCalledWith({ data: { clearSecret: true } }),
+      expect(updateSearchProvider).toHaveBeenCalledWith({ data: { id: "Tavily", enabled: false } }),
     );
   });
 

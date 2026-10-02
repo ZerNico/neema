@@ -2255,6 +2255,8 @@ export class StreamEngine extends Context.Service<
               });
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
+            // Where each call was made in the answer's text, for envelopes sent after it.
+            const callTextOffsets = new Map<string, number>();
             // The argument summary an integration row showed at start, for its result.
             const integrationSummaries = new Map<string, string | null>();
             // Snapshots asked to show their screenshot to the user, by provider call id.
@@ -2458,6 +2460,7 @@ export class StreamEngine extends Context.Service<
                               ? Schema.decodeUnknownOption(AskUserParams)(args)
                               : null;
                           const textOffset = assembled.length;
+                          callTextOffsets.set(part.id, textOffset);
                           const shownArgs = shownBrowserArgs(part.name, args);
                           if (part.name === "browser_snapshot" && args.share === true)
                             sharedSnapshots.add(part.id);
@@ -2500,6 +2503,7 @@ export class StreamEngine extends Context.Service<
                               rowId,
                               turnIndex: turn,
                               callIndex: callIndex - 1,
+                              textOffset,
                             });
                             return;
                           }
@@ -2831,7 +2835,7 @@ export class StreamEngine extends Context.Service<
                                 name: "deep_research",
                                 turnIndex: turn,
                                 callIndex: callIndex - 1,
-                                textOffset: 0,
+                                textOffset: callTextOffsets.get(part.id) ?? 0,
                                 progress: run.progress,
                               });
                             return;

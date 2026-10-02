@@ -3,11 +3,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddModelDialog } from "./provider-detail-page.tsx";
-import { probeEmbeddingDimensions, createModel } from "../server/functions.ts";
+import { probeEmbeddingDimensions, createModel, testChatModel } from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
   probeEmbeddingDimensions: vi.fn(),
   createModel: vi.fn(),
+  testChatModel: vi.fn(),
   createProvider: vi.fn(),
   deleteModel: vi.fn(),
   deleteProvider: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("./model-combobox.tsx", () => ({
 
 const createMock = vi.mocked(createModel);
 const probeMock = vi.mocked(probeEmbeddingDimensions);
+const testMock = vi.mocked(testChatModel);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -168,5 +170,40 @@ describe("AddModelDialog", () => {
         },
       }),
     );
+  });
+
+  it("tests a picked chat model before it is added and shows the outcome", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["admin", "groups"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <AddModelDialog providerId="provider-1" open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
+
+    testMock.mockResolvedValueOnce({ ok: false, error: "model not found" });
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    const failed = await screen.findByRole("status");
+    expect(failed).toHaveTextContent("Didn’t work: model not found");
+    expect(failed).toHaveClass("text-destructive");
+
+    testMock.mockResolvedValueOnce({ ok: true, reply: "OK", latencyMs: 640 });
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Works: replied “OK” in 640ms."),
+    );
+    expect(testMock).toHaveBeenLastCalledWith({
+      data: { providerId: "provider-1", modelKey: "catalog-model" },
+    });
+    // Testing never adds the model.
+    expect(createMock).not.toHaveBeenCalled();
+
+    // Embedding models have Detect instead.
+    screen.getByLabelText("Type").click();
+    await user.click(await screen.findByRole("option", { name: "Embedding" }));
+    expect(screen.queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
   });
 });

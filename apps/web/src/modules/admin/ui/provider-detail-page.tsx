@@ -14,6 +14,7 @@ import {
   createModel,
   deleteModel,
   deleteProvider,
+  testChatModel,
   updateProvider,
 } from "../server/functions.ts";
 import { groupsQuery } from "./groups-page.tsx";
@@ -60,6 +61,7 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
+import { cn } from "~/ui/utils";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
@@ -306,13 +308,27 @@ export function AddModelDialog({
   // suggests a choice that has not been made.
   const effective: CatalogPick | null = pick && (typed === "" || typed === pick.id) ? pick : null;
   const settings = modelSettingsFromDraft(draft);
+  // A result belongs to the model it tested; picking another clears it.
+  const [tested, setTested] = useState<{
+    modelKey: string;
+    result: Awaited<ReturnType<typeof testChatModel>>;
+  } | null>(null);
+  const testResult = tested && tested.modelKey === effective?.id ? tested.result : null;
 
   const reset = () => {
     selectedId.current = null;
     setPick(null);
     setTyped("");
     setDraft(emptyModelSettingsDraft());
+    setTested(null);
   };
+
+  const test = useMutation({
+    mutationFn: (modelKey: string) =>
+      testChatModel({ data: { providerId, modelKey } }).then((result) => ({ modelKey, result })),
+    onSuccess: setTested,
+    onError: (error) => toastError("Could not test the model.", error),
+  });
 
   const add = useMutation({
     mutationFn: () => {
@@ -419,8 +435,30 @@ export function AddModelDialog({
             ) : null}
           </FieldGroup>
 
+          {testResult ? (
+            <p
+              role="status"
+              className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
+            >
+              {testResult.ok
+                ? testResult.reply
+                  ? `Works: replied “${testResult.reply}” in ${testResult.latencyMs}ms.`
+                  : `Works: answered in ${testResult.latencyMs}ms.`
+                : `Didn’t work: ${testResult.error}`}
+            </p>
+          ) : null}
           {add.isError ? <FieldError>Could not add the model.</FieldError> : null}
           <DialogFooter>
+            {effective && draft.type === "chat" ? (
+              <PendingButton
+                variant="outline"
+                pending={test.isPending}
+                disabled={add.isPending}
+                onClick={() => test.mutate(effective.id)}
+              >
+                Test
+              </PendingButton>
+            ) : null}
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
               Cancel
             </DialogClose>

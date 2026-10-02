@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseRetryAfter, ProviderUnreachable } from "~/modules/providers/server/gateway.ts";
+import { ProviderUnreachable } from "~/modules/providers/server/gateway.ts";
+import { parseRetryAfter } from "~/server/retry-after.ts";
 import { embeddingRetry } from "./embedding-retry.ts";
 
 const failure = (diagnostic?: ProviderUnreachable["diagnostic"]) =>

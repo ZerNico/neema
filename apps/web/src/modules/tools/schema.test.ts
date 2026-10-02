@@ -1,13 +1,13 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { UpdateWebSearchToolInput, WebSearchConfig } from "./schema.ts";
+import { SearchProviderSettings, UpdateWebSearchToolInput, WebSearchConfig } from "./schema.ts";
 
-const config = { backend: "searxng", baseUrl: "http://searx", maxResults: 8 };
+const config = { maxResults: 8 };
 const decodeConfig = Schema.decodeUnknownSync(WebSearchConfig);
 const decodeUpdate = Schema.decodeUnknownSync(UpdateWebSearchToolInput);
 
 describe("research search configuration", () => {
-  it("accepts legacy config and keeps unrelated patches from resetting the budget", () => {
+  it("keeps unrelated patches from resetting the budget", () => {
     expect(decodeConfig(config)).toEqual(config);
     expect(decodeUpdate({ enabled: false })).toEqual({ enabled: false });
   });
@@ -29,4 +29,22 @@ describe("research search configuration", () => {
       expect(() => decodeUpdate({ researchMaxSearchQueries })).toThrow();
     },
   );
+});
+
+describe("search provider settings", () => {
+  const decode = Schema.decodeUnknownSync(SearchProviderSettings);
+
+  it("requires a base URL only for SearXNG", () => {
+    expect(decode({ kind: "searxng", baseUrl: "http://searx" })).toEqual({
+      kind: "searxng",
+      baseUrl: "http://searx",
+    });
+    expect(() => decode({ kind: "searxng" })).toThrow();
+    expect(decode({ kind: "tavily" })).toEqual({ kind: "tavily" });
+  });
+
+  it("keeps a hosted provider on its fixed endpoint", () => {
+    expect(decode({ kind: "brave", baseUrl: "http://elsewhere" })).toEqual({ kind: "brave" });
+    expect(() => decode({ kind: "bing" })).toThrow();
+  });
 });

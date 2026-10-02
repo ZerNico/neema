@@ -43,6 +43,8 @@ export type ToolCallRowRef = {
   readonly rowId: string;
   readonly turnIndex: number;
   readonly callIndex: number;
+  /** Where in the answer's text the call was made, so its row sits there live too. */
+  readonly textOffset?: number;
 };
 
 /**

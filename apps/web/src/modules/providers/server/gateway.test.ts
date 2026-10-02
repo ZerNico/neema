@@ -6,6 +6,7 @@ import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";
 import { buildHistoryMessages, type PromptDeps } from "~/modules/chat/server/prompt.ts";
 import { ResearchCoordinatorTools } from "~/modules/chat/server/research/runner.ts";
+import { ModelNotFound } from "~/modules/chat/errors.ts";
 import { ProviderRepo } from "./repo.ts";
 import {
   AiGateway,
@@ -438,6 +439,68 @@ describe("side generations", () => {
       // than a failed title or a lost compaction summary.
       expect(result.usage.inputTokens.total).toBeUndefined();
       expect(result.usage.outputTokens.total).toBeUndefined();
+    }),
+  );
+});
+
+const probeRepo = (enabled: boolean) =>
+  Layer.succeed(ProviderRepo)(
+    ProviderRepo.of(
+      // A model that is not saved yet: only the provider is looked up.
+      Object.assign({} as ProviderRepo["Service"], {
+        getModel: () => Effect.die("the probe must not need a stored model"),
+        getProviderWithKey: () =>
+          Effect.succeed({
+            id: "p1",
+            apiKey: "sk-test",
+            baseUrl: "https://provider.test/v1",
+            kind: "openai-compatible",
+            reasoningEffortFormat: "unsupported",
+            enabled,
+          }),
+      }),
+    ),
+  );
+const probe = (enabled = true) =>
+  Effect.flatMap(AiGateway, (gateway) =>
+    gateway.probeChatModel({ providerId: "p1", modelKey: " vendor/new-model " }),
+  ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(probeRepo(enabled)))));
+
+describe("chat model probe", () => {
+  it.effect("asks an unsaved model for a short reply, without its think block", () =>
+    Effect.gen(function* () {
+      const sent = stubProvider(
+        sse([
+          chunk({ content: "<think>Easy.</think>OK" }),
+          usageChunk({ prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 }),
+        ]),
+      );
+
+      expect(yield* probe()).toEqual({ reply: "OK" });
+      expect(sent[0]?.url).toBe("https://provider.test/v1/chat/completions");
+      expect(sent[0]?.body).toMatchObject({
+        model: "vendor/new-model",
+        max_tokens: 512,
+        stream: true,
+      });
+      expect(sent[0]?.body).not.toHaveProperty("tools");
+    }),
+  );
+
+  it.effect("reports a rejected model ID as an unreachable provider", () =>
+    Effect.gen(function* () {
+      stubProvider(JSON.stringify({ error: { message: "model not found" } }), 404);
+
+      expect(yield* probe().pipe(Effect.flip)).toBeInstanceOf(ProviderUnreachable);
+    }),
+  );
+
+  it.effect("refuses a disabled provider without a request", () =>
+    Effect.gen(function* () {
+      const sent = stubProvider(sse([chunk({ content: "OK" })]));
+
+      expect(yield* probe(false).pipe(Effect.flip)).toBeInstanceOf(ModelNotFound);
+      expect(sent).toHaveLength(0);
     }),
   );
 });

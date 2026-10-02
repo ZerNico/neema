@@ -3,25 +3,26 @@ import { Deferred, Effect, Exit, Fiber, Layer, Queue, Scope, Stream, Semaphore }
 import type { Toolkit } from "effect/unstable/ai";
 import { PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchBackend, SearchBackendError, type SearchHit, type SearchRequest } from "./search.ts";
+import { SearchFailed, SearchProviders } from "./search-providers/chain.ts";
+import type { SearchHit, SearchRequest } from "./search-providers/types.ts";
+import {
+  fakeSearchProviders as fakeProviders,
+  testSearchProvider as searxng,
+} from "../../../../tests/fixtures/search-providers.ts";
 import { createSourceIndexer, type SourceIndexer } from "./source-indexer.ts";
 import { prepareWebTools, mergeToolGroups } from "./toolset.ts";
 import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
-const config = {
-  backend: "searxng" as const,
-  baseUrl: "http://localhost:8081",
-  maxResults: 5,
-};
+const config = { maxResults: 5 };
 
 const FakeRepo = Layer.succeed(
   ToolsRepo,
   ToolsRepo.of({
     getTool: () => Effect.succeed(null),
     getKnowledgeSearch: () => Effect.succeed(null),
-    getWebSearch: () => Effect.succeed({ enabled: true, config, secret: null }),
+    getWebSearch: () => Effect.succeed({ enabled: true, config, providers: [searxng] }),
     getDocumentParser: () => Effect.succeed(null),
     getUrlReader: () => Effect.succeed(null),
     setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
@@ -39,14 +40,12 @@ const resultsByQuery: Record<string, SearchHit[]> = {
 };
 
 const FakeBackend = Layer.succeed(
-  SearchBackend,
-  SearchBackend.of({
-    kind: "fake",
+  SearchProviders,
+  fakeProviders({
     search: (_connection, request) =>
       request.query === "broken"
-        ? Effect.fail(new SearchBackendError({ backend: "fake", message: "backend unavailable" }))
+        ? Effect.fail(new SearchFailed({ message: "backend unavailable" }))
         : Effect.succeed(resultsByQuery[request.query] ?? []),
-    test: () => Effect.succeed({ resultCount: 0 }),
   }),
 );
 
@@ -174,10 +173,8 @@ describe("per-run search cache", () => {
       let calls = 0;
       let admitted = 0;
       const counted = Layer.succeed(
-        SearchBackend,
-        SearchBackend.of({
-          kind: "fake",
-          test: () => Effect.succeed({ resultCount: 0 }),
+        SearchProviders,
+        fakeProviders({
           search: (_connection, request) =>
             Effect.sync(() => {
               calls++;
@@ -236,7 +233,7 @@ describe("per-run search cache", () => {
 
 interface PendingRequest {
   request: SearchRequest;
-  reply: Deferred.Deferred<ReadonlyArray<SearchHit>, SearchBackendError>;
+  reply: Deferred.Deferred<ReadonlyArray<SearchHit>, SearchFailed>;
   interrupted: Deferred.Deferred<void>;
 }
 
@@ -245,12 +242,10 @@ interface PendingRequest {
 const controlledBackend = Effect.fnUntraced(function* (cleanup: Effect.Effect<void> = Effect.void) {
   const requests = yield* Queue.unbounded<PendingRequest>();
   const calls: PendingRequest[] = [];
-  const backend = SearchBackend.of({
-    kind: "fake",
-    test: () => Effect.succeed({ resultCount: 0 }),
+  const backend = fakeProviders({
     search: (_connection, request) =>
       Effect.gen(function* () {
-        const reply = yield* Deferred.make<ReadonlyArray<SearchHit>, SearchBackendError>();
+        const reply = yield* Deferred.make<ReadonlyArray<SearchHit>, SearchFailed>();
         const interrupted = yield* Deferred.make<void>();
         const call = { request, reply, interrupted };
         calls.push(call);
@@ -264,7 +259,7 @@ const controlledBackend = Effect.fnUntraced(function* (cleanup: Effect.Effect<vo
   const executor = yield* WebSearchExecutor.pipe(
     Effect.provide(
       WebSearchExecutor.layer.pipe(
-        Layer.provide(Layer.mergeAll(FakeRepo, Layer.succeed(SearchBackend, backend))),
+        Layer.provide(Layer.mergeAll(FakeRepo, Layer.succeed(SearchProviders, backend))),
       ),
     ),
   );
@@ -334,10 +329,7 @@ describe("single-flight search", () => {
       const failed = yield* Queue.take(requests);
       const second = yield* start(handler({ queries: ["same"] }));
       yield* settleWaiters;
-      yield* Deferred.fail(
-        failed.reply,
-        new SearchBackendError({ backend: "fake", message: "backend unavailable" }),
-      );
+      yield* Deferred.fail(failed.reply, new SearchFailed({ message: "backend unavailable" }));
       const a = yield* Fiber.join(first);
       const b = yield* Fiber.join(second);
       expect(a).toEqual(b);
@@ -596,10 +588,8 @@ describe("research shared external-operation gate", () => {
       let peak = 0;
       let calls = 0;
       const counted = Layer.succeed(
-        SearchBackend,
-        SearchBackend.of({
-          kind: "fake",
-          test: () => Effect.succeed({ resultCount: 0 }),
+        SearchProviders,
+        fakeProviders({
           search: () =>
             Effect.gen(function* () {
               active++;

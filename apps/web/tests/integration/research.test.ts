@@ -49,7 +49,8 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { SearchBackend, SearchBackendError } from "~/modules/tools/server/search.ts";
+import { SearchFailed, SearchProviders } from "~/modules/tools/server/search-providers/chain.ts";
+import { fakeSearchProviders } from "../fixtures/search-providers.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import {
   FakeBlobStore,
@@ -136,6 +137,8 @@ let hostAsksFirst = false;
 let hostAsks = 0;
 /** The host also opens a page in the same turn, so a sibling call is in flight. */
 let hostReadsAlongside = false;
+/** Text the host writes before its research call, in the same model turn. */
+let hostPreamble = "";
 let hostDraft = false;
 let hostDraftTurns = 0;
 const HOLD_URL = "https://hold.example/wait";
@@ -307,12 +310,17 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
           params: { brief: hostBrief },
           id: "host-research",
         };
-        return hostReadsAlongside
+        const calls = hostReadsAlongside
           ? twoTools(input, [
               research,
               { name: "read_url", params: { urls: [HOLD_URL] }, id: "host-read" },
             ])
           : tool(input, research.name, research.params);
+        return hostPreamble
+          ? (Stream.make(text(hostPreamble)).pipe(
+              Stream.concat(calls),
+            ) as Stream.Stream<ChatStreamPart>)
+          : calls;
       }
       return Stream.make(
         text("# Findings\nSupported conclusion[^1].\n"),
@@ -384,6 +392,7 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
 const FakeGateway = Layer.succeed(AiGateway, {
   fetchCatalog: () => Effect.succeed([]),
   probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
+  probeChatModel: () => Effect.die("no model probes in these tests"),
   // These suites never embed; a call here means the code under test grew a
   // provider dependency the fake was not asked to model.
   embed: () => Effect.die("unexpected embed call"),
@@ -403,22 +412,22 @@ const FakeGateway = Layer.succeed(AiGateway, {
   streamChat,
 });
 // Exercise the real config, handler and budget admission; only upstream search is fake.
-const FakeSearchBackend = Layer.succeed(SearchBackend, {
-  kind: "fake",
-  search: () =>
-    Effect.suspend(() => {
-      backendSearches++;
-      return searchDown
-        ? Effect.fail(
-            new SearchBackendError({
-              backend: "fake",
-              message: "search engines unavailable (too many requests)",
-            }),
-          )
-        : Effect.succeed([{ url: evidenceUrl, title: "Evidence", snippet: "A supported finding" }]);
-    }),
-  test: () => Effect.succeed({ resultCount: 1 }),
-});
+const FakeSearchBackend = Layer.succeed(
+  SearchProviders,
+  fakeSearchProviders({
+    search: () =>
+      Effect.suspend(() => {
+        backendSearches++;
+        return searchDown
+          ? Effect.fail(
+              new SearchFailed({ message: "search engines unavailable (too many requests)" }),
+            )
+          : Effect.succeed([
+              { url: evidenceUrl, title: "Evidence", snippet: "A supported finding" },
+            ]);
+      }),
+  }),
+);
 const FakeReader = Layer.succeed(UrlReaderExecutor, {
   availability: () => Effect.succeed({ configured: true, enabled: true }),
   handler: () =>
@@ -494,6 +503,12 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       const providerId = uuidv7();
+      // The executor offers web_search only with an enabled provider.
+      yield* db.execute(
+        sql.raw(
+          `insert into search_providers (id, kind, label, position, config) values ('test-provider', 'searxng', 'Test', 0, '{"baseUrl":"http://localhost:8081"}')`,
+        ),
+      );
       yield* db.execute(
         sql`insert into providers (id,name,kind,base_url,api_key_ciphertext) values (${providerId},'Test','openrouter','https://invalid.example','unused')`,
       );
@@ -546,6 +561,7 @@ beforeEach(async () => {
   hostAsksFirst = false;
   hostAsks = 0;
   hostReadsAlongside = false;
+  hostPreamble = "";
   hostDraft = false;
   hostDraftTurns = 0;
   readerGate = null;
@@ -752,6 +768,26 @@ describe("deep research as a tool call", () => {
           prompt.includes("Independently investigate disagreements"),
       ).toBe(false);
     }
+  });
+
+  it("places the research row where the host called it, live as on reload", async () => {
+    hostPreamble = "I will look into this properly. ";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    const events = await runtime.runPromise(collect(sent.assistantMessageId));
+    const offsets = events.flatMap((event) => {
+      if (event.kind !== "chunk" || event.chunkKind !== "tool") return [];
+      const envelope = JSON.parse(event.delta) as { family?: string; textOffset?: number };
+      return envelope.family === "research" ? [envelope.textOffset] : [];
+    });
+    expect(offsets.length).toBeGreaterThan(1);
+    expect(new Set(offsets)).toEqual(new Set([hostPreamble.length]));
+    const rows = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.listToolCalls([sent.assistantMessageId])),
+    );
+    expect(rows.find((row) => row.toolName === "deep_research")?.textOffset).toBe(
+      hostPreamble.length,
+    );
   });
 
   it("keeps a sibling call running when the run beside it finalizes", async () => {

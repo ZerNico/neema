@@ -50,7 +50,8 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { SearchBackend } from "~/modules/tools/server/search.ts";
+import { SearchProviders } from "~/modules/tools/server/search-providers/chain.ts";
+import { SearchProviderRepo } from "~/modules/tools/server/search-provider-repo.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db, PgLive } from "./db.ts";
@@ -74,6 +75,7 @@ const ReposLayer = Layer.mergeAll(
   SignupRepo.layer,
   ProviderRepo.layer,
   ToolsRepo.layer,
+  SearchProviderRepo.layer,
   GroupRepo.layer,
   FeaturePolicy.layer,
   IntegrationRepo.layer,
@@ -84,7 +86,7 @@ const ReposLayer = Layer.mergeAll(
 const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
-      SearchBackend.searxngLayer,
+      SearchProviders.layer,
       PageExtractor.layer.pipe(Layer.provide(DocumentParser.layer)),
     ),
   ),

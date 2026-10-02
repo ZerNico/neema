@@ -1,8 +1,16 @@
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Layer, Redacted } from "effect";
+import { Context, Deferred, Duration, Effect, Fiber, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { SearchBackend } from "./search.ts";
+import { makeSearxngAdapter } from "./searxng.ts";
+import type { SearchAdapter, SearchProviderSnapshot } from "./types.ts";
+
+// The adapter needs a scope for its config cache, so a layer holds one here.
+class SearchBackend extends Context.Service<SearchBackend, SearchAdapter>()("test/Searxng") {
+  static readonly searxngLayer = Layer.effect(SearchBackend, makeSearxngAdapter).pipe(
+    Layer.provide(FetchHttpClient.layer),
+  );
+}
 
 // Mock fetch so the SearXNG parsing/dedup/limits are tested without a server.
 const mockFetch = (handler: (url: URL) => Response) =>
@@ -36,7 +44,14 @@ const searxngJson = (results: unknown[]) =>
     headers: { "content-type": "application/json" },
   });
 
-const connection = { baseUrl: "http://localhost:8081", secret: null };
+const at = (baseUrl: string, secret: string | null = null): SearchProviderSnapshot => ({
+  id: "searxng",
+  label: "SearXNG",
+  version: 0,
+  settings: { kind: "searxng", baseUrl },
+  secret: secret === null ? null : Redacted.make(secret),
+});
+const connection = at("http://localhost:8081");
 
 describe("SearxngBackend", () => {
   it.effect(
@@ -48,10 +63,11 @@ describe("SearxngBackend", () => {
         yield* Effect.all(
           [
             backend.search(connection, { query: "one", maxResults: 2 }),
-            backend.search(
-              { ...connection, baseUrl: connection.baseUrl + "/" },
-              { query: "two", maxResults: 2, timeRange: "year" },
-            ),
+            backend.search(at("http://localhost:8081/"), {
+              query: "two",
+              maxResults: 2,
+              timeRange: "year",
+            }),
           ],
           { concurrency: "unbounded" },
         );
@@ -62,14 +78,11 @@ describe("SearxngBackend", () => {
         yield* TestClock.adjust(Duration.millis(2));
         yield* backend.search(connection, { query: "four", maxResults: 2 });
         expect(configs).toBe(2);
-        yield* backend.search(
-          { ...connection, secret: Redacted.make("another-identity") },
-          { query: "five", maxResults: 2 },
-        );
-        yield* backend.search(
-          { ...connection, baseUrl: "http://other.test" },
-          { query: "six", maxResults: 2 },
-        );
+        yield* backend.search(at("http://localhost:8081", "another-identity"), {
+          query: "five",
+          maxResults: 2,
+        });
+        yield* backend.search(at("http://other.test"), { query: "six", maxResults: 2 });
         expect(configs).toBe(4);
       }).pipe(
         Effect.provide(
@@ -111,7 +124,7 @@ describe("SearxngBackend", () => {
         yield* backend.search(connection, query);
         expect(configs).toBe(2);
         for (let n = 0; n < 16; n++)
-          yield* backend.search({ ...connection, baseUrl: `http://connection-${n}.test` }, query);
+          yield* backend.search(at(`http://connection-${n}.test`), query);
         yield* backend.search(connection, query);
         expect(configs).toBe(19);
       }).pipe(
@@ -170,7 +183,7 @@ describe("SearxngBackend", () => {
         yield* Fiber.join(second);
         expect(calls).toBe(1);
         const last = yield* backend
-          .search({ ...connection, baseUrl: "http://other.test" }, { query: "last", maxResults: 2 })
+          .search(at("http://other.test"), { query: "last", maxResults: 2 })
           .pipe(Effect.forkScoped);
         yield* Deferred.await(lastStarted);
         yield* Fiber.interrupt(last);
@@ -276,7 +289,7 @@ describe("SearxngBackend", () => {
       const error = yield* backend
         .search(connection, { query: "x", maxResults: 5 })
         .pipe(Effect.flip);
-      expect(error._tag).toBe("SearchBackendError");
+      expect(error._tag).toBe("SearchProviderError");
       expect(error.message).toContain("json format");
     }).pipe(Effect.provide(backendWith(() => new Response("forbidden", { status: 403 })))),
   );
@@ -427,7 +440,7 @@ describe("SearxngBackend", () => {
       const error = yield* backend
         .search(connection, { query: "x", maxResults: 5 })
         .pipe(Effect.flip);
-      expect(error._tag).toBe("SearchBackendError");
+      expect(error._tag).toBe("SearchProviderError");
     }).pipe(
       Effect.provide(
         backendWith(

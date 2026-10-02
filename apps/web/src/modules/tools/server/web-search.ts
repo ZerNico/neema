@@ -10,7 +10,8 @@ import {
   type WebToolResult as Result,
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchBackend, type SearchHit } from "./search.ts";
+import { SearchProviders } from "./search-providers/chain.ts";
+import type { SearchHit } from "./search-providers/types.ts";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
 import { canonicalUserUrl } from "./user-urls.ts";
@@ -103,7 +104,7 @@ export class WebSearchExecutor extends Context.Service<
     WebSearchExecutor,
     Effect.gen(function* () {
       const repo = yield* ToolsRepo;
-      const backend = yield* SearchBackend;
+      const searchProviders = yield* SearchProviders;
 
       const makeHandler = Effect.fn("WebSearchExecutor.handler")(function* (
         indexer: SourceIndexer,
@@ -111,29 +112,29 @@ export class WebSearchExecutor extends Context.Service<
         policy?: WebExecutionPolicy,
       ) {
         const tool = yield* repo.getWebSearch();
-        if (!tool) {
+        if (!tool || tool.providers.length === 0) {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "not configured" });
         }
         if (!tool.enabled) {
           return yield* new ToolUnavailable({ tool: "web_search", reason: "disabled" });
         }
-        const { config, secret } = tool;
-        const connection = { baseUrl: config.baseUrl, secret };
+        const { config, providers } = tool;
         const cached = yield* makeGenerationCache<SearchOutcome>({
           capacity: 128,
           retain: (outcome) => outcome.error === null,
         });
         const search = (query: string, params: WebSearchParams): Effect.Effect<SearchOutcome> => {
           const request = Effect.gen(function* () {
-            // Only the producer takes a permit and admits an actual request.
+            // Only the producer takes a permit and admits an actual request. The
+            // chain's fallbacks run inside that one permit and count as one search.
             if (policy && !policy.admit("search", 1))
               return {
                 query,
                 hits: [],
                 error: "Research web budget or exploration deadline reached.",
               };
-            return yield* backend
-              .search(connection, {
+            return yield* searchProviders
+              .search(providers, {
                 query,
                 maxResults: config.maxResults,
                 ...(params.timeRange !== undefined ? { timeRange: params.timeRange } : {}),
@@ -217,8 +218,11 @@ export class WebSearchExecutor extends Context.Service<
       });
 
       const availability = Effect.fn("WebSearchExecutor.availability")(function* () {
-        const tool = yield* repo.getTool("web_search");
-        return { configured: tool !== null, enabled: tool?.enabled ?? false };
+        const tool = yield* repo.getWebSearch();
+        return {
+          configured: (tool?.providers.length ?? 0) > 0,
+          enabled: tool?.enabled ?? false,
+        };
       });
 
       const researchSearchLimit = Effect.fn("WebSearchExecutor.researchSearchLimit")(function* () {
