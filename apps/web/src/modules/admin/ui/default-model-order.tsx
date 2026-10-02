@@ -263,8 +263,10 @@ export function UtilityModelPicker({
         ) : null}
       </div>
       <FieldDescription>
-        Writes the short title of each new chat. A fast, inexpensive model is enough; if it fails,
-        the chat’s own model writes the title instead.
+        Writes the short title of each new chat, so it reads every chat’s first message, whatever
+        model the chat uses. Pick a fast model you’d trust with any chat, such as a local one, or
+        leave it empty and each chat titles itself with its own model. If it fails, the chat’s own
+        model writes the title instead.
       </FieldDescription>
     </Field>
   );
