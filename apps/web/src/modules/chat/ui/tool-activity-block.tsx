@@ -95,7 +95,9 @@ const stackHosts = (sourceUrls: ReadonlyArray<string>, pages: ReadonlyArray<Tool
   return [...hosts.values()].slice(0, STACK_LIMIT);
 };
 
-export function FaviconStack({ urls }: { urls: ReadonlyArray<string> }) {
+export function FaviconStack({ urls: given }: { urls: ReadonlyArray<string> }) {
+  // One icon per site: two pages from the same site would draw the same icon twice.
+  const urls = [...new Map(given.map((url) => [hostOf(url), url])).values()];
   if (urls.length === 0)
     return <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />;
   return (
