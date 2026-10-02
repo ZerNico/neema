@@ -1,9 +1,9 @@
 import {
   Alert02Icon,
-  File01Icon,
+  Book02Icon,
+  FolderLibraryIcon,
   GlobalSearchIcon,
   Search01Icon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo } from "react";
@@ -14,7 +14,9 @@ import type {
   WebToolActivity,
 } from "../client/use-message-stream.ts";
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
+import { ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
+import { FaviconStack } from "./tool-activity-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import {
   useDetailPanel,
@@ -22,7 +24,6 @@ import {
   useDetailPanelTabIds,
   type DetailPanelRequest,
 } from "~/ui/detail-panel";
-import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { MotionSwap } from "~/ui/motion.tsx";
 
@@ -32,7 +33,7 @@ import { MotionSwap } from "~/ui/motion.tsx";
 // and stays internal.
 
 const taskLabels: Record<ResearchTaskProgress["status"], string> = {
-  queued: "Queued",
+  queued: "Up next",
   running: "Investigating",
   complete: "Done",
   error: "Incomplete",
@@ -60,139 +61,123 @@ const coverageNote = (progress: ResearchProgress | undefined): string | null => 
   return null;
 };
 
-interface ActivityItem {
-  key: string;
-  label: string;
-  url?: string;
-}
-
 /** Web and knowledge steps, grouped by task like the runner groups them. */
 export type ResearchStepActivity = WebToolActivity | KnowledgeToolActivity | SkillToolActivity;
 
-const describe = (activity: ResearchStepActivity): { verb: string; items: ActivityItem[] } => {
+const stepStatus = (activity: ResearchStepActivity) =>
+  activity.status === "running" ? "running" : activity.status === "error" ? "failed" : "done";
+
+/** One step, drawn like every other tool row: icon, label, detail, then what it touched. */
+function StepRow({ activity }: { activity: ResearchStepActivity }) {
+  const running = activity.status === "running";
+  const status = stepStatus(activity);
   if (activity.family === "skill")
-    return {
-      verb:
-        activity.status === "running"
-          ? "Using skill guidance"
-          : activity.status === "error"
-            ? "Skill guidance unavailable"
-            : "Used skill guidance",
-      items: [
-        {
-          key: activity.callId,
-          label: `${activity.skillName}${activity.path && activity.path !== "SKILL.md" ? ` · ${activity.path}` : ""}`,
-        },
-      ],
-    };
+    return (
+      <li className={stepClassName}>
+        <ActivityFace
+          icon={Book02Icon}
+          label={running ? `Using ${activity.skillName}` : `Used ${activity.skillName}`}
+          status={status}
+        />
+      </li>
+    );
   if (activity.family === "knowledge") {
-    const running = activity.status === "running";
     const count = activity.summary?.passagesReturned ?? 0;
-    const documents = activity.summary?.documentsListed ?? 0;
-    // Targets are opaque version ids: name what happened, not the handle.
-    return activity.name === "list_knowledge_documents"
-      ? {
-          verb: running ? "Listing documents" : "Listed documents",
-          items: running ? [] : [{ key: "count", label: `${documents} documents` }],
-        }
-      : activity.name === "search_knowledge"
-        ? {
-            verb: running ? "Searching knowledge" : "Searched knowledge",
-            items: [
-              ...(activity.summary?.targets ?? []).map((query) => ({
-                key: query,
-                label: `“${query}”`,
-              })),
-              ...(running ? [] : [{ key: "count", label: `${count} excerpts` }]),
-            ],
-          }
-        : {
-            verb: running ? "Reading documents" : "Read documents",
-            items: running ? [] : [{ key: "count", label: `${count} excerpts` }],
-          };
+    const listing = activity.name === "list_knowledge_documents";
+    const searching = activity.name === "search_knowledge";
+    return (
+      <li className="flex min-w-0 flex-col gap-1.5">
+        <div className={stepClassName}>
+          <ActivityFace
+            icon={FolderLibraryIcon}
+            label={
+              listing
+                ? running
+                  ? "Listing documents"
+                  : `Listed ${activity.summary?.documentsListed ?? 0} documents`
+                : searching
+                  ? running
+                    ? "Searching documents"
+                    : "Searched documents"
+                  : running
+                    ? "Reading documents"
+                    : "Read documents"
+            }
+            detail={
+              !running && !listing ? `${count} ${count === 1 ? "excerpt" : "excerpts"}` : null
+            }
+            status={status}
+          />
+        </div>
+        {searching ? <QueryChips queries={activity.summary?.targets ?? []} /> : null}
+      </li>
+    );
   }
   const targets = activity.targets.map((target) => target.trim()).filter(Boolean);
   if (activity.name === "read_url")
-    return {
-      verb: activity.status === "running" ? "Reading" : "Read",
-      items: targets.map((url) => ({ key: url, label: hostOf(url), url })),
-    };
-  return {
-    verb: activity.status === "running" ? "Searching" : "Searched",
-    items: targets.map((query) => ({ key: query, label: `“${query}”` })),
-  };
-};
-
-function ActivityRow({ activity }: { activity: ResearchStepActivity }) {
-  const { verb, items } = describe(activity);
-  const failed = activity.status === "error";
-  const resultCount = activity.family === "web" ? activity.resultCount : undefined;
-  return (
-    <li className="flex min-w-0 gap-2 py-1 text-xs leading-relaxed">
-      {/* h-lh: exactly one line of the text beside it, so the icon centres on
-          the first line whatever the font metrics. */}
-      <span className="flex h-lh shrink-0 items-center">
-        <MotionSwap value={activity.status} kind="icon" className="size-3.5">
-          {activity.status === "running" ? (
-            <Spinner aria-hidden className="text-muted-foreground size-3.5" />
-          ) : failed ? (
-            <HugeiconsIcon
-              icon={Alert02Icon}
-              strokeWidth={2}
-              className="text-warning size-3.5"
-              aria-hidden
-            />
-          ) : activity.family === "knowledge" || activity.family === "skill" ? (
-            <HugeiconsIcon
-              icon={File01Icon}
-              strokeWidth={2}
-              className="text-muted-foreground size-3.5"
-              aria-hidden
-            />
-          ) : activity.name === "read_url" ? (
-            <HugeiconsIcon
-              icon={Tick02Icon}
-              strokeWidth={2}
-              className="text-success size-3.5"
-              aria-hidden
-            />
-          ) : (
-            <HugeiconsIcon
-              icon={Search01Icon}
-              strokeWidth={2}
-              className="text-muted-foreground size-3.5"
-              aria-hidden
-            />
-          )}
-        </MotionSwap>
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className="text-muted-foreground">{verb} </span>
-        {items.map((item, index) => (
-          <span key={item.key} className="[overflow-wrap:anywhere]">
-            {index > 0 ? <span className="text-muted-foreground">, </span> : null}
-            {item.url ? (
-              <a
-                href={item.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="hover:text-primary transition-colors"
-              >
-                {/* Inline, not inline-flex: a flex box's baseline would be the
-                    image's bottom edge and push the label off the line. */}
-                <Favicon url={item.url} className="mr-1 inline-block size-3 align-[-2px]" />
-                {item.label}
-              </a>
-            ) : (
-              <span className="text-foreground">{item.label}</span>
-            )}
-          </span>
-        ))}
-        {resultCount !== undefined && activity.name !== "read_url" && !failed ? (
-          <span className="text-muted-foreground/70"> · {resultCount} results</span>
+    return (
+      <li className="flex min-w-0 flex-col gap-1">
+        <div className={stepClassName}>
+          <ActivityFace
+            glyph={<FaviconStack urls={targets.slice(0, 4)} />}
+            label={`${running ? "Reading" : status === "failed" ? "Couldn’t read" : "Read"} ${
+              targets.length === 1 ? "a page" : `${targets.length} pages`
+            }`}
+            status={status}
+          />
+        </div>
+        {targets.length > 0 ? (
+          <p className="text-muted-foreground pl-6 text-xs [overflow-wrap:anywhere]">
+            {targets.map((url, index) => (
+              <span key={url}>
+                {index > 0 ? ", " : null}
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="hover:text-foreground transition-colors"
+                >
+                  {hostOf(url)}
+                </a>
+              </span>
+            ))}
+          </p>
         ) : null}
+      </li>
+    );
+  return (
+    <li className="flex min-w-0 flex-col gap-1.5">
+      <div className={stepClassName}>
+        <ActivityFace
+          icon={Search01Icon}
+          label={
+            running
+              ? "Searching the web"
+              : status === "failed"
+                ? "Couldn’t search"
+                : "Searched the web"
+          }
+          detail={
+            activity.resultCount !== undefined && !running && status !== "failed"
+              ? `${activity.resultCount} results`
+              : null
+          }
+          status={status}
+        />
       </div>
+      <QueryChips queries={targets} />
     </li>
+  );
+}
+
+const stepClassName = "text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs";
+
+function QueryChips({ queries }: { queries: ReadonlyArray<string> }) {
+  if (!queries.length) return null;
+  return (
+    <div className="pl-6">
+      <ActivityQueries queries={queries} limit={3} />
+    </div>
   );
 }
 
@@ -204,31 +189,100 @@ function TaskGroup({
   activities: ResearchStepActivity[];
 }) {
   return (
-    <section className="min-w-0">
+    <section className="flex min-w-0 flex-col gap-2.5">
       {task ? (
         <header className="flex items-baseline gap-2">
           <h3 className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]">
             {task.title}
           </h3>
-          <span
-            className={cn(
-              "shrink-0 text-2xs uppercase tracking-wider",
-              task.status === "error" ? "text-warning" : "text-muted-foreground",
-            )}
-          >
-            <MotionSwap value={task.status}>{taskLabels[task.status]}</MotionSwap>
+          <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
+            {task.status === "error" ? (
+              <HugeiconsIcon
+                icon={Alert02Icon}
+                strokeWidth={2}
+                className="text-warning size-3.5"
+                aria-hidden
+              />
+            ) : null}
+            <MotionSwap value={task.status}>
+              <span className={cn(task.status === "running" && "text-shimmer")}>
+                {taskLabels[task.status]}
+              </span>
+            </MotionSwap>
           </span>
         </header>
       ) : null}
       {activities.length > 0 ? (
-        <ol className="mt-1 flex flex-col">
+        <ol className="flex flex-col gap-2.5">
           {activities.map((activity) => (
-            <ActivityRow key={activity.callId} activity={activity} />
+            <StepRow key={activity.callId} activity={activity} />
           ))}
         </ol>
       ) : task?.status === "queued" || task?.status === "running" ? (
-        <p className="text-muted-foreground mt-1 text-xs">Nothing yet.</p>
+        <p className="text-muted-foreground text-xs">Nothing yet.</p>
       ) : null}
+    </section>
+  );
+}
+
+/** The run's sources by site, as a reader sizes up what it drew on. */
+function SourceOverview({
+  activities,
+  running,
+}: {
+  activities: ResearchStepActivity[];
+  running: boolean;
+}) {
+  const bySite = new Map<string, { url: string; urls: Set<string> }>();
+  for (const activity of activities) {
+    if (activity.family !== "web") continue;
+    for (const source of activity.sources ?? []) {
+      if (source.kind === "document") continue;
+      const site = hostOf(source.url);
+      const entry = bySite.get(site) ?? { url: source.url, urls: new Set<string>() };
+      entry.urls.add(source.url);
+      bySite.set(site, entry);
+    }
+  }
+  const sites = [...bySite.entries()]
+    .map(([site, entry]) => ({ site, url: entry.url, count: entry.urls.size }))
+    .toSorted((a, b) => b.count - a.count);
+  const total = sites.reduce((sum, site) => sum + site.count, 0);
+  if (!total) return null;
+  const top = sites.slice(0, 4);
+  const most = top[0]!.count;
+  const rest = total - top.reduce((sum, site) => sum + site.count, 0);
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="text-muted-foreground flex items-center gap-1.5 text-sm">
+        <ActivityFace
+          glyph={<FaviconStack urls={top.map((site) => site.url)} />}
+          label={`${total} ${total === 1 ? "source" : "sources"}${running ? " so far" : ""}`}
+          status={running ? "running" : "done"}
+        />
+      </div>
+      <ul className="flex flex-col gap-1.5" aria-label="Sources by site">
+        {top.map((site) => (
+          <li key={site.site} className="flex min-w-0 items-center gap-2 text-xs">
+            <Favicon url={site.url} className="size-3.5" />
+            <span className="min-w-0 flex-1 truncate">{site.site}</span>
+            <span className="text-muted-foreground shrink-0 tabular-nums">
+              {site.count} {site.count === 1 ? "source" : "sources"}
+            </span>
+            <span className="bg-muted h-1 w-16 shrink-0 overflow-hidden rounded-full" aria-hidden>
+              <span
+                className="bg-muted-foreground/50 block h-full rounded-full"
+                style={{ width: `${Math.max(8, (site.count / most) * 100)}%` }}
+              />
+            </span>
+          </li>
+        ))}
+        {rest > 0 ? (
+          <li className="text-muted-foreground text-xs">
+            {rest} more {rest === 1 ? "source" : "sources"}
+          </li>
+        ) : null}
+      </ul>
     </section>
   );
 }
@@ -258,17 +312,22 @@ export function ResearchActivityBody({
   const empty = tasks.length === 0 && unassigned.length === 0;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      <SourceOverview activities={webActivities} running={running} />
       {empty ? (
         <p className="text-muted-foreground text-xs">
-          {running ? "Planning what to look into…" : "Nothing was researched."}
+          {running ? (
+            <span className="text-shimmer">Planning what to look into</span>
+          ) : (
+            "Nothing was researched."
+          )}
         </p>
       ) : null}
       {tasks.map((task) => (
         <TaskGroup key={task.id} task={task} activities={byTask.get(task.id) ?? []} />
       ))}
       {unassigned.length > 0 ? <TaskGroup task={null} activities={unassigned} /> : null}
-      {note && !running ? <p className="text-muted-foreground text-xs">{note}</p> : null}
+      {note && !running ? <ActivityNote>{note}</ActivityNote> : null}
     </div>
   );
 }

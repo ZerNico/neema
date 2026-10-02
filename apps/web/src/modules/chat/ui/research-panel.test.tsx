@@ -7,7 +7,7 @@ import type {
   WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
-import { ResearchPanelOwner } from "./research-panel.tsx";
+import { ResearchActivityBody, ResearchPanelOwner } from "./research-panel.tsx";
 import type { ResearchTaskProgress } from "../research-schema.ts";
 import { DetailPanelProvider, DetailPanelRail, DetailPanelToggle } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
@@ -133,8 +133,8 @@ describe("research panel", () => {
     const second = within(panel).getByText("Second topic");
     expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(panel).getByText("Investigating")).toBeInTheDocument();
-    expect(within(panel).getByText("Queued")).toBeInTheDocument();
-    expect(within(panel).getByText("“primary evidence”")).toBeInTheDocument();
+    expect(within(panel).getByText("Up next")).toBeInTheDocument();
+    expect(within(panel).getByText("primary evidence")).toBeInTheDocument();
     expect(within(panel).getByText(/20 results/)).toBeInTheDocument();
     expect(within(panel).getByRole("link", { name: /example\.org/ })).toHaveAttribute(
       "href",
@@ -179,13 +179,12 @@ describe("research panel", () => {
     expect(researchRow).toBeDefined();
     fireEvent.click(researchRow);
     const panel = screen.getByRole("complementary", { name: "Deep research" });
-    expect(within(panel).getByText("Listed documents")).toBeInTheDocument();
-    expect(within(panel).getByText("3 documents")).toBeInTheDocument();
+    expect(within(panel).getByText("Listed 3 documents")).toBeInTheDocument();
     expect(within(panel).getByText("Reading documents")).toBeInTheDocument();
     expect(within(panel).getByText("In progress")).toBeInTheDocument();
     expect(within(panel).queryByText(/version/)).not.toBeInTheDocument();
     const first = within(panel).getByText("First topic");
-    const listed = within(panel).getByText("Listed documents");
+    const listed = within(panel).getByText("Listed 3 documents");
     const second = within(panel).getByText("Second topic");
     expect(first.compareDocumentPosition(listed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(listed.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -195,12 +194,12 @@ describe("research panel", () => {
     const { rerender } = renderBubble();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
-    expect(within(panel).getByText("Queued")).toBeInTheDocument();
-    expect(within(panel).queryByText("“follow-up evidence”")).not.toBeInTheDocument();
+    expect(within(panel).getByText("Up next")).toBeInTheDocument();
+    expect(within(panel).queryByText("follow-up evidence")).not.toBeInTheDocument();
     // Virtualization evicts the opening bubble before the next stream chunk.
     rerender(tree(undefined, undefined, undefined, { visible: false }));
     expect(screen.queryByRole("button", { name: /Researching/ })).not.toBeInTheDocument();
-    expect(within(panel).getByText("Queued")).toBeInTheDocument();
+    expect(within(panel).getByText("Up next")).toBeInTheDocument();
     const later: WebToolActivity = {
       ...search,
       callId: "web-3",
@@ -230,13 +229,13 @@ describe("research panel", () => {
         { visible: false },
       ),
     );
-    expect(within(panel).getByText("“follow-up evidence”")).toBeInTheDocument();
+    expect(within(panel).getByText("follow-up evidence")).toBeInTheDocument();
     expect(within(panel).getAllByText("Investigating")).toHaveLength(2);
-    expect(within(panel).getByText("Queued").closest("[inert]")).toHaveAttribute(
+    expect(within(panel).getByText("Up next").closest("[inert]")).toHaveAttribute(
       "aria-hidden",
       "true",
     );
-    await waitFor(() => expect(within(panel).queryByText("Queued")).not.toBeInTheDocument());
+    await waitFor(() => expect(within(panel).queryByText("Up next")).not.toBeInTheDocument());
   });
 
   it("settles the header and shows terminal failures with the bubble unmounted", () => {
@@ -466,5 +465,59 @@ describe("research panel", () => {
     expect(screen.getByRole("complementary", { name: "Sources" })).toBe(sources);
     expect(within(sources).getByRole("link", { name: /Evidence/ })).toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Deep research" })).not.toBeInTheDocument();
+  });
+});
+
+describe("the research overview", () => {
+  it("sums the run's sources by site, most used first, with no tick on a page that loaded", () => {
+    const source = (index: number, url: string) => ({
+      kind: "web" as const,
+      index,
+      url,
+      title: url,
+      snippet: "",
+      read: false,
+    });
+    render(
+      <AppMotionProvider>
+        <ResearchActivityBody
+          running={false}
+          progress={undefined}
+          webActivities={[
+            {
+              family: "web",
+              callId: "s-1",
+              name: "web_search",
+              status: "complete",
+              targets: ["hormone therapy berlin"],
+              resultCount: 3,
+              sources: [
+                source(1, "https://awmf.org/a"),
+                source(2, "https://awmf.org/b"),
+                source(3, "https://bfarm.de/x"),
+              ],
+            },
+            {
+              family: "web",
+              callId: "r-1",
+              name: "read_url",
+              status: "complete",
+              targets: ["https://awmf.org/a"],
+            },
+          ]}
+        />
+      </AppMotionProvider>,
+    );
+    expect(screen.getByText("3 sources")).toBeInTheDocument();
+    const sites = within(screen.getByRole("list", { name: "Sources by site" }))
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(sites).toEqual(["awmf.org2 sources", "bfarm.de1 source"]);
+    expect(screen.getByText("Read a page")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "awmf.org" })).toHaveAttribute(
+      "href",
+      "https://awmf.org/a",
+    );
+    expect(document.querySelector(".text-success")).toBeNull();
   });
 });

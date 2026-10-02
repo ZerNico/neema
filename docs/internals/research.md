@@ -25,7 +25,7 @@ Deep research is a tool the model calls on an ordinary turn (`research/tool.ts`)
 
 ## Transcript and panels
 
-- The research row is one line: live phase plus current search/read while exploring, then `Researched N sources`. It settles when the call returns, not when the message completes — the answer streams below it with the ordinary "Thinking…" state. It opens the run's activity panel (`research-panel.tsx`, searches/reads grouped by task) under its own panel id.
+- The research row is one line: live phase plus current search/read while exploring, then `Researched N sources`. It settles when the call returns, not when the message completes — the answer streams below it with the ordinary "Thinking…" state. It opens the run's activity panel (`research-panel.tsx`) under its own panel id: the run's sources summed by site first, then searches and reads grouped by task, drawn through the transcript's `ActivityFace` so the panel reads like the rest of the answer (a shimmer while running, a warning only on failure, no tick on success). While the host writes the brief, a writing marker shows the row as starting. Task titles follow the `language` the host passes, since the coordinator never sees the conversation.
 - The detail panel snapshots its body at open; `ResearchPanelOwner` refreshes body/subtitle in a commit effect from the final persisted/live display. Selection is message + the chosen call's run id, independent of bubble mounts. A retry leaves no activity to render from, and stale chunks never arrive because the stream is fenced by the generation. Identity-checked refresh cannot reopen a closed panel or replace Sources. There is no module-level message cache or render-time publication.
 - The sources panel lists sources without an extraction badge: whether a page was read or only snippeted is model-facing (`evidenceManifest`), not reader-facing. Briefs and worker reports never render. `progress.limitations` is written for the answering turn and the run record only; the panel reduces it to one plain `coverageNote` and says nothing for routine cases (a provider hiccup on one of thirty calls, a report at its output cap, incomplete usage accounting). A failed task reads "Incomplete", not "Failed" — a failed read is never a user-facing limitation, the worker prompt just routes around it. A question card is the host's own `ask_user` activity and stands on its own.
 
@@ -35,7 +35,7 @@ Deep research is a tool the model calls on an ordinary turn (`research/tool.ts`)
 
 ## Search and outage detection
 
-- SearXNG returns HTTP 200 with `results: []` plus `unresponsive_engines` for both partial and total failure. The backend requests the enabled general engines from `/config` (respecting time-range support) and only fails when every requested engine is unresponsive. Missing config or a query bang selector leaves participation unknown, not evidence of a total outage; HTTP/transport failures still fail outright.
+- A query fails only when every configured search provider failed it; fallback between providers happens inside one admitted search ([web search](web-search.md)).
 - The budget counts consecutive failed backend queries across all workers (`observeSearch`), once per actual backend completion — never per tool batch, waiter, cache hit, cancellation or refusal. At `searchOutageThreshold` it latches `searchUnavailable`, which ends exploration and dispatch and adds one plain limitation: one failed search is the worker rephrasing, a run of them is the backend down.
 
 ## Prompt mechanics

@@ -95,7 +95,7 @@ const stackHosts = (sourceUrls: ReadonlyArray<string>, pages: ReadonlyArray<Tool
   return [...hosts.values()].slice(0, STACK_LIMIT);
 };
 
-function FaviconStack({ urls }: { urls: ReadonlyArray<string> }) {
+export function FaviconStack({ urls }: { urls: ReadonlyArray<string> }) {
   if (urls.length === 0)
     return <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />;
   return (
