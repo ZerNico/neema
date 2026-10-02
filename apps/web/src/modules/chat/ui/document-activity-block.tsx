@@ -4,7 +4,9 @@ import { useDocumentPanel } from "~/modules/documents/ui/document-owner.tsx";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
+import { disclosureTriggerClassName } from "~/ui/disclosure.tsx";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { ActivityFace } from "./activity-face.tsx";
 import {
   activityCardClassName,
   activityCardInteractiveClassName,
@@ -14,10 +16,10 @@ import {
 export function documentActivityLabel(activity: DocumentToolActivity) {
   const title = activity.result?.title;
   if (activity.status === "running") {
-    if (activity.name === "create_document") return "Creating document…";
+    if (activity.name === "create_document") return "Creating a document";
     if (activity.name === "edit_document" || activity.name === "replace_document")
-      return "Updating document…";
-    return "Reading documents…";
+      return "Updating the document";
+    return "Reading documents";
   }
   switch (activity.result?.outcome) {
     case "created":
@@ -31,7 +33,7 @@ export function documentActivityLabel(activity: DocumentToolActivity) {
     case "listed":
       return "Checked documents";
     default:
-      return "Document not updated";
+      return "Couldn’t update the document";
   }
 }
 
@@ -106,16 +108,14 @@ function DocumentActivityRow({
   documentId: string | undefined;
 }) {
   const { entry } = useDocumentPanel(documentId ?? "");
-  const label = (
-    <>
-      {documentActivityLabel(activity)}
-      {activity.status === "error" && (activity.error || activity.result?.message)
-        ? `: ${activity.error ?? activity.result?.message}`
-        : null}
-    </>
-  );
-  const icon = (
-    <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4 shrink-0" aria-hidden />
+  const failed = activity.status === "error" || !activity.result?.outcome;
+  const face = (
+    <ActivityFace
+      icon={File01Icon}
+      label={documentActivityLabel(activity)}
+      // The error was written for the model ("use a larger anchor"); the label says it in reader words.
+      status={activity.status === "running" ? "running" : failed ? "failed" : "done"}
+    />
   );
   // The row names a document that is open one click away, so it opens it rather
   // than making the person hunt for the card that created it.
@@ -125,24 +125,12 @@ function DocumentActivityRow({
         type="button"
         onClick={entry.open}
         aria-expanded={entry.expanded}
-        className={cn(
-          activityRowClassName,
-          focusRingClassName,
-          "mb-2 rounded-lg text-left hover:text-foreground",
-        )}
+        className={cn(disclosureTriggerClassName, focusRingClassName, "mb-2 rounded-lg")}
       >
-        {icon}
-        <span className="min-w-0 truncate">{label}</span>
+        {face}
       </button>
     );
-  return (
-    <div className={cn(activityRowClassName, "mb-2")}>
-      {icon}
-      <span className={cn("min-w-0", activity.status === "running" && "text-shimmer")}>
-        {label}
-      </span>
-    </div>
-  );
+  return <div className={cn(activityRowClassName, "mb-2")}>{face}</div>;
 }
 
 export function DocumentActivityBlock({ activity }: { activity: DocumentToolActivity }) {

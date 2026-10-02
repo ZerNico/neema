@@ -1754,7 +1754,7 @@ describe("MessageBubble actions", () => {
     });
 
     expect(screen.getByText("Saved to memory")).toBeInTheDocument();
-    expect(screen.getByText("Saving to memory…")).toBeInTheDocument();
+    expect(screen.getByText("Saving to memory")).toBeInTheDocument();
     expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByRole("button", { name: /memory/i })).toBeNull();
   });

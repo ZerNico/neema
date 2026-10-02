@@ -10,7 +10,7 @@ import { activityRowClassName } from "./activity-row.ts";
  * save that never completed (transport, defect, interruption) is an error.
  */
 export function memoryActivityLabel(activity: MemoryToolActivity): string {
-  if (activity.status === "running") return "Saving to memory…";
+  if (activity.status === "running") return "Saving to memory";
   const project = activity.scope === "project";
   if (activity.outcome === "created")
     return project ? "Saved to project memory" : "Saved to memory";

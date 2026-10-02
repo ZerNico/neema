@@ -64,7 +64,8 @@ describe("document activity", () => {
         })}
       />,
     );
-    expect(screen.getByText("Document not updated: Use a larger anchor.")).toBeVisible();
+    expect(screen.getByText("Couldn’t update the document")).toBeVisible();
+    expect(screen.queryByText(/larger anchor/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Open document/ })).not.toBeInTheDocument();
   });
 
@@ -78,7 +79,7 @@ describe("document activity", () => {
         callIndex: 0,
         status: "running",
       }),
-    ).toBe("Updating document…");
+    ).toBe("Updating the document");
     expect(
       documentActivityLabel(
         activity({
@@ -87,6 +88,6 @@ describe("document activity", () => {
           result: { outcome: "no_match", title: "Trip plan" },
         }),
       ),
-    ).toBe("Document not updated");
+    ).toBe("Couldn’t update the document");
   });
 });

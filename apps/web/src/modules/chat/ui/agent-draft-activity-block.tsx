@@ -1,7 +1,7 @@
 import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { AgentDraftToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 import { DraftWidget } from "./draft-widget.tsx";
 
@@ -12,14 +12,14 @@ import { DraftWidget } from "./draft-widget.tsx";
  */
 export function agentDraftActivityLabel(activity: AgentDraftToolActivity) {
   if (activity.status === "running") {
-    if (activity.name === "draft_agent") return "Preparing agent draft…";
+    if (activity.name === "draft_agent") return "Preparing the agent draft";
     return activity.name === "update_agent_draft"
-      ? "Updating agent draft…"
-      : "Checking agent settings…";
+      ? "Updating the agent draft"
+      : "Checking agent settings";
   }
   return activity.result?.outcome === "options"
     ? "Checked available options"
-    : "Agent draft not updated";
+    : "Couldn’t update the agent draft";
 }
 
 export function AgentDraftWidget({ draftId }: { draftId: string }) {
@@ -31,11 +31,18 @@ export function AgentDraftActivityBlock({ activity }: { activity: AgentDraftTool
   if (reference) return <AgentDraftWidget draftId={reference} />;
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
-      <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} className="size-4" aria-hidden />
       {/* The stored reason is for debugging (message_tool_calls.error), not the reader. */}
-      <span className={cn(activity.status === "running" && "text-shimmer")}>
-        {agentDraftActivityLabel(activity)}
-      </span>
+      <ActivityFace
+        icon={PencilEdit02Icon}
+        label={agentDraftActivityLabel(activity)}
+        status={
+          activity.status === "running"
+            ? "running"
+            : activity.result?.outcome === "options"
+              ? "done"
+              : "failed"
+        }
+      />
     </div>
   );
 }

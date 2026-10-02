@@ -52,16 +52,14 @@ export function ActivityFace({
         <span className={cn(status === "running" && "text-shimmer")}>{label}</span>
       </MotionSwap>
       {detail ? (
-        <>
-          <span className="text-muted-foreground/40 shrink-0">·</span>
-          <MotionSwap
-            value={detail}
-            kind="rolling-text"
-            className="text-muted-foreground/70 min-w-0"
-          >
+        // Reads exactly like a dot written into a label ("Searched the web · 3
+        // sources"): same colour, and about a space either side of the dot.
+        <span className="-ml-0.5 flex min-w-0 items-center gap-1">
+          <span className="shrink-0">·</span>
+          <MotionSwap value={detail} kind="rolling-text" className="min-w-0">
             {detail}
           </MotionSwap>
-        </>
+        </span>
       ) : null}
     </>
   );

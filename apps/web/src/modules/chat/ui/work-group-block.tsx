@@ -254,7 +254,9 @@ export function WorkGroupBlock({
         </span>
         {/* Counted, not alarming: a read the model worked around is no failure of the answer. */}
         {failed > 0 ? (
-          <span className="shrink-0">· {failed === 1 ? "1 failed" : `${failed} failed`}</span>
+          <span className="-ml-0.5 shrink-0">
+            · {failed === 1 ? "1 failed" : `${failed} failed`}
+          </span>
         ) : null}
         <ActivityChevron open={expanded || waiting} />
       </DisclosureTrigger>

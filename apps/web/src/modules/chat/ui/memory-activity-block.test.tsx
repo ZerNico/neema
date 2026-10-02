@@ -16,7 +16,7 @@ const activity = (
 
 describe("MemoryActivityBlock", () => {
   it.each([
-    [activity("running"), "Saving to memory…"],
+    [activity("running"), "Saving to memory"],
     [activity("complete", "created"), "Saved to memory"],
     [activity("complete", "updated"), "Updated memory"],
     [activity("complete", "unchanged"), "Memory already saved"],

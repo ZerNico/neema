@@ -1,19 +1,19 @@
 import { Calendar03Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { ScheduleDraftToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 import { DraftWidget } from "./draft-widget.tsx";
 
 /** Rows without a draft reference; anything naming a draft renders the widget. */
 export function scheduleDraftActivityLabel(activity: ScheduleDraftToolActivity) {
   if (activity.status === "running") {
-    if (activity.name === "draft_schedule") return "Preparing schedule draft…";
+    if (activity.name === "draft_schedule") return "Preparing the schedule draft";
     return activity.name === "update_schedule_draft"
-      ? "Updating schedule draft…"
-      : "Checking schedule drafts…";
+      ? "Updating the schedule draft"
+      : "Checking schedule drafts";
   }
-  return "Schedule draft not updated";
+  return "Couldn’t update the schedule draft";
 }
 
 export function ScheduleDraftWidget({ draftId }: { draftId: string }) {
@@ -27,10 +27,11 @@ export function ScheduleDraftActivityBlock({ activity }: { activity: ScheduleDra
   if (reference) return <ScheduleDraftWidget draftId={reference} />;
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
-      <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} className="size-4" aria-hidden />
-      <span className={cn(activity.status === "running" && "text-shimmer")}>
-        {scheduleDraftActivityLabel(activity)}
-      </span>
+      <ActivityFace
+        icon={Calendar03Icon}
+        label={scheduleDraftActivityLabel(activity)}
+        status={activity.status === "running" ? "running" : "failed"}
+      />
     </div>
   );
 }
