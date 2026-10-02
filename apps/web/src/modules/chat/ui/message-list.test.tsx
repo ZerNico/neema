@@ -158,7 +158,7 @@ describe("MessageBubble chronological body", () => {
     // and without a second label repeating the first.
     const header = screen.getByRole("button", { name: "Reading presentation" });
     expect(screen.queryByText("Reading slides")).toBeNull();
-    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.queryByText("Thinking")).toBeNull();
     fireEvent.click(header);
     expect(screen.getByText("Read slides 1–10")).toBeInTheDocument();
     expect(screen.getByText("Read slides 11–20")).toBeInTheDocument();
@@ -183,7 +183,7 @@ describe("MessageBubble chronological body", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: /^Working on presentation\s?Editing slides/ }),
+      screen.getByRole("button", { name: /^Working on presentation\s?·\s?Editing slides/ }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Creating the deck")).toBeNull();
     // While the model is still writing the call, the row says so.
@@ -210,7 +210,7 @@ describe("MessageBubble chronological body", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: /^Working on presentation\s?Writing changes/ }),
+      screen.getByRole("button", { name: /^Working on presentation\s?·\s?Writing changes/ }),
     ).toBeInTheDocument();
     rerender(<MessageBubble message={{ ...base, content: "", toolActivities: reads }} />);
     expect(screen.getByRole("button", { name: "Read presentation" })).toBeInTheDocument();
@@ -455,7 +455,7 @@ describe("MessageBubble chronological body", () => {
     expect(screen.getByText("Working on presentation")).toBeInTheDocument();
     // Keep the live label short; the individual steps are in the disclosure.
     expect(screen.getByText("Checking appearance")).toBeInTheDocument();
-    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.queryByText("Thinking")).toBeNull();
     rerender(
       <MessageBubble
         message={{
@@ -774,7 +774,7 @@ describe("MessageBubble", () => {
         }}
       />,
     );
-    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
   });
 
   it("shows a friendly alert for failed generations", () => {
@@ -1684,8 +1684,8 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getByText("Shortening earlier messages…")).toBeInTheDocument();
-    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.getByText("Shortening earlier messages")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking")).toBeNull();
     // Nothing to expand yet. A dead button would just be noise.
     expect(screen.queryByRole("button", { name: /Summarizing/ })).toBeNull();
   });
@@ -1741,7 +1741,7 @@ describe("MessageBubble actions", () => {
 
     expect(screen.getByText("Saved to memory")).toBeInTheDocument();
     expect(screen.getByText("Saving to memory…")).toBeInTheDocument();
-    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByRole("button", { name: /memory/i })).toBeNull();
   });
 
@@ -2171,7 +2171,7 @@ describe("generated image replies", () => {
     );
     expect(screen.queryByRole("link", { name: "Download image" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
     expect(screen.getByText("Loading image…")).toBeInTheDocument();
     fireEvent.load(img);
     expect(screen.queryByText("Loading image…")).not.toBeInTheDocument();
@@ -2236,7 +2236,7 @@ for (const [code, copy] of Object.entries(RESPONSE_FAILURES)) {
     expect(within(alert).getByText(copy.title)).toBeInTheDocument();
     expect(within(alert).getByText(copy.description)).toBeInTheDocument();
     expect(within(alert).queryByText("Technical details")).toBeNull();
-    expect(screen.queryByText("Thinking…")).toBeNull();
+    expect(screen.queryByText("Thinking")).toBeNull();
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     expect(onRetry).toHaveBeenCalledOnce();
   });

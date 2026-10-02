@@ -1,10 +1,4 @@
-import {
-  Alert02Icon,
-  ArrowDown01Icon,
-  ArrowRight01Icon,
-  GlobalSearchIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowRight01Icon, GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { ToolPageStatus, WebToolActivity } from "../client/use-message-stream.ts";
@@ -14,13 +8,11 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
-import { Badge } from "~/ui/primitives/badge";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 
-const QUERY_LIMIT = 4;
 const PAGE_LIMIT = 4;
 const STACK_LIMIT = 4;
 
@@ -229,48 +221,23 @@ export function ToolActivityBlock({
   }
   const visiblePages = showAllPages ? orderedPages : orderedPages.slice(0, PAGE_LIMIT);
   const hiddenPages = pages.length - visiblePages.length;
-  const hiddenQueries = queries.length - QUERY_LIMIT;
   const canViewSources = onViewSources !== undefined && sourceCount > 0 && !anyRunning;
   const hasDetails = queries.length > 0 || pages.length > 0 || failedSearches > 0 || canViewSources;
 
   return (
     <Disclosure open={expanded} onOpenChange={setExpanded} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <FaviconStack urls={stackHosts(sourceUrls, pages)} />
-        <span className={cn("min-w-0 truncate", anyRunning && "text-shimmer")}>{headerLabel}</span>
-        {hasDetails ? (
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(
-              disclosureChevronMotionClassName,
-              "size-3.5 shrink-0",
-              expanded && "rotate-180",
-            )}
-            aria-hidden
-          />
-        ) : null}
+        <ActivityFace
+          glyph={<FaviconStack urls={stackHosts(sourceUrls, pages)} />}
+          label={headerLabel}
+          status={anyRunning ? "running" : allFailed ? "failed" : "done"}
+        />
+        {hasDetails ? <ActivityChevron open={expanded} /> : null}
       </DisclosureTrigger>
       {hasDetails ? (
         <DisclosureContent>
           <div className={cn(disclosureBodyRailClassName, "flex flex-col gap-3")}>
-            {queries.length > 0 ? (
-              <ul className="flex flex-wrap gap-1.5" aria-label="Searches">
-                {queries.slice(0, QUERY_LIMIT).map((query) => (
-                  <li key={query} className="max-w-full">
-                    <Badge variant="secondary" className="max-w-full">
-                      <HugeiconsIcon icon={Search01Icon} strokeWidth={2} data-icon="inline-start" />
-                      <span className="truncate">{query}</span>
-                    </Badge>
-                  </li>
-                ))}
-                {hiddenQueries > 0 ? (
-                  <li>
-                    <Badge variant="outline">+{hiddenQueries} more</Badge>
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
+            <ActivityQueries queries={queries} />
             {pages.length > 0 ? (
               <ul className="flex flex-col gap-1.5" aria-label="Pages read">
                 {visiblePages.map((page) => (
@@ -290,11 +257,11 @@ export function ToolActivityBlock({
               </ul>
             ) : null}
             {failedSearches > 0 && !allFailed ? (
-              <p className="text-xs">
+              <ActivityNote>
                 {failedSearches === 1
                   ? "One search didn’t work."
                   : `${failedSearches} searches didn’t work.`}
-              </p>
+              </ActivityNote>
             ) : null}
             {canViewSources ? (
               <button

@@ -1,7 +1,7 @@
 import { Book02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { SkillToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 /**
@@ -20,12 +20,15 @@ export function SkillActivityBlock({ activities }: { activities: SkillToolActivi
   ];
   const running = activities.some((activity) => activity.status === "running");
   const label = names.length
-    ? `${running ? "Using" : "Used"} ${names.join(", ")}${running ? "…" : ""}`
-    : "Skill unavailable";
+    ? `${running ? "Using" : "Used"} ${names.join(", ")}`
+    : "Couldn’t load the skill";
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
-      <HugeiconsIcon icon={Book02Icon} strokeWidth={2} className="size-4" aria-hidden />
-      <span className={cn(running && "text-shimmer")}>{label}</span>
+      <ActivityFace
+        icon={Book02Icon}
+        label={label}
+        status={running ? "running" : names.length ? "done" : "failed"}
+      />
     </div>
   );
 }

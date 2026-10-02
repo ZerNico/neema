@@ -1,7 +1,7 @@
 import { Brain02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { MemoryToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
+import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 /**
@@ -31,11 +31,12 @@ export const isMemoryFailure = (activity: MemoryToolActivity) =>
 export function MemoryActivityBlock({ activity }: { activity: MemoryToolActivity }) {
   const running = activity.status === "running";
   return (
-    <div
-      className={cn(activityRowClassName, "mb-2", isMemoryFailure(activity) && "text-destructive")}
-    >
-      <HugeiconsIcon icon={Brain02Icon} strokeWidth={2} className="size-4" aria-hidden />
-      <span className={cn(running && "text-shimmer")}>{memoryActivityLabel(activity)}</span>
+    <div className={cn(activityRowClassName, "mb-2")}>
+      <ActivityFace
+        icon={Brain02Icon}
+        label={memoryActivityLabel(activity)}
+        status={running ? "running" : isMemoryFailure(activity) ? "failed" : "done"}
+      />
     </div>
   );
 }

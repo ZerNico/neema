@@ -1,5 +1,4 @@
-import { ArrowDown01Icon, CodeIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { CodeIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import type { CustomToolActivity } from "../client/use-message-stream.ts";
 import {
@@ -7,10 +6,10 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace, ActivityNote } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 import { workingFileState } from "./working-file-activity-block.tsx";
 
@@ -35,11 +34,12 @@ export function CustomToolActivityBlock({
   const [open, setOpen] = useState(false);
   const running = activity.status === "running";
   const failed = activity.status === "error";
+  const status = running ? "running" : failed ? "failed" : "done";
   const label = running
-    ? `Running ${activity.displayName}…`
+    ? `Running ${activity.displayName}`
     : failed
-      ? `${activity.displayName} failed`
-      : activity.displayName;
+      ? `Couldn’t run ${activity.displayName}`
+      : `Ran ${activity.displayName}`;
   const workingFiles = (activity.workingFiles ?? []).map((file) => ({
     file,
     state: workingFileState(published?.has(file.id) ?? false, terminal),
@@ -52,38 +52,20 @@ export function CustomToolActivityBlock({
 
   if (!activity.resultPreview && !activity.error && !workingFiles.length)
     return (
-      <div className={cn(activityRowClassName, "mb-2", failed && "text-destructive")}>
-        <HugeiconsIcon icon={CodeIcon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className={cn(running && "text-shimmer")}>{label}</span>
+      <div className={cn(activityRowClassName, "mb-2")}>
+        <ActivityFace icon={CodeIcon} label={label} status={status} />
       </div>
     );
 
   return (
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={CodeIcon} strokeWidth={2} className="size-4 shrink-0" aria-hidden />
-        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>
-          {label}
-          {workingState ? ` · ${workingState}` : ""}
-        </span>
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          className={cn(
-            "size-3.5 shrink-0",
-            disclosureChevronMotionClassName,
-            open && "rotate-180",
-          )}
-          aria-hidden
-        />
+        <ActivityFace icon={CodeIcon} label={label} detail={workingState} status={status} />
+        <ActivityChevron open={open} />
       </DisclosureTrigger>
       <DisclosureContent>
         <div className={disclosureBodyRailClassName}>
-          {failed && activity.error ? (
-            <p className="text-destructive mb-1 text-xs [overflow-wrap:anywhere]">
-              {activity.error}
-            </p>
-          ) : null}
+          {failed && activity.error ? <ActivityNote>{activity.error}</ActivityNote> : null}
           {workingFiles.map(({ file, state }) => (
             <p
               key={`${file.id}@${file.revision}`}

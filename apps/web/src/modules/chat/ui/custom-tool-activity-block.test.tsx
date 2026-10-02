@@ -18,7 +18,7 @@ describe("CustomToolActivityBlock", () => {
     const user = userEvent.setup();
     render(<CustomToolActivityBlock activity={failedActivity} />);
 
-    const trigger = screen.getByRole("button", { name: /Lookup failed/ });
+    const trigger = screen.getByRole("button", { name: /Couldn’t run Lookup/ });
     expect(screen.queryByText(failedActivity.error)).toBeNull();
 
     await user.click(trigger);
@@ -42,15 +42,17 @@ describe("CustomToolActivityBlock", () => {
     const { rerender } = render(
       <CustomToolActivityBlock activity={activity} published={new Set(["a"])} />,
     );
-    await user.click(screen.getByRole("button", { name: /^Build deck · Working/ }));
+    await user.click(screen.getByRole("button", { name: /^Ran Build deck\s?·\s?Working/ }));
     expect(screen.getByText("A.pptx · Published")).toBeInTheDocument();
     expect(screen.getByText("B.pptx · Working")).toBeInTheDocument();
     rerender(<CustomToolActivityBlock activity={activity} published={new Set(["a"])} terminal />);
     expect(screen.getByText("B.pptx · Draft")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Build deck · Draft/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Ran Build deck\s?·\s?Draft/ })).toBeInTheDocument();
     rerender(
       <CustomToolActivityBlock activity={activity} published={new Set(["a", "b"])} terminal />,
     );
-    expect(screen.getByRole("button", { name: /^Build deck · Published/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Ran Build deck\s?·\s?Published/ }),
+    ).toBeInTheDocument();
   });
 });

@@ -1,10 +1,4 @@
-import {
-  Alert02Icon,
-  ArrowDown01Icon,
-  Doc01Icon,
-  Presentation01Icon,
-  Xls01Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, Doc01Icon, Presentation01Icon, Xls01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState, type ReactNode } from "react";
 import {
@@ -12,14 +6,13 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
-import { MotionSwap } from "~/ui/motion.tsx";
-import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { OFFICE_FAMILIES, type OfficeFamily } from "~/modules/office/families.ts";
 import type { OfficeActivity } from "../client/use-message-stream.ts";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
+import { activityRowClassName } from "./activity-row.ts";
 import type { WorkingFilePart } from "./assistant-body.ts";
 
 type Step = WorkingFilePart["steps"][number];
@@ -305,15 +298,9 @@ export function WorkingFileActivityBlock({
     return (
       <>
         {failure ? (
-          <p className="text-muted-foreground mb-2 flex items-center gap-1.5 text-sm">
-            <HugeiconsIcon
-              icon={Alert02Icon}
-              strokeWidth={2}
-              className="text-destructive size-4"
-              aria-hidden
-            />
-            {failureLabel(failure)}
-          </p>
+          <div className={cn(activityRowClassName, "mb-2")}>
+            <ActivityFace label={failureLabel(failure)} status="failed" />
+          </div>
         ) : null}
         {children}
       </>
@@ -323,47 +310,19 @@ export function WorkingFileActivityBlock({
   const words = WORDING[office.family];
   const { edits, drafted } = partKind(part, words);
   const { live, primary, secondary } = rowLabels(part, state, edits, drafted, words);
+  const failed = !live && part.steps.every((step) => step.status === "error");
   return (
     <>
       <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
-        <DisclosureTrigger
-          className={cn(disclosureTriggerClassName, "h-5 max-w-full min-w-0")}
-          aria-busy={live || undefined}
-        >
-          <MotionSwap value={live ? "live" : "settled"} kind="icon" className="size-4 shrink-0">
-            {live ? (
-              <Spinner aria-hidden className="size-4" />
-            ) : (
-              <HugeiconsIcon icon={words.icon} strokeWidth={2} className="size-4" aria-hidden />
-            )}
-          </MotionSwap>
-          <MotionSwap
-            value={primary}
-            kind="rolling-text"
-            className={cn("min-w-0", live && "shrink-0")}
-          >
-            <span className={cn(live && "text-shimmer font-medium")}>{primary}</span>
-          </MotionSwap>
-          {secondary ? (
-            <>
-              <span className="text-muted-foreground/40 shrink-0" aria-hidden>
-                ·
-              </span>
-              <MotionSwap value={secondary} kind="rolling-text" className="min-w-0 truncate">
-                {secondary}
-              </MotionSwap>
-            </>
-          ) : null}
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(
-              disclosureChevronMotionClassName,
-              "size-3.5 shrink-0",
-              open && "rotate-180",
-            )}
-            aria-hidden
+        <DisclosureTrigger className={disclosureTriggerClassName} aria-busy={live || undefined}>
+          <ActivityFace
+            icon={words.icon}
+            label={primary}
+            // "Couldn’t read the presentation · 1 step failed" says it twice.
+            detail={failed ? null : secondary}
+            status={live ? "running" : failed ? "failed" : "done"}
           />
+          <ActivityChevron open={open} />
         </DisclosureTrigger>
         <DisclosureContent>
           <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
@@ -373,7 +332,7 @@ export function WorkingFileActivityBlock({
                   <HugeiconsIcon
                     icon={Alert02Icon}
                     strokeWidth={2}
-                    className="text-destructive mt-0.5 size-3.5 shrink-0"
+                    className="text-warning mt-0.5 size-3.5 shrink-0"
                     aria-label="Failed"
                   />
                 ) : null}

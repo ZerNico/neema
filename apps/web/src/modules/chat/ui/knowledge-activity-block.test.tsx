@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { KnowledgeToolActivity } from "../client/use-message-stream.ts";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
@@ -53,8 +53,12 @@ describe("knowledge activity block", () => {
     // Collapsed by default once nothing is running: the queries are not on the row.
     expect(screen.queryByText(/BIÖG Richtlinien/)).toBeNull();
     fireEvent.click(trigger);
-    expect(screen.getByText("“BIÖG Richtlinien”, “BIÖG”, “Barrierefreiheit”")).toBeInTheDocument();
-    expect(screen.getByText(/keyword search/)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("list", { name: "Searches" }))
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["BIÖG Richtlinien", "BIÖG", "Barrierefreiheit"]);
+    expect(screen.getByText("Matched by keywords only")).toBeInTheDocument();
     expect(screen.getByText("Read 2 excerpts in full")).toBeInTheDocument();
     // Opaque version ids never appear.
     expect(screen.queryByText(/v1/)).toBeNull();
@@ -62,9 +66,12 @@ describe("knowledge activity block", () => {
 
   it("shows the live step while running and names the queries as soon as they are known", () => {
     show([activity({ status: "running", summary: summary({ targets: ["one"] }) })]);
-    expect(screen.getByText("Searching documents…")).toBeInTheDocument();
-    // Open while running: what it is searching for is visible immediately.
-    expect(screen.getByText("“one”")).toBeInTheDocument();
+    const header = screen.getByRole("button", { name: "Searching documents" });
+    // Folded while running, as the work line around it is what opens; the
+    // query is there as soon as it is known.
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(header);
+    expect(screen.getByText("one")).toBeInTheDocument();
   });
 
   it("counts a listing without pretending it read anything", () => {

@@ -48,7 +48,7 @@ describe("summary-only skill activity", () => {
     expect(step?.kind).toBe("skill");
     if (step?.kind !== "skill") throw new Error("missing skill group");
     render(<SkillActivityBlock activities={step.activities} />);
-    expect(screen.getByText("Using Review…")).toBeVisible();
+    expect(screen.getByText("Using Review")).toBeVisible();
     // The row said the skill's name; a disclosure would only repeat it.
     expect(screen.queryByRole("button")).toBeNull();
   });

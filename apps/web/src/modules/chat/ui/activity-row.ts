@@ -5,7 +5,8 @@
  * affordance, so keeping both in one place stops the two from drifting
  * apart, since a message shows them stacked.
  */
-export const activityRowClassName = "text-muted-foreground flex items-center gap-1.5 text-sm";
+export const activityRowClassName =
+  "text-muted-foreground flex max-w-full min-w-0 items-center gap-1.5 text-sm";
 
 /**
  * The card an activity renders when it names a document or draft: icon, two

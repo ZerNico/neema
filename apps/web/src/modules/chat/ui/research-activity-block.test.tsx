@@ -104,7 +104,7 @@ describe("research activity", () => {
     const row = screen.getByRole("button", { name: /Researching/ });
     const label = screen.getByText("Searching “First”");
     const phase = screen.getByText("Researching");
-    const spinner = row.querySelector("svg");
+    const icon = row.querySelector("svg");
     expect(label.parentElement).toHaveClass("h-5", "overflow-hidden");
     rerender(tree("First"));
     expect(screen.getByText("Searching “First”")).toBe(label);
@@ -112,13 +112,15 @@ describe("research activity", () => {
     rerender(tree("Latest"));
     // The phase and the rolling target are separate spans; jsdom keeps them
     // inline, so the space a browser derives from the grid is absent.
-    expect(screen.getByRole("button", { name: /^Researching\s?Searching “Latest”$/ })).toBe(row);
+    expect(screen.getByRole("button", { name: /^Researching\s?·\s?Searching “Latest”$/ })).toBe(
+      row,
+    );
     expect(screen.queryByText("Searching “First”")).toBeNull();
     expect(row.querySelectorAll("[inert]")).toHaveLength(1);
     const latest = screen.getByText("Searching “Latest”");
     expect(latest.style.transform).toContain("translateY(100%)");
     expect(screen.getByText("Researching")).toBe(phase);
-    expect(row.querySelector("svg")).toBe(spinner);
+    expect(row.querySelector("svg")).toBe(icon);
     await waitFor(() => expect(row.querySelector("[inert]")).toBeNull());
     expect(latest.style.transform).toBe("none");
     rerender(tree("Latest", true));

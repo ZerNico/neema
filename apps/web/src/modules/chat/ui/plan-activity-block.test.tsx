@@ -56,10 +56,10 @@ describe("checklist activity", () => {
 
   it("shows a plain row while updating and when the call failed", () => {
     const running = show(activity(undefined, "running"));
-    expect(screen.getByText("Updating checklist…")).toBeInTheDocument();
+    expect(screen.getByText("Updating the checklist")).toBeInTheDocument();
     running.unmount();
     show(activity(undefined, "error"));
-    expect(screen.getByText("Checklist unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t update the checklist")).toBeInTheDocument();
   });
 
   it("replaces the previous list from the stream rather than appending to it", () => {

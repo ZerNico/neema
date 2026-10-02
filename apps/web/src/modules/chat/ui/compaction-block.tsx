@@ -1,21 +1,20 @@
-import { ArrowDown01Icon, ArrowShrink02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { ArrowShrink02Icon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import {
   Disclosure,
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 export type CompactionStatus = "running" | "complete" | "failed";
 
 const LABELS: Record<CompactionStatus, string> = {
-  running: "Shortening earlier messages…",
+  running: "Shortening earlier messages",
   complete: "Earlier messages shortened",
   failed: "Couldn’t shorten earlier messages",
 };
@@ -41,31 +40,27 @@ export function CompactionBlock({
   className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const running = status === "running";
+  const face = (label: string) => (
+    <ActivityFace
+      icon={ArrowShrink02Icon}
+      label={label}
+      status={status === "complete" ? "done" : status}
+    />
+  );
   const label =
     status === "complete" && outcome === "hard_truncation"
       ? "Earlier messages left out"
       : LABELS[status];
 
   if (!summary) {
-    return (
-      <div className={cn(activityRowClassName, className)}>
-        <HugeiconsIcon icon={ArrowShrink02Icon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className={cn(running && "text-shimmer")}>{label}</span>
-      </div>
-    );
+    return <div className={cn(activityRowClassName, className)}>{face(label)}</div>;
   }
 
   return (
     <Disclosure open={expanded} onOpenChange={setExpanded} className={className}>
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={ArrowShrink02Icon} strokeWidth={2} className="size-4" />
-        <span>{label}</span>
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
-        />
+        {face(label)}
+        <ActivityChevron open={expanded} />
       </DisclosureTrigger>
       <DisclosureContent>
         <p className={cn(disclosureBodyRailClassName, "whitespace-pre-wrap")}>{summary}</p>

@@ -1,13 +1,13 @@
 import { GlobalSearchIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { ResearchToolActivity } from "../client/use-message-stream.ts";
 import type { ResearchStepActivity } from "./research-panel.tsx";
 import type { ResearchPhase } from "../research-schema.ts";
 import { hostOf } from "./favicon.tsx";
-import { Spinner } from "~/ui/primitives/spinner";
+import { disclosureTriggerClassName } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
-import { MotionSwap } from "~/ui/motion.tsx";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { ActivityFace } from "./activity-face.tsx";
+import { activityRowClassName } from "./activity-row.ts";
 
 // Deliberately one line. What a reader wants inline is "is it still going, and
 // on what", then "what did it read". The plan, task list and per-task activity
@@ -65,15 +65,6 @@ export function ResearchActivityBlock({
 }) {
   const progress = activity.progress;
   const phase = progress?.phase;
-  // max-w-full: a button is shrink-to-fit, and a long unbreakable target (a
-  // URL, a query without spaces) would size it past the bubble before the
-  // detail span ever got the chance to truncate.
-  const rowClassName = "mb-3 flex max-w-full min-w-0 items-center gap-2 text-sm";
-  const buttonClassName = cn(
-    focusRingClassName,
-    "hover:text-foreground rounded-lg text-left transition-colors",
-  );
-
   // The row settles when the call returns; the answer streams in below it like
   // any other reply.
   const running = activity.status === "running";
@@ -90,39 +81,15 @@ export function ResearchActivityBlock({
   const note = sources > 0 && early ? early.note : null;
   const primary = running ? activeLabels[phase ?? "researching"] : label;
   const secondary = running ? detail : note;
+  const failed = phase === "error" && sources === 0;
   const body = (
-    <>
-      <MotionSwap value={running ? "running" : "settled"} kind="icon" className="size-4 shrink-0">
-        {running ? (
-          <Spinner aria-hidden className="size-4" />
-        ) : (
-          <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} className="size-4" aria-hidden />
-        )}
-      </MotionSwap>
-      <MotionSwap
-        value={primary}
-        kind="rolling-text"
-        className={cn("min-w-0", running && "shrink-0")}
-      >
-        <span className={cn(running && "text-shimmer font-medium")}>{primary}</span>
-      </MotionSwap>
-      {secondary ? (
-        <>
-          <span className="text-muted-foreground/40 shrink-0" aria-hidden>
-            ·
-          </span>
-          <MotionSwap
-            value={secondary}
-            kind="rolling-text"
-            className="text-muted-foreground min-w-0 truncate"
-          >
-            {secondary}
-          </MotionSwap>
-        </>
-      ) : null}
-    </>
+    <ActivityFace
+      icon={GlobalSearchIcon}
+      label={primary}
+      detail={secondary}
+      status={running ? "running" : failed ? "failed" : "done"}
+    />
   );
-  const className = cn(rowClassName, "text-muted-foreground h-5");
 
   return onOpen ? (
     <button
@@ -130,12 +97,16 @@ export function ResearchActivityBlock({
       onClick={onOpen}
       aria-live="polite"
       aria-busy={running || undefined}
-      className={cn(className, buttonClassName)}
+      className={cn(disclosureTriggerClassName, focusRingClassName, "mb-2 rounded-lg")}
     >
       {body}
     </button>
   ) : (
-    <div className={className} aria-live="polite" aria-busy={running || undefined}>
+    <div
+      className={cn(activityRowClassName, "mb-2")}
+      aria-live="polite"
+      aria-busy={running || undefined}
+    >
       {body}
     </div>
   );

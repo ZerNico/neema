@@ -1,5 +1,4 @@
-import { ArrowDown01Icon, AiBrain01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { AiBrain01Icon } from "@hugeicons/core-free-icons";
 import { memo, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import {
@@ -7,11 +6,11 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
@@ -54,9 +53,8 @@ export const ReasoningBlock = memo(function ReasoningBlock({
   if (!hasContent) {
     if (!active) return null;
     return (
-      <div className={cn(activityRowClassName, "mb-2 gap-2")}>
-        <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className="text-shimmer">Thinking…</span>
+      <div className={cn(activityRowClassName, "mb-2")}>
+        <ActivityFace icon={AiBrain01Icon} label="Thinking" status="running" />
       </div>
     );
   }
@@ -68,15 +66,12 @@ export const ReasoningBlock = memo(function ReasoningBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className={cn(active && "text-shimmer")}>
-          {active ? "Thinking…" : "Thought process"}
-        </span>
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
+        <ActivityFace
+          icon={AiBrain01Icon}
+          label={active ? "Thinking" : "Thought process"}
+          status={active ? "running" : "done"}
         />
+        <ActivityChevron open={expanded} />
       </DisclosureTrigger>
       <DisclosureContent>
         <div

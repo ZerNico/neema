@@ -1,15 +1,15 @@
 import { Folder01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "~/ui/utils";
 import type { ProjectFileToolActivity } from "../client/use-message-stream.ts";
+import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 export function projectFileActivityLabel(activity: ProjectFileToolActivity) {
   const name = activity.result?.fileName;
   if (activity.status === "running") {
-    if (activity.name === "save_project_file") return "Saving to the project…";
-    if (activity.name === "read_project_file") return "Reading a project file…";
-    return "Checking project files…";
+    if (activity.name === "save_project_file") return "Saving to the project";
+    if (activity.name === "read_project_file") return "Reading a project file";
+    return "Checking project files";
   }
   switch (activity.result?.outcome) {
     case "listed":
@@ -32,11 +32,18 @@ export function ProjectFileActivityRow({ activity }: { activity: ProjectFileTool
   const detail = activity.status === "error" ? (activity.error ?? activity.result?.message) : null;
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
-      <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-4 shrink-0" aria-hidden />
-      <span className={cn("min-w-0", activity.status === "running" && "text-shimmer")}>
-        {projectFileActivityLabel(activity)}
-        {detail ? `: ${detail}` : null}
-      </span>
+      <ActivityFace
+        icon={Folder01Icon}
+        label={projectFileActivityLabel(activity)}
+        detail={detail}
+        status={
+          activity.status === "running"
+            ? "running"
+            : activity.status === "error"
+              ? "failed"
+              : "done"
+        }
+      />
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import {
-  ArrowDown01Icon,
   Delete02Icon,
   Download04Icon,
   FileImportIcon,
@@ -32,10 +31,10 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
@@ -408,15 +407,11 @@ export function DesktopActivityBlock({
   // A command or a long path must never widen the column: the row truncates
   // and the body wraps, so the transcript stays as wide as the chat.
   const face = (
-    <>
-      <HugeiconsIcon
-        icon={iconOf(activity.name)}
-        strokeWidth={2}
-        className="size-4 shrink-0"
-        aria-hidden
-      />
-      <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
-    </>
+    <ActivityFace
+      icon={iconOf(activity.name)}
+      label={label}
+      status={running ? "running" : failed ? "failed" : "done"}
+    />
   );
 
   if (running || detail.length === 0) {
@@ -425,26 +420,14 @@ export function DesktopActivityBlock({
         <button
           type="button"
           onClick={preview.open}
-          className={cn(
-            disclosureTriggerClassName,
-            "mb-2 min-w-0 max-w-full text-left",
-            failed && "text-destructive",
-          )}
+          className={cn(disclosureTriggerClassName, "mb-2")}
         >
           {face}
         </button>
         {preview.dialog}
       </>
     ) : (
-      <div
-        className={cn(
-          activityRowClassName,
-          "mb-2 min-w-0 max-w-full",
-          failed && "text-destructive",
-        )}
-      >
-        {face}
-      </div>
+      <div className={cn(activityRowClassName, "mb-2")}>{face}</div>
     );
   }
 
@@ -453,13 +436,11 @@ export function DesktopActivityBlock({
       {preview ? (
         // Two targets, because the row now answers two questions: what the file
         // holds now, and what the call did to it.
-        <div
-          className={cn("flex min-w-0 max-w-full items-center gap-1", failed && "text-destructive")}
-        >
+        <div className="flex min-w-0 max-w-full items-center gap-1">
           <button
             type="button"
             onClick={preview.open}
-            className={cn(disclosureTriggerClassName, "min-w-0 flex-1 text-left")}
+            className={cn(disclosureTriggerClassName, "flex-1")}
           >
             {face}
           </button>
@@ -468,23 +449,13 @@ export function DesktopActivityBlock({
             className={cn(disclosureTriggerClassName, "shrink-0")}
             aria-label="Show what this call did"
           >
-            <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              strokeWidth={2}
-              className={cn(disclosureChevronMotionClassName, "size-3.5", open && "rotate-180")}
-              aria-hidden
-            />
+            <ActivityChevron open={open} />
           </DisclosureTrigger>
         </div>
       ) : (
-        <DisclosureTrigger
-          className={cn(
-            disclosureTriggerClassName,
-            "min-w-0 max-w-full",
-            failed && "text-destructive",
-          )}
-        >
+        <DisclosureTrigger className={disclosureTriggerClassName}>
           {face}
+          <ActivityChevron open={open} />
         </DisclosureTrigger>
       )}
       <DisclosureContent>

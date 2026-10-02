@@ -1,5 +1,6 @@
-import { ArrowDown01Icon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useState } from "react";
 import { BROWSER_ACTIVITY } from "~/modules/browser/ui/browser-activity.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import {
@@ -7,14 +8,13 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
-import { useRunDisclosure } from "./use-run-disclosure.ts";
 
 type Page = { url: string; title: string };
 
@@ -57,18 +57,16 @@ function PageLink({ page }: { page: Page }) {
 export function BrowserActivityBlock({
   activities,
   approvals,
-  live = false,
 }: {
   activities: DesktopToolActivity[];
-  /** The newest part of a streaming answer, which keeps the row open. */
-  live?: boolean;
   approvals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
 }) {
   const running = activities.find((activity) => activity.status === "running");
   const waiting = activities.find(
     (activity) => activity.status === "running" && approvals?.has(activity.callId),
   );
-  const { expanded, onOpenChange } = useRunDisclosure(running !== undefined || live);
+  // Folded until clicked: the work line around it is what opens while it runs.
+  const [expanded, setExpanded] = useState(false);
   if (activities.length === 0) return null;
 
   const sites = [
@@ -100,17 +98,22 @@ export function BrowserActivityBlock({
   const approval = waiting ? approvals?.get(waiting.callId) : undefined;
   return (
     <>
-      <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
+      <Disclosure open={expanded} onOpenChange={setExpanded} className="mb-2">
         <DisclosureTrigger className={disclosureTriggerClassName}>
-          <HugeiconsIcon icon={Globe02Icon} strokeWidth={2} className="size-4" aria-hidden />
-          <span className={cn("min-w-0 truncate", running && !waiting && "text-shimmer")}>
-            {headerLabel}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
+          <ActivityFace
+            icon={Globe02Icon}
+            label={headerLabel}
+            status={
+              waiting
+                ? "waiting"
+                : running
+                  ? "running"
+                  : failed === activities.length
+                    ? "failed"
+                    : "done"
+            }
           />
+          <ActivityChevron open={expanded} />
         </DisclosureTrigger>
         <DisclosureContent>
           <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
@@ -123,14 +126,16 @@ export function BrowserActivityBlock({
                   <span
                     className={cn(
                       "flex min-w-0 items-center gap-2",
-                      activity.status === "error" && "text-destructive",
                       activity.status === "running" && "text-shimmer",
                     )}
                   >
                     <HugeiconsIcon
-                      icon={icon}
+                      icon={activity.status === "error" ? Alert02Icon : icon}
                       strokeWidth={2}
-                      className="size-4 shrink-0"
+                      className={cn(
+                        "size-4 shrink-0",
+                        activity.status === "error" && "text-warning",
+                      )}
                       aria-hidden
                     />
                     <span className="min-w-0 truncate">{lineOf(activity)}</span>

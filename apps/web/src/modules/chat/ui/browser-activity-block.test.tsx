@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { BrowserActivityBlock } from "./browser-activity-block.tsx";
@@ -37,11 +37,10 @@ const step = (
 const block = (
   activities: DesktopToolActivity[],
   approvals?: Parameters<typeof BrowserActivityBlock>[0]["approvals"],
-  live = false,
 ) => (
   <QueryClientProvider client={client}>
     <AppMotionProvider>
-      <BrowserActivityBlock activities={activities} approvals={approvals} live={live} />
+      <BrowserActivityBlock activities={activities} approvals={approvals} />
     </AppMotionProvider>
   </QueryClientProvider>
 );
@@ -51,7 +50,6 @@ const show = (
   approvals?: Parameters<typeof BrowserActivityBlock>[0]["approvals"],
 ) => render(block(activities, approvals));
 
-const row = () => screen.getByRole("button", { name: /Browsed example\.com/ });
 const example = { url: "https://example.com/", title: "Example Domain" };
 const iana = { url: "https://www.iana.org/domains", title: "Domain Name Services" };
 
@@ -97,20 +95,14 @@ describe("browser activity block", () => {
     expect(screen.getByText("the “Learn more” link")).toBeInTheDocument();
   });
 
-  it("stays open between calls while it is the newest part, and closes once something follows", () => {
-    vi.useFakeTimers();
-    try {
-      const opened = step("browser_open", "Opened example.com", example);
-      const view = render(block([opened], undefined, true));
-      // The model is deciding its next call: nothing runs, yet the row stays open.
-      act(() => vi.advanceTimersByTime(5_000));
-      expect(row()).toHaveAttribute("aria-expanded", "true");
-      view.rerender(block([opened], undefined, false));
-      act(() => vi.advanceTimersByTime(1_000));
-      expect(row()).toHaveAttribute("aria-expanded", "false");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("stays folded while running, since the work line around it is what opens", () => {
+    const { result: _none, ...open } = step("browser_open", "", undefined, {
+      status: "running",
+      args: { url: "https://example.com" },
+    });
+    show([open]);
+    const header = screen.getAllByRole("button")[0]!;
+    expect(header).toHaveAttribute("aria-expanded", "false");
   });
 
   it("owns up when nothing worked", () => {

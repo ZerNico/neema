@@ -1,17 +1,15 @@
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import {
   Disclosure,
   DisclosureContent,
   DisclosureTrigger,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkPart, WorkStep } from "./assistant-body.ts";
+import { ActivityChevron } from "./activity-face.tsx";
 import { useRunDisclosure } from "./use-run-disclosure.ts";
 
 /** The calls behind a step, for timing, failures and what is running. */
@@ -168,7 +166,7 @@ export function WorkGroupBlock({
   part: WorkPart;
   /** The newest part of a streaming answer. */
   live: boolean;
-  renderStep: (step: WorkStep, live: boolean) => ReactNode;
+  renderStep: (step: WorkStep) => ReactNode;
 }) {
   const calls = part.steps.flatMap(stepActivities);
   const running = live || calls.some((call) => call.status === "running");
@@ -192,25 +190,12 @@ export function WorkGroupBlock({
         {failed > 0 ? (
           <span className="shrink-0">· {failed === 1 ? "1 failed" : `${failed} failed`}</span>
         ) : null}
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          className={cn(
-            disclosureChevronMotionClassName,
-            "size-3.5 shrink-0",
-            expanded && "rotate-180",
-          )}
-          aria-hidden
-        />
+        <ActivityChevron open={expanded} />
       </DisclosureTrigger>
       <DisclosureContent>
         {/* Flush, not railed: each step row draws its own rail, and a second one
             around them nested two borders where ChatGPT shows a plain list. */}
-        <div className="mt-2 flex flex-col">
-          {part.steps.map((step, index) =>
-            renderStep(step, live && index === part.steps.length - 1),
-          )}
-        </div>
+        <div className="mt-2 flex flex-col">{part.steps.map((step) => renderStep(step))}</div>
       </DisclosureContent>
     </Disclosure>
   );

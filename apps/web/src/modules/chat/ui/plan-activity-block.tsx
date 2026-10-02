@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, CheckListIcon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { CheckListIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { PlanToolActivity } from "../client/use-message-stream.ts";
@@ -7,11 +7,11 @@ import {
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
+import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 /**
@@ -28,44 +28,28 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
   const done = steps.filter((step) => step.status === "completed").length;
   const current = steps.find((step) => step.status === "in_progress");
   const label = running
-    ? "Updating checklist…"
+    ? "Updating the checklist"
     : activity.status === "error" || steps.length === 0
-      ? "Checklist unavailable"
+      ? "Couldn’t update the checklist"
       : (current?.step ?? `Checklist · ${done} of ${steps.length} done`);
 
   if (steps.length === 0)
     return (
       <div className={cn(activityRowClassName, "mb-2")}>
-        <HugeiconsIcon icon={CheckListIcon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className={cn(running && "text-shimmer")}>{label}</span>
+        <ActivityFace icon={CheckListIcon} label={label} status={running ? "running" : "failed"} />
       </div>
     );
 
   return (
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon
+        <ActivityFace
           icon={CheckListIcon}
-          strokeWidth={2}
-          className="size-4 shrink-0"
-          aria-hidden
+          label={label}
+          detail={current ? `${done} of ${steps.length}` : null}
+          status={running ? "running" : activity.status === "error" ? "failed" : "done"}
         />
-        <span className="min-w-0 truncate">{label}</span>
-        {current ? (
-          <span className="text-muted-foreground/70 shrink-0 text-xs">
-            · {done} of {steps.length}
-          </span>
-        ) : null}
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          className={cn(
-            "size-3.5 shrink-0",
-            disclosureChevronMotionClassName,
-            open && "rotate-180",
-          )}
-          aria-hidden
-        />
+        <ActivityChevron open={open} />
       </DisclosureTrigger>
       <DisclosureContent>
         <ol className={disclosureBodyRailClassName}>

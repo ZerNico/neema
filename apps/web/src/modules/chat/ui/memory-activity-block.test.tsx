@@ -28,14 +28,14 @@ describe("MemoryActivityBlock", () => {
   });
 
   // A refusal is the model's decision, not something the user can fix, so it
-  // must not wear the destructive colour that marks an actual failure.
-  it("styles a transport failure as an error but a refusal as an ordinary outcome", () => {
+  // must not wear the warning that marks an actual failure.
+  it("marks a transport failure with a warning but a refusal as an ordinary outcome", () => {
     const { container: refused } = render(
       <MemoryActivityBlock activity={{ ...activity("error", "rejected"), reason: "sensitive" }} />,
     );
-    expect(refused.firstElementChild).not.toHaveClass("text-destructive");
+    expect(refused.querySelector(".text-warning")).toBeNull();
     const { container: failed } = render(<MemoryActivityBlock activity={activity("error")} />);
-    expect(failed.firstElementChild).toHaveClass("text-destructive");
+    expect(failed.querySelector(".text-warning")).not.toBeNull();
   });
 
   it("never renders disclosure controls, links, favicons, or memory content", () => {

@@ -301,13 +301,19 @@ false`), so a page body is written against data already there. This includes loc
 - `activityRowClassName` (`src/modules/chat/ui/activity-row.ts`) is the one-line transcript summary row,
   sitting beside `disclosureTriggerClassName` — a message stacks both. Chat disclosures use
   `~/ui/disclosure.tsx` for measured-height/opacity animation, reduced-motion and hidden-until-found
-  handling; keep each consumer's open state and scroll behavior local. A row for a run of calls
-  (knowledge, browser, the work line) opens through `useRunDisclosure`: while a call runs or the
-  row is still the newest part of a streaming answer, then a moment after. Without the second
-  rule it would close while the model decides its next call and reopen when it makes it. The
-  web row is the exception: it stays folded until clicked, because the open work line around it
-  already shows the work, and its header carries the live detail instead ("Searching for …",
-  "Reading example.com") beside a stack of the sites' icons. Only a page that failed is marked.
+  handling; keep each consumer's open state and scroll behavior local.
+- Every tool row draws its content through `ActivityFace` (`activity-face.tsx`), whatever wraps
+  it: the family's icon, a label that rolls when it changes and an optional detail after a dot.
+  Running is a shimmer on the label, never a spinner or bold text; a failure swaps the icon for
+  a warning and says "Couldn’t …" in words, never red text, because a step the answer worked
+  around is not a fault the person must act on. Labels carry no trailing "…". Body lines use
+  `ActivityNote` for failures and `ActivityQueries` for search terms, and the chevron is
+  `ActivityChevron`. A new family uses these rather than restating them.
+- Only the work line opens by itself, through `useRunDisclosure`: while a call runs or it is
+  still the newest part of a streaming answer, then a moment after, so it does not close while
+  the model decides its next call. The step rows inside it stay folded until clicked, since the
+  open line already shows the work; their headers carry the live detail instead ("Searching for
+  …", "Reading example.com"), and the web row shows a stack of the sites' icons.
 - An answer's own work is one line, as in ChatGPT and Claude: `projectAssistantBody` folds each
   run of reasoning, searches, reads, commands and other machine steps between pieces of text
   into a `work` part (`work-group-block.tsx`), even a run of one call, so every answer reads

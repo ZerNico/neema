@@ -4,7 +4,12 @@ import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantFile } from "../assistant-output.ts";
-import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import {
+  AiBrain01Icon,
+  Alert02Icon,
+  ArrowDown01Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
@@ -64,6 +69,8 @@ import {
 } from "./context-picker.tsx";
 import { extractReferences, restoreReferences } from "../references.ts";
 import { KnowledgeActivityBlock } from "./knowledge-activity-block.tsx";
+import { ActivityFace } from "./activity-face.tsx";
+import { activityRowClassName } from "./activity-row.ts";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
@@ -737,13 +744,7 @@ const AssistantBody = memo(function AssistantBody({
         : [],
     ),
   );
-  // `live`: the newest thing in a streaming answer. A run of calls stays open
-  // while it is, rather than closing between one call and the model's next.
-  const renderPart = (
-    part: WorkStep | Exclude<BodyPart, WorkPart>,
-    index: number,
-    live: boolean,
-  ) => {
+  const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>, index: number) => {
     if (part.kind === "reasoning")
       return (
         <ReasoningBlock key={part.key} reasoning={message.reasoning} active={reasoningActive} />
@@ -777,14 +778,13 @@ const AssistantBody = memo(function AssistantBody({
     if (part.kind === "skill")
       return <SkillActivityBlock key={part.key} activities={part.activities} />;
     if (part.kind === "knowledge") {
-      return <KnowledgeActivityBlock key={part.key} activities={part.activities} live={live} />;
+      return <KnowledgeActivityBlock key={part.key} activities={part.activities} />;
     }
     if (part.kind === "browser")
       return (
         <BrowserActivityBlock
           key={part.key}
           activities={part.activities}
-          live={live}
           approvals={message.desktopApprovals}
         />
       );
@@ -891,17 +891,17 @@ const AssistantBody = memo(function AssistantBody({
   };
   return parts.map((part, index) => {
     const live = streaming && index === parts.length - 1;
-    if (part.kind !== "work") return renderPart(part, index, live);
+    if (part.kind !== "work") return renderPart(part, index);
     // A lone step without calls (reasoning, a compaction) keeps its own row:
     // a work line would only repeat it. Any call, even one, gets the line.
     if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
-      return renderPart(part.steps[0]!, index, live);
+      return renderPart(part.steps[0]!, index);
     return (
       <WorkGroupBlock
         key={part.key}
         part={part}
         live={live}
-        renderStep={(step, stepLive) => renderPart(step, index, stepLive)}
+        renderStep={(step) => renderPart(step, index)}
       />
     );
   });
@@ -1177,9 +1177,11 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         !toolRunning &&
         !compacting &&
         !draftLive &&
-        // A live work line already says "Thinking" between its steps.
+        // A live work line already says it is working between its steps.
         parts.at(-1)?.kind !== "work" ? (
-          <span className="text-shimmer">Thinking…</span>
+          <div className={cn(activityRowClassName, "mb-2")}>
+            <ActivityFace icon={AiBrain01Icon} label="Thinking" status="running" />
+          </div>
         ) : null}
         {message.status === "error" ? (
           <GenerationFailure

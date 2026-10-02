@@ -1,42 +1,25 @@
-import { ArrowDown01Icon, File01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { FolderLibraryIcon } from "@hugeicons/core-free-icons";
+import { useState } from "react";
 import type { KnowledgeToolActivity } from "../client/use-message-stream.ts";
 import {
   Disclosure,
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
-import { useRunDisclosure } from "./use-run-disclosure.ts";
-
-const QUERY_LIMIT = 6;
-
-const quotedQueries = (queries: ReadonlyArray<string>): string => {
-  const visible = queries.slice(0, QUERY_LIMIT).map((query) => `“${query}”`);
-  const joined = visible.join(visible.length === 2 ? " and " : ", ");
-  return queries.length > QUERY_LIMIT ? `${joined}, +${queries.length - QUERY_LIMIT} more` : joined;
-};
+import { ActivityChevron, ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 
 /**
  * One collapsed row for a run of knowledge calls, like the web row: the
  * header says what happened in a few words, the disclosure lists what was
- * searched and read. Open while running, closes shortly after, and a manual
- * choice sticks. Reads and listings are counted rather than itemised, since their
+ * searched and read. Folded until clicked, as the work line around it is what
+ * opens. Reads and listings are counted rather than itemised, since their
  * targets are opaque version ids.
  */
-export function KnowledgeActivityBlock({
-  activities,
-  live = false,
-}: {
-  activities: KnowledgeToolActivity[];
-  /** The newest part of a streaming answer, which keeps the row open. */
-  live?: boolean;
-}) {
-  const anyRunning = activities.some((activity) => activity.status === "running");
-  const { expanded, onOpenChange } = useRunDisclosure(anyRunning || live);
+export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeToolActivity[] }) {
+  const [expanded, setExpanded] = useState(false);
 
   if (activities.length === 0) return null;
 
@@ -59,12 +42,12 @@ export function KnowledgeActivityBlock({
 
   const headerLabel = running
     ? running.name === "search_knowledge"
-      ? "Searching documents…"
+      ? "Searching documents"
       : running.name === "read_knowledge_document"
-        ? "Reading documents…"
-        : "Listing documents…"
+        ? "Reading documents"
+        : "Listing documents"
     : allFailed
-      ? "Documents unavailable"
+      ? "Couldn’t search documents"
       : searches.length > 0
         ? `Searched documents · ${excerpts} ${excerpts === 1 ? "excerpt" : "excerpts"}`
         : reads.length > 0
@@ -73,28 +56,25 @@ export function KnowledgeActivityBlock({
   const hasDetails = queries.length > 0 || reads.length > 0 || listings.length > 0 || failed > 0;
 
   return (
-    <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
+    <Disclosure open={expanded} onOpenChange={setExpanded} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
-        <span className={cn(anyRunning && "text-shimmer")}>{headerLabel}</span>
-        {hasDetails ? (
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
-          />
-        ) : null}
+        <ActivityFace
+          icon={FolderLibraryIcon}
+          label={headerLabel}
+          status={running ? "running" : allFailed ? "failed" : "done"}
+        />
+        {hasDetails ? <ActivityChevron open={expanded} /> : null}
       </DisclosureTrigger>
       {hasDetails ? (
         <DisclosureContent>
           <div className={cn(disclosureBodyRailClassName, "flex flex-col gap-2")}>
             {queries.length > 0 ? (
-              <p>
-                Searched <span className="text-foreground/70">{quotedQueries(queries)}</span>
+              <div className="flex flex-col gap-1">
+                <ActivityQueries queries={queries} />
                 {keywordOnly ? (
-                  <span className="text-muted-foreground/70"> · keyword search</span>
+                  <p className="text-muted-foreground/70 text-xs">Matched by keywords only</p>
                 ) : null}
-              </p>
+              </div>
             ) : null}
             {reads.length > 0 ? (
               <p>
@@ -108,9 +88,9 @@ export function KnowledgeActivityBlock({
               </p>
             ) : null}
             {failed > 0 && !allFailed ? (
-              <p className="text-destructive text-xs">
-                {failed === 1 ? "One step failed." : `${failed} steps failed.`}
-              </p>
+              <ActivityNote>
+                {failed === 1 ? "One step didn’t work." : `${failed} steps didn’t work.`}
+              </ActivityNote>
             ) : null}
           </div>
         </DisclosureContent>

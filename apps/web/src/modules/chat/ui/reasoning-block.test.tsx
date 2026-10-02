@@ -11,7 +11,7 @@ const paneShown = () => (document.body.textContent ?? "").includes("Chain of tho
 describe("ReasoningBlock", () => {
   it("shows only a pulse indicator for hidden reasoning while active", () => {
     const { container, rerender } = render(<ReasoningBlock reasoning="" active />);
-    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
 
     rerender(<ReasoningBlock reasoning="" active={false} />);
