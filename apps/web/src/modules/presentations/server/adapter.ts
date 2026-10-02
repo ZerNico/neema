@@ -18,6 +18,7 @@ import { inspectPackage, templateOwners } from "./inspection.ts";
 import { auditOverflow, compareOverflow, needsAudit } from "./overflow.ts";
 import { openPackage } from "./package.ts";
 import { fail, toPart } from "./package-xml.ts";
+import { deckTypefaces, facesFor, operationTypefaces } from "./font-usage.ts";
 import { prepareFonts } from "./render.ts";
 import { apply, flush, startSession, worksOnParts, type Refs } from "./session.ts";
 import { applyDeckTemplate, DEFAULT_THEME } from "./template.ts";
@@ -62,7 +63,14 @@ export async function editPresentation(
   };
   let session = await startSession(input);
   // Moving, removing or annotating slides cannot change how text fits, so those edits skip the audit.
-  const audit = needsAudit(operations) ? await prepareFonts(fonts) : null;
+  const audit = needsAudit(operations)
+    ? await prepareFonts(
+        facesFor(
+          fonts,
+          new Set([...deckTypefaces(session.parts), ...operationTypefaces(operations)]),
+        ),
+      )
+    : null;
   const baseline = audit
     ? auditOverflow(audit.preview, session.deck, session.ids, audit.measureText, true)
     : null;

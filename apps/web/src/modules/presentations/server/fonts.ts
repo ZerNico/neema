@@ -4,7 +4,7 @@ import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { Context, Effect, Layer, Ref, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Ref, Schedule, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import { presentationFonts } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
@@ -17,6 +17,9 @@ import { PresentationWorkers } from "./runtime.ts";
 
 /** A failed fetch is remembered this long, so an offline server does not stall every edit. */
 const FETCH_RETRY_MS = 10 * 60 * 1000;
+/** Fetched faces no deck has used this long are dropped; the next use fetches them again. */
+const FETCHED_FONT_TTL_DAYS = 14;
+const SWEEP_EVERY = Duration.hours(6);
 
 export class FontRejected extends Schema.TaggedError<FontRejected>()("FontRejected", {
   reason: Schema.String,
@@ -86,6 +89,8 @@ export class PresentationFonts extends Context.Service<
      * ignored. A family an admin uploaded any face of is never fetched.
      */
     ensure(families: ReadonlyArray<string>): Effect.Effect<void>;
+    /** Drops fetched faces unused for two weeks, by the database clock; returns how many. */
+    sweep(): Effect.Effect<number>;
     /**
      * Faces a skill carries, for the answers that loaded it. Each is checked
      * once per content hash, in a worker process, like an upload; one the
@@ -373,7 +378,31 @@ export class PresentationFonts extends Context.Service<
           return started;
         });
 
+      const sweep = Effect.fn("PresentationFonts.sweep")(function* () {
+        const removed = yield* db
+          .delete(presentationFonts)
+          .where(
+            and(
+              eq(presentationFonts.source, "google"),
+              sql`coalesce(${presentationFonts.lastUsedAt}, ${presentationFonts.createdAt}) < now() - make_interval(days => ${FETCHED_FONT_TTL_DAYS})`,
+            ),
+          )
+          .returning({ id: presentationFonts.id })
+          .pipe(Effect.orDie);
+        // Their files stay in the temporary cache until the system cleans it;
+        // nothing reads a path whose row is gone.
+        if (removed.length) yield* Ref.set(cached, null);
+        return removed.length;
+      });
+
+      yield* sweep().pipe(
+        Effect.catchCause((cause) => Effect.logError("fetched font sweep failed", cause)),
+        Effect.repeat(Schedule.spaced(SWEEP_EVERY)),
+        Effect.forkScoped,
+      );
+
       return PresentationFonts.of({
+        sweep,
         ensure: Effect.fn("PresentationFonts.ensure")(function* (names) {
           const families = [...new Set(names.flatMap((name) => googleFontFamily(name) ?? []))];
           yield* Effect.forEach(families, ensureOnce, { concurrency: 4, discard: true });

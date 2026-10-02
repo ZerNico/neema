@@ -14,6 +14,9 @@ const faceKey = (face: FontFace) => `${face.family.toLowerCase()}|${face.bold}|$
 
 const rank = { upload: 0, skill: 1, google: 2 } as const;
 
+const missingFonts = (result: unknown): readonly string[] =>
+  Array.isArray(result) ? ((result[0] as { missingFonts?: string[] })?.missingFonts ?? []) : [];
+
 /**
  * One face per family and style: an upload keeps its name, a loaded skill's
  * face comes next, and a fetched Google face only fills what neither supplies.
@@ -50,11 +53,15 @@ export class PresentationProcessor extends Context.Service<
           if (request.kind !== "render" && request.kind !== "edit" && request.kind !== "chart")
             return runtime.run(request, signal, options);
           const stored = await Effect.runPromiseWith(context)(fonts.faces());
-          return runtime.run(
+          const result = await runtime.run(
             { ...request, fonts: withFaces(stored, options?.faces) },
             signal,
             options,
           );
+          // A preview never waits on a fetch: this one draws a substitute, the next the font.
+          const missing = request.kind === "render" ? missingFonts(result) : [];
+          if (missing.length) Effect.runForkWith(context)(fonts.ensure(missing));
+          return result;
         },
       };
       return processor;

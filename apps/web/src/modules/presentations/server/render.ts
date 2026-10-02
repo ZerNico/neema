@@ -13,6 +13,8 @@ import { readFileSync } from "node:fs";
 import { PRESENTATION_LIMITS } from "../limits.ts";
 import { toEmu } from "./content.ts";
 import { readFontFile, type FontFace } from "./font-file.ts";
+import { deckTypefaces, facesFor } from "./font-usage.ts";
+import { googleFontFamily } from "../google-fonts.ts";
 import { loadDerived, openPackage, type Deck } from "./package.ts";
 import { fail, toPart } from "./package-xml.ts";
 import { previewCopy } from "./preview-copy.ts";
@@ -102,7 +104,16 @@ export async function renderPresentation(
       PRESENTATION_LIMITS.renderPixels
   )
     fail("limit", "Slide dimensions exceed the safe render limit.");
-  const { preview: loaded, measureText, fontFiles } = await prepareFonts(fonts);
+  const typefaces = deckTypefaces(source.parts);
+  const drawn = facesFor(fonts, typefaces);
+  const { preview: loaded, measureText, fontFiles } = await prepareFonts(drawn);
+  // Curated families the deck names but no face covers: the caller fetches
+  // them for the next preview, as an evicted family would otherwise stay a substitute.
+  const covered = new Set(drawn.map((face) => face.family.toLowerCase()));
+  const missingFonts = [...typefaces].flatMap((typeface) => {
+    const family = googleFontFamily(typeface);
+    return family && !covered.has(typeface) ? [family] : [];
+  });
   const copy = previewCopy(source, selectedIds, { files: loaded.FONT_FILES, family: loaded.SANS });
   const deck: Deck = copy.bytes ? await loadDerived(copy.bytes) : source.deck;
   // The copy keeps every slide part name, so the source's identities still apply.
@@ -120,6 +131,7 @@ export async function renderPresentation(
     return {
       slideId: id,
       png,
+      ...(missingFonts.length ? { missingFonts } : {}),
       warning: `Approximate preview; missing fonts or unsupported PowerPoint effects may differ from Office.${
         copy.placeholders.includes(id)
           ? " Pictures this preview cannot draw show as placeholders; the file keeps them."

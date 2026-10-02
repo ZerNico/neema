@@ -723,6 +723,18 @@ describe("presentation core adapter", () => {
     await expect(checkFontFile(join(fonts, "LICENSES.md"))).rejects.toThrow(/not a TrueType/);
   });
 
+  it("reports a curated family a deck names but has no face for, and nothing it can draw", async () => {
+    const draft = await createPresentationDraft();
+    const id = (await inspect(draft)).slides[0]!.slideId;
+    const deck = await editPresentation(draft, [
+      { kind: "setText", slideId: id, placeholder: "title", text: "Hello", font: "Poppins" },
+      { kind: "setTheme", bodyFont: "Arial" },
+    ]);
+    const [slide] = await renderPresentation(deck.bytes, [id]);
+    // Arial is bundled; Poppins is fetched for the next preview.
+    expect(slide?.missingFonts).toEqual(["Poppins"]);
+  });
+
   it("classifies box overruns as new, existing or increased without calling them clipping", async () => {
     const draft = await createPresentationDraft();
     const fits = await editPresentation(draft, [

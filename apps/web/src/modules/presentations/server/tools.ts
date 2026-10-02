@@ -27,9 +27,7 @@ import {
 } from "./inspection.ts";
 import type { JobResult } from "~/server/jobs.ts";
 import type { PresentationJobs, PresentationRuntime } from "./runtime.ts";
-
-/** Every operation field that names a typeface, chart text included. */
-const FONT_FIELDS = new Set(["font", "headingFont", "bodyFont", "textFont"]);
+import { FONT_FIELDS } from "./font-usage.ts";
 
 const integer = (minimum: number, maximum: number, description: string) =>
   advertisedParameter({ type: "integer", minimum, maximum, description });

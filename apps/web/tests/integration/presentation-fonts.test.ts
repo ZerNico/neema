@@ -211,3 +211,64 @@ it("lets an upload own its family: it replaces fetched styles and stops further 
   await run(fonts.ensure(["Abril Fatface"]));
   expect(fetched).toEqual([]);
 });
+
+it("sweeps fetched faces unused for two weeks by the database clock, never an upload", async () => {
+  const fonts = await run(Effect.flatMap(PresentationFonts, (service) => Effect.succeed(service)));
+  // Abril Fatface is an upload by now (previous test). A fetched face beside it,
+  // one used recently, and every other row aged past the window.
+  const cachedFace = (family: string) => ({
+    id: uuidv7(),
+    family,
+    renderFamily: family,
+    style: "Regular",
+    bold: false,
+    italic: false,
+    embeddable: true,
+    format: "ttf" as const,
+    fileName: `${family}.ttf`,
+    byteSize: abril.length,
+    sha256: createHash("sha256").update(family).digest("hex"),
+    bytes: Buffer.from(abril),
+    source: "google" as const,
+  });
+  await run(
+    Effect.flatMap(Db, (db) =>
+      db.insert(presentationFonts).values([cachedFace("Bebas Neue"), cachedFace("Oswald")]),
+    ),
+  );
+  await run(
+    Effect.flatMap(Db, (db) =>
+      db.update(presentationFonts).set({
+        lastUsedAt: sql`now() - interval '15 days'`,
+        createdAt: sql`now() - interval '15 days'`,
+      }),
+    ),
+  );
+  const before = await run(
+    Effect.flatMap(Db, (db) =>
+      db.select({ source: presentationFonts.source }).from(presentationFonts),
+    ),
+  );
+  expect(before.some((row) => row.source === "upload")).toBe(true);
+  await run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .update(presentationFonts)
+        .set({ lastUsedAt: sql`now() - interval '13 days'` })
+        .where(eq(presentationFonts.family, "Oswald")),
+    ),
+  );
+  expect(await run(fonts.sweep())).toBe(1);
+  const after = await run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .select({ family: presentationFonts.family, source: presentationFonts.source })
+        .from(presentationFonts),
+    ),
+  );
+  expect(after.some((row) => row.family === "Bebas Neue")).toBe(false);
+  expect(after).toContainEqual({ family: "Oswald", source: "google" });
+  expect(after.filter((row) => row.source === "upload")).toHaveLength(
+    before.filter((row) => row.source === "upload").length,
+  );
+});
