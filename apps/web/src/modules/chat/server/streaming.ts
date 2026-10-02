@@ -1654,12 +1654,44 @@ export class StreamEngine extends Context.Service<
           // their policies say a later copy replaces an earlier one.
           let answerContext: ReadonlyArray<Prompt.MessageEncoded> | null = null;
           const startContext = () => (answerContext ??= trailingContext());
+          // A block's first line names it ("Application-provided documents…"),
+          // so an updated block is matched to its earlier snapshot by that line.
+          const headerOf = (message: Prompt.MessageEncoded) => {
+            const text =
+              typeof message.content === "string"
+                ? message.content
+                : message.content
+                    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+                    .join("\n");
+            return (
+              text
+                .split("\n")
+                .find((line) => line.trim())
+                ?.slice(0, 160) ?? ""
+            );
+          };
           const contextUpdates = (): Prompt.MessageEncoded[] => {
             if (!answerContext) return [];
-            const before = new Set(answerContext.map((message) => JSON.stringify(message.content)));
-            return trailingContext().filter(
-              (message) => !before.has(JSON.stringify(message.content)),
-            );
+            const now = trailingContext();
+            const key = (message: Prompt.MessageEncoded) => JSON.stringify(message.content);
+            const before = new Set(answerContext.map(key));
+            const headers = new Set(now.map(headerOf));
+            // A block that vanished (a cleared draft, a removed document) says
+            // so; its snapshot ahead of the rounds would otherwise still read as current.
+            const gone = answerContext
+              .map(headerOf)
+              .filter((header) => header && !headers.has(header));
+            return [
+              ...now.filter((message) => !before.has(key(message))),
+              ...(gone.length
+                ? [
+                    {
+                      role: "user" as const,
+                      content: `<context-update>\nNo longer current; the earlier snapshot of each no longer applies:\n${gone.map((header) => `- ${header}`).join("\n")}\n</context-update>`,
+                    },
+                  ]
+                : []),
+            ];
           };
           // Reminders are appended per request rather than stored in the
           // transcript, so only the budget adds them to the tail.
