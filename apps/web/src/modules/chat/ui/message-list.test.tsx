@@ -1,5 +1,12 @@
 import { RESPONSE_FAILURES } from "../generation-failure.ts";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render as renderUnwrapped,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -16,6 +23,10 @@ import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
+
+// Messages always render inside the app's panel: a delivered file opens there.
+const render = (ui: Parameters<typeof renderUnwrapped>[0]) =>
+  renderUnwrapped(ui, { wrapper: DetailPanelProvider });
 import { composerText, setComposerText } from "./composer-test-utils.ts";
 import { FileReferenceContext } from "./file-reference.tsx";
 
@@ -2087,6 +2098,41 @@ describe("generated image replies", () => {
     status: "complete",
     files: [image],
   };
+  it("opens a document delivered while the answer streams beside the chat, once, and never on reload", () => {
+    const delivered = (id: string, status: string) => (
+      <DetailPanelProvider>
+        <MessageBubble
+          message={{
+            ...message,
+            id: `answer-${id}`,
+            content: "Here is the report.",
+            status,
+            files: [
+              {
+                ...image,
+                attachment: {
+                  id,
+                  fileName: `${id}.pdf`,
+                  size: 2048,
+                  mediaType: "application/pdf",
+                  kind: "pdf",
+                },
+                textOffset: 19,
+                origin: { toolCallId: "call-1" },
+              },
+            ],
+          }}
+        />
+        <DetailPanelRail />
+      </DetailPanelProvider>
+    );
+    const live = renderUnwrapped(delivered("live-report", "streaming"));
+    expect(screen.getByRole("complementary", { name: "live-report.pdf" })).toBeInTheDocument();
+    live.unmount();
+    renderUnwrapped(delivered("old-report", "complete"));
+    expect(screen.queryByRole("complementary", { name: "old-report.pdf" })).toBeNull();
+  });
+
   it("renders a tool's document as a chip at its place in the text", () => {
     render(
       <MessageBubble

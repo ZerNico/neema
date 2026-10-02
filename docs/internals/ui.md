@@ -314,4 +314,5 @@ false`), so a page body is written against data already there. This includes loc
   "Worked for 42s", or a past-tense summary when the calls carry no timing, with failures
   counted in the header. A lone step without calls (reasoning, a compaction) keeps its own row.
   What the person acts on or receives stays outside: questions, plans, memory saves, draft and
-  document cards, research and files.
+  document cards, research and files. A document delivered while the answer streams opens in
+  the panel by itself; reloading opens nothing.

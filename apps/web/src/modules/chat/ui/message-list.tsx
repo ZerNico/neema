@@ -11,6 +11,7 @@ import {
   memo,
   use,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -87,7 +88,16 @@ import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { Attachment, MessageAttachment } from "~/modules/attachments/schema.ts";
-import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
+import {
+  AttachmentPreviewDialog,
+  FilePreviewBody,
+} from "~/modules/attachments/ui/attachment-preview.tsx";
+import {
+  useDetailPanel,
+  useDetailPanelAvailable,
+  useDetailPanelTabContent,
+  useDetailPanelTabIds,
+} from "~/ui/detail-panel.tsx";
 import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
@@ -551,7 +561,53 @@ function StoredAttachmentChip({
   );
 }
 
-function AssistantFileAttachment({ file }: { file: AssistantFile }) {
+// Files this page already opened by itself: the list remounts rows on scroll.
+const AUTO_OPENED_FILES = new Set<string>();
+
+const filePanelRequest = (attachment: Attachment) => ({
+  id: `file:${attachment.id}`,
+  title: attachment.fileName,
+  body: (
+    <FilePreviewBody
+      target={{
+        fileName: attachment.fileName,
+        size: attachment.size,
+        kind: attachment.kind,
+        url: attachmentUrl(attachment.id),
+        office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
+      }}
+      linkable
+    />
+  ),
+});
+
+/**
+ * A document an answer delivers opens beside the chat as it arrives, as
+ * ChatGPT's and Claude's do; reloading the chat opens nothing. An image is
+ * already in full view. The card also gives a restored tab its body back.
+ */
+function useDeliveredFilePanel(attachment: Attachment, fresh: boolean) {
+  const panel = useDetailPanel();
+  const available = useDetailPanelAvailable();
+  const id = `file:${attachment.id}`;
+  const open = useDetailPanelTabIds().includes(id);
+  const request = useMemo(() => filePanelRequest(attachment), [attachment]);
+  useDetailPanelTabContent(id, open ? request : null);
+  useEffect(() => {
+    if (!fresh || !available || attachment.kind === "image" || AUTO_OPENED_FILES.has(id)) return;
+    AUTO_OPENED_FILES.add(id);
+    panel.open(request);
+  }, [fresh, available, attachment.kind, id, panel, request]);
+}
+
+function AssistantFileAttachment({
+  file,
+  fresh = false,
+}: {
+  file: AssistantFile;
+  fresh?: boolean;
+}) {
+  useDeliveredFilePanel(file.attachment, fresh);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   // The virtual list remounts rows on scroll; an image already in the cache is
@@ -692,7 +748,8 @@ const AssistantBody = memo(function AssistantBody({
       return (
         <ReasoningBlock key={part.key} reasoning={message.reasoning} active={reasoningActive} />
       );
-    if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
+    if (part.kind === "file")
+      return <AssistantFileAttachment key={part.key} file={part.file} fresh={streaming} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
       return (
@@ -755,7 +812,7 @@ const AssistantBody = memo(function AssistantBody({
             final: !part.workingFileId || lastPartOfFile.get(part.workingFileId) === index,
           }}
         >
-          {part.file ? <AssistantFileAttachment file={part.file} /> : null}
+          {part.file ? <AssistantFileAttachment file={part.file} fresh={streaming} /> : null}
         </WorkingFileActivityBlock>
       );
     if (part.activity.family === "research") {
