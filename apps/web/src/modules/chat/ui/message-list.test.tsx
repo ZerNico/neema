@@ -2008,7 +2008,11 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    const search = screen.getByRole("button", { name: /Searched the web/ });
+    // One run of work: its header sums it up, and its steps keep model-turn order.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Searched the web and summarized earlier messages" }),
+    );
+    const search = screen.getByRole("button", { name: "Searched the web" });
     const compact = screen.getByRole("button", { name: "Earlier messages shortened" });
     const read = screen.getByRole("button", { name: /Read a page/ });
     expect(search.compareDocumentPosition(compact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -1583,8 +1583,17 @@ export function ChatView({
   // stream chunk and must not rescan the flat list per message.
   const toolCallsByMessage = useMemo(() => {
     const grouped = new Map<string, ToolActivity[]>();
+    // Settled rows carry their own timing, so a reloaded answer still says how long it worked.
+    const time = (value: Date | string | null | undefined) =>
+      value ? new Date(value).getTime() || undefined : undefined;
     for (const row of data.toolCalls) {
-      const activity = toActivity(row);
+      const startedAt = time(row.startedAt);
+      const completedAt = time(row.completedAt);
+      const activity = {
+        ...toActivity(row),
+        ...(startedAt === undefined ? {} : { startedAt }),
+        ...(completedAt === undefined ? {} : { completedAt }),
+      } as ToolActivity;
       const list = grouped.get(row.messageId);
       if (list) list.push(activity);
       else grouped.set(row.messageId, [activity]);

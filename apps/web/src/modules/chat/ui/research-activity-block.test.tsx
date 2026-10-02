@@ -222,7 +222,7 @@ describe("research activity", () => {
         streaming: false,
         tools: [web],
         compactions: [],
-      }).parts.map((part) => part.kind),
+      }).parts.map((part) => (part.kind === "work" ? part.steps[0]!.kind : part.kind)),
     ).toEqual(["text", "web", "text"]);
     expect(collectSources([{ ...root, sources: web.sources! }, web])).toEqual(web.sources);
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { liveWorkingFile, projectAssistantBody } from "./assistant-body.ts";
+import { liveWorkingFile, projectAssistantBody as projectGrouped } from "./assistant-body.ts";
 import type { CompactionActivity, ToolActivity } from "../client/use-message-stream.ts";
 
 const web = (callId: string, textOffset: number, callIndex = 0): ToolActivity => ({
@@ -44,6 +44,15 @@ const desktop = (callId: string, name: string, callIndex: number): ToolActivity 
   callIndex,
   status: "complete",
 });
+
+/** Order and anchoring, with runs of work unfolded into their steps. */
+const projectAssistantBody = (input: Parameters<typeof projectGrouped>[0]) => {
+  const projected = projectGrouped(input);
+  return {
+    ...projected,
+    parts: projected.parts.flatMap((part) => (part.kind === "work" ? part.steps : [part])),
+  };
+};
 
 describe("projectAssistantBody", () => {
   it("joins a run of browser calls into one row, apart from other desktop calls", () => {
@@ -415,5 +424,41 @@ describe("projectAssistantBody steers", () => {
       expect(parts).toHaveLength(1);
       expect(parts[0]).toMatchObject({ kind: "working-file", file });
     });
+  });
+});
+
+describe("runs of work", () => {
+  it("fold reasoning and adjacent work into one part, broken by text and kept apart from what the person acts on", () => {
+    const ask: ToolActivity = {
+      family: "ask",
+      name: "ask_user",
+      callId: "ask",
+      textOffset: 2,
+      turnIndex: 0,
+      callIndex: 3,
+      status: "complete",
+    };
+    const { parts } = projectGrouped({
+      content: "abcd",
+      streaming: false,
+      reasoning: true,
+      tools: [web("a", 0), memory(0, 1), web("b", 1, 2), ask, web("c", 3, 4)],
+      compactions: [],
+    });
+    expect(
+      parts.map((part) =>
+        part.kind === "work" ? `work(${part.steps.map((step) => step.kind).join(",")})` : part.kind,
+      ),
+    ).toEqual([
+      "work(reasoning,web)",
+      "tool",
+      "text",
+      "work(web)",
+      "text",
+      "tool",
+      "text",
+      "work(web)",
+      "text",
+    ]);
   });
 });

@@ -34,7 +34,13 @@ import {
 } from "./assistant-markdown.tsx";
 import { FileReferenceMachine } from "./file-reference.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
-import { liveWorkingFile, projectAssistantBody, type AssistantSteer } from "./assistant-body.ts";
+import {
+  liveWorkingFile,
+  projectAssistantBody,
+  type AssistantSteer,
+  type WorkPart,
+  type WorkStep,
+} from "./assistant-body.ts";
 import { WorkingFileActivityBlock } from "./working-file-activity-block.tsx";
 import { CitationChip } from "./citation-chip.tsx";
 import { CompactionBlock } from "./compaction-block.tsx";
@@ -74,6 +80,7 @@ import { BrowserActivityBlock } from "./browser-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
+import { WorkGroupBlock } from "./work-group-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
@@ -638,17 +645,20 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
 }
 
 type BodyParts = ReturnType<typeof projectAssistantBody>["parts"];
+type BodyPart = BodyParts[number];
 
 const AssistantBody = memo(function AssistantBody({
   message,
   parts,
   sources,
   onOpenSources,
+  reasoningActive,
 }: {
   message: DisplayMessage;
   parts: BodyParts;
   sources: ToolSource[];
   onOpenSources?: () => void;
+  reasoningActive: boolean;
 }) {
   const streaming = message.status === "streaming";
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
@@ -671,10 +681,17 @@ const AssistantBody = memo(function AssistantBody({
         : [],
     ),
   );
-  return parts.map((part, index) => {
-    // The newest thing in a streaming answer: a run of calls stays open while
-    // it is, rather than closing between one call and the model's next.
-    const live = streaming && index === parts.length - 1;
+  // `live`: the newest thing in a streaming answer. A run of calls stays open
+  // while it is, rather than closing between one call and the model's next.
+  const renderPart = (
+    part: WorkStep | Exclude<BodyPart, WorkPart>,
+    index: number,
+    live: boolean,
+  ) => {
+    if (part.kind === "reasoning")
+      return (
+        <ReasoningBlock key={part.key} reasoning={message.reasoning} active={reasoningActive} />
+      );
     if (part.kind === "file") return <AssistantFileAttachment key={part.key} file={part.file} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
@@ -813,6 +830,20 @@ const AssistantBody = memo(function AssistantBody({
         activity={part.activity}
         messageStatus={message.status}
         {...message.questionActions}
+      />
+    );
+  };
+  return parts.map((part, index) => {
+    const live = streaming && index === parts.length - 1;
+    if (part.kind !== "work") return renderPart(part, index, live);
+    // One step is its own line already; a group around it would only nest it.
+    if (part.steps.length === 1) return renderPart(part.steps[0]!, index, live);
+    return (
+      <WorkGroupBlock
+        key={part.key}
+        part={part}
+        live={live}
+        renderStep={(step, stepLive) => renderPart(step, index, stepLive)}
       />
     );
   });
@@ -1018,6 +1049,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const compactions = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
   const compacting = compactions.some((activity) => activity.status === "running");
   const steers = message.steers ?? EMPTY_STEERS;
+  // Reasoning leads the answer's first run of work, inside its group.
+  const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
   // Projected once here: the body renders it and the Thinking line reads it.
   const parts = useMemo(
     () =>
@@ -1029,6 +1062,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         tools: message.toolActivities,
         compactions,
         steers,
+        reasoning: showReasoning,
       }).parts,
     [
       message.content,
@@ -1038,11 +1072,11 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
       message.toolActivities,
       compactions,
       steers,
+      showReasoning,
     ],
   );
   // An unfinished draft's own row already says the model is working on it.
   const draftLive = streaming && liveWorkingFile(parts);
-  const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
   // The chat view wires resume only on the last answer.
   const resume =
     message.onResume && message.onResumeWith ? (
@@ -1068,9 +1102,6 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className="flex w-full justify-start">
       <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
-        {showReasoning ? (
-          <ReasoningBlock reasoning={message.reasoning} active={reasoningActive} />
-        ) : null}
         {sources.length > 0 && (!streaming || message.content.length > 0) ? (
           <AssistantSourcePanel messageId={message.id} sources={sources} bind={bindSourcePanel} />
         ) : null}
@@ -1078,6 +1109,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
           message={message}
           parts={parts}
           sources={sources}
+          reasoningActive={reasoningActive}
           {...(sources.length > 0 ? { onOpenSources: openSources } : {})}
         />
         {streaming &&

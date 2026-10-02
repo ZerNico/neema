@@ -103,6 +103,9 @@ interface ToolActivityBase {
   textOffset?: number;
   status: "running" | "complete" | "error";
   error?: string;
+  /** When the call started and settled (epoch ms): from its row on reload, the client clock live. */
+  startedAt?: number;
+  completedAt?: number;
 }
 
 /** Live/durable view of one web tool call, upserted by callId from tool chunks. */
@@ -1100,6 +1103,33 @@ const startsCall = (delta: string) => {
   }
 };
 
+/**
+ * Keeps each call's timing across a chunk: the family reducers rebuild their
+ * activity without it, so it is carried over, then a new call is stamped
+ * started and one that just settled stamped completed.
+ */
+export const stampToolTimes = (
+  before: ReadonlyArray<ToolActivity>,
+  after: ToolActivity[],
+  now: number,
+): ToolActivity[] => {
+  const previous = new Map(before.map((activity) => [activity.callId, activity]));
+  return after.map((activity) => {
+    const prior = previous.get(activity.callId);
+    if (prior === activity) return activity;
+    const startedAt = activity.startedAt ?? prior?.startedAt ?? now;
+    const completedAt =
+      activity.completedAt ??
+      prior?.completedAt ??
+      (activity.status === "running" ? undefined : now);
+    return {
+      ...activity,
+      startedAt,
+      ...(completedAt === undefined ? {} : { completedAt }),
+    };
+  });
+};
+
 /** Tool and writing chunks in stream order, for the live reducer and a reload's replay alike. */
 export const applyToolActivityChunk = (
   tools: ReadonlyArray<ToolActivity>,
@@ -1108,7 +1138,11 @@ export const applyToolActivityChunk = (
 ): ToolActivity[] =>
   kind === "writing"
     ? applyWritingChunk(tools, delta)
-    : applyToolChunk(startsCall(delta) ? withoutWriting(tools) : [...tools], delta);
+    : stampToolTimes(
+        tools,
+        applyToolChunk(startsCall(delta) ? withoutWriting(tools) : [...tools], delta),
+        Date.now(),
+      );
 
 type StateChunkKind = Extract<Action, { kind: "chunk" }>["chunkKind"];
 

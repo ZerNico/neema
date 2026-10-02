@@ -38,6 +38,9 @@ type PositionedActivity =
 
 export type AssistantBodyPart =
   | { kind: "file"; key: string; file: AssistantFile }
+  /** The answer's reasoning, drawn as the first step of the work it leads. */
+  | { kind: "reasoning"; key: string }
+  | WorkPart
   | { kind: "text"; key: string; content: string; streaming: boolean }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
@@ -65,6 +68,48 @@ export interface WorkingFilePart {
   steps: Array<OfficeActivity | ToolFileActivity>;
   file?: AssistantFile;
 }
+
+/**
+ * One run of the answer's own work (reasoning, searches, reads, commands)
+ * between pieces of text, folded under one line the way ChatGPT and Claude do.
+ * What the person acts on or receives stays outside it.
+ */
+export interface WorkPart {
+  kind: "work";
+  key: string;
+  steps: WorkStep[];
+}
+
+export type WorkStep = Exclude<AssistantBodyPart, WorkPart>;
+
+const WORK_FAMILIES = new Set<ToolActivity["family"]>([
+  "desktop",
+  "custom",
+  "integration",
+  "project-file",
+  "attachment",
+]);
+
+const isWorkStep = (part: AssistantBodyPart): part is WorkStep =>
+  part.kind === "reasoning" ||
+  part.kind === "web" ||
+  part.kind === "skill" ||
+  part.kind === "knowledge" ||
+  part.kind === "browser" ||
+  part.kind === "compaction" ||
+  (part.kind === "tool" && WORK_FAMILIES.has(part.activity.family));
+
+/** Adjacent work steps become one work part; everything else passes through. */
+const groupWork = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[] => {
+  const grouped: AssistantBodyPart[] = [];
+  for (const part of parts) {
+    const last = grouped.at(-1);
+    if (!isWorkStep(part)) grouped.push(part);
+    else if (last?.kind === "work") last.steps.push(part);
+    else grouped.push({ kind: "work", key: `work-${part.key}`, steps: [part] });
+  }
+  return grouped;
+};
 
 /** A draft still being worked on is its own live signal; nothing else needs to say "Thinking". */
 export const liveWorkingFile = (parts: ReadonlyArray<AssistantBodyPart>) => {
@@ -94,6 +139,7 @@ export function projectAssistantBody({
   compactions,
   files = [],
   steers = [],
+  reasoning = false,
 }: {
   content: string;
   rawTextLength?: number;
@@ -102,6 +148,8 @@ export function projectAssistantBody({
   compactions: CompactionActivity[];
   files?: ReadonlyArray<AssistantFile>;
   steers?: ReadonlyArray<AssistantSteer>;
+  /** Whether the answer reasoned; its one block leads the first run of work. */
+  reasoning?: boolean;
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
   const researchRuns = new Set(
     tools.flatMap((activity) =>
@@ -171,7 +219,7 @@ export function projectAssistantBody({
     return true;
   });
 
-  const parts: AssistantBodyPart[] = [];
+  const parts: AssistantBodyPart[] = reasoning ? [{ kind: "reasoning", key: "reasoning" }] : [];
   const appendActivity = (item: PositionedActivity) => {
     if (item.kind === "file") {
       parts.push({
@@ -261,7 +309,7 @@ export function projectAssistantBody({
   if (!chronological) {
     for (const item of activities) appendActivity(item);
     appendText(0, content.length, streaming);
-    return { chronological, parts };
+    return { chronological, parts: groupWork(parts) };
   }
 
   let cursor = 0;
@@ -275,5 +323,5 @@ export function projectAssistantBody({
     cursor = offset;
   }
   appendText(cursor, content.length, streaming);
-  return { chronological, parts };
+  return { chronological, parts: groupWork(parts) };
 }

@@ -1285,6 +1285,9 @@ describe("ChatView question handoff", () => {
             turnIndex: 1,
             callIndex: 2,
             questions: askQuestions,
+            // Replayed chunks are timed as they arrive.
+            startedAt: expect.any(Number),
+            completedAt: expect.any(Number),
           },
         ],
       }),
