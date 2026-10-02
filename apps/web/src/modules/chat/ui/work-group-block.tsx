@@ -95,20 +95,33 @@ const PAST: Record<string, string> = {
   "Looking through files": "Looked through files",
 };
 
-const pastLabel = (step: WorkStep) => {
+const pastLabels = (step: WorkStep): string[] => {
+  if (step.kind === "web") {
+    const searched = step.activities.some((call) => call.name !== "read_url");
+    const pages = new Set(
+      step.activities.flatMap((call) => (call.name === "read_url" ? call.targets : [])),
+    ).size;
+    const read = pages === 0 ? [] : [pages === 1 ? "Read a page" : `Read ${pages} pages`];
+    return searched ? ["Searched the web", ...read] : read;
+  }
   const present = stepLabel(step);
-  return (
+  return [
     PAST[present] ??
-    present
-      .replace(/^Using /, "Used ")
-      .replace(/^Running /, "Ran ")
-      .replace(/^Working$/, "Worked")
-  );
+      present
+        .replace(/^Using /, "Used ")
+        .replace(/^Running /, "Ran ")
+        .replace(/^Working$/, "Worked"),
+  ];
 };
 
-/** "Searched the web, read a file and ran a command": each kind of step once, in order. */
+/**
+ * "Searched the web, read 2 pages and ran a command": each kind of step once,
+ * in order. Thinking is named only when it is all there was.
+ */
 export const workSummary = (steps: ReadonlyArray<WorkStep>) => {
-  const labels = [...new Set(steps.map(pastLabel))];
+  const acting = steps.filter((step) => step.kind !== "reasoning");
+  const labels = [...new Set((acting.length ? acting : steps).flatMap(pastLabels))];
+  if (labels.length === 0) return "Worked";
   const shown = labels
     .slice(0, 3)
     .map((label, index) => (index === 0 ? label : label.charAt(0).toLowerCase() + label.slice(1)));
@@ -116,7 +129,7 @@ export const workSummary = (steps: ReadonlyArray<WorkStep>) => {
   return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]!;
 };
 
-export const formatDuration = (ms: number) => {
+const formatDuration = (ms: number) => {
   const seconds = Math.max(1, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -124,13 +137,10 @@ export const formatDuration = (ms: number) => {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 };
 
-/** Wall time from the first call's start to the last one's end, when the calls say. */
-export const workSpan = (steps: ReadonlyArray<WorkStep>) => {
-  const calls = steps.flatMap(stepActivities);
-  const starts = calls.flatMap((call) => (call.startedAt ? [call.startedAt] : []));
-  if (!starts.length) return null;
-  const ends = calls.flatMap((call) => [call.completedAt ?? call.startedAt ?? 0]);
-  return { start: Math.min(...starts), end: Math.max(...ends) };
+/** When the first call started, if the calls say. */
+const workStart = (steps: ReadonlyArray<WorkStep>) => {
+  const starts = steps.flatMap(stepActivities).flatMap((call) => call.startedAt ?? []);
+  return starts.length ? Math.min(...starts) : undefined;
 };
 
 /** A clock that ticks once a second while `running`; elapsed from `since`. */
@@ -146,9 +156,9 @@ function useElapsed(since: number, running: boolean) {
 
 /**
  * One line for a run of work. While it is the newest part of a streaming
- * answer it stays open, its header saying "Working" or "Thinking" with a
- * running clock while the steps below name the detail; once the answer moves
- * on it folds into "Worked for 42s".
+ * answer it stays open, its header saying "Working" with a running clock while
+ * the steps below name the detail; once the answer moves on it folds into what
+ * it did, "Searched the web and read 2 pages".
  */
 export function WorkGroupBlock({
   part,
@@ -163,32 +173,33 @@ export function WorkGroupBlock({
   const calls = part.steps.flatMap(stepActivities);
   const running = live || calls.some((call) => call.status === "running");
   const { expanded, onOpenChange } = useRunDisclosure(running);
-  const span = workSpan(part.steps);
   // Reasoning alone has no recorded start; the clock then starts when this
   // row first appears, which is when the work became visible.
   const [mountedAt] = useState(() => Date.now());
-  const elapsed = useElapsed(span?.start ?? mountedAt, running);
+  const elapsed = useElapsed(workStart(part.steps) ?? mountedAt, running);
   const failed = calls.filter((call) => call.status === "error").length;
 
-  // Live, the steps below name what is happening; the header only says
-  // whether a call is out or the model is deciding its next move, and how long.
-  const callOut = calls.some((call) => call.status === "running");
-  const label = running
-    ? `${callOut ? "Working" : "Thinking"} · ${formatDuration(elapsed)}`
-    : span && span.end - span.start >= 1000
-      ? `Worked for ${formatDuration(span.end - span.start)}`
-      : workSummary(part.steps);
+  // Live, the steps below name the detail and the header only that it is busy
+  // and for how long: "Thinking" between calls read as stalled. Settled, it says
+  // what was done, not how long, since the time spent thinking is not recorded.
+  const label = running ? `Working · ${formatDuration(elapsed)}` : workSummary(part.steps);
 
   return (
     <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <span className={cn(running && "text-shimmer")}>{label}</span>
+        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
         {/* Counted, not alarming: a read the model worked around is no failure of the answer. */}
-        {failed > 0 ? <span>· {failed === 1 ? "1 failed" : `${failed} failed`}</span> : null}
+        {failed > 0 ? (
+          <span className="shrink-0">· {failed === 1 ? "1 failed" : `${failed} failed`}</span>
+        ) : null}
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           strokeWidth={2}
-          className={cn(disclosureChevronMotionClassName, "size-3.5", expanded && "rotate-180")}
+          className={cn(
+            disclosureChevronMotionClassName,
+            "size-3.5 shrink-0",
+            expanded && "rotate-180",
+          )}
           aria-hidden
         />
       </DisclosureTrigger>

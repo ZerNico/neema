@@ -58,12 +58,12 @@ describe("a run of work", () => {
     expect(screen.getByText("step web")).toBeInTheDocument();
   });
 
-  it("says it is thinking between calls, in its own header rather than a line below", () => {
+  it("still says it is working between calls, rather than seeming to stall", () => {
     renderGroup(group(call("a", { startedAt: Date.now() - 2_000, completedAt: Date.now() })), true);
-    expect(screen.getByRole("button", { name: /^Thinking · \d+s/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Working · \d+s/ })).toBeInTheDocument();
   });
 
-  it("folds into how long it worked once settled, and never hides a failure", () => {
+  it("folds into what it did once settled, and never hides a failure", () => {
     renderGroup(
       group(
         call("a", { startedAt: 1_000, completedAt: 20_000 }),
@@ -77,18 +77,22 @@ describe("a run of work", () => {
       ),
       false,
     );
-    const header = screen.getByRole("button", { name: /^Worked for 42s\s?· 1 failed/ });
+    const header = screen.getByRole("button", {
+      name: /^Searched the web and ran a command\s?· 1 failed/,
+    });
     expect(header).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("sums itself up in words when the calls carry no timing", () => {
+  it("sums itself up by what it did, naming thinking only when that was all", () => {
+    const read = call("r", { name: "read_url", targets: ["https://a.test", "https://b.test"] });
     expect(
       workSummary([
         { kind: "reasoning", key: "r" },
-        { kind: "web", key: "w", activities: [call("a") as never] },
+        { kind: "web", key: "w", activities: [call("a"), read] as never },
         { kind: "compaction", key: "c", activity: {} as never },
       ]),
-    ).toBe("Thought, searched the web and summarized earlier messages");
+    ).toBe("Searched the web, read 2 pages and summarized earlier messages");
+    expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
   });
 });
 

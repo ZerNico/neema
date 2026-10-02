@@ -312,10 +312,13 @@ false`), so a page body is written against data already there. This includes loc
   run of reasoning, searches, reads, commands and other machine steps between pieces of text
   into a `work` part (`work-group-block.tsx`), even a run of one call, so every answer reads
   the same. While it is the newest part of a streaming answer it is open, its header saying
-  "Working" or "Thinking" with a running clock while the step rows below name the detail; the
-  separate "Thinking…" line is not drawn under it. Once the answer moves on it folds into
-  "Worked for 42s", or a past-tense summary when the calls carry no timing, with failures
-  counted in the header. A lone step without calls (reasoning, a compaction) keeps its own row.
+  "Working" with a running clock while the step rows below name the detail; the separate
+  "Thinking…" line is not drawn under it, and the header never switches to "Thinking" between
+  calls, which read as stalled. The clock starts at the first call's recorded start, which a
+  reload replays with each chunk's own time. Once the answer moves on it folds into what it
+  did ("Searched the web and read 2 pages"), each kind of step once and at most three, with
+  failures counted in the header. It says no duration then: the time spent thinking around
+  the calls is not recorded, so any figure would undercount. A lone step without calls (reasoning, a compaction) keeps its own row.
   What the person acts on or receives stays outside: questions, plans, memory saves, draft and
   document cards, research and files. A document delivered while the answer streams opens in
   the panel by itself; reloading opens nothing.
