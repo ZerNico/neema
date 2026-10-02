@@ -14,8 +14,9 @@ plugin config because highlighting, math, mermaid and CJK handling are opt-in an
 - Two streamdown 2.5.0 output details are load-bearing: the `#user-content-fn-N` href on a footnote ref, and
   the `data-footnotes` attribute on the appended section. hast gives that attribute the _empty string_, so
   suppress on `!== undefined` — a truthiness check silently renders the list. Pinned by `message-list.test.tsx`.
-- A citation chip is a link to its source showing favicon and truncated title; the number is never rendered,
-  in chips or in the sources panel. Markers, source manifests and the panel's row keys all use the number.
+- A citation chip is a link to its source showing favicon and site (a document or service source shows its
+  title instead); the page title and snippet wait in its hover card, since a title in every chip ran to the
+  chip's limit on every line. The number is never rendered, in chips or in the sources panel. Markers, source manifests and the panel's row keys all use the number.
 - Adjacent markers (`[^2][^5]`) are rewritten to one reference labelled `2-5`, with a synthesized definition
   pointing at the first source, so they render as one chip with a "+1" count and every source on hover.
   `FOOTNOTE_HREF` parses that label; the sources panel still reads the model's raw markers. The prompt asks

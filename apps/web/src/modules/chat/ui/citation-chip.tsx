@@ -13,7 +13,7 @@ const NO_MORE_SOURCES: ReadonlyArray<ToolSource> = [];
 
 /**
  * An inline citation replacing a GFM footnote reference: the source's favicon
- * and title, linking straight to the page. Citation numbers are an internal
+ * and site, linking straight to the page; the title waits in the hover card. Citation numbers are an internal
  * handle between model and source list; a reader wants to know what the
  * source is, not which number it was. Hovering previews host and snippet.
  * Adjacent markers arrive as one chip: the first source plus a count, with
@@ -73,6 +73,9 @@ function CitationPreview({
 }) {
   const document = source.kind === "document";
   const { label, icon } = describeSource(source);
+  // A page title ran to the chip's limit on every line; the site says enough
+  // in passing, as ChatGPT's chips do. Documents and services keep their titles.
+  const chipLabel = source.kind === "web" ? hostOf(source.url) : label;
   const name = more.length ? `Sources: ${label} and ${more.length} more` : `Source: ${label}`;
   const className =
     "bg-muted text-muted-foreground hover:bg-foreground/15 hover:text-foreground hover:ring-foreground/20 focus-visible:ring-ring mx-0.5 inline-flex max-w-48 translate-y-[-1px] items-center gap-1 rounded-full py-0.5 pr-2 pl-1 align-middle text-2xs leading-none font-medium no-underline ring-1 ring-transparent transition-colors duration-100 outline-none select-none focus-visible:ring-2";
@@ -96,7 +99,7 @@ function CitationPreview({
         }
       >
         {icon}
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="min-w-0 truncate">{chipLabel}</span>
         {more.length ? <span className="shrink-0 tabular-nums">+{more.length}</span> : null}
       </HoverCardTrigger>
       <HoverCardContent align="start" sideOffset={8}>

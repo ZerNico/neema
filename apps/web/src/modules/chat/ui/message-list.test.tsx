@@ -985,13 +985,14 @@ describe("MessageBubble citations", () => {
       </DetailPanelProvider>,
     );
 
-  it("renders a footnote marker as a titled link to the source, not a number", () => {
+  it("renders a footnote marker as a link to the source naming its site, not a number", () => {
     const { container } = renderCited("Effect 4.0 is out[^1].");
 
+    // The title is the accessible name and waits in the hover card; the chip shows the site.
     const chip = screen.getByRole("link", { name: "Source: Effect 4.0 released" });
     expect(chip).toHaveAttribute("href", "https://effect.website/blog");
     expect(chip).toHaveAttribute("target", "_blank");
-    expect(chip).toHaveTextContent("Effect 4.0 released");
+    expect(chip).toHaveTextContent("effect.website");
     expect(chip).not.toHaveTextContent("1");
     expect(container.textContent).not.toContain("[^1]");
   });
