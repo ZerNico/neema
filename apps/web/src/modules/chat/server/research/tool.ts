@@ -33,10 +33,11 @@ export type ResearchToolResult = typeof ResearchToolResult.Type;
 
 const researchTool = Tool.make("deep_research", {
   description:
-    "Investigate a question across the web with a team of workers and return their evidence for you to answer from. Write the brief yourself: state what to find out and what would settle it, in a few sentences, since the workers never see this conversation. Use it for questions needing several sources or current information, not for something you already know or one page you could read. It returns evidence and sources, never prose: you write the answer. It cannot ask the person anything, so resolve a consequential ambiguity with ask_user before calling it. Set language to the language the person writes in (for example German): the progress they watch uses it.",
+    "Investigate a question across the web with a team of workers and return their evidence for you to answer from. Write the brief yourself: state what to find out and what would settle it, in a few sentences, since the workers never see this conversation. Use it for questions needing several sources or current information, not for something you already know or one page you could read. It returns evidence and sources, never prose: you write the answer. It cannot ask the person anything, so resolve a consequential ambiguity with ask_user before calling it. Set language to the language the person writes in (for example German), and title to a few words naming the investigation in that language: the progress they watch shows both.",
   parameters: Schema.Struct({
     brief: Schema.optionalKey(Schema.String),
     language: Schema.optionalKey(Schema.String),
+    title: Schema.optionalKey(Schema.String),
   }),
   success: ResearchToolResult,
 });
@@ -109,6 +110,12 @@ export const prepareResearchTool = (input: {
           "Provide a brief of a few sentences saying what to find out and what would settle it. The workers never see this conversation.",
       } satisfies ResearchToolResult;
 
+    const rawTitle =
+      typeof raw === "object" && raw !== null ? (raw as { title?: unknown }).title : "";
+    // A label, not prose: one line, short enough for a card.
+    const title =
+      typeof rawTitle === "string" ? rawTitle.replaceAll(/\s+/g, " ").trim().slice(0, 80) : "";
+
     // The row this call already has: the observer mints it from the same
     // `tool-call` part the toolkit forked this handler on, so the wait is for
     // an ordering, not for work.
@@ -129,6 +136,7 @@ export const prepareResearchTool = (input: {
         generationId: input.generationId,
         toolCallId: row.rowId,
         modelId: input.modelId,
+        ...(title ? { title } : {}),
       })
       .pipe(
         Effect.catchTag("InvalidMessage", (error) =>
@@ -174,6 +182,7 @@ export const prepareResearchTool = (input: {
         // The call, not the queue: a tool called late in a turn must not
         // inherit an exploration window that is already half spent.
         startedAt: Date.now(),
+        ...(title ? { title } : {}),
         emit: input.emit,
         emitCompaction: input.emitCompaction,
         // The investigation is structurally barred from the answer sink

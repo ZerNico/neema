@@ -20,6 +20,8 @@ export type ResearchTaskProgress = typeof ResearchTaskProgress.Type;
 /** A bounded full snapshot, not a patch: replay and live updates use the same reducer. */
 export const ResearchProgress = Schema.Struct({
   runId: Schema.String,
+  /** A few words naming the investigation, written by the host in the person's language. */
+  title: Schema.optionalKey(Schema.String),
   phase: ResearchPhase,
   tasks: Schema.Array(ResearchTaskProgress),
   limitations: Schema.Array(Schema.String),
@@ -30,6 +32,7 @@ export type ResearchProgress = typeof ResearchProgress.Type;
 /** Internal plans and reports never cross the durable display boundary. */
 export const projectResearchProgress = (progress: ResearchProgress): ResearchProgress => ({
   runId: progress.runId,
+  ...(progress.title !== undefined ? { title: progress.title } : {}),
   phase: progress.phase,
   tasks: progress.tasks.map(({ id, ordinal, title, status, error }) => ({
     id,

@@ -141,6 +141,8 @@ let hostReadsAlongside = false;
 let hostPreamble = "";
 /** The person's language the host passes along, when a test sets one. */
 let hostLanguage: string | undefined;
+/** The title the host gives the run, when a test sets one. */
+let hostTitle: string | undefined;
 let hostDraft = false;
 let hostDraftTurns = 0;
 const HOLD_URL = "https://hold.example/wait";
@@ -309,7 +311,11 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
         hostCallsMade++;
         const research = {
           name: "deep_research",
-          params: { brief: hostBrief, ...(hostLanguage ? { language: hostLanguage } : {}) },
+          params: {
+            brief: hostBrief,
+            ...(hostLanguage ? { language: hostLanguage } : {}),
+            ...(hostTitle !== undefined ? { title: hostTitle } : {}),
+          },
           id: "host-research",
         };
         const calls = hostReadsAlongside
@@ -565,6 +571,7 @@ beforeEach(async () => {
   hostReadsAlongside = false;
   hostPreamble = "";
   hostLanguage = undefined;
+  hostTitle = undefined;
   hostDraft = false;
   hostDraftTurns = 0;
   readerGate = null;
@@ -800,6 +807,20 @@ describe("deep research as a tool call", () => {
     await runtime.runPromise(collect(sent.assistantMessageId));
     const coordinator = requests.find((request) => phaseOf(request) === "coordinator");
     expect(JSON.stringify(coordinator?.prompt)).toContain('Write each task title in \\"German\\"');
+  });
+
+  it("shows the run under the title the host gave it, as one short line", async () => {
+    hostTitle = "  HRT-Zugang\n in Berlin  ";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const calls = await runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* ChatRepo).listToolCalls([sent.assistantMessageId]);
+      }),
+    );
+    const call = calls.find((row) => row.toolName === "deep_research")!;
+    expect(call.result).toMatchObject({ progress: { title: "HRT-Zugang in Berlin" } });
   });
 
   it("keeps a sibling call running when the run beside it finalizes", async () => {

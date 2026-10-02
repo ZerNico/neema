@@ -137,6 +137,8 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     readonly textOffset?: number;
   };
   startedAt: number;
+  /** What the reader sees the run called; the host writes it with the brief. */
+  title?: string;
   emit: (event: ToolChunkEnvelope) => Effect.Effect<void>;
   emitCompaction: (event: CompactionChunkEnvelope) => Effect.Effect<void>;
   text: (delta: string) => Effect.Effect<void>;
@@ -154,7 +156,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   const sources = new Map<number, Source>();
   const registeredSources = () => mergeSources([...deps.priorSources, ...sources.values()]);
   const citationIds = () => new Set(registeredSources().map((source) => source.index));
-  let progress = initialResearchProgress(fence.runId);
+  let progress = initialResearchProgress(fence.runId, deps.title);
   const limitations = new Set<string>();
   const tasks: Array<
     { -readonly [K in keyof ResearchTaskProgress]: ResearchTaskProgress[K] } & { report?: string }

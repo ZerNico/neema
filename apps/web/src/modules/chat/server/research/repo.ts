@@ -27,8 +27,9 @@ export type ResearchFence = {
   generationId: string;
   owner: string;
 };
-export const initialResearchProgress = (runId: string): ResearchProgress => ({
+export const initialResearchProgress = (runId: string, title?: string): ResearchProgress => ({
   runId,
+  ...(title ? { title } : {}),
   phase: "queued",
   tasks: [],
   limitations: [],
@@ -45,6 +46,7 @@ const queueResearch = Effect.fn("research.queue")(function* (
     generationId: string;
     toolCallId: string;
     modelId: string;
+    title?: string;
   },
 ) {
   yield* tx
@@ -69,7 +71,17 @@ const queueResearch = Effect.fn("research.queue")(function* (
   // tool call, fenced by the generation that started it.
   yield* tx
     .insert(researchRuns)
-    .values({ id, ...input, modelName: input.modelId, progress: initialResearchProgress(id) })
+    .values({
+      id,
+      userId: input.userId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      generationId: input.generationId,
+      toolCallId: input.toolCallId,
+      modelId: input.modelId,
+      modelName: input.modelId,
+      progress: initialResearchProgress(id, input.title),
+    })
     .pipe(Effect.orDie);
   return id;
 });
@@ -409,6 +421,7 @@ export const createResearchStore = (db: Db["Service"]) => {
       generationId: string;
       toolCallId: string;
       modelId: string;
+      title?: string;
     }) =>
       db
         .transaction((tx) => queueResearch(tx, input))
