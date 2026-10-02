@@ -147,6 +147,17 @@ async function verify(session: Session, parts: Parts, bytes: Uint8Array | null):
   return { ...checked, allowed: new Set(), additions: [], dirty: false };
 }
 
+/**
+ * Commits parts a step outside the operations rewrote, under the same check:
+ * only `changed` may differ, and new parts must match `additions`.
+ */
+export const commitParts = (
+  session: Session,
+  parts: Parts,
+  changed: readonly string[],
+  additions: readonly RegExp[],
+) => verify({ ...session, allowed: new Set(changed), additions: [...additions] }, parts, null);
+
 export async function flush(session: Session): Promise<Session> {
   if (!session.dirty) return session;
   const next = await saved(session);

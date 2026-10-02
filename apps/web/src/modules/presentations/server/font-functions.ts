@@ -47,3 +47,17 @@ export const deletePresentationFont = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     runtime.runPromise(PresentationFonts.use((fonts) => fonts.remove(data.id))),
   );
+
+/** Embedding is per face and off by default: a brand font's licence may forbid it. */
+export const setPresentationFontEmbed = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(Schema.toStandardSchemaV1(Schema.Struct({ id: Schema.String, embed: Schema.Boolean })))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      PresentationFonts.use((fonts) => fonts.setEmbed(data.id, data.embed)).pipe(
+        Effect.catchTag("FontRejected", (error) =>
+          Effect.die(new Response(error.reason, { status: 400 })),
+        ),
+      ),
+    ),
+  );

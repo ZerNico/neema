@@ -10,7 +10,11 @@ export interface FontFileInfo {
   readonly style: string;
   readonly bold: boolean;
   readonly italic: boolean;
-  /** False when the font's licence bits forbid embedding it in documents. */
+  /**
+   * Whether the font's licence bits let a document carry it editably: a
+   * TrueType face marked installable or editable. Preview-only, restricted
+   * and bitmap-only faces would leave recipients unable to edit.
+   */
   readonly embeddable: boolean;
   readonly format: "ttf" | "otf";
 }
@@ -24,6 +28,8 @@ export interface FontFace {
   readonly path: string;
   /** Who supplied it; for one family and style an upload wins, then a skill, then Google. */
   readonly source: "upload" | "skill" | "google";
+  /** Whether decks that use it carry it: licence allowing, always for Google, by admin choice for uploads. */
+  readonly embed?: boolean;
 }
 
 const printable = (text: string) =>
@@ -121,8 +127,11 @@ export function readFontFile(bytes: Uint8Array): FontFileInfo {
     style: best(17) ?? best(2) ?? "Regular",
     bold: (selection & 0x20) !== 0 || (macStyle & 1) !== 0 || weight >= 700,
     italic: (selection & 0x201) !== 0 || (macStyle & 2) !== 0,
-    // Bit 1 alone is "restricted licence": no embedding at all.
-    embeddable: (fsType & 0x000f) !== 0x0002,
+    // Usage bits 0 (installable) or 8 (editable), not bitmap-only (0x200).
+    embeddable:
+      format === "ttf" &&
+      ((fsType & 0x000f) === 0 || (fsType & 0x000f) === 0x0008) &&
+      !(fsType & 0x0200),
     format,
   };
 }

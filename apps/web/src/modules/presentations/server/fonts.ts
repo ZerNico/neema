@@ -32,6 +32,8 @@ export interface FontRecord {
   readonly bold: boolean;
   readonly italic: boolean;
   readonly embeddable: boolean;
+  /** Whether decks that use it carry it; only an embeddable face can. */
+  readonly embed: boolean;
   readonly fileName: string;
   readonly byteSize: number;
   readonly createdAt: Date;
@@ -59,6 +61,7 @@ const record = (row: typeof presentationFonts.$inferSelect): FontRecord => ({
   bold: row.bold,
   italic: row.italic,
   embeddable: row.embeddable,
+  embed: row.embed,
   fileName: row.fileName,
   byteSize: row.byteSize,
   createdAt: row.createdAt,
@@ -79,6 +82,8 @@ export class PresentationFonts extends Context.Service<
       userId: string;
     }): Effect.Effect<FontRecord, FontRejected>;
     remove(id: string): Effect.Effect<void>;
+    /** An admin's choice to embed an uploaded face in decks; refused for one whose licence forbids it. */
+    setEmbed(id: string, embed: boolean): Effect.Effect<void, FontRejected>;
     /** Uploaded faces as local files, for render work. */
     faces(): Effect.Effect<readonly FontFace[]>;
     /** Every family a deck may use now: bundled, uploaded and fetched. */
@@ -119,6 +124,8 @@ export class PresentationFonts extends Context.Service<
         format: presentationFonts.format,
         sha256: presentationFonts.sha256,
         source: presentationFonts.source,
+        embeddable: presentationFonts.embeddable,
+        embed: presentationFonts.embed,
       };
 
       const faces = Effect.fn("PresentationFonts.faces")(function* () {
@@ -155,6 +162,8 @@ export class PresentationFonts extends Context.Service<
                 italic: row.italic,
                 path,
                 source: row.source,
+                // Google faces are licensed for embedding; an upload only by choice.
+                embed: row.embeddable && (row.source === "google" || row.embed),
               },
             ];
           }),
@@ -422,6 +431,7 @@ export class PresentationFonts extends Context.Service<
               bold: presentationFonts.bold,
               italic: presentationFonts.italic,
               embeddable: presentationFonts.embeddable,
+              embed: presentationFonts.embed,
               fileName: presentationFonts.fileName,
               byteSize: presentationFonts.byteSize,
               createdAt: presentationFonts.createdAt,
@@ -443,6 +453,25 @@ export class PresentationFonts extends Context.Service<
             .delete(presentationFonts)
             .where(eq(presentationFonts.id, id))
             .pipe(Effect.orDie);
+          yield* Ref.set(cached, null);
+        }),
+        setEmbed: Effect.fn("PresentationFonts.setEmbed")(function* (id: string, embed: boolean) {
+          const [row] = yield* db
+            .update(presentationFonts)
+            .set({ embed })
+            .where(
+              and(
+                eq(presentationFonts.id, id),
+                eq(presentationFonts.source, "upload"),
+                embed ? eq(presentationFonts.embeddable, true) : sql`true`,
+              ),
+            )
+            .returning({ id: presentationFonts.id })
+            .pipe(Effect.orDie);
+          if (!row)
+            return yield* Effect.fail(
+              new FontRejected({ reason: "This font's licence does not allow embedding it." }),
+            );
           yield* Ref.set(cached, null);
         }),
         faces,

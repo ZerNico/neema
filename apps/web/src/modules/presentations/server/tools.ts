@@ -100,6 +100,8 @@ const Result = Schema.Struct({
   nextPage: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   nextShapeOffset: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   previewWarning: Schema.optionalKey(Schema.String),
+  /** Families the deck uses that it could not carry: the file would exceed its size limit. */
+  fontsNotEmbedded: Schema.optionalKey(Schema.Array(Schema.String)),
   /** What an inspection covered, by slide position, so the activity can say so. */
   read: Schema.optionalKey(PresentationRead),
 });
@@ -525,6 +527,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         : {}),
       ...(renderIds?.length && host.onPreview ? { renderedSlideIds: renderIds } : {}),
       ...(previewWarning ? { previewWarning } : {}),
+      ...(output.fontsNotEmbedded ? { fontsNotEmbedded: output.fontsNotEmbedded } : {}),
     };
   });
   const render = execute("render", async (raw): Promise<PresentationToolResult> => {

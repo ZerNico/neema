@@ -28,6 +28,8 @@ export const presentationFonts = pgTable(
     bold: boolean().notNull(),
     italic: boolean().notNull(),
     embeddable: boolean().notNull(),
+    /** An admin's choice to embed an uploaded face in decks; its licence may still forbid it. */
+    embed: boolean().notNull().default(false),
     format: text({ enum: ["ttf", "otf"] }).notNull(),
     fileName: text("file_name").notNull(),
     byteSize: integer("byte_size").notNull(),

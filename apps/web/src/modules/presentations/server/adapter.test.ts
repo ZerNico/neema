@@ -723,6 +723,83 @@ describe("presentation core adapter", () => {
     await expect(checkFontFile(join(fonts, "LICENSES.md"))).rejects.toThrow(/not a TrueType/);
   });
 
+  it("embeds the faces a deck uses, keeps them across edits, drops them when unused, and never touches a deck's own", async () => {
+    const path = join(
+      import.meta.dirname,
+      "../../../../tests/fixtures/fonts/AbrilFatface-Regular.ttf",
+    );
+    const face = { ...(await checkFontFile(path)), path, source: "google" as const, embed: true };
+    const decoder = new TextDecoder();
+    const fontParts = (bytes: Uint8Array) =>
+      [...readPresentationArchive(bytes).keys()].filter((name) => name.startsWith("ppt/fonts/"));
+    const xmlOf = (bytes: Uint8Array, name: string) =>
+      decoder.decode(readPresentationArchive(bytes).get(name));
+
+    const draft = await createPresentationDraft();
+    const themed = await editPresentation(
+      draft,
+      [{ kind: "setTheme", headingFont: "Abril Fatface", bodyFont: "Arial" }],
+      [face],
+    );
+    const [part] = fontParts(themed.bytes);
+    expect(part).toMatch(/^ppt\/fonts\/chat-[0-9a-f]{8}-regular\.fntdata$/);
+    const presentation = xmlOf(themed.bytes, "ppt/presentation.xml");
+    expect(presentation).toContain('typeface="Abril Fatface"');
+    // Office families are never embedded: the faces held for them are substitutes.
+    expect(presentation).not.toContain('typeface="Arial"');
+    expect(presentation.match(/embedTrueTypeFonts=/g)).toHaveLength(1);
+    expect(presentation).toContain('saveSubsetFonts="0"');
+    expect(xmlOf(themed.bytes, "[Content_Types].xml")).toContain('Extension="fntdata"');
+    expect(xmlOf(themed.bytes, "ppt/_rels/presentation.xml.rels")).toContain("relationships/font");
+
+    // Another edit keeps exactly the one embedded face, and the deck still previews.
+    const id = (await inspect(themed.bytes)).slides[0]!.slideId;
+    expect((await renderPresentation(themed.bytes, [id], [face]))[0]!.png.length).toBeGreaterThan(
+      0,
+    );
+    const again = await editPresentation(
+      themed.bytes,
+      [{ kind: "setText", slideId: id, placeholder: "title", text: "Hello" }],
+      [face],
+    );
+    expect(fontParts(again.bytes)).toEqual([part]);
+
+    // A deck's own embedded font, from PowerPoint or elsewhere, is kept as it was.
+    const parts = readPresentationArchive(again.bytes);
+    const own = new Uint8Array([1, 2, 3, 4]);
+    parts.set("ppt/fonts/font1.fntdata", own);
+    parts.set(
+      "ppt/_rels/presentation.xml.rels",
+      strToU8(
+        xmlOf(again.bytes, "ppt/_rels/presentation.xml.rels").replace(
+          "</Relationships>",
+          '<Relationship Id="rId900" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata"/></Relationships>',
+        ),
+      ),
+    );
+    parts.set(
+      "ppt/presentation.xml",
+      strToU8(
+        xmlOf(again.bytes, "ppt/presentation.xml").replace(
+          "<p:embeddedFontLst>",
+          '<p:embeddedFontLst><p:embeddedFont><p:font typeface="Brand Sans"/><p:regular r:id="rId900"/></p:embeddedFont>',
+        ),
+      ),
+    );
+    const withOwn = zipSync(Object.fromEntries(parts));
+
+    // The deck stops using Abril Fatface: our face goes, the deck's own stays.
+    const plain = await editPresentation(
+      withOwn,
+      [{ kind: "setTheme", headingFont: "Arial" }],
+      [face],
+    );
+    expect(fontParts(plain.bytes)).toEqual(["ppt/fonts/font1.fntdata"]);
+    expect(readPresentationArchive(plain.bytes).get("ppt/fonts/font1.fntdata")).toEqual(own);
+    expect(xmlOf(plain.bytes, "ppt/presentation.xml")).toContain('typeface="Brand Sans"');
+    expect(xmlOf(plain.bytes, "ppt/presentation.xml")).not.toContain("Abril Fatface");
+  });
+
   it("reports a curated family a deck names but has no face for, and nothing it can draw", async () => {
     const draft = await createPresentationDraft();
     const id = (await inspect(draft)).slides[0]!.slideId;

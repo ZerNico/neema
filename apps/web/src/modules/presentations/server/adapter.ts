@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   addSlide,
   createPresentation,
@@ -20,7 +21,8 @@ import { openPackage } from "./package.ts";
 import { fail, toPart } from "./package-xml.ts";
 import { deckTypefaces, facesFor, operationTypefaces } from "./font-usage.ts";
 import { prepareFonts } from "./render.ts";
-import { apply, flush, startSession, worksOnParts, type Refs } from "./session.ts";
+import { apply, commitParts, flush, startSession, worksOnParts, type Refs } from "./session.ts";
+import { embedFontParts, OWN_FONT_PART } from "./font-embedding.ts";
 import { applyDeckTemplate, DEFAULT_THEME } from "./template.ts";
 
 /**
@@ -62,6 +64,32 @@ export async function editPresentation(
     created: new Set(),
   };
   let session = await startSession(input);
+  /**
+   * Carries the faces the deck's text uses, once per call after its last save,
+   * as a step of its own under the same preservation check. A deck the fonts
+   * would push past the package limit is kept without them; their names return.
+   */
+  const embedUsedFonts = async (): Promise<string[]> => {
+    const used = facesFor(
+      fonts.filter((face) => face.embed),
+      deckTypefaces(session.parts),
+    );
+    if (!used.length && ![...session.parts.keys()].some((name) => OWN_FONT_PART.test(name)))
+      return [];
+    const faces = await Promise.all(
+      used.map(async (face) => ({ ...face, bytes: new Uint8Array(await readFile(face.path)) })),
+    );
+    const embedded = embedFontParts(session.parts, faces);
+    if (!embedded) return [];
+    try {
+      session = await commitParts(session, embedded.parts, embedded.changed, [OWN_FONT_PART]);
+      return [];
+    } catch (error) {
+      if (error instanceof PresentationError && error.code === "limit")
+        return [...new Set(used.map((face) => face.family))];
+      throw error;
+    }
+  };
   // Moving, removing or annotating slides cannot change how text fits, so those edits skip the audit.
   const audit = needsAudit(operations)
     ? await prepareFonts(
@@ -105,6 +133,7 @@ export async function editPresentation(
     }
   }
   await settle(operations.length - 1);
+  const notEmbedded = await embedUsedFonts();
   // The last verified revision is the result; nothing is opened again to describe it.
   const inspection = inspectPackage(session, {
     slides: "all",
@@ -133,6 +162,7 @@ export async function editPresentation(
       ),
     },
     changedSlideIds,
+    ...(notEmbedded.length ? { fontsNotEmbedded: notEmbedded } : {}),
     ...feedback,
     refs: { slides: Object.fromEntries(refs.slides), shapes: Object.fromEntries(refs.shapes) },
   };

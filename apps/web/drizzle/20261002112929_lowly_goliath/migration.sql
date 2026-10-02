@@ -1,0 +1,1 @@
+ALTER TABLE "presentation_fonts" ADD COLUMN "embed" boolean DEFAULT false NOT NULL;

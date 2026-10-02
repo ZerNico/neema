@@ -7,6 +7,7 @@ import { ConfirmProvider } from "~/ui/confirm.tsx";
 import {
   deletePresentationFont,
   listPresentationFonts,
+  setPresentationFontEmbed,
   uploadPresentationFont,
 } from "../server/font-functions.ts";
 import { PresentationFontsRow } from "./presentation-fonts.tsx";
@@ -16,6 +17,7 @@ vi.mock("../server/font-functions.ts", () => ({
   listPresentationFonts: vi.fn(),
   uploadPresentationFont: vi.fn(),
   deletePresentationFont: vi.fn(),
+  setPresentationFontEmbed: vi.fn(),
 }));
 
 const font = {
@@ -25,6 +27,7 @@ const font = {
   bold: true,
   italic: false,
   embeddable: false,
+  embed: false,
   fileName: "BrandSans-Bold.ttf",
   byteSize: 120_000,
   createdAt: new Date().toISOString(),
@@ -90,4 +93,16 @@ it("uploads fonts dropped anywhere on the row", async () => {
   fireEvent.drop(zone, { dataTransfer });
   await waitFor(() => expect(uploadPresentationFont).toHaveBeenCalledTimes(1));
   expect(overlay.getAttribute("aria-hidden")).toBe("true");
+});
+
+it("offers embedding only for a face whose licence allows it, off until an admin turns it on", async () => {
+  vi.mocked(setPresentationFontEmbed).mockResolvedValue(undefined);
+  renderRow([font, { ...font, id: "f2", bold: false, style: "Regular", embeddable: true }]);
+  expect(screen.queryByRole("switch", { name: /Brand Sans Bold/ })).toBeNull();
+  const toggle = screen.getByRole("switch", { name: "Embed Brand Sans Regular in decks" });
+  expect(toggle).toHaveAttribute("aria-checked", "false");
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(setPresentationFontEmbed).toHaveBeenCalledWith({ data: { id: "f2", embed: true } }),
+  );
 });

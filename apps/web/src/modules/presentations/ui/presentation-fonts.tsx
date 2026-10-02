@@ -9,10 +9,12 @@ import { toastError } from "~/ui/error-toast.ts";
 import { useAppReducedMotion } from "~/ui/motion.tsx";
 import { ListRow } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { Switch } from "~/ui/primitives/switch";
 import { useFileDrop } from "~/ui/use-file-drop.ts";
 import {
   deletePresentationFont,
   listPresentationFonts,
+  setPresentationFontEmbed,
   uploadPresentationFont,
 } from "../server/font-functions.ts";
 
@@ -40,6 +42,11 @@ function FontItem({ font }: { font: Font }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: presentationFontsQuery.queryKey }),
     onError: (error) => toastError("Could not remove the font.", error),
   });
+  const embed = useMutation({
+    mutationFn: (next: boolean) => setPresentationFontEmbed({ data: { id: font.id, embed: next } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: presentationFontsQuery.queryKey }),
+    onError: (error) => toastError("Could not change embedding.", error),
+  });
   return (
     <li className="flex min-w-0 items-center gap-2 text-sm">
       <HugeiconsIcon
@@ -53,10 +60,21 @@ function FontItem({ font }: { font: Font }) {
         {styleLabel(font)} · {formatFileSize(font.byteSize)}
         {font.embeddable ? "" : " · licence forbids embedding"}
       </span>
+      {font.embeddable ? (
+        <div className="text-muted-foreground ml-auto flex shrink-0 items-center gap-2 text-xs">
+          <span aria-hidden>Embed in decks</span>
+          <Switch
+            checked={embed.isPending ? embed.variables : font.embed}
+            disabled={embed.isPending}
+            onCheckedChange={(next) => embed.mutate(next)}
+            aria-label={`Embed ${font.family} ${styleLabel(font)} in decks`}
+          />
+        </div>
+      ) : null}
       <PendingButton
         variant="ghost"
         size="icon-sm"
-        className="ml-auto"
+        className={font.embeddable ? undefined : "ml-auto"}
         aria-label={`Remove ${font.family} ${styleLabel(font)}`}
         pending={remove.isPending}
         onClick={() => {

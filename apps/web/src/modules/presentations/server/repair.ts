@@ -41,11 +41,18 @@ const entriesOf = (types: string) =>
 
 /**
  * Office Kit rewrites the content types from what it understands, which loses
- * the SVG default. The previous serialization is kept, extended with entries
- * the edit added and trimmed of parts it removed. Reports whether it changed.
+ * the SVG and embedded-font defaults. The previous serialization is kept,
+ * extended with entries the edit added and trimmed of parts it removed.
+ * Reports whether it changed.
  */
 export function preserveContentTypes(before: Parts, next: Parts) {
-  if (![...before.keys()].some((part) => /^ppt\/media\/[^/]+\.svg$/i.test(part))) return false;
+  if (
+    ![...before.keys()].some(
+      (part) =>
+        /^ppt\/media\/[^/]+\.svg$/i.test(part) || /^ppt\/fonts\/[^/]+\.fntdata$/i.test(part),
+    )
+  )
+    return false;
   const previous = text(before, TYPES);
   const current = text(next, TYPES);
   if (previous === current) return false;
