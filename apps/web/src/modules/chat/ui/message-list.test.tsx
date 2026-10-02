@@ -1789,9 +1789,10 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    const research = screen.getByRole("button", { name: "Reading sources…" });
-    expect(research).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("button", { name: /sources|web/i })).toHaveLength(1);
+    // Inside the open work line the search step stays folded until asked.
+    const research = screen.getByRole("button", { name: "Reading effect.website" });
+    expect(research).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(research);
     expect(screen.queryByText("Search-only result")).not.toBeInTheDocument();
     expect(screen.getByText("Reading this page")).toBeInTheDocument();
   });
@@ -1822,7 +1823,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getAllByRole("button", { name: "Opening sources…" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Opening effect.website" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Searched the web/ })).toBeNull();
   });
 

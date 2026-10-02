@@ -769,7 +769,6 @@ const AssistantBody = memo(function AssistantBody({
         <ToolActivityBlock
           key={part.key}
           activities={part.activities}
-          live={live}
           usedSources={usedIndexes}
           {...(!streaming && onOpenSources ? { onViewSources: onOpenSources } : {})}
         />

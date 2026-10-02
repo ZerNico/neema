@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { WebToolActivity } from "../client/use-message-stream.ts";
@@ -63,7 +63,7 @@ const completeRead: WebToolActivity = {
 
 const toggle = () =>
   screen.getByRole("button", {
-    name: /^(Searched|Searching|Opening|Reading|Read|Web search|Couldn’t)/i,
+    name: /^(Searched|Searching|Opening|Reading|Read|Couldn’t)/i,
   });
 
 describe("ToolActivityBlock", () => {
@@ -105,14 +105,16 @@ describe("ToolActivityBlock", () => {
         "https://drizzle.team/docs",
         "https://tanstack.com/router",
         "https://react.dev/reference",
+        "https://vitest.dev/guide",
       ],
       status: "complete",
-      pagesFetched: 4,
+      pagesFetched: 5,
       pages: [
         { url: "https://effect.website/blog", title: "Effect blog", status: "done" },
         { url: "https://drizzle.team/docs", title: "Drizzle docs", status: "done" },
         { url: "https://tanstack.com/router", title: "TanStack Router", status: "done" },
         { url: "https://react.dev/reference", title: "React reference", status: "done" },
+        { url: "https://vitest.dev/guide", title: "Vitest guide", status: "done" },
       ],
       sources: [
         {
@@ -131,71 +133,58 @@ describe("ToolActivityBlock", () => {
     expect(toggle()).toHaveAccessibleName("Searched the web · 1 source");
     await user.click(toggle());
 
-    expect(screen.getByText(/“first query” and “second query”, \+1 more/)).toBeInTheDocument();
-    expect(screen.queryByText("third query")).not.toBeInTheDocument();
+    expect(screen.getByText("first query")).toBeInTheDocument();
+    expect(screen.getByText("third query")).toBeInTheDocument();
     expect(screen.getByText("Effect blog")).toBeInTheDocument();
     expect(screen.getByText("Drizzle docs")).toBeInTheDocument();
     expect(screen.getByText("TanStack Router")).toBeInTheDocument();
-    expect(screen.queryByText("React reference")).not.toBeInTheDocument();
-    expect(screen.getByText("+1 more opened")).toBeInTheDocument();
+    expect(screen.getByText("React reference")).toBeInTheDocument();
+    expect(screen.queryByText("Vitest guide")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show 1 more" }));
+    expect(screen.getByText("Vitest guide")).toBeInTheDocument();
   });
 
-  it("shows live page progress and auto-collapses when reading finishes", async () => {
+  it("names what it reads while running, and never opens by itself", async () => {
+    const user = userEvent.setup();
     const { rerender } = render(<ToolActivityBlock activities={[runningRead]} />);
 
-    expect(toggle()).toHaveAccessibleName("Reading sources…");
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Effect blog")).toBeInTheDocument();
-    expect(screen.getByText("reading…")).toBeInTheDocument();
+    expect(toggle()).toHaveAccessibleName("Reading effect.website");
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle());
+    expect(screen.getByText("Effect blog")).toHaveClass("text-shimmer");
     expect(screen.getByText("Drizzle docs")).toBeInTheDocument();
-    expect(screen.getByText("queued")).toBeInTheDocument();
 
     rerender(<ToolActivityBlock activities={[completeRead]} />);
-
     expect(toggle()).toHaveAccessibleName("Read 2 pages");
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    await waitFor(
-      () => {
-        expect(toggle()).toHaveAttribute("aria-expanded", "false");
-        expect(screen.queryByText("Effect blog")).not.toBeInTheDocument();
-      },
-      { timeout: 1_500 },
-    );
   });
 
-  it("cancels collapse across a 500ms research gap and waits 800ms after the final read", () => {
-    vi.useFakeTimers();
-    const runningSearch: WebToolActivity = {
-      ...completeSearch,
-      status: "running",
-      sources: [],
-    };
-    const { rerender, unmount } = render(<ToolActivityBlock activities={[runningSearch]} />);
+  it("names the running query, and shows a failed page without a tick on the others", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ToolActivityBlock activities={[{ ...completeSearch, status: "running", sources: [] }]} />,
+    );
+    expect(toggle()).toHaveAccessibleName("Searching for “Effect TypeScript”");
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
 
-    try {
-      expect(toggle()).toHaveAttribute("aria-expanded", "true");
-
-      rerender(<ToolActivityBlock activities={[completeSearch]} />);
-      act(() => vi.advanceTimersByTime(500));
-      expect(toggle()).toHaveAttribute("aria-expanded", "true");
-
-      rerender(<ToolActivityBlock activities={[completeSearch, runningRead]} />);
-      expect(toggle()).toHaveAccessibleName("Reading sources…");
-      // Pass the original search-completion deadline while a read is running.
-      // A stale timeout would clear graceOpen and collapse immediately on finish.
-      act(() => vi.advanceTimersByTime(300));
-      expect(toggle()).toHaveAttribute("aria-expanded", "true");
-
-      rerender(<ToolActivityBlock activities={[completeSearch, completeRead]} />);
-      expect(toggle()).toHaveAttribute("aria-expanded", "true");
-      act(() => vi.advanceTimersByTime(799));
-      expect(toggle()).toHaveAttribute("aria-expanded", "true");
-      act(() => vi.advanceTimersByTime(1));
-      expect(toggle()).toHaveAttribute("aria-expanded", "false");
-    } finally {
-      unmount();
-      vi.useRealTimers();
-    }
+    rerender(
+      <ToolActivityBlock
+        activities={[
+          {
+            ...completeRead,
+            pages: [
+              { url: "https://effect.website/blog", title: "Effect blog", status: "done" },
+              { url: "https://drizzle.team/docs", title: "Drizzle docs", status: "error" },
+            ],
+          },
+        ]}
+      />,
+    );
+    await user.click(toggle());
+    expect(screen.getAllByText("Couldn’t open")).toHaveLength(1);
+    expect(screen.getByText("Drizzle docs").closest("li")).toHaveTextContent("Couldn’t open");
+    expect(screen.getByText("Effect blog").closest("li")).not.toHaveTextContent("Couldn’t open");
   });
 
   it("only offers the source-panel action after completion", async () => {
@@ -227,25 +216,9 @@ describe("ToolActivityBlock", () => {
         onViewSources={onViewSources}
       />,
     );
+    await user.click(toggle());
     await user.click(screen.getByRole("button", { name: "View all sources" }));
 
     expect(onViewSources).toHaveBeenCalledOnce();
-  });
-
-  it("scopes manual disclosure choices to the running or completed phase", async () => {
-    const user = userEvent.setup();
-    const { rerender } = render(<ToolActivityBlock activities={[runningRead]} />);
-
-    await user.click(toggle());
-    expect(toggle()).toHaveAttribute("aria-expanded", "false");
-
-    rerender(<ToolActivityBlock activities={[completeRead]} />);
-    expect(toggle()).toHaveAttribute("aria-expanded", "false");
-
-    await user.click(toggle());
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
-
-    rerender(<ToolActivityBlock activities={[runningRead]} />);
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
   });
 });
