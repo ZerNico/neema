@@ -247,6 +247,8 @@ skipped one on purpose.
   containment and previews.
 - `docs/internals/resume.md`: continuing a failed or stopped last answer. Same row, new
   generation, one continuous chunk and turn space, earlier rounds read as records.
+- `docs/internals/web-search.md`: the provider chain, why empty ends it, cooldowns that
+  reorder and never remove, failure reasons, and each provider's quirks.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
 - `docs/internals/temporary-chats.md`: the flag, where it is read, the sweep and
@@ -356,9 +358,11 @@ Differs from most Effect 3 material online.
   is exempt by design. After that check, callers must `fetchPinned` the returned
   addresses: a second DNS lookup would reopen rebinding.
 - `web_search` caches per generation by query, time range and language; failures
-  are evicted. Research shares `RESEARCH_LIMITS.externalOps` (3) permits, and
-  SearXNG fans each query to every enabled engine, so that is the burst upstreams
-  see. `infra/searxng/settings.yml` enables Google CSE, Yep, Yandex and Bing on purpose; its comment has the measurements.
+  are evicted. Each query walks the ordered `search_providers` until one answers;
+  empty is an answer, and a failing provider moves to the back, never out. Research
+  shares `RESEARCH_LIMITS.externalOps` (3) permits, a query's fallbacks run inside
+  its one permit, and SearXNG fans each query to every enabled engine, so that is the
+  burst upstreams see. `infra/searxng/settings.yml` enables Google CSE, Yep, Yandex and Bing on purpose; its comment has the measurements.
 - Search follows the composer toggle, which rests on the installed agent's "web
   search by default" (plain chat rests on true) and returns there after each send.
   The reader is armed with search, and also when user text or prior sources seed

@@ -61,7 +61,7 @@ Root `db:migrate`, `db:push` and `db:studio` target this isolated development da
 For intentional deployment migrations, invoke the web package’s `db:migrate`
 with an explicitly supplied `DATABASE_URL` instead.
 
-`pnpm dev:setup` starts shared Postgres and SearXNG. Configure
+`pnpm dev:setup` starts shared Postgres and SearXNG. Add a SearXNG search provider at
 `http://localhost:8081` under Admin → Tools in each development instance.
 OAuth providers may reject `.localhost` callbacks; use local email/password login,
 or configure Portless with a domain accepted by your provider.
