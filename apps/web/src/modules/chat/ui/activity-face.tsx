@@ -25,6 +25,7 @@ export function ActivityFace({
   label,
   detail,
   status,
+  title,
 }: {
   icon?: IconSvgElement;
   /** Drawn instead of `icon`, such as a stack of site icons. */
@@ -32,6 +33,8 @@ export function ActivityFace({
   label: string;
   detail?: string | null | undefined;
   status: ActivityStatus;
+  /** The label in full, on hover, where it is a shortened path or name. */
+  title?: string | undefined;
 }) {
   const failed = status === "failed";
   // Thinking is no tool: it reads as words alone, with no empty icon slot.
@@ -49,7 +52,9 @@ export function ActivityFace({
         </MotionSwap>
       ) : null}
       <MotionSwap value={label} kind="rolling-text" className="min-w-0">
-        <span className={cn(status === "running" && "text-shimmer")}>{label}</span>
+        <span className={cn(status === "running" && "text-shimmer")} title={title}>
+          {label}
+        </span>
       </MotionSwap>
       {detail ? (
         // Reads exactly like a dot written into a label ("Searched the web · 3

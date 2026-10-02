@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight01Icon,
   Delete02Icon,
   Download04Icon,
   FileImportIcon,
@@ -34,7 +35,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
-import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
+import { ActivityChevron, ActivityFace, ActivityNote } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
 const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
@@ -100,10 +101,55 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
 };
 
 /** Names the thing acted on, never the machinery that acted. */
-const runningLabel = (activity: DesktopToolActivity) => {
+/**
+ * A path as a row shows it: under an attached folder, that folder's name and
+ * the rest; elsewhere (the workspace, another machine) just the file's name,
+ * since the end of a path is what tells files apart. Hover shows it whole.
+ */
+const shortPath = (path: string, roots: ReadonlyArray<{ name: string; path: string }>) => {
+  let owner: { name: string; path: string } | undefined;
+  for (const root of roots)
+    if (path.startsWith(root.path + "/") && (!owner || root.path.length > owner.path.length))
+      owner = root;
+  if (owner) return `${owner.name}/${path.slice(owner.path.length + 1)}`;
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+};
+
+const PATH_TOOLS = new Set([
+  "read_local_file",
+  "import_local_file",
+  "write_local_file",
+  "save_to_workspace",
+  "edit_local_file",
+]);
+
+/** What a call that ended without a result tried, in reader words. */
+const FAILED: Partial<Record<DesktopToolActivity["name"], string>> = {
+  list_folder: "Couldn’t list the folder",
+  find_files: "Couldn’t find files",
+  search_files: "Couldn’t search files",
+  read_local_file: "Couldn’t read",
+  import_local_file: "Couldn’t import",
+  write_local_file: "Couldn’t write",
+  save_to_workspace: "Couldn’t save",
+  edit_local_file: "Couldn’t edit",
+  move_local_file: "Couldn’t move the file",
+  delete_local_file: "Couldn’t delete",
+  run_command: "Couldn’t run the program",
+};
+
+const runningLabel = (
+  activity: DesktopToolActivity,
+  roots: ReadonlyArray<{ name: string; path: string }> = [],
+) => {
   if (isBrowserTool(activity.name))
     return BROWSER_ACTIVITY[activity.name].running(activity.args ?? {});
-  const what = argText(activity);
+  const raw = argText(activity);
+  const what = PATH_TOOLS.has(activity.name) && raw ? shortPath(raw, roots) : raw;
+  if (activity.status === "error") {
+    const failed = FAILED[activity.name];
+    if (failed) return PATH_TOOLS.has(activity.name) && what ? `${failed} ${what}` : failed;
+  }
   switch (activity.name) {
     case "list_folder":
       return what && what !== "." ? `Listing ${what}` : "Listing the folder";
@@ -402,7 +448,8 @@ export function DesktopActivityBlock({
   // what to call next); its line already says what happened to the page.
   const detail = isBrowserTool(activity.name) ? "" : (activity.result?.detail ?? "");
   const violations = activity.result?.violations ?? [];
-  const label = activity.result?.summary ?? runningLabel(activity);
+  const label = activity.result?.summary ?? runningLabel(activity, roots);
+  const fullPath = PATH_TOOLS.has(activity.name) ? argText(activity) : "";
 
   // A command or a long path must never widen the column: the row truncates
   // and the body wraps, so the transcript stays as wide as the chat.
@@ -411,11 +458,14 @@ export function DesktopActivityBlock({
       icon={iconOf(activity.name)}
       label={label}
       status={running ? "running" : failed ? "failed" : "done"}
+      title={fullPath || undefined}
     />
   );
 
-  if (running || detail.length === 0) {
-    return preview ? (
+  // A file to look at makes the row one target that opens it, marked as
+  // opening something rather than unfolding: what the call did is the file.
+  if (preview)
+    return (
       <>
         <button
           type="button"
@@ -423,41 +473,31 @@ export function DesktopActivityBlock({
           className={cn(disclosureTriggerClassName, "mb-2")}
         >
           {face}
+          <HugeiconsIcon
+            icon={ArrowUpRight01Icon}
+            strokeWidth={2}
+            className="size-3.5 shrink-0"
+            aria-hidden
+          />
         </button>
         {preview.dialog}
+        {violations.length ? (
+          <div className="-mt-1 mb-2 pl-6">
+            <ActivityNote>{violations.join(" ")}</ActivityNote>
+          </div>
+        ) : null}
       </>
-    ) : (
-      <div className={cn(activityRowClassName, "mb-2")}>{face}</div>
     );
-  }
+
+  if (running || detail.length === 0)
+    return <div className={cn(activityRowClassName, "mb-2")}>{face}</div>;
 
   return (
     <Disclosure open={open} onOpenChange={setOpen} className="mb-2 min-w-0 max-w-full">
-      {preview ? (
-        // Two targets, because the row now answers two questions: what the file
-        // holds now, and what the call did to it.
-        <div className="flex min-w-0 max-w-full items-center gap-1">
-          <button
-            type="button"
-            onClick={preview.open}
-            className={cn(disclosureTriggerClassName, "flex-1")}
-          >
-            {face}
-          </button>
-          {preview.dialog}
-          <DisclosureTrigger
-            className={cn(disclosureTriggerClassName, "shrink-0")}
-            aria-label="Show what this call did"
-          >
-            <ActivityChevron open={open} />
-          </DisclosureTrigger>
-        </div>
-      ) : (
-        <DisclosureTrigger className={disclosureTriggerClassName}>
-          {face}
-          <ActivityChevron open={open} />
-        </DisclosureTrigger>
-      )}
+      <DisclosureTrigger className={disclosureTriggerClassName}>
+        {face}
+        <ActivityChevron open={open} />
+      </DisclosureTrigger>
       <DisclosureContent>
         <div className={cn(disclosureBodyRailClassName, "flex min-w-0 flex-col gap-2")}>
           {violations.length > 0 ? (

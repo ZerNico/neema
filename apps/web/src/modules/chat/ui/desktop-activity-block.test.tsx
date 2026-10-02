@@ -24,6 +24,29 @@ const running = (over: Partial<DesktopToolActivity> = {}): DesktopToolActivity =
 });
 
 describe("DesktopActivityBlock", () => {
+  it("names a file by its folder and the rest, or just its name, with the whole path on hover", () => {
+    const roots = [{ name: "Downloads", path: "/Users/me/Downloads" }];
+    const read = (path: string, over: Partial<DesktopToolActivity> = {}) =>
+      running({ name: "read_local_file", args: { path }, ...over });
+    const { unmount } = show(
+      <DesktopActivityBlock activity={read("/Users/me/Downloads/q3/report.pdf")} roots={roots} />,
+    );
+    expect(screen.getByText("Reading Downloads/q3/report.pdf")).toHaveAttribute(
+      "title",
+      "/Users/me/Downloads/q3/report.pdf",
+    );
+    unmount();
+    const workspace = "/Users/me/.data/desktop/workspaces/aafe548d/01a0fc67/image.png";
+    const { unmount: next } = show(
+      <DesktopActivityBlock activity={read(workspace)} roots={roots} />,
+    );
+    expect(screen.getByText("Reading image.png")).toBeInTheDocument();
+    next();
+    // A call that ended without a result says what it could not do, not that it is doing it.
+    show(<DesktopActivityBlock activity={read(workspace, { status: "error" })} roots={roots} />);
+    expect(screen.getByText("Couldn’t read image.png")).toBeInTheDocument();
+  });
+
   it("is pressable while the message is still streaming", async () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);

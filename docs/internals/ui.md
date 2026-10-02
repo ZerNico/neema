@@ -308,7 +308,10 @@ false`), so a page body is written against data already there. This includes loc
   a warning and says "Couldn’t …" in words, never red text, because a step the answer worked
   around is not a fault the person must act on. Labels carry no trailing "…". Body lines use
   `ActivityNote` for failures and `ActivityQueries` for search terms, and the chevron is
-  `ActivityChevron`. A new family uses these rather than restating them.
+  `ActivityChevron`. A new family uses these rather than restating them. A chevron only ever
+  unfolds the row's own detail; a row that opens something else (a file preview) is one
+  button marked with an up-right arrow beside its label, never a second target. Paths
+  read as an attached folder's name plus the rest, else the file's name, whole on hover.
 - Only the work line opens by itself, through `useRunDisclosure`: while a call runs or it is
   still the newest part of a streaming answer, then a moment after, so it does not close while
   the model decides its next call. The step rows inside it stay folded until clicked, since the
