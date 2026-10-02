@@ -3,7 +3,7 @@ import {
   xmlSafe,
   type Definition as OfficeDefinition,
 } from "../office/operations.ts";
-import { PRESENTATION_LIMITS } from "./limits.ts";
+import { BUNDLED_FONTS, PRESENTATION_LIMITS } from "./limits.ts";
 import { PresentationError } from "./errors.ts";
 
 /**
@@ -57,10 +57,12 @@ const ref = {
   about:
     "Name for the created object, usable as slideRef/shapeRef by later operations in this batch.",
 } as const;
-const point = (about: string) => ({ type: "number", min: 0, max: 2000, about }) as const;
+// Negative is allowed: a shape may start past the top or left edge to bleed off
+// the slide, as PowerPoint permits; models reach for it on decorative shapes.
+const point = (about: string) => ({ type: "number", min: -1000, max: 2000, about }) as const;
 const extent = (about: string) => ({ type: "number", min: 1, max: 2000, about }) as const;
 const box = {
-  x: point("Left edge in points (a 16:9 slide is 960 × 540)."),
+  x: point("Left edge in points (a 16:9 slide is 960 × 540; negative bleeds off the edge)."),
   y: point("Top edge in points."),
   width: extent("Width in points."),
   height: extent("Height in points."),
@@ -271,7 +273,7 @@ const themeColor = (about: string) => ({ type: "color", hexOnly: true, about }) 
 const font = {
   type: "string",
   max: 100,
-  about: "Typeface: one of availableFonts from the latest result.",
+  about: `Typeface: ${BUNDLED_FONTS.join(", ")}, or another name the latest result lists in availableFonts.`,
 } as const;
 
 export const PRESENTATION_OPERATIONS = {

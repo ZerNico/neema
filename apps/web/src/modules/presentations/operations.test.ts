@@ -32,4 +32,12 @@ describe("presentation operation batches", () => {
       ]),
     ).toThrow(/operations\[0\] addChart: pie charts take exactly one series/);
   });
+
+  it("lets a decorative shape bleed past the slide edge, within a bound", () => {
+    const shape = (y: number) => [
+      { kind: "addShape", slideId: 256, shape: "ellipse", x: -40, y, width: 300, height: 300 },
+    ];
+    expect(parsePresentationOperations(shape(-100))).toHaveLength(1);
+    expect(() => parsePresentationOperations(shape(-5000))).toThrow(/addShape\.y/);
+  });
 });
