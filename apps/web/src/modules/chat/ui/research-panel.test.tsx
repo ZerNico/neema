@@ -390,6 +390,45 @@ describe("research panel", () => {
     expect(within(panel).queryByText(/usage/i)).not.toBeInTheDocument();
   });
 
+  it("shows what a finished topic found, and nothing for one still running or failed", () => {
+    renderBubble([
+      {
+        ...research,
+        progress: {
+          ...research.progress!,
+          tasks: [
+            {
+              id: "task-1",
+              ordinal: 1,
+              title: "First topic",
+              status: "complete",
+              finding: "Two clinics take new patients.",
+            },
+            { id: "task-2", ordinal: 2, title: "Second topic", status: "running" },
+            {
+              id: "task-3",
+              ordinal: 3,
+              title: "Third topic",
+              status: "error",
+              finding: "Never shown for a topic that failed.",
+            },
+          ],
+        },
+      },
+      { ...search, status: "complete" },
+      { ...read, status: "complete" },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
+    const panel = screen.getByRole("complementary", { name: "Deep research" });
+    const title = within(panel).getByText("First topic");
+    const finding = within(panel).getByText("Two clinics take new patients.");
+    expect(title.compareDocumentPosition(finding) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // It sits inside the topic's own trigger, so the topic still opens on click.
+    expect(finding.closest("button")).toBe(title.closest("button"));
+    expect(within(panel).queryByText(/Never shown/)).not.toBeInTheDocument();
+    expect(within(panel).getByText("Couldn’t finish this one")).toBeInTheDocument();
+  });
+
   it("opens while the brief is still being written and follows the run that replaces it", () => {
     const starting: ResearchToolActivity = {
       family: "research",

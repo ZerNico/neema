@@ -15,6 +15,8 @@ export const ResearchTaskProgress = Schema.Struct({
   title: Schema.String,
   status: Schema.Literals(["queued", "running", "complete", "error", "aborted"]),
   error: Schema.optionalKey(Schema.String),
+  /** One plain sentence on what the task established, for the person watching. */
+  finding: Schema.optionalKey(Schema.String),
 });
 export type ResearchTaskProgress = typeof ResearchTaskProgress.Type;
 /** A bounded full snapshot, not a patch: replay and live updates use the same reducer. */
@@ -34,12 +36,13 @@ export const projectResearchProgress = (progress: ResearchProgress): ResearchPro
   runId: progress.runId,
   ...(progress.title !== undefined ? { title: progress.title } : {}),
   phase: progress.phase,
-  tasks: progress.tasks.map(({ id, ordinal, title, status, error }) => ({
+  tasks: progress.tasks.map(({ id, ordinal, title, status, error, finding }) => ({
     id,
     ordinal,
     title,
     status,
     ...(error !== undefined ? { error } : {}),
+    ...(finding !== undefined ? { finding } : {}),
   })),
   limitations: [...progress.limitations],
   usageComplete: progress.usageComplete,

@@ -152,6 +152,8 @@ let readerGate: {
 } | null = null;
 let reportRepeats = 1;
 let reportSuffix = "";
+/** The reader's finding line a report starts with, when a test sets one. */
+let reportFinding = "";
 let reportFinishReason: "stop" | "length" = "stop";
 let compactionFails = false;
 // Searches within a run are cached by query, so every fake call must ask
@@ -392,7 +394,9 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
     }
     return Stream.make(
       text(
-        "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) + reportSuffix,
+        reportFinding +
+          "A bounded finding supported by shared evidence[^1].".repeat(reportRepeats) +
+          reportSuffix,
       ),
       finish(reportFinishReason),
     );
@@ -577,6 +581,7 @@ beforeEach(async () => {
   readerGate = null;
   reportRepeats = 1;
   reportSuffix = "";
+  reportFinding = "";
   reportFinishReason = "stop";
   compactionFails = false;
   await runtime.runPromise(
@@ -807,6 +812,29 @@ describe("deep research as a tool call", () => {
     await runtime.runPromise(collect(sent.assistantMessageId));
     const coordinator = requests.find((request) => phaseOf(request) === "coordinator");
     expect(JSON.stringify(coordinator?.prompt)).toContain('Write each task title in \\"German\\"');
+  });
+
+  it("shows each finished topic's finding to the person and keeps it out of the evidence", async () => {
+    hostLanguage = "German";
+    reportFinding = "**Finding:** Zwei Praxen nehmen neue Patientinnen auf[^1].\n\n";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const report = requests.find((request) => phaseOf(request) === "report")!;
+    expect(promptText(report)).toContain('25 words in \\"German\\"');
+    const calls = await runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* ChatRepo).listToolCalls([sent.assistantMessageId]);
+      }),
+    );
+    const call = calls.find((row) => row.toolName === "deep_research")!;
+    const tasks = (call.result as { progress: { tasks: ResearchTaskProgress[] } }).progress.tasks;
+    expect(tasks.length).toBeGreaterThan(0);
+    for (const task of tasks.filter((candidate) => candidate.status === "complete"))
+      expect(task.finding).toBe("Zwei Praxen nehmen neue Patientinnen auf.");
+    // The coordinator and the host answer from the evidence, never the reader's line.
+    const later = requests.filter((request) => phaseOf(request) !== "report");
+    expect(later.some((request) => promptText(request).includes("Zwei Praxen"))).toBe(false);
   });
 
   it("shows the run under the title the host gave it, as one short line", async () => {

@@ -16,6 +16,7 @@ import {
 } from "../compaction.ts";
 import { RESEARCH_LIMITS, validateResearchCitations } from "./budget.ts";
 import * as prompts from "./prompts.ts";
+import { splitFinding } from "./finding.ts";
 import {
   boundEvidence,
   evidenceManifest,
@@ -331,6 +332,7 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
     }
     const reportTail = Prompt.make([
       { role: "system", content: prompts.reportPolicy },
+      { role: "system", content: prompts.findingLine(input.language) },
       { role: "assistant", content: `Registered sources:\n${manifest(task.id, specs.report)}` },
       { role: "user", content: prompts.reportRequest },
     ]);
@@ -365,7 +367,8 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
         reportTail,
       ),
     });
-    const validated = validateResearchCitations(report.text, citationIds());
+    const { report: evidence, finding } = splitFinding(report.text);
+    const validated = validateResearchCitations(evidence, citationIds());
     if (validated.invalid)
       limitations.add(`Task ${task.ordinal}: unregistered citation references were removed.`);
     if (report.finishReason === "length")
@@ -374,6 +377,7 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
       );
     state.report = validated.text;
     state.status = state.report.trim() ? "complete" : "error";
+    if (finding && state.status === "complete") state.finding = finding;
     // The panel shows a failed task's reason; a silent "Failed" after a full
     // investigation reads as if the searches were the problem.
     if (state.status === "error") {

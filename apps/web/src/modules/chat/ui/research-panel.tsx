@@ -186,12 +186,15 @@ type MilestoneState = "live" | "done" | "failed";
  */
 function Milestone({
   title,
+  finding,
   detail,
   state,
   last,
   children,
 }: {
   title: string;
+  /** What a finished topic established, in a sentence; quieter than the answer. */
+  finding?: string | undefined;
   detail?: string | null | undefined;
   state: MilestoneState;
   last: boolean;
@@ -206,6 +209,16 @@ function Milestone({
       >
         {title}
       </span>
+      {finding ? (
+        <m.span
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
+          className="text-muted-foreground text-[13px] leading-snug [overflow-wrap:anywhere]"
+        >
+          {finding}
+        </m.span>
+      ) : null}
       {detail ? (
         <span className="text-muted-foreground flex min-w-0 text-xs">
           <MotionSwap value={detail} kind="rolling-text" className="min-w-0">
@@ -363,6 +376,7 @@ export function ResearchActivityBody({
   const milestones: Array<{
     key: string;
     title: string;
+    finding?: string;
     detail?: string | null;
     state: MilestoneState;
     body?: ReactNode;
@@ -392,6 +406,7 @@ export function ResearchActivityBody({
     milestones.push({
       key: task.id,
       title: task.title,
+      ...(task.status === "complete" && task.finding ? { finding: task.finding } : {}),
       ...taskMilestone(task, activities),
       ...(activities.length ? { body: <StepList activities={activities} /> } : {}),
     });
