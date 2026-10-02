@@ -244,7 +244,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
     Stream.suspend(() => {
       gatewayState.calls.push({
         prompt: JSON.stringify(input.prompt),
-        // Draft tools and load_tools are always in the toolkit, and the bundled
+        // Draft tools, load_tools and read_attachment are always in the toolkit, and the bundled
         // authoring skills always appear in the ambient catalogue; these suites
         // assert the memory and question toolkit, so filter those constants out.
         tools: Object.keys(input.toolkit?.tools ?? {}).filter(
@@ -256,6 +256,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
             name !== "list_agent_options" &&
             name !== "load_skill" &&
             name !== "load_tools" &&
+            name !== "read_attachment" &&
             name !== "read_skill_file",
         ),
       });
@@ -999,9 +1000,8 @@ describe("StreamEngine foreground saved memory", () => {
     const result = await runGeneration(false, true);
 
     expect(result.events.at(-1)).toMatchObject({ kind: "done", status: "complete" });
-    // The attached file also makes the chat's files readable by id.
     expect(gatewayState.calls.map((call) => call.tools)).toEqual([
-      ["read_attachment", ...DOCUMENT_TOOLS, "ask_user", "save_memory"],
+      [...DOCUMENT_TOOLS, "ask_user", "save_memory"],
     ]);
     expect(gatewayState.calls[0]?.prompt).toContain(
       "When the save_memory tool is available, call it once",
