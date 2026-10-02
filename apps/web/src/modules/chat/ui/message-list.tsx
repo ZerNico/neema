@@ -4,12 +4,7 @@ import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import type { AssistantFile } from "../assistant-output.ts";
-import {
-  AiBrain01Icon,
-  Alert02Icon,
-  ArrowDown01Icon,
-  RefreshIcon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
@@ -1180,7 +1175,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         // A live work line already says it is working between its steps.
         parts.at(-1)?.kind !== "work" ? (
           <div className={cn(activityRowClassName, "mb-2")}>
-            <ActivityFace icon={AiBrain01Icon} label="Thinking" status="running" />
+            <ActivityFace label="Thinking" status="running" />
           </div>
         ) : null}
         {message.status === "error" ? (

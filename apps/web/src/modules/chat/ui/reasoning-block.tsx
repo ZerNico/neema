@@ -1,4 +1,3 @@
-import { AiBrain01Icon } from "@hugeicons/core-free-icons";
 import { memo, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import {
@@ -54,7 +53,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     if (!active) return null;
     return (
       <div className={cn(activityRowClassName, "mb-2")}>
-        <ActivityFace icon={AiBrain01Icon} label="Thinking" status="running" />
+        <ActivityFace label="Thinking" status="running" />
       </div>
     );
   }
@@ -67,7 +66,6 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <ActivityFace
-          icon={AiBrain01Icon}
           label={active ? "Thinking" : "Thought process"}
           status={active ? "running" : "done"}
         />

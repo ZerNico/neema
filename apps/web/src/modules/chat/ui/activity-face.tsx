@@ -34,23 +34,20 @@ export function ActivityFace({
   status: ActivityStatus;
 }) {
   const failed = status === "failed";
+  // Thinking is no tool: it reads as words alone, with no empty icon slot.
+  const mark = failed ? (
+    <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="text-warning size-4" aria-hidden />
+  ) : (
+    (glyph ??
+    (icon ? <HugeiconsIcon icon={icon} strokeWidth={2} className="size-4" aria-hidden /> : null))
+  );
   return (
     <>
-      <MotionSwap value={failed ? "failed" : "ok"} kind="icon" className="shrink-0">
-        {failed ? (
-          <HugeiconsIcon
-            icon={Alert02Icon}
-            strokeWidth={2}
-            className="text-warning size-4"
-            aria-hidden
-          />
-        ) : (
-          (glyph ??
-          (icon ? (
-            <HugeiconsIcon icon={icon} strokeWidth={2} className="size-4" aria-hidden />
-          ) : null))
-        )}
-      </MotionSwap>
+      {mark ? (
+        <MotionSwap value={failed ? "failed" : "ok"} kind="icon" className="shrink-0">
+          {mark}
+        </MotionSwap>
+      ) : null}
       <MotionSwap value={label} kind="rolling-text" className="min-w-0">
         <span className={cn(status === "running" && "text-shimmer")}>{label}</span>
       </MotionSwap>
