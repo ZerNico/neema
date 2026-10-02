@@ -9,21 +9,11 @@ import {
 } from "~/ui/disclosure.tsx";
 import { cn } from "~/ui/utils";
 import { serverNow } from "../client/use-message-stream.ts";
+import { useElapsed } from "./use-elapsed.ts";
 import type { WorkPart, WorkStep } from "./assistant-body.ts";
 import { ActivityChevron } from "./activity-face.tsx";
 import { useRunDisclosure } from "./use-run-disclosure.ts";
 import { formatDuration, stepActivities, workStart, workSummary } from "./work-steps.ts";
-
-/** A clock that ticks once a second while `running`; elapsed from `since`. */
-function useElapsed(since: number, running: boolean) {
-  const [now, setNow] = useState(serverNow);
-  useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => setNow(serverNow()), 1000);
-    return () => window.clearInterval(timer);
-  }, [running]);
-  return Math.max(0, now - since);
-}
 
 /**
  * Mounted only while an integration call runs, so a chat without one never

@@ -123,17 +123,22 @@ describe("research panel", () => {
     "matchMedia",
     vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   );
-  it("opens the live investigation from the running row, grouped by task", () => {
+  it("opens the live investigation from the card as milestones, each step one click away", () => {
     renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
     expect(within(panel).getByText("In progress")).toBeInTheDocument();
-    // Dispatch order, with live status, and the search and read under their task.
-    const first = within(panel).getByText("First topic");
-    const second = within(panel).getByText("Second topic");
-    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(panel).getByText("Investigating")).toBeInTheDocument();
-    expect(within(panel).getByText("Up next")).toBeInTheDocument();
+    // A started topic says what it is on now; one not started yet sits in the plan.
+    expect(within(panel).getByText("First topic")).toBeInTheDocument();
+    expect(within(panel).getByText("Reading example.org")).toBeInTheDocument();
+    expect(within(panel).queryByText("Second topic")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("primary evidence")).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: /Made a plan/ }));
+    const plan = within(panel)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(plan.indexOf("First topic")).toBeLessThan(plan.indexOf("Second topic"));
+    fireEvent.click(within(panel).getByRole("button", { name: /First topic/ }));
     expect(within(panel).getByText("primary evidence")).toBeInTheDocument();
     expect(within(panel).getByText(/20 results/)).toBeInTheDocument();
     expect(within(panel).getByRole("link", { name: /example\.org/ })).toHaveAttribute(
@@ -160,6 +165,15 @@ describe("research panel", () => {
         coverage: "",
       },
     };
+    const bothRunning: ResearchToolActivity = {
+      ...research,
+      progress: {
+        ...research.progress!,
+        tasks: research.progress!.tasks.map((task) =>
+          task.id === "task-2" ? Object.assign({}, task, { status: "running" as const }) : task,
+        ),
+      },
+    };
     const reading: KnowledgeToolActivity = {
       family: "knowledge",
       callId: "k-2",
@@ -169,18 +183,15 @@ describe("research panel", () => {
       status: "running",
     };
     const strayRun: KnowledgeToolActivity = { ...reading, callId: "k-3", runId: "other-run" };
-    renderBubble([research, search, listing, reading, strayRun]);
-    // The research row names the newest running step of *its* run. The stray
-    // activity belongs to another run and is rendered as an ordinary knowledge
-    // row instead, so pick the research row by its own name.
-    const rows = screen.getAllByRole("button", { name: /Reading documents/ });
-    expect(rows).toHaveLength(2);
-    const researchRow = rows.find((row) => /Researching|research/i.test(row.textContent ?? ""))!;
-    expect(researchRow).toBeDefined();
-    fireEvent.click(researchRow);
+    renderBubble([bothRunning, search, listing, reading, strayRun]);
+    // The stray activity belongs to another run, so it renders as an ordinary
+    // knowledge row beside the card and never inside the panel.
+    expect(screen.getByRole("button", { name: /Reading documents/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
-    expect(within(panel).getByText("Listed 3 documents")).toBeInTheDocument();
     expect(within(panel).getByText("Reading documents")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: /First topic/ }));
+    expect(within(panel).getByText("Listed 3 documents")).toBeInTheDocument();
     expect(within(panel).getByText("In progress")).toBeInTheDocument();
     expect(within(panel).queryByText(/version/)).not.toBeInTheDocument();
     const first = within(panel).getByText("First topic");
@@ -192,14 +203,13 @@ describe("research panel", () => {
 
   it("follows progress after the opening bubble unmounts in StrictMode", async () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
-    expect(within(panel).getByText("Up next")).toBeInTheDocument();
-    expect(within(panel).queryByText("follow-up evidence")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Second topic")).not.toBeInTheDocument();
     // Virtualization evicts the opening bubble before the next stream chunk.
     rerender(tree(undefined, undefined, undefined, { visible: false }));
-    expect(screen.queryByRole("button", { name: /Researching/ })).not.toBeInTheDocument();
-    expect(within(panel).getByText("Up next")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /source so far/ })).not.toBeInTheDocument();
+    expect(within(panel).getByText("First topic")).toBeInTheDocument();
     const later: WebToolActivity = {
       ...search,
       callId: "web-3",
@@ -229,18 +239,16 @@ describe("research panel", () => {
         { visible: false },
       ),
     );
-    expect(within(panel).getByText("follow-up evidence")).toBeInTheDocument();
-    expect(within(panel).getAllByText("Investigating")).toHaveLength(2);
-    expect(within(panel).getByText("Up next").closest("[inert]")).toHaveAttribute(
-      "aria-hidden",
-      "true",
+    // The topic joins the story when work on it starts, saying what it is on.
+    await waitFor(() =>
+      expect(within(panel).getByText("Searching “follow-up evidence”")).toBeInTheDocument(),
     );
-    await waitFor(() => expect(within(panel).queryByText("Up next")).not.toBeInTheDocument());
+    expect(within(panel).getByText("Second topic")).toBeInTheDocument();
   });
 
   it("settles the header and shows terminal failures with the bubble unmounted", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
     expect(within(panel).getByText("In progress")).toBeInTheDocument();
     rerender(
@@ -271,7 +279,7 @@ describe("research panel", () => {
     );
     expect(within(panel).queryByText("In progress")).not.toBeInTheDocument();
     expect(within(panel).getByText("2 steps")).toBeInTheDocument();
-    expect(within(panel).getAllByText("Incomplete")).toHaveLength(2);
+    expect(within(panel).getAllByText("Couldn’t finish this one")).toHaveLength(2);
     // Diagnostics are for the model and the run record, never the reader:
     // the panel says what it means in one sentence and drops the rest.
     expect(within(panel).queryByText(/returned no report/)).not.toBeInTheDocument();
@@ -284,7 +292,7 @@ describe("research panel", () => {
 
   it("summarises expected provider hiccups in plain words and stays quiet about accounting", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
     const finished = (tasks: ResearchTaskProgress[], limitations: string[]) =>
       tree(
@@ -320,8 +328,8 @@ describe("research panel", () => {
         ],
       ),
     );
-    expect(within(panel).getByText("Incomplete")).toBeInTheDocument();
-    expect(within(panel).getByText("Done")).toBeInTheDocument();
+    expect(within(panel).getByText("Couldn’t finish this one")).toBeInTheDocument();
+    expect(within(panel).getByText("First topic")).toBeInTheDocument();
     expect(
       within(panel).getByText("One topic couldn’t be finished, so some of this may be missing."),
     ).toBeInTheDocument();
@@ -341,7 +349,7 @@ describe("research panel", () => {
 
   it("settles at synthesis and keeps the final activity after completion without a bubble", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
     rerender(tree(undefined, undefined, undefined, { visible: false }));
     const settled: ResearchToolActivity = {
@@ -359,7 +367,8 @@ describe("research panel", () => {
     rerender(tree(tools, "streaming", "Answer starts", { visible: false }));
     expect(within(panel).queryByText("In progress")).not.toBeInTheDocument();
     expect(within(panel).getByText("2 steps")).toBeInTheDocument();
-    expect(within(panel).getAllByText("Done")).toHaveLength(2);
+    expect(within(panel).getByText("Second topic")).toBeInTheDocument();
+    expect(within(panel).queryByText("and counting")).not.toBeInTheDocument();
     rerender(
       tree(
         [
@@ -393,7 +402,7 @@ describe("research panel", () => {
       writing: true,
     };
     const { rerender } = renderBubble([starting]);
-    fireEvent.click(screen.getByRole("button", { name: /Starting research/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Planning what to look into/ }));
     const panel = screen.getByRole("complementary", { name: "Deep research" });
     expect(within(panel).getByText("Planning what to look into")).toBeInTheDocument();
     // The started run takes the placeholder's place, so the open panel stays on it.
@@ -407,7 +416,7 @@ describe("research panel", () => {
 
   it("closes the old run on retry", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     const fresh: ResearchToolActivity = {
       ...research,
       callId: "run-2",
@@ -419,13 +428,13 @@ describe("research panel", () => {
     // never arrive: the stream itself is fenced by the generation.
     rerender(tree([fresh]));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     expect(screen.getByRole("complementary", { name: "Deep research" })).toBeInTheDocument();
   });
 
   it("does not reopen after explicit close and subsequent progress", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     rerender(
       tree([research, search, { ...read, status: "complete" }], undefined, undefined, {
@@ -437,17 +446,17 @@ describe("research panel", () => {
 
   it("closes when the selected message disappears, not following a matching run on another message", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     rerender(tree(undefined, undefined, undefined, { id: "another-message" }));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     rerender(tree(undefined, undefined, undefined, { removed: true }));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("closes on conversation navigation without reopening on a late activity update", () => {
     const { rerender } = renderBubble();
-    fireEvent.click(screen.getByRole("button", { name: /Researching/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     environment.pathname = "/chat/another";
     rerender(tree([research, search, { ...read, status: "complete" }]));
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
@@ -467,7 +476,7 @@ describe("research panel", () => {
       "complete",
       "Answer with evidence[^1].",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Researched 1 source" }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research/ }));
     expect(
       within(screen.getByRole("complementary", { name: "Deep research" })).getByText("2 steps"),
     ).toBeInTheDocument();
@@ -493,7 +502,7 @@ describe("research panel", () => {
 });
 
 describe("the research overview", () => {
-  it("sums the run's sources by site, most used first, with no tick on a page that loaded", () => {
+  it("sums the run's sources by site behind its milestone, with no tick on a page that loaded", () => {
     const source = (index: number, url: string) => ({
       kind: "web" as const,
       index,
@@ -532,11 +541,13 @@ describe("the research overview", () => {
         />
       </AppMotionProvider>,
     );
-    expect(screen.getByText("3 sources")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "3 sources" }));
     const sites = within(screen.getByRole("list", { name: "Sources by site" }))
       .getAllByRole("listitem")
       .map((item) => item.textContent);
     expect(sites).toEqual(["awmf.org2 sources", "bfarm.de1 source"]);
+    // Steps outside any topic still have a place, behind their own milestone.
+    fireEvent.click(screen.getByRole("button", { name: /Other steps/ }));
     expect(screen.getByText("Read a page")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "awmf.org" })).toHaveAttribute(
       "href",

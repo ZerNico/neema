@@ -6,7 +6,8 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useState } from "react";
+import { m } from "motion/react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type {
   KnowledgeToolActivity,
   SkillToolActivity,
@@ -15,7 +16,7 @@ import type {
   WebToolActivity,
 } from "../client/use-message-stream.ts";
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
-import { ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
+import { ActivityChevron, ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 import { Favicon, hostOf } from "./favicon.tsx";
 import { FaviconStack } from "./tool-activity-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
@@ -27,20 +28,13 @@ import {
   type DetailPanelRequest,
 } from "~/ui/detail-panel";
 import { cn } from "~/ui/utils";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { MotionSwap } from "~/ui/motion.tsx";
+import { currentDetail, gatheredPages } from "./research-steps.ts";
 
-// The transcript row stays one line; this is where the rest lives: what the
-// run did, in order, grouped by task. The sources panel is a separate view
-// (citation chips, the message menu); the plan is the model's working note
-// and stays internal.
-
-const taskLabels: Record<ResearchTaskProgress["status"], string> = {
-  queued: "Up next",
-  running: "Investigating",
-  complete: "Done",
-  error: "Incomplete",
-  aborted: "Stopped",
-};
+// The story behind the transcript card: the plan, each topic as work on it
+// starts, and where the sources came from. Briefs and reports stay internal.
 
 // Limitations are written for the model that synthesises the answer, not the
 // reader: "InvalidOutputError", output limits and usage mean nothing to them.
@@ -183,111 +177,167 @@ function QueryChips({ queries }: { queries: ReadonlyArray<string> }) {
   );
 }
 
-function TaskGroup({
-  task,
-  activities,
+type MilestoneState = "live" | "done" | "failed";
+
+/**
+ * One step of the run's story: a dot on the rail, what happened, and one line
+ * of detail. What it involved opens underneath on click, so the panel reads as
+ * milestones first and the full log only where someone asks for it.
+ */
+function Milestone({
+  title,
+  detail,
+  state,
+  last,
+  children,
 }: {
-  task: ResearchTaskProgress | null;
-  activities: ResearchStepActivity[];
+  title: string;
+  detail?: string | null | undefined;
+  state: MilestoneState;
+  last: boolean;
+  children?: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
+  const live = state === "live";
+  const face = (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span
+        className={cn("text-foreground text-sm [overflow-wrap:anywhere]", live && "text-shimmer")}
+      >
+        {title}
+      </span>
+      {detail ? (
+        <span className="text-muted-foreground flex min-w-0 text-xs">
+          <MotionSwap value={detail} kind="rolling-text" className="min-w-0">
+            {detail}
+          </MotionSwap>
+        </span>
+      ) : null}
+    </span>
+  );
   return (
-    <section className="flex min-w-0 flex-col gap-2.5">
-      {task ? (
-        <header className="flex items-baseline gap-2">
-          <h3 className="min-w-0 flex-1 text-sm font-medium [overflow-wrap:anywhere]">
-            {task.title}
-          </h3>
-          <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
-            {task.status === "error" ? (
-              <HugeiconsIcon
-                icon={Alert02Icon}
-                strokeWidth={2}
-                className="text-warning size-3.5"
-                aria-hidden
-              />
-            ) : null}
-            <MotionSwap value={task.status}>
-              <span className={cn(task.status === "running" && "text-shimmer")}>
-                {taskLabels[task.status]}
+    <m.li
+      layout="position"
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className="relative flex gap-3 pb-5 last:pb-0"
+    >
+      {last ? null : (
+        <span className="bg-border absolute top-5 bottom-0 left-[5px] w-px" aria-hidden />
+      )}
+      <span className="flex h-5 w-[11px] shrink-0 items-center justify-center" aria-hidden>
+        <MotionSwap value={state} kind="icon">
+          {state === "failed" ? (
+            <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="text-warning size-3.5" />
+          ) : (
+            <span
+              className={cn(
+                "block size-[11px] rounded-full border-2",
+                live
+                  ? "border-foreground bg-background"
+                  : "border-transparent bg-muted-foreground/50",
+              )}
+            />
+          )}
+        </MotionSwap>
+      </span>
+      {children ? (
+        <Disclosure open={open} onOpenChange={setOpen} className="flex min-w-0 flex-1 flex-col">
+          <DisclosureTrigger
+            className={cn(focusRingClassName, "group flex w-full min-w-0 text-left")}
+          >
+            <span className="flex min-w-0 flex-1 items-start gap-2">
+              {face}
+              <span className="text-muted-foreground group-hover:text-foreground flex h-5 items-center">
+                <ActivityChevron open={open} />
               </span>
-            </MotionSwap>
-          </span>
-        </header>
-      ) : null}
-      {activities.length > 0 ? (
-        <ol className="flex flex-col gap-2.5">
-          {activities.map((activity) => (
-            <StepRow key={activity.callId} activity={activity} />
-          ))}
-        </ol>
-      ) : task?.status === "queued" || task?.status === "running" ? (
-        <p className="text-muted-foreground text-xs">Nothing yet.</p>
-      ) : null}
-    </section>
+            </span>
+          </DisclosureTrigger>
+          <DisclosureContent>
+            <div className="pt-2.5">{children}</div>
+          </DisclosureContent>
+        </Disclosure>
+      ) : (
+        face
+      )}
+    </m.li>
   );
 }
 
-/** The run's sources by site, as a reader sizes up what it drew on. */
-function SourceOverview({
-  activities,
-  running,
-}: {
-  activities: ResearchStepActivity[];
-  running: boolean;
-}) {
-  const bySite = new Map<string, { url: string; urls: Set<string> }>();
-  for (const activity of activities) {
-    if (activity.family !== "web") continue;
-    for (const source of activity.sources ?? []) {
-      if (source.kind === "document") continue;
-      const site = hostOf(source.url);
-      const entry = bySite.get(site) ?? { url: source.url, urls: new Set<string>() };
-      entry.urls.add(source.url);
-      bySite.set(site, entry);
-    }
-  }
-  const sites = [...bySite.entries()]
-    .map(([site, entry]) => ({ site, url: entry.url, count: entry.urls.size }))
-    .toSorted((a, b) => b.count - a.count);
-  const total = sites.reduce((sum, site) => sum + site.count, 0);
-  if (!total) return null;
-  const top = sites.slice(0, 4);
-  const most = top[0]!.count;
-  const rest = total - top.reduce((sum, site) => sum + site.count, 0);
+function StepList({ activities }: { activities: ResearchStepActivity[] }) {
   return (
-    <section className="flex flex-col gap-3">
-      <div className="text-muted-foreground flex items-center gap-1.5 text-sm">
-        <ActivityFace
-          glyph={<FaviconStack urls={top.map((site) => site.url)} />}
-          label={`${total} ${total === 1 ? "source" : "sources"}${running ? " so far" : ""}`}
-          status={running ? "running" : "done"}
-        />
-      </div>
-      <ul className="flex flex-col gap-1.5" aria-label="Sources by site">
-        {top.map((site) => (
-          <li key={site.site} className="flex min-w-0 items-center gap-2 text-xs">
-            <Favicon url={site.url} className="size-3.5" />
-            <span className="min-w-0 flex-1 truncate">{site.site}</span>
-            <span className="text-muted-foreground shrink-0 tabular-nums">
-              {site.count} {site.count === 1 ? "source" : "sources"}
-            </span>
-            <span className="bg-muted h-1 w-16 shrink-0 overflow-hidden rounded-full" aria-hidden>
-              <span
-                className="bg-muted-foreground/50 block h-full rounded-full"
-                style={{ width: `${Math.max(8, (site.count / most) * 100)}%` }}
-              />
-            </span>
-          </li>
-        ))}
-        {rest > 0 ? (
-          <li className="text-muted-foreground text-xs">
-            {rest} more {rest === 1 ? "source" : "sources"}
-          </li>
-        ) : null}
-      </ul>
-    </section>
+    <ol className="flex flex-col gap-2.5">
+      {activities.map((activity) => (
+        <StepRow key={activity.callId} activity={activity} />
+      ))}
+    </ol>
   );
 }
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/** The run's sources by site, as a reader sizes up what it drew on. */
+function SourcesBySite({ activities }: { activities: ResearchStepActivity[] }) {
+  const bySite = new Map<string, { url: string; count: number }>();
+  for (const [url, site] of gatheredPages(activities)) {
+    const entry = bySite.get(site) ?? { url, count: 0 };
+    entry.count++;
+    bySite.set(site, entry);
+  }
+  const sites = [...bySite.entries()]
+    .map(([site, entry]) => ({ site, ...entry }))
+    .toSorted((a, b) => b.count - a.count);
+  const top = sites.slice(0, 5);
+  const most = top[0]?.count ?? 1;
+  const rest = sites.slice(5).reduce((sum, site) => sum + site.count, 0);
+  return (
+    <ul className="flex flex-col gap-1.5" aria-label="Sources by site">
+      {top.map((site) => (
+        <li key={site.site} className="flex min-w-0 items-center gap-2 text-xs">
+          <Favicon url={site.url} className="size-3.5" />
+          <span className="min-w-0 flex-1 truncate">{site.site}</span>
+          <span className="text-muted-foreground shrink-0 tabular-nums">
+            {plural(site.count, "source")}
+          </span>
+          <span className="bg-muted h-1 w-16 shrink-0 overflow-hidden rounded-full" aria-hidden>
+            <span
+              className="bg-muted-foreground/50 block h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
+              style={{ width: `${Math.max(8, (site.count / most) * 100)}%` }}
+            />
+          </span>
+        </li>
+      ))}
+      {rest > 0 ? (
+        <li className="text-muted-foreground text-xs">{plural(rest, "more source")}</li>
+      ) : null}
+    </ul>
+  );
+}
+
+const taskMilestone = (
+  task: ResearchTaskProgress,
+  activities: ResearchStepActivity[],
+): { detail: string | null; state: MilestoneState } => {
+  const pages = gatheredPages(activities).size;
+  switch (task.status) {
+    case "running":
+      return { detail: currentDetail(activities) ?? "Getting started", state: "live" };
+    case "error":
+      return { detail: "Couldn’t finish this one", state: "failed" };
+    case "aborted":
+      return { detail: "Stopped", state: "done" };
+    default:
+      return {
+        detail: pages
+          ? plural(pages, "source")
+          : activities.length
+            ? plural(activities.length, "step")
+            : null,
+        state: "done",
+      };
+  }
+};
 
 export function ResearchActivityBody({
   progress,
@@ -299,36 +349,83 @@ export function ResearchActivityBody({
   running: boolean;
 }) {
   // Ordinal is dispatch order, which is what a reader expects to scroll through.
-  // oxlint-disable-next-line no-array-sort -- fresh array
-  const tasks = [...(progress?.tasks ?? [])].sort((a, b) => a.ordinal - b.ordinal);
+  const tasks = (progress?.tasks ?? []).toSorted((a, b) => a.ordinal - b.ordinal);
   const byTask = new Map<string, ResearchStepActivity[]>();
   const unassigned: ResearchStepActivity[] = [];
   for (const activity of webActivities) {
-    const list = activity.taskId ? byTask.get(activity.taskId) : undefined;
-    if (activity.taskId && tasks.some((task) => task.id === activity.taskId)) {
-      if (list) list.push(activity);
-      else byTask.set(activity.taskId, [activity]);
-    } else unassigned.push(activity);
+    if (activity.taskId && tasks.some((task) => task.id === activity.taskId))
+      byTask.set(activity.taskId, [...(byTask.get(activity.taskId) ?? []), activity]);
+    else unassigned.push(activity);
   }
   const note = coverageNote(progress);
-  const empty = tasks.length === 0 && unassigned.length === 0;
+  const total = gatheredPages(webActivities).size;
+
+  const milestones: Array<{
+    key: string;
+    title: string;
+    detail?: string | null;
+    state: MilestoneState;
+    body?: ReactNode;
+  }> = [];
+  if (tasks.length)
+    milestones.push({
+      key: "plan",
+      title: "Made a plan",
+      detail: plural(tasks.length, "topic"),
+      state: "done",
+      body: (
+        <ol className="text-muted-foreground flex list-decimal flex-col gap-1 pl-4 text-xs">
+          {tasks.map((task) => (
+            <li key={task.id} className="[overflow-wrap:anywhere]">
+              {task.title}
+            </li>
+          ))}
+        </ol>
+      ),
+    });
+  else if (running)
+    milestones.push({ key: "plan", title: "Planning what to look into", state: "live" });
+  // A topic joins the story when work on it starts; until then it sits in the plan.
+  for (const task of tasks) {
+    if (task.status === "queued") continue;
+    const activities = byTask.get(task.id) ?? [];
+    milestones.push({
+      key: task.id,
+      title: task.title,
+      ...taskMilestone(task, activities),
+      ...(activities.length ? { body: <StepList activities={activities} /> } : {}),
+    });
+  }
+  if (unassigned.length)
+    milestones.push({
+      key: "other",
+      title: "Other steps",
+      detail: plural(unassigned.length, "step"),
+      state: unassigned.some((activity) => activity.status === "running") ? "live" : "done",
+      body: <StepList activities={unassigned} />,
+    });
+  if (total)
+    milestones.push({
+      key: "sources",
+      title: plural(total, "source"),
+      detail: running ? "and counting" : null,
+      state: "done",
+      body: <SourcesBySite activities={webActivities} />,
+    });
 
   return (
-    <div className="flex flex-col gap-6">
-      <SourceOverview activities={webActivities} running={running} />
-      {empty ? (
-        <p className="text-muted-foreground text-xs">
-          {running ? (
-            <span className="text-shimmer">Planning what to look into</span>
-          ) : (
-            "Nothing was researched."
-          )}
-        </p>
-      ) : null}
-      {tasks.map((task) => (
-        <TaskGroup key={task.id} task={task} activities={byTask.get(task.id) ?? []} />
-      ))}
-      {unassigned.length > 0 ? <TaskGroup task={null} activities={unassigned} /> : null}
+    <div className="flex flex-col gap-5">
+      {milestones.length ? (
+        <ol className="flex flex-col">
+          {milestones.map(({ key, body, ...milestone }, index) => (
+            <Milestone key={key} {...milestone} last={index === milestones.length - 1}>
+              {body}
+            </Milestone>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-muted-foreground text-xs">Nothing was researched.</p>
+      )}
       {note && !running ? <ActivityNote>{note}</ActivityNote> : null}
     </div>
   );
@@ -346,7 +443,7 @@ function researchPanelRequest(
   const running = activity.status === "running";
   return {
     id: researchPanelId(messageId, position),
-    title: "Deep research",
+    title: activity.progress?.title ?? "Deep research",
     subtitle: running ? "In progress" : `${webActivities.length} steps`,
     icon: GlobalSearchIcon,
     restorable: true,

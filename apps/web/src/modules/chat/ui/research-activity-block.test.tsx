@@ -84,55 +84,66 @@ const envelope = (phase: string, progress: unknown) =>
   });
 
 describe("research activity", () => {
-  it("rolls changed targets inside a fixed line, keeps the action stable, and settles immediately", async () => {
+  it("names the run, rolls its count in a fixed line, and settles with how long it took", async () => {
     const onOpen = vi.fn();
-    const tree = (target: string, settled = false) => (
+    const pages = (count: number): WebToolActivity => ({
+      ...web,
+      sources: Array.from({ length: count }, (_, index) => ({
+        ...web.sources![0]!,
+        index,
+        url: `https://example.org/${index}`,
+      })),
+    });
+    const tree = (count: number, settled = false) => (
       <AppMotionProvider>
         <ResearchActivityBlock
           activity={{
             ...root,
             status: settled ? "complete" : "running",
-            progress: { ...root.progress!, phase: settled ? "complete" : "researching" },
+            startedAt: 0,
+            ...(settled ? { completedAt: 125_000 } : {}),
+            progress: {
+              ...root.progress!,
+              title: "HRT-Zugang in Berlin",
+              phase: settled ? "complete" : "researching",
+            },
           }}
-          sourceCount={1}
-          webActivities={[{ ...web, targets: [target] }]}
+          webActivities={[pages(count)]}
           onOpen={onOpen}
         />
       </AppMotionProvider>
     );
-    const { rerender } = render(tree("First"));
-    const row = screen.getByRole("button", { name: /Researching/ });
-    const label = screen.getByText("Searching “First”");
-    const phase = screen.getByText("Researching");
-    const icon = row.querySelector("svg");
-    expect(label.parentElement).toHaveClass("h-5", "overflow-hidden");
-    rerender(tree("First"));
-    expect(screen.getByText("Searching “First”")).toBe(label);
-    rerender(tree("Second"));
-    rerender(tree("Latest"));
-    // The phase and the rolling target are separate spans; jsdom keeps them
-    // inline, so the space a browser derives from the grid is absent.
-    expect(screen.getByRole("button", { name: /^Researching\s?·\s?Searching “Latest”$/ })).toBe(
-      row,
-    );
-    expect(screen.queryByText("Searching “First”")).toBeNull();
-    expect(row.querySelectorAll("[inert]")).toHaveLength(1);
-    const latest = screen.getByText("Searching “Latest”");
-    expect(latest.style.transform).toContain("translateY(100%)");
-    expect(screen.getByText("Researching")).toBe(phase);
-    expect(row.querySelector("svg")).toBe(icon);
-    await waitFor(() => expect(row.querySelector("[inert]")).toBeNull());
-    expect(latest.style.transform).toBe("none");
-    rerender(tree("Latest", true));
-    expect(screen.getByRole("button", { name: "Researched 1 source" })).toBe(row);
-    expect(row).not.toHaveAttribute("aria-busy");
-    fireEvent.click(row);
+    const { rerender } = render(tree(1));
+    const card = screen.getByRole("button", { name: /HRT-Zugang in Berlin/ });
+    expect(card).toHaveAttribute("aria-busy", "true");
+    const title = screen.getByText("HRT-Zugang in Berlin");
+    expect(title).toHaveClass("text-shimmer");
+    const label = screen.getByText("1 source so far");
+    expect(label.closest(".h-5")).toHaveClass("overflow-hidden");
+    rerender(tree(4));
+    expect(screen.queryByText("1 source so far", { ignore: "[inert] *" })).toBeNull();
+    expect(screen.getByText("4 sources so far")).toBeInTheDocument();
+    expect(card.querySelectorAll("[inert]")).toHaveLength(1);
+    await waitFor(() => expect(card.querySelector("[inert]")).toBeNull());
+    // The title holds still while the line under it changes.
+    expect(screen.getByText("HRT-Zugang in Berlin")).toBe(title);
+    rerender(tree(4, true));
+    expect(
+      screen.getByRole("button", { name: /^HRT-Zugang in Berlin\s?4 sources\s?· 2m 5s$/ }),
+    ).toBe(card);
+    expect(title).not.toHaveClass("text-shimmer");
+    expect(card).not.toHaveAttribute("aria-busy");
+    fireEvent.click(card);
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
-  it("reports what it is doing now, then the sources it read, and nothing else", () => {
-    const { rerender } = render(<ResearchActivityBlock activity={root} webActivities={[web]} />);
-    expect(screen.getByText("Researching")).toBeTruthy();
-    expect(screen.getByText("Searching \u201cprimary evidence\u201d")).toBeTruthy();
+
+  it("reports how much it has gathered, then the sources it read, and nothing else", () => {
+    const { rerender } = render(<ResearchActivityBlock activity={root} webActivities={[]} />);
+    // Planned but nothing gathered yet; an untitled run reads as deep research.
+    expect(screen.getByText("Deep research")).toBeTruthy();
+    expect(screen.getByText("Made a plan · 2 topics")).toBeTruthy();
+    rerender(<ResearchActivityBlock activity={root} webActivities={[web]} />);
+    expect(screen.getByText("1 source so far")).toBeTruthy();
     // The call has returned; the answer streaming in below is an ordinary reply.
     rerender(
       <ResearchActivityBlock
@@ -145,10 +156,11 @@ describe("research activity", () => {
         webActivities={[web]}
       />,
     );
-    expect(screen.getByText("Researched 1 source")).toBeTruthy();
-    expect(screen.queryByText(/Searching|Writing/)).toBeNull();
+    expect(screen.getByText("1 source")).toBeTruthy();
+    // The old line may still be leaving; nothing live is left in the card.
+    expect(screen.queryByText(/Searching|Writing|so far/, { ignore: "[inert] *" })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
-    // Task details belong in the panel, not the one-line transcript row.
+    // Task details belong in the panel, not the card.
     expect(screen.queryByText("First topic")).toBeNull();
     expect(screen.queryByText("Second topic")).toBeNull();
     expect(screen.queryByText("Internal worker context")).toBeNull();
@@ -166,7 +178,7 @@ describe("research activity", () => {
         onOpen={onOpen}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Researched 1 source" }));
+    fireEvent.click(screen.getByRole("button", { name: /Deep research\s?1 source/ }));
     expect(onOpen).toHaveBeenCalled();
 
     rerender(
@@ -181,7 +193,7 @@ describe("research activity", () => {
             limitations: ["One source could not be read."],
           },
         }}
-        webActivities={[web]}
+        webActivities={[]}
       />,
     );
     expect(screen.getByText("Research interrupted")).toBeTruthy();
@@ -202,7 +214,7 @@ describe("research activity", () => {
         onOpen={onOpen}
       />,
     );
-    expect(screen.getByRole("button", { name: /Researched 1 source/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Deep research\s?1 source/ })).toBeTruthy();
     expect(screen.getByText("stopped early")).toBeTruthy();
   });
 
