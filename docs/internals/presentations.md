@@ -226,23 +226,55 @@ A [skill](skills.md) may carry `.ttf` and `.otf` faces. Once an answer has loade
 skill, its faces join that answer's renders and edits and its list of usable families,
 never the uploaded catalogue. Each is checked once per content hash like an upload, but
 entirely inside a worker process, since any skill author can supply one; a face that fails
-is left out rather than failing the render, and an uploaded face keeps its name over a
-skill's. The model may name only the bundled, uploaded or loaded-skill families; others are
-refused with the list. A deck only names its fonts: people opening the file still need
-them installed, since uploaded fonts are not embedded in the PPTX.
+is left out rather than failing the render.
 
-A run of calls on one draft renders as one collapsed activity. Prose the model writes
-between rounds splits a draft into several such runs, so each header says what its own
-calls did; only the newest run is live, standing in for "Thinking…" while the draft is
-unfinished. A final unpublished file is labeled a draft; tool activity alone does not
-prove whether its durable checkpoint was saved. A publish is the last step of its run,
-and the delivered file its result. The live row names only the current action; streamed
+Free Google families are the third source: a curated catalogue (`google-fonts.ts`, about
+forty OFL and Apache families) that the edit tool's description lists once, beside the
+Office five, so the model knows them before a deck's first edit. Uploaded families are
+named in the fixed system prefix when deck tools are offered, and every result's
+`availableFonts` lists what is installed now. An edit naming a catalogue family it lacks
+fetches it first: the CSS2 API answers a non-browser client with static TrueType faces per
+weight and style, only `fonts.googleapis.com` and `fonts.gstatic.com` are contacted, no
+redirect is followed, and a face must call itself by the catalogue's name. A failure is
+remembered for ten minutes, so an offline server refuses that font quickly. The model may
+name only bundled, uploaded, loaded-skill or catalogue families; others are refused with
+the list. A live probe (`PROBE_GOOGLE_FONTS=1`) checks the catalogue against Google.
+
+Fetched faces sit in `presentation_fonts` beside uploads, marked `google`, and are a cache:
+an edit touches `last_used_at` (at most daily), and a sweep drops those unused for fourteen
+days by the database clock; the next use fetches again. Their tmpdir files are left for the
+system to clean. They count against no upload quota and are not listed to admins. For one
+family and style an upload wins, then a skill's face, then Google's, and an upload owns its
+whole family, so a deck never mixes an admin's Regular with Google's Bold. Every face
+handed to the renderer is opened for each slide and becomes a glyph fallback, so a job
+gets only the faces its deck and operations name (`font-usage.ts`). A render that meets a
+catalogue family with no face reports it, and the processor fetches it in the background:
+that preview draws a substitute, the next the font.
+
+A deck carries the fonts it uses. Each edit, after its last save, embeds them as one step
+under the preservation check (`font-embedding.ts`): uncompressed EOT parts named
+`ppt/fonts/chat-<hash>-<style>.fntdata`, the presentation's `embeddedFontLst`,
+`embedTrueTypeFonts` on and `saveSubsetFonts` off, so recipients can edit with them. Only
+parts under our names are replaced or removed; a font a deck already embedded is kept byte
+for byte and its family not re-embedded. Office families are never embedded, since the
+faces held for them are metric substitutes. Google faces embed (their licences allow it);
+an upload only when an admin turns it on and its `fsType` is installable or editable
+TrueType, since a brand licence may forbid documents carrying it; skill faces never. A
+deck the fonts would push past the package limit is kept without them, and the result
+names them. PowerPoint on Windows and Mac honours embedded fonts; Google Slides has the
+Google families natively; Keynote and LibreOffice substitute. Fonts are never subset or
+altered, which some OFL reserved-name terms would forbid.
+
+A run of calls on one draft renders as one step of the answer's work line. Prose the
+model writes between rounds splits a draft into several such steps, so each says what its
+own calls did; only the newest is live. A final unpublished file is labeled a draft; tool
+activity alone does not prove whether its durable checkpoint was saved. A publish is the
+last step of its run, and the delivered file a part of its own after the work line. The live row names only the current action; streamed
 edit arguments show “Writing changes” until the decoded call replaces that marker.
 Terminal events clear unfinished markers. The expanded rail labels structural inspection
 as “Read” and rendered feedback as “Checked appearance”, not two kinds of “looking”.
 Creation, editing and checking stay short rather than displaying operation counts as one
-sentence. A recovered tool error remains in the rail, not beside a successfully delivered
-file. Persisted rows, the stream and the reload projection share
+sentence. A recovered tool error is marked in the step list, never announced on a line. Persisted rows, the stream and the reload projection share
 `presentationActivitySummary`, which keeps outcomes, counts and a kind-derived change
 summary for the model, never operation payloads.
 
