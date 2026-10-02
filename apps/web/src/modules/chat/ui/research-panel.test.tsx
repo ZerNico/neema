@@ -381,6 +381,30 @@ describe("research panel", () => {
     expect(within(panel).queryByText(/usage/i)).not.toBeInTheDocument();
   });
 
+  it("opens while the brief is still being written and follows the run that replaces it", () => {
+    const starting: ResearchToolActivity = {
+      family: "research",
+      callId: "writing:call-1",
+      name: "deep_research",
+      status: "running",
+      textOffset: 0,
+      turnIndex: 0,
+      callIndex: Number.MAX_SAFE_INTEGER,
+      writing: true,
+    };
+    const { rerender } = renderBubble([starting]);
+    fireEvent.click(screen.getByRole("button", { name: /Starting research/ }));
+    const panel = screen.getByRole("complementary", { name: "Deep research" });
+    expect(within(panel).getByText("Planning what to look into")).toBeInTheDocument();
+    // The started run takes the placeholder's place, so the open panel stays on it.
+    rerender(tree([research, search, read]));
+    const live = screen.getByRole("complementary", { name: "Deep research" });
+    expect(within(live).getByText("First topic")).toBeInTheDocument();
+    // A retry's own placeholder at the same position is not this run.
+    rerender(tree([{ ...starting, callId: "writing:call-2" }]));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
   it("closes the old run on retry", () => {
     const { rerender } = renderBubble();
     fireEvent.click(screen.getByRole("button", { name: /Researching/ }));

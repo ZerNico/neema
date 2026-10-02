@@ -6,11 +6,12 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type {
   KnowledgeToolActivity,
   SkillToolActivity,
   ResearchToolActivity,
+  ToolActivity,
   WebToolActivity,
 } from "../client/use-message-stream.ts";
 import type { ResearchProgress, ResearchTaskProgress } from "../research-schema.ts";
@@ -18,6 +19,7 @@ import { ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx
 import { Favicon, hostOf } from "./favicon.tsx";
 import { FaviconStack } from "./tool-activity-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
+import { researchPanelId, researchPosition } from "./research-panel-id.ts";
 import {
   useDetailPanel,
   useDetailPanelTabContent,
@@ -332,21 +334,18 @@ export function ResearchActivityBody({
   );
 }
 
-const researchPanelId = (messageId: string, runId: string) =>
-  `research:${JSON.stringify([messageId, runId])}`;
-
 const runIdOf = (activity: ResearchToolActivity) => activity.progress?.runId ?? activity.runId;
 
 function researchPanelRequest(
   messageId: string,
+  position: number,
   activity: ResearchToolActivity,
   webActivities: ResearchStepActivity[],
 ): DetailPanelRequest | null {
-  const runId = runIdOf(activity);
-  if (!runId) return null;
+  if (position < 0) return null;
   const running = activity.status === "running";
   return {
-    id: researchPanelId(messageId, runId),
+    id: researchPanelId(messageId, position),
     title: "Deep research",
     subtitle: running ? "In progress" : `${webActivities.length} steps`,
     icon: GlobalSearchIcon,
@@ -364,14 +363,15 @@ function researchPanelRequest(
 /** Bubbles only open a snapshot; their mount/render lifecycle owns no panel data. */
 export function useResearchPanel(
   messageId: string,
+  position: number,
   activity: ResearchToolActivity,
   webActivities: ResearchStepActivity[],
 ) {
   const panel = useDetailPanel();
   return useCallback(() => {
-    const request = researchPanelRequest(messageId, activity, webActivities);
+    const request = researchPanelRequest(messageId, position, activity, webActivities);
     if (request) panel.open(request);
-  }, [panel, messageId, activity, webActivities]);
+  }, [panel, messageId, position, activity, webActivities]);
 }
 
 /**
@@ -393,35 +393,45 @@ function ResearchTabOwner({
   id: string;
   messages: ReadonlyArray<DisplayMessage>;
 }) {
+  const atPosition = (candidate: DisplayMessage, activity: ToolActivity) =>
+    activity.family === "research" &&
+    researchPanelId(candidate.id, researchPosition(candidate.toolActivities, activity.callId)) ===
+      id;
   const message = messages.find((candidate) =>
-    candidate.toolActivities.some(
-      (activity) =>
-        activity.family === "research" &&
-        researchPanelId(candidate.id, runIdOf(activity) ?? "") === id,
-    ),
+    candidate.toolActivities.some((activity) => atPosition(candidate, activity)),
   );
-  const messageId = message?.id;
-  const activities = message?.toolActivities;
+  const current = message?.toolActivities.find((candidate): candidate is ResearchToolActivity =>
+    atPosition(message, candidate),
+  );
+  // A tab opened on a starting run binds to the run that replaces it. A retry
+  // puts a different run, or a new placeholder, at the same position: the run
+  // this tab showed is gone, so it closes.
+  const [boundRun, setBoundRun] = useState<string | null>(null);
+  const currentRun = current ? (runIdOf(current) ?? null) : null;
+  if (currentRun && boundRun === null) setBoundRun(currentRun);
+  const replaced = boundRun !== null && currentRun !== boundRun;
   // Text smoothing changes display rows every token, but does not change their
   // activity data. Neither text nor the refreshed detail request is a dependency.
   const request = useMemo(() => {
-    if (!messageId || !activities) return null;
-    const activity = activities.find(
-      (candidate): candidate is ResearchToolActivity =>
-        candidate.family === "research" &&
-        researchPanelId(messageId, runIdOf(candidate) ?? "") === id,
-    );
-    if (!activity) return null;
+    const activity = current;
+    if (!message || !activity || replaced) return null;
     const runId = runIdOf(activity);
-    const webActivities = activities.filter(
+    const webActivities = message.toolActivities.filter(
       (candidate): candidate is ResearchStepActivity =>
         (candidate.family === "web" ||
           candidate.family === "knowledge" ||
           candidate.family === "skill") &&
+        !!runId &&
         candidate.runId === runId,
     );
-    return researchPanelRequest(messageId, activity, webActivities);
-  }, [messageId, activities, id]);
+    return researchPanelRequest(
+      message.id,
+      researchPosition(message.toolActivities, activity.callId),
+      activity,
+      webActivities,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the message's activities, not its text
+  }, [message?.id, message?.toolActivities, id, replaced]);
 
   useDetailPanelTabContent(id, request);
   return null;

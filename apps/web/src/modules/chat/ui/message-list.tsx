@@ -54,6 +54,7 @@ import {
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
+import { researchPosition } from "./research-panel-id.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import {
@@ -777,6 +778,7 @@ const AssistantBody = memo(function AssistantBody({
         <ResearchActivityRow
           key={part.key}
           messageId={message.id}
+          position={researchPosition(message.toolActivities, part.activity.callId)}
           activity={part.activity}
           webActivities={message.toolActivities.filter(
             (activity): activity is ResearchStepActivity =>
@@ -884,16 +886,19 @@ function AssistantSourcePanel({
 // An opening-only trigger. The conversation owns updates after this row unmounts.
 function ResearchActivityRow({
   messageId,
+  position,
   activity,
   webActivities,
   sourceCount,
 }: {
   messageId: string;
+  /** Its place among the message's research calls, which keys its panel. */
+  position: number;
   activity: ResearchToolActivity;
   webActivities: ResearchStepActivity[];
   sourceCount: number;
 }) {
-  const open = useResearchPanel(messageId, activity, webActivities);
+  const open = useResearchPanel(messageId, position, activity, webActivities);
   return (
     <ResearchActivityBlock
       activity={activity}
