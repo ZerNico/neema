@@ -58,6 +58,15 @@ const idleUploads = (): AttachmentUploads => ({
   dismissNotice: vi.fn(),
 });
 
+/** Office steps sit inside the answer's work line, folded once it settles. */
+const openWorkLines = () => {
+  for (const header of screen.queryAllByRole("button", {
+    expanded: false,
+    name: /^(Created|Edited|Read|Published) (the|a) /,
+  }))
+    fireEvent.click(header);
+};
+
 describe("MessageBubble chronological body", () => {
   const intro = "First, a little context.\n\n";
   const ask: ToolActivity = {
@@ -257,6 +266,7 @@ describe("MessageBubble chronological body", () => {
         }}
       />,
     );
+    openWorkLines();
     const header = screen.getByRole("button", { name: "Created presentation · 2 slides" });
     expect(screen.getAllByText("Q3.pptx")).toHaveLength(1);
     expect(screen.queryByText(/File ready/)).toBeNull();
@@ -303,6 +313,7 @@ describe("MessageBubble chronological body", () => {
         }}
       />,
     );
+    openWorkLines();
     const header = screen.getByRole("button", { name: "Created presentation · 2 slides" });
     expect(header).not.toHaveTextContent("step failed");
     fireEvent.click(header);
@@ -349,6 +360,7 @@ describe("MessageBubble chronological body", () => {
         }}
       />,
     );
+    openWorkLines();
     fireEvent.click(screen.getByRole("button", { name: /^Presentation draft/ }));
     for (const label of [
       "Couldn’t read the presentation",
@@ -423,6 +435,7 @@ describe("MessageBubble chronological body", () => {
         }}
       />,
     );
+    openWorkLines();
     fireEvent.click(screen.getByRole("button", { name: /Spreadsheet draft/ }));
     for (const label of [
       "Started a new workbook",
@@ -516,6 +529,7 @@ describe("MessageBubble chronological body", () => {
       <MessageBubble message={{ ...base, status: "streaming", content, toolActivities: tools }} />,
     );
     // Only the newest part is live; the earlier one says what it did.
+    openWorkLines();
     expect(
       screen.getByRole("button", { name: "Created presentation · 2 slides" }),
     ).toBeInTheDocument();

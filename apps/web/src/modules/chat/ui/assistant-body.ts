@@ -57,9 +57,9 @@ export type AssistantBodyPart =
   | { kind: "steer"; key: string; steer: AssistantSteer };
 
 /**
- * One working file's run of calls: deck or workbook steps, the publish that
- * delivered it, and the delivered file itself, so a draft reads as one activity
- * rather than a row per call plus a separate file card.
+ * One working file's run of calls: deck or workbook steps and the publish that
+ * delivered it, so a draft reads as one step of the work rather than a row per
+ * call. The delivered file is named here and drawn as its own part after the work.
  */
 export interface WorkingFilePart {
   kind: "working-file";
@@ -67,6 +67,10 @@ export interface WorkingFilePart {
   workingFileId?: string;
   steps: Array<OfficeActivity | ToolFileActivity>;
   file?: AssistantFile;
+  /** Nothing follows it in the answer yet. */
+  newest?: boolean;
+  /** No later part continues the same file. */
+  final?: boolean;
 }
 
 /**
@@ -90,34 +94,64 @@ const WORK_FAMILIES = new Set<ToolActivity["family"]>([
   "attachment",
 ]);
 
-const isWorkStep = (part: AssistantBodyPart): part is WorkStep =>
+const isWorkStep = (part: WorkStep) =>
   part.kind === "reasoning" ||
   part.kind === "web" ||
   part.kind === "skill" ||
   part.kind === "knowledge" ||
   part.kind === "browser" ||
+  part.kind === "working-file" ||
   part.kind === "compaction" ||
   (part.kind === "tool" && WORK_FAMILIES.has(part.activity.family));
 
-/** Adjacent work steps become one work part; everything else passes through. */
+/**
+ * Adjacent work steps become one work part; everything else passes through. A
+ * file delivered in the middle of a run waits until the run ends, so the
+ * deliverable sits right after the work that made it instead of splitting it.
+ */
 const groupWork = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[] => {
   const grouped: AssistantBodyPart[] = [];
+  let held: AssistantBodyPart[] = [];
+  const release = () => {
+    grouped.push(...held);
+    held = [];
+  };
   for (const part of parts) {
     const last = grouped.at(-1);
-    if (!isWorkStep(part)) grouped.push(part);
-    else if (last?.kind === "work") last.steps.push(part);
-    else grouped.push({ kind: "work", key: `work-${part.key}`, steps: [part] });
+    if (part.kind !== "work" && isWorkStep(part)) {
+      if (last?.kind === "work") last.steps.push(part);
+      else grouped.push({ kind: "work", key: `work-${part.key}`, steps: [part] });
+    } else if (part.kind === "file" && last?.kind === "work") held.push(part);
+    else {
+      release();
+      grouped.push(part);
+    }
   }
+  release();
   return grouped;
 };
 
-/** A draft still being worked on is its own live signal; nothing else needs to say "Thinking". */
-export const liveWorkingFile = (parts: ReadonlyArray<AssistantBodyPart>) => {
-  const last = parts.at(-1);
-  return (
-    last?.kind === "working-file" &&
-    !last.steps.some((step) => step.family === "tool-file" && step.status === "complete")
-  );
+/** Marks where each draft sits, then gives every delivered file a part of its own. */
+const placeWorkingFiles = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[] => {
+  const lastOfFile = new Map<string, number>();
+  parts.forEach((part, index) => {
+    if (part.kind === "working-file" && part.workingFileId)
+      lastOfFile.set(part.workingFileId, index);
+  });
+  return parts.flatMap((part, index): AssistantBodyPart[] => {
+    if (part.kind !== "working-file") return [part];
+    part.newest = index === parts.length - 1;
+    part.final = !part.workingFileId || lastOfFile.get(part.workingFileId) === index;
+    const file: AssistantBodyPart[] = part.file
+      ? [{ kind: "file", key: `file-${part.file.attachment.id}`, file: part.file }]
+      : [];
+    // Another tool's file, published: the card says it all, and an empty step
+    // would only sit in the work line. Still publishing or failed, it is a step.
+    const publishedOnly =
+      part.steps.every((step) => step.family === "tool-file") &&
+      part.steps.every((step) => step.status === "complete");
+    return publishedOnly ? file : [part, ...file];
+  });
 };
 
 const turnOf = (item: PositionedActivity) =>
@@ -309,7 +343,7 @@ export function projectAssistantBody({
   if (!chronological) {
     for (const item of activities) appendActivity(item);
     appendText(0, content.length, streaming);
-    return { chronological, parts: groupWork(parts) };
+    return { chronological, parts: groupWork(placeWorkingFiles(parts)) };
   }
 
   let cursor = 0;
@@ -323,5 +357,5 @@ export function projectAssistantBody({
     cursor = offset;
   }
   appendText(cursor, content.length, streaming);
-  return { chronological, parts: groupWork(parts) };
+  return { chronological, parts: groupWork(placeWorkingFiles(parts)) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { liveWorkingFile, projectAssistantBody as projectGrouped } from "./assistant-body.ts";
+import { projectAssistantBody as projectGrouped } from "./assistant-body.ts";
 import type { CompactionActivity, ToolActivity } from "../client/use-message-stream.ts";
 
 const web = (callId: string, textOffset: number, callIndex = 0): ToolActivity => ({
@@ -392,20 +392,35 @@ describe("projectAssistantBody steers", () => {
     const project = (tools: ToolActivity[], content = "", files = [file]) =>
       projectAssistantBody({ content, streaming: true, tools, compactions: [], files }).parts;
 
-    it("folds a draft's steps, its publish and the delivered file into one part", () => {
+    it("folds a draft's steps and its publish into one step, its file a part of its own", () => {
       const parts = project([step("a", 0, "d1"), step("b", 1, "d1"), publish(2, "d1", "deck")]);
-      expect(parts).toHaveLength(1);
-      expect(parts[0]).toMatchObject({ kind: "working-file", workingFileId: "d1", file });
+      expect(parts.map((part) => part.kind)).toEqual(["working-file", "file"]);
+      expect(parts[0]).toMatchObject({ workingFileId: "d1", file, final: true });
       expect(
         parts[0]?.kind === "working-file" && parts[0].steps.map((item) => item.callId),
       ).toEqual(["a", "b", "publish-d1"]);
-      expect(liveWorkingFile(parts)).toBe(false);
+      expect(parts[1]).toMatchObject({ file });
     });
 
     it("keeps a running step without a file ID in the draft before it", () => {
       const parts = project([step("a", 0, "d1"), step("b", 1, undefined, "running")], "", []);
       expect(parts).toHaveLength(1);
-      expect(liveWorkingFile(parts)).toBe(true);
+      expect(parts[0]).toMatchObject({ kind: "working-file", newest: true });
+    });
+
+    it("puts the delivered file after the whole run of work, not inside it", () => {
+      const grouped = projectGrouped({
+        content: "",
+        streaming: false,
+        tools: [step("a", 0, "d1"), publish(1, "d1", "deck"), { ...web("w", 0), turnIndex: 2 }],
+        compactions: [],
+        files: [file],
+      }).parts;
+      expect(grouped.map((part) => part.kind)).toEqual(["work", "file"]);
+      expect(grouped[0]?.kind === "work" && grouped[0].steps.map((part) => part.kind)).toEqual([
+        "working-file",
+        "web",
+      ]);
     });
 
     it("starts a new part for another file or after intervening text", () => {
@@ -419,10 +434,9 @@ describe("projectAssistantBody steers", () => {
       expect(split.map((part) => part.kind)).toEqual(["working-file", "text", "working-file"]);
     });
 
-    it("gives another tool's published file its own part without a file card duplicate", () => {
+    it("shows another tool's published file as its card alone, with no empty step", () => {
       const parts = project([publish(0, "custom-1", "deck")]);
-      expect(parts).toHaveLength(1);
-      expect(parts[0]).toMatchObject({ kind: "working-file", file });
+      expect(parts).toEqual([{ kind: "file", key: "file-deck", file }]);
     });
   });
 });

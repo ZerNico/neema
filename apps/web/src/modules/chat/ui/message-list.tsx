@@ -36,7 +36,6 @@ import {
 import { FileReferenceMachine } from "./file-reference.tsx";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
 import {
-  liveWorkingFile,
   projectAssistantBody,
   type AssistantSteer,
   type WorkPart,
@@ -732,14 +731,7 @@ const AssistantBody = memo(function AssistantBody({
       ),
     [message.toolActivities],
   );
-  const lastPartOfFile = new Map(
-    parts.flatMap((part, index) =>
-      part.kind === "working-file" && part.workingFileId
-        ? [[part.workingFileId, index] as const]
-        : [],
-    ),
-  );
-  const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>, index: number) => {
+  const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>) => {
     if (part.kind === "reasoning")
       return (
         <ReasoningBlock key={part.key} reasoning={message.reasoning} active={reasoningActive} />
@@ -801,13 +793,11 @@ const AssistantBody = memo(function AssistantBody({
           part={part}
           state={{
             streaming,
-            live: index === parts.length - 1,
+            live: part.newest ?? false,
             published: !!part.workingFileId && publishedFiles.has(part.workingFileId),
-            final: !part.workingFileId || lastPartOfFile.get(part.workingFileId) === index,
+            final: part.final ?? true,
           }}
-        >
-          {part.file ? <AssistantFileAttachment file={part.file} fresh={streaming} /> : null}
-        </WorkingFileActivityBlock>
+        />
       );
     if (part.activity.family === "research") {
       const runId = part.activity.progress?.runId;
@@ -886,17 +876,18 @@ const AssistantBody = memo(function AssistantBody({
   };
   return parts.map((part, index) => {
     const live = streaming && index === parts.length - 1;
-    if (part.kind !== "work") return renderPart(part, index);
+    if (part.kind !== "work") return renderPart(part);
     // A lone step without calls (reasoning, a compaction) keeps its own row:
     // a work line would only repeat it. Any call, even one, gets the line.
     if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
-      return renderPart(part.steps[0]!, index);
+      return renderPart(part.steps[0]!);
     return (
       <WorkGroupBlock
         key={part.key}
         part={part}
         live={live}
-        renderStep={(step) => renderPart(step, index)}
+        approvals={message.desktopApprovals}
+        renderStep={(step) => renderPart(step)}
       />
     );
   });
@@ -1128,8 +1119,6 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
       showReasoning,
     ],
   );
-  // An unfinished draft's own row already says the model is working on it.
-  const draftLive = streaming && liveWorkingFile(parts);
   // The chat view wires resume only on the last answer.
   const resume =
     message.onResume && message.onResumeWith ? (
@@ -1171,7 +1160,6 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         !showReasoning &&
         !toolRunning &&
         !compacting &&
-        !draftLive &&
         // A live work line already says it is working between its steps.
         parts.at(-1)?.kind !== "work" ? (
           <div className={cn(activityRowClassName, "mb-2")}>

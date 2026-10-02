@@ -1,15 +1,15 @@
-import { ArrowDown01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
+import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { IntegrationToolActivity } from "~/modules/chat/client/use-message-stream.ts";
+import { ActivityChevron, ActivityFace, ActivityNote } from "~/modules/chat/ui/activity-face.tsx";
 import { activityRowClassName } from "~/modules/chat/ui/activity-row.ts";
 import {
   Disclosure,
   DisclosureContent,
   DisclosureTrigger,
   disclosureBodyRailClassName,
-  disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
 import { toastError } from "~/ui/error-toast.ts";
@@ -37,13 +37,11 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   const failed = activity.status === "error";
   const label = waiting
     ? `Waiting for your approval: ${activity.label}`
-    : running
-      ? `${activity.label}…`
-      : activity.refused
-        ? `${activity.label}: not done`
-        : failed
-          ? `${activity.label} failed`
-          : activity.label;
+    : activity.refused
+      ? `${activity.label}: not done`
+      : failed
+        ? `${activity.label}: didn’t work`
+        : activity.label;
   const detail = [
     activity.summary,
     activity.sources?.length ? `${activity.sources.length} results` : null,
@@ -51,56 +49,40 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
     .filter(Boolean)
     .join(" · ");
 
+  // A refusal is the person's or the service's decision, not a fault: it reads
+  // as a quiet outcome, without the warning a real failure carries.
   const row = (
-    <>
-      <IntegrationLogo integrationId={activity.integrationId} className="text-foreground" />
-      <span className={cn("min-w-0 truncate", running && !waiting && "text-shimmer")}>
-        {label}
-        {detail ? <span className="text-muted-foreground/80"> · {detail}</span> : null}
-      </span>
-    </>
+    <ActivityFace
+      glyph={<IntegrationLogo integrationId={activity.integrationId} className="text-foreground" />}
+      label={label}
+      detail={detail || null}
+      status={
+        waiting ? "waiting" : running ? "running" : failed && !activity.refused ? "failed" : "done"
+      }
+    />
   );
 
   return (
     <>
       {waiting ? <ApprovalCard call={waiting} name={name} label={activity.label} /> : null}
       {!activity.error && !activity.link ? (
-        <div
-          className={cn(
-            activityRowClassName,
-            "mb-2",
-            failed && !activity.refused && "text-destructive",
-          )}
-          aria-label={`${name}: ${label}`}
-        >
+        <div className={cn(activityRowClassName, "mb-2")} aria-label={`${name}: ${label}`}>
           {row}
         </div>
       ) : (
         <Disclosure open={open} onOpenChange={setOpen} className="mb-2">
           <DisclosureTrigger className={disclosureTriggerClassName}>
             {row}
-            <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              strokeWidth={2}
-              className={cn(
-                "size-3.5 shrink-0",
-                disclosureChevronMotionClassName,
-                open && "rotate-180",
-              )}
-              aria-hidden
-            />
+            <ActivityChevron open={open} />
           </DisclosureTrigger>
           <DisclosureContent>
             <div className={disclosureBodyRailClassName}>
               {activity.error ? (
-                <p
-                  className={cn(
-                    "text-xs [overflow-wrap:anywhere]",
-                    activity.refused ? "text-muted-foreground" : "text-destructive",
-                  )}
-                >
-                  {activity.error}
-                </p>
+                activity.refused ? (
+                  <p className="text-xs [overflow-wrap:anywhere]">{activity.error}</p>
+                ) : (
+                  <ActivityNote>{activity.error}</ActivityNote>
+                )
               ) : null}
               {activity.link ? (
                 <a

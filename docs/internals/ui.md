@@ -325,6 +325,11 @@ false`), so a page body is written against data already there. This includes loc
   did ("Searched the web and read 2 pages"), each kind of step once and at most three, with
   failures counted in the header. It says no duration then: the time spent thinking around
   the calls is not recorded, so any figure would undercount. A lone step without calls (reasoning, a compaction) keeps its own row.
-  What the person acts on or receives stays outside: questions, plans, memory saves, draft and
-  document cards, research and files. A document delivered while the answer streams opens in
-  the panel by itself; reloading opens nothing.
+  Every machine step belongs in it, Office edits included; what the person acts on or
+  receives stays outside: questions, plans, memory saves, draft and document cards, research
+  and files. A file delivered mid-run is held until the run ends, so it sits right after the
+  work that made it, and a file another tool published shows as its card alone. A step parked
+  on the person's approval (desktop, browser, integration) holds the line open and its header
+  says "Waiting for you", whatever it was collapsed to: a decision is never folded away. A
+  document delivered while the answer streams opens in the panel by itself; reloading opens
+  nothing.

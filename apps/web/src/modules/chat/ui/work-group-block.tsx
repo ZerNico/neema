@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
+import { pendingIntegrationCallsQuery } from "~/modules/integrations/client/queries.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import {
   Disclosure,
@@ -20,11 +22,21 @@ export const stepActivities = (step: WorkStep): ToolActivity[] => {
     case "knowledge":
     case "browser":
       return step.activities;
+    case "working-file":
+      return step.steps;
     case "tool":
       return [step.activity];
     default:
       return [];
   }
+};
+
+const OFFICE_NOUN = { presentation: "presentation", spreadsheet: "spreadsheet", word: "document" };
+
+/** The Office family a draft step edits; a publish-only step has none. */
+const officeNoun = (step: Extract<WorkStep, { kind: "working-file" }>) => {
+  const office = step.steps.find((call) => call.family !== "tool-file");
+  return office ? OFFICE_NOUN[office.family] : null;
 };
 
 /** What a step is doing, in the present tense, for the live header. */
@@ -46,6 +58,10 @@ export function stepLabel(step: WorkStep): string {
       return "Using the browser";
     case "compaction":
       return "Summarizing earlier messages";
+    case "working-file": {
+      const noun = officeNoun(step);
+      return noun ? `Working on the ${noun}` : "Publishing the file";
+    }
     case "tool": {
       const call = step.activity;
       switch (call.family) {
@@ -102,6 +118,15 @@ const pastLabels = (step: WorkStep): string[] => {
     const read = pages === 0 ? [] : [pages === 1 ? "Read a page" : `Read ${pages} pages`];
     return searched ? ["Searched the web", ...read] : read;
   }
+  if (step.kind === "working-file") {
+    const noun = officeNoun(step);
+    if (!noun) return ["Published a file"];
+    const done = step.steps.filter((call) => call.status === "complete");
+    if (done.some((call) => call.family !== "tool-file" && call.origin === "created"))
+      return [`Created the ${noun}`];
+    if (done.some((call) => call.name.startsWith("edit_"))) return [`Edited the ${noun}`];
+    return [`Read the ${noun}`];
+  }
   const present = stepLabel(step);
   return [
     PAST[present] ??
@@ -153,6 +178,26 @@ function useElapsed(since: number, running: boolean) {
 }
 
 /**
+ * Mounted only while an integration call runs, so a chat without one never
+ * asks the server which calls are parked on the person.
+ */
+function IntegrationApprovalWatch({
+  callIds,
+  onWaiting,
+}: {
+  callIds: ReadonlyArray<string>;
+  onWaiting: (waiting: boolean) => void;
+}) {
+  const pending = useQuery(pendingIntegrationCallsQuery);
+  const waiting = pending.data?.some((call) => callIds.includes(call.callId)) ?? false;
+  useEffect(() => {
+    onWaiting(waiting);
+    return () => onWaiting(false);
+  }, [waiting, onWaiting]);
+  return null;
+}
+
+/**
  * One line for a run of work. While it is the newest part of a streaming
  * answer it stays open, its header saying "Working" with a running clock while
  * the steps below name the detail; once the answer moves on it folds into what
@@ -162,10 +207,13 @@ export function WorkGroupBlock({
   part,
   live,
   renderStep,
+  approvals,
 }: {
   part: WorkPart;
   /** The newest part of a streaming answer. */
   live: boolean;
+  /** Desktop and browser calls parked on the person's decision. */
+  approvals?: ReadonlyMap<string, unknown> | undefined;
   renderStep: (step: WorkStep) => ReactNode;
 }) {
   const calls = part.steps.flatMap(stepActivities);
@@ -176,21 +224,39 @@ export function WorkGroupBlock({
   const [mountedAt] = useState(() => Date.now());
   const elapsed = useElapsed(workStart(part.steps) ?? mountedAt, running);
   const failed = calls.filter((call) => call.status === "error").length;
+  // A decision is never folded away: a step parked on the person holds the
+  // line open and says so, whatever it was collapsed to.
+  const [integrationWaiting, setIntegrationWaiting] = useState(false);
+  const runningIntegrations = calls.flatMap((call) =>
+    call.family === "integration" && call.status === "running" ? [call.callId] : [],
+  );
+  const waiting =
+    calls.some((call) => call.status === "running" && approvals?.has(call.callId)) ||
+    (runningIntegrations.length > 0 && integrationWaiting);
 
   // Live, the steps below name the detail and the header only that it is busy
   // and for how long: "Thinking" between calls read as stalled. Settled, it says
   // what was done, not how long, since the time spent thinking is not recorded.
-  const label = running ? `Working · ${formatDuration(elapsed)}` : workSummary(part.steps);
+  const label = waiting
+    ? "Waiting for you"
+    : running
+      ? `Working · ${formatDuration(elapsed)}`
+      : workSummary(part.steps);
 
   return (
-    <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
+    <Disclosure open={expanded || waiting} onOpenChange={onOpenChange} className="mb-2">
+      {runningIntegrations.length > 0 ? (
+        <IntegrationApprovalWatch callIds={runningIntegrations} onWaiting={setIntegrationWaiting} />
+      ) : null}
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <span className={cn("min-w-0 truncate", running && "text-shimmer")}>{label}</span>
+        <span className={cn("min-w-0 truncate", running && !waiting && "text-shimmer")}>
+          {label}
+        </span>
         {/* Counted, not alarming: a read the model worked around is no failure of the answer. */}
         {failed > 0 ? (
           <span className="shrink-0">· {failed === 1 ? "1 failed" : `${failed} failed`}</span>
         ) : null}
-        <ActivityChevron open={expanded} />
+        <ActivityChevron open={expanded || waiting} />
       </DisclosureTrigger>
       <DisclosureContent>
         {/* Flush, not railed: each step row draws its own rail, and a second one

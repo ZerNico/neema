@@ -83,6 +83,21 @@ describe("a run of work", () => {
     expect(header).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("holds itself open and says so while a step waits on the person", () => {
+    const parked = call("p", { family: "desktop", name: "run_command", status: "running" });
+    render(
+      <WorkGroupBlock
+        part={group(parked)}
+        live={false}
+        approvals={new Map([["p", {}]])}
+        renderStep={(step) => <p key={step.key}>step {step.kind}</p>}
+      />,
+    );
+    const header = screen.getByRole("button", { name: /^Waiting for you/ });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("step tool")).toBeInTheDocument();
+  });
+
   it("sums itself up by what it did, naming thinking only when that was all", () => {
     const read = call("r", { name: "read_url", targets: ["https://a.test", "https://b.test"] });
     expect(

@@ -1,6 +1,12 @@
-import { Alert02Icon, Doc01Icon, Presentation01Icon, Xls01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  Doc01Icon,
+  File01Icon,
+  Presentation01Icon,
+  Xls01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import {
   Disclosure,
   DisclosureContent,
@@ -278,17 +284,14 @@ function rowLabels(
 /**
  * One draft's calls as a single line that states what is happening now. Steps,
  * failures included, stay one click away so the transcript does not jump as a
- * long edit loop runs. The delivered file renders beneath as its result.
+ * long edit loop runs. The delivered file is its own part, after the work line.
  */
 export function WorkingFileActivityBlock({
   part,
   state,
-  children,
 }: {
   part: WorkingFilePart;
   state: WorkingFileState;
-  /** The delivered file, if any. */
-  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const office = part.steps.find((step) => step.family !== "tool-file");
@@ -296,14 +299,13 @@ export function WorkingFileActivityBlock({
   if (!office) {
     const failure = part.steps.find((step) => step.status === "error");
     return (
-      <>
+      <div className={cn(activityRowClassName, "mb-2")}>
         {failure ? (
-          <div className={cn(activityRowClassName, "mb-2")}>
-            <ActivityFace label={failureLabel(failure)} status="failed" />
-          </div>
-        ) : null}
-        {children}
-      </>
+          <ActivityFace label={failureLabel(failure)} status="failed" />
+        ) : (
+          <ActivityFace icon={File01Icon} label="Publishing the file" status="running" />
+        )}
+      </div>
     );
   }
   const fileName = part.file?.attachment.fileName;
@@ -344,7 +346,6 @@ export function WorkingFileActivityBlock({
           </ol>
         </DisclosureContent>
       </Disclosure>
-      {children}
     </>
   );
 }
