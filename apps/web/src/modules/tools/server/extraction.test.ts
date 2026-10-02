@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentKind, readCapped } from "./extraction.ts";
+import { contentKind, fileNameOf, readCapped, textBody } from "./extraction.ts";
 
 describe("what read_url can read", () => {
   it("classifies by declared type, and a .pdf path a server calls octet-stream", () => {
@@ -34,5 +34,18 @@ describe("what read_url can read", () => {
       4,
     );
     expect(exact.truncated).toBe(false);
+  });
+
+  it("names a PDF from a malformed escape as written, rather than failing the answer", () => {
+    expect(fileNameOf("https://x.example/r%ZZ.pdf", "document.pdf")).toBe("r%ZZ.pdf");
+    expect(fileNameOf("https://x.example/a%20b.pdf", "document.pdf")).toBe("a b.pdf");
+    expect(fileNameOf("https://x.example/", "document.pdf")).toBe("document.pdf");
+  });
+
+  it("fences JSON whatever its backtick runs, without a stack-deep spread", () => {
+    const many = "`a".repeat(200_000);
+    const fenced = textBody("json", many);
+    expect(fenced.startsWith("```json\n")).toBe(true);
+    expect(textBody("csv", "x````y").startsWith("`````csv")).toBe(true);
   });
 });

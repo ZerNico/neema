@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Schema } from "effect";
 import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
@@ -105,6 +105,12 @@ export class PageExtractor extends Context.Service<
                   .pipe(
                     Effect.map((parsed) => ({ title: null, raw: parsed.text })),
                     Effect.mapError((e) => fail(`PDF could not be read: ${e.reason}`)),
+                    // A page's PDF is anyone's file: interrupting aborts the
+                    // parse between pages, so one cannot hold the server.
+                    Effect.timeoutOrElse({
+                      duration: PDF_TIMEOUT,
+                      orElse: () => Effect.fail(fail("PDF took too long to read")),
+                    }),
                   )
               : Effect.succeed({
                   title: null,
@@ -146,18 +152,31 @@ export const contentKind = (contentType: string, url: string): ContentKind | nul
   return null;
 };
 
+const PDF_TIMEOUT = Duration.seconds(20);
+
 /** Structured text reads best fenced, so its shape survives the model's Markdown. */
-const textBody = (kind: ContentKind, text: string) => {
+export const textBody = (kind: ContentKind, text: string) => {
   if (kind === "json" || kind === "csv") {
-    const longestRun = Math.max(2, ...[...text.matchAll(/`+/g)].map((match) => match[0].length));
+    // A loop, not a spread: a body of many short backtick runs would pass more
+    // arguments than the call stack holds.
+    let longestRun = 2;
+    for (const match of text.matchAll(/`+/g))
+      if (match[0].length > longestRun) longestRun = match[0].length;
     const fence = "`".repeat(longestRun + 1);
     return `${fence}${kind}\n${text}\n${fence}`;
   }
   return text;
 };
 
-const fileNameOf = (url: string, fallback: string) =>
-  decodeURIComponent(new URL(url).pathname.split("/").at(-1) || "") || fallback;
+/** The last path segment, decoded when it can be; a malformed escape keeps it as written. */
+export const fileNameOf = (url: string, fallback: string) => {
+  const segment = new URL(url).pathname.split("/").at(-1) || "";
+  try {
+    return decodeURIComponent(segment) || fallback;
+  } catch {
+    return segment || fallback;
+  }
+};
 
 export const readCapped = async (body: ReadableStream<Uint8Array> | null, cap: number) => {
   const reader = body?.getReader();
