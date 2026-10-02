@@ -3702,9 +3702,9 @@ export class StreamEngine extends Context.Service<
                         // decoded call settles it.
                         case "tool-params-start":
                           documents.live.start(part.id, part.name);
-                          // An Office edit is one long call the model can spend
-                          // minutes writing; say so before it completes.
-                          if (officeFamilyOfEdit(part.name)) {
+                          // An Office edit or a research brief is a call the model
+                          // can spend a while writing; say so before it completes.
+                          if (officeFamilyOfEdit(part.name) || part.name === "deep_research") {
                             pushChunk(
                               "writing",
                               JSON.stringify({

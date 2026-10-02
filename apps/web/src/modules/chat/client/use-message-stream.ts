@@ -141,6 +141,8 @@ export interface ResearchToolActivity extends ToolActivityBase {
   family: "research";
   progress?: ResearchProgress;
   sources?: ToolSource[];
+  /** Stands in while the model writes the brief; replaced when the run starts. */
+  writing?: true;
 }
 
 export const readResearchProgress = (value: unknown): ResearchProgress | null =>
@@ -1044,7 +1046,7 @@ export const applyFileChunk = (
 
 /** A call still being written leaves once any call starts or the answer ends. */
 const withoutWriting = (tools: ReadonlyArray<ToolActivity>) =>
-  tools.filter((tool) => !isOfficeActivity(tool) || !tool.writing);
+  tools.filter((tool) => !("writing" in tool && tool.writing));
 
 /**
  * A writing marker from an earlier attempt of a resumed answer. That attempt
@@ -1077,21 +1079,22 @@ export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: str
       typeof writing.turnIndex !== "number"
     )
       return [...tools];
+    // A long call the model spends a while writing: an Office edit, or a
+    // research brief, which otherwise shows nothing until the run starts.
+    const position = {
+      name: writing.name,
+      callId: `writing:${writing.id}`,
+      status: "running" as const,
+      textOffset: writing.textOffset,
+      turnIndex: writing.turnIndex,
+      callIndex: Number.MAX_SAFE_INTEGER,
+      writing: true as const,
+    };
     const family = officeFamilyOfEdit(writing.name);
-    if (!family) return [...tools];
-    return [
-      ...withoutWriting(tools),
-      {
-        family,
-        name: writing.name,
-        callId: `writing:${writing.id}`,
-        status: "running" as const,
-        textOffset: writing.textOffset,
-        turnIndex: writing.turnIndex,
-        callIndex: Number.MAX_SAFE_INTEGER,
-        writing: true as const,
-      },
-    ];
+    if (family) return [...withoutWriting(tools), { ...position, family }];
+    if (writing.name === "deep_research")
+      return [...withoutWriting(tools), { ...position, family: "research" as const }];
+    return [...tools];
   } catch {
     return [...tools];
   }

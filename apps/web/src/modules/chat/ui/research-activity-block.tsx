@@ -79,7 +79,8 @@ export function ResearchActivityBlock({
   // Only how the run ended is worth a qualifier. Individual failed reads are
   // the answer's job to route around, and the panel lists them for the curious.
   const note = sources > 0 && early ? early.note : null;
-  const primary = running ? activeLabels[phase ?? "researching"] : label;
+  // Before any progress (the brief still being written) it is starting.
+  const primary = running ? activeLabels[phase ?? "queued"] : label;
   const secondary = running ? detail : note;
   const failed = phase === "error" && sources === 0;
   const body = (

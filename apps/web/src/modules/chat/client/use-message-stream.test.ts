@@ -620,6 +620,39 @@ describe("a deck edit still being written", () => {
     expect(tools.some((tool) => tool.callId === "writing:b")).toBe(true);
   });
 
+  it("stands in for a research brief being written, until the run starts", () => {
+    let tools = applyToolActivityChunk(
+      [],
+      "writing",
+      JSON.stringify({ v: 1, id: "r", name: "deep_research", textOffset: 12, turnIndex: 0 }),
+    );
+    expect(tools).toEqual([
+      expect.objectContaining({ family: "research", writing: true, textOffset: 12 }),
+    ]);
+    tools = applyToolActivityChunk(
+      tools,
+      "tool",
+      env({
+        family: "research",
+        phase: "start",
+        name: "deep_research",
+        callId: "row-1",
+        runId: "run-1",
+        turnIndex: 0,
+        callIndex: 0,
+        textOffset: 12,
+        progress: {
+          runId: "run-1",
+          phase: "queued",
+          tasks: [],
+          limitations: [],
+          usageComplete: false,
+        },
+      }),
+    );
+    expect(tools.map((tool) => tool.callId)).toEqual(["row-1"]);
+  });
+
   it("ignores markers for other tools and malformed ones", () => {
     expect(
       applyToolActivityChunk(
