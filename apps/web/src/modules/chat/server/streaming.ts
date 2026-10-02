@@ -1648,9 +1648,9 @@ export class StreamEngine extends Context.Service<
             officeEditors.includes("presentation") && Option.isSome(presentationFonts)
               ? [...new Set((yield* presentationFonts.value.list()).map((font) => font.family))]
               : [];
-          // Tool policies + memory data + history are the stable prefix.
-          // Actual memory records sit in a lower-authority assistant/data message;
-          // only the application-authored handling policy is a system message.
+          // Tool policies, memory and instructions, then history, are the stable
+          // prefix. Memory records are system role but tagged and quoted as
+          // user-provided data, never instructions (docs/internals/memory.md).
           const fixedPrefix = buildFixedPrefix({
             lazyFamilies: offeredLazy,
             agentAuthoring: permissions.agentsCreate,
