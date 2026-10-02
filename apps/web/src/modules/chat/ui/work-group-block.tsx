@@ -6,7 +6,6 @@ import {
   Disclosure,
   DisclosureContent,
   DisclosureTrigger,
-  disclosureBodyRailClassName,
   disclosureChevronMotionClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure.tsx";
@@ -184,11 +183,8 @@ export function WorkGroupBlock({
     <Disclosure open={expanded} onOpenChange={onOpenChange} className="mb-2">
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <span className={cn(running && "text-shimmer")}>{label}</span>
-        {failed > 0 ? (
-          <span className="text-destructive">
-            · {failed === 1 ? "1 failed" : `${failed} failed`}
-          </span>
-        ) : null}
+        {/* Counted, not alarming: a read the model worked around is no failure of the answer. */}
+        {failed > 0 ? <span>· {failed === 1 ? "1 failed" : `${failed} failed`}</span> : null}
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           strokeWidth={2}
@@ -197,7 +193,9 @@ export function WorkGroupBlock({
         />
       </DisclosureTrigger>
       <DisclosureContent>
-        <div className={cn(disclosureBodyRailClassName, "flex flex-col")}>
+        {/* Flush, not railed: each step row draws its own rail, and a second one
+            around them nested two borders where ChatGPT shows a plain list. */}
+        <div className="mt-2 flex flex-col">
           {part.steps.map((step, index) =>
             renderStep(step, live && index === part.steps.length - 1),
           )}
