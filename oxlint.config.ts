@@ -30,6 +30,9 @@ export default defineConfig({
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
     "react/react-in-jsx-scope": "off",
+    // Fast Refresh swaps a module only when it exports nothing but components;
+    // a helper exported beside one reloads it and everything importing it.
+    "react/only-export-components": "warn",
     "import/no-unassigned-import": "off",
     "shadcn/no-restyle": [
       "error",
@@ -55,6 +58,12 @@ export default defineConfig({
     ...slop("warn", "prefer-jsdoc"),
   },
   overrides: [
+    {
+      // Route modules export their Route, which the router plugin handles, and
+      // shadcn primitives export their variants by design.
+      files: ["apps/web/src/routes/**", "apps/web/src/ui/primitives/**", "**/*.test.tsx"],
+      rules: { "react/only-export-components": "off" },
+    },
     {
       // The design system owns styling; tests exercise class forwarding.
       files: ["apps/web/src/ui/**", "**/*.test.tsx"],
