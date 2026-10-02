@@ -395,7 +395,7 @@ describe("projectAssistantBody steers", () => {
     it("folds a draft's steps and its publish into one step, its file a part of its own", () => {
       const parts = project([step("a", 0, "d1"), step("b", 1, "d1"), publish(2, "d1", "deck")]);
       expect(parts.map((part) => part.kind)).toEqual(["working-file", "file"]);
-      expect(parts[0]).toMatchObject({ workingFileId: "d1", file, final: true });
+      expect(parts[0]).toMatchObject({ workingFileId: "d1", files: [file], final: true });
       expect(
         parts[0]?.kind === "working-file" && parts[0].steps.map((item) => item.callId),
       ).toEqual(["a", "b", "publish-d1"]);
@@ -432,6 +432,38 @@ describe("projectAssistantBody steers", () => {
         compactions: [],
       }).parts;
       expect(split.map((part) => part.kind)).toEqual(["working-file", "text", "working-file"]);
+    });
+
+    it("keeps every file: two created in a row, and a draft published twice", () => {
+      const created = (callId: string, attachmentId: string, turnIndex: number): ToolActivity => ({
+        family: "tool-file",
+        name: "create_file",
+        callId,
+        textOffset: 0,
+        turnIndex,
+        callIndex: 0,
+        status: "complete",
+        attachmentId,
+      });
+      const delivered = (id: string, turnIndex: number) => ({
+        ...file,
+        attachment: { ...file.attachment, id, fileName: `${id}.csv` },
+        turnIndex,
+      });
+      const two = project([created("c1", "a", 0), created("c2", "b", 1)], "", [
+        delivered("a", 0),
+        delivered("b", 1),
+      ]);
+      expect(two.map((part) => part.kind)).toEqual(["file", "file"]);
+      const republished = project(
+        [step("e", 0, "d1"), publish(1, "d1", "a"), { ...publish(2, "d1", "b"), callId: "p2" }],
+        "",
+        [delivered("a", 1), delivered("b", 2)],
+      );
+      expect(republished.filter((part) => part.kind === "file").map((part) => part.key)).toEqual([
+        "file-a",
+        "file-b",
+      ]);
     });
 
     it("shows another tool's published file as its card alone, with no empty step", () => {

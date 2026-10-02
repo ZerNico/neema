@@ -66,7 +66,8 @@ export interface WorkingFilePart {
   key: string;
   workingFileId?: string;
   steps: Array<OfficeActivity | ToolFileActivity>;
-  file?: AssistantFile;
+  /** Every file its publishes delivered, in order: a draft may be published more than once. */
+  files: AssistantFile[];
   /** Nothing follows it in the answer yet. */
   newest?: boolean;
   /** No later part continues the same file. */
@@ -142,9 +143,11 @@ const placeWorkingFiles = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBo
     if (part.kind !== "working-file") return [part];
     part.newest = index === parts.length - 1;
     part.final = !part.workingFileId || lastOfFile.get(part.workingFileId) === index;
-    const file: AssistantBodyPart[] = part.file
-      ? [{ kind: "file", key: `file-${part.file.attachment.id}`, file: part.file }]
-      : [];
+    const file: AssistantBodyPart[] = part.files.map((delivered) => ({
+      kind: "file",
+      key: `file-${delivered.attachment.id}`,
+      file: delivered,
+    }));
     // Another tool's file, published: the card says it all, and an empty step
     // would only sit in the work line. Still publishing or failed, it is a step.
     const publishedOnly =
@@ -308,9 +311,14 @@ export function projectAssistantBody({
       const last = parts.at(-1);
       // A step joins the draft before it unless it names a different file; a
       // running call has no file ID yet and must not flash into its own row.
+      // A created file is a one-off of its own: it joins nothing, and nothing joins it.
+      const oneOff = (candidate: WorkingFilePart["steps"][number]) =>
+        candidate.family === "tool-file" && candidate.name === "create_file";
       let group: WorkingFilePart;
       if (
         last?.kind === "working-file" &&
+        !oneOff(step) &&
+        !oneOff(last.steps[0]!) &&
         (!step.workingFileId || !last.workingFileId || step.workingFileId === last.workingFileId)
       ) {
         group = last;
@@ -322,11 +330,12 @@ export function projectAssistantBody({
           key: `working-file-${step.callId}`,
           ...(step.workingFileId ? { workingFileId: step.workingFileId } : {}),
           steps: [step],
+          files: [],
         };
         parts.push(group);
       }
       const file = claimed.get(step.callId);
-      if (file) group.file = file;
+      if (file) group.files.push(file);
     } else {
       parts.push({ kind: "tool", key: `tool-${item.activity.callId}`, activity: item.activity });
     }

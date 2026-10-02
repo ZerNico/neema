@@ -300,7 +300,7 @@ export function WorkingFileActivityBlock({
       </div>
     );
   }
-  const fileName = part.file?.attachment.fileName;
+  const fileName = part.files.at(-1)?.attachment.fileName;
   const words = WORDING[office.family];
   const { edits, drafted } = partKind(part, words);
   const { live, primary, secondary } = rowLabels(part, state, edits, drafted, words);
