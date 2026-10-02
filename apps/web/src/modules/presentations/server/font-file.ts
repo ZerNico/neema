@@ -15,13 +15,15 @@ export interface FontFileInfo {
   readonly format: "ttf" | "otf";
 }
 
-/** An uploaded face the renderer may use, materialized to a local file. */
+/** A face the renderer may use, materialized to a local file. */
 export interface FontFace {
   readonly family: string;
   readonly renderFamily: string;
   readonly bold: boolean;
   readonly italic: boolean;
   readonly path: string;
+  /** Who supplied it; for one family and style an upload wins, then a skill, then Google. */
+  readonly source: "upload" | "skill" | "google";
 }
 
 const printable = (text: string) =>

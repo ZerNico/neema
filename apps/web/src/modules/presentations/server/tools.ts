@@ -11,9 +11,11 @@ import {
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { PresentationRead } from "../activity.ts";
 import { PresentationError } from "../errors.ts";
+import { googleFontFamily } from "../google-fonts.ts";
 import { BUNDLED_FONTS, INSPECT_LIMITS, PRESENTATION_LIMITS } from "../limits.ts";
 import {
   describePresentationChanges,
+  FONT_CHOICES,
   operationsJsonSchema,
   parsePresentationOperations,
 } from "../operations.ts";
@@ -25,6 +27,9 @@ import {
 } from "./inspection.ts";
 import type { JobResult } from "~/server/jobs.ts";
 import type { PresentationJobs, PresentationRuntime } from "./runtime.ts";
+
+/** Every operation field that names a typeface, chart text included. */
+const FONT_FIELDS = new Set(["font", "headingFont", "bodyFont", "textFont"]);
 
 const integer = (minimum: number, maximum: number, description: string) =>
   advertisedParameter({ type: "integer", minimum, maximum, description });
@@ -139,7 +144,7 @@ export const inspectPresentationTool = Tool.make("inspect_presentation", {
   success: Result,
 });
 export const editPresentationTool = Tool.make("edit_presentation", {
-  description: `Create or change a PowerPoint deck as a private draft. Start from create:true (a 16:9 deck whose one Title Slide is slideRef "first", with the layouts Title Slide, Title and Content, Two Content, Section Header, Title Only, Blank) or an inspected sourceRef plus sourceFingerprint; afterwards pass the returned workingRef. Operations run in order and commit together, at most ${PRESENTATION_LIMITS.operationsPerCall} per call. One failing operation undoes its whole call: build or rework about 3–5 slides per call. To replace template examples, add fresh slides from catalog layouts first, then bulk-remove the original slideIds in another call. Do not switch an example’s layout expecting new placeholders. Fill layout placeholders with setText (placeholder: title, subtitle, body) rather than drawing text boxes over them; give new slides or shapes a ref to address them later in the same batch. Add render: "changed" to see the result. ${fitGuidance} ${templateGuidance} Nothing is delivered until publish_file.`,
+  description: `Create or change a PowerPoint deck as a private draft. Start from create:true (a 16:9 deck whose one Title Slide is slideRef "first", with the layouts Title Slide, Title and Content, Two Content, Section Header, Title Only, Blank) or an inspected sourceRef plus sourceFingerprint; afterwards pass the returned workingRef. Operations run in order and commit together, at most ${PRESENTATION_LIMITS.operationsPerCall} per call. One failing operation undoes its whole call: build or rework about 3–5 slides per call. To replace template examples, add fresh slides from catalog layouts first, then bulk-remove the original slideIds in another call. Do not switch an example’s layout expecting new placeholders. Fill layout placeholders with setText (placeholder: title, subtitle, body) rather than drawing text boxes over them; give new slides or shapes a ref to address them later in the same batch. Add render: "changed" to see the result. ${fitGuidance} ${templateGuidance} ${FONT_CHOICES} Nothing is delivered until publish_file.`,
   parameters: Schema.Struct({
     create: advertisedParameter({
       type: "boolean",
@@ -178,8 +183,10 @@ export const renderPresentationTool = Tool.make("render_presentation", {
 type Inspection = JobResult<PresentationJobs, "inspect">;
 export interface PresentationToolHost extends OfficeToolHost {
   runtime: PresentationRuntime;
-  /** Families decks may use: the bundled ones and any an admin uploaded. */
+  /** Families decks may use now: bundled, uploaded, fetched and loaded skills'. */
   fonts?: () => Promise<readonly string[]>;
+  /** Fetches curated Google families an edit names, before it is checked. */
+  ensureFonts?: (families: readonly string[]) => Promise<void>;
   /** Deliver ephemeral PNGs to the model continuation, never the persisted tool result. */
   onPreview?: (
     slides: readonly { slideId: number; png: Uint8Array; label: string }[],
@@ -263,30 +270,45 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
     return list.map((id, index) => whole(id, `${field}[${index}]`, 1, 0xffffffff));
   };
   const availableFonts = async () => [...((await host.fonts?.()) ?? BUNDLED_FONTS)];
-  /** A font must be one previews can draw; the name is normalized to its catalogue spelling. */
+  /**
+   * A font must be one previews can draw; the name is normalized to its
+   * catalogue spelling. Curated Google families are fetched first, so naming
+   * one is enough; one that cannot be fetched now is refused like any other.
+   */
   const checkFonts = async (operations: unknown[]) => {
-    const fonts = await availableFonts();
-    const known = new Map(fonts.map((font) => [font.toLowerCase(), font]));
+    const fields: Array<{ owner: Record<string, unknown>; key: string; path: string }> = [];
     const visit = (value: unknown, path: string): void => {
       if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}[${index}]`));
       else if (value && typeof value === "object" && !(value instanceof Uint8Array))
         for (const [key, item] of Object.entries(value)) {
-          if (
-            (key === "font" || key === "headingFont" || key === "bodyFont") &&
-            typeof item === "string"
-          ) {
-            const font = known.get(item.trim().toLowerCase());
-            if (!font)
-              invalid(
-                `${path}.${key}: "${item.slice(0, 60)}" isn't available; use one of ${fonts.join(", ")}.`,
-              );
-            (value as Record<string, unknown>)[key] = font;
-          } else visit(item, `${path}.${key}`);
+          if (FONT_FIELDS.has(key) && typeof item === "string")
+            fields.push({ owner: value as Record<string, unknown>, key, path });
+          else visit(item, `${path}.${key}`);
         }
     };
     operations.forEach((operation, index) =>
       visit(operation, `operations[${index}] ${(operation as { kind: string }).kind}`),
     );
+    if (!fields.length) return;
+    const named = fields.map(({ owner, key }) => String(owner[key]));
+    let fonts = await availableFonts();
+    const lower = new Set(fonts.map((font) => font.toLowerCase()));
+    if (host.ensureFonts && named.some((name) => !lower.has(name.trim().toLowerCase()))) {
+      await host.ensureFonts(named);
+      fonts = await availableFonts();
+    }
+    const known = new Map(fonts.map((font) => [font.toLowerCase(), font]));
+    for (const { owner, key, path } of fields) {
+      const item = String(owner[key]);
+      const font = known.get(item.trim().toLowerCase());
+      if (!font)
+        invalid(
+          googleFontFamily(item)
+            ? `${path}.${key}: "${googleFontFamily(item)}" couldn't be loaded right now; use one of ${fonts.join(", ")}.`
+            : `${path}.${key}: "${item.slice(0, 60)}" isn't available; use one of ${fonts.join(", ")}.`,
+        );
+      owner[key] = font;
+    }
   };
   /** Validates the batch, then swaps each image reference for authorized bytes. */
   const materialize = async (raw: unknown) => {

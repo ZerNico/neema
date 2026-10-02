@@ -1085,6 +1085,8 @@ export class StreamEngine extends Context.Service<
                               ...(await skillFaces()).map((face) => face.family),
                             ]),
                           ],
+                          ensureFonts: (families: readonly string[]) =>
+                            Effect.runPromise(presentationFonts.value.ensure(families)),
                         }
                       : {}),
                     ...(model?.capabilities.vision

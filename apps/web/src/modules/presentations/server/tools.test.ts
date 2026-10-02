@@ -800,6 +800,48 @@ describe("presentation tool group", () => {
     }
   });
 
+  it("fetches a curated family an edit names before checking it, chart text included", async () => {
+    const runtime = createPresentationRuntime(workerUrl);
+    const workingFiles = createWorkingFiles();
+    const installed = ["Calibri"];
+    const asked: string[][] = [];
+    const { group } = preparePresentationTools({
+      runtime,
+      workingFiles,
+      resolveFile: () => Effect.fail("Not available"),
+      fonts: async () => [...installed],
+      // Abril Fatface arrives; Poppins stays unreachable, as when offline.
+      ensureFonts: async (families) => {
+        asked.push([...families]);
+        if (families.some((family) => family.toLowerCase() === "abril fatface"))
+          installed.push("Abril Fatface");
+      },
+    });
+    try {
+      const created = await invoke(group.handlers.edit_presentation, {
+        create: true,
+        operations: [{ kind: "setTheme", headingFont: "abril fatface", bodyFont: "Calibri" }],
+      });
+      expect(created).toMatchObject({ outcome: "working" });
+      expect(asked).toEqual([["abril fatface", "Calibri"]]);
+      const offline = await invoke(group.handlers.edit_presentation, {
+        workingRef: created.workingRef,
+        operations: [{ kind: "setTheme", bodyFont: "Poppins" }],
+      });
+      expect(offline.outcome).toBe("error");
+      expect(offline.message).toContain('"Poppins" couldn\'t be loaded right now');
+      // Nothing new named: the installed list is enough, no fetch is asked for.
+      await invoke(group.handlers.edit_presentation, {
+        workingRef: created.workingRef,
+        operations: [{ kind: "setTheme", headingFont: "Abril Fatface" }],
+      });
+      expect(asked).toHaveLength(2);
+    } finally {
+      workingFiles.dispose();
+      await runtime.close();
+    }
+  });
+
   it("fills a new deck's first slide by ref and previews what the edit changed", async () => {
     const runtime = createPresentationRuntime(workerUrl);
     const workingFiles = createWorkingFiles();

@@ -148,6 +148,8 @@ export async function checkFontFile(path: string) {
   setShapeTextFormat(sample, { font: info.family, bold: info.bold, italic: info.italic, size: 32 });
   const bytes = await savePresentation(deck);
   const { ids } = await openPackage(bytes);
-  await renderPresentation(bytes, [...ids.values()].slice(0, 1), [{ ...info, path }]);
+  await renderPresentation(bytes, [...ids.values()].slice(0, 1), [
+    { ...info, path, source: "upload" },
+  ]);
   return info;
 }

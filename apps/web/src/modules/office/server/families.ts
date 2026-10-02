@@ -30,7 +30,7 @@ export interface OfficeAttempt extends OfficeToolHost {
   /** The sender; one person's jobs share a cap. */
   readonly owner: string;
   /** PowerPoint alone draws: fonts of loaded skills, the families decks may use, vision feedback. */
-  readonly presentation: Pick<PresentationToolHost, "fonts" | "onPreview"> & {
+  readonly presentation: Pick<PresentationToolHost, "fonts" | "ensureFonts" | "onPreview"> & {
     readonly faces: () => Promise<readonly FontFace[]>;
   };
 }
@@ -50,6 +50,9 @@ export function prepareOfficeTools(processors: OfficeProcessors, attempt: Office
           workingFiles,
           resolveFile,
           ...(attempt.presentation.fonts ? { fonts: attempt.presentation.fonts } : {}),
+          ...(attempt.presentation.ensureFonts
+            ? { ensureFonts: attempt.presentation.ensureFonts }
+            : {}),
           ...(attempt.presentation.onPreview ? { onPreview: attempt.presentation.onPreview } : {}),
         }).group,
     ),

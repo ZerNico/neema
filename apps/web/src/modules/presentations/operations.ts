@@ -3,7 +3,16 @@ import {
   xmlSafe,
   type Definition as OfficeDefinition,
 } from "../office/operations.ts";
+import { GOOGLE_FONT_FAMILIES } from "./google-fonts.ts";
 import { BUNDLED_FONTS, PRESENTATION_LIMITS } from "./limits.ts";
+
+/**
+ * The typefaces a deck may name, stated once in the edit tool's description.
+ * Static, so it never moves the cached prompt; uploaded and skill faces arrive
+ * through availableFonts in results instead.
+ */
+export const FONT_CHOICES = `Fonts: Office ${BUNDLED_FONTS.join(", ")}; free fonts, fetched on first use and embedded in the file, ${GOOGLE_FONT_FAMILIES.join(", ")}; or another name a result lists in availableFonts.`;
+const fontSpec = { type: "string", max: 100 } as const;
 import { PresentationError } from "./errors.ts";
 
 /**
@@ -209,11 +218,7 @@ const chartContent = {
     about: "Space between column or bar groups as a percent of a bar's width; lower is chunkier.",
   },
   textColor: { type: "color", about: "Colour of the title, labels and legend." },
-  textFont: {
-    type: "string",
-    max: 100,
-    about: "Typeface for the chart's text: one of availableFonts.",
-  },
+  textFont: { ...fontSpec, about: "Typeface for the chart's text, from the fonts listed above." },
   textSize: {
     type: "number",
     min: 6,
@@ -270,11 +275,7 @@ const tableStyle = {
   verticalAlign,
 } as const;
 const themeColor = (about: string) => ({ type: "color", hexOnly: true, about }) as const;
-const font = {
-  type: "string",
-  max: 100,
-  about: `Typeface: ${BUNDLED_FONTS.join(", ")}, or another name the latest result lists in availableFonts.`,
-} as const;
+const font = { ...fontSpec, about: "Typeface, from the fonts listed above." } as const;
 
 export const PRESENTATION_OPERATIONS = {
   addSlide: {

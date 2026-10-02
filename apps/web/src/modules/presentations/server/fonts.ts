@@ -3,15 +3,20 @@ import { existsSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Ref, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import { presentationFonts } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import { PresentationError } from "../errors.ts";
 import { BUNDLED_FONTS, FONT_LIMITS } from "../limits.ts";
+import { googleFontFamily, type GoogleFontFamily } from "../google-fonts.ts";
 import { readFontFile, type FontFace } from "./font-file.ts";
+import { GoogleFontSource } from "./google-font-source.ts";
 import { PresentationWorkers } from "./runtime.ts";
+
+/** A failed fetch is remembered this long, so an offline server does not stall every edit. */
+const FETCH_RETRY_MS = 10 * 60 * 1000;
 
 export class FontRejected extends Schema.TaggedError<FontRejected>()("FontRejected", {
   reason: Schema.String,
@@ -73,8 +78,14 @@ export class PresentationFonts extends Context.Service<
     remove(id: string): Effect.Effect<void>;
     /** Uploaded faces as local files, for render work. */
     faces(): Effect.Effect<readonly FontFace[]>;
-    /** Every family a deck may use: bundled and uploaded. */
+    /** Every family a deck may use now: bundled, uploaded and fetched. */
     families(): Effect.Effect<readonly string[]>;
+    /**
+     * Makes curated Google families a deck names available: fetched and
+     * checked on first use, their last use touched after that. Other names are
+     * ignored. A family an admin uploaded any face of is never fetched.
+     */
+    ensure(families: ReadonlyArray<string>): Effect.Effect<void>;
     /**
      * Faces a skill carries, for the answers that loaded it. Each is checked
      * once per content hash, in a worker process, like an upload; one the
@@ -85,11 +96,14 @@ export class PresentationFonts extends Context.Service<
     ): Effect.Effect<readonly FontFace[]>;
   }
 >()("chat/presentations/PresentationFonts") {
-  static readonly layer = Layer.effect(
+  /** Without a font source, so tests can supply one that never touches the network. */
+  static readonly base = Layer.effect(
     PresentationFonts,
     Effect.gen(function* () {
       const db = yield* Db;
       const workers = yield* PresentationWorkers;
+      const source = yield* GoogleFontSource;
+      const context = yield* Effect.context<never>();
       const cached = yield* Ref.make<readonly FontFace[] | null>(null);
       const columns = {
         id: presentationFonts.id,
@@ -99,13 +113,23 @@ export class PresentationFonts extends Context.Service<
         italic: presentationFonts.italic,
         format: presentationFonts.format,
         sha256: presentationFonts.sha256,
+        source: presentationFonts.source,
       };
 
       const faces = Effect.fn("PresentationFonts.faces")(function* () {
         const current = yield* Ref.get(cached);
         // The cache lives in the temporary directory, which the system may clean.
         if (current?.every((face) => existsSync(face.path))) return current;
-        const rows = yield* db.select(columns).from(presentationFonts).pipe(Effect.orDie);
+        // Ordered, so the hash of the list changes only when the faces do.
+        const rows = yield* db
+          .select(columns)
+          .from(presentationFonts)
+          .orderBy(
+            asc(presentationFonts.family),
+            asc(presentationFonts.bold),
+            asc(presentationFonts.italic),
+          )
+          .pipe(Effect.orDie);
         const loaded = yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             let path = cachePath(row.sha256, row.format);
@@ -125,6 +149,7 @@ export class PresentationFonts extends Context.Service<
                 bold: row.bold,
                 italic: row.italic,
                 path,
+                source: row.source,
               },
             ];
           }),
@@ -162,7 +187,10 @@ export class PresentationFonts extends Context.Service<
           })
           .from(presentationFonts)
           .where(
-            sql`not (${presentationFonts.family} = ${info.family} and ${presentationFonts.bold} = ${info.bold} and ${presentationFonts.italic} = ${info.italic})`,
+            and(
+              eq(presentationFonts.source, "upload"),
+              sql`not (${presentationFonts.family} = ${info.family} and ${presentationFonts.bold} = ${info.bold} and ${presentationFonts.italic} = ${info.italic})`,
+            ),
           )
           .pipe(Effect.orDie);
         if ((usage?.count ?? 0) >= FONT_LIMITS.faces)
@@ -197,8 +225,20 @@ export class PresentationFonts extends Context.Service<
           byteSize: bytes.length,
           sha256,
           bytes: Buffer.from(bytes),
+          source: "upload" as const,
+          lastUsedAt: null,
           createdBy: userId,
         };
+        // An upload owns its family: fetched styles of it would mix two designs.
+        yield* db
+          .delete(presentationFonts)
+          .where(
+            and(
+              eq(presentationFonts.source, "google"),
+              sql`lower(${presentationFonts.family}) = lower(${info.family})`,
+            ),
+          )
+          .pipe(Effect.orDie);
         const [row] = yield* db
           .insert(presentationFonts)
           .values({ id: uuidv7(), ...values })
@@ -231,14 +271,113 @@ export class PresentationFonts extends Context.Service<
           const info = await workers.run({ kind: "font", path }).catch(() => null);
           if (!info) return null;
           const { family, renderFamily, bold, italic } = info;
-          return { family, renderFamily, bold, italic, path };
+          return { family, renderFamily, bold, italic, path, source: "skill" as const };
         })();
         if (checked.size >= FONT_LIMITS.faces * 4) checked.delete(checked.keys().next().value!);
         checked.set(sha256, result);
         return result;
       };
 
+      const fetchFamily = Effect.fn("PresentationFonts.fetchFamily")(function* (
+        family: GoogleFontFamily,
+      ) {
+        const faces = yield* source.fetchFamily(family);
+        let stored = 0;
+        for (const face of faces) {
+          // A fixed, trusted source: the tables are measured as for an upload,
+          // and the face must call itself what the catalogue asked for.
+          let info;
+          try {
+            info = readFontFile(face.bytes);
+          } catch {
+            continue;
+          }
+          if (
+            info.format !== "ttf" ||
+            info.family.toLowerCase() !== family.toLowerCase() ||
+            info.bold !== face.bold ||
+            info.italic !== face.italic
+          )
+            continue;
+          const sha256 = createHash("sha256").update(face.bytes).digest("hex");
+          yield* db
+            .insert(presentationFonts)
+            .values({
+              id: uuidv7(),
+              family: info.family,
+              renderFamily: info.renderFamily,
+              style: info.style,
+              bold: info.bold,
+              italic: info.italic,
+              embeddable: info.embeddable,
+              format: info.format,
+              fileName: `${family} ${info.style}.ttf`,
+              byteSize: face.bytes.length,
+              sha256,
+              bytes: Buffer.from(face.bytes),
+              source: "google",
+              lastUsedAt: sql`now()`,
+            })
+            // An upload of the same face, or a concurrent fetch, keeps its row.
+            .onConflictDoNothing()
+            .pipe(Effect.orDie);
+          stored += 1;
+        }
+        return stored;
+      });
+
+      const failedUntil = new Map<GoogleFontFamily, number>();
+      const ensureFamily = Effect.fn("PresentationFonts.ensureFamily")(function* (
+        family: GoogleFontFamily,
+      ) {
+        const rows = yield* db
+          .select({ source: presentationFonts.source })
+          .from(presentationFonts)
+          .where(sql`lower(${presentationFonts.family}) = lower(${family})`)
+          .pipe(Effect.orDie);
+        if (rows.some((row) => row.source === "upload")) return;
+        if (rows.length) {
+          // Throttled, so a busy deck does not write on every render.
+          yield* db
+            .update(presentationFonts)
+            .set({ lastUsedAt: sql`now()` })
+            .where(
+              and(
+                eq(presentationFonts.source, "google"),
+                sql`lower(${presentationFonts.family}) = lower(${family})`,
+                sql`(${presentationFonts.lastUsedAt} is null or ${presentationFonts.lastUsedAt} < now() - interval '1 day')`,
+              ),
+            )
+            .pipe(Effect.orDie);
+          return;
+        }
+        if ((failedUntil.get(family) ?? 0) > Date.now()) return;
+        const stored = yield* fetchFamily(family).pipe(Effect.orElseSucceed(() => 0));
+        if (stored === 0) failedUntil.set(family, Date.now() + FETCH_RETRY_MS);
+        else {
+          failedUntil.delete(family);
+          yield* Ref.set(cached, null);
+        }
+      });
+
+      // One fetch per family at a time, however many edits ask for it at once.
+      const inFlight = new Map<GoogleFontFamily, Promise<void>>();
+      const ensureOnce = (family: GoogleFontFamily) =>
+        Effect.promise(() => {
+          const running = inFlight.get(family);
+          if (running) return running;
+          const started = Effect.runPromiseWith(context)(ensureFamily(family)).finally(() =>
+            inFlight.delete(family),
+          );
+          inFlight.set(family, started);
+          return started;
+        });
+
       return PresentationFonts.of({
+        ensure: Effect.fn("PresentationFonts.ensure")(function* (names) {
+          const families = [...new Set(names.flatMap((name) => googleFontFamily(name) ?? []))];
+          yield* Effect.forEach(families, ensureOnce, { concurrency: 4, discard: true });
+        }),
         skillFaces: Effect.fn("PresentationFonts.skillFaces")(function* (fonts) {
           const checkedFaces = yield* Effect.promise(() =>
             Promise.all(fonts.map((font) => skillFace(font.sha256, font.bytes))),
@@ -259,6 +398,8 @@ export class PresentationFonts extends Context.Service<
               createdAt: presentationFonts.createdAt,
             })
             .from(presentationFonts)
+            // Fetched faces are a cache, not something an admin manages.
+            .where(eq(presentationFonts.source, "upload"))
             .orderBy(
               asc(presentationFonts.family),
               asc(presentationFonts.bold),
@@ -282,7 +423,11 @@ export class PresentationFonts extends Context.Service<
         }),
       });
     }),
-  ).pipe(Layer.provide(PresentationWorkers.layer));
+  );
+
+  static readonly layer = PresentationFonts.base.pipe(
+    Layer.provide([PresentationWorkers.layer, GoogleFontSource.layer]),
+  );
 }
 
 /**

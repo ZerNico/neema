@@ -6,8 +6,15 @@ import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { user } from "~/db/schema/index.ts";
+import { eq, sql } from "drizzle-orm";
+import { presentationFonts, user } from "~/db/schema/index.ts";
 import { PresentationFonts } from "~/modules/presentations/server/fonts.ts";
+import {
+  FontFetchFailed,
+  GoogleFontSource,
+  type FetchedFace,
+} from "~/modules/presentations/server/google-font-source.ts";
+import { PresentationWorkers } from "~/modules/presentations/server/runtime.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -16,7 +23,24 @@ const bundled = join(
   "fonts",
 );
 const face = (name: string) => new Uint8Array(readFileSync(join(bundled, name)));
+const abril = new Uint8Array(
+  readFileSync(join(import.meta.dirname, "../fixtures/fonts/AbrilFatface-Regular.ttf")),
+);
 
+// Stands in for Google: no test touches the network. Each family answers with
+// the faces listed here, and every call is counted.
+const served = new Map<string, FetchedFace[]>();
+const fetched: string[] = [];
+const fakeSource = Layer.succeed(
+  GoogleFontSource,
+  GoogleFontSource.of({
+    fetchFamily: (family) => {
+      fetched.push(family);
+      const faces = served.get(family);
+      return faces ? Effect.succeed(faces) : Effect.fail(new FontFetchFailed({ family }));
+    },
+  }),
+);
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Db | PresentationFonts, unknown>;
 let admin: string;
@@ -28,7 +52,12 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 4 })),
   );
-  runtime = ManagedRuntime.make(PresentationFonts.layer.pipe(Layer.provideMerge(infrastructure)));
+  runtime = ManagedRuntime.make(
+    PresentationFonts.base.pipe(
+      Layer.provide([PresentationWorkers.layer, fakeSource]),
+      Layer.provideMerge(infrastructure),
+    ),
+  );
   admin = uuidv7();
   await run(
     Effect.flatMap(Db, (db) =>
@@ -115,4 +144,70 @@ it("checks a skill's faces in a worker once per content, and drops one that can'
   expect(await run(fonts.skillFaces([{ sha256, bytes: carlito }]))).toEqual(faces);
   // Skill faces never join the uploaded catalogue.
   expect(await run(fonts.families())).not.toContain("Carlito");
+});
+
+it("fetches a curated family on first use, keeps it out of the admin list, and touches it after", async () => {
+  const fonts = await run(Effect.flatMap(PresentationFonts, (service) => Effect.succeed(service)));
+  served.set("Abril Fatface", [{ bold: false, italic: false, bytes: abril }]);
+  fetched.length = 0;
+  // Names that are not in the catalogue are ignored; spelling is normalized.
+  await run(fonts.ensure(["abril fatface", "Comic Sans MS"]));
+  expect(fetched).toEqual(["Abril Fatface"]);
+  expect(await run(fonts.families())).toContain("Abril Fatface");
+  expect((await run(fonts.faces())).find((f) => f.family === "Abril Fatface")).toMatchObject({
+    source: "google",
+  });
+  expect((await run(fonts.list())).some((f) => f.family === "Abril Fatface")).toBe(false);
+
+  // Cached: a later edit touches it instead of fetching, once a day at most.
+  await run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .update(presentationFonts)
+        .set({ lastUsedAt: sql`now() - interval '3 days'` })
+        .where(eq(presentationFonts.family, "Abril Fatface")),
+    ),
+  );
+  await run(fonts.ensure(["Abril Fatface"]));
+  expect(fetched).toEqual(["Abril Fatface"]);
+  const [row] = await run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .select({
+          recent: sql<boolean>`${presentationFonts.lastUsedAt} > now() - interval '1 hour'`,
+        })
+        .from(presentationFonts)
+        .where(eq(presentationFonts.family, "Abril Fatface")),
+    ),
+  );
+  expect(row?.recent).toBe(true);
+});
+
+it("refuses a fetched face that calls itself something else, and does not retry at once", async () => {
+  const fonts = await run(Effect.flatMap(PresentationFonts, (service) => Effect.succeed(service)));
+  served.set("Poppins", [{ bold: false, italic: false, bytes: face("Caladea-Regular.ttf") }]);
+  fetched.length = 0;
+  await run(fonts.ensure(["Poppins"]));
+  await run(fonts.ensure(["Poppins"]));
+  expect(fetched).toEqual(["Poppins"]);
+  expect(await run(fonts.families())).not.toContain("Poppins");
+});
+
+it("lets an upload own its family: it replaces fetched styles and stops further fetches", async () => {
+  const fonts = await run(Effect.flatMap(PresentationFonts, (service) => Effect.succeed(service)));
+  served.set("Abril Fatface", [{ bold: false, italic: false, bytes: abril }]);
+  await run(fonts.ensure(["Abril Fatface"]));
+  await run(fonts.upload({ fileName: "Abril.ttf", bytes: abril, userId: admin }));
+  const rows = await run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .select({ source: presentationFonts.source })
+        .from(presentationFonts)
+        .where(eq(presentationFonts.family, "Abril Fatface")),
+    ),
+  );
+  expect(rows).toEqual([{ source: "upload" }]);
+  fetched.length = 0;
+  await run(fonts.ensure(["Abril Fatface"]));
+  expect(fetched).toEqual([]);
 });

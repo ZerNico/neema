@@ -712,7 +712,9 @@ describe("presentation core adapter", () => {
     const plain = (await renderPresentation(deck.bytes, [id]))[0]!.png;
     const path = join(fonts, "Caladea-Regular.ttf");
     const face = await checkFontFile(path);
-    const registered = (await renderPresentation(deck.bytes, [id], [{ ...face, path }]))[0]!.png;
+    const registered = (
+      await renderPresentation(deck.bytes, [id], [{ ...face, path, source: "upload" }])
+    )[0]!.png;
     expect(Buffer.from(registered).equals(Buffer.from(plain))).toBe(false);
     // A later render in the same process is unaffected by the earlier registration.
     expect(

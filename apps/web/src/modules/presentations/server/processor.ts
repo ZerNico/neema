@@ -12,10 +12,17 @@ import type { JobResult } from "~/server/jobs.ts";
 
 const faceKey = (face: FontFace) => `${face.family.toLowerCase()}|${face.bold}|${face.italic}`;
 
-/** An uploaded face keeps its name: a job's own faces never replace one. */
-const withFaces = (uploaded: readonly FontFace[], extra: readonly FontFace[] = []) => {
-  const taken = new Set(uploaded.map(faceKey));
-  return [...uploaded, ...extra.filter((face) => !taken.has(faceKey(face)))];
+const rank = { upload: 0, skill: 1, google: 2 } as const;
+
+/**
+ * One face per family and style: an upload keeps its name, a loaded skill's
+ * face comes next, and a fetched Google face only fills what neither supplies.
+ */
+export const withFaces = (stored: readonly FontFace[], extra: readonly FontFace[] = []) => {
+  const chosen = new Map<string, FontFace>();
+  for (const face of [...stored, ...extra].toSorted((a, b) => rank[a.source] - rank[b.source]))
+    if (!chosen.has(faceKey(face))) chosen.set(faceKey(face), face);
+  return [...chosen.values()];
 };
 
 /**
@@ -42,9 +49,9 @@ export class PresentationProcessor extends Context.Service<
         ): Promise<JobResult<PresentationJobs, R["kind"]>> {
           if (request.kind !== "render" && request.kind !== "edit" && request.kind !== "chart")
             return runtime.run(request, signal, options);
-          const uploaded = await Effect.runPromiseWith(context)(fonts.faces());
+          const stored = await Effect.runPromiseWith(context)(fonts.faces());
           return runtime.run(
-            { ...request, fonts: withFaces(uploaded, options?.faces) },
+            { ...request, fonts: withFaces(stored, options?.faces) },
             signal,
             options,
           );
