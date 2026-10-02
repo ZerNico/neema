@@ -1389,10 +1389,13 @@ export class StreamEngine extends Context.Service<
             if (call.researchRunId === null) unlockByCall(everUnlocked, call);
           for (const file of kept) if (isOfficeFamily(file.owner)) everUnlocked.add(file.owner);
           const toolSchemaTokens = schemaTokensWith(everUnlocked) ?? 0;
-          const summaryToolChoice = (toolkit: { tools: Record<string, unknown> }) => {
+          const summaryToolChoice = (
+            toolkit: { tools: Record<string, unknown> },
+            unlocked: ReadonlySet<LazyToolFamily>,
+          ) => {
             const names = Object.keys(toolkit.tools).filter(
               (name) =>
-                isAdvertised(name, offeredLazy, everUnlocked) &&
+                isAdvertised(name, offeredLazy, unlocked) &&
                 (readerAdvertised || name !== "read_attachment") &&
                 (retrievalEnabled || !Schema.is(KnowledgeToolName)(name)) &&
                 !(memorySpent && name === "save_memory"),
@@ -1445,6 +1448,27 @@ export class StreamEngine extends Context.Service<
                 })
               : message;
           });
+          // What the previous request advertised: families its retained history
+          // (everything after the last checkpoint) had loaded. The summary
+          // repeats that list so it reads the cached prefix; the budget above
+          // keeps the wider set as an upper bound.
+          const priorUnlocked = new Set<LazyToolFamily>();
+          if (offeredLazy.length) {
+            const suffixIds = new Set(historySuffix.map((message) => message.id));
+            for (const call of priorToolCalls)
+              if (
+                call.researchRunId === null &&
+                (suffixIds.has(call.messageId) || call.messageId === input.messageId)
+              )
+                unlockByCall(priorUnlocked, call);
+            for (const file of kept) if (isOfficeFamily(file.owner)) priorUnlocked.add(file.owner);
+            for (const file of yield* promptDeps.attachments.listWithBlobsForMessages([
+              ...suffixIds,
+            ])) {
+              const family = officeFamilyOfFile({ name: file.fileName, mediaType: file.mediaType });
+              if (family) priorUnlocked.add(family);
+            }
+          }
           // A skill an earlier answer loaded replays just before that answer
           // (first retained load only), so its text caches with the history
           // instead of reloading into trailing context every turn. A pinned
@@ -1709,7 +1733,7 @@ export class StreamEngine extends Context.Service<
                 ? {
                     summaryRequest: {
                       toolkit: budgetToolkit,
-                      toolChoice: summaryToolChoice(budgetToolkit),
+                      toolChoice: summaryToolChoice(budgetToolkit, priorUnlocked),
                       reasoningEffort: config.reasoningEffort,
                       cacheKey: input.conversationId,
                     },
