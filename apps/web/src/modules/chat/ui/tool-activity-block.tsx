@@ -195,8 +195,10 @@ export function ToolActivityBlock({
   const failedSearches = searches.filter((activity) => activity.status === "error").length;
   const anyRunning = activities.some((activity) => activity.status === "running");
   const allFailed = activities.every((activity) => activity.status === "error");
-  const readingNow = pages.filter((page) => page.status === "reading");
-  const waiting = pages.filter((page) => page.status === "pending");
+  // Pages being read, or else those queued for a read that has started.
+  const readingNow = pages.some((page) => page.status === "reading")
+    ? pages.filter((page) => page.status === "reading")
+    : pages.filter((page) => page.status === "pending");
   const runningQuery = searches
     .filter((activity) => activity.status === "running")
     .flatMap((activity) => activity.targets)
@@ -206,13 +208,11 @@ export function ToolActivityBlock({
   const suffix =
     sourceCount > 0 ? ` · ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}` : "";
   const headerLabel = anyRunning
-    ? readingNow.length > 0
-      ? `Reading ${readingNow.length === 1 ? hostOf(readingNow[0]!.url) : websites(readingNow.length)}`
-      : reads.some((activity) => activity.status === "running")
-        ? `Opening ${waiting.length === 1 ? hostOf(waiting[0]!.url) : waiting.length > 1 ? websites(waiting.length) : "websites"}`
-        : runningQuery
-          ? `Searching for “${runningQuery}”`
-          : "Searching the web"
+    ? reads.some((activity) => activity.status === "running")
+      ? `Reading ${readingNow.length === 1 ? hostOf(readingNow[0]!.url) : readingNow.length > 1 ? websites(readingNow.length) : "websites"}`
+      : runningQuery
+        ? `Searching for “${runningQuery}”`
+        : "Searching the web"
     : allFailed
       ? searches.length > 0
         ? "Couldn’t search the web"

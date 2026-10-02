@@ -1823,7 +1823,7 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    expect(screen.getAllByRole("button", { name: "Opening effect.website" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Reading effect.website" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /Searched the web/ })).toBeNull();
   });
 

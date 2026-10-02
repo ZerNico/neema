@@ -63,7 +63,7 @@ const completeRead: WebToolActivity = {
 
 const toggle = () =>
   screen.getByRole("button", {
-    name: /^(Searched|Searching|Opening|Reading|Read|Couldn’t)/i,
+    name: /^(Searched|Searching|Reading|Read|Couldn’t)/i,
   });
 
 describe("ToolActivityBlock", () => {
