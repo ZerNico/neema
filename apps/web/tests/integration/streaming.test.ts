@@ -644,6 +644,41 @@ describe("conversational agent authoring", () => {
         matches: 1,
       });
       expect(JSON.stringify(read?.result)).not.toContain("69132");
+
+      // In a branch the file is a copy with a new id; the original id, as a
+      // summary's file list keeps it, still reads that copy.
+      const branch = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.branchConversation({
+            userId: seed.userId,
+            conversationId,
+            messageId: assistantMessageId,
+          }),
+        ),
+      );
+      prompts.length = 0;
+      const again = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: branch.conversationId },
+            modelId: textModelId,
+            content: "And row 9876 again?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(again.assistantMessageId);
+      const branched = await runtime.runPromise(
+        loadConversationDetail(seed.userId, branch.conversationId),
+      );
+      const reread = branched.toolCalls.find(
+        (call) =>
+          call.messageId === again.assistantMessageId && call.toolName === "read_attachment",
+      );
+      expect(reread?.result).toMatchObject({ ok: true, fileName: "big.csv", matches: 1 });
     } finally {
       authoringScript = null;
     }
@@ -2996,6 +3031,60 @@ describe("queued turns", () => {
     expect(result.order).toEqual(["user", "assistant", "user"]);
     expect(result.steeredFiles).toEqual(["steer.txt"]);
     expect(result.queue).toEqual([]);
+  }, 60_000);
+
+  it("lets the answer read a file a steer brought in, by id, from the next round", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const file = yield* uploadText(seed.userId, "steer.txt", "Steer file body 42");
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "check the file",
+          attachmentIds: [file.id],
+          input: queuedInput(),
+        });
+        yield* repo.steerQueueEntry({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        });
+        let calls = 0;
+        authoringScript = (input) => {
+          calls += 1;
+          if (calls === 1) return authoringTool(input, "list_agent_options", { kind: "models" });
+          if (calls === 2)
+            return authoringTool(input, "read_attachment", {
+              attachmentId: file.id,
+              pattern: "body",
+            });
+          return Stream.make(
+            AiResponse.makePart("text-delta", { id: "t", delta: "Read it." }),
+            authoringFinish(),
+          ) as Stream.Stream<ChatStreamPart>;
+        };
+        yield* engine.startGeneration({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId ?? undefined,
+          modelId: textModelId,
+          searchEnabled: false,
+        });
+        yield* waitForAnswer(seed.assistant.id);
+        authoringScript = null;
+        return (yield* repo.listToolCalls([seed.assistant.id])).find(
+          (call) => call.toolName === "read_attachment",
+        );
+      }),
+    );
+    expect(result).toMatchObject({ status: "complete" });
+    expect(result?.result).toMatchObject({ ok: true, fileName: "steer.txt", matches: 1 });
   }, 60_000);
 
   it("places a steer between replayed turns for an image-output model", async () => {

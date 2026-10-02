@@ -197,6 +197,7 @@ import {
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { buildFixedPrefix } from "./system-prompt.ts";
 import { attachmentReadActivity, prepareAttachmentReader } from "./attachment-reader.ts";
+import { currentAttachmentId } from "./file-aliases.ts";
 import { hasFileText } from "~/modules/attachments/server/file-text.ts";
 import {
   isAdvertised,
@@ -1283,23 +1284,30 @@ export class StreamEngine extends Context.Service<
           // through the answer and never shrinks within it.
           // A file too long to inline, or one summarized away, stays readable
           // by id; only files linked to this conversation's messages are.
-          const conversationFiles = yield* promptDeps.attachments.listWithBlobsForMessages([
-            ...completed.map((message) => message.id),
-            ...ownSteers.map((steer) => steer.id),
-          ]);
-          const attachmentReader = conversationFiles.some(
-            (file) =>
-              ["text", "pdf"].includes(attachmentKind(file.mediaType)) ||
-              hasFileText(file.fileName),
-          )
-            ? prepareAttachmentReader({
-                deps: promptDeps,
-                find: (attachmentId) =>
-                  Effect.succeed(
-                    conversationFiles.find((file) => file.id === attachmentId) ?? null,
-                  ),
-              })
-            : undefined;
+          // Grows when a steer brings files in mid-answer.
+          const conversationFiles = [
+            ...(yield* promptDeps.attachments.listWithBlobsForMessages([
+              ...completed.map((message) => message.id),
+              ...ownSteers.map((steer) => steer.id),
+            ])),
+          ];
+          const readable = (file: (typeof conversationFiles)[number]) =>
+            ["text", "pdf"].includes(attachmentKind(file.mediaType)) || hasFileText(file.fileName);
+          // Always in the toolkit, advertised only while a readable file is
+          // here: a steered file can bring the first one in mid-answer.
+          let readerAdvertised = conversationFiles.some(readable);
+          const attachmentReader = prepareAttachmentReader({
+            deps: promptDeps,
+            find: (requested) =>
+              Effect.gen(function* () {
+                // A branch maps its source's ids onto its own copies, as in a
+                // summary's file list; the alias grants nothing by itself.
+                const attachmentId = Option.isSome(database)
+                  ? yield* currentAttachmentId(database.value, input, requested)
+                  : requested;
+                return conversationFiles.find((file) => file.id === attachmentId) ?? null;
+              }),
+          });
           const offeredLazy = LazyToolFamily.literals.filter((family) =>
             family === "agent-draft"
               ? permissions.agentsCreate
@@ -1338,7 +1346,7 @@ export class StreamEngine extends Context.Service<
           };
           const commonGroups = [
             ...(toolLoad ? [toolLoad] : []),
-            ...(attachmentReader ? [attachmentReader] : []),
+            attachmentReader,
             ...(permissions.agentsCreate ? [authoring.group] : []),
             ...(permissions.schedules ? [scheduleAuthoring.group] : []),
             ...(permissions.documents ? [documents.group] : []),
@@ -1369,8 +1377,10 @@ export class StreamEngine extends Context.Service<
             budgetToolkit &&
             estimateToolSchemaTokens({
               tools: Object.fromEntries(
-                Object.entries(budgetToolkit.tools).filter(([name]) =>
-                  isAdvertised(name, offeredLazy, unlocked),
+                Object.entries(budgetToolkit.tools).filter(
+                  ([name]) =>
+                    isAdvertised(name, offeredLazy, unlocked) &&
+                    (readerAdvertised || name !== "read_attachment"),
                 ),
               ),
             });
@@ -1383,6 +1393,7 @@ export class StreamEngine extends Context.Service<
             const names = Object.keys(toolkit.tools).filter(
               (name) =>
                 isAdvertised(name, offeredLazy, everUnlocked) &&
+                (readerAdvertised || name !== "read_attachment") &&
                 (retrievalEnabled || !Schema.is(KnowledgeToolName)(name)) &&
                 !(memorySpent && name === "save_memory"),
             );
@@ -2210,8 +2221,10 @@ export class StreamEngine extends Context.Service<
               // Unloaded families stay callable but unadvertised: a call to one
               // loads it (see the tool-call observer) instead of failing.
               const advertised = activeToolkit
-                ? Object.keys(activeToolkit.tools).filter((name) =>
-                    isAdvertised(name, offeredLazy, unlockedFamilies),
+                ? Object.keys(activeToolkit.tools).filter(
+                    (name) =>
+                      isAdvertised(name, offeredLazy, unlockedFamilies) &&
+                      (readerAdvertised || name !== "read_attachment"),
                   )
                 : [];
               modelCallOpen = true;
@@ -2341,7 +2354,7 @@ export class StreamEngine extends Context.Service<
                           const family =
                             part.name === "load_tools" && toolLoad
                               ? "tool-load"
-                              : part.name === "read_attachment" && attachmentReader
+                              : part.name === "read_attachment"
                                 ? "attachment"
                                 : Schema.is(AgentDraftToolName)(part.name)
                                   ? "agent-draft"
@@ -3837,6 +3850,9 @@ export class StreamEngine extends Context.Service<
               const files = yield* attachments.listWithBlobsForMessages(
                 steered.map((message) => message.id),
               );
+              // Readable by id from the next round, like a file sent with the question.
+              conversationFiles.push(...files);
+              if (files.some(readable)) readerAdvertised = true;
               for (const message of steered) {
                 const envelope: SteerChunkEnvelope = {
                   v: 1,
