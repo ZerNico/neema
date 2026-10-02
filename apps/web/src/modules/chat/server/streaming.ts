@@ -1617,6 +1617,10 @@ export class StreamEngine extends Context.Service<
             ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
           ];
 
+          const deckFonts =
+            officeEditors.includes("presentation") && Option.isSome(presentationFonts)
+              ? [...new Set((yield* presentationFonts.value.list()).map((font) => font.family))]
+              : [];
           // Tool policies + memory data + history are the stable prefix.
           // Actual memory records sit in a lower-authority assistant/data message;
           // only the application-authored handling policy is a system message.
@@ -1643,6 +1647,7 @@ export class StreamEngine extends Context.Service<
             memory: conversationContext.messages(),
             project: config.resolvedProject ?? null,
             agent: config.resolvedAgent ?? null,
+            ...(deckFonts.length ? { deckFonts } : {}),
           });
 
           // Synchronously, before a single token streams: a summary written

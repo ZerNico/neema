@@ -69,6 +69,12 @@ export interface FixedPrefixInput {
   readonly memory: ReadonlyArray<Prompt.MessageEncoded>;
   readonly project: { readonly name: string; readonly instructions: string } | null;
   readonly agent: { readonly name: string; readonly instructions: string } | null;
+  /**
+   * Families an admin uploaded for decks, when deck tools are offered. The
+   * edit tool's own description lists the Office and Google fonts; these
+   * would otherwise only surface in a result, after the deck's first edit.
+   */
+  readonly deckFonts?: ReadonlyArray<string>;
 }
 
 const system = (content: string): Prompt.MessageEncoded => ({ role: "system", content });
@@ -82,6 +88,13 @@ export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded
   system(basePolicy(input)),
   system(fileReferencesSystemHint),
   ...(input.lazyFamilies.length ? [system(toolLoadPolicy(input.lazyFamilies))] : []),
+  ...(input.deckFonts?.length
+    ? [
+        system(
+          `Fonts uploaded for this app, usable in presentations beside those the deck tools list: ${input.deckFonts.join(", ")}.`,
+        ),
+      ]
+    : []),
   ...(input.agentAuthoring ? [system(AGENT_APP_POLICY)] : []),
   ...(input.documents ? [system(DOCUMENT_APP_POLICY)] : []),
   ...(input.knowledge ? [system(KNOWLEDGE_SYSTEM_HINT)] : []),

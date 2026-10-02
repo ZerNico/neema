@@ -114,3 +114,17 @@ describe("configured instructions", () => {
     expect(text.match(/<\/agent-instructions>/g)).toHaveLength(1);
   });
 });
+
+describe("uploaded deck fonts", () => {
+  it("are named once deck tools are offered, so a first edit can choose them", () => {
+    const named = render(
+      buildFixedPrefix({ ...nothing, lazyFamilies: ["presentation"], deckFonts: ["Brand Sans"] }),
+    );
+    expect(named).toContain(
+      "usable in presentations beside those the deck tools list: Brand Sans.",
+    );
+    expect(render(buildFixedPrefix({ ...nothing, lazyFamilies: ["presentation"] }))).not.toContain(
+      "Fonts uploaded",
+    );
+  });
+});
