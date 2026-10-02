@@ -298,8 +298,8 @@ export class PresentationFonts extends Context.Service<
         const faces = yield* source.fetchFamily(family);
         let stored = 0;
         for (const face of faces) {
-          // A fixed, trusted source: the tables are measured as for an upload,
-          // and the face must call itself what the catalogue asked for.
+          // The tables are measured as for an upload, and the face must call
+          // itself what the catalogue asked for.
           let info;
           try {
             info = readFontFile(face.bytes);
@@ -314,7 +314,14 @@ export class PresentationFonts extends Context.Service<
           )
             continue;
           const sha256 = createHash("sha256").update(face.bytes).digest("hex");
-          yield* db
+          // Drawn once in a worker like any other face before every deck may use it.
+          const path = yield* Effect.promise(() => materialize(sha256, info.format, face.bytes));
+          const drawn = yield* Effect.tryPromise(() => workers.run({ kind: "font", path })).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!drawn) continue;
+          const inserted = yield* db
             .insert(presentationFonts)
             .values({
               id: uuidv7(),
@@ -334,8 +341,9 @@ export class PresentationFonts extends Context.Service<
             })
             // An upload of the same face, or a concurrent fetch, keeps its row.
             .onConflictDoNothing()
+            .returning({ id: presentationFonts.id })
             .pipe(Effect.orDie);
-          stored += 1;
+          stored += inserted.length;
         }
         return stored;
       });

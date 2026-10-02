@@ -235,7 +235,8 @@ named in the fixed system prefix when deck tools are offered, and every result's
 `availableFonts` lists what is installed now. An edit naming a catalogue family it lacks
 fetches it first: the CSS2 API answers a non-browser client with static TrueType faces per
 weight and style, only `fonts.googleapis.com` and `fonts.gstatic.com` are contacted, no
-redirect is followed, and a face must call itself by the catalogue's name. A failure is
+redirect is followed, and a face must call itself by the catalogue's name and draw in a
+worker trial render, as an upload must. A failure is
 remembered for ten minutes, so an offline server refuses that font quickly. The model may
 name only bundled, uploaded, loaded-skill or catalogue families; others are refused with
 the list. A live probe (`PROBE_GOOGLE_FONTS=1`) checks the catalogue against Google.
