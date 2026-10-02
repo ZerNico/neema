@@ -9,12 +9,8 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
-import {
-  MessageBubble,
-  PLACED_CALL_PREFIX,
-  withLiveText,
-  type DisplayMessage,
-} from "./message-list.tsx";
+import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
+import { PLACED_CALL_PREFIX, withLiveText } from "./live-message.ts";
 import { createLiveText, type LiveTextSnapshot } from "../client/live-text.ts";
 import { inheritSources } from "./inherited-sources.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";

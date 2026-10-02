@@ -1,9 +1,5 @@
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
-import { OFFICE_FAMILIES, officeFamilyOfTool } from "~/modules/office/families.ts";
-import { ToolFileActivity } from "../tool-file-schema.ts";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
-import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
-import { IntegrationToolActivity as StoredIntegrationActivity } from "~/modules/integrations/tool-schema.ts";
+
 import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
 import {
   ScheduleDraftOwner,
@@ -12,39 +8,20 @@ import {
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
-import {
-  DocumentToolName,
-  documentResultOk,
-  projectDocumentResult,
-} from "~/modules/documents/tool-schema.ts";
-import {
-  ProjectFileToolName,
-  projectFileResultOk,
-  projectProjectFileResult,
-} from "~/modules/projects/file-tool-schema.ts";
-import {
-  AgentDraftToolName,
-  projectAgentDraftResult,
-  agentDraftResultOk,
-} from "~/modules/agents/tool-schema.ts";
+import { DocumentToolName, projectDocumentResult } from "~/modules/documents/tool-schema.ts";
+
+import { AgentDraftToolName, projectAgentDraftResult } from "~/modules/agents/tool-schema.ts";
 import {
   ScheduleDraftToolName,
   projectScheduleDraftResult,
-  scheduleDraftResultOk,
 } from "~/modules/schedules/tool-schema.ts";
-import { SkillActivity, SkillToolName } from "~/modules/skills/tool-schema.ts";
-import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
-import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
-import {
-  applyFileChunk,
-  integrationActivityFromRow,
-  learnServerClock,
-} from "../client/use-message-stream.ts";
+
+import { applyFileChunk, learnServerClock } from "../client/use-message-stream.ts";
 import type { AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
-import { KnowledgeActivityResult, KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
-import { Option, Schema } from "effect";
+
+import { Schema } from "effect";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -66,25 +43,15 @@ import {
   applySteerChunk,
   applyToolActivityChunk,
   isStaleWriting,
-  toMemoryActivityOutcome,
-  toMemoryActivityReason,
-  readTextOffset,
-  readResearchProgress,
   useMessageStream,
   type CompactionActivity,
-  type OfficeActivity,
   type ToolActivity,
-  type ToolPageStatus,
-  type ToolSource,
 } from "../client/use-message-stream.ts";
 import {
-  abortWorkTurn,
   activateWorkTurn,
   answerQuestion,
   branchConversation,
   editMessage,
-  getWorkTurnReservation,
-  reserveWorkTurn,
   resumeMessage,
   retryMessage,
   sendMessage,
@@ -117,7 +84,7 @@ import { FileReferenceContext } from "./file-reference.tsx";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
 import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
-import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
+
 import { agentIcon } from "./context-picker.tsx";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
@@ -127,7 +94,8 @@ import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
-import { type DisplayMessage, PLACED_CALL_PREFIX } from "./message-list.tsx";
+import type { DisplayMessage } from "./message-list.tsx";
+import { PLACED_CALL_PREFIX } from "./live-message.ts";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
@@ -138,10 +106,8 @@ import { useAttachmentUploads } from "~/modules/attachments/client/use-attachmen
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { uuidv7 } from "uuidv7";
 import type { MessageAttachment } from "~/modules/attachments/schema.ts";
-import { readPresentedQuestions, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
-import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
-import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
-import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
+import { type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { useConfirm } from "~/ui/confirm.tsx";
@@ -150,473 +116,8 @@ import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
-
-export const sendReservedWorkspaceTurn = async (input: {
-  conversation:
-    | { kind: "new"; id: string; mode: ConversationMode }
-    | { kind: "existing"; id: string };
-  imports: WorkspaceImports;
-  activate: (
-    reservationId: string,
-    files: ReadonlyArray<string>,
-  ) => Promise<{ conversationId: string; assistantMessageId: string }>;
-}) => {
-  const reservationId = crypto.randomUUID();
-  await reserveWorkTurn({ data: { reservationId, conversation: input.conversation } });
-  let receipt;
-  try {
-    receipt = await input.imports.promote(reservationId);
-  } catch (error) {
-    await abortWorkTurn({ data: { reservationId } }).catch(() => {});
-    throw error;
-  }
-  const files = receipt.files.map((file) => file.finalName);
-  let activated: { conversationId: string; assistantMessageId: string };
-  try {
-    activated = await input.activate(reservationId, files);
-  } catch (initialError) {
-    let status;
-    try {
-      status = await getWorkTurnReservation({ data: { reservationId } });
-    } catch {
-      // The server may have committed. Keep the journal for startup recovery.
-      throw initialError;
-    }
-    if (status.status === "activated" && status.assistantMessageId) {
-      activated = {
-        conversationId: status.conversationId,
-        assistantMessageId: status.assistantMessageId,
-      };
-    } else if (status.status === "reserved") {
-      // Activation is idempotent; one retry resolves a lost response without
-      // creating another turn or starting another generation.
-      try {
-        activated = await input.activate(reservationId, files);
-      } catch (retryError) {
-        let retryStatus;
-        try {
-          retryStatus = await getWorkTurnReservation({ data: { reservationId } });
-        } catch {
-          // The retry may have committed too. Leave recovery evidence intact.
-          throw retryError;
-        }
-        if (retryStatus.status === "activated" && retryStatus.assistantMessageId) {
-          activated = {
-            conversationId: retryStatus.conversationId,
-            assistantMessageId: retryStatus.assistantMessageId,
-          };
-        } else {
-          if (retryStatus.status === "reserved") {
-            try {
-              await abortWorkTurn({ data: { reservationId } });
-            } catch {
-              throw retryError;
-            }
-          }
-          await input.imports.rollback(reservationId).catch(() => {});
-          throw retryError;
-        }
-      }
-    } else {
-      await input.imports.rollback(reservationId).catch(() => {});
-      throw initialError;
-    }
-  }
-  // A failed local cleanup leaves the journal for authenticated recovery. The
-  // server turn owns the files now, so they must never be rolled back.
-  await input.imports.commit(reservationId).catch(() => {});
-  return activated;
-};
-
-const epoch = (value: Date | string | null | undefined) =>
-  value ? new Date(value).getTime() || undefined : undefined;
-
-/**
- * A row's activity with the times it records, so a reloaded answer, still
- * streaming or settled, says how long it worked rather than restarting its clock.
- */
-const timedActivity = (
-  row: Parameters<typeof toActivity>[0] & {
-    startedAt?: Date | string | null;
-    completedAt?: Date | string | null;
-  },
-): ToolActivity => {
-  const startedAt = epoch(row.startedAt);
-  const completedAt = epoch(row.completedAt);
-  return {
-    ...toActivity(row),
-    ...(startedAt === undefined ? {} : { startedAt }),
-    ...(completedAt === undefined ? {} : { completedAt }),
-  } as ToolActivity;
-};
-
-/**
- * Durable message_tool_calls row → the same family-discriminated shape used by
- * live chunks. The tool name is the durable discriminator; old web rows never
- * carried a family field of their own.
- */
-export function toActivity(row: {
-  id: string;
-  toolName: string;
-  arguments: unknown;
-  result: unknown;
-  status: "running" | "complete" | "error";
-  turnIndex: number;
-  callIndex: number;
-  textOffset?: number | null;
-  researchRunId?: string | null;
-  researchTaskId?: string | null;
-  error: { code: string; message: string } | null;
-}): ToolActivity {
-  const textOffset = readTextOffset(row.textOffset);
-  const position = textOffset === undefined ? {} : { textOffset };
-  if (Schema.is(AgentDraftToolName)(row.toolName)) {
-    const result = projectAgentDraftResult(row.result);
-    return {
-      family: "agent-draft",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status:
-        row.status === "running" ? "running" : agentDraftResultOk(result) ? "complete" : "error",
-      ...(row.status === "running" ? {} : { result }),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (Schema.is(ScheduleDraftToolName)(row.toolName)) {
-    const result = projectScheduleDraftResult(row.result);
-    return {
-      family: "schedule-draft",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status:
-        row.status === "running" ? "running" : scheduleDraftResultOk(result) ? "complete" : "error",
-      ...(row.status === "running" ? {} : { result }),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (Schema.is(DocumentToolName)(row.toolName)) {
-    const result = projectDocumentResult(row.result);
-    return {
-      family: "document",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status:
-        row.status === "running" ? "running" : documentResultOk(result) ? "complete" : "error",
-      ...(row.status === "running" ? {} : { result }),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (Schema.is(ProjectFileToolName)(row.toolName)) {
-    const result = projectProjectFileResult(row.result);
-    return {
-      family: "project-file",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status:
-        row.status === "running" ? "running" : projectFileResultOk(result) ? "complete" : "error",
-      ...(row.status === "running" ? {} : { result }),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (Schema.is(SkillToolName)(row.toolName)) {
-    const result = Option.getOrNull(Schema.decodeUnknownOption(SkillActivity)(row.result));
-    return {
-      family: "skill",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      skillId: result?.skillId ?? "",
-      skillName: result?.skillName ?? "Skill",
-      path: result?.path ?? "",
-      status:
-        row.status === "running" ? "running" : result?.status === "complete" ? "complete" : "error",
-      ...(row.researchRunId ? { runId: row.researchRunId } : {}),
-      ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
-    };
-  }
-  if (row.toolName === "update_plan") {
-    const result = Option.getOrNull(Schema.decodeUnknownOption(PlanToolResult)(row.result));
-    const steps = result?.outcome === "updated" ? result.steps : null;
-    return {
-      family: "plan",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status === "running" ? "running" : steps ? "complete" : "error",
-      ...(steps ? { steps } : {}),
-    };
-  }
-  if (row.toolName === "read_attachment") {
-    const read = Option.getOrNull(Schema.decodeUnknownOption(AttachmentReadActivity)(row.result));
-    return {
-      family: "attachment",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status === "running" ? "running" : read?.ok ? "complete" : "error",
-      ...(read ? { read } : {}),
-    };
-  }
-  if (row.toolName === "load_tools") {
-    const result = Option.getOrNull(Schema.decodeUnknownOption(LoadToolsResult)(row.result));
-    return {
-      family: "tool-load",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status === "running" ? "running" : result ? "complete" : "error",
-      ...(result ? { loaded: result.loaded } : {}),
-    };
-  }
-  if (Schema.is(KnowledgeToolName)(row.toolName)) {
-    const result = Option.getOrNull(
-      Schema.decodeUnknownOption(KnowledgeActivityResult)(row.result),
-    );
-    return {
-      family: "knowledge",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      ...(row.researchRunId ? { runId: row.researchRunId } : {}),
-      ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status === "complete" && (!result || !result.ok) ? "error" : row.status,
-      ...(result ? { summary: result.summary, sources: [...result.sources] } : {}),
-      ...(row.error ? { error: row.error.message } : result?.error ? { error: result.error } : {}),
-    };
-  }
-  if (row.toolName === "deep_research") {
-    const result = (row.result ?? {}) as { progress?: unknown; sources?: ToolSource[] };
-    const progress = readResearchProgress(result.progress);
-    return {
-      family: "research",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      // A running row has not received its first progress yet; forcing a
-      // terminal status here would make the reducer reject every later update.
-      status: row.status === "complete" && !progress ? "error" : row.status,
-      ...(progress ? { progress, runId: progress.runId } : {}),
-      ...(result.sources ? { sources: result.sources } : {}),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (row.toolName === "ask_user") {
-    const questions = readPresentedQuestions(row.result);
-    return {
-      family: "ask",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status === "complete" && !questions ? "error" : row.status,
-      ...(questions ? { questions } : {}),
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-  if (row.toolName === "save_memory") {
-    const result = (row.result ?? {}) as { outcome?: unknown; reason?: unknown; scope?: unknown };
-    const outcome = toMemoryActivityOutcome(result.outcome);
-    const reason = toMemoryActivityReason(result.reason);
-    const scope = result.scope === "project" ? ({ scope: "project" } as const) : {};
-    return {
-      family: "memory",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      ...(outcome ? { outcome } : {}),
-      ...(reason ? { reason } : {}),
-      ...scope,
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-
-  const integrationCall = parseIntegrationToolName(row.toolName);
-  if (integrationCall) {
-    // Also ahead of the web fallback. A finished row carries its own
-    // projection; a running one (reload mid-answer) is named from the manifest.
-    const stored = Option.getOrNull(
-      Schema.decodeUnknownOption(StoredIntegrationActivity)(row.result),
-    );
-    if (stored)
-      return {
-        ...integrationActivityFromRow(row.id, stored),
-        ...position,
-        turnIndex: row.turnIndex,
-        callIndex: row.callIndex,
-      };
-    const tool = findIntegration(integrationCall.integrationId)?.tools.find(
-      (entry) => entry.name === integrationCall.tool,
-    );
-    return {
-      family: "integration",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      integrationId: integrationCall.integrationId,
-      tool: integrationCall.tool,
-      label: tool?.label ?? integrationCall.tool,
-      access: tool?.access ?? "read",
-      summary: null,
-      ...(row.error ? { error: row.error.message } : {}),
-    };
-  }
-
-  const office = officeFamilyOfTool(row.toolName);
-  if (office) {
-    return {
-      family: office,
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      ...OFFICE_FAMILIES[office].summary(row.result, row.status === "error"),
-      ...(row.error ? { error: row.error.message } : {}),
-      // The family and its summary match; the compiler cannot correlate them.
-    } as OfficeActivity;
-  }
-  if (row.toolName === "publish_file" || row.toolName === "create_file") {
-    const result = Option.getOrNull(Schema.decodeUnknownOption(ToolFileActivity)(row.result));
-    return {
-      family: "tool-file",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      ...(result?.attachmentId ? { attachmentId: result.attachmentId } : {}),
-      ...(result?.workingFileId ? { workingFileId: result.workingFileId } : {}),
-      ...(row.error ? { error: row.error.message } : result?.error ? { error: result.error } : {}),
-    };
-  }
-
-  if (isCustomToolName(row.toolName)) {
-    // Must precede the web fallback below: a `custom_…` row holds a
-    // CustomToolActivity, not web targets.
-    const stored = Option.getOrNull(Schema.decodeUnknownOption(CustomToolActivity)(row.result));
-    return {
-      family: "custom",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      displayName: stored?.displayName ?? row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      ...(stored?.resultPreview !== undefined ? { resultPreview: stored.resultPreview } : {}),
-      ...(stored?.resultChars !== undefined ? { resultChars: stored.resultChars } : {}),
-      ...(row.error ? { error: row.error.message } : stored?.error ? { error: stored.error } : {}),
-      ...(stored?.fileIds?.length ? { fileIds: stored.fileIds } : {}),
-      ...(stored?.workingFiles?.length ? { workingFiles: stored.workingFiles } : {}),
-    };
-  }
-
-  if (Schema.is(DesktopToolName)(row.toolName)) {
-    // The persisted row holds the summary only, never the file contents or
-    // command output that the live envelope carried, so a reload shows the
-    // row without its disclosure rather than inventing a body for it.
-    const stored = Option.getOrNull(Schema.decodeUnknownOption(DesktopToolResult)(row.result));
-    return {
-      family: "desktop",
-      ...position,
-      callId: row.id,
-      name: row.toolName,
-      turnIndex: row.turnIndex,
-      callIndex: row.callIndex,
-      status: row.status,
-      ...(row.arguments && typeof row.arguments === "object"
-        ? { args: row.arguments as Record<string, unknown> }
-        : {}),
-      ...(stored ? { result: stored } : {}),
-    };
-  }
-
-  const args = (row.arguments ?? {}) as { queries?: string[]; urls?: string[] };
-  const result = (row.result ?? {}) as {
-    targets?: string[];
-    resultCount?: number;
-    pagesFetched?: number;
-    pages?: ToolPageStatus[];
-    sources?: ToolSource[];
-  };
-  return {
-    family: "web",
-    ...position,
-    ...(row.researchRunId ? { runId: row.researchRunId } : {}),
-    ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
-    callId: row.id,
-    name: row.toolName,
-    turnIndex: row.turnIndex,
-    callIndex: row.callIndex,
-    targets: result.targets ?? args.queries ?? args.urls ?? [],
-    status: row.status,
-    ...(result.resultCount !== undefined ? { resultCount: result.resultCount } : {}),
-    ...(result.pagesFetched !== undefined ? { pagesFetched: result.pagesFetched } : {}),
-    ...(result.pages !== undefined ? { pages: result.pages } : {}),
-    ...(result.sources !== undefined ? { sources: result.sources } : {}),
-    ...(row.error ? { error: row.error.message } : {}),
-  };
-}
-
-function toCompactionActivity(row: {
-  id: string;
-  beforeTurnIndex: number;
-  passIndex: number;
-  scope: "history" | "active_rounds";
-  status: "running" | "complete" | "error";
-  outcome: "summary" | "hard_truncation" | null;
-  summary: string | null;
-  textOffset?: number | null;
-  researchRunId?: string | null;
-  researchTaskId?: string | null;
-}): CompactionActivity {
-  const textOffset = readTextOffset(row.textOffset);
-  return {
-    eventId: row.id,
-    ...(row.researchRunId ? { runId: row.researchRunId } : {}),
-    ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
-    ...(textOffset === undefined ? {} : { textOffset }),
-    beforeTurnIndex: row.beforeTurnIndex,
-    passIndex: row.passIndex,
-    scope: row.scope,
-    status: row.status === "error" ? "failed" : row.status,
-    ...(row.outcome ? { outcome: row.outcome } : {}),
-    ...(row.summary ? { summary: row.summary } : {}),
-  };
-}
+import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
+import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
 /**
  * " The document “Plan” will also be deleted." for one casualty; counts per

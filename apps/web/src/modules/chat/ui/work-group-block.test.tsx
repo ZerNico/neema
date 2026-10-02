@@ -6,7 +6,8 @@ import {
   type WebToolActivity,
 } from "../client/use-message-stream.ts";
 import type { WorkPart } from "./assistant-body.ts";
-import { WorkGroupBlock, workSummary } from "./work-group-block.tsx";
+import { WorkGroupBlock } from "./work-group-block.tsx";
+import { workSummary } from "./work-steps.ts";
 
 const call = (callId: string, overrides: Partial<ToolActivity> = {}): ToolActivity =>
   ({

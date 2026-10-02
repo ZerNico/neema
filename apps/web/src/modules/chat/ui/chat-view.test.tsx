@@ -9,7 +9,9 @@ import { AskUserBlock } from "./ask-user-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
-import { ChatView, sendReservedWorkspaceTurn, toActivity } from "./chat-view.tsx";
+import { ChatView } from "./chat-view.tsx";
+import { toActivity } from "./stored-activities.ts";
+import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 import {
   abortWorkTurn,
   answerQuestion,

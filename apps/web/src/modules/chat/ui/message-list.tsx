@@ -19,7 +19,8 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { LiveText, LiveTextSnapshot } from "../client/live-text.ts";
+import type { LiveText } from "../client/live-text.ts";
+import { withLiveText } from "./live-message.ts";
 import { NO_INHERITED_SOURCES, type InheritedSources } from "./inherited-sources.ts";
 import {
   type CompactionActivity,
@@ -82,7 +83,8 @@ import { BrowserActivityBlock } from "./browser-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
-import { stepActivities, WorkGroupBlock } from "./work-group-block.tsx";
+import { WorkGroupBlock } from "./work-group-block.tsx";
+import { stepActivities } from "./work-steps.ts";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
@@ -284,36 +286,6 @@ export interface DisplayMessage {
 export interface LiveStream {
   text: LiveText;
   status: StreamState["status"];
-}
-
-/** Marks a card placed at the end of its answer rather than by a tool row of its own. */
-export const PLACED_CALL_PREFIX = "placed:";
-
-/** The live answer as drawn at one pacing tick. */
-export function withLiveText(
-  message: DisplayMessage,
-  status: LiveStream["status"],
-  snapshot: LiveTextSnapshot,
-): DisplayMessage {
-  // Status comes from the stream, not the row: the refetched row says
-  // complete while the last words are still landing.
-  const following = status === "streaming";
-  const ahead = snapshot.text.length > message.content.length;
-  const content = following || ahead ? snapshot.text : message.content;
-  return {
-    ...message,
-    content,
-    status: following ? "streaming" : ahead ? status : message.status,
-    reasoning: snapshot.reasoning,
-    reasoningSeen: snapshot.reasoningSeen || message.reasoningSeen,
-    rawTextLength: snapshot.rawTextLength,
-    // A placed card belongs at the end of the answer, which moves while it streams.
-    toolActivities: message.toolActivities.some((a) => a.callId.startsWith(PLACED_CALL_PREFIX))
-      ? message.toolActivities.map((a) =>
-          a.callId.startsWith(PLACED_CALL_PREFIX) ? { ...a, textOffset: content.length } : a,
-        )
-      : message.toolActivities,
-  };
 }
 
 // Separates two calendar days inside the conversation. Drawn as part of the
