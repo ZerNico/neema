@@ -313,6 +313,19 @@ export const messageToolCalls = pgTable(
 );
 
 /**
+ * A failed call's arguments in full, for debugging. The row itself keeps a
+ * trimmed copy; this one goes with its call and is swept after a week. Never
+ * written for memory saves or typed browser text.
+ */
+export const toolCallDebugArguments = pgTable("tool_call_debug_arguments", {
+  toolCallId: text("tool_call_id")
+    .primaryKey()
+    .references(() => messageToolCalls.id, { onDelete: "cascade" }),
+  arguments: jsonb().$type<JsonValue>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Progressive compaction checkpoints (Onyx-style): the summary that stands in
  * for everything up to and including `through_message_id` when a conversation
  * outgrows the model's context window. The stored transcript is never touched,

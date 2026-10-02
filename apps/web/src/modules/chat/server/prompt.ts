@@ -587,8 +587,8 @@ const recordLine = (call: ResumedCall) => {
 /**
  * An interrupted answer's own rounds, rebuilt from its stored rows for the
  * attempt that resumes it. Each round is its text, then a plain record of its
- * calls, then any steer it took in. Records rather than tool-call parts: most
- * rows keep no arguments, and providers reject unsigned replayed tool turns.
+ * calls, then any steer it took in. Records rather than tool-call parts: rows
+ * keep only trimmed arguments, and providers reject unsigned replayed tool turns.
  */
 export const resumedRounds = (input: {
   content: string;

@@ -56,6 +56,7 @@ import {
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
+  toolCallDebugArguments,
   schedules,
   scheduleRuns,
   usageEvents,
@@ -1083,6 +1084,12 @@ export class ChatRepo extends Context.Service<
      * Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
      */
     failRunningToolCalls(messageId: string, message: string): Effect.Effect<void>;
+    /** Keeps the full arguments of those calls that ended in error, for a week of debugging. */
+    keepFailedCallArguments(
+      calls: ReadonlyArray<{ id: string; arguments: JsonValue }>,
+    ): Effect.Effect<void>;
+    /** Drops failed calls' full arguments older than a week, by the database clock. */
+    sweepFailedCallArguments(): Effect.Effect<number>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
     createCompactionEvent(input: {
       id: string;
@@ -3279,6 +3286,40 @@ export class ChatRepo extends Context.Service<
           );
         }),
 
+        keepFailedCallArguments: Effect.fn("ChatRepo.keepFailedCallArguments")(function* (calls) {
+          if (!calls.length) return;
+          const failed = yield* db
+            .select({ id: messageToolCalls.id })
+            .from(messageToolCalls)
+            .where(
+              and(
+                inArray(
+                  messageToolCalls.id,
+                  calls.map((call) => call.id),
+                ),
+                eq(messageToolCalls.status, "error"),
+              ),
+            )
+            .pipe(Effect.orDie);
+          const ids = new Set(failed.map((row) => row.id));
+          const rows = calls
+            .filter((call) => ids.has(call.id))
+            .map((call) => ({ toolCallId: call.id, arguments: call.arguments }));
+          if (rows.length)
+            yield* db
+              .insert(toolCallDebugArguments)
+              .values(rows)
+              .onConflictDoNothing()
+              .pipe(Effect.orDie);
+        }),
+        sweepFailedCallArguments: Effect.fn("ChatRepo.sweepFailedCallArguments")(function* () {
+          const removed = yield* db
+            .delete(toolCallDebugArguments)
+            .where(sql`${toolCallDebugArguments.createdAt} < now() - interval '7 days'`)
+            .returning({ id: toolCallDebugArguments.toolCallId })
+            .pipe(Effect.orDie);
+          return removed.length;
+        }),
         failRunningToolCalls: Effect.fn("ChatRepo.failRunningToolCalls")(
           function* (messageId, message) {
             return yield* generationWrite((db) =>

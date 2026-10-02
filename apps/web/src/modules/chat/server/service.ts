@@ -2163,6 +2163,16 @@ function makeChatService() {
     if (temporarySweepInterval)
       yield* sweepTemporary().pipe(
         Effect.catchCause((cause) => Effect.logError("temporary chat sweep failed", cause)),
+        // Failed calls' full arguments are kept a week, then go the same way.
+        Effect.andThen(
+          repo
+            .sweepFailedCallArguments()
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError("failed call arguments sweep failed", cause),
+              ),
+            ),
+        ),
         Effect.repeat(Schedule.spaced(temporarySweepInterval)),
         Effect.forkScoped,
       );

@@ -18,7 +18,7 @@ import { uuidv7 } from "uuidv7";
 import { fromBase64, toBase64 } from "lib0/buffer";
 import * as Y from "yjs";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   conversationDrafts,
   conversations,
@@ -33,6 +33,7 @@ import {
   messageChunks,
   messageCompactionEvents,
   messageToolCalls,
+  toolCallDebugArguments,
   messageGenerationConfig,
   messages,
   models,
@@ -561,6 +562,37 @@ describe("conversational agent authoring", () => {
       const calls = detail.toolCalls.filter((row) => row.toolName === "create_file");
       expect(calls.map((row) => row.status)).toEqual(["complete", "error"]);
       expect(calls[0]?.result).toMatchObject({ ok: true, attachmentId: delivered[0]!.id });
+      // Each row keeps what was asked; only the failed call's full copy is kept aside.
+      const stored = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({
+              id: messageToolCalls.id,
+              status: messageToolCalls.status,
+              args: messageToolCalls.arguments,
+              debug: toolCallDebugArguments.arguments,
+            })
+            .from(messageToolCalls)
+            .leftJoin(
+              toolCallDebugArguments,
+              eq(toolCallDebugArguments.toolCallId, messageToolCalls.id),
+            )
+            .where(
+              and(
+                eq(messageToolCalls.messageId, assistantMessageId),
+                eq(messageToolCalls.toolName, "create_file"),
+              ),
+            )
+            .orderBy(messageToolCalls.callIndex),
+        ),
+      );
+      expect(stored.map(({ args, debug }) => ({ args, debug }))).toEqual([
+        { args: { name: "totals.csv", content: "region,total\nnorth,12\n" }, debug: null },
+        {
+          args: { name: "deck.pptx", content: "x" },
+          debug: { name: "deck.pptx", content: "x" },
+        },
+      ]);
     } finally {
       authoringScript = null;
     }

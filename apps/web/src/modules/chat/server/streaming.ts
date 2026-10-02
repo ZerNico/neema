@@ -152,6 +152,10 @@ import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
 import { isBrowserTool, shownBrowserArgs } from "~/modules/browser/tool-schema.ts";
+import { debugArguments, storedArguments } from "./stored-arguments.ts";
+
+// Families whose content lives in its own deletable row; their calls keep no arguments.
+const OWNED_CONTENT = new Set(["memory", "agent-draft", "schedule-draft", "document"]);
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -716,6 +720,8 @@ export class StreamEngine extends Context.Service<
             return flush; // same reason as tool markers, only more so: this
           }); //          is the only thing on screen while it runs
 
+        // Each call's full arguments, kept for a week only if it ends in error.
+        const debugArgs = new Map<string, JsonValue>();
         const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
           Effect.gen(function* () {
             yield* flush;
@@ -732,6 +738,16 @@ export class StreamEngine extends Context.Service<
               yield* repo.failRunningToolCalls(input.messageId, "stopped");
               yield* repo.failRunningCompactionEvents(input.messageId, "stopped");
             }
+            // Every call is settled by now, those interrupted included.
+            yield* repo
+              .keepFailedCallArguments(
+                [...debugArgs].map(([id, value]) => ({ id, arguments: value })),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("keeping failed call arguments failed", cause),
+                ),
+              );
             yield* repo.finalizeMessage({
               messageId: input.messageId,
               status,
@@ -2384,27 +2400,28 @@ export class StreamEngine extends Context.Service<
                             textOffset,
                             providerCallId: part.id,
                             toolName: part.name,
-                            // The canonical memory row is the sole persisted copy
-                            // of proposed content. Chat activity stores only that
-                            // the tool ran, so deleting memory actually removes it.
-                            arguments:
-                              family === "memory" ||
-                              family === "skill" ||
-                              family === "agent-draft" ||
-                              family === "schedule-draft" ||
-                              family === "document" ||
-                              family === "project-file" ||
-                              family === "tool-file" ||
-                              isOfficeFamily(family) ||
-                              family === "research" ||
-                              family === "integration"
-                                ? {}
+                            // Memory, drafts and documents own their content in a
+                            // row that can be deleted, so the call keeps nothing of
+                            // it. Other tools that write content keep a trimmed
+                            // copy: the content lives in what they produced.
+                            arguments: OWNED_CONTENT.has(family)
+                              ? {}
+                              : family === "skill" ||
+                                  family === "project-file" ||
+                                  family === "tool-file" ||
+                                  isOfficeFamily(family) ||
+                                  family === "research" ||
+                                  family === "integration"
+                                ? storedArguments(args)
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
                                     ? json(askArgs.value)
                                     : {}
                                   : (shownArgs as JsonValue),
                           });
+                          // Typed browser text may be a password; owned content has its own row.
+                          if (!OWNED_CONTENT.has(family))
+                            debugArgs.set(rowId, debugArguments(shownArgs));
                           if (family === "research") {
                             // The handler cannot learn its own row id: the
                             // toolkit hands it the provider's call id, and this
