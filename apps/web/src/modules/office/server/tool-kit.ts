@@ -131,20 +131,18 @@ export function officeToolKit<F extends OfficeFamily>(
       return invalid(
         field === "workingRef"
           ? "workingRef: expected working:<id>@<revision> from the latest edit result."
-          : "sourceRef: expected attachment:<id>, project:<id>@<version>, skill:<revision>/<path> or an imported working: reference.",
+          : "sourceRef: expected attachment:<id>, project:<id>@<version>, skill:<revision>/<path> or a working:<id>@<revision> reference exactly as a result returned it.",
       );
     if (ref.kind === "working") {
       await host.workingFiles.load(ref);
       const file = host.workingFiles.read(ref);
-      // A draft is edited in place; a file imported from the user's computer
-      // is a source like an attachment, opened into a draft of its own.
-      if (field === "workingRef" && file.owner !== family)
-        invalid(`workingRef: this working file is not ${info.draft}; pass it as sourceRef.`);
-      if (field === "sourceRef" && (file.owner !== "local" || !accepts(file)))
-        invalid(
-          `sourceRef: only an imported .${info.extension} can be opened from a working reference.`,
-        );
-      return { bytes: file.bytes, name: file.name, ref, draft: field === "workingRef" };
+      // A draft is edited in place; an import from the user's computer opens
+      // into a draft of its own. The reference says which it is, so either
+      // field reads it as meant: models mix the two up.
+      if (file.owner === family) return { bytes: file.bytes, name: file.name, ref, draft: true };
+      if (file.owner !== "local" || !accepts(file))
+        invalid(`${field}: this working file is not ${info.file}.`);
+      return { bytes: file.bytes, name: file.name, ref, draft: false };
     }
     if (requireFingerprint && raw.sourceFingerprint === undefined)
       return invalid(

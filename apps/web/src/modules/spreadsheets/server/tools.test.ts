@@ -165,7 +165,7 @@ describe("spreadsheet tool group", () => {
             operations: [],
           })
         ).message,
-      ).toMatch(/not a spreadsheet draft/);
+      ).toMatch(/workingRef: this working file is not/);
       // A workbook imported from the computer is a source, opened into a draft of its own.
       const imported = workingFiles.create({
         bytes: base.bytes,

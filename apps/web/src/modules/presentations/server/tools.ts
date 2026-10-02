@@ -529,7 +529,13 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
   });
   const render = execute("render", async (raw): Promise<PresentationToolResult> => {
     const source = await openSource(raw);
-    const slideIds = idList(raw.slideIds, "slideIds", PRESENTATION_LIMITS.rendersPerCall);
+    // Asked for more than one call draws, it draws the first ones and names the
+    // rest, rather than failing a call whose intent is plain.
+    const asked = Array.isArray(raw.slideIds) ? raw.slideIds : [raw.slideIds];
+    const max = PRESENTATION_LIMITS.rendersPerCall;
+    const slideIds = idList(asked.slice(0, max), "slideIds", max);
+    const later =
+      asked.length > max ? idList(asked.slice(max), "slideIds", PRESENTATION_LIMITS.slides) : [];
     const warning = await rendered(
       source.bytes,
       slideIds,
@@ -542,7 +548,11 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       operation: "render",
       outcome: host.onPreview ? "complete" : "unavailable",
       message: host.onPreview
-        ? "Approximate slide images follow as vision input; no file was saved."
+        ? `Approximate slide images follow as vision input; no file was saved.${
+            later.length
+              ? ` At most ${max} slides render per call; render ${later.join(", ")} in another call.`
+              : ""
+          }`
         : "Vision feedback is unavailable; no pixels were inspected.",
       ...(host.onPreview ? { renderedSlideIds: slideIds } : {}),
       ...(warning ? { previewWarning: warning } : {}),

@@ -144,7 +144,7 @@ describe("Word tool group", () => {
             operations: [],
           })
         ).message,
-      ).toMatch(/not a Word draft/);
+      ).toMatch(/workingRef: this working file is not/);
       const imported = workingFiles.create({
         bytes: base.bytes,
         name: "local.docx",

@@ -800,6 +800,43 @@ describe("presentation tool group", () => {
     }
   });
 
+  it("reads a draft passed as sourceRef as meant, and renders the first slides of too many", async () => {
+    const runtime = createPresentationRuntime(workerUrl);
+    const workingFiles = createWorkingFiles();
+    const previewed: number[][] = [];
+    const { group } = preparePresentationTools({
+      runtime,
+      workingFiles,
+      resolveFile: () => Effect.fail("Not available"),
+      onPreview: async (slides) => {
+        previewed.push(slides.map((slide) => slide.slideId));
+      },
+    });
+    try {
+      const created = await invoke(group.handlers.edit_presentation, {
+        create: true,
+        operations: Array.from({ length: 4 }, () => ({ kind: "addSlide", layoutId: "Blank" })),
+      });
+      const ids = (created.slides as Array<{ slideId: number }>).map((slide) => slide.slideId);
+      expect(ids).toHaveLength(5);
+      // Its own draft in the source field: inspected as the draft, no fingerprint asked for.
+      const inspected = await invoke(group.handlers.inspect_presentation, {
+        sourceRef: created.workingRef,
+      });
+      expect(inspected).toMatchObject({ slideIds: ids, workingFileId: created.workingFileId });
+      const rendered = await invoke(group.handlers.render_presentation, {
+        sourceRef: created.workingRef,
+        slideIds: ids,
+      });
+      expect(rendered).toMatchObject({ outcome: "complete", renderedSlideIds: ids.slice(0, 4) });
+      expect(rendered.message).toContain(`render ${ids[4]} in another call`);
+      expect(previewed).toEqual([ids.slice(0, 4)]);
+    } finally {
+      workingFiles.dispose();
+      await runtime.close();
+    }
+  });
+
   it("fetches a curated family an edit names before checking it, chart text included", async () => {
     const runtime = createPresentationRuntime(workerUrl);
     const workingFiles = createWorkingFiles();
@@ -950,11 +987,13 @@ describe("presentation tool group", () => {
       expect(opened).toMatchObject({ outcome: "working", origin: "opened", revision: 1 });
       expect(opened.workingFileId).not.toBe(deck.ref.id);
       expect(workingFiles.read(deck.ref).bytes).toEqual(created);
-      const misuse = await invoke(group.handlers.edit_presentation, {
+      // Passed in the other field, the import is still read as the source it is.
+      const swapped = await invoke(group.handlers.edit_presentation, {
         workingRef: deckRef,
         operations: [],
       });
-      expect(misuse.message).toContain("pass it as sourceRef");
+      expect(swapped).toMatchObject({ outcome: "working", origin: "opened" });
+      expect(swapped.workingFileId).not.toBe(deck.ref.id);
     } finally {
       workingFiles.dispose();
       await runtime.close();
