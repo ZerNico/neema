@@ -1847,9 +1847,10 @@ describe("MessageBubble actions", () => {
       ],
     });
 
-    const search = screen.getByRole("button", { name: /Searched the web/ });
+    // Two runs of work, each its own line, with the memory save between them.
+    const search = screen.getByRole("button", { name: "Searched the web" });
     const memory = screen.getByText("Saved to memory");
-    const read = screen.getByRole("button", { name: /Read a page/ });
+    const read = screen.getByRole("button", { name: "Read pages" });
     expect(search.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(memory.compareDocumentPosition(read) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -1898,6 +1899,8 @@ describe("MessageBubble actions", () => {
       </DetailPanelProvider>,
     );
 
+    // The search sits inside the answer's work line; open it, then the search.
+    fireEvent.click(screen.getByRole("button", { name: "Searched the web" }));
     fireEvent.click(screen.getByRole("button", { name: "Searched the web · 1 source" }));
     fireEvent.click(screen.getByRole("button", { name: "View all sources" }));
 
@@ -1956,6 +1959,8 @@ describe("MessageBubble actions", () => {
     );
     // Cited own, read own and cited inherited, not the two uncited hits. The
     // tool row counts the same way: two of its five hits made the list.
+    // The search sits inside the answer's work line; open it, then the search.
+    fireEvent.click(screen.getByRole("button", { name: "Searched the web" }));
     fireEvent.click(screen.getByRole("button", { name: "Searched the web · 2 sources" }));
     fireEvent.click(screen.getByRole("button", { name: "View all sources" }));
     const panel = screen.getByRole("complementary", { name: "Sources" });
@@ -2010,7 +2015,9 @@ describe("MessageBubble actions", () => {
 
     // One run of work: its header sums it up, and its steps keep model-turn order.
     fireEvent.click(
-      screen.getByRole("button", { name: "Searched the web and summarized earlier messages" }),
+      screen.getByRole("button", {
+        name: "Searched the web, summarized earlier messages and read pages",
+      }),
     );
     const search = screen.getByRole("button", { name: "Searched the web" });
     const compact = screen.getByRole("button", { name: "Earlier messages shortened" });

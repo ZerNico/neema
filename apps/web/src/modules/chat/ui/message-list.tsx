@@ -80,7 +80,7 @@ import { BrowserActivityBlock } from "./browser-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
-import { WorkGroupBlock } from "./work-group-block.tsx";
+import { stepActivities, WorkGroupBlock } from "./work-group-block.tsx";
 import { useSourcesPanel } from "./sources-panel.tsx";
 import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
@@ -836,8 +836,10 @@ const AssistantBody = memo(function AssistantBody({
   return parts.map((part, index) => {
     const live = streaming && index === parts.length - 1;
     if (part.kind !== "work") return renderPart(part, index, live);
-    // One step is its own line already; a group around it would only nest it.
-    if (part.steps.length === 1) return renderPart(part.steps[0]!, index, live);
+    // A lone step without calls (reasoning, a compaction) keeps its own row:
+    // a work line would only repeat it. Any call, even one, gets the line.
+    if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
+      return renderPart(part.steps[0]!, index, live);
     return (
       <WorkGroupBlock
         key={part.key}
@@ -1118,7 +1120,9 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         !showReasoning &&
         !toolRunning &&
         !compacting &&
-        !draftLive ? (
+        !draftLive &&
+        // A live work line already says "Thinking" between its steps.
+        parts.at(-1)?.kind !== "work" ? (
           <span className="text-shimmer">Thinking…</span>
         ) : null}
         {message.status === "error" ? (

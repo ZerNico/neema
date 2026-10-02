@@ -50,12 +50,17 @@ const renderGroup = (part: WorkPart, live: boolean) =>
   );
 
 describe("a run of work", () => {
-  it("names the current step with a running clock while it is live, and stays open", () => {
+  it("says it is working, with a running clock, while live, and stays open", () => {
     const now = Date.now();
     renderGroup(group(call("a", { status: "running", startedAt: now - 5_000 })), true);
-    const header = screen.getByRole("button", { name: /^Searching the web · \d+s/ });
+    const header = screen.getByRole("button", { name: /^Working · [5-9]s/ });
     expect(header).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("step web")).toBeInTheDocument();
+  });
+
+  it("says it is thinking between calls, in its own header rather than a line below", () => {
+    renderGroup(group(call("a", { startedAt: Date.now() - 2_000, completedAt: Date.now() })), true);
+    expect(screen.getByRole("button", { name: /^Thinking · \d+s/ })).toBeInTheDocument();
   });
 
   it("folds into how long it worked once settled, and never hides a failure", () => {

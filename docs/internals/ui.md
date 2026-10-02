@@ -307,9 +307,11 @@ false`), so a page body is written against data already there. This includes loc
   would close while the model decides its next call and reopen when it makes it.
 - An answer's own work is one line, as in ChatGPT and Claude: `projectAssistantBody` folds each
   run of reasoning, searches, reads, commands and other machine steps between pieces of text
-  into a `work` part (`work-group-block.tsx`). While it is the newest part of a streaming
-  answer it is open, its header naming the current step with a running clock; once the answer
-  moves on it folds into "Worked for 42s", or a past-tense summary when the calls carry no
-  timing, with failures counted in the header. What the person acts on or receives stays
-  outside: questions, plans, memory saves, draft and document cards, research and files. A run
-  of one step renders as that step, since a group would only nest it.
+  into a `work` part (`work-group-block.tsx`), even a run of one call, so every answer reads
+  the same. While it is the newest part of a streaming answer it is open, its header saying
+  "Working" or "Thinking" with a running clock while the step rows below name the detail; the
+  separate "Thinking…" line is not drawn under it. Once the answer moves on it folds into
+  "Worked for 42s", or a past-tense summary when the calls carry no timing, with failures
+  counted in the header. A lone step without calls (reasoning, a compaction) keeps its own row.
+  What the person acts on or receives stays outside: questions, plans, memory saves, draft and
+  document cards, research and files.

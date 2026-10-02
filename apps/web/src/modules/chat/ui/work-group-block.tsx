@@ -36,7 +36,9 @@ export function stepLabel(step: WorkStep): string {
     case "reasoning":
       return "Thinking";
     case "web":
-      return step.activities.some((call) => call.name === "read_url" && call.status === "running")
+      return step.activities.some(
+        (call) => call.name === "read_url" && call.status === "running",
+      ) || step.activities.every((call) => call.name === "read_url")
         ? "Reading pages"
         : "Searching the web";
     case "knowledge":
@@ -145,8 +147,9 @@ function useElapsed(since: number, running: boolean) {
 
 /**
  * One line for a run of work. While it is the newest part of a streaming
- * answer it stays open, its header naming the current step with a running
- * clock; once the answer moves on it folds into "Worked for 42s".
+ * answer it stays open, its header saying "Working" or "Thinking" with a
+ * running clock while the steps below name the detail; once the answer moves
+ * on it folds into "Worked for 42s".
  */
 export function WorkGroupBlock({
   part,
@@ -167,10 +170,12 @@ export function WorkGroupBlock({
   const [mountedAt] = useState(() => Date.now());
   const elapsed = useElapsed(span?.start ?? mountedAt, running);
   const failed = calls.filter((call) => call.status === "error").length;
-  const current = part.steps.at(-1)!;
 
+  // Live, the steps below name what is happening; the header only says
+  // whether a call is out or the model is deciding its next move, and how long.
+  const callOut = calls.some((call) => call.status === "running");
   const label = running
-    ? `${stepLabel(current)} · ${formatDuration(elapsed)}`
+    ? `${callOut ? "Working" : "Thinking"} · ${formatDuration(elapsed)}`
     : span && span.end - span.start >= 1000
       ? `Worked for ${formatDuration(span.end - span.start)}`
       : workSummary(part.steps);
