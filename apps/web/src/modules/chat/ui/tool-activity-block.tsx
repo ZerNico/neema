@@ -146,7 +146,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
       {failed ? (
         <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
           <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="text-warning size-3.5" />
-          Couldn’t open
+          Couldn’t read
         </span>
       ) : (
         <span className="text-muted-foreground/70 hidden shrink-0 text-xs sm:inline">
@@ -216,7 +216,7 @@ export function ToolActivityBlock({
     : allFailed
       ? searches.length > 0
         ? "Couldn’t search the web"
-        : "Couldn’t open the pages"
+        : "Couldn’t read the pages"
       : searches.length > 0
         ? `Searched the web${suffix}`
         : `Read ${pages.length === 1 ? "a page" : `${pages.length} pages`}${suffix}`;

@@ -182,9 +182,9 @@ describe("ToolActivityBlock", () => {
       />,
     );
     await user.click(toggle());
-    expect(screen.getAllByText("Couldn’t open")).toHaveLength(1);
-    expect(screen.getByText("Drizzle docs").closest("li")).toHaveTextContent("Couldn’t open");
-    expect(screen.getByText("Effect blog").closest("li")).not.toHaveTextContent("Couldn’t open");
+    expect(screen.getAllByText("Couldn’t read")).toHaveLength(1);
+    expect(screen.getByText("Drizzle docs").closest("li")).toHaveTextContent("Couldn’t read");
+    expect(screen.getByText("Effect blog").closest("li")).not.toHaveTextContent("Couldn’t read");
   });
 
   it("only offers the source-panel action after completion", async () => {
