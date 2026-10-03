@@ -66,13 +66,15 @@ describe("ModelPicker", () => {
     expect(onChange).toHaveBeenCalledWith("sonnet");
   });
 
-  it("groups the models under their provider", async () => {
+  it("lists every model in the order given, naming each one's provider", async () => {
     renderPicker();
     await openPicker();
 
-    expect(screen.getByRole("group", { name: "Anthropic" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "OpenAI" })).toBeInTheDocument();
-    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Claude Sonnet 5Anthropic",
+      "Claude Opus 5Anthropic",
+      "GPT-5OpenAI",
+    ]);
   });
 
   it("marks the current model", async () => {
@@ -96,8 +98,6 @@ describe("ModelPicker", () => {
     expect(options[0]).toHaveTextContent("Claude Opus 5");
   });
 
-  // The provider name is never shown on the row itself, so typing it has to
-  // work or the grouping heading is the only way to find a provider's models.
   it("filters on the provider name too", async () => {
     const { user } = renderPicker();
     await openPicker();
@@ -113,7 +113,7 @@ describe("ModelPicker", () => {
       models: [{ ...MODELS[2]!, description: "Fast, good for everyday questions" }, MODELS[0]!],
     });
     await openPicker();
-    expect(screen.getByText("Fast, good for everyday questions")).toBeVisible();
+    expect(screen.getByText("OpenAI · Fast, good for everyday questions")).toBeVisible();
     await user.type(screen.getByPlaceholderText("Search models…"), "everyday");
     const options = screen.getAllByRole("option");
     expect(options).toHaveLength(1);
@@ -144,5 +144,27 @@ describe("ModelPicker", () => {
 
     trigger.click();
     expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("puts the best name match first while searching", async () => {
+    const { user } = renderPicker({
+      models: [{ ...MODELS[0]!, description: "Better than GPT-5 at prose" }, ...MODELS.slice(1)],
+    });
+    await openPicker();
+    await user.type(screen.getByPlaceholderText("Search models…"), "gpt");
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "GPT-5OpenAI",
+      "Claude Sonnet 5Anthropic · Better than GPT-5 at prose",
+    ]);
+  });
+
+  it("leaves the provider off rows when every model comes from one", async () => {
+    renderPicker({ models: MODELS.slice(0, 2) });
+    await openPicker();
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Claude Sonnet 5",
+      "Claude Opus 5",
+    ]);
   });
 });

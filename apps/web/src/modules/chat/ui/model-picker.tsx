@@ -1,52 +1,29 @@
-import { useMemo, useState } from "react";
-import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
-import type { Capabilities } from "~/modules/providers/ui/capability-icons.tsx";
-import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
+import * as m from "motion/react-m";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
+import { motionEase, useAppReducedMotion } from "~/ui/motion";
 import {
   Combobox,
-  ComboboxCollection,
   ComboboxContent,
   ComboboxEmpty,
-  ComboboxGroup,
   ComboboxInput,
   ComboboxItem,
-  ComboboxLabel,
   ComboboxList,
   ComboboxTrigger,
 } from "~/ui/primitives/combobox";
+import { rankModels, type PickableModel } from "./model-picker-rank.ts";
 
-export interface PickableModel {
-  id: string;
-  displayName: string;
-  /** The admin's plain-words note; optional so callers without it still fit. */
-  description?: string | null;
-  providerName: string;
-  contextLength: number | null;
-  capabilities: Capabilities | null;
-  reasoningEfforts?: ReadonlyArray<ReasoningEffort>;
-}
+export type { PickableModel } from "./model-picker-rank.ts";
 
-interface ProviderGroup {
-  /** Doubles as the group heading and as the key. */
-  value: string;
-  items: PickableModel[];
-}
-
-// A model is worth showing for the provider it comes from as much as for its
-// own name, so "sonnet" and "anthropic" should both find the same row.
-const matches = (model: PickableModel, query: string): boolean => {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  const haystack =
-    `${model.displayName} ${model.providerName} ${model.description ?? ""}`.toLowerCase();
-  return needle.split(/\s+/).every((word) => haystack.includes(word));
-};
+// Quick enough to follow the pointer, damped so it settles without a wobble.
+const slideSpring = { type: "spring", stiffness: 700, damping: 48, mass: 0.6 } as const;
 
 /**
- * Searchable, provider-grouped model list. Shared by the composer's model
- * button and the retry menu so both offer the same rows, the same grouping and
- * the same typeahead. Only the trigger (and an optional header) differs.
+ * Searchable model list, shared by the composer's model button, the retry menu
+ * and the agent and schedule forms, so all of them offer the same rows in the
+ * same order with the same typeahead. Only the trigger (and an optional
+ * header) differs. One list in the admin's global order; a search ranks it.
  */
 export function ModelPicker({
   models,
@@ -80,75 +57,145 @@ export function ModelPicker({
   side?: "top" | "bottom";
   emptyLabel?: string;
 }) {
-  // Providers keep the order their models arrive in (display name, from the
-  // server), so the list is stable between renders and refetches.
-  const groups = useMemo<ProviderGroup[]>(() => {
-    const byProvider = new Map<string, ProviderGroup>();
-    for (const model of models) {
-      const group = byProvider.get(model.providerName);
-      if (group) group.items.push(model);
-      else byProvider.set(model.providerName, { value: model.providerName, items: [model] });
-    }
-    return [...byProvider.values()];
-  }, [models]);
+  // Controlled so the header's actions can close the popup, and so the search
+  // starts empty each time it opens.
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlighted, setHighlighted] = useState<string | null>(null);
 
+  const items = useMemo(() => rankModels(models, query), [models, query]);
   const selected = useMemo(
     () => models.find((model) => model.id === value) ?? null,
     [models, value],
   );
-
-  // Controlled only so the header's actions can close the popup; model
-  // selection still closes it through the primitive's own change event.
-  const [open, setOpen] = useState(false);
+  // With a single provider its name on every row says nothing.
+  const showProvider = useMemo(
+    () => new Set(models.map((model) => model.providerName)).size > 1,
+    [models],
+  );
 
   return (
     <Combobox
       open={open}
-      onOpenChange={setOpen}
-      items={groups}
+      onOpenChange={(next: boolean) => {
+        setOpen(next);
+        if (next) setQuery("");
+      }}
+      items={items}
+      // rankModels filters and orders; the primitive's filter would only keep or drop.
+      filter={null}
+      inputValue={query}
+      onInputValueChange={setQuery}
       value={selected}
       disabled={disabled}
       onValueChange={(model: PickableModel | null) => {
         if (model) onChange(model.id);
       }}
+      onItemHighlighted={(model: PickableModel | undefined) => setHighlighted(model?.id ?? null)}
       itemToStringLabel={(model: PickableModel) => model.displayName}
       // Model rows are re-created by every refetch, so identity comparison
       // would drop the tick off the selected one.
       isItemEqualToValue={(a: PickableModel, b: PickableModel) => a.id === b.id}
-      filter={(model: PickableModel, query: string) => matches(model, query)}
       autoHighlight
     >
       <ComboboxTrigger render={trigger} disabled={disabled}>
         {children}
       </ComboboxTrigger>
-      <ComboboxContent side={side} align={align} className="w-72 min-w-72">
+      <ComboboxContent side={side} align={align} className="w-80 min-w-80">
         {header?.({ close: () => setOpen(false) })}
         <ComboboxInput placeholder="Search models…" showTrigger={false} />
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
-        <ComboboxList>
-          {(group: ProviderGroup) => (
-            <ComboboxGroup key={group.value} items={group.items}>
-              <ComboboxLabel>{group.value}</ComboboxLabel>
-              <ComboboxCollection>
-                {(model: PickableModel) => (
-                  // oxlint-disable-next-line shadcn/no-restyle -- reserves room for the selected check, which sits absolute at right-2
-                  <ComboboxItem key={model.id} value={model} className="pr-9">
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{model.displayName}</span>
-                      {model.description ? (
-                        <span className="text-muted-foreground truncate text-xs">
-                          {model.description}
-                        </span>
-                      ) : null}
-                    </span>
-                    <CapabilityIcons capabilities={model.capabilities} audience="user" />
-                  </ComboboxItem>
-                )}
-              </ComboboxCollection>
-            </ComboboxGroup>
-          )}
+        <ComboboxList className="relative">
+          <HighlightIndicator id={highlighted} />
+          {items.map((model) => (
+            <ModelRow key={model.id} model={model} showProvider={showProvider} />
+          ))}
         </ComboboxList>
       </ComboboxContent>
     </Combobox>
+  );
+}
+
+function ModelRow({ model, showProvider }: { model: PickableModel; showProvider: boolean }) {
+  const detail = [showProvider ? model.providerName : null, model.description]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    // HighlightIndicator draws the highlight once and slides it between rows.
+    <ComboboxItem
+      value={model}
+      data-model-id={model.id}
+      highlight="shared"
+      // oxlint-disable-next-line shadcn/no-restyle -- reserves room for the selected check, which sits absolute at right-2
+      className="pr-9"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{model.displayName}</span>
+        {detail ? <span className="text-muted-foreground truncate text-xs">{detail}</span> : null}
+      </span>
+      <CapabilityIcons capabilities={model.capabilities} audience="user" />
+    </ComboboxItem>
+  );
+}
+
+/**
+ * One highlight for the whole list that slides to the highlighted row instead
+ * of each row lighting up on its own. It sits inside the scrolling list and is
+ * placed by the row's offset, so scrolling moves it with the rows for free.
+ */
+function HighlightIndicator({ id }: { id: string | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduced = useAppReducedMotion();
+  const [box, setBox] = useState<{
+    y: number;
+    height: number;
+    visible: boolean;
+    /** Slide only from a visible highlight; one that reappears jumps into place. */
+    slide: boolean;
+  } | null>(null);
+
+  // Measured after every render: rows move whenever the list is filtered,
+  // not only when the highlight changes. Equal boxes keep the
+  // previous state, so an unchanged measure does not render again.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- deliberately every render, see above
+  useLayoutEffect(() => {
+    const list = ref.current?.parentElement;
+    const row =
+      id === null
+        ? undefined
+        : [...(list?.querySelectorAll<HTMLElement>("[data-model-id]") ?? [])].find(
+            (element) => element.dataset.modelId === id,
+          );
+    setBox((previous) => {
+      if (!row) return previous?.visible ? { ...previous, visible: false } : previous;
+      const next = {
+        y: row.offsetTop,
+        height: row.offsetHeight,
+        visible: true,
+        slide: previous?.visible ?? false,
+      };
+      return previous &&
+        previous.visible &&
+        previous.y === next.y &&
+        previous.height === next.height
+        ? previous
+        : next;
+    });
+  });
+
+  const move = box?.slide && !reduced ? slideSpring : { duration: 0 };
+  return (
+    <m.div
+      ref={ref}
+      aria-hidden
+      className="bg-accent pointer-events-none absolute inset-x-1.5 top-0 rounded-2xl"
+      initial={false}
+      animate={
+        box
+          ? { y: box.y, height: box.height, opacity: box.visible ? 1 : 0 }
+          : { height: 0, opacity: 0 }
+      }
+      transition={{ y: move, height: move, opacity: { duration: 0.12, ease: motionEase } }}
+    />
   );
 }
