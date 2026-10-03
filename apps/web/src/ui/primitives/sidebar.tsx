@@ -468,6 +468,7 @@ const sidebarMenuButtonVariants = cva(
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
         lg: "h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!",
+        tile: "h-auto flex-col justify-center gap-1.5 px-0 py-2.5 text-center text-2xs text-muted-foreground bg-sidebar-accent/40 [&_svg]:size-4.5 [&_svg]:text-sidebar-foreground data-active:shadow-[inset_0_0_0_1px_var(--sidebar-ring)]",
       },
     },
     defaultVariants: {

@@ -54,9 +54,19 @@ export function AppSidebar({
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const trimmed = pathname.replace(/\/$/, "");
   const { data: capabilities } = useQuery(capabilitiesQuery);
-  const onChatsPage = trimmed === "/chats";
-  const onAgentsPage = trimmed.startsWith("/agents");
-  const onKnowledgePage = trimmed.startsWith("/knowledge");
+  const destinations = [
+    { to: "/projects", label: "Projects", icon: Folder01Icon, shown: capabilities?.projectsUse },
+    { to: "/agents", label: "Agents", icon: Robot01Icon, shown: capabilities?.agentsUse },
+    {
+      to: "/knowledge",
+      label: "Knowledge",
+      icon: FolderLibraryIcon,
+      shown: capabilities?.knowledgeUse,
+    },
+    { to: "/schedules", label: "Schedules", icon: Calendar03Icon, shown: capabilities?.schedules },
+    { to: "/skills", label: "Skills", icon: Book02Icon, shown: capabilities?.skillsUse },
+    { to: "/chats", label: "Chats", icon: BubbleChatIcon, shown: true },
+  ].filter((destination) => destination.shown);
 
   return (
     <Sidebar>
@@ -76,62 +86,22 @@ export function AppSidebar({
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
             New chat
           </Link>
-          <SidebarMenu>
-            {capabilities?.projectsUse ? (
-              <SidebarMenuItem>
+          {/* Tiles keep every destination one labelled click away in two rows,
+            leaving the height to the chat list. */}
+          {/* oxlint-disable-next-line shadcn/no-restyle -- a tile grid, not the menu's vertical list */}
+          <SidebarMenu className={cn("grid gap-1", tileColumns(destinations.length))}>
+            {destinations.map((destination) => (
+              <SidebarMenuItem key={destination.to}>
                 <SidebarMenuButton
-                  isActive={trimmed.startsWith("/projects")}
-                  render={<Link to="/projects" />}
+                  size="tile"
+                  isActive={trimmed.startsWith(destination.to)}
+                  render={<Link to={destination.to} />}
                 >
-                  <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} />
-                  Projects
+                  <HugeiconsIcon icon={destination.icon} strokeWidth={2} />
+                  {destination.label}
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            ) : null}
-            {capabilities?.agentsUse ? (
-              <SidebarMenuItem>
-                <SidebarMenuButton isActive={onAgentsPage} render={<Link to="/agents" />}>
-                  <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
-                  Agents
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ) : null}
-            {capabilities?.knowledgeUse ? (
-              <SidebarMenuItem>
-                <SidebarMenuButton isActive={onKnowledgePage} render={<Link to="/knowledge" />}>
-                  <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
-                  Knowledge
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ) : null}
-            {capabilities?.schedules ? (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={trimmed.startsWith("/schedules")}
-                  render={<Link to="/schedules" />}
-                >
-                  <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} />
-                  Schedules
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ) : null}
-            {capabilities?.skillsUse ? (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={trimmed.startsWith("/skills")}
-                  render={<Link to="/skills" />}
-                >
-                  <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
-                  Skills
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ) : null}
-            <SidebarMenuItem>
-              <SidebarMenuButton isActive={onChatsPage} render={<Link to="/chats" />}>
-                <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
-                Chats
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            ))}
           </SidebarMenu>
         </SidebarHeader>
         {/* Match the chat scroller's soft edge; padding keeps the first and last
@@ -154,6 +124,13 @@ export function AppSidebar({
       </ClosesOnLink>
     </Sidebar>
   );
+}
+
+// Four tiles read better as two pairs than as three and a straggler.
+function tileColumns(count: number) {
+  if (count >= 5) return "grid-cols-3";
+  if (count === 4 || count === 2) return "grid-cols-2";
+  return count === 3 ? "grid-cols-3" : "grid-cols-1";
 }
 
 function ConversationListSkeleton() {
