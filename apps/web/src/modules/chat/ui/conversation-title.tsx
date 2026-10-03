@@ -207,18 +207,13 @@ export function ConversationTitle({
           {titleContents}
         </span>
       </TooltipTrigger>
-      <TooltipContent
-        side="right"
-        align="center"
-        sideOffset={48}
-        showArrow={false}
-        // oxlint-disable-next-line shadcn/no-restyle -- a two line tooltip; the default padding is tuned for one
-        className="max-w-80 flex-col items-start gap-0.5 whitespace-normal py-2"
-      >
-        <span className="font-medium leading-snug">{title}</span>
-        {relativeAge ? (
-          <span className="text-background/70 leading-snug">Created {relativeAge}</span>
-        ) : null}
+      <TooltipContent side="right" align="center" sideOffset={48} showArrow={false}>
+        <span className="flex flex-col gap-0.5">
+          <span className="font-medium leading-snug">{title}</span>
+          {relativeAge ? (
+            <span className="text-muted-foreground leading-snug">Created {relativeAge}</span>
+          ) : null}
+        </span>
       </TooltipContent>
     </Tooltip>
   );
