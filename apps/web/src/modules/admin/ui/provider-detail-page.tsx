@@ -28,8 +28,16 @@ import {
 } from "./model-settings-form.tsx";
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { modelsQuery, providersQuery } from "./providers-page.tsx";
-import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
-import type { ReasoningEffortFormat } from "~/modules/providers/model-config.ts";
+import {
+  getPreset,
+  effectiveSettings,
+  type PresetId,
+  type ProviderSettings,
+} from "@chat/model-client/presets";
+import { readServerError } from "~/server-error.ts";
+import { ProviderSettingsFields } from "./provider-settings-fields.tsx";
+import { FORMAT_LABELS, REASONING_LABELS } from "./provider-settings-labels.ts";
+
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -52,13 +60,6 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
 import { cn } from "~/ui/utils";
@@ -114,6 +115,8 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       </Page>
     );
   }
+  const preset = getPreset(provider.preset);
+  const settings = effectiveSettings(preset, provider.settings);
 
   return (
     <Page
@@ -171,28 +174,29 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       <Section title="Connection">
         <ListCard>
           <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">Kind</span>
-            <span className="text-sm">{PROVIDER_PRESETS[provider.kind].label}</span>
+            <span className="text-muted-foreground w-24 shrink-0 text-sm">Service</span>
+            <span className="text-sm">{preset.label}</span>
           </ListRow>
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">Base URL</span>
             <span className="min-w-0 truncate font-mono text-sm">{provider.baseUrl}</span>
           </ListRow>
           <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">Reasoning effort</span>
-            <span className="text-sm">
-              {provider.kind === "openrouter"
-                ? "Nested (OpenRouter)"
-                : provider.reasoningEffortFormat === "unsupported"
-                  ? "Unsupported"
-                  : provider.reasoningEffortFormat === "flat"
-                    ? "Flat"
-                    : "Nested"}
-            </span>
+            <span className="text-muted-foreground w-24 shrink-0 text-sm">API</span>
+            <span className="text-sm">{FORMAT_LABELS[settings.format]}</span>
           </ListRow>
+          {/* Responses always takes a level; on Chat Completions the provider names its field. */}
+          {settings.format === "chat-completions" ? (
+            <ListRow>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">Reasoning level</span>
+              <span className="text-sm">{REASONING_LABELS[settings.reasoning]}</span>
+            </ListRow>
+          ) : null}
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">API key</span>
-            <span className="text-muted-foreground text-sm">Encrypted at rest</span>
+            <span className="text-muted-foreground text-sm">
+              {provider.hasApiKey ? "Encrypted at rest" : "None"}
+            </span>
           </ListRow>
         </ListCard>
       </Section>
@@ -272,7 +276,12 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
         )}
       </Section>
 
-      <AddModelDialog providerId={providerId} open={addingModel} onOpenChange={setAddingModel} />
+      <AddModelDialog
+        providerId={providerId}
+        presetId={provider.preset}
+        open={addingModel}
+        onOpenChange={setAddingModel}
+      />
 
       <ModelEditDialog
         model={editingModel}
@@ -287,10 +296,13 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
 
 export function AddModelDialog({
   providerId,
+  presetId,
   open,
   onOpenChange,
 }: {
   providerId: string;
+  /** Azure names deployments, which no catalog lists, so its field asks for one. */
+  presetId?: PresetId;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -366,7 +378,9 @@ export function AddModelDialog({
         <DialogHeader>
           <DialogTitle>Add model</DialogTitle>
           <DialogDescription>
-            Search the provider’s live catalog, or type a model ID if the catalog is unavailable.
+            {presetId === "azure"
+              ? "Search your resource’s deployments, or type a deployment name."
+              : "Search the provider’s live catalog, or type a model ID if the catalog is unavailable."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -378,11 +392,14 @@ export function AddModelDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-model`}>Model</FieldLabel>
+              <FieldLabel htmlFor={`${id}-model`}>
+                {presetId === "azure" ? "Deployment name" : "Model"}
+              </FieldLabel>
               <ModelCombobox
                 inputId={`${id}-model`}
                 providerId={providerId}
                 disabled={add.isPending}
+                {...(presetId === "azure" ? { placeholder: "my-gpt-deployment" } : {})}
                 onPick={(picked) => {
                   selectedId.current = picked.id;
                   setPick(picked);
@@ -403,6 +420,14 @@ export function AddModelDialog({
                       picked.pricing?.output === null || picked.pricing?.output === undefined
                         ? ""
                         : String(picked.pricing.output),
+                    cacheReadPrice:
+                      picked.pricing?.cacheRead === undefined
+                        ? ""
+                        : String(picked.pricing.cacheRead),
+                    cacheWritePrice:
+                      picked.pricing?.cacheWrite === undefined
+                        ? ""
+                        : String(picked.pricing.cacheWrite),
                   }));
                 }}
                 onInput={(value) => {
@@ -484,26 +509,25 @@ function EditProviderDialog({
   provider: {
     id: string;
     name: string;
-    kind: ProviderKind;
+    preset: PresetId;
     baseUrl: string;
-    reasoningEffortFormat: ReasoningEffortFormat;
+    settings: ProviderSettings;
   };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
-  const defaultBaseUrl = PROVIDER_PRESETS[provider.kind].baseUrl;
+  const preset = getPreset(provider.preset);
   // The default shows as the placeholder, so a provider on it opens with an empty field.
-  const initialBaseUrl = provider.baseUrl === defaultBaseUrl ? "" : provider.baseUrl;
+  const initialBaseUrl = provider.baseUrl === preset.baseUrl ? "" : provider.baseUrl;
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
-  const [reasoningEffortFormat, setReasoningEffortFormat] = useState(
-    provider.reasoningEffortFormat,
-  );
+  const [settings, setSettings] = useState(provider.settings);
   // Empty means "keep the current key", since the stored key can't be shown.
   const [apiKey, setApiKey] = useState("");
-  const complete = Boolean(name.trim());
+  const needsBaseUrl = preset.baseUrl === null;
+  const complete = Boolean(name.trim() && (!needsBaseUrl || baseUrl.trim()));
 
   const save = useMutation({
     mutationFn: () =>
@@ -512,7 +536,7 @@ function EditProviderDialog({
           providerId: provider.id,
           name: name.trim(),
           baseUrl: baseUrl.trim(),
-          ...(provider.kind === "openai-compatible" ? { reasoningEffortFormat } : {}),
+          settings,
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         },
       }),
@@ -537,7 +561,7 @@ function EditProviderDialog({
           if (save.isPending) return;
           setName(provider.name);
           setBaseUrl(initialBaseUrl);
-          setReasoningEffortFormat(provider.reasoningEffortFormat);
+          setSettings(provider.settings);
           setApiKey("");
         }
         onOpenChange(next);
@@ -567,42 +591,23 @@ function EditProviderDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                Base URL <OptionalMark />
+                Base URL {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={defaultBaseUrl}
+                placeholder={preset.baseUrl ?? preset.baseUrlPlaceholder ?? ""}
                 disabled={save.isPending}
               />
             </Field>
-            {provider.kind === "openai-compatible" ? (
-              <Field>
-                <FieldLabel htmlFor={`${id}-reasoning-format`}>Reasoning effort format</FieldLabel>
-                <Select
-                  value={reasoningEffortFormat}
-                  onValueChange={(value) =>
-                    value && setReasoningEffortFormat(value as ReasoningEffortFormat)
-                  }
-                  items={[
-                    { value: "unsupported", label: "Unsupported" },
-                    { value: "flat", label: "Flat (reasoning_effort)" },
-                    { value: "nested", label: "Nested (reasoning.effort)" },
-                  ]}
-                >
-                  <SelectTrigger id={`${id}-reasoning-format`} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unsupported">Unsupported</SelectItem>
-                    <SelectItem value="flat">Flat (reasoning_effort)</SelectItem>
-                    <SelectItem value="nested">Nested (reasoning.effort)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FieldDescription>Choose the request shape this endpoint accepts.</FieldDescription>
-              </Field>
-            ) : null}
+            <ProviderSettingsFields
+              id={id}
+              preset={preset}
+              settings={settings}
+              onChange={setSettings}
+              disabled={save.isPending}
+            />
             <Field>
               <FieldLabel htmlFor={`${id}-api-key`}>API key</FieldLabel>
               <Input
@@ -616,7 +621,11 @@ function EditProviderDialog({
               />
             </Field>
           </FieldGroup>
-          {save.isError ? <FieldError>Could not save the provider.</FieldError> : null}
+          {save.isError ? (
+            <FieldError>
+              {readServerError(save.error).reason ?? "Could not save the provider."}
+            </FieldError>
+          ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel

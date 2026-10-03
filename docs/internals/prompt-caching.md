@@ -36,20 +36,19 @@ the whole input again on every turn.
   a long tool loop reads its earlier rounds from cache. The second round anchor covers a round
   with more blocks than one anchor looks back over. The mark is provider-neutral and inert;
   the gateway alone decides what it means.
-- A round ends on its tool results, which the adapter sends as plain strings. The
-  `@effect/ai-openrouter` patch sends an anchored tool message's last result as a text part
-  so it can carry `cache_control`.
+- A round ends on its tool results, which go out as plain strings. A marked round's last
+  result goes out as a text part instead, so it can carry `cache_control`.
 - Chat requests to OpenRouter carry the conversation id as `session_id` and
   `prompt_cache_key`, keeping a conversation on the provider that holds its cache. Other
   servers never see them.
-- Claude caches only at explicit points, so for an `anthropic/` model on OpenRouter the gateway
-  turns each anchor into `cache_control`. OpenAI, Gemini, DeepSeek, Grok and local servers
+- Claude caches only at explicit points, so for an `anthropic/` model on OpenRouter or Vercel
+  the model client turns each anchor into `cache_control` (at most four, the first and the
+  latest). OpenAI, Gemini, DeepSeek, Grok and local servers
   cache a stable prefix by themselves and never see a marker, which also keeps strict
   OpenAI-compatible servers from rejecting an unknown field.
 - 9router discards client markers and places its own: its system text, last tool, and last
-  assistant message. Only a stable system block and tool list matter there. Its OpenAI-shaped
-  usage has no `prompt_tokens_details`, so the ledger shows no cached tokens even when the
-  cache hits.
+  assistant message. Only a stable system block and tool list matter there. Whether its usage
+  reports cache reads depends on the route behind it.
 
 ## Lazy tool families
 

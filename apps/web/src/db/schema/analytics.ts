@@ -40,6 +40,9 @@ export const usageEvents = pgTable(
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    // Tokens written to a provider's prompt cache, billed above the input
+    // price by some. Null where the provider did not say.
+    cacheWriteTokens: integer("cache_write_tokens"),
     reasoningTokens: integer("reasoning_tokens").notNull().default(0),
     // USD. Null = unknown (no provider-reported cost and no model pricing).
     usageComplete: boolean("usage_complete").notNull().default(true),

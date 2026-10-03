@@ -630,6 +630,7 @@ const recordCompactionUsage = Effect.fn("chat.recordCompactionUsage")(function* 
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
     cachedInputTokens: totals.cachedInputTokens,
+    cacheWriteTokens: totals.cacheWriteTokens,
     reasoningTokens: totals.reasoningTokens,
     ...resolveCost(totals, model?.pricing),
   });

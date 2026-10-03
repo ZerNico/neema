@@ -107,9 +107,6 @@ settings:
 
 catalogs:
   default:
-    '@effect/ai-openrouter':
-      specifier: 4.0.0-rc.117
-      version: 4.0.0-rc.117
     '@effect/sql-pg':
       specifier: 4.0.0-rc.117
       version: 4.0.0-rc.117
@@ -121,7 +118,6 @@ catalogs:
       version: 4.0.0-rc.117
 
 patchedDependencies:
-  '@effect/ai-openrouter@4.0.0-rc.117': 953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3
   '@office-kit/pptx-preview@0.11.0': e85d2415c0d8e9aad93a8a6a6e74b1fedb4c888834fe43361803d55a679df24f
 
 importers:
@@ -198,6 +194,9 @@ importers:
       '@chat/desktop-rpc':
         specifier: workspace:*
         version: link:../../packages/desktop-rpc
+      '@chat/model-client':
+        specifier: workspace:*
+        version: link:../../packages/model-client
       '@codemirror/lang-javascript':
         specifier: 6.2.5
         version: 6.2.5
@@ -228,9 +227,6 @@ importers:
       '@dnd-kit/react':
         specifier: 0.5.0
         version: 0.5.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@effect/ai-openrouter':
-        specifier: 'catalog:'
-        version: 4.0.0-rc.117(patch_hash=953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3)(effect@4.0.0-rc.117)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 4.0.0-rc.117(effect@4.0.0-rc.117)
@@ -545,6 +541,19 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+
+  packages/model-client:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.117
+    devDependencies:
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.1
+        version: 5.0.1(@types/node@26.6.2)(jsdom@30.1.1(@noble/hashes@2.3.0))(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
 
@@ -995,11 +1004,6 @@ packages:
 
   '@drizzle-team/brocli@0.12.1':
     resolution: {integrity: sha512-yHwomvolVafvUXhy5TdiJVkuNCxXn+bKOs2aWiWEQh/5YaV97Oa/abJz3dmx7lxgIUsUlS1Jl4mEfvJPo3YsVw==}
-
-  '@effect/ai-openrouter@4.0.0-rc.117':
-    resolution: {integrity: sha512-CNfMPZSsYQmg3vt6/H9lYr2Sov9e+EoviMTKoRGtVgl8EVoj+Hd00kgh1MrhGnNanR7ZNUNOOqTzN1ENV1LMlw==}
-    peerDependencies:
-      effect: ^4.0.0-rc.117
 
   '@effect/sql-pg@4.0.0-rc.117':
     resolution: {integrity: sha512-UQwKoulwVUQ5w4/lMonKf02VbMqZTrhgZXEreOWlTNNNVPYjlBZKBJNJmLPKZMHPMlHHltKjoi504uT/N9S2aQ==}
@@ -8967,10 +8971,6 @@ snapshots:
   '@dotenvx/primitives@0.8.0': {}
 
   '@drizzle-team/brocli@0.12.1': {}
-
-  '@effect/ai-openrouter@4.0.0-rc.117(patch_hash=953b87ebae7c5484ddea960704bdb5c84a8fb283e286791c11571015c77815d3)(effect@4.0.0-rc.117)':
-    dependencies:
-      effect: 4.0.0-rc.117
 
   '@effect/sql-pg@4.0.0-rc.117(effect@4.0.0-rc.117)':
     dependencies:

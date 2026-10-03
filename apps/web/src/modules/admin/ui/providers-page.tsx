@@ -7,7 +7,9 @@ import { createProvider, listModels, listProviders } from "../server/functions.t
 import { DefaultModelsDialog } from "./default-model-order.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import { PROVIDER_PRESETS, type ProviderKind } from "~/modules/providers/provider-kinds.ts";
+import { getPreset, type PresetId, type ProviderSettings } from "@chat/model-client/presets";
+import { readServerError } from "~/server-error.ts";
+import { PresetSelect, ProviderSettingsFields } from "./provider-settings-fields.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -19,16 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/ui/primitives/select";
 
 export const providersQuery = queryOptions({
   queryKey: ["admin", "providers"],
@@ -40,10 +35,19 @@ export const modelsQuery = queryOptions({
   queryFn: () => listModels(),
 });
 
-const PROVIDER_KIND_ITEMS = (Object.keys(PROVIDER_PRESETS) as ProviderKind[]).map((value) => ({
-  value,
-  label: PROVIDER_PRESETS[value].label,
-}));
+const EMPTY_DRAFT: {
+  name: string;
+  preset: PresetId;
+  baseUrl: string;
+  apiKey: string;
+  settings: ProviderSettings;
+} = {
+  name: "OpenRouter",
+  preset: "openrouter",
+  baseUrl: "",
+  apiKey: "",
+  settings: {},
+};
 
 export function ProvidersPage() {
   const { data: providers } = useSuspenseQuery(providersQuery);
@@ -100,7 +104,7 @@ export function ProvidersPage() {
                       {!provider.enabled ? <Badge variant="outline">Disabled</Badge> : null}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
-                      {PROVIDER_PRESETS[provider.kind].label} ·{" "}
+                      {getPreset(provider.preset).label} ·{" "}
                       {modelCount === 1 ? "1 model" : `${modelCount} models`}
                     </span>
                   </div>
@@ -136,24 +140,27 @@ function AddProviderDialog({
   const id = useId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<{
-    name: string;
-    kind: ProviderKind;
-    baseUrl: string;
-    apiKey: string;
-  }>({ name: "OpenRouter", kind: "openrouter", baseUrl: "", apiKey: "" });
-  const complete = Boolean(draft.name.trim() && draft.apiKey.trim());
-  const reset = () => setDraft({ name: "OpenRouter", kind: "openrouter", baseUrl: "", apiKey: "" });
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const preset = getPreset(draft.preset);
+  // A preset without a shared endpoint (Azure, self-hosted) needs its own.
+  const needsBaseUrl = preset.baseUrl === null;
+  const complete = Boolean(
+    draft.name.trim() &&
+    (!preset.keyRequired || draft.apiKey.trim()) &&
+    (!needsBaseUrl || draft.baseUrl.trim()),
+  );
+  const reset = () => setDraft(EMPTY_DRAFT);
 
   const add = useMutation({
     mutationFn: () =>
       createProvider({
         data: {
-          kind: draft.kind,
+          preset: draft.preset,
           name: draft.name.trim(),
-          apiKey: draft.apiKey.trim(),
-          // Blank uses the kind's default, which the placeholder shows.
+          ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+          // Blank uses the preset's endpoint, which the placeholder shows.
           ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
+          settings: draft.settings,
         },
       }),
     onSuccess: async (provider) => {
@@ -195,35 +202,25 @@ function AddProviderDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-kind`}>Kind</FieldLabel>
-              <Select
-                value={draft.kind}
-                onValueChange={(kind) => {
-                  if (!kind) return;
-                  const k = kind as ProviderKind;
+              <FieldLabel htmlFor={`${id}-preset`}>Service</FieldLabel>
+              <PresetSelect
+                id={`${id}-preset`}
+                value={draft.preset}
+                onChange={(next) =>
                   setDraft((d) => ({
                     ...d,
-                    kind: k,
+                    preset: next,
+                    // Settings belong to the preset they were chosen for.
+                    settings: {},
                     name:
-                      d.name === "" || d.name === PROVIDER_PRESETS[d.kind].label
-                        ? PROVIDER_PRESETS[k].label
+                      d.name === "" || d.name === getPreset(d.preset).label
+                        ? getPreset(next).label
                         : d.name,
-                  }));
-                }}
-                items={PROVIDER_KIND_ITEMS}
+                  }))
+                }
                 disabled={add.isPending}
-              >
-                <SelectTrigger id={`${id}-kind`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_KIND_ITEMS.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
+              {preset.note ? <FieldDescription>{preset.note}</FieldDescription> : null}
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
@@ -237,18 +234,27 @@ function AddProviderDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                Base URL <OptionalMark />
+                Base URL {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
                 value={draft.baseUrl}
                 onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
-                placeholder={PROVIDER_PRESETS[draft.kind].baseUrl}
+                placeholder={preset.baseUrl ?? preset.baseUrlPlaceholder ?? ""}
                 disabled={add.isPending}
               />
             </Field>
+            <ProviderSettingsFields
+              id={id}
+              preset={preset}
+              settings={draft.settings}
+              onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
+              disabled={add.isPending}
+            />
             <Field>
-              <FieldLabel htmlFor={`${id}-api-key`}>API key</FieldLabel>
+              <FieldLabel htmlFor={`${id}-api-key`}>
+                API key {preset.keyRequired ? null : <OptionalMark />}
+              </FieldLabel>
               <Input
                 id={`${id}-api-key`}
                 type="password"
@@ -259,7 +265,11 @@ function AddProviderDialog({
               />
             </Field>
           </FieldGroup>
-          {add.isError ? <FieldError>Could not add the provider.</FieldError> : null}
+          {add.isError ? (
+            <FieldError>
+              {readServerError(add.error).reason ?? "Could not add the provider."}
+            </FieldError>
+          ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
               Cancel

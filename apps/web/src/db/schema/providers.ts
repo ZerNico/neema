@@ -1,9 +1,9 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import type { PresetId, ProviderSettings } from "@chat/model-client";
 import type {
   ModelCapabilities,
   ModelPricing,
   ModelType,
-  ReasoningEffortFormat,
 } from "~/modules/providers/model-config.ts";
 
 export type JsonValue =
@@ -21,18 +21,15 @@ export type JsonValue =
 export const providers = pgTable("providers", {
   id: text().primaryKey(),
   name: text().notNull(),
-  // wire protocol family: openrouter today, openai-compatible for generic endpoints
-  kind: text({ enum: ["openrouter", "openai-compatible"] }).notNull(),
+  // Which service it is: the preset holds its endpoint, wire format and quirks.
+  preset: text().$type<PresetId>().notNull(),
+  // What an admin changed from the preset, only keys the preset lets them change.
+  settings: jsonb().$type<ProviderSettings>().notNull().default({}),
   baseUrl: text("base_url").notNull(),
-  // AES-256-GCM encrypted with PROVIDER_KEY_SECRET; never returned to clients
-  apiKeyCiphertext: text("api_key_ciphertext").notNull(),
+  // AES-256-GCM encrypted with PROVIDER_KEY_SECRET; never returned to clients.
+  // Null for a self-hosted server that takes no key.
+  apiKeyCiphertext: text("api_key_ciphertext"),
   enabled: boolean().notNull().default(true),
-  reasoningEffortFormat: text("reasoning_effort_format", {
-    enum: ["unsupported", "flat", "nested"],
-  })
-    .$type<ReasoningEffortFormat>()
-    .notNull()
-    .default("unsupported"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -60,7 +57,7 @@ export const models = pgTable(
     capabilities: jsonb()
       .$type<ModelCapabilities>()
       .notNull()
-      .default({ reasoning: false, tools: false, vision: false, files: false }),
+      .default({ imageOutput: false, reasoning: false, tools: false, vision: false, files: false }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     // USD per 1M tokens; prefilled from the provider catalog where it carries
     // prices (OpenRouter), admin-editable. Null = unknown, so usage costs then

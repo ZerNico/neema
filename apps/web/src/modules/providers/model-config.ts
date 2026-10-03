@@ -1,3 +1,5 @@
+import { sendsReasoningEffort } from "./provider-presets.ts";
+
 export const MODEL_TYPES = ["chat", "embedding"] as const;
 
 export type ModelType = (typeof MODEL_TYPES)[number];
@@ -13,20 +15,18 @@ export const REASONING_EFFORTS = [
   "max",
 ] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
-export type ReasoningEffortFormat = "unsupported" | "flat" | "nested";
 
 export const actionableReasoningEfforts = (
   capabilities: ModelCapabilities,
-  providerKind: "openrouter" | "openai-compatible",
-  format: ReasoningEffortFormat,
+  provider: Parameters<typeof sendsReasoningEffort>[0],
 ): ReasoningEffort[] =>
-  capabilities.reasoning && (providerKind === "openrouter" || format !== "unsupported")
+  capabilities.reasoning && sendsReasoningEffort(provider)
     ? [...(capabilities.reasoningEfforts ?? [])]
     : [];
 
 export interface ModelCapabilities {
-  /** Native image output; absent on older model records means disabled. */
-  imageOutput?: boolean;
+  /** Native image output, asked for per call where the provider supports it. */
+  imageOutput: boolean;
   reasoning: boolean;
   reasoningEfforts?: ReadonlyArray<ReasoningEffort>;
   tools: boolean;
@@ -34,7 +34,14 @@ export interface ModelCapabilities {
   files: boolean;
 }
 
-export type ModelPricing = { input: number; output: number } | { input: number; output: null };
+/**
+ * USD per 1M tokens. Cache rates are optional: without them a cached read or a
+ * cache write is priced as ordinary input.
+ */
+export type ModelPricing = ({ input: number; output: number } | { input: number; output: null }) & {
+  cacheRead?: number;
+  cacheWrite?: number;
+};
 
 interface CommonModelSettings {
   displayName: string;
@@ -57,7 +64,7 @@ export interface EmbeddingModelSettings extends CommonModelSettings {
   type: "embedding";
   embeddingDimensions: number | null;
   capabilities: {
-    imageOutput?: false;
+    imageOutput: false;
     reasoning: false;
     tools: false;
     vision: boolean;
@@ -76,6 +83,7 @@ export interface UnnormalizedModelSettings extends CommonModelSettings {
 }
 
 export const EMPTY_CAPABILITIES: ModelCapabilities = {
+  imageOutput: false,
   reasoning: false,
   tools: false,
   vision: false,
@@ -90,6 +98,7 @@ export const normalizeModelSettings = (settings: UnnormalizedModelSettings): Mod
       ...settings,
       type: "embedding",
       capabilities: {
+        imageOutput: false,
         reasoning: false,
         tools: false,
         vision: settings.capabilities.vision,

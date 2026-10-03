@@ -145,7 +145,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'Prov', 'openrouter', 'http://x', 'x')` as never,
       );
     }),
@@ -193,7 +193,7 @@ const makeProvider = Effect.fn("test.makeProvider")(function* (enabled: boolean)
   yield* db.insert(providers).values({
     id,
     name: `Prov ${id.slice(-4)}`,
-    kind: "openrouter",
+    preset: "openrouter",
     baseUrl: "http://x",
     apiKeyCiphertext: "x",
     enabled,
@@ -332,7 +332,13 @@ describe("model visibility", () => {
           type: "embedding",
           contextLength: 8192,
           embeddingDimensions: 1536,
-          capabilities: { reasoning: false, tools: false, vision: true, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: true,
+            files: false,
+          },
           pricing: { input: 0.02, output: null },
           enabled: false,
           access: "groups",
@@ -351,7 +357,13 @@ describe("model visibility", () => {
       type: "embedding",
       contextLength: 8192,
       embeddingDimensions: 1536,
-      capabilities: { reasoning: false, tools: false, vision: true, files: false },
+      capabilities: {
+        imageOutput: false,
+        reasoning: false,
+        tools: false,
+        vision: true,
+        files: false,
+      },
       pricing: { input: 0.02, output: null },
       enabled: false,
       access: "groups",
@@ -371,7 +383,13 @@ describe("model visibility", () => {
             type: "chat",
             contextLength: null,
             embeddingDimensions: null,
-            capabilities: { reasoning: false, tools: false, vision: false, files: false },
+            capabilities: {
+              imageOutput: false,
+              reasoning: false,
+              tools: false,
+              vision: false,
+              files: false,
+            },
             pricing: null,
             enabled: true,
             access: "groups",
@@ -402,7 +420,13 @@ describe("model visibility", () => {
           type: "chat",
           contextLength: 200_000,
           embeddingDimensions: null,
-          capabilities: { reasoning: true, tools: true, vision: false, files: true },
+          capabilities: {
+            imageOutput: false,
+            reasoning: true,
+            tools: true,
+            vision: false,
+            files: true,
+          },
           pricing: { input: 3, output: 12 },
           enabled: false,
           access: "groups",
@@ -422,7 +446,13 @@ describe("model visibility", () => {
       displayName: "Edited model",
       type: "chat",
       contextLength: 200_000,
-      capabilities: { reasoning: true, tools: true, vision: false, files: true },
+      capabilities: {
+        imageOutput: false,
+        reasoning: true,
+        tools: true,
+        vision: false,
+        files: true,
+      },
       pricing: { input: 3, output: 12 },
       enabled: false,
       access: "groups",

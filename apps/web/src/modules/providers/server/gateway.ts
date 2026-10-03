@@ -1,4 +1,12 @@
-import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
+import {
+  authHeaders,
+  Catalog,
+  endpoint,
+  isSensitivePrompt,
+  layer as modelClientLayer,
+  makeConnection,
+  type Connection,
+} from "@chat/model-client";
 import {
   Cause,
   Context,
@@ -19,16 +27,13 @@ import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import {
   EMPTY_CAPABILITIES,
-  REASONING_EFFORTS,
   type ModelCapabilities,
   type ModelPricing,
   type ModelType,
   type ReasoningEffort,
-  type ReasoningEffortFormat,
 } from "../model-config.ts";
 import { HermesCallableTools, withHermesTools } from "./hermes-tools.ts";
 import { ProviderRepo, type ProviderWithKey } from "./repo.ts";
-import { extractThinkTags } from "./think-extractor.ts";
 import { parseRetryAfter } from "~/server/retry-after.ts";
 
 /**
@@ -61,7 +66,6 @@ const embeddingDiagnostic = (status: number, retryAfter: string | undefined) => 
   if (status === 401 || status === 403) return { kind: "AuthenticationError" as const, status };
   return { kind: "InvalidRequestError" as const, status };
 };
-
 export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>()(
   "ProviderUnreachable",
   {
@@ -197,134 +201,17 @@ export const anchorLastMessage = (prompt: Prompt.Prompt): Prompt.Prompt => {
   ]);
 };
 
-// Claude caches only at explicit points; OpenAI, Gemini, DeepSeek, Grok and
-// local servers cache a stable prefix by themselves. A relay such as 9router
-// discards client markers and places its own.
-const explicitCacheModel = (providerKind: string, modelKey: string) =>
-  providerKind === "openrouter" && modelKey.startsWith("anthropic/");
-
-const withCacheControl = (prompt: Prompt.Prompt): Prompt.Prompt =>
-  Prompt.fromMessages(
-    prompt.content.map((message) =>
-      (message.role === "user" || message.role === "system" || message.role === "tool") &&
-      (message.options["cache"] as { anchor?: unknown } | null | undefined)?.anchor === true
-        ? Prompt.makeMessage(message.role, {
-            ...message,
-            options: {
-              ...message.options,
-              openrouter: {
-                ...(message.options["openrouter"] as object | null | undefined),
-                cacheControl: { type: "ephemeral" },
-              },
-            },
-          } as never)
-        : message,
-    ),
-  );
-
-const hasSensitivePrompt = (prompt: Prompt.Prompt): boolean =>
-  prompt.content.some(
-    (message) =>
-      (message.role === "assistant" &&
-        (message.options.openrouter?.reasoningDetails?.length ?? 0) > 0) ||
-      (message.role !== "system" &&
-        message.content.some(
-          (part) =>
-            (part.type === "file" && part.mediaType.startsWith("image/")) ||
-            ((part.type === "tool-call" || part.type === "reasoning") &&
-              (part.options.openrouter?.reasoningDetails?.length ?? 0) > 0),
-        )),
-  );
-
 const StreamedProviderError = Schema.Struct({ code: Schema.Int });
-
-const ModelsResponse = Schema.Struct({
-  data: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      name: Schema.optionalKey(Schema.String),
-      context_length: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-      supported_parameters: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
-      reasoning: Schema.optionalKey(
-        Schema.NullOr(
-          Schema.Struct({
-            supported_efforts: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
-          }),
-        ),
-      ),
-      // OpenRouter: USD per token, as decimal strings. Generic providers omit it.
-      pricing: Schema.optionalKey(
-        Schema.NullOr(
-          Schema.Struct({
-            prompt: Schema.optionalKey(Schema.NullOr(Schema.String)),
-            completion: Schema.optionalKey(Schema.NullOr(Schema.String)),
-          }),
-        ),
-      ),
-      architecture: Schema.optionalKey(
-        Schema.Struct({
-          input_modalities: Schema.optionalKey(Schema.Array(Schema.String)),
-          output_modalities: Schema.optionalKey(Schema.Array(Schema.String)),
-        }),
-      ),
-    }),
-  ),
-});
-
-const parseCatalogPrice = (value: string | null | undefined) =>
-  typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
-
-/**
- * Catalog prices arrive as USD-per-token decimal strings ("0.0000025");
- * the app stores USD per 1M tokens. Free models ("0") map to a zero price,
- * which is a statement, not an unknown.
- */
-export const catalogPricing = (
-  pricing: { prompt?: string | null; completion?: string | null } | null | undefined,
-): CatalogModel["pricing"] => {
-  // Number(null) is 0, so only a non-empty string is a stated price.
-  const input = parseCatalogPrice(pricing?.prompt);
-  const output = parseCatalogPrice(pricing?.completion);
-  if (!Number.isFinite(input)) return null;
-  return {
-    input: input * 1_000_000,
-    output: Number.isFinite(output) ? output * 1_000_000 : null,
-  };
-};
-
-export const inferType = (
-  outputModalities: ReadonlyArray<string> | undefined,
-): ModelType | null => {
-  // OpenRouter lists embedding models with `output_modalities: ["embeddings"]`
-  // (no text), so they used to fall through to "chat" and never appeared as
-  // embedding candidates in the picker. Plain OpenAI-compatible catalogs omit
-  // the field entirely, in which case the admin still sets the type by hand.
-  if (!outputModalities) return "chat";
-  if (outputModalities.includes("text")) return "chat";
-  if (outputModalities.includes("embeddings") || outputModalities.includes("embedding"))
-    return "embedding";
-  // Image/audio/video generation, reranking and speech are out of scope for the registry.
-  return null;
-};
-
-// OpenRouter-style capability signals; plain OpenAI-compatible endpoints
-// usually return neither field, in which case everything stays false and the
-// admin toggles capabilities manually.
-const inferCapabilities = (m: {
-  supported_parameters?: ReadonlyArray<string> | null;
-  architecture?: {
-    input_modalities?: ReadonlyArray<string>;
-    output_modalities?: ReadonlyArray<string>;
-  };
-}): ModelCapabilities => {
-  const params = m.supported_parameters ?? [];
-  return {
-    ...(m.architecture?.output_modalities?.includes("image") ? { imageOutput: true } : {}),
-    reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
-    tools: params.includes("tools"),
-    vision: (m.architecture?.input_modalities ?? []).includes("image"),
-    files: (m.architecture?.input_modalities ?? []).includes("file"),
-  };
+/** Responses stream errors name their kind as a string; only these known codes are kept. */
+const StreamedErrorCode = Schema.Struct({ code: Schema.String });
+const RESPONSES_ERROR_KINDS: Record<
+  string,
+  "RateLimitError" | "QuotaExhaustedError" | "AuthenticationError" | "InternalProviderError"
+> = {
+  rate_limit_exceeded: "RateLimitError",
+  insufficient_quota: "QuotaExhaustedError",
+  invalid_api_key: "AuthenticationError",
+  server_error: "InternalProviderError",
 };
 
 // Embedding responses are the OpenAI-compatible shape both provider kinds
@@ -362,57 +249,52 @@ export interface EmbeddingResult {
   readonly inputTokens: number | null;
 }
 
+/** The package's view of a stored provider: its preset, endpoint, key and overrides. */
+const connectionOf = (provider: ProviderWithKey): Connection | null =>
+  makeConnection({
+    provider: provider.id,
+    preset: provider.preset,
+    baseUrl: provider.baseUrl,
+    apiKey: provider.apiKey,
+    settings: provider.settings,
+  });
+
+/** A stored provider as a connection, or ModelNotFound when it cannot be reached at all. */
+const connect = (provider: ProviderWithKey, notFound: string) => {
+  const connection = connectionOf(provider);
+  return connection ? Effect.succeed(connection) : new ModelNotFound({ modelId: notFound });
+};
+
 // Separate from the stored-model lookup so a model can be tried before it is saved.
 const buildModelLayer = (
-  provider: ProviderWithKey,
+  connection: Connection,
   model: { providerId: string; modelKey: string; capabilities: ModelCapabilities },
-  config?: {
-    max_tokens?: number;
+  config: {
+    maxOutputTokens?: number;
     reasoningEffort?: ReasoningEffort | null;
     cacheKey?: string;
-  },
+  } = {},
   imageOutput = false,
 ) => {
-  const actualImageOutput = imageOutput && model.capabilities.imageOutput === true;
-  const { reasoningEffort, cacheKey, ...requestConfig } = config ?? {};
-  const reasoningFormat: ReasoningEffortFormat =
-    provider.kind === "openrouter" ? "nested" : provider.reasoningEffortFormat;
-  const adapter = OpenRouterLanguageModel.model(model.modelKey, {
-    ...requestConfig,
-    ...(reasoningEffort && reasoningFormat === "nested"
-      ? { reasoning: { effort: reasoningEffort } }
-      : reasoningEffort && reasoningFormat === "flat"
-        ? { reasoning_effort: reasoningEffort }
-        : {}),
-    ...(actualImageOutput
-      ? { modalities: ["text", "image"] as const }
-      : provider.kind === "openrouter"
-        ? { modalities: ["text"] as const }
-        : {}),
-    // One key per conversation keeps OpenRouter on the provider holding
-    // its cache and helps OpenAI route to it. Unknown fields on strict
-    // OpenAI-compatible servers are rejected, so nobody else gets them.
-    ...(cacheKey && provider.kind === "openrouter"
-      ? { session_id: cacheKey, prompt_cache_key: cacheKey }
-      : {}),
-  }).pipe(
-    Layer.provide(
-      OpenRouterClient.layer({
-        apiKey: provider.apiKey,
-        apiUrl: provider.baseUrl,
-      }),
-    ),
-    Layer.provide(FetchHttpClient.layer),
-  );
-  // `capabilities.tools` means native tool calling. Without it the
-  // Hermes polyfill sits between the adapter and the toolkit loop:
-  // adapter → hermes → think extraction (in streamChat/generateText).
-  const layer = model.capabilities.tools ? adapter : withHermesTools(adapter);
+  const actualImageOutput =
+    imageOutput &&
+    model.capabilities.imageOutput === true &&
+    connection.preset.imageOutput &&
+    connection.settings.format === "chat-completions";
+  const adapter = modelClientLayer(connection, {
+    model: model.modelKey,
+    capabilities: model.capabilities,
+    maxOutputTokens: config.maxOutputTokens,
+    reasoningEffort: config.reasoningEffort,
+    cacheKey: config.cacheKey,
+    imageOutput: actualImageOutput,
+  }).pipe(Layer.provide(FetchHttpClient.layer));
+  // `capabilities.tools` means native tool calling. Without it the Hermes
+  // polyfill sits between the adapter and the toolkit loop.
   return {
     providerId: model.providerId,
-    layer,
+    layer: model.capabilities.tools ? adapter : withHermesTools(adapter),
     imageOutput: actualImageOutput,
-    explicitCache: explicitCacheModel(provider.kind, model.modelKey),
   };
 };
 
@@ -505,12 +387,6 @@ export class AiGateway extends Context.Service<
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
     >;
     /**
-     * Embeds a batch of inputs with a stored embedding model. Separate from the
-     * language-model path on purpose: `OpenRouterLanguageModel` covers chat
-     * completions only, while `POST /embeddings` is the shape both provider
-     * kinds expose. Callers batch and bound the inputs.
-     */
-    /**
      * Sends one short input to `POST /embeddings` for a model that may not be
      * stored yet, and returns the vector width the provider actually produced.
      * Catalogs do not state dimensions (verified against OpenRouter), so this
@@ -528,6 +404,11 @@ export class AiGateway extends Context.Service<
       { reply: string },
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
     >;
+    /**
+     * Embeds a batch of inputs with a stored embedding model through
+     * `POST /embeddings`, authenticated as the preset says. The queueing,
+     * validation and accounting stay here. Callers batch and bound the inputs.
+     */
     embed(input: {
       modelId: string;
       inputs: ReadonlyArray<string>;
@@ -548,83 +429,29 @@ export class AiGateway extends Context.Service<
       const analytics = yield* AnalyticsRepo;
       const embeddingPermits = yield* Semaphore.make(KNOWLEDGE_LIMITS.embeddingConcurrency);
 
-      const decodeModels = Schema.decodeUnknownEffect(ModelsResponse);
       const decodeEmbeddings = Schema.decodeUnknownEffect(EmbeddingsResponse);
 
       const fetchCatalog = Effect.fn("AiGateway.fetchCatalog")(function* (providerId: string) {
         const provider = yield* repo.getProviderWithKey(providerId);
         if (!provider) return yield* new ModelNotFound({ modelId: providerId });
-
-        // Both supported kinds expose an OpenAI-style GET /models.
-        //
-        // OpenRouter's listing is text-generation only; embedding models
-        // appear only when the query asks for that modality, so fetch both
-        // and merge for one admin autocomplete. A plain endpoint lists
-        // everything in one call, so it gets a single request.
-        const base = provider.baseUrl.replace(/\/$/, "");
-        const listing = (url: string) =>
-          httpClient
-            .execute(
-              HttpClientRequest.get(url).pipe(HttpClientRequest.bearerToken(provider.apiKey)),
-            )
-            .pipe(
-              Effect.flatMap((res) => res.json),
-              Effect.flatMap((json) => decodeModels(json)),
-              Effect.mapError(
-                (cause) => new ProviderUnreachable({ providerId, message: String(cause) }),
-              ),
-            );
-        const pages = yield* Effect.all(
-          provider.kind === "openrouter"
-            ? [listing(`${base}/models`), listing(`${base}/models?output_modalities=embeddings`)]
-            : [listing(`${base}/models`)],
-          { concurrency: 2 },
+        const connection = yield* connect(provider, providerId);
+        // The preset knows its listing: OpenRouter's two, Azure's deployments, or one.
+        const models = yield* Catalog.fetchCatalog(connection).pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.mapError(
+            (cause) =>
+              new ProviderUnreachable({ providerId, message: providerErrorMessage(cause) }),
+          ),
         );
-        const seen = new Set<string>();
-        const data = pages
-          .flatMap((page) => page.data)
-          .filter((m) => !seen.has(m.id) && seen.add(m.id));
-
-        return data.flatMap((m): CatalogModel[] => {
-          const type = inferType(m.architecture?.output_modalities);
-          const supportedEfforts = m.reasoning?.supported_efforts;
-          return type === null
-            ? []
-            : [
-                {
-                  id: m.id,
-                  name: m.name ?? m.id,
-                  type,
-                  contextLength: m.context_length ?? null,
-                  capabilities: {
-                    ...inferCapabilities(m),
-                    ...(provider.kind === "openrouter" && (supportedEfforts?.length ?? 0) > 0
-                      ? { reasoning: true }
-                      : {}),
-                    ...(provider.kind === "openrouter" && type === "chat" && supportedEfforts
-                      ? {
-                          reasoningEfforts: REASONING_EFFORTS.filter((effort) =>
-                            supportedEfforts.includes(effort),
-                          ),
-                        }
-                      : {}),
-                  },
-                  pricing: catalogPricing(m.pricing),
-                },
-              ];
-        });
+        return models satisfies ReadonlyArray<CatalogModel>;
       });
 
       // Streaming and one-shot must not drift apart on credentials, base url
       // or model key, so both resolve the provider layer through here.
-      // OpenRouterLanguageModel maps deltas/reasoning_details (incl. encrypted
-      // → "[REDACTED]"), fragmented tool calls, and usage to
-      // Response.StreamParts, and replays reasoning signatures on
-      // continuation turns.
       const resolveModel = Effect.fn("AiGateway.resolveModel")(function* (
         modelId: string,
         config?: {
-          max_tokens?: number;
+          maxOutputTokens?: number;
           reasoningEffort?: ReasoningEffort | null;
           cacheKey?: string;
         },
@@ -634,7 +461,8 @@ export class AiGateway extends Context.Service<
         if (!model) return yield* new ModelNotFound({ modelId });
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
-        return buildModelLayer(provider, model, config, imageOutput);
+        const connection = yield* connect(provider, modelId);
+        return buildModelLayer(connection, model, config, imageOutput);
       });
 
       // One place decides which provider rejections are recoverable, so chat
@@ -652,6 +480,7 @@ export class AiGateway extends Context.Service<
         // SSE error values are plain objects, not AiErrors. Their code is a
         // provider code, not the HTTP status of the already-open stream.
         const streamedError = Schema.decodeUnknownOption(StreamedProviderError)(cause);
+        const namedError = Schema.decodeUnknownOption(StreamedErrorCode)(cause);
         return new ProviderUnreachable({
           providerId,
           message,
@@ -659,12 +488,18 @@ export class AiGateway extends Context.Service<
             ? { diagnostic: { kind: reason._tag, ...(status === undefined ? {} : { status }) } }
             : Option.isSome(streamedError)
               ? { diagnostic: { kind: "ProviderStreamError", code: streamedError.value.code } }
-              : {}),
+              : Option.isSome(namedError)
+                ? {
+                    diagnostic: {
+                      kind: RESPONSES_ERROR_KINDS[namedError.value.code] ?? "ProviderStreamError",
+                    },
+                  }
+                : {}),
         });
       };
 
       const requestError = (providerId: string, prompt: Prompt.Prompt, imageOutput = false) => {
-        const sensitive = imageOutput || hasSensitivePrompt(prompt);
+        const sensitive = imageOutput || isSensitivePrompt(prompt);
         return (cause: unknown) => {
           const error = classify(providerId, cause);
           // Provider/decode failures may quote image bytes or opaque replay signatures.
@@ -706,13 +541,12 @@ export class AiGateway extends Context.Service<
               providerId,
               layer: modelLayer,
               imageOutput,
-              explicitCache,
             } = yield* resolveModel(
               input.modelId,
               {
                 ...(input.maxOutputTokens === undefined
                   ? {}
-                  : { max_tokens: input.maxOutputTokens }),
+                  : { maxOutputTokens: input.maxOutputTokens }),
                 ...(input.reasoningEffort === undefined
                   ? {}
                   : { reasoningEffort: input.reasoningEffort }),
@@ -720,7 +554,7 @@ export class AiGateway extends Context.Service<
               },
               input.imageOutput === true,
             );
-            const prompt = explicitCache ? withCacheControl(input.prompt) : input.prompt;
+            const prompt = input.prompt;
 
             const parts = input.toolkit
               ? LanguageModel.streamText({
@@ -730,9 +564,7 @@ export class AiGateway extends Context.Service<
                 })
               : LanguageModel.streamText({ prompt });
 
-            // Always-on extractor: models emitting raw <think> blocks in text
-            // (R1 distills, QwQ, local models) still feed the reasoning track.
-            const provided = (imageOutput ? parts : extractThinkTags(parts)).pipe(
+            const provided = parts.pipe(
               Stream.provide(modelLayer),
               Stream.provideService(
                 HermesCallableTools,
@@ -770,20 +602,17 @@ export class AiGateway extends Context.Service<
         sameAs?: SideGenerationRequest;
       }) {
         const same = input.sameAs;
-        const {
-          providerId,
-          layer: modelLayer,
-          explicitCache,
-        } = yield* resolveModel(input.modelId, {
-          ...(input.maxOutputTokens === undefined ? {} : { max_tokens: input.maxOutputTokens }),
+        const { providerId, layer: modelLayer } = yield* resolveModel(input.modelId, {
+          ...(input.maxOutputTokens === undefined
+            ? {}
+            : { maxOutputTokens: input.maxOutputTokens }),
           ...(same?.reasoningEffort === undefined ? {} : { reasoningEffort: same.reasoningEffort }),
           ...(same?.cacheKey === undefined ? {} : { cacheKey: same.cacheKey }),
         });
-        const prompt = explicitCache ? withCacheControl(input.prompt) : input.prompt;
+        const prompt = input.prompt;
         // Without a toolkit the request carries no tools. With one, its calls
-        // are never resolved: only text is wanted. Think extraction is shared
-        // with `streamChat`: a <think> block is never part of a side answer.
-        const stream = extractThinkTags(
+        // are never resolved: only text is wanted.
+        const stream = (
           same?.toolkit
             ? LanguageModel.streamText({
                 prompt,
@@ -791,7 +620,7 @@ export class AiGateway extends Context.Service<
                 toolChoice: same.toolChoice ?? "auto",
                 disableToolCallResolution: true,
               })
-            : LanguageModel.streamText({ prompt }),
+            : LanguageModel.streamText({ prompt })
         ).pipe(
           Stream.provide(modelLayer),
           Stream.provideService(
@@ -825,18 +654,19 @@ export class AiGateway extends Context.Service<
             message: "invalid model key",
             diagnostic: { kind: "InvalidRequestError" },
           });
+        const connection = yield* connect(provider, input.providerId);
         // Room for a reasoning model to think before it says OK.
         const { layer } = buildModelLayer(
-          provider,
+          connection,
           {
             providerId: provider.id,
             modelKey,
             capabilities: { ...EMPTY_CAPABILITIES, tools: true },
           },
-          { max_tokens: 512 },
+          { maxOutputTokens: 512 },
         );
         const prompt = Prompt.make("Reply with the single word OK.");
-        const stream = extractThinkTags(LanguageModel.streamText({ prompt })).pipe(
+        const stream = LanguageModel.streamText({ prompt }).pipe(
           Stream.provide(layer),
           Stream.provideService(HermesCallableTools, new Set<string>()),
         ) as Stream.Stream<ChatStreamPart, unknown, never>;
@@ -858,10 +688,9 @@ export class AiGateway extends Context.Service<
               message: "invalid model key",
               diagnostic: { kind: "InvalidRequestError" },
             });
-          const request = HttpClientRequest.post(
-            `${provider.baseUrl.replace(/\/$/, "")}/embeddings`,
-          ).pipe(
-            HttpClientRequest.bearerToken(provider.apiKey),
+          const connection = yield* connect(provider, input.providerId);
+          const request = HttpClientRequest.post(endpoint(connection, "/embeddings")).pipe(
+            HttpClientRequest.setHeaders(authHeaders(connection)),
             HttpClientRequest.bodyJsonUnsafe({ model: modelKey, input: ["dimension probe"] }),
           );
           const response = yield* httpClient.execute(request).pipe(
@@ -910,7 +739,7 @@ export class AiGateway extends Context.Service<
         if (
           approved &&
           (approved.providerId !== provider.id ||
-            approved.baseUrl !== provider.baseUrl.replace(/\/$/, "") ||
+            approved.baseUrl !== provider.baseUrl.replace(/\/+$/, "") ||
             approved.modelKey !== model.modelKey ||
             approved.modelDimensions !== model.embeddingDimensions)
         ) {
@@ -961,10 +790,9 @@ export class AiGateway extends Context.Service<
         // asks the provider to truncate, which only Matryoshka-trained models honour;
         // others may reject or ignore it. Detect recorded the model's width, so the
         // check below is the contract.
-        const request = HttpClientRequest.post(
-          `${provider.baseUrl.replace(/\/$/, "")}/embeddings`,
-        ).pipe(
-          HttpClientRequest.bearerToken(provider.apiKey),
+        const connection = yield* connect(provider, input.modelId);
+        const request = HttpClientRequest.post(endpoint(connection, "/embeddings")).pipe(
+          HttpClientRequest.setHeaders(authHeaders(connection)),
           HttpClientRequest.bodyJsonUnsafe({ model: model.modelKey, input: input.inputs }),
         );
 
@@ -1123,6 +951,7 @@ export class AiGateway extends Context.Service<
                 inputTokens: inputTokens ?? 0,
                 outputTokens: 0,
                 cachedInputTokens: 0,
+                cacheWriteTokens: null,
                 reasoningTokens: 0,
                 usageComplete: inputTokens !== null,
                 cost,

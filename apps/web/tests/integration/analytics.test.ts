@@ -88,7 +88,7 @@ const makeUsage = (input: {
   },
   outputTokens: {
     ...(input.outputTotal !== undefined ? { total: input.outputTotal } : {}),
-    ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
+    ...(input.reasoning !== undefined ? { imageOutput: false, reasoning: input.reasoning } : {}),
   },
 });
 
@@ -178,7 +178,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'Prov', 'openrouter', 'http://x', 'x')` as never,
       );
     }),
@@ -213,7 +213,13 @@ const makeModel = Effect.fn("test.makeModel")(function* (
     type: "chat",
     contextLength: null,
     embeddingDimensions: null,
-    capabilities: { reasoning: false, tools: false, vision: false, files: false },
+    capabilities: {
+      imageOutput: false,
+      reasoning: false,
+      tools: false,
+      vision: false,
+      files: false,
+    },
     pricing: options.pricing ?? null,
     enabled: true,
     access: "public",
@@ -250,7 +256,7 @@ const eventsForMessage = Effect.fn("test.eventsForMessage")(function* (messageId
 describe("usage ledger capture", () => {
   it("records one row per completed generation, provider-reported cost first", async () => {
     finishUsage = makeUsage({ inputTotal: 100, cacheRead: 20, outputTotal: 50, reasoning: 10 });
-    finishMetadata = { openrouter: { usage: { cost: 0.0042 } } };
+    finishMetadata = { modelClient: { cost: 0.0042 } };
     const result = await run(
       Effect.gen(function* () {
         const userId = yield* makeUser();
@@ -468,6 +474,8 @@ describe("usage aggregates", () => {
         inputTokens: 200,
         outputTokens: 100,
         cachedInputTokens: 60,
+        // The other rows leave it null, as rows older than the column do.
+        cacheWriteTokens: 30,
         reasoningTokens: 25,
         cost: 0.002,
         costSource: "pricing",
@@ -557,8 +565,9 @@ describe("usage aggregates", () => {
       abortedAttempts: 0,
       inputTokens: 310,
       outputTokens: 155,
-      // Cache reads live *inside* inputTokens; they are not an addend.
+      // Cache reads and writes live *inside* inputTokens; they are not addends.
       cachedInputTokens: 100,
+      cacheWriteTokens: 30,
       reasoningTokens: 35,
       cost: 0.003,
       costComplete: false, // the title row has unknown cost
@@ -709,6 +718,7 @@ describe("usage aggregates", () => {
       inputTokens: 0,
       outputTokens: 0,
       cachedInputTokens: 0,
+      cacheWriteTokens: 0,
       reasoningTokens: 0,
       cost: 0,
       // Nothing is unknown when nothing is there, so the tile must not claim
@@ -817,6 +827,7 @@ describe("embedding ledger isolation", () => {
           modelName: "Embedding model",
           outputTokens: 0,
           cachedInputTokens: 0,
+          cacheWriteTokens: null,
           reasoningTokens: 0,
         };
         yield* analytics.record({

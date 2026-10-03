@@ -281,7 +281,7 @@ describe("durable scheduled attempts", () => {
           yield* db.insert(providers).values({
             id: providerId,
             name: "Test provider",
-            kind: "openrouter",
+            preset: "openrouter",
             baseUrl: "http://x",
             apiKeyCiphertext: "x",
           });
@@ -372,7 +372,7 @@ describe("durable scheduled attempts", () => {
           yield* db.insert(providers).values({
             id: providerId,
             name: "Test provider",
-            kind: "openrouter",
+            preset: "openrouter",
             baseUrl: "http://x",
             apiKeyCiphertext: "x",
           });

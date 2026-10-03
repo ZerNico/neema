@@ -17,7 +17,11 @@ import type { Db } from "~/server/db.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { InvalidMessage } from "../../errors.ts";
 import { projectResearchProgress, type ResearchProgress } from "../../research-schema.ts";
-import { emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
+import {
+  emptyUsageTotals,
+  mergeUsageTotals,
+  resolveCost,
+} from "~/modules/analytics/server/usage.ts";
 
 export type ResearchFence = {
   runId: string;
@@ -169,6 +173,7 @@ export const createResearchStore = (db: Db["Service"]) => {
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           cachedInputTokens: usage.cachedInputTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
           reasoningTokens: usage.reasoningTokens,
           usageComplete: call.usageComplete,
           ...(call.usageComplete
@@ -178,18 +183,8 @@ export const createResearchStore = (db: Db["Service"]) => {
         .onConflictDoNothing()
         .pipe(Effect.orDie);
     }
-    for (const call of calls) {
-      if (!call.usage || call.phase === "compaction") continue;
-      totals.inputTokens += call.usage.inputTokens;
-      totals.outputTokens += call.usage.outputTokens;
-      totals.cachedInputTokens += call.usage.cachedInputTokens;
-      totals.reasoningTokens += call.usage.reasoningTokens;
-      totals.sawUsage ||= call.usage.sawUsage;
-      if (call.usage.providerCost !== null)
-        totals.providerCost = (totals.providerCost ?? 0) + call.usage.providerCost;
-    }
-    if (calls.some((call) => call.phase !== "compaction" && call.usage?.providerCost == null))
-      totals.providerCost = null;
+    for (const call of calls)
+      if (call.usage && call.phase !== "compaction") mergeUsageTotals(totals, call.usage);
     const status = phase === "aborted" ? "aborted" : phase === "complete" ? "complete" : "error";
     const progress = projectResearchProgress({
       ...run.progress,
@@ -264,6 +259,7 @@ export const createResearchStore = (db: Db["Service"]) => {
         inputTokens: totals.inputTokens,
         outputTokens: totals.outputTokens,
         cachedInputTokens: totals.cachedInputTokens,
+        cacheWriteTokens: totals.cacheWriteTokens,
         reasoningTokens: totals.reasoningTokens,
         usageComplete: complete,
         ...(complete ? resolveCost(totals, run.pricing) : { cost: null, costSource: null }),

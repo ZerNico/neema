@@ -1,9 +1,29 @@
-import { OpenRouterClient, OpenRouterLanguageModel } from "@effect/ai-openrouter";
+import { layer as modelLayer, makeConnection, roundPrompt } from "@chat/model-client";
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Layer, Redacted, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient } from "effect/unstable/http";
-import { responseTurnPrompt } from "./response-prompt.ts";
+
+const connection = makeConnection({
+  provider: "p1",
+  preset: "openrouter",
+  baseUrl: "https://mock.invalid/api/v1",
+  apiKey: "synthetic",
+})!;
+const openRouter = (
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<globalThis.Response>,
+  model = "synthetic/model",
+  imageOutput = true,
+) =>
+  modelLayer(connection, {
+    model,
+    capabilities: { reasoning: false, tools: true, imageOutput: true },
+    imageOutput,
+  }).pipe(
+    Layer.provide(
+      FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
+    ),
+  );
 
 const image =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
@@ -34,7 +54,7 @@ const chunk = (delta: Record<string, unknown>, finish = false) => ({
   choices: [{ index: 0, delta, ...(finish ? { finish_reason: "stop" } : {}) }],
 });
 
-describe("pinned OpenRouter image replay contract", () => {
+describe("OpenRouter image replay through the model client", () => {
   it.effect(
     "keeps returned edits distinct from replayed images across requests with reused image indexes",
     () =>
@@ -65,19 +85,7 @@ describe("pinned OpenRouter image replay contract", () => {
             },
           );
         };
-        const layer = OpenRouterLanguageModel.model("synthetic/model", {
-          modalities: ["text", "image"],
-        }).pipe(
-          Layer.provide(
-            OpenRouterClient.layer({
-              apiKey: Redacted.make("synthetic"),
-              apiUrl: "https://mock.invalid/api/v1",
-            }),
-          ),
-          Layer.provide(
-            FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
-          ),
-        );
+        const layer = openRouter(fetch);
         let prompt = Prompt.make("Generate a red image");
         for (const [index, nextRequest] of [
           "Make it blue",
@@ -94,7 +102,7 @@ describe("pinned OpenRouter image replay contract", () => {
             `data:${files[0]!.mediaType};base64,${Buffer.from(files[0]!.data).toString("base64")}`,
           ).toBe(returnedImages[index]);
           prompt = Prompt.concat(
-            Prompt.concat(prompt, responseTurnPrompt(parts)),
+            Prompt.concat(prompt, roundPrompt(parts)),
             Prompt.make(nextRequest),
           );
         }
@@ -162,19 +170,7 @@ describe("pinned OpenRouter image replay contract", () => {
             { headers: { "content-type": "text/event-stream" } },
           );
         };
-        const layer = OpenRouterLanguageModel.model("synthetic/model", {
-          modalities: ["text", "image"],
-        }).pipe(
-          Layer.provide(
-            OpenRouterClient.layer({
-              apiKey: Redacted.make("synthetic"),
-              apiUrl: "https://mock.invalid/api/v1",
-            }),
-          ),
-          Layer.provide(
-            FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
-          ),
-        );
+        const layer = openRouter(fetch);
         const tool = Tool.make("inspect_image", {
           parameters: Tool.EmptyParams,
           success: Schema.String,
@@ -188,7 +184,7 @@ describe("pinned OpenRouter image replay contract", () => {
         ).pipe(Effect.provide(layer));
         expect(parts.some((part) => part.type === "tool-call")).toBe(true);
         expect(parts.some((part) => part.type === "tool-result")).toBe(true);
-        const replay = responseTurnPrompt(parts);
+        const replay = roundPrompt(parts);
         const assistant = replay.content[0]!;
         expect(assistant.role).toBe("assistant");
         if (assistant.role !== "assistant") throw new Error("Missing assistant replay");
@@ -197,7 +193,10 @@ describe("pinned OpenRouter image replay contract", () => {
           "file",
           "text",
         ]);
-        expect(assistant.options.openrouter?.reasoningDetails).toEqual(details);
+        expect(
+          (assistant.options["modelClient"] as { replay: { reasoningDetails: unknown } }).replay
+            .reasoningDetails,
+        ).toEqual(details);
         yield* Stream.runCollect(
           LanguageModel.streamText({ prompt: Prompt.concat(replay, Prompt.make("Edit")), toolkit }),
         ).pipe(Effect.provide(layer));
@@ -225,7 +224,7 @@ describe("pinned OpenRouter image replay contract", () => {
         });
       }),
   );
-  it.effect("keeps ordinary duplicate reasoning deduplication without image replay opt-in", () =>
+  it.effect("sends a round's state once, and only to the connection that wrote it", () =>
     Effect.gen(function* () {
       const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
       const fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -241,37 +240,45 @@ describe("pinned OpenRouter image replay contract", () => {
           { headers: { "content-type": "text/event-stream" } },
         );
       };
-      const layer = OpenRouterLanguageModel.model("synthetic/model").pipe(
-        Layer.provide(
-          OpenRouterClient.layer({
-            apiKey: Redacted.make("synthetic"),
-            apiUrl: "https://mock.invalid/api/v1",
-          }),
-        ),
-        Layer.provide(
-          FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
-        ),
-      );
-      const assistant = Prompt.makeMessage("assistant", {
-        content: [Prompt.makePart("text", { text: "answer" })],
-        options: { openrouter: { reasoningDetails: details } },
+      const unit = (id: string, model: string) => ({
+        v: 1 as const,
+        id,
+        identity: {
+          provider: "p1",
+          baseUrl: "https://mock.invalid/api/v1",
+          format: "chat-completions" as const,
+          model,
+        },
+        format: "chat-completions" as const,
+        reasoningDetails: [...details],
+      });
+      const assistant = (replay: ReturnType<typeof unit>) =>
+        Prompt.makeMessage("assistant", {
+          content: [Prompt.makePart("text", { text: "answer" })],
+          options: { modelClient: { replay } },
+        });
+      const user = Prompt.makeMessage("user", {
+        content: [Prompt.makePart("text", { text: "again" })],
       });
       yield* Stream.runDrain(
         LanguageModel.streamText({
           prompt: Prompt.make([
-            assistant,
-            Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "again" })] }),
-            assistant,
+            assistant(unit("a", "synthetic/model")),
+            user,
+            assistant(unit("a", "synthetic/model")),
+            user,
+            assistant(unit("b", "other/model")),
           ]),
         }),
-      ).pipe(Effect.provide(layer));
+      ).pipe(Effect.provide(openRouter(fetch, "synthetic/model", false)));
       expect(requests[0]!.messages[0]!.reasoning_details).toEqual(details);
       expect(requests[0]!.messages[2]!.reasoning_details).toBeUndefined();
+      expect(requests[0]!.messages[4]!.reasoning_details).toBeUndefined();
     }),
   );
 });
 
-it.effect("streams refusal deltas as text through the actual patched image adapter", () =>
+it.effect("streams refusal deltas as tagged text through the image path", () =>
   Effect.gen(function* () {
     const events = [
       chunk({ content: null, refusal: "I cannot " }),
@@ -287,14 +294,7 @@ it.effect("streams refusal deltas as text through the actual patched image adapt
         events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "data: [DONE]\n\n",
         { headers: { "content-type": "text/event-stream" } },
       );
-    const layer = OpenRouterLanguageModel.model("synthetic/image", {
-      modalities: ["text", "image"],
-    }).pipe(
-      Layer.provide(OpenRouterClient.layer({ apiUrl: "https://mock.invalid/api/v1" })),
-      Layer.provide(
-        FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
-      ),
-    );
+    const layer = openRouter(fetch, "synthetic/image");
     const parts = yield* LanguageModel.streamText({ prompt: Prompt.make("Draw") }).pipe(
       Stream.runCollect,
       Effect.provide(layer),
@@ -306,7 +306,11 @@ it.effect("streams refusal deltas as text through the actual patched image adapt
     expect(parts.filter((part) => part.type === "text-end")).toHaveLength(1);
     expect(parts.find((part) => part.type === "finish")).toMatchObject({
       reason: "stop",
-      metadata: { openrouter: { usage: { cost: 0.04 } } },
+      metadata: { modelClient: { cost: 0.04 } },
     });
+    // Tagged so analytics and the transcript can tell a refusal from an answer.
+    expect(
+      parts.filter((part) => part.type === "text-delta" && part.metadata["modelClient"]),
+    ).toHaveLength(3);
   }),
 );

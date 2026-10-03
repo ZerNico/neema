@@ -251,8 +251,8 @@ beforeAll(async () => {
   const providerId = uuidv7();
   embeddingModelId = uuidv7();
   await exec(
-    `insert into providers (id, name, kind, base_url, api_key_ciphertext)
-     values ('${providerId}', 'P', 'openai-compatible', 'http://x', 'x')`,
+    `insert into providers (id, name, preset, base_url, api_key_ciphertext)
+     values ('${providerId}', 'P', 'custom', 'http://x', 'x')`,
   );
   await exec(
     `insert into models (id, provider_id, model_key, display_name, type, embedding_dimensions)
@@ -3109,8 +3109,8 @@ describe("knowledge search", () => {
     const before = await run(Effect.flatMap(EmbeddingSpace, (space) => space.current()));
     const providerId = uuidv7();
     const aliasId = uuidv7();
-    await exec(`insert into providers (id, name, kind, base_url, api_key_ciphertext)
-      values ('${providerId}', 'Alias provider', 'openai-compatible', 'http://alias.invalid/v1', 'fake')`);
+    await exec(`insert into providers (id, name, preset, base_url, api_key_ciphertext)
+      values ('${providerId}', 'Alias provider', 'custom', 'http://alias.invalid/v1', 'fake')`);
     await exec(`insert into models (id, provider_id, model_key, display_name, type, embedding_dimensions)
       values ('${aliasId}', '${providerId}', 'same-model-different-name', 'Alias', 'embedding', ${DIMENSIONS})`);
     const configured = await run(

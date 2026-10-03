@@ -8,7 +8,6 @@ import {
   Tool,
   Toolkit,
 } from "effect/unstable/ai";
-import { partialTagSuffix } from "./think-extractor.ts";
 
 /**
  * Prompt-based tool calling for models that cannot take a `tools` parameter.
@@ -149,6 +148,15 @@ interface ParsedCall {
   readonly name: string;
   readonly params: unknown;
 }
+
+/** How many trailing characters of `text` could start `tag`: held back until known. */
+const partialTagSuffix = (text: string, tag: string): number => {
+  const max = Math.min(text.length, tag.length - 1);
+  for (let len = max; len > 0; len--) {
+    if (text.endsWith(tag.slice(0, len))) return len;
+  }
+  return 0;
+};
 
 // Built through `Response.makePart`: it stamps the part brand and defaults
 // `metadata`, without which `Prompt.fromResponseParts` dies on the fold.

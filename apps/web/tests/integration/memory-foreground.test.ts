@@ -446,7 +446,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values({
@@ -455,7 +455,13 @@ beforeAll(async () => {
         modelKey: "memory-model",
         displayName: "Memory Model",
         type: "chat",
-        capabilities: { reasoning: false, tools: true, vision: false, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: false,
+          tools: true,
+          vision: false,
+          files: false,
+        },
       });
     }),
   );

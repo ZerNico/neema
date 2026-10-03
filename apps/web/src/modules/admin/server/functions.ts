@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import { requireAdmin } from "~/modules/auth/server/middleware.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
+import { getPreset, resolveBaseUrl } from "@chat/model-client";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -31,17 +32,36 @@ export const listProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ProviderRepo.use((repo) => repo.listProviders())));
 
+const needsBaseUrl = (preset: string) =>
+  new Response(`${preset} needs the base URL of your server.`, { status: 400 });
+
 export const createProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateProviderInput))
-  .handler(({ data }) => runtime.runPromise(ProviderRepo.use((repo) => repo.createProvider(data))));
+  .handler(({ data }) => {
+    const preset = getPreset(data.preset);
+    if (!resolveBaseUrl(preset, data.baseUrl)) throw needsBaseUrl(preset.label);
+    if (preset.keyRequired && !data.apiKey?.trim())
+      throw new Response(`${preset.label} needs an API key.`, { status: 400 });
+    return runtime.runPromise(ProviderRepo.use((repo) => repo.createProvider(data)));
+  });
 
 export const updateProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateProviderInput))
   .handler(({ data }) => {
     const { providerId, ...patch } = data;
-    return runtime.runPromise(ProviderRepo.use((repo) => repo.updateProvider(providerId, patch)));
+    return runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ProviderRepo;
+        const provider = (yield* repo.listProviders()).find((row) => row.id === providerId);
+        if (!provider) return;
+        const preset = getPreset(provider.preset);
+        if (patch.baseUrl !== undefined && !resolveBaseUrl(preset, patch.baseUrl))
+          return yield* Effect.die(needsBaseUrl(preset.label));
+        yield* repo.updateProvider(providerId, patch);
+      }),
+    );
   });
 
 export const deleteProvider = createServerFn({ method: "POST" })

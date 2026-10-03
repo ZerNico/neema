@@ -10,7 +10,7 @@ export const ASSISTANT_FILE_LIMITS = {
   count: MAX_ATTACHMENTS_PER_MESSAGE,
   bytes: MAX_ATTACHMENT_BYTES,
   totalBytes: MAX_ATTACHMENT_BYTES * 2,
-  replayBytes: 256 * 1024,
+  replayBytes: 1024 * 1024,
 } as const;
 const Offset = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /**

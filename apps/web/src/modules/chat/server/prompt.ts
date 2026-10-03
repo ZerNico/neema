@@ -1,6 +1,7 @@
 import type { AssistantOutput } from "../assistant-output.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
 import type { AssistantFile } from "../assistant-output.ts";
+import { isEmptyUnit, METADATA_KEY, type ReplayUnit } from "@chat/model-client";
 import type { ProviderReplay } from "./provider-replay.ts";
 import type { ChatRepo, ToolCallRow } from "./repo.ts";
 import { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
@@ -343,36 +344,26 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           return part;
         });
       const replay = message.providerReplay;
-      const compatible =
-        replay &&
-        input.modelIdentity?.providerId === replay.providerId &&
-        input.modelIdentity.modelKey === replay.modelKey;
-      const turns =
-        input.expandAssistantTurns && replay?.turns.length
-          ? [...replay.turns]
-          : [
-              {
-                turnIndex: -1,
-                startOffset: 0,
-                endOffset: message.content.length,
-                reasoningDetails: [],
-              },
-            ];
-      if (input.expandAssistantTurns && replay?.turns.length) {
-        const end = turns.at(-1)!.endOffset;
-        const trailing = files.filter(
-          (file) => !turns.some((turn) => turn.turnIndex === file.turnIndex),
-        );
-        if (end < message.content.length || trailing.length)
-          turns.push({
-            turnIndex: trailing[0]?.turnIndex ?? turns.at(-1)!.turnIndex + 1,
-            startOffset: end,
-            endOffset: message.content.length,
-            reasoningDetails: [],
-          });
-      }
+      // State goes back only to the model that wrote it; the model client
+      // also checks the endpoint and wire format before sending any.
+      const compatible = (unit: ReplayUnit | null): unit is ReplayUnit =>
+        unit !== null &&
+        input.modelIdentity?.providerId === unit.identity.provider &&
+        input.modelIdentity.modelKey === unit.identity.model;
+      const calls =
+        input.expandAssistantTurns && deps.chat ? yield* deps.chat.listToolCalls([message.id]) : [];
+      const turns = expandedTurns({
+        content: message.content,
+        recorded: input.expandAssistantTurns ? (replay?.turns ?? []) : [],
+        // Every row a round can leave, and where in the text it sat.
+        positions: [
+          ...files.map((file) => ({ turnIndex: file.turnIndex, textOffset: file.textOffset })),
+          ...calls.map((call) => ({ turnIndex: call.turnIndex, textOffset: call.textOffset })),
+          ...steers.map((steer) => ({ turnIndex: steer.turnIndex, textOffset: steer.textOffset })),
+        ],
+      });
       const protectsText = (turn: (typeof turns)[number]) =>
-        compatible && input.expandAssistantTurns && turn.reasoningDetails.length > 0;
+        input.expandAssistantTurns === true && compatible(turn.unit) && !isEmptyUnit(turn.unit);
       const signedReplay = turns.some(protectsText);
       let timestamp = messageTimestamp(message);
       if (signedReplay) {
@@ -386,8 +377,6 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           });
         timestamp = "";
       }
-      const calls =
-        input.expandAssistantTurns && deps.chat ? yield* deps.chat.listToolCalls([message.id]) : [];
       for (const turn of turns) {
         const parts: Prompt.AssistantMessagePartEncoded[] = [];
         if (timestamp) {
@@ -399,9 +388,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           if (text) parts.push({ type: "text", text });
         };
         let cursor = turn.startOffset;
-        for (const file of files.filter(
-          (file) => turn.turnIndex === -1 || file.turnIndex === turn.turnIndex,
-        )) {
+        for (const file of files.filter((file) => turn.owns(file.turnIndex))) {
           if (file.textOffset < cursor || file.textOffset > turn.endOffset)
             return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
           if (file.textOffset > cursor) appendText(cursor, file.textOffset);
@@ -410,7 +397,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
         }
         if (cursor < turn.endOffset) appendText(cursor, turn.endOffset);
         const turnCalls = calls.filter(
-          (call) => call.turnIndex === turn.turnIndex && call.toolName !== "knowledge_context",
+          (call) => turn.owns(call.turnIndex) && call.toolName !== "knowledge_context",
         );
         for (const call of turnCalls)
           parts.push({
@@ -422,13 +409,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
         messages.push({
           role: "assistant",
           content: parts,
-          ...(compatible && input.expandAssistantTurns
-            ? {
-                options: {
-                  openrouter: { imageReplay: true, reasoningDetails: turn.reasoningDetails },
-                },
-              }
-            : {}),
+          ...(protectsText(turn) ? { options: { [METADATA_KEY]: { replay: turn.unit } } } : {}),
         });
         if (turnCalls.length)
           messages.push({
@@ -443,13 +424,9 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           });
         // A steer is claimed only after a round's results are terminal, so it
         // sits between this turn's results and the next turn.
-        for (const steer of steers.filter((item) => item.turnIndex === turn.turnIndex))
+        for (const steer of steers.filter((item) => turn.owns(item.turnIndex)))
           messages.push(yield* userMessage(steer));
       }
-      // Unexpanded, there are no turns to sit between; keep them after.
-      const placed = new Set(turns.map((turn) => turn.turnIndex));
-      for (const steer of steers.filter((item) => !placed.has(item.turnIndex)))
-        messages.push(yield* userMessage(steer));
       continue;
     }
     if (steers.length > 0) {
@@ -477,6 +454,77 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
   }
   return messages;
 });
+
+/**
+ * An answer's rounds for history: each recorded round with its own span, and
+ * the rounds between them rebuilt from their rows. Only some rounds leave a
+ * record (those with replay state, or every round of an image answer). Between
+ * recorded ones, a round's text ends at its own last call, file or steer,
+ * except the last, which runs up to the next recorded round.
+ */
+export const expandedTurns = (input: {
+  content: string;
+  recorded: ProviderReplay["turns"];
+  positions: ReadonlyArray<{ turnIndex: number; textOffset: number | null }>;
+}) => {
+  type Turn = {
+    startOffset: number;
+    endOffset: number;
+    unit: ReplayUnit | null;
+    owns: (turnIndex: number) => boolean;
+  };
+  const length = input.content.length;
+  if (input.recorded.length === 0)
+    return [{ startOffset: 0, endOffset: length, unit: null, owns: () => true }] satisfies Turn[];
+  const turns: Turn[] = [];
+  let cursor = 0;
+  let after = Number.NEGATIVE_INFINITY;
+  const gap = (until: number, below: number) => {
+    const from = after;
+    const rounds = [
+      ...new Set(
+        input.positions
+          .map((position) => position.turnIndex)
+          .filter((turnIndex) => turnIndex > from && turnIndex < below),
+      ),
+    ].toSorted((a, b) => a - b);
+    for (const [index, round] of rounds.entries()) {
+      const offsets = input.positions.flatMap((position) =>
+        position.turnIndex === round && position.textOffset !== null ? [position.textOffset] : [],
+      );
+      // The next round starts after this one's last row; the last takes the rest.
+      const end =
+        index === rounds.length - 1
+          ? Math.max(cursor, until)
+          : Math.min(Math.max(cursor, ...offsets), Math.max(cursor, until));
+      turns.push({
+        startOffset: cursor,
+        endOffset: end,
+        unit: null,
+        owns: (turnIndex) => turnIndex === round,
+      });
+      cursor = end;
+    }
+    // A stretch with no rows at all is a round of text alone.
+    if (until > cursor)
+      turns.push({ startOffset: cursor, endOffset: until, unit: null, owns: () => false });
+  };
+  for (const turn of input.recorded.toSorted((a, b) => a.turnIndex - b.turnIndex)) {
+    gap(turn.startOffset, turn.turnIndex);
+    const start = Math.max(cursor, turn.startOffset);
+    const end = Math.min(Math.max(start, turn.endOffset), length);
+    turns.push({
+      startOffset: start,
+      endOffset: end,
+      unit: turn.unit,
+      owns: (turnIndex) => turnIndex === turn.turnIndex,
+    });
+    cursor = end;
+    after = turn.turnIndex;
+  }
+  gap(length, Number.POSITIVE_INFINITY);
+  return turns;
+};
 
 /** A stored tool row as a resumed answer reads its own earlier rounds. */
 export type ResumedCall = Pick<
@@ -668,9 +716,7 @@ export const resumedRounds = (input: {
       messages.push({
         role: "assistant",
         content: parts,
-        options: {
-          openrouter: { imageReplay: true, reasoningDetails: signed.reasoningDetails },
-        },
+        ...(signed.unit ? { options: { [METADATA_KEY]: { replay: signed.unit } } } : {}),
       });
     else if (placed) messages.push({ role: "assistant", content: parts });
     else if (end > cursor)

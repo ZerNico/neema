@@ -3,6 +3,7 @@ import type { DesktopSubmission } from "../schema.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
+import { sendsReasoningEffort } from "~/modules/providers/provider-presets.ts";
 import { uuidv7 } from "uuidv7";
 import {
   BranchNotAllowed,
@@ -514,10 +515,7 @@ function makeChatService() {
       const provider = (yield* providers.listProviders()).find(
         (row) => row.id === model.providerId,
       );
-      return (
-        !!provider &&
-        (provider.kind === "openrouter" || provider.reasoningEffortFormat !== "unsupported")
-      );
+      return !!provider && sendsReasoningEffort(provider);
     });
 
     const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { DefaultModelIds } from "~/modules/providers/default-models.ts";
 import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
+import { PRESET_IDS, REASONING_SHAPES, WIRE_FORMATS } from "@chat/model-client";
 import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
 export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
@@ -9,11 +10,21 @@ export const UpdateUtilityModelInput = Schema.Struct({
   modelId: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
 });
 
+/** Overrides of a preset's settings; the server keeps only those the preset allows. */
+export const ProviderSettingsInput = Schema.Struct({
+  format: Schema.optionalKey(Schema.Literals(WIRE_FORMATS)),
+  reasoning: Schema.optionalKey(Schema.Literals(REASONING_SHAPES)),
+  sendReasoning: Schema.optionalKey(Schema.Boolean),
+  streamUsage: Schema.optionalKey(Schema.Boolean),
+  keyHeader: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9-]{1,64}$/))),
+});
+
 export const CreateProviderInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
-  kind: Schema.Literals(["openrouter", "openai-compatible"]),
+  preset: Schema.Literals(PRESET_IDS),
   baseUrl: Schema.optionalKey(Schema.String),
-  apiKey: Schema.String.check(Schema.isMinLength(1)),
+  apiKey: Schema.optionalKey(Schema.String),
+  settings: Schema.optionalKey(ProviderSettingsInput),
 });
 
 export const UpdateProviderInput = Schema.Struct({
@@ -22,7 +33,7 @@ export const UpdateProviderInput = Schema.Struct({
   baseUrl: Schema.optionalKey(Schema.String),
   apiKey: Schema.optionalKey(Schema.String),
   enabled: Schema.optionalKey(Schema.Boolean),
-  reasoningEffortFormat: Schema.optionalKey(Schema.Literals(["unsupported", "flat", "nested"])),
+  settings: Schema.optionalKey(ProviderSettingsInput),
 });
 
 export const ProviderIdInput = Schema.Struct({
@@ -35,6 +46,8 @@ const PositiveInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const ChatPricingSchema = Schema.Struct({
   input: NonNegativePrice,
   output: NonNegativePrice,
+  cacheRead: Schema.optionalKey(NonNegativePrice),
+  cacheWrite: Schema.optionalKey(NonNegativePrice),
 });
 
 const EmbeddingPricingSchema = Schema.Struct({
@@ -43,7 +56,7 @@ const EmbeddingPricingSchema = Schema.Struct({
 });
 
 const ChatCapabilitiesSchema = Schema.Struct({
-  imageOutput: Schema.optionalKey(Schema.Boolean),
+  imageOutput: Schema.Boolean,
   reasoning: Schema.Boolean,
   reasoningEfforts: Schema.optionalKey(Schema.Array(Schema.Literals(REASONING_EFFORTS))),
   tools: Schema.Boolean,
@@ -52,7 +65,7 @@ const ChatCapabilitiesSchema = Schema.Struct({
 });
 
 const EmbeddingCapabilitiesSchema = Schema.Struct({
-  imageOutput: Schema.optionalKey(Schema.Literal(false)),
+  imageOutput: Schema.Literal(false),
   reasoning: Schema.Literal(false),
   tools: Schema.Literal(false),
   vision: Schema.Boolean,

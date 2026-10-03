@@ -465,6 +465,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                             inputTokens: totals.inputTokens,
                             outputTokens: totals.outputTokens,
                             cachedInputTokens: totals.cachedInputTokens,
+                            cacheWriteTokens: totals.cacheWriteTokens,
                             reasoningTokens: totals.reasoningTokens,
                             usageComplete: complete,
                             ...(complete

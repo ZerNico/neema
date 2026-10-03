@@ -8,7 +8,7 @@ A self-hosted, ChatGPT-style chat app built as a modular monolith.
 - **Effects**: Effect 4 (rc) — services, DI layers, typed errors, streams, retries, resources
 - **Database**: PostgreSQL, Drizzle ORM 1.0 (rc) with the Effect client (`drizzle-orm/effect-postgres` on `@effect/sql-pg`), generated migrations
 - **Auth**: Better Auth (Drizzle adapter, admin plugin). The **first registered user becomes the instance admin**.
-- **AI**: OpenRouter / OpenAI-compatible providers via `@effect/ai-openrouter`; providers and models are managed in the admin panel, with autocomplete backed by each provider's live `/models` catalog
+- **AI**: any OpenAI-like service (OpenRouter, OpenAI, Azure, hosted vendors, self-hosted servers, gateways) through our own `@chat/model-client` and its presets; providers and models are managed in the admin panel, with autocomplete backed by each provider's live catalog
 - **Tests**: Vitest 5, `@effect/vitest`, Testing Library + jsdom, Testcontainers
 - **Lint/format**: oxlint (`oxlint.config.ts`) + oxfmt, with `eslint-plugin-slop` loaded as an oxlint JS plugin with full inspection
 

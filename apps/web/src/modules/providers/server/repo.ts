@@ -23,9 +23,15 @@ import {
   normalizeModelSettings,
   type ModelSettings,
   type ReasoningEffort,
-  type ReasoningEffortFormat,
 } from "../model-config.ts";
-import { resolveBaseUrl, type ProviderKind } from "../provider-kinds.ts";
+import {
+  getPreset,
+  resolveBaseUrl,
+  sanitizeSettings,
+  type PresetId,
+  type ProviderSettings,
+} from "@chat/model-client";
+import { supportsImageOutput } from "../provider-presets.ts";
 import { KeyCipher } from "./crypto.ts";
 
 export type ModelRow = typeof models.$inferSelect;
@@ -41,10 +47,13 @@ export type ChatModelRow = Pick<
 };
 type ProviderRow = typeof providers.$inferSelect;
 /** Provider rows with the ciphertext stripped, safe to send to admin clients. */
-export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext">;
-export type ProviderWithKey = PublicProvider & { apiKey: Redacted.Redacted<string> };
+export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext"> & { hasApiKey: boolean };
+export type ProviderWithKey = PublicProvider & { apiKey: Redacted.Redacted<string> | null };
 
-const toPublic = ({ apiKeyCiphertext: _, ...rest }: ProviderRow): PublicProvider => rest;
+const toPublic = ({ apiKeyCiphertext, ...rest }: ProviderRow): PublicProvider => ({
+  ...rest,
+  hasApiKey: apiKeyCiphertext !== null,
+});
 
 export class ProviderRepo extends Context.Service<
   ProviderRepo,
@@ -52,10 +61,13 @@ export class ProviderRepo extends Context.Service<
     listProviders(): Effect.Effect<PublicProvider[]>;
     createProvider(input: {
       name: string;
-      kind: ProviderKind;
-      /** Blank or absent means the kind's default. */
+      preset: PresetId;
+      /** Blank or absent means the preset's endpoint; a preset without one must be given it. */
       baseUrl?: string;
-      apiKey: string;
+      /** Absent or blank stores no key, for servers that take none. */
+      apiKey?: string;
+      /** Only what the preset lets an admin change is kept. */
+      settings?: ProviderSettings;
     }): Effect.Effect<PublicProvider>;
     updateProvider(
       providerId: string,
@@ -64,7 +76,8 @@ export class ProviderRepo extends Context.Service<
         baseUrl: string;
         apiKey: string;
         enabled: boolean;
-        reasoningEffortFormat: ReasoningEffortFormat;
+        /** Replaces the overrides; keys left out return to the preset's value. */
+        settings: ProviderSettings;
       }>,
     ): Effect.Effect<void>;
     deleteProvider(providerId: string): Effect.Effect<void>;
@@ -144,14 +157,20 @@ export class ProviderRepo extends Context.Service<
         }, Effect.orDie),
 
         createProvider: Effect.fn("ProviderRepo.createProvider")(function* (input) {
-          const apiKeyCiphertext = yield* cipher.encrypt(input.apiKey);
+          const preset = getPreset(input.preset);
+          const baseUrl = resolveBaseUrl(preset, input.baseUrl);
+          // The admin function refuses this first, with a reason a person can act on.
+          if (!baseUrl) return yield* Effect.die(new Error(`${input.preset} needs a base URL`));
+          const key = input.apiKey?.trim();
+          const apiKeyCiphertext = key ? yield* cipher.encrypt(key) : null;
           const rows = yield* db
             .insert(providers)
             .values({
               id: uuidv7(),
               name: input.name,
-              kind: input.kind,
-              baseUrl: resolveBaseUrl(input.kind, input.baseUrl),
+              preset: input.preset,
+              settings: sanitizeSettings(preset, input.settings),
+              baseUrl,
               apiKeyCiphertext,
             })
             .returning()
@@ -160,25 +179,30 @@ export class ProviderRepo extends Context.Service<
         }),
 
         updateProvider: Effect.fn("ProviderRepo.updateProvider")(function* (providerId, patch) {
-          const { apiKey, baseUrl, ...rest } = patch;
-          const apiKeyCiphertext = apiKey ? yield* cipher.encrypt(apiKey) : undefined;
+          const { apiKey, baseUrl, settings, ...rest } = patch;
+          const apiKeyCiphertext = apiKey?.trim()
+            ? yield* cipher.encrypt(apiKey.trim())
+            : undefined;
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                // A cleared base URL falls back to the default of the row's kind.
-                let resolved = baseUrl?.trim();
-                if (baseUrl !== undefined && !resolved) {
-                  const [row] = yield* tx
-                    .select({ kind: providers.kind })
-                    .from(providers)
-                    .where(eq(providers.id, providerId));
-                  if (row) resolved = resolveBaseUrl(row.kind, undefined);
-                }
+                const [row] = yield* tx
+                  .select({ preset: providers.preset })
+                  .from(providers)
+                  .where(eq(providers.id, providerId));
+                if (!row) return;
+                const preset = getPreset(row.preset);
+                // A cleared base URL falls back to the preset's endpoint.
+                const resolved =
+                  baseUrl === undefined
+                    ? undefined
+                    : (resolveBaseUrl(preset, baseUrl) ?? undefined);
                 yield* tx
                   .update(providers)
                   .set({
                     ...rest,
                     ...(resolved ? { baseUrl: resolved } : {}),
+                    ...(settings ? { settings: sanitizeSettings(preset, settings) } : {}),
                     ...(apiKeyCiphertext ? { apiKeyCiphertext } : {}),
                     updatedAt: new Date(),
                   })
@@ -204,7 +228,8 @@ export class ProviderRepo extends Context.Service<
             .pipe(Effect.orDie);
           const row = rows[0];
           if (!row) return null;
-          const apiKey = yield* cipher.decrypt(row.apiKeyCiphertext);
+          const apiKey =
+            row.apiKeyCiphertext === null ? null : yield* cipher.decrypt(row.apiKeyCiphertext);
           return { ...toPublic(row), apiKey };
         }),
 
@@ -231,8 +256,8 @@ export class ProviderRepo extends Context.Service<
               contextLength: models.contextLength,
               capabilities: models.capabilities,
               providerName: providers.name,
-              providerKind: providers.kind,
-              reasoningEffortFormat: providers.reasoningEffortFormat,
+              preset: providers.preset,
+              settings: providers.settings,
             })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
@@ -246,16 +271,14 @@ export class ProviderRepo extends Context.Service<
             )
             .orderBy(asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
-          return markDefaultModel(rows).map(
-            ({ providerKind, reasoningEffortFormat, ...model }) => ({
-              ...model,
-              reasoningEfforts: actionableReasoningEfforts(
-                model.capabilities,
-                providerKind,
-                reasoningEffortFormat,
-              ),
-            }),
-          );
+          return markDefaultModel(rows).map(({ preset, settings, ...model }) => ({
+            ...model,
+            // A model's image output works only where its provider asks for it.
+            capabilities: supportsImageOutput({ preset, settings })
+              ? model.capabilities
+              : { ...model.capabilities, imageOutput: false },
+            reasoningEfforts: actionableReasoningEfforts(model.capabilities, { preset, settings }),
+          }));
         }),
 
         setDefaultModelOrder: Effect.fn("ProviderRepo.setDefaultModelOrder")(function* (input) {

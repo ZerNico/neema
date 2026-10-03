@@ -42,6 +42,7 @@ export function ModelCombobox({
   onPick,
   onInput,
   disabled = false,
+  placeholder,
 }: {
   providerId: string;
   /** Forwarded to the text input so a FieldLabel can point at it. */
@@ -50,6 +51,8 @@ export function ModelCombobox({
   /** Fires on every keystroke with the raw text, for free-text fallback. */
   onInput?: (text: string) => void;
   disabled?: boolean;
+  /** Replaces the search prompt, e.g. where names are typed rather than found. */
+  placeholder?: string;
 }) {
   const [input, setInput] = useState("");
 
@@ -88,11 +91,12 @@ export function ModelCombobox({
       <ComboboxInput
         id={inputId}
         placeholder={
-          catalog.isLoading
+          placeholder ??
+          (catalog.isLoading
             ? "Loading models…"
             : catalog.data?.ok === false
               ? "Catalog unavailable, type a model ID"
-              : "Search models or type an ID…"
+              : "Search models or type an ID…")
         }
       />
       <ComboboxContent>

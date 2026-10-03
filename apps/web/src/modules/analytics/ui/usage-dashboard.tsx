@@ -422,8 +422,9 @@ export function UsageOverview({
         {/* The accessible companion: the stacked segments get small. */}
         <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           {[
-            ["Input", summary.inputTokens - summary.cachedInputTokens],
+            ["Input", summary.inputTokens - summary.cachedInputTokens - summary.cacheWriteTokens],
             ["Cached", summary.cachedInputTokens],
+            ["Cache write", summary.cacheWriteTokens],
             ["Output", summary.outputTokens - summary.reasoningTokens],
             ["Reasoning", summary.reasoningTokens],
           ].map(([label, value]) => (

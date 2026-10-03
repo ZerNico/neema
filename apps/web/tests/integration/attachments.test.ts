@@ -70,7 +70,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values({
@@ -890,6 +890,7 @@ describe("attachment-related migration state", () => {
     );
 
     expect(result.capabilities).toEqual({
+      imageOutput: false,
       reasoning: false,
       tools: false,
       vision: false,
@@ -986,7 +987,7 @@ describe("generated assistant image transactions", () => {
           invalidateCheckpointThroughMessageIds: [],
         });
         expect(retry.generationId).not.toBe(fence.generationId);
-        const replay = { v: 1 as const, providerId: "synthetic", modelKey: "synthetic", turns: [] };
+        const replay = { v: 1 as const, turns: [] };
         const writes = [
           repo.appendChunks(turn.assistant.id, [{ seq: 1, kind: "text", delta: "stale" }]),
           repo.saveProviderReplay(turn.assistant.id, replay),

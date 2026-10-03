@@ -112,6 +112,9 @@ function ModelEditForm({
     inputPrice: model.pricing === null ? "" : String(model.pricing.input),
     outputPrice:
       model.pricing === null || model.pricing.output === null ? "" : String(model.pricing.output),
+    cacheReadPrice: model.pricing?.cacheRead === undefined ? "" : String(model.pricing.cacheRead),
+    cacheWritePrice:
+      model.pricing?.cacheWrite === undefined ? "" : String(model.pricing.cacheWrite),
     enabled: model.enabled,
     access: model.access,
     selectedGroups: groups.filter((group) => allowedIds.has(group.id)),

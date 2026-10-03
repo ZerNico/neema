@@ -15,14 +15,15 @@ const common = {
 };
 
 describe("UpdateProviderInput", () => {
-  it("accepts only known reasoning transport formats", () => {
+  it("accepts only known setting values", () => {
     const decode = Schema.decodeUnknownSync(UpdateProviderInput);
-    for (const reasoningEffortFormat of ["unsupported", "flat", "nested"]) {
-      expect(decode({ providerId: "p1", reasoningEffortFormat })).toMatchObject({
-        reasoningEffortFormat,
+    for (const reasoning of ["none", "flat", "nested"]) {
+      expect(decode({ providerId: "p1", settings: { reasoning } })).toMatchObject({
+        settings: { reasoning },
       });
     }
-    expect(() => decode({ providerId: "p1", reasoningEffortFormat: "automatic" })).toThrow();
+    expect(() => decode({ providerId: "p1", settings: { reasoning: "thinking" } })).toThrow();
+    expect(() => decode({ providerId: "p1", settings: { keyHeader: "x-key\nevil: 1" } })).toThrow();
   });
 });
 
@@ -33,7 +34,13 @@ describe("CreateModelInput", () => {
         ...common,
         type: "embedding",
         embeddingDimensions: 1536,
-        capabilities: { reasoning: false, tools: false, vision: true, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: false,
+          tools: false,
+          vision: true,
+          files: false,
+        },
         pricing: { input: 0.02, output: null },
       }),
     ).toMatchObject({ type: "embedding", embeddingDimensions: 1536 });
@@ -45,6 +52,7 @@ describe("CreateModelInput", () => {
       type: "chat",
       embeddingDimensions: null,
       capabilities: {
+        imageOutput: false,
         reasoning: true,
         reasoningEfforts: ["minimal", "xhigh", "max"],
         tools: false,
@@ -70,7 +78,13 @@ describe("CreateModelInput", () => {
         ...common,
         type: "image",
         embeddingDimensions: null,
-        capabilities: { reasoning: false, tools: false, vision: true, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: false,
+          tools: false,
+          vision: true,
+          files: false,
+        },
         pricing: null,
       }),
     ).toThrow();
@@ -80,7 +94,13 @@ describe("CreateModelInput", () => {
         ...common,
         type: "embedding",
         embeddingDimensions: 1536,
-        capabilities: { reasoning: false, tools: true, vision: true, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: false,
+          tools: true,
+          vision: true,
+          files: false,
+        },
         pricing: { input: 0.02, output: null },
       }),
     ).toThrow();
@@ -90,7 +110,13 @@ describe("CreateModelInput", () => {
         ...common,
         type: "chat",
         embeddingDimensions: null,
-        capabilities: { reasoning: false, tools: false, vision: false, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: false,
+          tools: false,
+          vision: false,
+          files: false,
+        },
         pricing: { input: 1, output: null },
       }),
     ).toThrow();

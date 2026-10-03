@@ -9,7 +9,7 @@ const model = (id: string, displayName: string, providerName: string): PickableM
   displayName,
   providerName,
   contextLength: 128_000,
-  capabilities: { reasoning: false, tools: true, vision: false, files: false },
+  capabilities: { imageOutput: false, reasoning: false, tools: true, vision: false, files: false },
 });
 
 const MODELS = [

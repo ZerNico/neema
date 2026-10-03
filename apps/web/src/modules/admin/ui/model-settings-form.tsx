@@ -77,6 +77,9 @@ export interface ModelSettingsDraft {
   capabilities: ModelCapabilities;
   inputPrice: string;
   outputPrice: string;
+  /** Optional: blank prices a cached read or a cache write as ordinary input. */
+  cacheReadPrice: string;
+  cacheWritePrice: string;
   enabled: boolean;
   access: ModelAccess;
   selectedGroups: PickableGroup[];
@@ -91,6 +94,8 @@ export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({
   capabilities: { ...EMPTY_CAPABILITIES },
   inputPrice: "",
   outputPrice: "",
+  cacheReadPrice: "",
+  cacheWritePrice: "",
   enabled: true,
   access: "public",
   selectedGroups: [],
@@ -133,9 +138,13 @@ export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings
   }
 
   const outputPrice = parsePrice(draft.outputPrice);
+  const cacheRead = parsePrice(draft.cacheReadPrice);
+  const cacheWrite = parsePrice(draft.cacheWritePrice);
   const clearingPricing = inputPrice === null && outputPrice === null;
   if (
     outputPrice === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined ||
     (!clearingPricing && (inputPrice === null || outputPrice === null))
   ) {
     return null;
@@ -151,7 +160,12 @@ export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings
     pricing:
       inputPrice === null || outputPrice === null
         ? null
-        : { input: inputPrice, output: outputPrice },
+        : {
+            input: inputPrice,
+            output: outputPrice,
+            ...(cacheRead === null ? {} : { cacheRead }),
+            ...(cacheWrite === null ? {} : { cacheWrite }),
+          },
     enabled: draft.enabled,
     access: draft.access,
     groupIds: draft.selectedGroups.map((group) => group.id),
@@ -194,6 +208,10 @@ export function ModelSettingsFields({
     draft.inputPrice.trim() !== "" && parsePrice(draft.inputPrice) === undefined;
   const outputPriceInvalid =
     draft.outputPrice.trim() !== "" && parsePrice(draft.outputPrice) === undefined;
+  const cacheReadInvalid =
+    draft.cacheReadPrice.trim() !== "" && parsePrice(draft.cacheReadPrice) === undefined;
+  const cacheWriteInvalid =
+    draft.cacheWritePrice.trim() !== "" && parsePrice(draft.cacheWritePrice) === undefined;
   const partialChatPricing =
     draft.type === "chat" && (draft.inputPrice.trim() === "") !== (draft.outputPrice.trim() === "");
   const visibleCapabilities =
@@ -456,6 +474,32 @@ export function ModelSettingsFields({
                 aria-invalid={outputPriceInvalid || partialChatPricing}
               />
             </Field>
+          ) : null}
+          {draft.type === "chat" ? (
+            <>
+              <Field data-invalid={cacheReadInvalid}>
+                <FieldLabel htmlFor={`${id}-cache-read-price`}>Cache read $/1M</FieldLabel>
+                <Input
+                  id={`${id}-cache-read-price`}
+                  inputMode="decimal"
+                  value={draft.cacheReadPrice}
+                  onChange={(event) => patch({ cacheReadPrice: event.target.value })}
+                  placeholder="Input price"
+                  aria-invalid={cacheReadInvalid}
+                />
+              </Field>
+              <Field data-invalid={cacheWriteInvalid}>
+                <FieldLabel htmlFor={`${id}-cache-write-price`}>Cache write $/1M</FieldLabel>
+                <Input
+                  id={`${id}-cache-write-price`}
+                  inputMode="decimal"
+                  value={draft.cacheWritePrice}
+                  onChange={(event) => patch({ cacheWritePrice: event.target.value })}
+                  placeholder="Input price"
+                  aria-invalid={cacheWriteInvalid}
+                />
+              </Field>
+            </>
           ) : null}
         </div>
       </FieldSet>

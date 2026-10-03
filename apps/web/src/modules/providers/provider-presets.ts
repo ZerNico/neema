@@ -1,10 +1,29 @@
-export const PROVIDER_PRESETS = {
-  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  "openai-compatible": { label: "OpenAI-compatible", baseUrl: "https://api.openai.com/v1" },
-} as const;
+import {
+  effectiveSettings,
+  getPreset,
+  type PresetId,
+  type ProviderSettings,
+} from "@chat/model-client";
 
-export type ProviderKind = keyof typeof PROVIDER_PRESETS;
+/** A stored provider as far as request shaping cares. */
+export interface ProviderShape {
+  readonly preset: PresetId;
+  readonly settings: ProviderSettings;
+}
 
-/** A blank base URL means the kind's default, resolved at write time so the row stays concrete. */
-export const resolveBaseUrl = (kind: ProviderKind, baseUrl: string | undefined) =>
-  baseUrl?.trim() || PROVIDER_PRESETS[kind].baseUrl;
+export const settingsOf = (provider: ProviderShape) =>
+  effectiveSettings(getPreset(provider.preset), provider.settings);
+
+/**
+ * Whether a reasoning level reaches the model at all. Responses always takes
+ * one; on Chat Completions only a preset (or an admin) that names a request
+ * shape sends it, since strict servers refuse fields they do not know.
+ */
+export const sendsReasoningEffort = (provider: ProviderShape) => {
+  const settings = settingsOf(provider);
+  return settings.format === "responses" || settings.reasoning !== "none";
+};
+
+/** Image output exists only where the preset asks for it per call (OpenRouter's modalities). */
+export const supportsImageOutput = (provider: ProviderShape) =>
+  getPreset(provider.preset).imageOutput && settingsOf(provider).format === "chat-completions";

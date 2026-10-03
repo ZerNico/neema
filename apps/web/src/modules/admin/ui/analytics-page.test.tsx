@@ -40,6 +40,7 @@ const summary = {
   inputTokens: 1_200_000,
   outputTokens: 300_000,
   cachedInputTokens: 600_000, // half of input, a clean 50% hit rate
+  cacheWriteTokens: 0,
   reasoningTokens: 100_000,
   cost: 1.25,
   costComplete: true,
@@ -190,6 +191,7 @@ describe("AnalyticsPage", () => {
         inputTokens: 0,
         outputTokens: 0,
         cachedInputTokens: 0,
+        cacheWriteTokens: 0,
         reasoningTokens: 0,
         cost: 0,
         activeUsers: 0,

@@ -2,31 +2,31 @@ import { describe, expect, it } from "vitest";
 import { actionableReasoningEfforts, normalizeModelSettings } from "./model-config.ts";
 
 describe("actionableReasoningEfforts", () => {
-  it("offers only configured levels on capable transports", () => {
+  it("offers only configured levels where the preset or an admin sends them", () => {
     const capabilities = {
+      imageOutput: false,
       reasoning: true,
       reasoningEfforts: ["low", "high"] as const,
       tools: false,
       vision: false,
       files: false,
     };
-    expect(actionableReasoningEfforts(capabilities, "openrouter", "unsupported")).toEqual([
-      "low",
-      "high",
-    ]);
-    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "flat")).toEqual([
-      "low",
-      "high",
-    ]);
-    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "nested")).toEqual([
-      "low",
-      "high",
-    ]);
-    expect(actionableReasoningEfforts(capabilities, "openai-compatible", "unsupported")).toEqual(
-      [],
-    );
+    const levels = (preset: "openrouter" | "azure" | "custom" | "mistral", settings = {}) =>
+      actionableReasoningEfforts(capabilities, { preset, settings });
+    expect(levels("openrouter")).toEqual(["low", "high"]);
+    expect(levels("custom", { reasoning: "flat" })).toEqual(["low", "high"]);
+    expect(levels("custom", { reasoning: "nested" })).toEqual(["low", "high"]);
+    expect(levels("custom")).toEqual([]);
+    // A preset without a reasoning field never offers a level.
+    expect(levels("mistral")).toEqual([]);
+    // Responses always takes the level.
+    expect(levels("custom", { format: "responses" })).toEqual(["low", "high"]);
+    expect(levels("azure")).toEqual(["low", "high"]);
     expect(
-      actionableReasoningEfforts({ ...capabilities, reasoning: false }, "openrouter", "nested"),
+      actionableReasoningEfforts(
+        { ...capabilities, reasoning: false },
+        { preset: "openrouter", settings: {} },
+      ),
     ).toEqual([]);
   });
 });
@@ -39,7 +39,13 @@ describe("normalizeModelSettings", () => {
         type: "embedding",
         contextLength: 8192,
         embeddingDimensions: 1536,
-        capabilities: { reasoning: true, tools: true, vision: true, files: true },
+        capabilities: {
+          imageOutput: false,
+          reasoning: true,
+          tools: true,
+          vision: true,
+          files: true,
+        },
         pricing: { input: 0.02, output: 10 },
         enabled: true,
         access: "groups",
@@ -50,7 +56,13 @@ describe("normalizeModelSettings", () => {
       type: "embedding",
       contextLength: 8192,
       embeddingDimensions: 1536,
-      capabilities: { reasoning: false, tools: false, vision: true, files: false },
+      capabilities: {
+        imageOutput: false,
+        reasoning: false,
+        tools: false,
+        vision: true,
+        files: false,
+      },
       pricing: { input: 0.02, output: null },
       enabled: true,
       access: "groups",
@@ -67,6 +79,7 @@ describe("normalizeModelSettings", () => {
       groupIds: [],
       pricing: null,
       capabilities: {
+        imageOutput: false,
         reasoning: false,
         reasoningEfforts: ["low", "high"] as ("low" | "high")[],
         tools: false,
@@ -76,11 +89,11 @@ describe("normalizeModelSettings", () => {
     };
     expect(
       normalizeModelSettings({ ...common, type: "chat", embeddingDimensions: null }).capabilities,
-    ).toEqual({ reasoning: false, tools: false, vision: false, files: false });
+    ).toEqual({ imageOutput: false, reasoning: false, tools: false, vision: false, files: false });
     expect(
       normalizeModelSettings({ ...common, type: "embedding", embeddingDimensions: null })
         .capabilities,
-    ).toEqual({ reasoning: false, tools: false, vision: false, files: false });
+    ).toEqual({ imageOutput: false, reasoning: false, tools: false, vision: false, files: false });
   });
 
   it("clears embedding dimensions and group links from public chat models", () => {
@@ -90,7 +103,13 @@ describe("normalizeModelSettings", () => {
         type: "chat",
         contextLength: null,
         embeddingDimensions: 1536,
-        capabilities: { reasoning: true, tools: true, vision: false, files: false },
+        capabilities: {
+          imageOutput: false,
+          reasoning: true,
+          tools: true,
+          vision: false,
+          files: false,
+        },
         pricing: { input: 1, output: 3 },
         enabled: true,
         access: "public",

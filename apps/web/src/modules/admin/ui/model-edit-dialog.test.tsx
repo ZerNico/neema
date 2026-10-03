@@ -48,7 +48,7 @@ const model: EditableModel = {
   type: "chat",
   contextLength: 128_000,
   embeddingDimensions: null,
-  capabilities: { reasoning: false, tools: true, vision: false, files: false },
+  capabilities: { imageOutput: false, reasoning: false, tools: true, vision: false, files: false },
   pricing: { input: 2.5, output: 10 },
   enabled: true,
   access: "groups",
@@ -123,7 +123,13 @@ describe("ModelEditDialog", () => {
           type: "chat",
           contextLength: 200_000,
           embeddingDimensions: null,
-          capabilities: { reasoning: false, tools: true, vision: true, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: true,
+            vision: true,
+            files: false,
+          },
           pricing: { input: 3, output: 12 },
           enabled: false,
           access: "groups",
@@ -138,6 +144,7 @@ describe("ModelEditDialog", () => {
     const user = userEvent.setup();
     renderDialog({
       capabilities: {
+        imageOutput: false,
         reasoning: true,
         reasoningEfforts: ["high"],
         tools: true,
@@ -161,6 +168,7 @@ describe("ModelEditDialog", () => {
       expect(updateMock).toHaveBeenCalledWith({
         data: expect.objectContaining({
           capabilities: {
+            imageOutput: false,
             reasoning: true,
             reasoningEfforts: ["none", "low"],
             tools: true,
@@ -176,7 +184,13 @@ describe("ModelEditDialog", () => {
     renderDialog({
       type: "embedding",
       embeddingDimensions: 1536,
-      capabilities: { reasoning: false, tools: false, vision: true, files: false },
+      capabilities: {
+        imageOutput: false,
+        reasoning: false,
+        tools: false,
+        vision: true,
+        files: false,
+      },
       pricing: { input: 0.02, output: null },
     });
 
@@ -195,7 +209,13 @@ describe("ModelEditDialog", () => {
         data: expect.objectContaining({
           type: "embedding",
           embeddingDimensions: 3072,
-          capabilities: { reasoning: false, tools: false, vision: true, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: true,
+            files: false,
+          },
           pricing: { input: 0.03, output: null },
         }),
       }),

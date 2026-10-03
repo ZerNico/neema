@@ -217,6 +217,7 @@ export const mistralReader =
           inputTokens: 0,
           outputTokens: 0,
           cachedInputTokens: 0,
+          cacheWriteTokens: null,
           reasoningTokens: 0,
           cost: null,
           costSource: null,
@@ -296,6 +297,7 @@ export const modelReader =
                   inputTokens: totals.inputTokens,
                   outputTokens: totals.outputTokens,
                   cachedInputTokens: totals.cachedInputTokens,
+                  cacheWriteTokens: totals.cacheWriteTokens,
                   reasoningTokens: totals.reasoningTokens,
                   ...resolveCost(totals, model?.pricing),
                 });

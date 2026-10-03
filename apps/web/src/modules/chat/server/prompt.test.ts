@@ -7,6 +7,7 @@ import { DocumentParseError } from "~/modules/attachments/errors.ts";
 import { pdfFingerprint } from "~/modules/attachments/server/document-parser.ts";
 import {
   buildHistoryMessages,
+  expandedTurns,
   imageStandIn,
   loadResumedImages,
   resumeFirstTurn,
@@ -455,6 +456,18 @@ describe("assistant image replay", () => {
       id: "signed",
     },
   ];
+  const unitOf = (reasoningDetails: ReadonlyArray<(typeof details)[number]>) => ({
+    v: 1 as const,
+    id: `unit-${reasoningDetails.length}`,
+    identity: {
+      provider: "provider",
+      baseUrl: "https://provider.test/v1",
+      format: "chat-completions" as const,
+      model: "model",
+    },
+    format: "chat-completions" as const,
+    reasoningDetails,
+  });
   const message: HistoryMessage = {
     id: "answer",
     role: "assistant",
@@ -462,9 +475,7 @@ describe("assistant image replay", () => {
     assistantOutput: { v: 1, files: [image] },
     providerReplay: {
       v: 1,
-      providerId: "provider",
-      modelKey: "model",
-      turns: [{ turnIndex: 0, startOffset: 0, endOffset: 2, reasoningDetails: details }],
+      turns: [{ turnIndex: 0, startOffset: 0, endOffset: 2, unit: unitOf(details) }],
     },
   };
   const input = {
@@ -489,13 +500,14 @@ describe("assistant image replay", () => {
         expect(replay[0]).toMatchObject({
           role: "assistant",
           content: [{ type: "text", text: "😀" }],
-          options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+          options: { modelClient: { replay: unitOf(details) } },
         });
         expect(replay[1]).toMatchObject({
           role: "assistant",
           content: [{ type: "file" }, { type: "text", text: "after" }],
-          options: { openrouter: { reasoningDetails: [] } },
         });
+        // An unsigned trailing turn carries no state.
+        expect(replay[1]?.options).toBeUndefined();
       }),
   );
   it.effect("replays fileless empty-metadata text exactly, markers included", () =>
@@ -511,9 +523,7 @@ describe("assistant image replay", () => {
         createdAt: new Date("2026-09-01T00:00:00Z"),
         providerReplay: {
           ...message.providerReplay!,
-          turns: [
-            { turnIndex: 0, startOffset: 0, endOffset: content.length, reasoningDetails: [] },
-          ],
+          turns: [{ turnIndex: 0, startOffset: 0, endOffset: content.length, unit: unitOf([]) }],
         },
       };
       const rendered = yield* buildHistoryMessages(deps, {
@@ -527,7 +537,6 @@ describe("assistant image replay", () => {
             { type: "text", text: `[Completed: ${completedAt.toISOString()}]\n` },
             { type: "text", text: content },
           ],
-          options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
         },
       ]);
       expect(history.content).toBe(content);
@@ -555,7 +564,7 @@ describe("assistant image replay", () => {
                 turnIndex: 0,
                 startOffset: 0,
                 endOffset: content.length,
-                reasoningDetails: mode === "empty metadata" ? [] : details,
+                unit: unitOf(mode === "empty metadata" ? [] : details),
               },
             ],
           },
@@ -632,7 +641,7 @@ describe("assistant image replay", () => {
                 turnIndex: 0,
                 startOffset: 0,
                 endOffset: signedText.length,
-                reasoningDetails: details,
+                unit: unitOf(details),
               },
             ],
           },
@@ -660,7 +669,7 @@ describe("assistant image replay", () => {
             { type: "text", text: "after[^2]" },
             { type: "tool-call", id: "call", name: "inspect", params: { target: "image" } },
           ],
-          options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+          options: { modelClient: { replay: unitOf(details) } },
         });
         expect(rendered[2]).toEqual({
           role: "tool",
@@ -681,6 +690,91 @@ describe("assistant image replay", () => {
         expect(history).toEqual(original);
       }),
   );
+  it.effect("keeps a round without state that came before one with it", () =>
+    Effect.gen(function* () {
+      const { deps } = harness({ rows: [] });
+      const call = (turnIndex: number, id: string): ToolCallRow => ({
+        id: `row-${id}`,
+        messageId: "answer",
+        researchRunId: null,
+        researchTaskId: null,
+        turnIndex,
+        callIndex: 0,
+        textOffset: null,
+        providerCallId: id,
+        toolName: "inspect",
+        arguments: {},
+        result: { ok: true },
+        status: "complete",
+        error: null,
+        startedAt: new Date(),
+        completedAt: null,
+      });
+      const chat = { listToolCalls: () => Effect.succeed([call(0, "first"), call(1, "second")]) };
+      const content = "Looking. Found it.";
+      const rendered = yield* buildHistoryMessages(
+        { ...deps, chat },
+        {
+          ...input,
+          messages: [
+            {
+              ...message,
+              content,
+              assistantOutput: null,
+              providerReplay: {
+                v: 1,
+                // Only the second round returned state; the first left no record.
+                turns: [
+                  {
+                    turnIndex: 1,
+                    startOffset: 9,
+                    endOffset: content.length,
+                    unit: unitOf(details),
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      );
+      expect(rendered.map((item) => item.role)).toEqual(["assistant", "tool", "assistant", "tool"]);
+      expect(rendered[0]).toMatchObject({
+        content: [
+          { type: "text", text: "Looking. " },
+          { type: "tool-call", id: "first" },
+        ],
+      });
+      expect(rendered[0]).not.toHaveProperty("options");
+      expect(rendered[2]).toMatchObject({
+        content: [
+          { type: "text", text: "Found it." },
+          { type: "tool-call", id: "second" },
+        ],
+        options: { modelClient: { replay: unitOf(details) } },
+      });
+    }),
+  );
+  it("splits unrecorded rounds at their rows, so a steer stays before the text it caused", () => {
+    const turns = expandedTurns({
+      content: "ABC",
+      recorded: [{ turnIndex: 2, startOffset: 2, endOffset: 3, unit: unitOf(details) }],
+      positions: [
+        { turnIndex: 0, textOffset: 1 },
+        { turnIndex: 0, textOffset: 1 },
+        { turnIndex: 1, textOffset: 2 },
+      ],
+    });
+    expect(turns.map((turn) => [turn.startOffset, turn.endOffset])).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ]);
+    expect(turns.map((turn) => [0, 1, 2].filter((index) => turn.owns(index)))).toEqual([
+      [0],
+      [1],
+      [2],
+    ]);
+  });
   it.effect("fails closed when every referenced attachment is absent", () =>
     Effect.gen(function* () {
       const { deps } = harness({ rows: [] });
@@ -835,9 +929,7 @@ describe("assistant image replay", () => {
         imageParts,
         replay: {
           v: 1,
-          providerId: "provider",
-          modelKey: "model",
-          turns: [{ turnIndex: 0, startOffset: 0, endOffset: 7, reasoningDetails: details }],
+          turns: [{ turnIndex: 0, startOffset: 0, endOffset: 7, unit: unitOf(details) }],
         },
         steers: [],
       });
@@ -846,7 +938,7 @@ describe("assistant image replay", () => {
       expect(signed).toMatchObject({
         role: "assistant",
         content: [{ type: "text", text: "😀" }, { type: "file" }, { type: "text", text: "after" }],
-        options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+        options: { modelClient: { replay: unitOf(details) } },
       });
       expect(record).toMatchObject({ role: "assistant" });
       expect(record!.content).toContain("<application-record>");
@@ -860,7 +952,7 @@ describe("assistant image replay", () => {
         messages: [{ ...message, content: "😀", assistantOutput: null }],
       });
       expect(replay[0]).toMatchObject({
-        options: { openrouter: { imageReplay: true, reasoningDetails: details } },
+        options: { modelClient: { replay: unitOf(details) } },
       });
     }),
   );
@@ -1107,9 +1199,20 @@ describe("resumedRounds", () => {
         files: [],
         replay: {
           v: 1,
-          providerId: "p",
-          modelKey: "m",
-          turns: [{ turnIndex: 4, startOffset: 0, endOffset: 0, reasoningDetails: [] }],
+          turns: [
+            {
+              turnIndex: 4,
+              startOffset: 0,
+              endOffset: 0,
+              unit: {
+                v: 1,
+                id: "u",
+                identity: { provider: "p", baseUrl: "b", format: "chat-completions", model: "m" },
+                format: "chat-completions",
+                reasoningDetails: [{ type: "reasoning.encrypted", data: "x" }],
+              },
+            },
+          ],
         },
       }),
     ).toBe(5);

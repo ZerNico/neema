@@ -158,6 +158,7 @@ describe("AddModelDialog", () => {
           contextLength: 128_000,
           embeddingDimensions: null,
           capabilities: {
+            imageOutput: false,
             reasoning: false,
             tools: false,
             vision: false,

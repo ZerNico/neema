@@ -296,7 +296,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values([
@@ -308,7 +308,13 @@ beforeAll(async () => {
           displayName: "Small Window",
           type: "chat",
           contextLength: SMALL_ENGINE_CONTEXT,
-          capabilities: { reasoning: false, tools: true, vision: false, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: true,
+            vision: false,
+            files: false,
+          },
         },
         {
           id: toolModelId,
@@ -320,7 +326,13 @@ beforeAll(async () => {
           // leaves a workable input budget; adding a tool family must not make
           // this window useless.
           contextLength: 12_000,
-          capabilities: { reasoning: false, tools: true, vision: false, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: true,
+            vision: false,
+            files: false,
+          },
         },
       ]);
     }),

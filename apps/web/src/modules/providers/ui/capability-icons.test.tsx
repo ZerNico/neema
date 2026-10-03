@@ -3,7 +3,13 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Image01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 import { CAPABILITY_META, CapabilityIcons } from "./capability-icons.tsx";
-const capabilities = { tools: true, reasoning: true, vision: true, files: true };
+const capabilities = {
+  imageOutput: false,
+  tools: true,
+  reasoning: true,
+  vision: true,
+  files: true,
+};
 describe("CapabilityIcons", () => {
   it("preserves full native capability metadata for admin displays", () => {
     render(<CapabilityIcons capabilities={capabilities} />);

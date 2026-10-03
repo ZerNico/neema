@@ -148,7 +148,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values({
@@ -623,16 +623,23 @@ describe("branching a conversation", () => {
         const content = `[earlier upload](/api/files/${early!.id})`;
         const replay = {
           v: 1 as const,
-          providerId,
-          modelKey: "m",
           turns: [
             {
               turnIndex: 0,
               startOffset: 0,
               endOffset: content.length,
-              reasoningDetails: [
-                { type: "reasoning.encrypted" as const, data: "signed-private-data" },
-              ],
+              unit: {
+                v: 1 as const,
+                id: "unit-1",
+                identity: {
+                  provider: providerId,
+                  baseUrl: "https://provider.test/v1",
+                  format: "chat-completions" as const,
+                  model: "m",
+                },
+                format: "chat-completions" as const,
+                reasoningDetails: [{ type: "reasoning.encrypted", data: "signed-private-data" }],
+              },
             },
           ],
         };

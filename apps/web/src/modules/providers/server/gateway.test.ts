@@ -14,10 +14,11 @@ import {
   ProviderUnreachable,
   anchorLastMessage,
   cacheAnchor,
-  catalogPricing,
-  inferType,
   isContextOverflow,
 } from "./gateway.ts";
+import { Catalog } from "@chat/model-client";
+
+const { catalogPricing, inferType } = Catalog;
 
 describe("provider catalog normalization", () => {
   it("preserves input-only pricing for embedding configuration", () => {
@@ -152,8 +153,9 @@ const repoWith = (
             id: "p1",
             apiKey: "sk-test",
             baseUrl: "https://provider.test/v1",
-            kind,
-            reasoningEffortFormat,
+            preset: kind === "openai-compatible" ? "custom" : kind,
+            settings:
+              reasoningEffortFormat === "unsupported" ? {} : { reasoning: reasoningEffortFormat },
           }),
       }),
     ),
@@ -192,7 +194,7 @@ describe("provider prompt ordering", () => {
         ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoStub))));
         expect(recorded[0]?.body).toMatchObject({
           messages: [
-            { role: "system", content: [{ type: "text", text: "Stable policy" }] },
+            { role: "system", content: "Stable policy" },
             { role: "user", content: "Earlier question" },
             { role: "assistant", content: "Earlier answer" },
             { role: "user", content: "What day is it?" },
@@ -454,8 +456,8 @@ const probeRepo = (enabled: boolean) =>
             id: "p1",
             apiKey: "sk-test",
             baseUrl: "https://provider.test/v1",
-            kind: "openai-compatible",
-            reasoningEffortFormat: "unsupported",
+            preset: "custom",
+            settings: {},
             enabled,
           }),
       }),
@@ -593,6 +595,18 @@ describe("provider failure diagnostics", () => {
 describe("sensitive input diagnostics for text output", () => {
   const secret = "PRIVATE-replay-signature";
   const details = [{ type: "reasoning.encrypted" as const, data: secret, id: "signed" }];
+  const unit = {
+    v: 1 as const,
+    id: "unit-1",
+    identity: {
+      provider: "p1",
+      baseUrl: "https://provider.test/v1",
+      format: "chat-completions" as const,
+      model: "vendor/model",
+    },
+    format: "chat-completions" as const,
+    reasoningDetails: details,
+  };
   // The model still reads images, but its output capability has been disabled.
   const layer = GatewayLayer.pipe(Layer.provide(repoWith(true, false, "openrouter", true)));
   const request = (mode: "chat" | "side", prompt: Prompt.Prompt) =>
@@ -626,11 +640,7 @@ describe("sensitive input diagnostics for text output", () => {
                   completedAt: new Date("2026-09-08T12:00:00Z"),
                   providerReplay: {
                     v: 1,
-                    providerId: "p1",
-                    modelKey: "vendor/model",
-                    turns: [
-                      { turnIndex: 0, startOffset: 0, endOffset: 12, reasoningDetails: details },
-                    ],
+                    turns: [{ turnIndex: 0, startOffset: 0, endOffset: 12, unit }],
                   },
                 },
               ],
@@ -685,14 +695,14 @@ describe("sensitive input diagnostics for text output", () => {
                 ? {
                     type: "reasoning",
                     text: "",
-                    options: { openrouter: { reasoningDetails: details } },
+                    options: { modelClient: { replay: unit } },
                   }
                 : {
                     type: "tool-call",
                     id: "call",
                     name: "inspect",
                     params: {},
-                    options: { openrouter: { reasoningDetails: details } },
+                    options: { modelClient: { replay: unit } },
                   };
           const error = yield* request(
             mode,
@@ -736,7 +746,7 @@ describe("sensitive input diagnostics for text output", () => {
             {
               role: "assistant",
               content: "Answer",
-              options: { openrouter: { imageReplay: true, reasoningDetails: [] } },
+              options: { modelClient: { replay: { ...unit, reasoningDetails: [] } } },
             },
             { role: "user", content: "Explain" },
           ]),
@@ -996,6 +1006,8 @@ const embeddingRepo = Layer.succeed(
         Effect.succeed({
           id: "p1",
           enabled: true,
+          preset: "custom",
+          settings: {},
           apiKey: Redacted.make("fake-key"),
           baseUrl: "https://provider.test/v1",
         }),
@@ -1042,6 +1054,7 @@ describe("bounded embedding gateway", () => {
           inputTokens: 5,
           outputTokens: 0,
           cachedInputTokens: 0,
+          cacheWriteTokens: null,
           reasoningTokens: 0,
           usageComplete: true,
           cost: expect.closeTo(0.0000001, 15),
@@ -1368,7 +1381,8 @@ describe("provider catalog", () => {
             getProviderWithKey: () =>
               Effect.succeed({
                 id: "p1",
-                kind: "openrouter",
+                preset: "openrouter",
+                settings: {},
                 apiKey: Redacted.make("sk-test"),
                 baseUrl: "https://provider.test/v1/",
               }),
@@ -1412,7 +1426,8 @@ describe("provider catalog", () => {
             getProviderWithKey: () =>
               Effect.succeed({
                 id: "p2",
-                kind: "openai-compatible",
+                preset: "custom",
+                settings: {},
                 apiKey: Redacted.make("sk-test"),
                 baseUrl: "https://compat.test/v1",
               }),
@@ -1437,7 +1452,8 @@ describe("per-call image output policy", () => {
   for (const [kind, capable, requested, modalities] of [
     ["openai-compatible", false, false, undefined],
     ["openai-compatible", false, true, undefined],
-    ["openai-compatible", true, true, ["text", "image"]],
+    // Only a preset that asks for image output per call (OpenRouter) can get it.
+    ["openai-compatible", true, true, undefined],
     ["openrouter", true, false, ["text"]],
     ["openrouter", true, true, ["text", "image"]],
   ] as const) {
@@ -1460,7 +1476,10 @@ describe("per-call image output policy", () => {
         ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repoWith(true, capable, kind)))));
         if (modalities) expect(recorded[0]?.body).toMatchObject({ modalities });
         else expect(recorded[0]?.body).not.toHaveProperty("modalities");
-        expect(parts.some((part) => part.type === "reasoning-delta")).toBe(!(capable && requested));
+        // Inline images and text interleave, so <think> splitting stays off for image output.
+        expect(parts.some((part) => part.type === "reasoning-delta")).toBe(
+          !(modalities as ReadonlyArray<string> | undefined)?.includes("image"),
+        );
       }),
     );
   }
@@ -1513,7 +1532,7 @@ describe("terminal provider responses through the pinned adapter", () => {
           expect(parts.find((part) => part.type === "finish")).toMatchObject({
             reason: reason === "content_filter" ? "content-filter" : reason,
             usage: { inputTokens: { total: 12 }, outputTokens: { total: 4 } },
-            metadata: { openrouter: { usage: { cost: 0.04 } } },
+            metadata: { modelClient: { cost: 0.04 } },
           });
         }),
       );

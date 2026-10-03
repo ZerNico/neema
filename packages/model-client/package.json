@@ -1,0 +1,20 @@
+{
+  "name": "@chat/model-client",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./presets": "./src/preset.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm exec vitest run"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

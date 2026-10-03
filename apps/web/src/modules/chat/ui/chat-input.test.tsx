@@ -47,6 +47,7 @@ const model = (overrides: {
   enabled: true,
   contextLength: 128_000,
   capabilities: {
+    imageOutput: false,
     reasoning: false,
     tools: false,
     vision: overrides.vision ?? false,
@@ -673,7 +674,7 @@ describe("ChatInput attachment picking", () => {
   it("accepts a file drop on the shell", () => {
     const harness = setup();
     const shell = harness.container.firstElementChild!;
-    const dataTransfer = { files: [textFile()], types: ["Files"] };
+    const dataTransfer = { imageOutput: false, files: [textFile()], types: ["Files"] };
 
     fireEvent.dragEnter(shell, { dataTransfer });
     fireEvent.drop(shell, { dataTransfer });
@@ -685,7 +686,7 @@ describe("ChatInput attachment picking", () => {
   it("shows the drop overlay while a file drag hovers the shell", () => {
     const harness = setup();
     const shell = harness.container.firstElementChild!;
-    const dataTransfer = { files: [], types: ["Files"] };
+    const dataTransfer = { imageOutput: false, files: [], types: ["Files"] };
 
     fireEvent.dragEnter(shell, { dataTransfer });
     expect(screen.getByText("Drop files to attach")).toBeInTheDocument();
@@ -700,7 +701,9 @@ describe("ChatInput attachment picking", () => {
   it("ignores drags that carry no files", () => {
     const harness = setup();
     const shell = harness.container.firstElementChild!;
-    fireEvent.drop(shell, { dataTransfer: { files: [], types: ["text/plain"] } });
+    fireEvent.drop(shell, {
+      dataTransfer: { imageOutput: false, files: [], types: ["text/plain"] },
+    });
     expect(harness.upload).not.toHaveBeenCalled();
   });
 
@@ -719,7 +722,7 @@ describe("ChatInput paste", () => {
   const paste = (_harness: Harness, data: { files?: File[]; text?: string }) => {
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
-      value: { files: data.files ?? [], getData: () => data.text ?? "" },
+      value: { imageOutput: false, files: data.files ?? [], getData: () => data.text ?? "" },
     });
     fireEvent(screen.getByRole("textbox"), event);
     return event;

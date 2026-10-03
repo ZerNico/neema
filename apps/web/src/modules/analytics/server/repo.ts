@@ -25,6 +25,8 @@ export interface UsageEventInput {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** Null: the provider said nothing about cache writes. */
+  cacheWriteTokens: number | null;
   reasoningTokens: number;
   usageComplete?: boolean;
   cost: number | null;
@@ -56,6 +58,8 @@ export interface UsageSummary {
   outputTokens: number;
   /** Cache reads, already included in `inputTokens`, not an addend. */
   cachedInputTokens: number;
+  /** Cache writes, also inside `inputTokens`; rows whose provider never said count nothing. */
+  cacheWriteTokens: number;
   reasoningTokens: number;
   cost: number;
   /** False when any event in range has unknown cost, so the total is a floor. */
@@ -152,6 +156,9 @@ export class AnalyticsRepo extends Context.Service<
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null or not ${usageEvents.usageComplete})::int`,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
+              cacheWriteTokens: sql`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`.mapWith(
+                tokenTotal,
+              ),
             })
             .from(usageEvents)
             .where(inScope(scope))
@@ -167,6 +174,7 @@ export class AnalyticsRepo extends Context.Service<
             inputTokens: row.inputTokens,
             outputTokens: row.outputTokens,
             cachedInputTokens: row.cachedInputTokens,
+            cacheWriteTokens: row.cacheWriteTokens,
             reasoningTokens: row.reasoningTokens,
             cost: row.cost,
             costComplete: row.unknownCost === 0,

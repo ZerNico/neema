@@ -338,8 +338,8 @@ beforeAll(async () => {
   noToolModelId = uuidv7();
   researchModelId = uuidv7();
   await exec(
-    `insert into providers (id, name, kind, base_url, api_key_ciphertext)
-     values ('${providerId}', 'P', 'openai-compatible', 'http://x', 'x')`,
+    `insert into providers (id, name, preset, base_url, api_key_ciphertext)
+     values ('${providerId}', 'P', 'custom', 'http://x', 'x')`,
   );
   // A small window: two short notes fit directly, a long one forces retrieval.
   await exec(

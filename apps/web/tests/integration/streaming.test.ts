@@ -282,11 +282,22 @@ const FakeGateway = Layer.succeed(AiGateway, {
             reason: "stop",
             usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
             metadata: {
-              openrouter: {
-                reasoningDetails: [
-                  { type: "reasoning.encrypted", data: "private-replay", id: "opaque" },
-                ],
-                usage: { cost: 0.04, prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+              modelClient: {
+                cost: 0.04,
+                replay: {
+                  v: 1,
+                  id: "image-round",
+                  identity: {
+                    provider: "p",
+                    baseUrl: "http://x",
+                    format: "chat-completions",
+                    model: "image-model",
+                  },
+                  format: "chat-completions",
+                  reasoningDetails: [
+                    { type: "reasoning.encrypted", data: "private-replay", id: "opaque" },
+                  ],
+                },
               },
             },
           }),
@@ -380,7 +391,7 @@ beforeAll(async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.execute(
-        `insert into providers (id, name, kind, base_url, api_key_ciphertext)
+        `insert into providers (id, name, preset, base_url, api_key_ciphertext)
          values ('${providerId}', 'p', 'openrouter', 'http://x', 'x')` as never,
       );
       yield* db.insert(models).values([
@@ -404,7 +415,13 @@ beforeAll(async () => {
           modelKey: "sees",
           displayName: "Sees Images",
           type: "chat",
-          capabilities: { reasoning: false, tools: false, vision: true, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: true,
+            files: false,
+          },
         },
         {
           id: textModelId,
@@ -412,7 +429,13 @@ beforeAll(async () => {
           modelKey: "text",
           displayName: "Text Only",
           type: "chat",
-          capabilities: { reasoning: false, tools: false, vision: false, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: false,
+            files: false,
+          },
         },
       ]);
     }),
@@ -3690,6 +3713,7 @@ describe("resumable streaming pipeline", () => {
                 inputTokens: 0,
                 outputTokens: 0,
                 cachedInputTokens: 0,
+                cacheWriteTokens: null,
                 reasoningTokens: 0,
                 usageComplete: false,
                 cost: null,
@@ -4833,6 +4857,7 @@ describe("reasoning effort attempts", () => {
             displayName: "Reasoning test model",
             type: "chat",
             capabilities: {
+              imageOutput: false,
               reasoning: true,
               reasoningEfforts: ["low", "high"],
               tools: false,
@@ -4938,6 +4963,7 @@ describe("reasoning effort attempts", () => {
             displayName: "Reasoning question model",
             type: "chat",
             capabilities: {
+              imageOutput: false,
               reasoning: true,
               reasoningEfforts: ["high"],
               tools: true,
@@ -5013,8 +5039,8 @@ describe("reasoning effort attempts", () => {
         const seed = yield* seedAnswered(textModelId);
         const providerId = uuidv7();
         const modelId = uuidv7();
-        yield* db.execute(sql`insert into providers (id, name, kind, base_url, api_key_ciphertext)
-          values (${providerId}, 'unsupported-effort', 'openai-compatible', 'http://x', 'x')`);
+        yield* db.execute(sql`insert into providers (id, name, preset, base_url, api_key_ciphertext)
+          values (${providerId}, 'unsupported-effort', 'custom', 'http://x', 'x')`);
         yield* db.insert(models).values({
           id: modelId,
           providerId,
@@ -5022,6 +5048,7 @@ describe("reasoning effort attempts", () => {
           displayName: "Unsupported transport",
           type: "chat",
           capabilities: {
+            imageOutput: false,
             reasoning: true,
             reasoningEfforts: ["high"],
             tools: false,
@@ -5062,6 +5089,7 @@ describe("reasoning effort attempts", () => {
         const capabilities = {
           reasoning: true,
           reasoningEfforts: ["high" as const],
+          imageOutput: false,
           tools: false,
           vision: false,
           files: false,
@@ -5288,7 +5316,9 @@ describe("generated image streaming", () => {
           content: "BeforeAfter",
           status: "complete",
           assistantOutput: { files: [{ textOffset: 6, turnIndex: 0 }] },
-          providerReplay: { turns: [{ reasoningDetails: [{ data: "private-replay" }] }] },
+          providerReplay: {
+            turns: [{ unit: { reasoningDetails: [{ data: "private-replay" }] } }],
+          },
         });
       }),
     );
@@ -5312,16 +5342,7 @@ describe("terminal response validation", () => {
                   inputTokens: { total: 12 },
                   outputTokens: { total: 4 },
                 }),
-                metadata: {
-                  openrouter: {
-                    usage: {
-                      prompt_tokens: 12,
-                      completion_tokens: 4,
-                      total_tokens: 16,
-                      cost: 0.04,
-                    },
-                  },
-                },
+                metadata: { modelClient: { cost: 0.04 } },
               }),
             ]),
             { tools: [askUserTool], nextId: Effect.succeed("hermes-question") },
@@ -5407,11 +5428,7 @@ describe("terminal response validation", () => {
           AiResponse.makePart("finish", {
             reason,
             usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
-            metadata: {
-              openrouter: {
-                usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16, cost: 0.04 },
-              },
-            },
+            metadata: { modelClient: { cost: 0.04 } },
           }),
         );
       terminalFixtures = [parts];
@@ -8349,9 +8366,7 @@ describe("resuming an interrupted answer", () => {
         AiResponse.makePart("finish", {
           reason: "stop",
           usage: new AiResponse.Usage({ inputTokens: { total: 12 }, outputTokens: { total: 4 } }),
-          metadata: {
-            openrouter: { usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } },
-          },
+          metadata: {},
         }),
       );
     };
@@ -8507,9 +8522,25 @@ describe("resuming an interrupted answer", () => {
           .set({
             providerReplay: {
               v: 1,
-              providerId: "p",
-              modelKey: "text",
-              turns: [{ turnIndex: 0, startOffset: 0, endOffset: 8, reasoningDetails: [] }],
+              turns: [
+                {
+                  turnIndex: 0,
+                  startOffset: 0,
+                  endOffset: 8,
+                  unit: {
+                    v: 1 as const,
+                    id: "unit-1",
+                    identity: {
+                      provider: "p",
+                      baseUrl: "https://provider.test/v1",
+                      format: "chat-completions" as const,
+                      model: "text",
+                    },
+                    format: "chat-completions" as const,
+                    reasoningDetails: [{ type: "reasoning.encrypted", data: "signed" }],
+                  },
+                },
+              ],
             },
           })
           .where(eq(messages.id, seed.assistant.id));

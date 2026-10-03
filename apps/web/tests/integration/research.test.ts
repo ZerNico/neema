@@ -522,7 +522,7 @@ beforeAll(async () => {
         ),
       );
       yield* db.execute(
-        sql`insert into providers (id,name,kind,base_url,api_key_ciphertext) values (${providerId},'Test','openrouter','https://invalid.example','unused')`,
+        sql`insert into providers (id,name,preset,base_url,api_key_ciphertext) values (${providerId},'Test','openrouter','https://invalid.example','unused')`,
       );
       yield* db.insert(models).values({
         id: modelId,
@@ -530,7 +530,13 @@ beforeAll(async () => {
         modelKey: "fake",
         displayName: "Fake Research",
         type: "chat",
-        capabilities: { tools: true, reasoning: false, files: false, vision: false },
+        capabilities: {
+          imageOutput: false,
+          tools: true,
+          reasoning: false,
+          files: false,
+          vision: false,
+        },
         contextLength: 128000,
         pricing: { input: 1, output: 2 },
       });

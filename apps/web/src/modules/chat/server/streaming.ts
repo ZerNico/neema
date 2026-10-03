@@ -74,8 +74,8 @@ import {
   lockGeneration,
   type GenerationIdentity,
 } from "./generation-fence.ts";
-import { boundedReplay, replayDetails, type ProviderReplay } from "./provider-replay.ts";
-import { responseTurnPrompt } from "~/modules/providers/server/response-prompt.ts";
+import { appendReplay, replayUnitOf, type ProviderReplay } from "./provider-replay.ts";
+import { replayOf, roundPrompt } from "@chat/model-client";
 import { prepareConversationContext } from "./conversation-context.ts";
 import {
   Context,
@@ -103,7 +103,12 @@ import { PlanSnapshot, PlanToolResult, renderPlanReminder } from "~/modules/tool
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
+import {
+  addFinishUsage,
+  emptyUsageTotals,
+  providerCostOf,
+  resolveCost,
+} from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { Db } from "~/server/db.ts";
 import { makeToolFileResolver } from "./tool-files.ts";
@@ -157,6 +162,7 @@ import { debugArguments, storedArguments } from "./stored-arguments.ts";
 // Families whose content lives in its own deletable row; their calls keep no arguments.
 const OWNED_CONTENT = new Set(["memory", "agent-draft", "schedule-draft", "document"]);
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
+import { supportsImageOutput } from "~/modules/providers/provider-presets.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { isWebSource, sourceTarget, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
@@ -662,16 +668,19 @@ export class StreamEngine extends Context.Service<
         let assembled = resuming ? currentMessage.content : "";
         let assembledReasoning = resuming ? (currentMessage.reasoning ?? "") : "";
         let acceptedImages = 0;
-        // A resumed image answer keeps the signed turns its model wrote; the
-        // resume transaction already cleared them for a different model.
-        const storedReplay = resuming ? currentMessage.providerReplay : null;
-        let replay: ProviderReplay | null =
-          storedReplay &&
-          storedReplay.providerId === model?.providerId &&
-          storedReplay.modelKey === model.modelKey
-            ? storedReplay
-            : null;
-        const imageOutput = model?.capabilities.imageOutput === true;
+        // A resumed answer keeps the replay units its model wrote; the resume
+        // transaction already cleared them for a different model.
+        let replay: ProviderReplay | null = resuming
+          ? (currentMessage.providerReplay ?? null)
+          : null;
+        // Image output exists only where the provider's wire format carries it.
+        const provider = model
+          ? (yield* providers.listProviders()).find((row) => row.id === model.providerId)
+          : undefined;
+        const imageOutput =
+          model?.capabilities.imageOutput === true &&
+          provider !== undefined &&
+          supportsImageOutput(provider);
         let imageCostIncomplete = false;
         let modelCallOpen = false;
         let buffer: Array<{ seq: number; kind: ChunkKind; delta: string }> = [];
@@ -824,6 +833,7 @@ export class StreamEngine extends Context.Service<
                 inputTokens: totals.inputTokens,
                 outputTokens: totals.outputTokens,
                 cachedInputTokens: totals.cachedInputTokens,
+                cacheWriteTokens: totals.cacheWriteTokens,
                 reasoningTokens: totals.reasoningTokens,
                 ...resolveCost(
                   totals,
@@ -3707,28 +3717,21 @@ export class StreamEngine extends Context.Service<
                           finishReason = part.reason;
                           addFinishUsage(totals, part);
                           modelCallOpen = false;
-                          if (imageOutput) {
-                            if (part.metadata.openrouter?.usage?.cost == null)
-                              imageCostIncomplete = true;
-                            if (model) {
-                              const details = replayDetails(
-                                part.metadata.openrouter?.reasoningDetails ?? [],
-                              );
-                              replay = boundedReplay({
-                                v: 1,
-                                providerId: model.providerId,
-                                modelKey: model.modelKey,
-                                turns: [
-                                  ...(replay?.turns ?? []),
-                                  {
-                                    turnIndex: turn,
-                                    startOffset: turnStartOffset,
-                                    endOffset: assembled.length,
-                                    reasoningDetails: details,
-                                  },
-                                ],
-                              });
-                              yield* repo.saveProviderReplay(input.messageId, replay);
+                          if (imageOutput && providerCostOf(part.metadata) === null)
+                            imageCostIncomplete = true;
+                          // The round's opaque reasoning state, kept with the
+                          // answer so its history replays it to the same model.
+                          const unit = replayUnitOf(replayOf(part.metadata));
+                          if (model && (unit || imageOutput)) {
+                            const next = appendReplay(replay, {
+                              turnIndex: turn,
+                              startOffset: turnStartOffset,
+                              endOffset: assembled.length,
+                              unit,
+                            });
+                            if (next && next !== replay) {
+                              replay = next;
+                              yield* repo.saveProviderReplay(input.messageId, next);
                             }
                           }
                           if (!sawFirstFinish) {
@@ -3915,18 +3918,18 @@ export class StreamEngine extends Context.Service<
             // A completed response/tool batch is one atomic unit. It becomes
             // eligible for compaction only now, after every tool result is
             // terminal; no call can ever be separated from its result.
-            const roundPrompt = imageOutput
-              ? responseTurnPrompt(turnParts)
-              : Prompt.fromResponseParts(turnParts);
+            // Files keep their place among the text, and the round's replay
+            // unit rides on the assistant message.
+            const roundMessages = roundPrompt(turnParts);
             activeRounds = [
               ...activeRounds,
               {
                 turnIndex: turn,
                 prompt:
                   turnFiles.length === 0
-                    ? roundPrompt
+                    ? roundMessages
                     : Prompt.concat(
-                        roundPrompt,
+                        roundMessages,
                         Prompt.make([{ role: "user", content: turnFiles }]),
                       ),
               },
@@ -4089,6 +4092,7 @@ export class StreamEngine extends Context.Service<
                     inputTokens: 0,
                     outputTokens: 0,
                     cachedInputTokens: 0,
+                    cacheWriteTokens: null,
                     reasoningTokens: 0,
                     usageComplete: false,
                     cost: null,

@@ -8,9 +8,9 @@
   lockFileMaintenance: { enabled: true },
   packageRules: [
     {
-      // Every effect package shares one rc, and @effect/ai-openrouter's patch
-      // has to be regenerated on each bump (AGENTS.md, Version pins), so the
-      // group waits for approval on the dependency dashboard.
+      // Every effect package shares one rc, and an rc can change the AI
+      // interfaces the model client implements (AGENTS.md, Version pins), so
+      // the group waits for approval on the dependency dashboard.
       groupName: "effect",
       matchPackageNames: ["effect", "@effect/**"],
       dependencyDashboardApproval: true,

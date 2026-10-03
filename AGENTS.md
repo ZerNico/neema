@@ -137,7 +137,8 @@ skipped one on purpose.
   spreadsheet, word, tool-file, tool-load, attachment.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
-  it. The toolkit loop never learns the difference.
+  it, over either wire format (Chat Completions, Responses). The toolkit loop never
+  learns the difference.
 - **Reverse states**: every way in needs a way out. Stop, lease expiry, owner change
   and a stale run all have to leave the row terminal and the client consistent.
 - **Docs**: if you changed a rule recorded in `docs/internals/`, rewrite the
@@ -260,6 +261,10 @@ skipped one on purpose.
   and why a schedule's fire does not.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
+- `docs/internals/providers.md`: `@chat/model-client` and its presets, admin overrides,
+  one finish and no truncated calls, replay units for reasoning state across rounds and turns,
+  the two wire formats, Azure deployments, the opt-in live check, and the settings for
+  services without a preset.
 - `docs/internals/prompt-caching.md`: what must stay byte-stable before history,
   cache anchors and which providers need them.
 - `docs/internals/compaction.md`: when a chat compacts, clearing results before
@@ -278,24 +283,18 @@ skipped one on purpose.
 All release candidates. Pin exactly; never float to `latest`.
 
 - `effect@4.0.0-rc.x` and every `@effect/*` package share the same rc
-  (`@effect/vitest`, `@effect/sql-pg`, `@effect/ai-openrouter` are on the `rc`
-  dist-tag). `latest` is Effect 3.
+  (`@effect/vitest`, `@effect/sql-pg` are on the `rc` dist-tag). `latest` is
+  Effect 3. `@chat/model-client` implements `effect/unstable/ai`'s `LanguageModel`;
+  on a bump, run its tests and the provider tests in `apps/web` first.
 - `drizzle-orm` / `drizzle-kit` are `1.0.0-rc.5-*` builds, kept as a matched pair.
   rc.4 crashes at import with effect >= 4.0.0-beta.104.
 - `vitest` is v5 (peer of `@effect/vitest` rc). `katex` stays on 0.16 because
   `@streamdown/math` pins `rehype-katex@7`.
-- `@effect/ai-openrouter` is patched (`patches/`) and cannot be un-patched: image
-  replay, the `imageReplay` prompt option, `refusal` deltas as text, ordered
-  `reasoningDetails`, an image-delta normalizer, and `cache_control` on anchored
-  tool results, all inside code a wrapper cannot reach. On a bump, diff the new `src/` first. pnpm applies patches
-  without fuzz, so when the patched files moved, regenerate: drop the
-  `patchedDependencies` entry, install, `pnpm patch` the new version, apply the
-  old patch there with `patch -p1`, then `pnpm patch-commit`.
-  Nine tests in `image-replay.test.ts` and `gateway.test.ts` run the real adapter
-  and fail if the patch stops applying.
 - `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
   instead of the bundled substitutes. On a bump, check the substitution still runs through
-  one function and regenerate the patch the same way.
+  one function. pnpm applies patches without fuzz, so when the patched file moved,
+  regenerate: drop the `patchedDependencies` entry, install, `pnpm patch` the new version,
+  apply the old patch there with `patch -p1`, then `pnpm patch-commit`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
@@ -336,9 +335,11 @@ Differs from most Effect 3 material online.
 
 - `LanguageModel.streamText` is one model turn. The multi-turn loop is ours
   (`src/modules/chat/server/streaming.ts`): re-run while `finish.reason` is
-  `"tool-calls"`, feeding parts back with `Prompt.fromResponseParts`.
-- The OpenRouter model only emits `finish` when a chunk carries `usage`. A mock
-  that omits usage hangs the loop.
+  `"tool-calls"`, feeding each round back with `roundPrompt`, which keeps the round's
+  replay unit and its files' places.
+- The model client emits exactly one `finish` per call, at `[DONE]` or a Responses
+  terminal event, and fails a stream that ends with neither. Calls come only with it,
+  never from a round cut off by its limit. See [providers](docs/internals/providers.md).
 - Every model call streams, side generations included. `generateText` fails to
   decode against plain OpenAI-compatible servers (`system_fingerprint` required);
   `AiGateway.generateText` folds the stream instead.

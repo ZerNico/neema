@@ -54,14 +54,14 @@ beforeEach(async () => {
         {
           id: "p",
           name: "Provider",
-          kind: "openrouter",
+          preset: "openrouter",
           baseUrl: "http://unused",
           apiKeyCiphertext: "unused",
         },
         {
           id: "off",
           name: "Disabled",
-          kind: "openrouter",
+          preset: "openrouter",
           baseUrl: "http://unused",
           apiKeyCiphertext: "unused",
           enabled: false,
@@ -218,13 +218,25 @@ describe("default model priority", () => {
         yield* repo.updateModel("c", {
           ...settings,
           type: "chat",
-          capabilities: { reasoning: false, tools: false, vision: false, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: false,
+            files: false,
+          },
         });
         expect((yield* repo.getModel("c"))?.defaultPriority).toBe(0);
         yield* repo.updateModel("c", {
           ...settings,
           type: "embedding",
-          capabilities: { reasoning: false, tools: false, vision: false, files: false },
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: false,
+            files: false,
+          },
         });
         expect((yield* repo.getModel("c"))?.defaultPriority).toBeNull();
         expect(yield* winner()).toBe("a");
