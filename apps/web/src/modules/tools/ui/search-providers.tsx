@@ -1,9 +1,4 @@
-import {
-  ArrowDown01Icon,
-  ArrowUp01Icon,
-  Delete02Icon,
-  PencilEdit02Icon,
-} from "@hugeicons/core-free-icons";
+import { Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
@@ -13,6 +8,13 @@ import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
 import { ListRow } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import {
+  SortableHandle,
+  SortableItem,
+  SortableList,
+  SortableMoveButtons,
+} from "~/ui/sortable-list.tsx";
+import { moveId } from "~/ui/move-id.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
@@ -126,9 +128,12 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
       setDraft(null);
     },
   });
-  const move = (index: number, offset: number) => {
-    const next = order.map((provider) => provider.id);
-    [next[index], next[index + offset]] = [next[index + offset]!, next[index]!];
+  const move = (from: number, to: number) => {
+    const next = moveId(
+      order.map((provider) => provider.id),
+      from,
+      to,
+    );
     setDraft(next);
     reorder.mutate(next);
   };
@@ -161,17 +166,17 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
         {order.length === 0 ? (
           <p className="text-muted-foreground text-sm">Add a provider to turn on web search.</p>
         ) : (
-          <ol className="divide-y rounded-md border">
+          <SortableList onMove={move} className="divide-y overflow-hidden rounded-md border">
             {order.map((provider, index) => {
               const status = statusOf(provider);
               return (
-                <li key={provider.id} className="flex items-center gap-3 px-3 py-2">
-                  <span
-                    className="text-muted-foreground w-5 shrink-0 text-center text-xs tabular-nums"
-                    aria-hidden
-                  >
-                    {index + 1}
-                  </span>
+                <SortableItem
+                  key={provider.id}
+                  id={provider.id}
+                  index={index}
+                  className="flex items-center gap-3 py-2 pr-3 pl-1.5"
+                >
+                  <SortableHandle label={provider.label} />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium" title={provider.label}>
                       {provider.label}
@@ -187,24 +192,12 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Move ${provider.label} up`}
-                      disabled={index === 0}
-                      onClick={() => move(index, -1)}
-                    >
-                      <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Move ${provider.label} down`}
-                      disabled={index === order.length - 1}
-                      onClick={() => move(index, 1)}
-                    >
-                      <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
-                    </Button>
+                    <SortableMoveButtons
+                      label={provider.label}
+                      index={index}
+                      count={order.length}
+                      onMove={move}
+                    />
                     <Button
                       size="icon-sm"
                       variant="ghost"
@@ -235,10 +228,10 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
                       aria-label={`${provider.label} enabled`}
                     />
                   </div>
-                </li>
+                </SortableItem>
               );
             })}
-          </ol>
+          </SortableList>
         )}
       </ListRow>
       {editing ? (
