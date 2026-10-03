@@ -176,7 +176,8 @@ export class SearchProviderRepo extends Context.Service<
               ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
               config: configOf(settings),
               secretCiphertext,
-              updatedAt: new Date(),
+              // The database's clock, as at creation: the version must only grow.
+              updatedAt: sql`now()`,
             })
             .where(eq(searchProviders.id, input.id))
             .returning()
