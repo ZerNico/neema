@@ -1,8 +1,6 @@
-import * as m from "motion/react-m";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
-import { motionEase, useAppReducedMotion } from "~/ui/motion";
 import {
   Combobox,
   ComboboxContent,
@@ -15,9 +13,6 @@ import {
 import { rankModels, type PickableModel } from "./model-picker-rank.ts";
 
 export type { PickableModel } from "./model-picker-rank.ts";
-
-// Quick enough to follow the pointer, damped so it settles without a wobble.
-const slideSpring = { type: "spring", stiffness: 700, damping: 48, mass: 0.6 } as const;
 
 /**
  * Searchable model list, shared by the composer's model button, the retry menu
@@ -61,7 +56,6 @@ export function ModelPicker({
   // starts empty each time it opens.
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [highlighted, setHighlighted] = useState<string | null>(null);
 
   const items = useMemo(() => rankModels(models, query), [models, query]);
   const selected = useMemo(
@@ -91,7 +85,6 @@ export function ModelPicker({
       onValueChange={(model: PickableModel | null) => {
         if (model) onChange(model.id);
       }}
-      onItemHighlighted={(model: PickableModel | undefined) => setHighlighted(model?.id ?? null)}
       itemToStringLabel={(model: PickableModel) => model.displayName}
       // Model rows are re-created by every refetch, so identity comparison
       // would drop the tick off the selected one.
@@ -105,8 +98,7 @@ export function ModelPicker({
         {header?.({ close: () => setOpen(false) })}
         <ComboboxInput placeholder="Search models…" showTrigger={false} />
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
-        <ComboboxList className="relative">
-          <HighlightIndicator id={highlighted} />
+        <ComboboxList>
           {items.map((model) => (
             <ModelRow key={model.id} model={model} showProvider={showProvider} />
           ))}
@@ -121,11 +113,8 @@ function ModelRow({ model, showProvider }: { model: PickableModel; showProvider:
     .filter(Boolean)
     .join(" · ");
   return (
-    // HighlightIndicator draws the highlight once and slides it between rows.
     <ComboboxItem
       value={model}
-      data-model-id={model.id}
-      highlight="shared"
       // oxlint-disable-next-line shadcn/no-restyle -- reserves room for the selected check, which sits absolute at right-2
       className="pr-9"
     >
@@ -135,67 +124,5 @@ function ModelRow({ model, showProvider }: { model: PickableModel; showProvider:
       </span>
       <CapabilityIcons capabilities={model.capabilities} audience="user" />
     </ComboboxItem>
-  );
-}
-
-/**
- * One highlight for the whole list that slides to the highlighted row instead
- * of each row lighting up on its own. It sits inside the scrolling list and is
- * placed by the row's offset, so scrolling moves it with the rows for free.
- */
-function HighlightIndicator({ id }: { id: string | null }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reduced = useAppReducedMotion();
-  const [box, setBox] = useState<{
-    y: number;
-    height: number;
-    visible: boolean;
-    /** Slide only from a visible highlight; one that reappears jumps into place. */
-    slide: boolean;
-  } | null>(null);
-
-  // Measured after every render: rows move whenever the list is filtered,
-  // not only when the highlight changes. Equal boxes keep the
-  // previous state, so an unchanged measure does not render again.
-  // oxlint-disable-next-line react-hooks/exhaustive-deps -- deliberately every render, see above
-  useLayoutEffect(() => {
-    const list = ref.current?.parentElement;
-    const row =
-      id === null
-        ? undefined
-        : [...(list?.querySelectorAll<HTMLElement>("[data-model-id]") ?? [])].find(
-            (element) => element.dataset.modelId === id,
-          );
-    setBox((previous) => {
-      if (!row) return previous?.visible ? { ...previous, visible: false } : previous;
-      const next = {
-        y: row.offsetTop,
-        height: row.offsetHeight,
-        visible: true,
-        slide: previous?.visible ?? false,
-      };
-      return previous &&
-        previous.visible &&
-        previous.y === next.y &&
-        previous.height === next.height
-        ? previous
-        : next;
-    });
-  });
-
-  const move = box?.slide && !reduced ? slideSpring : { duration: 0 };
-  return (
-    <m.div
-      ref={ref}
-      aria-hidden
-      className="bg-accent pointer-events-none absolute inset-x-1.5 top-0 rounded-2xl"
-      initial={false}
-      animate={
-        box
-          ? { y: box.y, height: box.height, opacity: box.visible ? 1 : 0 }
-          : { height: 0, opacity: 0 }
-      }
-      transition={{ y: move, height: move, opacity: { duration: 0.12, ease: motionEase } }}
-    />
   );
 }
