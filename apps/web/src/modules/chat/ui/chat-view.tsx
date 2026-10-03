@@ -1925,6 +1925,8 @@ export function NewChatView({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Fixed per visit so the line doesn't change while you type.
+  const [greetingMoment] = useState(() => ({ now: new Date(), roll: Math.random() }));
   const [modelId, setModelId] = useState<string | null>(null);
   const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   const context = useContextSelection({
@@ -2127,9 +2129,11 @@ export function NewChatView({
               ) : null}
             </>
           ) : (
-            <h1 className="text-muted-foreground text-2xl font-medium">
+            <h1 className="text-foreground text-2xl font-medium tracking-tight">
               <MotionSwap value={isTemporary ? "temporary" : "greeting"}>
-                {isTemporary ? "Temporary chat" : greetingFor(user.name)}
+                {isTemporary
+                  ? "Temporary chat"
+                  : greetingFor(user.name, greetingMoment.now, greetingMoment.roll)}
               </MotionSwap>
             </h1>
           )}
