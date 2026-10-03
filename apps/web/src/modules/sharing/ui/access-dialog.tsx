@@ -13,6 +13,7 @@ import {
   shareResourceWithGroup,
 } from "../server/functions.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { initials } from "~/ui/initials";
 import { ErrorState } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
@@ -68,15 +69,6 @@ const AUDIENCES = [
 
 const responseText = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
-
-// Two words at most: "Alex Morgan" → AM, "support@acme.io" → S.
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("") || "?";
 
 /**
  * Owner-only access management for an agent or a collection. Every grant is the

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { authClient } from "./client.ts";
 import { useIdentityBoundary } from "./identity-boundary.tsx";
 import { useDesktopAuth } from "~/modules/desktop/client/bridge.ts";
+import { initials } from "~/ui/initials";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import {
   DropdownMenu,
@@ -84,7 +85,9 @@ export function AccountMenu({
         {/* oxlint-disable-next-line shadcn/no-restyle -- marks an impersonated session, so it is a state signal rather than decoration */}
         <Avatar className={impersonating ? "size-8 ring-2 ring-warning" : "size-8"}>
           <AvatarFallback>
-            {user.name.slice(0, 2).toUpperCase() || (
+            {user.name.trim() ? (
+              initials(user.name)
+            ) : (
               <HugeiconsIcon icon={UserIcon} strokeWidth={2} className="size-4" />
             )}
           </AvatarFallback>

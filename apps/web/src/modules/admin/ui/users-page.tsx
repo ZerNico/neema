@@ -7,6 +7,7 @@ import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { membershipsQuery } from "./groups-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { PendingAccounts } from "~/modules/auth/ui/pending-accounts.tsx";
+import { initials } from "~/ui/initials";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
@@ -113,7 +114,7 @@ export function UsersPage() {
               return (
                 <ListRow key={user.id}>
                   <Avatar className="size-9">
-                    <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    <AvatarFallback>{initials(user.name)}</AvatarFallback>
                   </Avatar>
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">

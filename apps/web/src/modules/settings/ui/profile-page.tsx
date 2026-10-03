@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
 import { useAppForm } from "~/ui/form/app-form.tsx";
+import { initials } from "~/ui/initials";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
@@ -98,7 +99,7 @@ function ProfileForms({
         <ListCard>
           <ListRow>
             <Avatar className="size-10">
-              <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+              <AvatarFallback>{initials(user.name)}</AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="min-w-0 truncate text-sm font-medium" title={user.name}>

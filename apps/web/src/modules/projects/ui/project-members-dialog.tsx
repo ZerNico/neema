@@ -7,6 +7,7 @@ import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { shareRecipientsQuery } from "~/modules/sharing/client/queries.ts";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { initials } from "~/ui/initials";
 import { ErrorState } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Button } from "~/ui/primitives/button";
@@ -62,14 +63,6 @@ const ROLES: ReadonlyArray<{ value: ProjectMemberRole; label: string }> = [
 const roleText = (role: ProjectMemberRole) => (role === "editor" ? "Can edit" : "Can view");
 const responseText = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? "")
-    .join("") || "?";
-
 /**
  * Who is in a project. The owner adds people and groups with a role; everyone
  * else sees the list and may leave. Roles from a person's own row and from

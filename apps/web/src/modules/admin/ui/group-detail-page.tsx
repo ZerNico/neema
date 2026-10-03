@@ -26,6 +26,7 @@ import { CapabilitySettings, groupsQuery, isConflict } from "./groups-page.tsx";
 import type { GroupMember, MemberSharing } from "~/modules/groups/server/repo.ts";
 import { usersQuery } from "./users-page.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
+import { initials } from "~/ui/initials";
 import {
   EmptyState,
   ErrorState,
@@ -204,7 +205,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
             {(members.data ?? []).map((member) => (
               <ListRow key={member.userId}>
                 <Avatar className="size-9">
-                  <AvatarFallback>{member.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  <AvatarFallback>{initials(member.name)}</AvatarFallback>
                 </Avatar>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium">{member.name}</span>
