@@ -76,6 +76,8 @@ export class UrlReaderExecutor extends Context.Service<
       indexer: SourceIndexer,
       authority: UrlAuthority,
       policy?: WebExecutionPolicy,
+      /** The person whose answer this is, for anything a read bills, such as scanned PDF pages. */
+      owner?: string,
     ): Effect.Effect<
       (
         params: UrlReadParams,
@@ -96,6 +98,7 @@ export class UrlReaderExecutor extends Context.Service<
         indexer: SourceIndexer,
         authority: UrlAuthority,
         policy?: WebExecutionPolicy,
+        owner?: string,
       ) {
         const tool = yield* repo.getUrlReader();
         if (!tool) {
@@ -170,7 +173,11 @@ export class UrlReaderExecutor extends Context.Service<
                 pages[entry.index] = { url: entry.canonical, status: "reading" };
                 yield* progress();
                 return yield* extractor
-                  .extract({ url: entry.canonical, charCap: config.perPageCharCap })
+                  .extract({
+                    url: entry.canonical,
+                    charCap: config.perPageCharCap,
+                    ...(owner ? { owner } : {}),
+                  })
                   .pipe(
                     (effect) => (policy ? policy.run(effect) : effect),
                     Effect.map((extracted): ReadOutcome => {

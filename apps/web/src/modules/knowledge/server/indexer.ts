@@ -12,7 +12,7 @@ import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import { chunkDocument } from "./chunking.ts";
 import { EmbeddingSpace } from "./embedding-space.ts";
 import { embeddingRetry } from "./embedding-retry.ts";
-import { KnowledgeRepo } from "./repo.ts";
+import { KnowledgeRepo, MAX_EXTRACTION_ATTEMPTS } from "./repo.ts";
 
 // Expired leases become claimable without a write or notification.
 const RECOVERY_INTERVAL = Duration.seconds(30);
@@ -72,8 +72,16 @@ export class KnowledgeIndexer extends Context.Service<
         if (!claim) return false;
         yield* changed();
         const { version, storageKey, leaseToken } = claim;
-        const fail = (error: string, retryable: boolean) =>
-          repo.failExtraction({ versionId: version.id, leaseToken, error, retryable });
+        const fail = (error: string, retryable: boolean, retryAfterMs?: number) =>
+          repo.failExtraction({
+            versionId: version.id,
+            leaseToken,
+            error,
+            retryable,
+            ...(retryAfterMs === undefined
+              ? {}
+              : { retryAfterMs: Math.min(retryAfterMs, 900_000) }),
+          });
 
         const publish = (
           text: string,
@@ -113,7 +121,7 @@ export class KnowledgeIndexer extends Context.Service<
                 skippedPages.length > 0
                   ? {
                       truncated: true,
-                      reason: `${skippedPages.length === 1 ? "Page" : "Pages"} ${skippedPages.join(", ")} ${skippedPages.length === 1 ? "has" : "have"} no extractable text (probably scanned) and ${skippedPages.length === 1 ? "was" : "were"} skipped.`,
+                      reason: `${skippedPages.length === 1 ? "Page" : "Pages"} ${skippedPages.join(", ")} ${skippedPages.length === 1 ? "is a scan that wasn’t" : "are scans that weren’t"} read.`,
                     }
                   : { truncated: false, reason: null },
               chunks,
@@ -160,6 +168,13 @@ export class KnowledgeIndexer extends Context.Service<
         let skippedPages: ReadonlyArray<number> = [];
 
         if (mediaType === "application/pdf") {
+          // Reading scanned pages can take minutes, longer than a lease: it is
+          // renewed while the parse runs, and the parse stops once it is lost.
+          const keepLease = repo.renewExtractionLease({ versionId: version.id, leaseToken }).pipe(
+            Effect.flatMap((held) => (held ? Effect.void : Effect.fail("lease-lost" as const))),
+            Effect.delay(Duration.seconds(30)),
+            Effect.forever,
+          );
           const parsed = yield* parser
             .parsePdf({
               bytes,
@@ -169,21 +184,48 @@ export class KnowledgeIndexer extends Context.Service<
                 maxChars: KNOWLEDGE_LIMITS.maxExtractedChars,
                 maxPages: KNOWLEDGE_LIMITS.maxPages,
               },
+              ...(claim.ownerUserId ? { owner: claim.ownerUserId } : {}),
+              // Shares read pages with chats of the same file, and keeps them across retries.
+              ...(version.blobId ? { blobId: version.blobId } : {}),
+              background: true,
             })
             .pipe(
-              Effect.timeout(Duration.seconds(60)),
+              Effect.raceFirst(keepLease),
+              Effect.timeout(Duration.minutes(20)),
+              // Pages read so far are cached, so another attempt continues where this one stopped.
               Effect.catchTag("TimeoutError", () =>
-                fail("document extraction timed out; split it into smaller documents", false).pipe(
-                  Effect.as(null),
-                ),
+                fail(
+                  "document extraction timed out; split it into smaller documents",
+                  version.attempts < MAX_EXTRACTION_ATTEMPTS,
+                ).pipe(Effect.as(null)),
               ),
-              Effect.catchTag("DocumentParseError", (error) =>
-                // A scan with no text layer will not parse on the next attempt
-                // either; saying so is more useful than retrying three times.
-                fail(error.reason, false).pipe(Effect.as(null)),
+              // Another worker owns the version now; it reports the outcome.
+              Effect.catch((error) =>
+                error === "lease-lost"
+                  ? Effect.succeed(null)
+                  : error.retryable && version.attempts < MAX_EXTRACTION_ATTEMPTS
+                    ? fail(
+                        "Its scanned pages couldn’t be read yet. Trying again shortly.",
+                        true,
+                        error.retryable.afterMs ?? 60_000 * version.attempts,
+                      ).pipe(Effect.as(null))
+                    : // A scan with no text layer will not parse on the next attempt
+                      // either; saying so is more useful than retrying three times.
+                      fail(error.reason, false).pipe(Effect.as(null)),
               ),
             );
           if (!parsed) return true;
+          // Scanned pages that failed for a passing reason are tried again
+          // later, unless this was the last attempt: then what was read is
+          // published, with the missing pages disclosed.
+          if (parsed.retryable && version.attempts < MAX_EXTRACTION_ATTEMPTS) {
+            yield* fail(
+              "Some scanned pages couldn’t be read yet. Trying again shortly.",
+              true,
+              parsed.retryable.afterMs ?? 60_000 * version.attempts,
+            );
+            return true;
+          }
           text = parsed.text;
           parsedWith = parsed.parsedWith;
           if (parsed.truncated) {
@@ -193,7 +235,7 @@ export class KnowledgeIndexer extends Context.Service<
             );
             return true;
           }
-          pageCount = (text.match(/^\[page \d+\]$/gm) ?? []).length || null;
+          pageCount = parsed.pageCount || null;
           skippedPages = parsed.skippedPages ?? [];
         } else if (isTextual(mediaType)) {
           parsedWith = "utf8";

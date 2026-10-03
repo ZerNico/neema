@@ -1,0 +1,1 @@
+ALTER TABLE "attachment_blobs" ADD COLUMN "scanned_pages" jsonb;

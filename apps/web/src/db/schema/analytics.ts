@@ -12,7 +12,8 @@ import { models } from "./providers.ts";
 
 /**
  * Append-only usage ledger: one row per generation attempt (chat answer,
- * title, context compaction, or embedding request), written at finalize time and never updated.
+ * title, context compaction, embedding request, or paid reading of scanned
+ * PDF pages), written at finalize time and never updated.
  * Retry adds a new row, branching copies nothing, deleting a conversation
  * leaves it intact. That is exactly why analytics reads this and not
  * `messages.usage`.
@@ -26,7 +27,7 @@ export const usageEvents = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     kind: text({
-      enum: ["chat", "title", "compaction", "embedding_document", "embedding_query"],
+      enum: ["chat", "title", "compaction", "embedding_document", "embedding_query", "ocr"],
     }).notNull(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     // displayName snapshot so a deleted model still labels its history

@@ -3,6 +3,8 @@ import { Effect } from "effect";
 import { strToU8, zipSync } from "fflate";
 import type { Prompt } from "effect/unstable/ai";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
+import { DocumentParseError } from "~/modules/attachments/errors.ts";
+import { pdfFingerprint } from "~/modules/attachments/server/document-parser.ts";
 import {
   buildHistoryMessages,
   imageStandIn,
@@ -46,18 +48,26 @@ interface Harness {
 const harness = (options: {
   rows: ReadonlyArray<Row>;
   blobs?: Record<string, string>;
-  parserKind?: string | null;
+  /** The scan engine the settings name; a PDF with scans is fingerprinted by it. */
+  scanEngine?: string;
   parsed?: string;
+  /** What the parser reports producing the text with. */
+  parsedWith?: string;
+  failure?: string;
 }): Harness => {
   const get = vi.fn((key: string) =>
     Effect.succeed(new TextEncoder().encode(options.blobs?.[key] ?? `bytes of ${key}`)),
   );
   const parsePdf = vi.fn(() =>
-    Effect.succeed({
-      text: options.parsed ?? "extracted body",
-      parsedWith: options.parserKind ?? "local",
-      truncated: false,
-    }),
+    options.failure
+      ? Effect.fail(new DocumentParseError({ fileName: "paper.pdf", reason: options.failure }))
+      : Effect.succeed({
+          text: options.parsed ?? "extracted body",
+          parsedWith: options.parsedWith ?? pdfFingerprint(null),
+          truncated: false,
+          totalPages: 1,
+          pageCount: 1,
+        }),
   );
   const cacheParsedText = vi.fn(() => Effect.void);
   return {
@@ -76,10 +86,10 @@ const harness = (options: {
           Effect.succeed({
             configured: true,
             enabled: true,
-            kind: options.parserKind === undefined ? "local" : options.parserKind,
+            scanEngine: options.scanEngine ?? "off",
           }),
       },
-    } as PromptDeps,
+    },
   };
 };
 
@@ -367,13 +377,14 @@ describe("buildHistoryMessages PDF delivery", () => {
     expect(cacheParsedText).toHaveBeenCalledWith({
       blobId: "blob-pdf",
       text: "page one",
-      parsedWith: "local",
+      parsedWith: pdfFingerprint(null),
     });
   });
 
-  it("reuses cached text produced by the configured parser", async () => {
+  it("reuses cached text the current settings would produce", async () => {
     const { deps, parsePdf, get } = harness({
-      rows: [pdfRow({ parsedText: "cached body", parsedWith: "local" })],
+      rows: [pdfRow({ parsedText: "cached body", parsedWith: pdfFingerprint(null) })],
+      scanEngine: "mistral-ocr-4-1",
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
     expect(
@@ -385,10 +396,10 @@ describe("buildHistoryMessages PDF delivery", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("re-parses when the cache came from a different backend", async () => {
+  it("re-parses scans read by another engine than the one now configured", async () => {
     const { deps, parsePdf } = harness({
-      rows: [pdfRow({ parsedText: "stale body", parsedWith: "legacy-ocr" })],
-      parserKind: "local",
+      rows: [pdfRow({ parsedText: "stale body", parsedWith: pdfFingerprint("off") })],
+      scanEngine: "local-ppocrv6-small",
       parsed: "fresh body",
     });
     const [message] = await build(deps, [user("m1", "summarize")]);
@@ -397,6 +408,25 @@ describe("buildHistoryMessages PDF delivery", () => {
         ?.text,
     ).toContain("fresh body");
     expect(parsePdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache text whose scanned pages failed, so the next answer reads them again", async () => {
+    const { deps, cacheParsedText } = harness({
+      rows: [pdfRow()],
+      scanEngine: "mistral-ocr-4-1",
+      parsedWith: pdfFingerprint("mistral-ocr-4-1", true),
+    });
+    await build(deps, [user("m1", "summarize")]);
+    expect(cacheParsedText).not.toHaveBeenCalled();
+  });
+
+  it("says a PDF could not be read instead of failing the answer", async () => {
+    const { deps } = harness({ rows: [pdfRow()], failure: "no extractable text" });
+    const [message] = await build(deps, [user("m1", "summarize")]);
+    expect(
+      ((message as Prompt.UserMessageEncoded).content as ReadonlyArray<Prompt.TextPartEncoded>)[1]
+        ?.text,
+    ).toContain("paper.pdf is a PDF, and its text could not be read: no extractable text.");
   });
 });
 

@@ -788,6 +788,26 @@ describe("MessageBubble", () => {
     expect(screen.getByText("Thinking")).toBeInTheDocument();
   });
 
+  it("says scanned pages are being read, with the count apart from the steady label", () => {
+    render(
+      <MessageBubble
+        message={{
+          id: "2",
+          role: "assistant",
+          content: "",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "streaming",
+          reading: { read: 4, total: 12 },
+        }}
+      />,
+    );
+    expect(screen.getByText("Reading scanned pages")).toBeInTheDocument();
+    expect(screen.getByText("4 of 12")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking")).toBeNull();
+  });
+
   it("shows a friendly alert for failed generations", () => {
     render(
       <MessageBubble

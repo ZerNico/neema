@@ -66,6 +66,8 @@ export const prepareWebTools: (input: {
   /** The composer's web toggle: search is offered only when the user asked. */
   requestSearch: boolean;
   policy?: WebExecutionPolicy;
+  /** Whose answer the tools serve; see `UrlReaderExecutor.handler`. */
+  owner: string;
 }) => Effect.Effect<PreparedWebTools | undefined, never, Scope.Scope> = Effect.fn(
   "tools.prepareWebTools",
 )(function* (input) {
@@ -80,7 +82,7 @@ export const prepareWebTools: (input: {
   const reader =
     search !== null || input.authority.seeded
       ? yield* input.urlReader
-          .handler(input.indexer, input.authority, input.policy)
+          .handler(input.indexer, input.authority, input.policy, input.owner)
           .pipe(Effect.catchTag("ToolUnavailable", unavailable))
       : null;
 

@@ -235,8 +235,19 @@ export interface DoneEvent {
   readonly status: "complete" | "error" | "aborted";
 }
 
+/**
+ * What a generation is doing before it has anything to show, such as reading
+ * scanned pages. Live only: never a chunk, so it takes no `seq`; null clears it.
+ */
+export interface StatusEvent {
+  readonly messageId: string;
+  readonly runId?: string;
+  readonly reading: { readonly read: number; readonly total: number } | null;
+}
+
 export type StreamEvent =
   | ({ readonly kind: "chunk" } & ChunkEvent)
+  | ({ readonly kind: "status" } & StatusEvent)
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
@@ -394,11 +405,13 @@ export class StreamEngine extends Context.Service<
       const integrations = yield* IntegrationService;
       const integrationApprovals = yield* IntegrationApprovals;
       const attachments = yield* AttachmentRepo;
-      const promptDeps: PromptDeps = {
+      const basePromptDeps: PromptDeps = {
         attachments,
         store: yield* BlobStore,
         parser: yield* DocumentParser,
       };
+      // The latest status of each generation still reading, for a subscriber that joins mid-read.
+      const statuses = new Map<string, StatusEvent>();
       // Sliding, not unbounded: a subscriber that stops reading (stalled SSE
       // connection) must not buffer every in-flight generation's chunks
       // forever. Dropped events are recoverable: resume replays from
@@ -709,6 +722,35 @@ export class StreamEngine extends Context.Service<
           buffer.push({ seq, kind, delta });
         };
 
+        const publishStatus = (reading: StatusEvent["reading"]) =>
+          Effect.suspend(() => {
+            const event: StatusEvent = {
+              ...(fence ? { runId: fence.generationId } : {}),
+              messageId: input.messageId,
+              reading,
+            };
+            if (reading) statuses.set(input.messageId, event);
+            // Only this attempt's own line: a stale attempt must not clear a newer one's.
+            else if (statuses.get(input.messageId)?.runId === event.runId)
+              statuses.delete(input.messageId);
+            return PubSub.publish(pubsub, { kind: "status", ...event });
+          });
+        // Scanned pages this answer needs are read in the sender's queue,
+        // billed to them, and reported live while the answer waits.
+        const promptDeps: PromptDeps = {
+          ...basePromptDeps,
+          parser: {
+            availability: basePromptDeps.parser.availability,
+            parsePdf: (pdf) =>
+              basePromptDeps.parser.parsePdf({
+                owner: input.userId,
+                onScanProgress: (read, total) =>
+                  publishStatus(read < total ? { read, total } : null),
+                ...pdf,
+              }),
+          },
+        };
+
         const pushToolChunk = (envelope: ToolChunkEnvelope) =>
           Effect.suspend(() => {
             pushChunk("tool", JSON.stringify(envelope));
@@ -895,6 +937,7 @@ export class StreamEngine extends Context.Service<
                 indexer,
                 authority,
                 requestSearch: input.searchEnabled,
+                owner: input.userId,
               })
             : null;
 
@@ -4081,8 +4124,10 @@ export class StreamEngine extends Context.Service<
                   Effect.sync(() => {
                     // Identity-checked: a retry reuses the message id, so this
                     // run must not evict the registration a newer one made.
-                    if (inFlight.get(input.messageId) === registration)
+                    if (inFlight.get(input.messageId) === registration) {
                       inFlight.delete(input.messageId);
+                      statuses.delete(input.messageId);
+                    }
                   }),
                 ),
               ),
@@ -4171,9 +4216,10 @@ export class StreamEngine extends Context.Service<
               return replay.pipe(Stream.concat(Stream.make(done)));
             }
 
+            const status = statuses.get(messageId);
             const live: Stream.Stream<StreamEvent> = Stream.fromSubscription(subscription).pipe(
               Stream.filter((event) => event.messageId === messageId && event.runId === runId),
-              Stream.filter((event) => event.kind === "done" || event.seq > lastSeq),
+              Stream.filter((event) => event.kind !== "chunk" || event.seq > lastSeq),
               Stream.tap((event) =>
                 Effect.sync(() => {
                   if (event.kind === "chunk") lastSeq = event.seq;
@@ -4182,7 +4228,11 @@ export class StreamEngine extends Context.Service<
               Stream.takeUntil((event) => event.kind === "done"),
             );
 
-            return replay.pipe(Stream.concat(live));
+            const reading: Stream.Stream<StreamEvent> =
+              status && status.runId === runId
+                ? Stream.make({ kind: "status", ...status })
+                : Stream.empty;
+            return replay.pipe(Stream.concat(reading), Stream.concat(live));
           }),
         );
 

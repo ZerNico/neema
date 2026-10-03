@@ -1,318 +1,406 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer } from "effect";
-import { vi } from "vitest";
-import * as unpdf from "unpdf";
-
-vi.mock("unpdf", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("unpdf")>();
-  return { ...actual, getResolvedPDFJS: vi.fn(actual.getResolvedPDFJS) };
-});
-import { buildEmptyPdf, buildPdf } from "../../../../tests/fixtures/pdf.ts";
+import { Effect, Layer, Redacted } from "effect";
+import { afterEach, vi } from "vitest";
+import { buildPdf } from "../../../../tests/fixtures/pdf.ts";
+import { buildScannedPdf } from "../../../../tests/fixtures/scanned-pdf.ts";
+import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
+import { OcrModels, type OcrModelStatus } from "~/modules/pdf/server/ocr-models.ts";
+import { createPdfRuntime, PdfWorkers } from "~/modules/pdf/server/runtime.ts";
+import { AiGateway } from "~/modules/providers/server/gateway.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import type { DocumentParserConfig } from "~/modules/tools/schema.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { DocumentParser, LOCAL_PARSER_KIND, stripControlCharacters } from "./document-parser.ts";
+import { Db } from "~/server/db.ts";
+import { assemble, DocumentParser, pdfFingerprint } from "./document-parser.ts";
+import { AttachmentRepo } from "./repo.ts";
 
-const repoLayer = (
-  row: { enabled: boolean; kind: string; config: { maxChars: number; maxPages: number } } | null,
-) =>
-  Layer.succeed(
-    ToolsRepo,
-    ToolsRepo.of({
-      getTool: () => Effect.succeed(null),
-      getKnowledgeSearch: () => Effect.succeed(null),
-      getWebSearch: () => Effect.succeed(null),
-      getUrlReader: () => Effect.succeed(null),
-      getDocumentParser: () => Effect.succeed(row),
-      setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
-      updateTool: () => Effect.succeed(null),
-    }),
+type Row = {
+  enabled: boolean;
+  config: DocumentParserConfig;
+  secret: Redacted.Redacted<string> | null;
+};
+
+const row = (config: Partial<DocumentParserConfig> = {}, secret: string | null = null): Row => ({
+  enabled: true,
+  config: { maxChars: 100_000, maxPages: 100, ...config },
+  secret: secret === null ? null : Redacted.make(secret),
+});
+
+/** The parser over a real PDF worker, with the stores and services around it faked. */
+const harness = (current: Row | null, files: OcrModelStatus = { state: "missing" }) => {
+  const cache = new Map<string, { engine: string; pages: Record<number, string> }>();
+  const usage: UsageEventInput[] = [];
+  const workers = Layer.effect(
+    PdfWorkers,
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        createPdfRuntime(new URL("../../pdf/server/runtime-worker.ts", import.meta.url)),
+      ),
+      (runtime) => Effect.promise(() => runtime.close()),
+    ),
   );
+  const layer = DocumentParser.base.pipe(
+    Layer.provide([
+      workers,
+      Layer.succeed(
+        ToolsRepo,
+        ToolsRepo.of({
+          getTool: () => Effect.succeed(null),
+          getKnowledgeSearch: () => Effect.succeed(null),
+          getWebSearch: () => Effect.succeed(null),
+          getUrlReader: () => Effect.succeed(null),
+          getDocumentParser: () => Effect.succeed(current),
+          setToolEnabled: () => Effect.succeed({ tool: null, changed: false }),
+          updateTool: () => Effect.succeed(null),
+        }),
+      ),
+      Layer.succeed(
+        OcrModels,
+        OcrModels.of({
+          status: () => Effect.succeed(files),
+          ensure: () => Effect.void,
+          paths: () => Effect.succeed(null),
+        }),
+      ),
+      Layer.succeed(AttachmentRepo, {
+        scannedPages: ({ blobId, engine }: { blobId: string; engine: string }) =>
+          Effect.succeed(cache.get(blobId)?.engine === engine ? cache.get(blobId)!.pages : {}),
+        saveScannedPages: (input: {
+          blobId: string;
+          engine: string;
+          pages: Record<number, string>;
+        }) =>
+          Effect.sync(() => {
+            const previous = cache.get(input.blobId);
+            cache.set(input.blobId, {
+              engine: input.engine,
+              pages: {
+                ...(previous?.engine === input.engine ? previous.pages : {}),
+                ...input.pages,
+              },
+            });
+          }),
+      } as never),
+      Layer.succeed(AnalyticsRepo, {
+        record: (event: UsageEventInput) => Effect.sync(() => void usage.push(event)),
+      } as never),
+      // Only the vision-model reader uses these, and no test here chooses it.
+      Layer.succeed(AiGateway, {} as never),
+      Layer.succeed(ProviderRepo, {} as never),
+      Layer.succeed(Db, {} as never),
+    ]),
+  );
+  const run = <A, E>(f: (parser: DocumentParser["Service"]) => Effect.Effect<A, E>) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          return yield* f(yield* DocumentParser);
+        }).pipe(Effect.provide(layer)),
+      ),
+    );
+  return { run, cache, usage };
+};
 
-const enabled = (config: Partial<{ maxChars: number; maxPages: number }> = {}) =>
-  repoLayer({
-    enabled: true,
-    kind: LOCAL_PARSER_KIND,
-    config: { maxChars: 100_000, maxPages: 100, ...config },
+const mistralAnswers = (respond: (pages: number) => Response) =>
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { document: { document_url: string } };
+    const { PDFDocument } = await import("pdf-lib");
+    const pdf = Buffer.from(body.document.document_url.split(",")[1]!, "base64");
+    return respond((await PDFDocument.load(pdf)).getPageCount());
+  });
+const pagesResponse = (count: number, text: (index: number) => string) =>
+  Response.json({
+    pages: Array.from({ length: count }, (_, index) => ({ index, markdown: text(index) })),
+    usage_info: { pages_processed: count },
   });
 
-const withParser = <A, E>(
-  layer: Layer.Layer<ToolsRepo>,
-  f: (parser: DocumentParser["Service"]) => Effect.Effect<A, E>,
-) =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      return yield* f(yield* DocumentParser);
-    }).pipe(Effect.provide(DocumentParser.layer.pipe(Layer.provide(layer)))),
-  );
-
-const parseError = (layer: Layer.Layer<ToolsRepo>, bytes: Uint8Array, fileName = "doc.pdf") =>
-  withParser(layer, (parser) => Effect.flip(parser.parsePdf({ bytes, fileName })));
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("DocumentParser availability", () => {
   it.each([
-    ["missing", null, { configured: false, enabled: false, kind: null }],
+    ["missing", null, { configured: false, enabled: false, scanEngine: null }],
+    ["off", row(), { configured: true, enabled: true, scanEngine: "off" }],
     [
-      "disabled",
-      { enabled: false, kind: LOCAL_PARSER_KIND, config: { maxChars: 10, maxPages: 1 } },
-      { configured: true, enabled: false, kind: LOCAL_PARSER_KIND },
+      "Mistral's EU endpoint",
+      row({ scans: { mode: "mistral", baseUrl: "https://api.eu.mistral.ai/v1" } }, "key"),
+      { configured: true, enabled: true, scanEngine: "mistral-ocr-4-1@api.eu.mistral.ai" },
     ],
-  ])("reports the registry row as %s", async (_label, row, expected) => {
-    const availability = await withParser(repoLayer(row), (parser) => parser.availability());
-    expect(availability).toEqual(expected);
+  ])("names the engine when %s", async (_label, current, expected) => {
+    expect(await harness(current).run((parser) => parser.availability())).toEqual(expected);
   });
 });
 
-describe("DocumentParser.parsePdf (local backend)", () => {
+describe("DocumentParser.parsePdf", () => {
+  it("extracts page-labelled text, the same under any scan setting", async () => {
+    const bytes = buildPdf(["First page body", "Second page body"]);
+    const original = new Uint8Array(bytes);
+    const parsed = await harness(row()).run((parser) =>
+      parser.parsePdf({ bytes, fileName: "a.pdf" }),
+    );
+    expect(bytes).toEqual(original);
+    expect(parsed).toEqual({
+      text: "[page 1]\nFirst page body\n\n[page 2]\nSecond page body",
+      parsedWith: pdfFingerprint(null),
+      truncated: false,
+      totalPages: 2,
+      pageCount: 2,
+    });
+  });
+
   it.each([
     [{ maxPages: 1 }, ["First page", "Second page"], "page limit"],
     [{ maxChars: 10 }, ["A longer page of text"], "extraction limit"],
   ])(
     "rejects incomplete knowledge extraction rather than truncating",
     async (limits, pages, reason) => {
-      const error = await withParser(enabled(limits), (parser) =>
+      const error = await harness(row(limits)).run((parser) =>
         Effect.flip(
-          parser.parsePdf({
-            bytes: buildPdf(pages),
-            fileName: "knowledge.pdf",
-            requireComplete: true,
-          }),
+          parser.parsePdf({ bytes: buildPdf(pages), fileName: "k.pdf", requireComplete: true }),
         ),
       );
       expect(error.reason).toContain(reason);
     },
   );
 
-  it("extracts page-labelled text", async () => {
-    const bytes = buildPdf(["First page body", "Second page body"]);
-    const original = new Uint8Array(bytes);
-    const parsed = await withParser(enabled(), (parser) =>
+  it("truncates a prompt's PDF past its limits and says so", async () => {
+    const parsed = await harness(row({ maxPages: 1 })).run((parser) =>
+      parser.parsePdf({ bytes: buildPdf(["One", "Two"]), fileName: "a.pdf" }),
+    );
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.text).toBe("[page 1]\nOne\n\n[document truncated]");
+  });
+
+  it("refuses while parsing is disabled, and bytes that are not a PDF", async () => {
+    const disabled = await harness({ ...row(), enabled: false }).run((parser) =>
+      Effect.flip(parser.parsePdf({ bytes: buildPdf(["x"]), fileName: "a.pdf" })),
+    );
+    expect(disabled.reason).toBe("document parsing is disabled");
+    const garbage = await harness(row()).run((parser) =>
+      Effect.flip(parser.parsePdf({ bytes: new TextEncoder().encode("hello"), fileName: "a.pdf" })),
+    );
+    expect(garbage.reason).toContain("could not read the PDF");
+  });
+
+  it("keeps scanned pages' markers and says why they were not read when reading is off", async () => {
+    const bytes = await buildScannedPdf([
+      { kind: "text", text: "Cover letter" },
+      { kind: "scan", text: "Signed contract" },
+    ]);
+    const parsed = await harness(row()).run((parser) =>
       parser.parsePdf({ bytes, fileName: "a.pdf" }),
     );
-    expect(bytes).toEqual(original);
-    expect(parsed).toEqual({
-      text: "[page 1]\nFirst page body\n\n[page 2]\nSecond page body",
-      parsedWith: LOCAL_PARSER_KIND,
-      truncated: false,
-    });
-  });
-
-  it("truncates past maxChars and says so", async () => {
-    const parsed = await withParser(enabled({ maxChars: 20 }), (parser) =>
-      parser.parsePdf({ bytes: buildPdf(["A fairly long line of text"]), fileName: "a.pdf" }),
-    );
-    expect(parsed.truncated).toBe(true);
-    expect(parsed.text).toBe("[page 1]\nA fairly lo\n\n[document truncated]");
-  });
-
-  it("stops after maxPages", async () => {
-    const parsed = await withParser(enabled({ maxPages: 1 }), (parser) =>
-      parser.parsePdf({ bytes: buildPdf(["Kept page", "Dropped page"]), fileName: "a.pdf" }),
-    );
-    expect(parsed.truncated).toBe(true);
-    expect(parsed.text).toBe("[page 1]\nKept page\n\n[document truncated]");
-  });
-
-  it("never requests excluded pages and releases the document after extracting text", async () => {
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    const getTextContent = vi.fn().mockResolvedValue({
-      items: [
-        { str: "First", hasEOL: true },
-        { type: "beginMarkedContent" },
-        { str: "Second", hasEOL: false },
-      ],
-    });
-    const getPage = vi.fn(async (page: number) => {
-      if (page > 1) throw new Error("excluded page must not be extracted");
-      return { getTextContent, cleanup: vi.fn() };
-    });
-    vi.mocked(unpdf.getResolvedPDFJS).mockResolvedValueOnce({
-      getDocument: () => ({ promise: Promise.resolve({ numPages: 3, getPage }), destroy }),
-    } as never);
-
-    const parsed = await withParser(enabled({ maxPages: 1 }), (parser) =>
-      parser.parsePdf({ bytes: new Uint8Array(), fileName: "limited.pdf" }),
-    );
-    expect(parsed.text).toBe("[page 1]\nFirst\nSecond\n\n[document truncated]");
-    expect(parsed.truncated).toBe(true);
-    expect(getPage).toHaveBeenCalledExactlyOnceWith(1);
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("releases the document when a retained page fails extraction", async () => {
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(unpdf.getResolvedPDFJS).mockResolvedValueOnce({
-      getDocument: () => ({
-        promise: Promise.resolve({
-          numPages: 1,
-          getPage: vi.fn().mockResolvedValue({
-            getTextContent: vi.fn().mockRejectedValue(new Error("broken page")),
-          }),
-        }),
-        destroy,
-      }),
-    } as never);
-
-    const error = await parseError(enabled(), new Uint8Array(), "broken.pdf");
-    expect(error).toMatchObject({ reason: "broken page", fileName: "broken.pdf" });
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("destroys a PDF worker when extraction is interrupted", async () => {
-    const started = Deferred.makeUnsafe<void>();
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(unpdf.getResolvedPDFJS).mockResolvedValueOnce({
-      getDocument: () => ({
-        promise: Promise.resolve({
-          numPages: 2,
-          getPage: vi.fn().mockResolvedValue({
-            getTextContent: () => {
-              Effect.runSync(Deferred.succeed(started, undefined));
-              return new Promise(() => {});
-            },
-          }),
-        }),
-        destroy,
-      }),
-    } as never);
-    const fiber = Effect.runFork(
-      Effect.flatMap(DocumentParser, (parser) =>
-        parser.parsePdf({
-          bytes: new Uint8Array(),
-          fileName: "stalled.pdf",
-          requireComplete: true,
-        }),
-      ).pipe(Effect.provide(DocumentParser.layer.pipe(Layer.provide(enabled())))),
-    );
-    await Effect.runPromise(Deferred.await(started));
-    await Effect.runPromise(Fiber.interrupt(fiber));
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([false, true])(
-    "destroys pending PDF acquisition on interruption (requireComplete=%s)",
-    async (requireComplete) => {
-      const started = Deferred.makeUnsafe<void>();
-      let rejectLoading!: (error: Error) => void;
-      const promise = new Promise<never>((_resolve, reject) => {
-        rejectLoading = reject;
-      });
-      const destroy = vi.fn(async () => {
-        rejectLoading(new Error("loading task destroyed"));
-      });
-      vi.mocked(unpdf.getResolvedPDFJS).mockResolvedValueOnce({
-        getDocument: () => {
-          Effect.runSync(Deferred.succeed(started, undefined));
-          return { promise, destroy };
-        },
-      } as never);
-      const fiber = Effect.runFork(
-        Effect.flatMap(DocumentParser, (parser) =>
-          parser.parsePdf({ bytes: new Uint8Array(), fileName: "loading.pdf", requireComplete }),
-        ).pipe(Effect.provide(DocumentParser.layer.pipe(Layer.provide(enabled())))),
-      );
-      await Effect.runPromise(Deferred.await(started));
-      await Effect.runPromise(Fiber.interrupt(fiber));
-      // Let the rejected acquisition settle through finally as well as abort:
-      // both paths must share one destruction, without an unhandled rejection.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(destroy).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it("does not start PDF loading if interrupted while resolving PDF.js", async () => {
-    const started = Deferred.makeUnsafe<void>();
-    const getDocument = vi.fn();
-    let resolveModule!: (module: Awaited<ReturnType<typeof unpdf.getResolvedPDFJS>>) => void;
-    vi.mocked(unpdf.getResolvedPDFJS).mockImplementationOnce(() => {
-      Effect.runSync(Deferred.succeed(started, undefined));
-      return new Promise((resolve) => {
-        resolveModule = resolve;
-      });
-    });
-    const fiber = Effect.runFork(
-      Effect.flatMap(DocumentParser, (parser) =>
-        parser.parsePdf({ bytes: new Uint8Array(), fileName: "cancelled.pdf" }),
-      ).pipe(Effect.provide(DocumentParser.layer.pipe(Layer.provide(enabled())))),
-    );
-    await Effect.runPromise(Deferred.await(started));
-    await Effect.runPromise(Fiber.interrupt(fiber));
-    resolveModule({ getDocument } as never);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(getDocument).not.toHaveBeenCalled();
-  });
-
-  it("destroys the loading task when document acquisition fails", async () => {
-    const destroy = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(unpdf.getResolvedPDFJS).mockResolvedValueOnce({
-      getDocument: () => ({ promise: Promise.reject(new Error("broken PDF load")), destroy }),
-    } as never);
-    const error = await parseError(enabled(), new Uint8Array(), "broken.pdf");
-    expect(error).toMatchObject({ reason: "broken PDF load", fileName: "broken.pdf" });
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("extracts a complete PDF using caller limits instead of prompt limits", async () => {
-    const parsed = await withParser(enabled({ maxPages: 1, maxChars: 10 }), (parser) =>
-      parser.parsePdf({
-        bytes: buildPdf(["First page body", "Second page body"]),
-        fileName: "knowledge.pdf",
-        limits: { maxPages: 2, maxChars: 1_000 },
-        requireComplete: true,
-      }),
-    );
-    expect(parsed).toEqual({
-      text: "[page 1]\nFirst page body\n\n[page 2]\nSecond page body",
-      parsedWith: LOCAL_PARSER_KIND,
-      truncated: false,
-    });
-  });
-
-  it("skips a textless page, keeps its marker, and reports it instead of refusing the file", async () => {
-    const parsed = await withParser(enabled(), (parser) =>
-      parser.parsePdf({
-        bytes: buildPdf(["Readable introduction", "", "Readable conclusion"]),
-        fileName: "mixed.pdf",
-        requireComplete: true,
-      }),
-    );
-    // Page numbers stay aligned with the original: the marker survives alone.
     expect(parsed.text).toBe(
-      "[page 1]\nReadable introduction\n\n[page 2]\n\n[page 3]\nReadable conclusion",
+      "[page 1]\nCover letter\n\n[page 2]\n(scanned page, not read: reading scanned pages is turned off)",
     );
-    expect(parsed.truncated).toBe(false);
     expect(parsed.skippedPages).toEqual([2]);
+    // Off is a choice, complete for its setting, never retried.
+    expect(parsed.parsedWith).toBe(pdfFingerprint("off"));
+    expect(parsed.retryable).toBeUndefined();
   });
 
-  it("strips NUL and other control characters that pdf.js emits for private-use glyphs", () => {
-    const nul = String.fromCharCode(0);
-    const bell = String.fromCharCode(7);
-    expect(stripControlCharacters(`Ticket ${nul}${bell} QR\tcode\nnext\r\nline`)).toBe(
-      "Ticket  QR\tcode\nnext\r\nline",
+  it("refuses a wholly scanned PDF it cannot read, naming why", async () => {
+    const bytes = await buildScannedPdf([{ kind: "scan", text: "Only a scan" }]);
+    const error = await harness(row({ scans: { mode: "local", quality: "accurate" } })).run(
+      (parser) => Effect.flip(parser.parsePdf({ bytes, fileName: "a.pdf" })),
+    );
+    expect(error.reason).toBe(
+      "no extractable text: the PDF is scanned, and reading scanned pages is still being set up on this server",
     );
   });
 
-  it("rejects a PDF with no extractable text", async () => {
-    const error = await parseError(enabled(), buildEmptyPdf(), "scan.pdf");
-    expect(error).toMatchObject({ _tag: "DocumentParseError", fileName: "scan.pdf" });
-    expect(error.reason).toContain("no extractable text");
+  it("marks pages an unready engine skipped as incomplete, so they are read once it is ready", async () => {
+    const bytes = await buildScannedPdf([
+      { kind: "text", text: "Cover" },
+      { kind: "scan", text: "Scan" },
+    ]);
+    const parsed = await harness(row({ scans: { mode: "local", quality: "fast" } }), {
+      state: "unsupported",
+    }).run((parser) => parser.parsePdf({ bytes, fileName: "a.pdf" }));
+    expect(parsed.parsedWith).toBe(pdfFingerprint("local-ppocrv6-tiny", true));
+    expect(parsed.text).toContain(
+      "not read: reading scanned pages is not available on this server",
+    );
   });
 
-  it("rejects bytes that are not a PDF at all", async () => {
-    const error = await parseError(enabled(), new TextEncoder().encode("not a pdf"));
-    expect(error._tag).toBe("DocumentParseError");
+  it("reads scans with Mistral once per blob, records the paid pages, and reuses them", async () => {
+    const fetch = mistralAnswers((count) =>
+      pagesResponse(count, (index) => `Scanned text ${index + 1}`),
+    );
+    const bytes = await buildScannedPdf([
+      { kind: "text", text: "Cover" },
+      { kind: "scan", text: "Two" },
+      { kind: "scan", text: "Three" },
+    ]);
+    const { run, usage } = harness(
+      row({ scans: { mode: "mistral", baseUrl: "https://api.eu.mistral.ai/v1" } }, "secret"),
+    );
+    const progress: Array<[number, number]> = [];
+    const parse = () =>
+      run((parser) =>
+        parser.parsePdf({
+          bytes,
+          fileName: "a.pdf",
+          blobId: "blob-1",
+          owner: "user-1",
+          onScanProgress: (read, total) => Effect.sync(() => void progress.push([read, total])),
+        }),
+      );
+    const first = await parse();
+    expect(first.text).toBe(
+      "[page 1]\nCover\n\n[page 2]\n(scanned page, read from its image)\nScanned text 1\n\n[page 3]\n(scanned page, read from its image)\nScanned text 2",
+    );
+    expect(first.parsedWith).toBe(pdfFingerprint("mistral-ocr-4-1@api.eu.mistral.ai"));
+    expect(first.skippedPages).toBeUndefined();
+    expect(progress).toEqual([
+      [0, 2],
+      [2, 2],
+    ]);
+    // Only the two scanned pages left the server, with the key, to the EU host.
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.eu.mistral.ai/v1/ocr");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer secret");
+    expect(usage).toMatchObject([{ userId: "user-1", kind: "ocr", modelName: "Mistral OCR" }]);
+    // No price is assumed: list prices change, and other services charge their own.
+    expect(usage[0]!.cost).toBeNull();
+
+    const second = await parse();
+    expect(second.text).toBe(first.text);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveLength(1);
   });
 
-  it("refuses to parse while the registry row is disabled or unknown", async () => {
-    const pdf = buildPdf(["body"]);
-    const off = await parseError(
-      repoLayer({ enabled: false, kind: LOCAL_PARSER_KIND, config: { maxChars: 10, maxPages: 1 } }),
-      pdf,
+  it("leaves rate-limited pages unread and retryable, caching nothing", async () => {
+    mistralAnswers(
+      () => new Response("slow down", { status: 429, headers: { "retry-after": "30" } }),
     );
-    expect(off.reason).toBe("document parsing is disabled");
+    const bytes = await buildScannedPdf([
+      { kind: "text", text: "Cover" },
+      { kind: "scan", text: "Two" },
+    ]);
+    const { run, cache } = harness(
+      row({ scans: { mode: "mistral", baseUrl: "https://api.mistral.ai/v1" } }, "secret"),
+    );
+    const parsed = await run((parser) =>
+      parser.parsePdf({ bytes, fileName: "a.pdf", blobId: "blob-2" }),
+    );
+    expect(parsed.retryable).toEqual({ afterMs: 30_000 });
+    expect(parsed.skippedPages).toEqual([2]);
+    expect(parsed.parsedWith).toBe(pdfFingerprint("mistral-ocr-4-1@api.mistral.ai", true));
+    expect(parsed.text).toContain(
+      "not read: The OCR service is rate limiting (HTTP 429): slow down",
+    );
+    expect(cache.size).toBe(0);
+  });
 
-    const alien = await parseError(
-      repoLayer({ enabled: true, kind: "cloud-ocr", config: { maxChars: 10, maxPages: 1 } }),
-      pdf,
+  it("keeps a wholly scanned PDF retryable when its reader is rate limited", async () => {
+    mistralAnswers(
+      () => new Response("slow down", { status: 429, headers: { "retry-after": "5" } }),
     );
-    expect(alien.reason).toContain("cloud-ocr");
+    const bytes = await buildScannedPdf([{ kind: "scan", text: "Only page" }]);
+    const error = await harness(
+      row({ scans: { mode: "mistral", baseUrl: "https://api.eu.mistral.ai/v1" } }, "k"),
+    ).run((parser) => Effect.flip(parser.parsePdf({ bytes, fileName: "scan.pdf" })));
+    expect(error.retryable).toEqual({ afterMs: 5_000 });
+  });
+
+  it("stops reading scans once the text passes the limit, so no page is paid for to be cut", async () => {
+    const fetch = mistralAnswers((count) => pagesResponse(count, () => "x".repeat(400)));
+    const bytes = await buildScannedPdf(
+      Array.from({ length: 6 }, (_, i) => ({ kind: "scan" as const, text: `Page ${i + 1}` })),
+    );
+    const parse = (requireComplete: boolean) =>
+      harness(
+        row(
+          { maxChars: 1000, scans: { mode: "mistral", baseUrl: "https://api.eu.mistral.ai/v1" } },
+          "k",
+        ),
+      ).run((parser) =>
+        Effect.result(parser.parsePdf({ bytes, fileName: "big.pdf", requireComplete })),
+      );
+    const chat = await parse(false);
+    // One batch of four was enough to pass the limit; pages five and six were never sent.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(chat._tag === "Success" && chat.success).toMatchObject({
+      truncated: true,
+      pageCount: 4,
+    });
+    const knowledge = await parse(true);
+    expect(knowledge._tag === "Failure" && knowledge.failure.reason).toContain(
+      "character extraction limit",
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a complete extraction before reading scans when its text alone overflows", async () => {
+    const fetch = mistralAnswers((count) => pagesResponse(count, () => "read"));
+    const bytes = await buildScannedPdf([
+      { kind: "text", text: "a".repeat(60) },
+      { kind: "text", text: "b".repeat(60) },
+      { kind: "scan", text: "Never sent" },
+    ]);
+    const error = await harness(
+      row(
+        { maxChars: 1000, scans: { mode: "mistral", baseUrl: "https://api.eu.mistral.ai/v1" } },
+        "k",
+      ),
+    ).run((parser) =>
+      Effect.flip(
+        parser.parsePdf({
+          bytes,
+          fileName: "k.pdf",
+          requireComplete: true,
+          limits: { maxChars: 70, maxPages: 10 },
+        }),
+      ),
+    );
+    expect(error.reason).toContain("character extraction limit");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unread scan's own text layer, such as a slide title over a full-bleed image", async () => {
+    const bytes = await buildScannedPdf([
+      { kind: "scan", text: "Background", stamp: "Quarterly results" },
+    ]);
+    const parsed = await harness(row()).run((parser) =>
+      parser.parsePdf({ bytes, fileName: "deck.pdf" }),
+    );
+    expect(parsed.text).toBe(
+      "[page 1]\n(scanned page, not read: reading scanned pages is turned off)\nQuarterly results",
+    );
+  });
+
+  it("reads only as many scanned pages as the caller allows", async () => {
+    const fetch = mistralAnswers((count) => pagesResponse(count, () => "Read"));
+    const bytes = await buildScannedPdf([
+      { kind: "scan", text: "One" },
+      { kind: "scan", text: "Two" },
+    ]);
+    const parsed = await harness(
+      row({ scans: { mode: "mistral", baseUrl: "https://api.mistral.ai/v1" } }, "k"),
+    ).run((parser) => parser.parsePdf({ bytes, fileName: "web.pdf", maxScanPages: 1 }));
+    expect(parsed.text).toContain(
+      "[page 2]\n(scanned page, not read: only the first scanned pages are read here)",
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("assemble", () => {
+  it("keeps every marker exactly `[page N]` and counts readable pages", () => {
+    const { text, readable } = assemble(
+      [
+        { kind: "text", text: "Body" },
+        { kind: "blank", text: "" },
+        { kind: "scan", text: "" },
+      ],
+      new Map([[3, "Read text"]]),
+      new Map(),
+    );
+    expect(text).toBe(
+      "[page 1]\nBody\n\n[page 2]\n\n[page 3]\n(scanned page, read from its image)\nRead text",
+    );
+    expect(readable).toBe(2);
   });
 });

@@ -21,7 +21,7 @@ export const FakeBlobStore = Layer.succeed(BlobStore, {
 
 export const FakeDocumentParser = Layer.succeed(DocumentParser, {
   parsePdf: () => Effect.die("no documents in these tests"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+  availability: () => Effect.succeed({ configured: false, enabled: false, scanEngine: null }),
 });
 
 // Disabled tools fail with ToolUnavailable, not a defect, so tools-capable models

@@ -381,7 +381,7 @@ const FakeBlobStore = Layer.succeed(BlobStore, {
 
 const FakeDocumentParser = Layer.succeed(DocumentParser, {
   parsePdf: () => Effect.die("no documents in foreground memory tests"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+  availability: () => Effect.succeed({ configured: false, enabled: false, scanEngine: null }),
 });
 
 // Knowledge-backed generations are exercised in knowledge.test.ts; here no
@@ -665,7 +665,9 @@ describe("StreamEngine durable clarification handoff", () => {
     });
     expect(stored.ledger).toHaveLength(1);
     expect(stored.replay).toEqual(
-      result.events.filter((event) => event.kind === "done" || event.seq > 1),
+      result.events.filter(
+        (event) => event.kind === "done" || (event.kind === "chunk" && event.seq > 1),
+      ),
     );
     expect(result.events.flatMap((event) => (event.kind === "chunk" ? [event.seq] : []))).toEqual([
       1, 2,

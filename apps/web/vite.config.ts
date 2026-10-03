@@ -54,6 +54,17 @@ export default defineConfig({
         "@office-kit/pptx*",
         "@resvg/resvg-js*",
         "fontkit*",
+        // The PDF worker bundle leaves these external; the canvas pattern also
+        // matches its platform package, and pdf-lib's dependencies are listed.
+        "unpdf*",
+        "onnxruntime-node*",
+        "onnxruntime-common*",
+        "@napi-rs/canvas*",
+        "pdf-lib*",
+        "@pdf-lib/*",
+        "yaml*",
+        "pako*",
+        "tslib*",
       ],
     }),
     viteReact(),

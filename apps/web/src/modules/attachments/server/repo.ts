@@ -273,6 +273,14 @@ export class AttachmentRepo extends Context.Service<
       text: string;
       parsedWith: string;
     }): Effect.Effect<void>;
+    /** The blob's scanned pages already read by `engine`, by page number. */
+    scannedPages(input: { blobId: string; engine: string }): Effect.Effect<Record<number, string>>;
+    /** Adds pages `engine` read; pages another engine read are dropped. */
+    saveScannedPages(input: {
+      blobId: string;
+      engine: string;
+      pages: Record<number, string>;
+    }): Effect.Effect<void>;
     /** Unclaimed uploads older than the cutoff (tab closed before sending). */
     sweepUnclaimed(olderThan: Date): Effect.Effect<ReadonlyArray<string>>;
     /**
@@ -800,6 +808,43 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const scannedPages = Effect.fn("AttachmentRepo.scannedPages")(function* (input: {
+        blobId: string;
+        engine: string;
+      }) {
+        const [row] = yield* db
+          .select({ scannedPages: attachmentBlobs.scannedPages })
+          .from(attachmentBlobs)
+          .where(eq(attachmentBlobs.id, input.blobId))
+          .pipe(Effect.orDie);
+        const stored = row?.scannedPages;
+        if (!stored || stored.engine !== input.engine) return {};
+        return Object.fromEntries(
+          Object.entries(stored.pages).map(([page, text]) => [Number(page), text]),
+        );
+      });
+
+      const saveScannedPages = Effect.fn("AttachmentRepo.saveScannedPages")(function* (input: {
+        blobId: string;
+        engine: string;
+        pages: Record<number, string>;
+      }) {
+        // One statement, so two readers of the same blob cannot drop each other's pages.
+        const added = JSON.stringify(input.pages);
+        yield* db
+          .update(attachmentBlobs)
+          .set({
+            scannedPages: sql`jsonb_build_object(
+              'engine', ${input.engine}::text,
+              'pages', case when ${attachmentBlobs.scannedPages}->>'engine' = ${input.engine}::text
+                then coalesce(${attachmentBlobs.scannedPages}->'pages', '{}'::jsonb) || ${added}::jsonb
+                else ${added}::jsonb end
+            )`,
+          })
+          .where(eq(attachmentBlobs.id, input.blobId))
+          .pipe(Effect.orDie);
+      });
+
       const recordBlobCandidate = Effect.fn("AttachmentRepo.recordBlobCandidate")(function* (
         storageKey: string,
       ) {
@@ -929,6 +974,8 @@ export class AttachmentRepo extends Context.Service<
         listWithBlobsForMessages,
         listWithBlobsByIds,
         cacheParsedText,
+        scannedPages,
+        saveScannedPages,
         sweepUnclaimed,
       });
     }),

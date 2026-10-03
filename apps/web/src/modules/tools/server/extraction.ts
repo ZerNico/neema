@@ -33,6 +33,8 @@ export class PageExtractor extends Context.Service<
     extract(input: {
       url: string;
       charCap: number;
+      /** Whose answer reads the page: scanned PDF pages are read in their queue and billed to them. */
+      owner?: string;
     }): Effect.Effect<ExtractedPage, PageExtractionError>;
   }
 >()("chat/tools/PageExtractor") {
@@ -101,7 +103,13 @@ export class PageExtractor extends Context.Service<
               })
             : kind === "pdf"
               ? parser
-                  .parsePdf({ bytes: bytes.data, fileName: fileNameOf(current, "document.pdf") })
+                  .parsePdf({
+                    bytes: bytes.data,
+                    fileName: fileNameOf(current, "document.pdf"),
+                    // A web page's scans are read only as far as a tool call can wait.
+                    maxScanPages: WEB_SCAN_PAGES,
+                    ...(input.owner ? { owner: input.owner } : {}),
+                  })
                   .pipe(
                     Effect.map((parsed) => ({ title: null, raw: parsed.text })),
                     Effect.mapError((e) => fail(`PDF could not be read: ${e.reason}`)),
@@ -152,7 +160,9 @@ export const contentKind = (contentType: string, url: string): ContentKind | nul
   return null;
 };
 
-const PDF_TIMEOUT = Duration.seconds(20);
+const WEB_SCAN_PAGES = 5;
+/** Enough for the text layer and a few scanned pages read on this server. */
+const PDF_TIMEOUT = Duration.seconds(45);
 
 /** Structured text reads best fenced, so its shape survives the model's Markdown. */
 export const textBody = (kind: ContentKind, text: string) => {

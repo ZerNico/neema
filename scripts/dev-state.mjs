@@ -103,6 +103,8 @@ export function instanceEnv(instance, inherited = process.env) {
     PROVIDER_KEY_SECRET: instance.providerSecret,
     BLOB_STORE_ROOT: instance.blobs,
     CHAT_DESKTOP_PROFILE: instance.profile,
+    // Pinned, verified files that never change: shared by every snapshot of this checkout.
+    OCR_MODEL_ROOT: join(instance.directory, "ocr-models"),
   };
 }
 

@@ -1,3 +1,5 @@
+import { readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
@@ -22,6 +24,12 @@ const workers = [
     source: "../src/modules/word/server/runtime-worker.ts",
     bundle: "word-worker.mjs",
   },
+  {
+    // Native bindings load from their own packages; pdf.js stays one copy.
+    source: "../src/modules/pdf/server/runtime-worker.ts",
+    bundle: "pdf-worker.mjs",
+    external: ["onnxruntime-node", "@napi-rs/canvas", "unpdf", "unpdf/*", "pdf-lib", "yaml"],
+  },
 ];
 
 await Promise.all(
@@ -38,3 +46,17 @@ await Promise.all(
     }),
   ),
 );
+
+// onnxruntime-node ships every platform's binaries (about 290 MB); the output
+// runs where it was built, so only this platform's are kept.
+const onnxBinaries = at("../.output/server/node_modules/onnxruntime-node/bin/napi-v6");
+const platforms = await readdir(onnxBinaries).catch(() => []);
+for (const platform of platforms) {
+  if (platform !== process.platform) {
+    await rm(join(onnxBinaries, platform), { recursive: true, force: true });
+    continue;
+  }
+  for (const arch of await readdir(join(onnxBinaries, platform)))
+    if (arch !== process.arch)
+      await rm(join(onnxBinaries, platform, arch), { recursive: true, force: true });
+}

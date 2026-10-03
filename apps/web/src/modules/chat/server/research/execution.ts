@@ -263,6 +263,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       ...deps.priorSources.filter(isWebSource).map((source) => source.url),
     ]),
     requestSearch: true,
+    owner: deps.userId,
     policy: {
       admit: (kind, count) => budget.admitWeb(kind, count),
       run: (effect) => external.withPermits(1)(effect),

@@ -1,4 +1,3 @@
-import { PDF_EXTRACTION_REVISION } from "~/modules/attachments/server/document-parser.ts";
 /**
  * Deterministic source ranges, never reconstructed text. Small page spans stay
  * whole; larger ones split by heading, then paragraph/sentence/line boundaries,
@@ -15,10 +14,11 @@ export const CHUNKER_REVISION = 2;
  * predate a parser or chunker change. The content is immutable, so improving
  * the pipeline means building a *new* version, never rewriting an old one.
  *
- * Notes carry their own text, so only the chunker is part of their identity.
+ * Notes carry their own text, so only the chunker is part of their identity. A
+ * PDF's parser fingerprint already names its extraction revision and scan engine.
  */
 export const pipelineFingerprint = (parsedWith: string | null): string =>
-  `${parsedWith ?? "none"}${parsedWith && parsedWith !== "utf8" ? `:pdf-${PDF_EXTRACTION_REVISION}` : ""}:chunker-${CHUNKER_REVISION}`;
+  `${parsedWith ?? "none"}:chunker-${CHUNKER_REVISION}`;
 
 export const CHUNKING = {
   targetTokens: 700,

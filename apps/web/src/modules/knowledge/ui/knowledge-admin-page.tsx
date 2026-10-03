@@ -28,6 +28,7 @@ import {
   useInvalidateTools,
 } from "~/modules/tools/ui/tool-fields.tsx";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
+import { ScanReadingRow } from "~/modules/pdf/ui/scan-reading-row.tsx";
 import { ProjectFileSettingsSection } from "~/modules/projects/ui/project-file-settings-section.tsx";
 import { useConfirm } from "~/ui/confirm.tsx";
 import { useAppForm } from "~/ui/form/app-form.tsx";
@@ -339,8 +340,7 @@ function DocumentParserSection() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">PDF text extraction</span>
             <span className="text-muted-foreground text-xs">
-              Reads text out of PDFs so they work with any model. Nothing leaves this server.
-              Scanned PDFs without text inside won’t work.
+              Reads the text of PDFs for models that can’t open them, and for collections.
             </span>
           </div>
           <Switch
@@ -351,11 +351,9 @@ function DocumentParserSection() {
           />
         </ListRow>
 
+        <ScanReadingRow disabled={!tool.enabled} />
+
         <ListRow className="flex-col items-stretch gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Backend</span>
-            <Badge variant="outline">{tool.kind === "local" ? "Local (unpdf)" : tool.kind}</Badge>
-          </div>
           <form
             noValidate
             className="flex flex-col gap-3"

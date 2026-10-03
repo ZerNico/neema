@@ -4,11 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeAdminPage } from "./knowledge-admin-page.tsx";
-import { updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
+import { getScanReading, updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
 import type { PublicTool } from "~/modules/tools/server/repo.ts";
 import { configureEmbeddings, rebuildAllKnowledgeIndexes } from "../server/functions.ts";
 import { updateProjectFileSettings } from "~/modules/projects/server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { scanReadingQuery } from "~/modules/pdf/ui/scan-reading-row.tsx";
 import { toast } from "sonner";
 
 vi.mock("../server/functions.ts", () => ({
@@ -18,6 +19,10 @@ vi.mock("../server/functions.ts", () => ({
   rebuildAllKnowledgeIndexes: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
+  getScanReading: vi.fn(),
+  updateScanReading: vi.fn(),
+  retryOcrModelDownload: vi.fn(),
+  testMistralOcr: vi.fn(),
   getMemoryTool: vi.fn(),
   getWebSearchTool: vi.fn(),
   getUrlReaderTool: vi.fn(),
@@ -106,11 +111,20 @@ const embeddings = (
   models: overrides.models ?? [MODEL],
 });
 
+const scanSettings: NonNullable<Awaited<ReturnType<typeof getScanReading>>> = {
+  scans: { mode: "off" },
+  keyConfigured: false,
+  localFiles: { accurate: { state: "missing" }, fast: { state: "missing" } },
+  visionModels: [],
+  needsApproval: false,
+};
+
 const renderPage = (config = embeddings()) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "tools", "embeddings"], config);
   client.setQueryData(["admin", "tools", "document-parser"], parserTool);
   client.setQueryData(["admin", "project-files"], { maxProjectBytes: 500 * 1024 * 1024 });
+  client.setQueryData(scanReadingQuery.queryKey, scanSettings);
   return render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>

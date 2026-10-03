@@ -153,7 +153,10 @@ export class ProjectFileService extends Context.Service<
       userId: string,
       projectId: string,
       target: { fileId?: string | undefined; name?: string | undefined },
-    ): Effect.Effect<{ file: ProjectFileSummary; bytes: Uint8Array }, ProjectFileError>;
+    ): Effect.Effect<
+      { file: ProjectFileSummary; bytes: Uint8Array; blobId: string },
+      ProjectFileError
+    >;
     settings(): Effect.Effect<{ maxProjectBytes: number }>;
     updateSettings(maxProjectBytes: number): Effect.Effect<void>;
   }
@@ -564,8 +567,9 @@ export class ProjectFileService extends Context.Service<
         if (!file) return yield* new ProjectRejected({ reason: "no such file in this project" });
         const row = yield* versionRow(file.versionId);
         const bytes = row ? yield* blobBytes(row.version.blobId) : null;
-        if (!bytes) return yield* new ProjectRejected({ reason: "no such file in this project" });
-        return { file, bytes };
+        if (!row || !bytes)
+          return yield* new ProjectRejected({ reason: "no such file in this project" });
+        return { file, bytes, blobId: row.version.blobId };
       });
       return ProjectFileService.of({
         settings,
@@ -759,7 +763,7 @@ export class ProjectFileService extends Context.Service<
           return row !== undefined;
         }),
         read: Effect.fn("ProjectFileService.read")(function* (userId, projectId, target) {
-          const { file, bytes } = yield* open(userId, projectId, target);
+          const { file, bytes, blobId } = yield* open(userId, projectId, target);
           const kind = attachmentKind(classifyFile(file.name, "", bytes).mediaType);
           if (kind === "text")
             return {
@@ -769,7 +773,7 @@ export class ProjectFileService extends Context.Service<
             };
           if (kind === "pdf") {
             const parsed = yield* parser
-              .parsePdf({ bytes, fileName: file.name })
+              .parsePdf({ bytes, fileName: file.name, blobId, owner: userId })
               .pipe(Effect.option);
             return Option.isSome(parsed)
               ? {

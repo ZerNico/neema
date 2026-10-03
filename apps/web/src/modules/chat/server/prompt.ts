@@ -8,7 +8,10 @@ import { Effect } from "effect";
 import type { Prompt } from "effect/unstable/ai";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { BlobStore } from "~/modules/attachments/server/blob-store.ts";
-import type { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
+import {
+  currentPdfFingerprints,
+  type DocumentParser,
+} from "~/modules/attachments/server/document-parser.ts";
 import type { AttachmentRepo, AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { describeFile, opaqueFileText } from "~/modules/attachments/server/file-text.ts";
 import { buildTextFence } from "~/modules/attachments/server/validation.ts";
@@ -195,22 +198,30 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     });
 
   // Resolved on the first PDF that needs parsing, not before.
-  let parserKind: string | null | undefined;
+  let current: ReadonlyArray<string> | undefined;
 
   const pdfText = Effect.fn("chat.pdfText")(function* (row: AttachmentWithBlob) {
-    if (parserKind === undefined) parserKind = (yield* deps.parser.availability()).kind;
-    // Cached extractions are only reusable while the configured backend is the
-    // one that produced them, so a better parser must not be shadowed by old text.
-    if (row.parsedText !== null && row.parsedWith === parserKind) return row.parsedText;
+    current ??= currentPdfFingerprints(yield* deps.parser.availability());
+    // Cached text is reusable only while the current settings would produce
+    // it, so a newly configured scan reader is not shadowed by old text.
+    if (row.parsedText !== null && row.parsedWith !== null && current.includes(row.parsedWith))
+      return row.parsedText;
 
     const bytes = yield* loadBytes(row);
-    const parsed = yield* deps.parser.parsePdf({ bytes, fileName: row.fileName });
-    yield* deps.attachments.cacheParsedText({
-      blobId: row.blobId,
-      text: parsed.text,
-      parsedWith: parsed.parsedWith,
-    });
-    return parsed.text;
+    const parsed = yield* deps.parser
+      .parsePdf({ bytes, fileName: row.fileName, blobId: row.blobId })
+      .pipe(Effect.result);
+    // An unreadable PDF is said to be one; it never fails the answer around it.
+    if (parsed._tag === "Failure")
+      return `${row.fileName} is a PDF, and its text could not be read: ${parsed.failure.reason}.`;
+    // Pages that failed are read again next time rather than cached as missing.
+    if (current.includes(parsed.success.parsedWith))
+      yield* deps.attachments.cacheParsedText({
+        blobId: row.blobId,
+        text: parsed.success.text,
+        parsedWith: parsed.success.parsedWith,
+      });
+    return parsed.success.text;
   });
 
   const userMessage = Effect.fn("chat.historyUserMessage")(function* (message: HistoryMessage) {

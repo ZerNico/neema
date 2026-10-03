@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, fork } from "node:child_process";
 import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -190,6 +190,70 @@ try {
   await rm(presentationDirectory, { recursive: true, force: true });
 }
 console.log("Checked the production PowerPoint worker and packaged renderer.");
+
+// The PDF worker leaves pdf.js, the canvas, pdf-lib and ONNX Runtime external:
+// fork its bundle from another directory, as the pool does, and prove each loads.
+const { PDFDocument, StandardFonts } = await import("pdf-lib");
+const sample = await PDFDocument.create();
+const sampleFont = await sample.embedFont(StandardFonts.Helvetica);
+sample.addPage([300, 200]).drawText("Production", { x: 20, y: 100, size: 18, font: sampleFont });
+// Bars like lines of text drawn as shapes: content with no text layer.
+const drawn = sample.addPage([300, 200]);
+for (let line = 0; line < 6; line++)
+  drawn.drawRectangle({ x: 20, y: 170 - line * 28, width: 220, height: 8 });
+const samplePdf = new Uint8Array(await sample.save());
+const pdfDirectory = await mkdtemp(join(tmpdir(), "chat-pdf-worker-"));
+const pdfWorker = fork(join(serverDirectory, "pdf-worker.mjs"), [], {
+  cwd: pdfDirectory,
+  env: { PATH: process.env.PATH },
+  serialization: "advanced",
+  stdio: ["ignore", "inherit", "inherit", "ipc"],
+});
+let nextJob = 0;
+const pdfJob = (request) =>
+  new Promise((resolveJob, rejectJob) => {
+    const id = ++nextJob;
+    const onMessage = (reply) => {
+      if (reply.id !== id) return;
+      pdfWorker.off("message", onMessage);
+      if (reply.ok) resolveJob(reply.result);
+      else rejectJob(Object.assign(new Error(reply.message), { code: reply.code }));
+    };
+    pdfWorker.on("message", onMessage);
+    pdfWorker.send({ id, ...request });
+  });
+try {
+  const read = await pdfJob({ kind: "read", bytes: samplePdf, maxPages: 5, maxChars: 1000 });
+  if (read.pages[0]?.kind !== "text" || !read.pages[0].text.includes("Production"))
+    throw new Error("PDF worker did not read the text layer.");
+  if (read.pages[1]?.kind !== "scan")
+    throw new Error("PDF worker did not render to classify a page.");
+  const [image] = await pdfJob({ kind: "render", bytes: samplePdf, pages: [2], longEdge: 300 });
+  if (!image || image.bytes[0] !== 0xff) throw new Error("PDF worker did not render a JPEG.");
+  const subset = await pdfJob({ kind: "subset", bytes: samplePdf, pages: [2] });
+  if ((await PDFDocument.load(subset)).getPageCount() !== 1)
+    throw new Error("PDF worker did not cut a PDF down to its pages.");
+  // No model files here: loading them fails, which proves the runtime itself loaded.
+  const ocr = await pdfJob({
+    kind: "ocr",
+    bytes: samplePdf,
+    pages: [2],
+    models: {
+      detection: "missing.onnx",
+      recognition: "missing.onnx",
+      recognitionConfig: "missing.yml",
+    },
+  }).then(
+    () => null,
+    (error) => error,
+  );
+  if (ocr?.code !== "models_unavailable")
+    throw new Error(`ONNX Runtime did not load in the PDF worker: ${ocr?.code ?? "no failure"}`);
+} finally {
+  pdfWorker.kill();
+  await rm(pdfDirectory, { recursive: true, force: true });
+}
+console.log("Checked the production PDF worker, its canvas and ONNX Runtime.");
 
 // The spreadsheet worker bundles its libraries whole; prove it parses and calculates.
 const spreadsheetCandidates = moduleSources

@@ -213,10 +213,13 @@ whatever agent the conversation is associated with.
 - `pipelineFingerprint` (parser + `CHUNKER_REVISION`) is recorded on every published version, so
   a pipeline improvement never rewrites one: `rebuildContent` queues a new version only where
   the current pipeline couldn't have produced it, and keeps the old one readable/citable until
-  the new one is ready. Identical replacement saves reuse the latest version.
+  the new one is ready. Identical replacement saves reuse the latest version. A PDF's parser
+  part names its scan engine, and an incomplete scan reading never counts as current; see
+  [PDFs](pdf.md#fingerprints-and-caches).
 - Postgres refuses NUL (U+0000) in `text`; pdf.js emits it for private-use glyphs.
   `stripControlCharacters` guards every extraction — without it `completeExtraction` dies and
   the row sits in `extracting` until the lease lapses, so the owner sees a "timeout" that is
-  really three failed attempts. A textless PDF page is skipped, not failed (`truncated: true`
-  refuses direct context and tells the model coverage is partial); a fully textless PDF still
-  fails, with the scanned-PDF hint.
+  really three failed attempts. A scanned page that was not read is disclosed, not fatal
+  (`truncated: true` refuses direct context and tells the model coverage is partial); a PDF with
+  nothing readable at all still fails, saying why its scans were not read. Reading scans renews
+  the extraction lease and waits out a reader's rate limit; see [PDFs](pdf.md#waiting-for-it).

@@ -1595,6 +1595,7 @@ export function ChatView({
             ),
           ],
           liveStream: { text: stream.live, status: stream.status },
+          reading: stream.reading,
         };
       }),
     [
@@ -1620,6 +1621,7 @@ export function ChatView({
       editResearchEnabled,
       stream.compactions,
       stream.live,
+      stream.reading,
       stream.status,
       stream.steers,
       stream.tools,

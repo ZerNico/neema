@@ -96,6 +96,7 @@ const prepared = (
       indexer,
       authority: createUrlAuthority(authorityUrls),
       requestSearch,
+      owner: "user-1",
     });
     if (!result) return undefined;
     return { tools: result.tools, toolkit: (yield* mergeToolGroups([result.group]))! };
@@ -140,6 +141,31 @@ describe("UrlReaderExecutor", () => {
       expect(final.failures).toEqual([]);
     }).pipe(Effect.provide(layers(true))),
   );
+
+  it.effect("reads each page as the person whose answer it is", () => {
+    const owners: Array<string | undefined> = [];
+    const Recording = Layer.succeed(
+      PageExtractor,
+      PageExtractor.of({
+        extract: (input) => {
+          owners.push(input.owner);
+          return Effect.succeed({
+            url: input.url,
+            title: "Scan",
+            content: "Text",
+            truncated: false,
+          });
+        },
+      }),
+    );
+    return Effect.gen(function* () {
+      const toolkit = (yield* prepared(createSourceIndexer([]), ["https://docs.example/a.pdf"]))!
+        .toolkit;
+      yield* runTool(toolkit, "read_url", { urls: ["https://docs.example/a.pdf"] });
+      // Scanned pages a web PDF needs are billed to them, not to no one.
+      expect(owners).toEqual(["user-1"]);
+    }).pipe(Effect.provide(layers(true, Recording)));
+  });
 
   it.effect("enforces the aggregate character budget fairly across a full batch", () =>
     Effect.gen(function* () {

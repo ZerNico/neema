@@ -149,7 +149,7 @@ const MemoryBlobStore = Layer.succeed(BlobStore, {
 
 const FakeParser = Layer.succeed(DocumentParser, {
   parsePdf: () => Effect.die("no PDFs in this suite"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, kind: null }),
+  availability: () => Effect.succeed({ configured: false, enabled: false, scanEngine: null }),
 });
 
 let database: TestDatabase;
@@ -723,7 +723,13 @@ describe("knowledge application boundary", () => {
       markStarted = resolve;
     });
     let aborted = false;
-    const parsed = { text: "[page 1]\nRecovered source.", parsedWith: "local", truncated: false };
+    const parsed = {
+      text: "[page 1]\nRecovered source.",
+      parsedWith: "pdf-3",
+      truncated: false,
+      totalPages: 1,
+      pageCount: 1,
+    };
     const workerRuntime = (parsePdf: DocumentParser["Service"]["parsePdf"]) =>
       ManagedRuntime.make(
         KnowledgeIndexer.workers.pipe(
@@ -737,7 +743,7 @@ describe("knowledge application boundary", () => {
                 DocumentParser.of({
                   parsePdf,
                   availability: () =>
-                    Effect.succeed({ configured: true, enabled: true, kind: "local" }),
+                    Effect.succeed({ configured: true, enabled: true, scanEngine: "off" }),
                 }),
               ),
               MemoryBlobStore,
@@ -833,6 +839,99 @@ describe("knowledge application boundary", () => {
         )
       ).content,
     ).toBe(parsed.text);
+  });
+
+  it("waits out a scan reader's rate limit, then publishes what it read on the last attempt", async () => {
+    await configureEmbeddings({ spaceId: null, enabled: false });
+    await drainIndexer();
+    const owner = await createUser();
+    const collectionId = await run(
+      Effect.flatMap(KnowledgeService, (service) =>
+        service.create(owner, { name: "Scans", description: "" }),
+      ),
+    );
+    const document = await run(
+      Effect.flatMap(KnowledgeService, (service) =>
+        service.upload(owner, {
+          collectionId,
+          title: "Scanned PDF",
+          fileName: "scan.pdf",
+          declaredMediaType: "application/pdf",
+          bytes: new TextEncoder().encode("%PDF-1.7\nFake scanned fixture"),
+        }),
+      ),
+    );
+    const { repo, space } = await run(Effect.all({ repo: KnowledgeRepo, space: EmbeddingSpace }));
+    const owners: Array<string | undefined> = [];
+    const partial = {
+      text: "[page 1]\nCover\n\n[page 2]\n(scanned page, not read: Mistral is rate limiting)",
+      parsedWith: "pdf-3+scan:mistral-ocr-4-1+incomplete",
+      truncated: false,
+      totalPages: 2,
+      pageCount: 2,
+      skippedPages: [2],
+      retryable: { afterMs: 3_600_000 },
+    };
+    const indexer = ManagedRuntime.make(
+      KnowledgeIndexer.workers.pipe(
+        Layer.provideMerge(KnowledgeIndexer.layer),
+        Layer.provideMerge(
+          Layer.mergeAll(
+            Layer.succeed(KnowledgeRepo, repo),
+            Layer.succeed(EmbeddingSpace, space),
+            Layer.succeed(
+              DocumentParser,
+              DocumentParser.of({
+                parsePdf: (input) =>
+                  Effect.sync(() => {
+                    owners.push(input.owner);
+                    return partial;
+                  }),
+                availability: () =>
+                  Effect.succeed({
+                    configured: true,
+                    enabled: true,
+                    scanEngine: "mistral-ocr-4-1",
+                  }),
+              }),
+            ),
+            MemoryBlobStore,
+            FakeGateway,
+            FakeSync,
+          ),
+        ),
+      ),
+    );
+    const version = () =>
+      exec(
+        `select status, attempts, lease_until > now() as waiting, truncated, pipeline_fingerprint from knowledge_document_versions where id = '${document.versionId}'`,
+      ).then((result) => result.rows[0]);
+    try {
+      await indexer.runPromise(Effect.void);
+      // The first attempt is put back with the reader's delay, not retried at once.
+      await expect
+        .poll(version, { timeout: 5_000, interval: 20 })
+        .toMatchObject({ status: "queued", attempts: 1, waiting: true });
+      expect(owners).toEqual([owner]);
+      // The delay passes, and the last attempt publishes the pages it has.
+      await exec(
+        `update knowledge_document_versions set attempts = 2, lease_until = now() - interval '1 second' where id = '${document.versionId}'`,
+      );
+      await indexer.runPromise(
+        Effect.flatMap(KnowledgeIndexer, (worker) => worker.runExtraction()),
+      );
+      await expect.poll(version, { timeout: 5_000, interval: 20 }).toMatchObject({
+        status: "ready",
+        attempts: 3,
+        truncated: {
+          truncated: true,
+          reason: "Page 2 is a scan that wasn’t read.",
+        },
+        pipeline_fingerprint: `${partial.parsedWith}:chunker-${CHUNKER_REVISION}`,
+      });
+    } finally {
+      await indexer.dispose();
+    }
   });
 
   it("does not queue PDF extraction while parsing is disabled, but repairs usable embeddings", async () => {
@@ -1208,7 +1307,7 @@ describe("knowledge application boundary", () => {
               reason: "Page 2 has no extractable text (probably scanned) and was skipped.",
             },
             chunks: chunkDocument(text),
-            parsedWith: "local",
+            parsedWith: "pdf-3",
           }),
         ),
       ),

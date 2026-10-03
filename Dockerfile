@@ -31,7 +31,8 @@ ENV NODE_ENV=production \
     NITRO_HOST=0.0.0.0 \
     NITRO_PORT=3000 \
     BLOB_STORE_ROOT=/data/storage \
-    CUSTOM_TOOL_PACKAGE_ROOT=/data/custom-tools
+    CUSTOM_TOOL_PACKAGE_ROOT=/data/custom-tools \
+    OCR_MODEL_ROOT=/data/ocr-models
 WORKDIR /app
 # .output is self-contained: Nitro traced the server's node_modules into it,
 # and the build bundled the migrator and copied drizzle/ beside it.

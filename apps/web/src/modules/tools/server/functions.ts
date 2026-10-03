@@ -6,13 +6,20 @@ import { runtime } from "~/server/runtime.ts";
 import {
   CreateSearchProviderInput,
   SearchProviderOrderInput,
+  TestScanReaderInput,
   TestSearchProviderInput,
   UpdateDocumentParserToolInput,
+  UpdateScanReadingInput,
   UpdateMemoryToolInput,
   UpdateUrlReaderToolInput,
   UpdateSearchProviderInput,
   UpdateWebSearchToolInput,
 } from "../schema.ts";
+import { readVisionConnection } from "~/modules/attachments/server/document-parser.ts";
+import { OcrModels } from "~/modules/pdf/server/ocr-models.ts";
+import { mistralBaseUrl, mistralOcr } from "~/modules/pdf/server/scan-readers.ts";
+import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { Db } from "~/server/db.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchProviderRepo, type InvalidSearchProvider } from "./search-provider-repo.ts";
 import { SearchProviders } from "./search-providers/chain.ts";
@@ -244,6 +251,155 @@ export const updateDocumentParserTool = createServerFn({ method: "POST" })
       ),
     );
   });
+
+/** A choice the admin can fix, said as the reason. */
+const refuse = (reason: string) => Effect.die(new Response(reason, { status: 400 }));
+
+/**
+ * How scanned pages are read, with what the admin page needs to show for it:
+ * the model files' state, the vision models one could choose, and whether a
+ * chosen model's connection changed since it was approved.
+ */
+export const getScanReading = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ToolsRepo;
+        const ocrModels = yield* OcrModels;
+        const providers = yield* ProviderRepo;
+        const db = yield* Db;
+        const row = yield* repo.getDocumentParser();
+        if (!row) return null;
+        const scans = row.config.scans ?? { mode: "off" as const };
+        const providerRows = yield* providers.listProviders();
+        const providerName = new Map(providerRows.map((provider) => [provider.id, provider.name]));
+        const visionModels = (yield* providers.listModels({ enabledOnly: true }))
+          .filter(
+            (model) =>
+              model.type === "chat" &&
+              model.access === "public" &&
+              model.capabilities.vision &&
+              providerRows.some((provider) => provider.id === model.providerId && provider.enabled),
+          )
+          .map((model) => ({
+            id: model.id,
+            displayName: model.displayName,
+            providerName: providerName.get(model.providerId) ?? "",
+          }));
+        let needsApproval = false;
+        if (scans.mode === "model") {
+          const now = yield* readVisionConnection(db, scans.modelId);
+          needsApproval =
+            now === null ||
+            now.providerId !== scans.approved.providerId ||
+            now.baseUrl !== scans.approved.baseUrl ||
+            now.modelKey !== scans.approved.modelKey;
+        }
+        return {
+          scans:
+            scans.mode === "model" ? { mode: "model" as const, modelId: scans.modelId } : scans,
+          keyConfigured: row.secret !== null,
+          localFiles: {
+            accurate: yield* ocrModels.status("accurate"),
+            fast: yield* ocrModels.status("fast"),
+          },
+          visionModels,
+          needsApproval,
+        };
+      }),
+    ),
+  );
+
+/**
+ * Saves the scanned-pages choice. A vision model is approved as its
+ * connection is now; reading on this server starts fetching its files.
+ */
+export const updateScanReading = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateScanReadingInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ToolsRepo;
+        const db = yield* Db;
+        let scans;
+        if (data.scans.mode === "model") {
+          const approved = yield* readVisionConnection(db, data.scans.modelId);
+          if (!approved)
+            return yield* refuse("Choose an enabled, public model that can see images.");
+          scans = { mode: "model" as const, modelId: data.scans.modelId, approved };
+        } else if (data.scans.mode === "mistral") {
+          const baseUrl = mistralBaseUrl(data.scans.baseUrl);
+          if (!baseUrl)
+            return yield* refuse("Enter the OCR service’s base URL, starting with https://.");
+          scans = { mode: "mistral" as const, baseUrl };
+        } else scans = data.scans;
+        if (
+          scans.mode === "local" &&
+          (yield* (yield* OcrModels).status(scans.quality)).state === "unsupported"
+        )
+          return yield* refuse("This server’s platform can’t read scanned pages itself.");
+        if (data.scans.mode === "mistral" && !data.secret?.trim()) {
+          const current = yield* repo.getDocumentParser();
+          if (!current?.secret) return yield* refuse("Enter an API key for the OCR service.");
+        }
+        yield* repo.updateTool("document_parser", {
+          config: { scans },
+          ...(data.secret?.trim() ? { secret: data.secret.trim() } : {}),
+        });
+        if (scans.mode === "local") yield* (yield* OcrModels).ensure(scans.quality);
+      }),
+    ),
+  );
+
+/** Fetches the model files for reading scans on this server again, after a failure. */
+export const retryOcrModelDownload = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(Schema.Struct({ quality: Schema.Literals(["accurate", "fast"]) })))
+  .handler(({ data }) =>
+    runtime.runPromise(OcrModels.use((models) => models.ensure(data.quality))),
+  );
+
+/** A one-page PDF with known words, so a test reads something real and cheap. */
+const samplePdf = Effect.promise(async () => {
+  const { PDFDocument, StandardFonts } = await import("pdf-lib");
+  const document = await PDFDocument.create();
+  const page = document.addPage([420, 200]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Scanned page test", { x: 40, y: 120, size: 24, font });
+  return new Uint8Array(await document.save());
+});
+
+/** Reads the sample page with the OCR service: whether the URL and key work, and how fast. */
+export const testMistralOcr = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(TestScanReaderInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ToolsRepo;
+        const typed = data.secret?.trim();
+        const key = typed ? Redacted.make(typed) : (yield* repo.getDocumentParser())?.secret;
+        if (!key) return { ok: false as const, error: "Enter an API key." };
+        const baseUrl = mistralBaseUrl(data.baseUrl);
+        if (!baseUrl)
+          return { ok: false as const, error: "Enter a base URL starting with https://." };
+        const started = Date.now();
+        const result = yield* mistralOcr({ baseUrl, key, pdf: yield* samplePdf }).pipe(
+          Effect.result,
+        );
+        if (result._tag === "Failure") return { ok: false as const, error: result.failure.reason };
+        const read = result.success.pages[0]?.markdown ?? "";
+        return /scanned\s+page\s+test/i.test(read)
+          ? { ok: true as const, latencyMs: Date.now() - started }
+          : {
+              ok: false as const,
+              error: "The service answered, but did not read the sample page.",
+            };
+      }),
+    ),
+  );
 
 export const getResearchAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])

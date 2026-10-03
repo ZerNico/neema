@@ -41,21 +41,26 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
         if (!stream) return new Response("Not found", { status: 404 });
 
         return sseResponse(stream, (event) =>
-          event.kind === "chunk"
-            ? sseFrame("chunk", {
-                seq: event.seq,
-                kind: event.chunkKind,
-                delta: event.delta,
-                // A replayed tool call keeps its own start, so a reload's clock agrees.
-                at: event.at ?? Date.now(),
-                // The server's clock now, so the client can read `at` against it.
-                sentAt: Date.now(),
+          event.kind === "status"
+            ? sseFrame("status", {
+                reading: event.reading,
                 ...(event.runId ? { runId: event.runId } : {}),
               })
-            : sseFrame("done", {
-                status: event.status,
-                ...(event.runId ? { runId: event.runId } : {}),
-              }),
+            : event.kind === "chunk"
+              ? sseFrame("chunk", {
+                  seq: event.seq,
+                  kind: event.chunkKind,
+                  delta: event.delta,
+                  // A replayed tool call keeps its own start, so a reload's clock agrees.
+                  at: event.at ?? Date.now(),
+                  // The server's clock now, so the client can read `at` against it.
+                  sentAt: Date.now(),
+                  ...(event.runId ? { runId: event.runId } : {}),
+                })
+              : sseFrame("done", {
+                  status: event.status,
+                  ...(event.runId ? { runId: event.runId } : {}),
+                }),
         );
       },
     },

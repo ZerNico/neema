@@ -276,6 +276,8 @@ export interface StreamState {
   /** Queued messages this answer took in, in the order it took them. */
   steers: AssistantSteer[];
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
+  /** Scanned pages being read before the answer starts; live only, never replayed. */
+  reading: { read: number; total: number } | null;
 }
 
 type Action =
@@ -293,6 +295,7 @@ type Action =
       /** The server's time for the chunk, so a replayed call keeps its start. */
       at?: number;
     }
+  | { kind: "reading"; reading: StreamState["reading"] }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
 const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
@@ -1193,11 +1196,19 @@ function reducer(state: StreamState, action: Action): StreamState {
         compactions: action.compactions,
         steers: action.steers ?? [],
         status: "streaming",
+        reading: null,
       };
     case "chunk":
       return applyChunk(state, action.chunkKind, action.delta, action.at);
+    case "reading":
+      return { ...state, reading: action.reading };
     case "done":
-      return { ...state, tools: withoutWriting(state.tools), status: action.status };
+      return {
+        ...state,
+        tools: withoutWriting(state.tools),
+        status: action.status,
+        reading: null,
+      };
   }
 }
 
@@ -1244,6 +1255,7 @@ export function useMessageStream(
     compactions: initial?.compactions ?? [],
     steers: initial?.steers ?? [],
     status: messageId ? "streaming" : "idle",
+    reading: null,
   });
   const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
@@ -1323,6 +1335,15 @@ export function useMessageStream(
             queryKey: ["documents", activity.result.documentId],
           });
       }
+    });
+
+    source.addEventListener("status", (raw) => {
+      const data = JSON.parse((raw as MessageEvent).data) as {
+        reading: StreamState["reading"];
+        runId?: string;
+      };
+      if (!acceptsRun(data.runId)) return;
+      dispatch({ kind: "reading", reading: data.reading });
     });
 
     source.addEventListener("done", (raw) => {

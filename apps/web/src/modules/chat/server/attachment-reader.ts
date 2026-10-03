@@ -108,6 +108,7 @@ export const prepareAttachmentReader = (input: {
                 .parsePdf({
                   bytes,
                   fileName: row.fileName,
+                  blobId: row.blobId,
                   limits: {
                     maxChars: KNOWLEDGE_LIMITS.maxExtractedChars,
                     maxPages: KNOWLEDGE_LIMITS.maxPages,

@@ -185,6 +185,8 @@ const CitedAnswer = memo(function CitedAnswer({
 
 export interface DisplayMessage {
   desktopMachineId?: string | null;
+  /** Scanned pages the live answer is reading before it can start. */
+  reading?: StreamState["reading"];
   files?: ReadonlyArray<AssistantFile>;
   id: string;
   role: "user" | "assistant" | "system";
@@ -1140,7 +1142,14 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         // A live work line already says it is working between its steps.
         parts.at(-1)?.kind !== "work" ? (
           <div className={cn(activityRowClassName, "mb-2")}>
-            <ActivityFace label="Thinking" status="running" />
+            {/* The label holds still while pages are read; only the count after it rolls. */}
+            <ActivityFace
+              label={message.reading ? "Reading scanned pages" : "Thinking"}
+              detail={
+                message.reading ? `${message.reading.read} of ${message.reading.total}` : null
+              }
+              status="running"
+            />
           </div>
         ) : null}
         {message.status === "error" ? (

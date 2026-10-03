@@ -41,6 +41,7 @@ export interface VersionBody extends VersionBodyReference {
 /** How long a claimed extraction/embedding job is protected from re-claiming. */
 const LEASE_SECONDS = 120;
 const MAX_ATTEMPTS = 3;
+export const MAX_EXTRACTION_ATTEMPTS = MAX_ATTEMPTS;
 
 const semanticStatus = (
   status: string | null,
@@ -234,6 +235,8 @@ export class KnowledgeRepo extends Context.Service<
       /** Where the bytes live, for file versions. */
       storageKey: string | null;
       leaseToken: string;
+      /** The collection's owner, whom any paid reading of scanned pages is billed to. */
+      ownerUserId: string | null;
     } | null>;
     completeExtraction(input: {
       versionId: string;
@@ -249,7 +252,11 @@ export class KnowledgeRepo extends Context.Service<
       leaseToken: string;
       error: string;
       retryable: boolean;
+      /** A retryable failure waits this long before it is claimed again. */
+      retryAfterMs?: number;
     }): Effect.Effect<void>;
+    /** Extends a live extraction's lease; false once it was lost, and the work must stop. */
+    renewExtractionLease(input: { versionId: string; leaseToken: string }): Effect.Effect<boolean>;
 
     claimEmbedding(
       spaceId: string,
@@ -855,7 +862,10 @@ export class KnowledgeRepo extends Context.Service<
                   attempts = attempts + 1
               where id = (
                 select id from knowledge_document_versions
-                where attempts < ${MAX_ATTEMPTS} and (status = 'queued'
+                where attempts < ${MAX_ATTEMPTS}
+                  -- On a queued row lease_until is the earliest retry, set by a
+                  -- failure worth waiting out (a scan reader's rate limit).
+                  and ((status = 'queued' and (lease_until is null or lease_until <= now()))
                    or (status = 'extracting' and (lease_until is null or lease_until < now())))
                 order by created_at
                 for update skip locked
@@ -886,7 +896,21 @@ export class KnowledgeRepo extends Context.Service<
               .limit(1)
               .pipe(Effect.orDie)
           : [];
-        return { version, storageKey: blob[0]?.storageKey ?? null, leaseToken };
+        const [owner] = yield* db
+          .select({ ownerUserId: knowledgeCollections.userId })
+          .from(knowledgeDocuments)
+          .innerJoin(
+            knowledgeCollections,
+            eq(knowledgeCollections.id, knowledgeDocuments.collectionId),
+          )
+          .where(eq(knowledgeDocuments.id, version.documentId))
+          .pipe(Effect.orDie);
+        return {
+          version,
+          storageKey: blob[0]?.storageKey ?? null,
+          leaseToken,
+          ownerUserId: owner?.ownerUserId ?? null,
+        };
       });
 
       const completeExtraction = Effect.fn("KnowledgeRepo.completeExtraction")(function* (input: {
@@ -1011,11 +1035,31 @@ export class KnowledgeRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const renewExtractionLease = Effect.fn("KnowledgeRepo.renewExtractionLease")(
+        function* (input: { versionId: string; leaseToken: string }) {
+          const renewed = yield* db
+            .update(knowledgeDocumentVersions)
+            .set({ leaseUntil: sql`now() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'` })
+            .where(
+              and(
+                eq(knowledgeDocumentVersions.id, input.versionId),
+                eq(knowledgeDocumentVersions.leaseToken, input.leaseToken),
+                eq(knowledgeDocumentVersions.status, "extracting"),
+                sql`${knowledgeDocumentVersions.leaseUntil} > now()`,
+              ),
+            )
+            .returning({ id: knowledgeDocumentVersions.id })
+            .pipe(Effect.orDie);
+          return renewed.length > 0;
+        },
+      );
+
       const failExtraction = Effect.fn("KnowledgeRepo.failExtraction")(function* (input: {
         versionId: string;
         leaseToken: string;
         error: string;
         retryable: boolean;
+        retryAfterMs?: number;
       }) {
         yield* db
           .transaction((tx) =>
@@ -1041,7 +1085,11 @@ export class KnowledgeRepo extends Context.Service<
                     : "failed",
                   error: input.error,
                   leaseToken: null,
-                  leaseUntil: null,
+                  // Judged by the database clock, like every lease.
+                  leaseUntil:
+                    input.retryable && input.retryAfterMs
+                      ? sql`now() + make_interval(secs => ${input.retryAfterMs / 1000})`
+                      : null,
                 })
                 .where(
                   and(
@@ -2062,6 +2110,7 @@ export class KnowledgeRepo extends Context.Service<
         claimExtraction,
         completeExtraction,
         failExtraction,
+        renewExtractionLease,
         claimEmbedding,
         listChunksForEmbedding,
         renewEmbedding,

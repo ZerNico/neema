@@ -48,6 +48,8 @@ allowBuilds:
   # Squirrel.Windows tooling pulled in by electron-builder; the NSIS target
   # used for releases never runs it.
   electron-winstaller: false
+  # Its CPU binaries ship in the package; the script only fetches CUDA ones.
+  onnxruntime-node: false
 
 # Behaviour these packages do not have upstream; see Version pins in AGENTS.md.
 patchedDependencies:

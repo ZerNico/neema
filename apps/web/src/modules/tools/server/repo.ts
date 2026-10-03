@@ -1,5 +1,5 @@
 import { and, eq, ne } from "drizzle-orm";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -38,12 +38,13 @@ export class ToolsRepo extends Context.Service<
       providers: ReadonlyArray<SearchProviderSnapshot>;
     } | null>;
     /**
-     * Internal: decoded document_parser row (no secret) for the parser service.
+     * Internal: decoded document_parser row for the parser service, with the
+     * Mistral key decrypted when one is stored.
      */
     getDocumentParser(): Effect.Effect<{
       enabled: boolean;
-      kind: string;
       config: DocumentParserConfig;
+      secret: Redacted.Redacted<string> | null;
     } | null>;
     /**
      * Internal: decoded read_url row for the URL reader executor.
@@ -107,7 +108,8 @@ export class ToolsRepo extends Context.Service<
           const row = yield* getRow("document_parser");
           if (!row) return null;
           const config = yield* decodeDocumentParserConfig(row.config).pipe(Effect.orDie);
-          return { enabled: row.enabled, kind: row.kind, config };
+          const secret = row.secretCiphertext ? yield* cipher.decrypt(row.secretCiphertext) : null;
+          return { enabled: row.enabled, config, secret };
         }),
 
         getKnowledgeSearch: Effect.fn("ToolsRepo.getKnowledgeSearch")(function* () {

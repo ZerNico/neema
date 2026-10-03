@@ -226,6 +226,9 @@ skipped one on purpose.
   exact-match and streamed model edits, live sync and the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
   kind served only as a download, what the model sees, working drafts and publication.
+- `docs/internals/pdf.md`: PDF reading in worker processes, what makes a page a scan, who reads
+  scans (local OCR, Mistral, a vision model) and with whose consent, fingerprints and the
+  per-page cache, waiting for scans in a chat and in knowledge.
 - `docs/internals/presentations.md`: trusted PPTX operations in killable worker processes,
   visual feedback, fonts, preview authorization, preservation boundary and
   native-compatibility gate.
@@ -303,6 +306,11 @@ All release candidates. Pin exactly; never float to `latest`.
   [spreadsheets](docs/internals/spreadsheets.md).
 - `@office-kit/docx` (pre-1.0) is pinned exact. It has no decompression limits, so the
   adapter measures every part first; re-check that on a bump. See [word](docs/internals/word.md).
+- `onnxruntime-node` (with `onnxruntime-common`), `@napi-rs/canvas` and `pdf-lib` are pinned exact
+  and stay external to the PDF worker bundle, traced by name in `vite.config.ts`. The ONNX
+  install script only fetches CUDA files and is denied in `allowBuilds`. On a bump, run the OCR
+  test in `pdf/server/pages.test.ts` with model files present and `pnpm build`, whose PDF worker
+  smoke proves the natives load from the output. See [PDFs](docs/internals/pdf.md).
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.
 

@@ -29,7 +29,12 @@ export class BlobStoreError extends Schema.TaggedError<BlobStoreError>()("BlobSt
 
 export class DocumentParseError extends Schema.TaggedError<DocumentParseError>()(
   "DocumentParseError",
-  { fileName: Schema.String, reason: Schema.String },
+  {
+    fileName: Schema.String,
+    reason: Schema.String,
+    /** Nothing was readable yet because a scan reader failed for a passing reason. */
+    retryable: Schema.optionalKey(Schema.Struct({ afterMs: Schema.optionalKey(Schema.Number) })),
+  },
 ) {}
 
 /** The selected model cannot take this attachment and nothing can convert it. */

@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -30,11 +31,15 @@ export const attachmentBlobs = pgTable(
     size: integer().notNull(),
     // normalized from the magic bytes, not from the upload's Content-Type
     mediaType: text("media_type").notNull(),
-    // Lazy cache of locally extracted PDF text, so a long conversation does not
-    // re-parse the same document on every generation. `parsedWith` records the
-    // parser kind: a different configured backend invalidates the cache.
+    // Lazy cache of a PDF's text as a chat prompt inlines it, so a long
+    // conversation does not re-read the same document on every generation.
+    // `parsedWith` records what produced it; changing the limits does not invalidate it.
     parsedText: text("parsed_text"),
     parsedWith: text("parsed_with"),
+    // Text read from scanned pages, by page, for one engine: reading a scan
+    // can cost money and seconds a page, so each page is read once per engine
+    // whatever limits a later reader has. Another engine's pages are replaced.
+    scannedPages: jsonb("scanned_pages").$type<{ engine: string; pages: Record<string, string> }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

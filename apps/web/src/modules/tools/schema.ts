@@ -64,9 +64,43 @@ export const SearchProviderSettings = Schema.Union([
 ]);
 export type SearchProviderSettings = typeof SearchProviderSettings.Type;
 
+/** The model connection an admin approved sending scanned pages to. */
+export const ScanModelConnection = Schema.Struct({
+  providerId: Schema.String,
+  baseUrl: Schema.String,
+  modelKey: Schema.String,
+});
+export type ScanModelConnection = typeof ScanModelConnection.Type;
+
 /**
- * Non-secret configuration for the document_parser tool row. `kind` on the
- * row selects the backend; "local" is the in-process unpdf extractor.
+ * How pages without a text layer are read: not at all, on this server, by
+ * Mistral OCR, or by a vision model. The Mistral key is the row's secret.
+ */
+const ScanOff = Schema.Struct({ mode: Schema.Literal("off") });
+const ScanLocal = Schema.Struct({
+  mode: Schema.Literal("local"),
+  quality: Schema.Literals(["accurate", "fast"]),
+});
+/** Mistral's OCR API, or any service that speaks it: its base URL ends before `/ocr`. */
+const ScanMistral = Schema.Struct({
+  mode: Schema.Literal("mistral"),
+  baseUrl: BaseUrl,
+});
+export const ScanReading = Schema.Union([
+  ScanOff,
+  ScanLocal,
+  ScanMistral,
+  Schema.Struct({
+    mode: Schema.Literal("model"),
+    modelId: Schema.String,
+    approved: ScanModelConnection,
+  }),
+]);
+export type ScanReading = typeof ScanReading.Type;
+
+/**
+ * Non-secret configuration for the document_parser tool row: how much of a
+ * PDF is read, and how its scanned pages are.
  */
 export const DocumentParserConfig = Schema.Struct({
   maxChars: Schema.Int.check(
@@ -74,6 +108,8 @@ export const DocumentParserConfig = Schema.Struct({
     Schema.isLessThanOrEqualTo(500_000),
   ),
   maxPages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(2000)),
+  // Rows from before scans could be read omit this; absent means off.
+  scans: Schema.optionalKey(ScanReading),
 });
 export type DocumentParserConfig = typeof DocumentParserConfig.Type;
 
@@ -379,6 +415,32 @@ export const UpdateDocumentParserToolInput = Schema.Struct({
   maxPages: Schema.optionalKey(DocumentParserConfig.fields.maxPages),
 });
 export type UpdateDocumentParserToolInput = typeof UpdateDocumentParserToolInput.Type;
+
+/**
+ * The scanned-pages choice as the admin form sends it. A vision model's
+ * connection is read and approved on the server, never taken from the client.
+ */
+/** Left out, the base URL is Mistral's own, resolved when saved so the row stays concrete. */
+const OptionalBaseUrl = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000)));
+
+export const UpdateScanReadingInput = Schema.Struct({
+  scans: Schema.Union([
+    ScanOff,
+    ScanLocal,
+    Schema.Struct({ mode: Schema.Literal("mistral"), baseUrl: OptionalBaseUrl }),
+    Schema.Struct({ mode: Schema.Literal("model"), modelId: Schema.String }),
+  ]),
+  // Mistral's key; empty keeps the stored one.
+  secret: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
+});
+export type UpdateScanReadingInput = typeof UpdateScanReadingInput.Type;
+
+/** Reads a sample page with Mistral: the stored key, or the one being typed. */
+export const TestScanReaderInput = Schema.Struct({
+  baseUrl: OptionalBaseUrl,
+  secret: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
+});
+export type TestScanReaderInput = typeof TestScanReaderInput.Type;
 
 export const UpdateUrlReaderToolInput = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),

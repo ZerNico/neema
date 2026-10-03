@@ -1,4 +1,7 @@
-import { PDF_EXTRACTION_REVISION } from "~/modules/attachments/server/document-parser.ts";
+import {
+  PDF_EXTRACTION_REVISION,
+  pdfFingerprint,
+} from "~/modules/attachments/server/document-parser.ts";
 import { describe, expect, it } from "vitest";
 import {
   CHUNKING,
@@ -251,8 +254,9 @@ describe("chunkDocument", () => {
 });
 
 it("versions PDF extraction independently from authored notes and decoded text", () => {
-  expect(pipelineFingerprint("local")).toBe(
-    `local:pdf-${PDF_EXTRACTION_REVISION}:chunker-${CHUNKER_REVISION}`,
+  // The parser's fingerprint carries the PDF revision and scan engine itself.
+  expect(pipelineFingerprint(pdfFingerprint("off"))).toBe(
+    `pdf-${PDF_EXTRACTION_REVISION}+scan:off:chunker-${CHUNKER_REVISION}`,
   );
   expect(pipelineFingerprint(null)).toBe(`none:chunker-${CHUNKER_REVISION}`);
   expect(pipelineFingerprint("utf8")).toBe(`utf8:chunker-${CHUNKER_REVISION}`);

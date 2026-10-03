@@ -68,6 +68,7 @@ const prepared = (indexer: SourceIndexer) =>
       urlReader: yield* UrlReaderExecutor,
       indexer,
       authority: createUrlAuthority([]),
+      owner: "user-1",
       requestSearch: true,
     });
     return (yield* mergeToolGroups([result!.group]))!;

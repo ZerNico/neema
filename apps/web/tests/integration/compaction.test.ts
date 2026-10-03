@@ -210,7 +210,7 @@ const parsePdf = vi.fn<DocumentParser["Service"]["parsePdf"]>(() =>
   Effect.die("covered documents must not be parsed"),
 );
 const parserAvailability = vi.fn<DocumentParser["Service"]["availability"]>(() =>
-  Effect.succeed({ configured: true, enabled: true, kind: "test-parser" }),
+  Effect.succeed({ configured: true, enabled: true, scanEngine: "off" }),
 );
 const FakeBlobStore = Layer.succeed(BlobStore, {
   put: () => Effect.die("no blob writes in these tests"),
@@ -1148,7 +1148,7 @@ describe("compaction inside a generation", () => {
     },
   );
 
-  it("retains uncovered PDF parse failures inside generation error handling", async () => {
+  it("tells the model an uncovered PDF could not be read, and still answers", async () => {
     getBlob.mockImplementation(() => Effect.succeed(new Uint8Array([1, 2, 3, 4])));
     parsePdf.mockImplementation(({ fileName }) =>
       Effect.fail(
@@ -1179,9 +1179,11 @@ describe("compaction inside a generation", () => {
     expect(getBlob).toHaveBeenCalledOnce();
     expect(parserAvailability).toHaveBeenCalledOnce();
     expect(parsePdf).toHaveBeenCalledOnce();
-    expect(message?.status).toBe("error");
-    expect(message?.error).toMatchObject({ tag: "GenerationFailed" });
-    expect(gateway.streamPrompts).toEqual([]);
+    // An unreadable file is said to be one; it never fails the answer around it.
+    expect(message?.status).toBe("complete");
+    expect(JSON.stringify(gateway.streamPrompts)).toContain(
+      "its text could not be read: cannot parse uncovered PDF.",
+    );
   });
 
   it("keeps covered user URLs and persisted sources in reader authority and citation numbering", async () => {

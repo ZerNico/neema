@@ -10,6 +10,7 @@ import { KNOWLEDGE_LIMITS, type CollectionSummary, type KnowledgeDocument } from
 import { pipelineFingerprint } from "./chunking.ts";
 import { textEnd } from "./text-range.ts";
 import {
+  currentPdfFingerprints,
   DocumentParser,
   stripControlCharacters,
 } from "~/modules/attachments/server/document-parser.ts";
@@ -245,9 +246,9 @@ export class KnowledgeService extends Context.Service<
           [
             pipelineFingerprint(null),
             pipelineFingerprint("utf8"),
-            ...(backend.kind ? [pipelineFingerprint(backend.kind)] : []),
+            ...(backend.configured ? currentPdfFingerprints(backend).map(pipelineFingerprint) : []),
           ],
-          backend.enabled && backend.kind === "local",
+          backend.enabled,
         );
       });
 
