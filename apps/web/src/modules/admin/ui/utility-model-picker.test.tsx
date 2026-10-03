@@ -2,12 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { UtilityModelPicker } from "./default-model-order.tsx";
+import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { getUtilityModel, updateUtilityModel } from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
   getUtilityModel: vi.fn(),
-  updateDefaultModelOrder: vi.fn(),
   updateUtilityModel: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -33,7 +32,7 @@ const setup = (current: string | null) => {
     >
       <UtilityModelPicker
         models={[model("a", "Alpha"), model("b", "Beta"), model("e", "Embed", "embedding")]}
-        providers={[{ id: "p", name: "Provider", enabled: true }]}
+        providers={[{ id: "p", name: "Provider" }]}
       />
     </QueryClientProvider>,
   );
@@ -45,7 +44,7 @@ describe("UtilityModelPicker", () => {
   it("saves a picked chat model and clears back to each chat's own", async () => {
     setup(null);
     const user = userEvent.setup();
-    const picker = await screen.findByRole("combobox", { name: "Model for chat titles" });
+    const picker = await screen.findByRole("combobox", { name: "Title model" });
     await waitFor(() => expect(picker).not.toBeDisabled());
     fireEvent.click(picker);
     expect(screen.queryByRole("option", { name: /Embed/ })).not.toBeInTheDocument();

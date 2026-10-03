@@ -5,6 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
 import { DefaultModelsDialog } from "./default-model-order.tsx";
+import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { getPreset, type PresetId, type ProviderSettings } from "@chat/model-client/presets";
@@ -119,6 +120,9 @@ export function ProvidersPage() {
           })}
         </ListCard>
       )}
+      {models.some((model) => model.type === "chat") ? (
+        <UtilityModelPicker models={models} providers={providers} />
+      ) : null}
       <DefaultModelsDialog
         open={editingDefaults}
         onOpenChange={setEditingDefaults}

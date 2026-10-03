@@ -1,6 +1,6 @@
 import { ArrowDown01Icon, ArrowUp01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { MAX_DEFAULT_MODELS } from "~/modules/providers/default-models.ts";
@@ -17,12 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
-import {
-  getUtilityModel,
-  updateDefaultModelOrder,
-  updateUtilityModel,
-} from "../server/functions.ts";
+import { updateDefaultModelOrder } from "../server/functions.ts";
 
 type PriorityModel = Pick<
   ModelRow,
@@ -52,12 +47,7 @@ export function DefaultModelsDialog({
             they last picked. Changes save right away.
           </DialogDescription>
         </DialogHeader>
-        {open ? (
-          <>
-            <DefaultModelOrder models={models} providers={providers} />
-            <UtilityModelPicker models={models} providers={providers} />
-          </>
-        ) : null}
+        {open ? <DefaultModelOrder models={models} providers={providers} /> : null}
         <DialogFooter>
           <DialogClose render={<Button />}>Done</DialogClose>
         </DialogFooter>
@@ -210,64 +200,5 @@ export function DefaultModelOrder({
         className="w-full min-w-0"
       />
     </div>
-  );
-}
-
-const utilityKey = ["admin", "utility-model"];
-
-/** The model small side tasks run on; empty means each chat's own model. */
-export function UtilityModelPicker({
-  models,
-  providers,
-}: {
-  models: ReadonlyArray<PriorityModel>;
-  providers: Providers;
-}) {
-  const queryClient = useQueryClient();
-  const current = useQuery({ queryKey: utilityKey, queryFn: () => getUtilityModel() });
-  const save = useMutation({
-    mutationFn: (modelId: string | null) => updateUtilityModel({ data: { modelId } }),
-    onError: () =>
-      toast.error(
-        "Could not save the title model. Refresh the page if it was removed, then try again.",
-      ),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: utilityKey }),
-  });
-  const options = models
-    .filter((model) => model.type === "chat")
-    .map((model) => ({
-      id: model.id,
-      displayName: model.displayName,
-      providerName:
-        providers.find((provider) => provider.id === model.providerId)?.name ??
-        "Unavailable provider",
-    }));
-  const value = save.isPending ? (save.variables ?? null) : (current.data?.modelId ?? null);
-  return (
-    <Field>
-      <FieldLabel htmlFor="utility-model">Model for chat titles</FieldLabel>
-      <div className="flex gap-2">
-        <ModelSelect
-          id="utility-model"
-          models={options}
-          value={value}
-          onChange={(id) => save.mutate(id)}
-          placeholder="Each chat’s own model"
-          disabled={current.isPending}
-          className="w-full min-w-0"
-        />
-        {value ? (
-          <Button variant="ghost" onClick={() => save.mutate(null)}>
-            Clear
-          </Button>
-        ) : null}
-      </div>
-      <FieldDescription>
-        Writes the short title of each new chat, so it reads every chat’s first message, whatever
-        model the chat uses. Pick a fast model you’d trust with any chat, such as a local one, or
-        leave it empty and each chat titles itself with its own model. If it fails, the chat’s own
-        model writes the title instead.
-      </FieldDescription>
-    </Field>
   );
 }
