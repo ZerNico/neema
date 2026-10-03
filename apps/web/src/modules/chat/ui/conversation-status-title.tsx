@@ -28,8 +28,10 @@ export function ConversationStatusTitle({
   const moving = !reduced && slot.settled !== width;
   return (
     <>
+      {/* Trails the title so titles share one left edge whether or not a row
+        carries a status. Visual order only: the title stays the last child. */}
       <m.span
-        className="flex shrink-0 items-center overflow-hidden"
+        className="order-last ml-auto flex shrink-0 items-center justify-end overflow-hidden"
         initial={false}
         animate={{ width }}
         transition={{ duration: reduced ? 0 : 0.2, ease: motionEase }}
