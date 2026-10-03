@@ -362,6 +362,55 @@ html[data-panel-resizing] webview {
   content-visibility: visible !important;
 }
 
+/* Streamdown frames a table twice, a filled card around a toolbar row and the
+   bordered table, and takes no class for it. One frame reads lighter, so the
+   toolbar floats over the header row. Its fullscreen view reuses the wrapper
+   attribute with role="presentation" and keeps the stock layout. */
+[data-streamdown="table-wrapper"]:not([role="presentation"]) {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+[data-streamdown="table-wrapper"]:not([role="presentation"]) > :first-child:not(:last-child) {
+  position: absolute;
+  top: 0.3125rem;
+  right: 0.3125rem;
+  z-index: 1;
+  padding: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  transition: opacity 150ms ease-out;
+}
+
+/* Touch screens have no hover to reveal it, so it stays put there. */
+@media (hover: hover) {
+  [data-streamdown="table-wrapper"]:not([role="presentation"]) > :first-child:not(:last-child) {
+    opacity: 0;
+  }
+
+  [data-streamdown="table-wrapper"]:not([role="presentation"]):is(:hover, :focus-within)
+    > :first-child:not(:last-child) {
+    opacity: 1;
+  }
+}
+
+[data-streamdown="table-wrapper"]:not([role="presentation"]) > :last-child {
+  border-radius: var(--radius-lg);
+  background: transparent;
+}
+
+[data-streamdown="table-header"] {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+}
+
+[data-streamdown="table-header-cell"] {
+  font-weight: 500;
+}
+
 /* Live-progress label (deep research, and anything else that reports what it
    is doing right now). A sweep across the text reads as "still working"
    without the twitch of a pulsing opacity on a line of prose. */
