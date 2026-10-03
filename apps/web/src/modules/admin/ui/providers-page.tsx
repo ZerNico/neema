@@ -4,7 +4,7 @@ import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@ta
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { createProvider, listModels, listProviders } from "../server/functions.ts";
-import { DefaultModelsDialog } from "./default-model-order.tsx";
+import { ModelOrderDialog } from "./model-order.tsx";
 import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -54,7 +54,7 @@ export function ProvidersPage() {
   const { data: providers } = useSuspenseQuery(providersQuery);
   const { data: models } = useSuspenseQuery(modelsQuery);
   const [adding, setAdding] = useState(false);
-  const [editingDefaults, setEditingDefaults] = useState(false);
+  const [editingOrder, setEditingOrder] = useState(false);
 
   return (
     <Page
@@ -62,8 +62,8 @@ export function ProvidersPage() {
       description="AI providers this instance can talk to."
       actions={
         <>
-          <Button size="sm" variant="outline" onClick={() => setEditingDefaults(true)}>
-            Default models
+          <Button size="sm" variant="outline" onClick={() => setEditingOrder(true)}>
+            Model order
           </Button>
           <Button size="sm" onClick={() => setAdding(true)}>
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
@@ -123,9 +123,9 @@ export function ProvidersPage() {
       {models.some((model) => model.type === "chat") ? (
         <UtilityModelPicker models={models} providers={providers} />
       ) : null}
-      <DefaultModelsDialog
-        open={editingDefaults}
-        onOpenChange={setEditingDefaults}
+      <ModelOrderDialog
+        open={editingOrder}
+        onOpenChange={setEditingOrder}
         models={models}
         providers={providers}
       />

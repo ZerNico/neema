@@ -3,6 +3,7 @@ import { Context, Effect, Layer, Schema, type Redacted } from "effect";
 import {
   DefaultModelIds,
   InvalidDefaultModelOrder,
+  MAX_DEFAULT_MODELS,
   InvalidUtilityModel,
   markDefaultModel,
 } from "../default-models.ts";
@@ -269,7 +270,9 @@ export class ProviderRepo extends Context.Service<
                 accessibleBy(userId),
               ),
             )
-            .orderBy(asc(models.displayName), asc(models.id))
+            // The admin's order; Postgres sorts nulls last on ascending, so a
+            // model nobody has placed yet follows the placed ones alphabetically.
+            .orderBy(asc(models.defaultPriority), asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
           return markDefaultModel(rows).map(({ preset, settings, ...model }) => ({
             ...model,
@@ -285,7 +288,9 @@ export class ProviderRepo extends Context.Service<
           const modelIds = yield* Schema.decodeUnknownEffect(DefaultModelIds)(input).pipe(
             Effect.mapError(
               () =>
-                new InvalidDefaultModelOrder({ reason: "Choose up to 100 distinct model IDs." }),
+                new InvalidDefaultModelOrder({
+                  reason: `Choose up to ${MAX_DEFAULT_MODELS} distinct model IDs.`,
+                }),
             ),
           );
           yield* db
@@ -313,15 +318,11 @@ export class ProviderRepo extends Context.Service<
                     });
                   }
                 }
-                const rank =
-                  modelIds.length === 0
-                    ? sql`null`
-                    : sql`case ${sql.join(
-                        modelIds.map(
-                          (id, index) => sql`when ${models.id} = ${id} then ${index}::integer`,
-                        ),
-                        sql` `,
-                      )} else null end`;
+                // A model left out of the list gets null from array_position.
+                const rank = sql`array_position(array[${sql.join(
+                  modelIds.map((id) => sql`${id}`),
+                  sql`, `,
+                )}]::text[], ${models.id}) - 1`;
                 yield* tx.update(models).set({ defaultPriority: rank, updatedAt: new Date() });
               }),
             )

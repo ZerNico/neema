@@ -123,7 +123,7 @@ const ranked = ProviderRepo.pipe(
 );
 
 describe("default model priority", () => {
-  it("resolves after group authorization and keeps public fields and display order", async () => {
+  it("resolves after group authorization and lists models in the admin's order", async () => {
     await run(
       Effect.gen(function* () {
         const groups = yield* GroupRepo;
@@ -136,7 +136,7 @@ describe("default model priority", () => {
         expect(yield* winner("member")).toBe("b");
         expect(yield* winner("admin")).toBe("b");
         const rows = yield* visible();
-        expect(rows.map((row) => row.id)).toEqual(["a", "c"]);
+        expect(rows.map((row) => row.id)).toEqual(["c", "a"]);
         expect(rows.filter((row) => row.isDefault)).toHaveLength(1);
         expect(new Set(Object.keys(rows[0]!))).toEqual(
           new Set([
@@ -176,6 +176,8 @@ describe("default model priority", () => {
         expect(yield* winner()).toBe("a");
         yield* setOrder(["c"]);
         expect(yield* winner()).toBe("c");
+        // Placed models lead; the rest follow alphabetically.
+        expect((yield* visible()).map((row) => row.id)).toEqual(["c", "a"]);
         yield* setOrder([]);
         expect(yield* ranked).toEqual([]);
         expect(yield* winner()).toBe("a");
