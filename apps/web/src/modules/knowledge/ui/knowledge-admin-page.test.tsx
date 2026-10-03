@@ -152,7 +152,7 @@ describe("KnowledgeAdminPage", () => {
       }),
     );
     const trigger = screen.getByRole("combobox", { name: "Embedding model" });
-    expect(trigger).toHaveTextContent("Qwen3 Embedding 8B · OpenRouter");
+    expect(trigger).toHaveTextContent("Qwen3 Embedding 8BOpenRouter");
     expect(trigger).not.toHaveTextContent("embed-1");
     const actions = screen.getByRole("button", { name: "Apply" }).parentElement!;
     expect(actions.className).not.toMatch(/justify-end/);

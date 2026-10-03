@@ -16,7 +16,8 @@ describe("ModelSelect", () => {
   it("shows the chosen model by name and provider, never by id", () => {
     render(<ModelSelect models={MODELS} value="m1" onChange={() => {}} aria-label="Model" />);
     const trigger = screen.getByRole("combobox", { name: "Model" });
-    expect(trigger).toHaveTextContent("Qwen3 Embedding 8B · OpenRouter");
+    // Name and provider are separate spans, drawn as in the list.
+    expect(trigger).toHaveTextContent("Qwen3 Embedding 8BOpenRouter · 4096d");
     expect(trigger).not.toHaveTextContent("m1");
   });
 
