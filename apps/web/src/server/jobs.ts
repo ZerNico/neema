@@ -22,6 +22,8 @@ export interface JobRunOptions {
   readonly priority?: "background";
   /** Whose work this is: one person's jobs beyond `perOwner` wait for their own. */
   readonly owner?: string;
+  /** Replaces the runtime's timeout for a job whose size the caller knows, such as pages to read. */
+  readonly timeoutMs?: number;
 }
 
 export interface JobRuntime<H extends JobHandlers, O extends JobRunOptions = JobRunOptions> {
@@ -122,7 +124,7 @@ export function createJobRuntime<H extends JobHandlers>(options: {
     return pool.run<unknown>({
       message,
       transfer,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: runOptions.timeoutMs ?? options.timeoutMs,
       ...(signal ? { signal } : {}),
       background: runOptions.priority === "background",
       // A reply crosses a process boundary, so it is read, not trusted.
