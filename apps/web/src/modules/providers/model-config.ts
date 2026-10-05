@@ -19,8 +19,9 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export const actionableReasoningEfforts = (
   capabilities: ModelCapabilities,
   provider: Parameters<typeof sendsReasoningEffort>[0],
+  modelKey: string,
 ): ReasoningEffort[] =>
-  capabilities.reasoning && sendsReasoningEffort(provider)
+  capabilities.reasoning && sendsReasoningEffort(provider, modelKey)
     ? [...(capabilities.reasoningEfforts ?? [])]
     : [];
 
@@ -43,10 +44,16 @@ export type ModelPricing = ({ input: number; output: number } | { input: number;
   cacheWrite?: number;
 };
 
+/** The APIs a model can be called on, where its preset lets models differ (Azure). */
+export const MODEL_FORMATS = ["responses", "chat-completions"] as const;
+export type ModelFormat = (typeof MODEL_FORMATS)[number];
+
 interface CommonModelSettings {
   displayName: string;
   /** Absent leaves a stored description as it is; null clears it. */
   description?: string | null;
+  /** Absent leaves the stored API as it is; null returns to the preset's. */
+  format?: ModelFormat | null;
   contextLength: number | null;
   enabled: boolean;
   access: ModelAccess;

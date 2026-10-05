@@ -11,8 +11,9 @@ provider without knowing it.
 Effect's OpenRouter and OpenAI adapters each needed patches for behaviour we depend on (image
 replay, refusals, ordered reasoning state, cache markers on tool results, loose tool schemas)
 and still covered only two services. Every OpenAI-compatible service differs in small ways,
-so the client keeps those differences as data in one table (`preset.ts`) read by two codecs,
-Chat Completions and Responses. It implements Effect's `LanguageModel`, so the toolkit loop,
+so the client keeps those differences as data in one table (`preset.ts`) read by its codecs:
+Chat Completions, Responses, and Anthropic's Messages for the models a preset routes there. It
+implements Effect's `LanguageModel`, so the toolkit loop,
 Hermes polyfill and tests are unchanged. Adding a service is a preset, not a branch.
 
 ## Presets and settings
@@ -21,11 +22,14 @@ Hermes polyfill and tests are unchanged. Adding a service is a preset, not a bra
   formats, the reasoning request field, what reasoning goes back in history, cache key,
   output-limit field, catalog kind and image output.
 - Presets exist where a service needs behaviour no setting expresses (OpenRouter, OpenAI,
-  Azure, Vercel) or is common enough that its settings should not be looked up (Gemini,
+  Azure, Bedrock, Vercel) or is common enough that its settings should not be looked up (Gemini,
   DeepSeek, Mistral, Groq, xAI, Ollama). Everything else is the OpenAI-compatible preset with
   the right settings, which can express all the rest.
-- `overridable` lists what an admin may change. Most presets allow nothing or only the wire
-  format; the generic OpenAI-compatible preset allows everything, the key header included.
+- `overridable` lists what an admin may change, and the admin UI shows nothing else: a fixed
+  value shown as a setting reads as a choice. Most presets allow nothing; the generic
+  OpenAI-compatible preset allows everything, the key header included, since there the server
+  decides. OpenAI and xAI are fixed to Responses, every current model taking it and GPT-5.4+
+  needing it for tools with reasoning.
   The server keeps only allowed keys that differ from the preset (`sanitizeSettings`), so a
   stored row says exactly what was changed, and a preset fix reaches every row left on it.
 - Unknown request fields are never sent: strict servers (OpenAI, Groq, Mistral, LiteLLM)
@@ -102,9 +106,62 @@ the catalog reads the older data-plane deployment listing, which also names each
 model.
 
 Responses serves OpenAI's models and most models Azure sells itself (DeepSeek, Grok, Llama,
-MAI), but not every deployment, and Azure publishes no complete list. A deployment that answers
-"model not supported" is sent the same request on Chat Completions and stays there for the
-life of the process, so one provider holds both kinds without a per-model setting.
+MAI), but not every deployment, and Azure publishes no complete list. So the API is each
+model's, stored on its row (`models.format`, null meaning Responses), never the provider's
+(`modelFormat` on the preset). A deployment answering "model not supported" gets the same
+request on Chat Completions, and the gateway records that on the row: the next call starts
+there, the admin sees it in the model dialog, and switching it back is an ordinary edit. The
+model dialog's Test runs the same fallback and puts what answered into the form.
+
+## Amazon Bedrock
+
+One Bedrock provider serves two APIs. Claude refuses the OpenAI-compatible API and speaks only
+Anthropic's Messages, so the preset routes model IDs containing `anthropic.` (plain or an
+inference profile such as `eu.anthropic.…` or `global.anthropic.…`) to the Messages codec, and
+every other model to Chat Completions. The routing is per
+model, not a setting, so one provider serves both kinds.
+
+Claude always goes to `bedrock-runtime` in the provider's region, at `/anthropic/v1/messages`,
+even when the base URL is mantle. Only runtime takes geo and global inference profiles; mantle
+serves Claude in-region in a few regions only, so an EU deployment could not reach current
+Claude models there at all.
+
+Mantle's `/models` lists no Claude, so the catalog adds the account's Claude inference profiles
+from the control plane (`bedrock.<region>.amazonaws.com`, `ListInferenceProfiles`), which
+carry the exact IDs runtime takes, versioned where a model has one. Listing them is an IAM
+permission of its own (`bedrock:ListInferenceProfiles`); without it the catalog still shows
+mantle's models and Claude is simply missing, so a signing user needs it to pick Claude from
+the list. The listing names every profile the account could enable, so it includes models
+without access and old ones without Messages; Test in the model dialog tells them apart.
+
+AWS's compatibility table is not the last word on which Claude models take Messages: Sonnet 4.6
+does though listed without it, while Sonnet 4.5 answers "doesn't support this API" and stays
+unreachable, taking only Converse and Invoke. The catalog lists such profiles all the same.
+
+- **Signing in.** A Bedrock API key goes out as a bearer token (`x-api-key` on Messages), or
+  an IAM access key signs each request with SigV4. The signer covers the exact body bytes, so
+  every request is serialised once before it is signed. The signing name follows the host:
+  `bedrock-mantle` for mantle, which IAM treats as its own service, `bedrock` for runtime. A
+  signing user with both kinds of model therefore needs `bedrock-mantle:CreateInference` and
+  `bedrock:InvokeModelWithResponseStream`.
+  Access keys are stored as one JSON document in the encrypted key column, read only when the
+  provider's `auth` setting says so. No ambient credentials and no session tokens: temporary
+  keys would expire in the database.
+- **Endpoint.** A bare region becomes the `bedrock-mantle` endpoint, the only one with
+  `/models`. A typed `bedrock-runtime` URL works for requests but lists nothing, and its model
+  IDs differ (`openai.gpt-oss-120b` on mantle, versioned or inference profile IDs on runtime).
+- **Messages requests.** Anchors always become `cache_control`, at most four. A reasoning
+  level sends adaptive thinking with the level as `effort`, summarised, since newer models omit
+  their thinking text otherwise. Haiku 4.5 refuses adaptive thinking, so it gets no reasoning
+  levels in its model settings; without levels no thinking is sent. Signed thinking goes back before its tool calls only beside
+  unchanged text; a forced tool with reasoning is refused, as Claude cannot do both.
+- **Chat Completions there, fixed.** Tried against every model an account listed: only gpt-oss
+  takes Responses, so offering the switch would break the rest. Every model accepted
+  `reasoning_effort`, those without levels ignoring it, and it goes out only for a level a user
+  picked, so the field is fixed too and the provider's only setting is how it signs in. OpenAI's GPT-5.4 and later on Bedrock therefore cannot take tools with a
+  reasoning level: such a request is refused before it is sent, and turning reasoning off for
+  the model is the fix. Routing them to Responses like Claude to Messages is the way to lift
+  that, held back until it can be checked against an account that has them.
 
 ## Checking a service
 
@@ -115,7 +172,7 @@ variables. It costs real requests and is never part of the test suites.
 ## Setting up a service
 
 Until there is a docs site, the admin setup lives here. A service in the preset list needs only
-a key (and, for Azure and Ollama, the server's address). Every other service uses
+a key (and, for Azure and Ollama, the server's address, for Bedrock its region). Every other service uses
 **OpenAI-compatible**, set as its row says. Each row lists every setting, so nothing is left to
 a default.
 

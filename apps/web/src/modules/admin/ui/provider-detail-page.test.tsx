@@ -2,8 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AddModelDialog } from "./provider-detail-page.tsx";
-import { probeEmbeddingDimensions, createModel, testChatModel } from "../server/functions.ts";
+import { AddModelDialog, EditProviderDialog } from "./provider-detail-page.tsx";
+import {
+  probeEmbeddingDimensions,
+  createModel,
+  testChatModel,
+  updateProvider,
+} from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
   probeEmbeddingDimensions: vi.fn(),
@@ -197,7 +202,7 @@ describe("AddModelDialog", () => {
       expect(screen.getByRole("status")).toHaveTextContent("Works: replied “OK” in 640ms."),
     );
     expect(testMock).toHaveBeenLastCalledWith({
-      data: { providerId: "provider-1", modelKey: "catalog-model" },
+      data: { providerId: "provider-1", modelKey: "catalog-model", format: null },
     });
     // Testing never adds the model.
     expect(createMock).not.toHaveBeenCalled();
@@ -206,5 +211,89 @@ describe("AddModelDialog", () => {
     screen.getByLabelText("Type").click();
     await user.click(await screen.findByRole("option", { name: "Embedding" }));
     expect(screen.queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AddModelDialog on Azure", () => {
+  it("starts on Responses and takes the API a test switched to", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["admin", "groups"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <AddModelDialog providerId="provider-1" presetId="azure" open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Pick catalog model" }));
+    expect(screen.getByLabelText("API")).toHaveTextContent("Responses");
+
+    testMock.mockResolvedValueOnce({
+      ok: true,
+      reply: "OK",
+      latencyMs: 300,
+      format: "chat-completions",
+    });
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Works on Chat Completions: replied “OK” in 300ms.",
+      ),
+    );
+    expect(testMock).toHaveBeenLastCalledWith({
+      data: { providerId: "provider-1", modelKey: "catalog-model", format: "responses" },
+    });
+    expect(screen.getByLabelText("API")).toHaveTextContent("Chat Completions");
+
+    await user.click(screen.getByRole("button", { name: "Add model" }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    expect(createMock.mock.lastCall?.[0].data).toMatchObject({ format: "chat-completions" });
+  });
+});
+
+describe("EditProviderDialog", () => {
+  it("asks for both access key fields when Bedrock switches to signing", async () => {
+    const user = userEvent.setup();
+    const update = vi.mocked(updateProvider).mockResolvedValue(undefined as never);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <EditProviderDialog
+          provider={{
+            id: "provider-1",
+            name: "Bedrock",
+            preset: "bedrock",
+            baseUrl: "https://bedrock-mantle.us-east-1.api.aws/v1",
+            settings: {},
+          }}
+          open
+          onOpenChange={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    const save = screen.getByRole("button", { name: "Save changes" });
+    // The stored endpoint shows as the region it came from.
+    expect(screen.getByLabelText("Region")).toHaveValue("us-east-1");
+    // Bedrock's API and reasoning field are fixed: signing in is its only setting.
+    expect(screen.queryByLabelText("API")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Reasoning level field")).not.toBeInTheDocument();
+    // The stored key stays when nothing is typed.
+    expect(screen.getByLabelText("API key")).toHaveAttribute("placeholder", "Unchanged");
+    expect(save).toBeEnabled();
+
+    screen.getByLabelText("Sign in with").click();
+    await user.click(await screen.findByRole("option", { name: "Access key" }));
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+    expect(save).toBeDisabled();
+    await user.type(screen.getByLabelText("Access key ID"), "AKIAIOSFODNN7EXAMPLE");
+    expect(save).toBeDisabled();
+    await user.type(screen.getByLabelText("Secret access key"), "secret");
+    expect(save).toBeEnabled();
+
+    await user.click(save);
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.lastCall?.[0].data).toMatchObject({
+      settings: { auth: "aws" },
+      awsKeys: { accessKeyId: "AKIAIOSFODNN7EXAMPLE", secretAccessKey: "secret" },
+    });
+    expect(update.mock.lastCall?.[0].data).not.toHaveProperty("apiKey");
   });
 });

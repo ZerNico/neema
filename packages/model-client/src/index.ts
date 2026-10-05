@@ -1,16 +1,20 @@
 export * as Catalog from "./catalog.ts";
 export {
-  authHeaders,
+  authenticate,
   endpoint,
   identityOf,
+  jsonRequest,
   makeConnection,
   type Connection,
+  type Credentials,
   type ModelCall,
 } from "./connection.ts";
 export { parseErrorBody, retryAfter } from "./errors.ts";
 export { foldParts, layer, make } from "./language-model.ts";
 export {
+  AUTH_KINDS,
   effectiveSettings,
+  formatFor,
   getPreset,
   isPresetId,
   PRESET_IDS,
@@ -19,6 +23,7 @@ export {
   resolveBaseUrl,
   sanitizeSettings,
   WIRE_FORMATS,
+  type AuthKind,
   type CacheKeyField,
   type MaxTokensField,
   type Preset,

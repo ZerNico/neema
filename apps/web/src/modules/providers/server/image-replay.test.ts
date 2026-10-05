@@ -8,7 +8,7 @@ const connection = makeConnection({
   provider: "p1",
   preset: "openrouter",
   baseUrl: "https://mock.invalid/api/v1",
-  apiKey: "synthetic",
+  credentials: { kind: "key", key: "synthetic" },
 })!;
 const openRouter = (
   fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<globalThis.Response>,

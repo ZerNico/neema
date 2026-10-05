@@ -58,6 +58,9 @@ export const models = pgTable(
       .$type<ModelCapabilities>()
       .notNull()
       .default({ imageOutput: false, reasoning: false, tools: false, vision: false, files: false }),
+    // The API this model is called on, where its preset lets models differ
+    // (Azure). Set by an admin or by a refusal of Responses; null is the preset's.
+    format: text({ enum: ["chat-completions", "responses"] }),
     metadata: jsonb().$type<Record<string, JsonValue>>(),
     // USD per 1M tokens; prefilled from the provider catalog where it carries
     // prices (OpenRouter), admin-editable. Null = unknown, so usage costs then

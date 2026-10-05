@@ -40,7 +40,7 @@ function About({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function ChoiceField<T extends string>({
+export function ChoiceField<T extends string>({
   id,
   label,
   about,

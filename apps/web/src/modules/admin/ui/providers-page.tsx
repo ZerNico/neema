@@ -8,8 +8,20 @@ import { ModelOrderDialog } from "./model-order.tsx";
 import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import { getPreset, type PresetId, type ProviderSettings } from "@chat/model-client/presets";
+import {
+  baseUrlField,
+  getPreset,
+  type PresetId,
+  type ProviderSettings,
+} from "@chat/model-client/presets";
 import { readServerError } from "~/server-error.ts";
+import { ProviderCredentialFields } from "./provider-credential-fields.tsx";
+import {
+  credentialsInput,
+  credentialsReady,
+  EMPTY_CREDENTIALS,
+  type CredentialDraft,
+} from "./provider-credentials.ts";
 import { PresetSelect, ProviderSettingsFields } from "./provider-settings-fields.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -40,13 +52,13 @@ const EMPTY_DRAFT: {
   name: string;
   preset: PresetId;
   baseUrl: string;
-  apiKey: string;
+  credentials: CredentialDraft;
   settings: ProviderSettings;
 } = {
   name: "OpenRouter",
   preset: "openrouter",
   baseUrl: "",
-  apiKey: "",
+  credentials: EMPTY_CREDENTIALS,
   settings: {},
 };
 
@@ -150,7 +162,7 @@ function AddProviderDialog({
   const needsBaseUrl = preset.baseUrl === null;
   const complete = Boolean(
     draft.name.trim() &&
-    (!preset.keyRequired || draft.apiKey.trim()) &&
+    credentialsReady(preset, draft.settings, draft.credentials) &&
     (!needsBaseUrl || draft.baseUrl.trim()),
   );
   const reset = () => setDraft(EMPTY_DRAFT);
@@ -161,7 +173,7 @@ function AddProviderDialog({
         data: {
           preset: draft.preset,
           name: draft.name.trim(),
-          ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+          ...credentialsInput(preset, draft.settings, draft.credentials),
           // Blank uses the preset's endpoint, which the placeholder shows.
           ...(draft.baseUrl.trim() ? { baseUrl: draft.baseUrl.trim() } : {}),
           settings: draft.settings,
@@ -194,7 +206,7 @@ function AddProviderDialog({
         <DialogHeader>
           <DialogTitle>Add provider</DialogTitle>
           <DialogDescription>
-            The API key is encrypted at rest and never shown again.
+            Credentials are encrypted at rest and never shown again.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -216,6 +228,7 @@ function AddProviderDialog({
                     preset: next,
                     // Settings belong to the preset they were chosen for.
                     settings: {},
+                    credentials: EMPTY_CREDENTIALS,
                     name:
                       d.name === "" || d.name === getPreset(d.preset).label
                         ? getPreset(next).label
@@ -238,7 +251,7 @@ function AddProviderDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                Base URL {needsBaseUrl ? null : <OptionalMark />}
+                {baseUrlField(preset).label} {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
@@ -255,19 +268,15 @@ function AddProviderDialog({
               onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
               disabled={add.isPending}
             />
-            <Field>
-              <FieldLabel htmlFor={`${id}-api-key`}>
-                API key {preset.keyRequired ? null : <OptionalMark />}
-              </FieldLabel>
-              <Input
-                id={`${id}-api-key`}
-                type="password"
-                autoComplete="off"
-                value={draft.apiKey}
-                onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value }))}
-                disabled={add.isPending}
-              />
-            </Field>
+            <ProviderCredentialFields
+              id={id}
+              preset={preset}
+              settings={draft.settings}
+              onSettingsChange={(settings) => setDraft((d) => ({ ...d, settings }))}
+              draft={draft.credentials}
+              onChange={(credentials) => setDraft((d) => ({ ...d, credentials }))}
+              disabled={add.isPending}
+            />
           </FieldGroup>
           {add.isError ? (
             <FieldError>

@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { authHeaders, endpoint, type Connection } from "./connection.ts";
+import { authenticate, endpoint, type Connection } from "./connection.ts";
 import { httpError, invalidOutput, networkError } from "./errors.ts";
+import { bedrockScope } from "./sigv4.ts";
 
 export const REASONING_EFFORTS = [
   "none",
@@ -128,10 +129,9 @@ const listingEntry = (raw: unknown, efforts: boolean): CatalogModel | null => {
 const getJson = (connection: Connection, url: string) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
+    const headers = yield* authenticate(connection, { method: "GET", url, body: "" });
     const response = yield* http
-      .execute(
-        HttpClientRequest.get(url).pipe(HttpClientRequest.setHeaders(authHeaders(connection))),
-      )
+      .execute(HttpClientRequest.get(url).pipe(HttpClientRequest.setHeaders(headers)))
       .pipe(Effect.mapError(() => networkError("The provider could not be reached")));
     if (response.status < 200 || response.status >= 300) {
       const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""));
@@ -179,6 +179,33 @@ const azureEntry = (raw: unknown): CatalogModel | null => {
 };
 
 /**
+ * Bedrock's Claude as its inference profiles (`eu.anthropic.…`), the IDs the
+ * Messages route takes. Mantle's listing has no Claude at all.
+ */
+const bedrockProfile =
+  (connection: Connection) =>
+  (raw: unknown): CatalogModel | null => {
+    if (!isRecord(raw) || typeof raw["inferenceProfileId"] !== "string") return null;
+    const id = raw["inferenceProfileId"];
+    if (raw["status"] !== undefined && raw["status"] !== "ACTIVE") return null;
+    if (connection.preset.messages?.models.test(id) !== true) return null;
+    return {
+      id,
+      name: typeof raw["inferenceProfileName"] === "string" ? raw["inferenceProfileName"] : id,
+      type: "chat",
+      contextLength: null,
+      capabilities: {
+        imageOutput: false,
+        reasoning: false,
+        tools: true,
+        vision: true,
+        files: true,
+      },
+      pricing: null,
+    };
+  };
+
+/**
  * The models a connection offers, per its preset: OpenRouter's two listings
  * (text and embeddings), Azure's deployments, or one OpenAI-style listing.
  */
@@ -196,6 +223,28 @@ export const fetchCatalog = (connection: Connection) =>
           `${root}/openai/deployments?api-version=2022-12-01`,
         );
         return listing(value).flatMap((raw) => azureEntry(raw) ?? []);
+      }
+      case "bedrock": {
+        const listed = listing(yield* getJson(connection, endpoint(connection, "/models"))).flatMap(
+          (raw) => listingEntry(raw, false) ?? [],
+        );
+        const scope = bedrockScope(new URL(connection.baseUrl));
+        if (!scope) return listed;
+        // Listing profiles is its own IAM permission; without it the rest still shows.
+        const profiles = yield* getJson(
+          connection,
+          `https://bedrock.${scope.region}.amazonaws.com/inference-profiles?typeEquals=SYSTEM_DEFINED&maxResults=1000`,
+        ).pipe(
+          Effect.map((value) =>
+            isRecord(value) && Array.isArray(value["inferenceProfileSummaries"])
+              ? value["inferenceProfileSummaries"].flatMap(
+                  (raw) => bedrockProfile(connection)(raw) ?? [],
+                )
+              : [],
+          ),
+          Effect.orElseSucceed((): CatalogModel[] => []),
+        );
+        return [...listed, ...profiles];
       }
       case "openrouter":
       case "openai-list": {

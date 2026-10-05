@@ -39,6 +39,17 @@ export type ReplayUnit =
       readonly format: "responses";
       /** Output items as received: reasoning with encrypted content, messages with phase, calls. */
       readonly items: ReadonlyArray<Schema.Json>;
+    }
+  | {
+      readonly v: 1;
+      readonly id: string;
+      readonly identity: ReplayIdentity;
+      readonly format: "messages";
+      /**
+       * Content blocks in output order: signed thinking as received, text, and
+       * tool uses by id only (their input comes from the prompt).
+       */
+      readonly blocks: ReadonlyArray<Schema.Json>;
     };
 
 /** The key replay state travels under in part metadata and prompt options. */
@@ -55,7 +66,9 @@ const isIdentity = (value: unknown): value is ReplayIdentity =>
   typeof value["provider"] === "string" &&
   typeof value["baseUrl"] === "string" &&
   typeof value["model"] === "string" &&
-  (value["format"] === "chat-completions" || value["format"] === "responses");
+  (value["format"] === "chat-completions" ||
+    value["format"] === "responses" ||
+    value["format"] === "messages");
 
 /** Reads a replay unit from untrusted JSON, or nothing when it is not one. */
 export const decodeReplayUnit = (value: unknown): ReplayUnit | undefined => {
@@ -63,6 +76,8 @@ export const decodeReplayUnit = (value: unknown): ReplayUnit | undefined => {
   if (!isIdentity(value["identity"])) return undefined;
   if (value["format"] === "responses")
     return Array.isArray(value["items"]) ? (value as ReplayUnit) : undefined;
+  if (value["format"] === "messages")
+    return Array.isArray(value["blocks"]) ? (value as ReplayUnit) : undefined;
   if (value["format"] !== "chat-completions") return undefined;
   if (value["reasoningDetails"] !== undefined && !Array.isArray(value["reasoningDetails"]))
     return undefined;
@@ -89,9 +104,11 @@ export const sameIdentity = (a: ReplayIdentity, b: ReplayIdentity) =>
 export const isEmptyUnit = (unit: ReplayUnit) =>
   unit.format === "responses"
     ? unit.items.length === 0
-    : (unit.reasoningDetails?.length ?? 0) === 0 &&
-      !unit.reasoningContent &&
-      Object.keys(unit.callExtras ?? {}).length === 0;
+    : unit.format === "messages"
+      ? unit.blocks.length === 0
+      : (unit.reasoningDetails?.length ?? 0) === 0 &&
+        !unit.reasoningContent &&
+        Object.keys(unit.callExtras ?? {}).length === 0;
 
 /** The units in an assistant message, in order, each once. */
 export const unitsOfMessage = (message: Prompt.AssistantMessage): ReadonlyArray<ReplayUnit> => {

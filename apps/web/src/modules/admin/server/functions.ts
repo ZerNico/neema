@@ -3,7 +3,14 @@ import { Effect, Schema } from "effect";
 import { requireAdmin } from "~/modules/auth/server/middleware.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
-import { getPreset, resolveBaseUrl } from "@chat/model-client";
+import {
+  effectiveSettings,
+  getPreset,
+  resolveBaseUrl,
+  type AuthKind,
+  type Preset,
+} from "@chat/model-client";
+import { encodeAwsKeys, type AwsKeys } from "~/modules/providers/aws-keys.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -32,18 +39,51 @@ export const listProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ProviderRepo.use((repo) => repo.listProviders())));
 
-const needsBaseUrl = (preset: string) =>
-  new Response(`${preset} needs the base URL of your server.`, { status: 400 });
+const needsBaseUrl = (preset: Preset) =>
+  new Response(
+    preset.baseUrlLabel
+      ? `${preset.label} needs a ${preset.baseUrlLabel.toLowerCase()}.`
+      : `${preset.label} needs the base URL of your server.`,
+    { status: 400 },
+  );
+
+const refused = (reason: string) => new Response(reason, { status: 400 });
+
+/**
+ * The one secret a provider stores, of the kind it signs in with: a key, or
+ * AWS access keys as one document. The other kind is refused, never stored.
+ */
+const storedSecret = (
+  preset: Preset,
+  auth: AuthKind,
+  input: { readonly apiKey?: string; readonly awsKeys?: AwsKeys },
+) => {
+  if (auth === "aws") {
+    if (input.apiKey?.trim()) throw refused(`${preset.label} is set to sign with an access key.`);
+    return input.awsKeys ? encodeAwsKeys(input.awsKeys) : undefined;
+  }
+  if (input.awsKeys) throw refused(`${preset.label} is set to use an API key.`);
+  return input.apiKey?.trim() || undefined;
+};
+
+const missingSecret = (preset: Preset, auth: AuthKind) =>
+  refused(`${preset.label} needs ${auth === "aws" ? "an access key" : "an API key"}.`);
 
 export const createProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateProviderInput))
   .handler(({ data }) => {
+    const { awsKeys: _awsKeys, apiKey: _apiKey, ...rest } = data;
     const preset = getPreset(data.preset);
-    if (!resolveBaseUrl(preset, data.baseUrl)) throw needsBaseUrl(preset.label);
-    if (preset.keyRequired && !data.apiKey?.trim())
-      throw new Response(`${preset.label} needs an API key.`, { status: 400 });
-    return runtime.runPromise(ProviderRepo.use((repo) => repo.createProvider(data)));
+    if (!resolveBaseUrl(preset, data.baseUrl)) throw needsBaseUrl(preset);
+    const auth = effectiveSettings(preset, data.settings).auth;
+    const secret = storedSecret(preset, auth, data);
+    if (!secret && (preset.keyRequired || auth === "aws")) throw missingSecret(preset, auth);
+    return runtime.runPromise(
+      ProviderRepo.use((repo) =>
+        repo.createProvider({ ...rest, ...(secret ? { apiKey: secret } : {}) }),
+      ),
+    );
   });
 
 export const updateProvider = createServerFn({ method: "POST" })
@@ -58,8 +98,18 @@ export const updateProvider = createServerFn({ method: "POST" })
         if (!provider) return;
         const preset = getPreset(provider.preset);
         if (patch.baseUrl !== undefined && !resolveBaseUrl(preset, patch.baseUrl))
-          return yield* Effect.die(needsBaseUrl(preset.label));
-        yield* repo.updateProvider(providerId, patch);
+          return yield* Effect.die(needsBaseUrl(preset));
+        const { awsKeys: _awsKeys, apiKey: _apiKey, ...rest } = patch;
+        const current = effectiveSettings(preset, provider.settings).auth;
+        const auth = patch.settings ? effectiveSettings(preset, patch.settings).auth : current;
+        const secret = yield* Effect.try({
+          try: () => storedSecret(preset, auth, patch),
+          catch: (response) => response,
+        }).pipe(Effect.orDie);
+        // The stored secret is of the old kind, so a switch needs new credentials.
+        if (auth !== current && !secret && (preset.keyRequired || auth === "aws"))
+          return yield* Effect.die(missingSecret(preset, auth));
+        yield* repo.updateProvider(providerId, { ...rest, ...(secret ? { apiKey: secret } : {}) });
       }),
     );
   });
@@ -342,8 +392,13 @@ export const testChatModel = createServerFn({ method: "POST" })
     runtime.runPromise(
       Effect.gen(function* () {
         const started = Date.now();
-        const { reply } = yield* (yield* AiGateway).probeChatModel(data);
-        return { ok: true as const, reply, latencyMs: Date.now() - started };
+        const { reply, format } = yield* (yield* AiGateway).probeChatModel(data);
+        return {
+          ok: true as const,
+          reply,
+          latencyMs: Date.now() - started,
+          ...(format ? { format } : {}),
+        };
       }).pipe(
         Effect.catchTags({
           ProviderUnreachable: (error) =>

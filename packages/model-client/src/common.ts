@@ -97,6 +97,46 @@ export const jsonSchema = (
 export const isAnchor = (message: Prompt.Message) =>
   isRecord(message.options["cache"]) && message.options["cache"]["anchor"] === true;
 
+/** Anthropic honours at most four cache breakpoints per request. */
+export const MAX_CACHE_MARKERS = 4;
+
+/**
+ * The anchored messages that get a cache marker: all of them within the
+ * budget, else the first (the system prompt, stable longest) and the latest.
+ */
+export const markerBudget = (prompt: Prompt.Prompt) => {
+  const anchored = prompt.content.filter(
+    (message) => message.role !== "assistant" && isAnchor(message),
+  );
+  if (anchored.length <= MAX_CACHE_MARKERS) return new Set(anchored);
+  return new Set([anchored[0]!, ...anchored.slice(-(MAX_CACHE_MARKERS - 1))]);
+};
+
+/**
+ * Files in an assistant turn (an answer's image, a tool's PDF) have no place
+ * on most servers. They follow the turn, after its tool results, as a user
+ * message, so the model still sees them. OpenRouter takes images inline.
+ */
+export const carryAssistantFiles = (prompt: Prompt.Prompt, keepImages: boolean) => {
+  const messages: Array<Prompt.Message | { role: "carried"; files: Prompt.FilePart[] }> = [];
+  let carried: Prompt.FilePart[] = [];
+  const flush = () => {
+    if (carried.length > 0) messages.push({ role: "carried", files: carried });
+    carried = [];
+  };
+  for (const message of prompt.content) {
+    if (message.role !== "tool") flush();
+    messages.push(message);
+    if (message.role === "assistant")
+      carried = message.content.filter(
+        (part): part is Prompt.FilePart =>
+          part.type === "file" && !(keepImages && part.mediaType.startsWith("image/")),
+      );
+  }
+  flush();
+  return messages;
+};
+
 export const replayMetadata = (unit: ReplayUnit | undefined) =>
   unit ? { [METADATA_KEY]: { replay: unit } } : undefined;
 

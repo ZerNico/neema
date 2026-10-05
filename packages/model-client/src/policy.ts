@@ -5,10 +5,16 @@ import { configurationError } from "./errors.ts";
 
 /**
  * OpenAI models from GPT-5.4 on refuse tools beside any reasoning effort but
- * `none` on Chat Completions. Matched on the model id or deployment name,
- * which on Azure is usually the model's.
+ * `none` on Chat Completions. Matched on the model id, a deployment name
+ * (on Azure usually the model's) or a Bedrock id (`us.openai.gpt-5.6-sol`).
  */
-const RESPONSES_ONLY_TOOLS = /(^|\/)(gpt-5\.(?:[4-9]|\d{2,})|gpt-[6-9])/;
+const RESPONSES_ONLY_TOOLS = /(^|[/.])(gpt-5\.(?:[4-9]|\d{2,})|gpt-[6-9])/;
+
+/** What fixes it, per service: Azure's API is each model's, Bedrock's is always Chat Completions. */
+const REMEDY: Partial<Record<string, string>> = {
+  azure: "Set this model's API to Responses.",
+  bedrock: "Bedrock is used over Chat Completions here, so turn reasoning off for this model.",
+};
 
 /**
  * Refuses, before anything is sent, a call the resolved policy cannot serve.
@@ -19,9 +25,9 @@ export const checkCall = (
   call: ModelCall,
   options: LanguageModel.ProviderOptions,
 ) => {
-  const openai = connection.preset.id === "openai" || connection.preset.id === "azure";
+  const remedy = REMEDY[connection.preset.id];
   if (
-    openai &&
+    remedy &&
     connection.settings.format === "chat-completions" &&
     options.tools.length > 0 &&
     call.reasoningEffort &&
@@ -30,7 +36,7 @@ export const checkCall = (
   )
     return Effect.fail(
       configurationError(
-        `${call.model} takes tools with reasoning only on the Responses API. Switch this provider to Responses.`,
+        `${call.model} takes tools with reasoning only on the Responses API. ${remedy}`,
       ),
     );
   return Effect.void;

@@ -5,7 +5,13 @@
  * never branch on a service's name.
  */
 
-export const WIRE_FORMATS = ["chat-completions", "responses"] as const;
+import { bedrockScope } from "./sigv4.ts";
+
+/**
+ * `messages` is Anthropic's API. No preset offers it as a choice: a preset
+ * routes the models that speak only it there (Claude on Bedrock).
+ */
+export const WIRE_FORMATS = ["chat-completions", "responses", "messages"] as const;
 export type WireFormat = (typeof WIRE_FORMATS)[number];
 
 /**
@@ -24,7 +30,10 @@ export type ReasoningShape = (typeof REASONING_SHAPES)[number];
 
 export type MaxTokensField = "max_tokens" | "max_completion_tokens";
 export type CacheKeyField = "none" | "prompt_cache_key" | "session_id";
-export type Catalog = "openrouter" | "openai-list" | "azure-deployments" | "none";
+/** A key sent as a header, or AWS access keys that sign each request (SigV4). */
+export const AUTH_KINDS = ["key", "aws"] as const;
+export type AuthKind = (typeof AUTH_KINDS)[number];
+export type Catalog = "openrouter" | "openai-list" | "azure-deployments" | "bedrock" | "none";
 
 /** What an admin may change on a provider; the rest is the preset's. */
 export interface ProviderSettings {
@@ -39,6 +48,7 @@ export interface ProviderSettings {
   readonly streamUsage?: boolean;
   /** Header the key goes in instead of `Authorization: Bearer` (`api-key`, `x-api-key`). */
   readonly keyHeader?: string;
+  readonly auth?: AuthKind;
 }
 export type SettingKey = keyof ProviderSettings;
 
@@ -53,6 +63,7 @@ export interface ResolvedSettings {
   readonly maxTokensField: MaxTokensField;
   readonly streamUsage: boolean;
   readonly keyHeader?: string;
+  readonly auth: AuthKind;
 }
 
 export interface Preset {
@@ -63,6 +74,10 @@ export interface Preset {
   readonly baseUrlPlaceholder?: string;
   /** Rewrites what an admin typed into the URL requests go to (Azure's `/openai/v1`). */
   readonly normalizeBaseUrl?: (url: string) => string;
+  /** What the admin enters, when it is not a URL (Bedrock's region). */
+  readonly baseUrlLabel?: string;
+  /** The stored URL as the admin entered it, the inverse of `normalizeBaseUrl`. */
+  readonly displayBaseUrl?: (url: string) => string;
   /** Whether a key is required; self-hosted servers often run without one. */
   readonly keyRequired: boolean;
   readonly formats: ReadonlyArray<WireFormat>;
@@ -71,6 +86,13 @@ export interface Preset {
   readonly overridable: ReadonlyArray<SettingKey>;
   /** Only these models get explicit cache markers; everyone else caches a stable prefix by itself. */
   readonly cacheMarkers?: RegExp;
+  /**
+   * Each model has its own API among `formats` (Azure deployments differ),
+   * and a model refusing Responses moves to Chat Completions.
+   */
+  readonly modelFormat?: boolean;
+  /** Models served only on Anthropic's Messages API, and where that API lives. */
+  readonly messages?: { readonly models: RegExp; readonly url: (baseUrl: string) => string };
   /** OpenRouter's `modalities`, sent on every request so image output is per call. */
   readonly imageOutput: boolean;
   readonly catalog: Catalog;
@@ -93,6 +115,7 @@ const chat = {
   cacheKey: "none",
   maxTokensField: "max_tokens",
   streamUsage: true,
+  auth: "key",
 } as const satisfies Preset["defaults"];
 
 const azureBaseUrl = (url: string) => {
@@ -101,6 +124,29 @@ const azureBaseUrl = (url: string) => {
   // A resource or Foundry endpoint as the portal shows it.
   if (/^https:\/\/[^/]+$/.test(trimmed)) return `${trimmed}/openai/v1`;
   return trimmed;
+};
+
+/** A bare region becomes its bedrock-mantle endpoint, the one that lists models. */
+const bedrockBaseUrl = (url: string) => {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (/^[a-z]{2}(-[a-z]+)+-\d+$/.test(trimmed))
+    return `https://bedrock-mantle.${trimmed}.api.aws/v1`;
+  return trimmed;
+};
+
+/**
+ * Claude goes to bedrock-runtime in the provider's region even when the base
+ * URL is mantle: only runtime takes the geo and global inference profiles
+ * (`eu.anthropic.…`), and mantle serves Claude in a few regions only.
+ */
+const bedrockMessagesUrl = (baseUrl: string) => {
+  const url = new URL(baseUrl);
+  const scope = bedrockScope(url);
+  const origin =
+    scope && !url.hostname.startsWith("bedrock-runtime")
+      ? `https://bedrock-runtime.${scope.region}.amazonaws.com`
+      : url.origin;
+  return `${origin}/anthropic/v1/messages`;
 };
 
 const definePresets = <const T extends ReadonlyArray<Preset>>(presets: T) => presets;
@@ -123,7 +169,8 @@ export const PRESETS = definePresets([
     label: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     keyRequired: true,
-    formats: ["responses", "chat-completions"],
+    // Every current model takes Responses, and GPT-5.4+ needs it for tools with reasoning.
+    formats: ["responses"],
     defaults: {
       ...chat,
       format: "responses",
@@ -131,7 +178,7 @@ export const PRESETS = definePresets([
       cacheKey: "prompt_cache_key",
       maxTokensField: "max_completion_tokens",
     },
-    overridable: ["format"],
+    overridable: [],
     imageOutput: false,
     catalog: "openai-list",
   },
@@ -150,10 +197,33 @@ export const PRESETS = definePresets([
       maxTokensField: "max_completion_tokens",
       keyHeader: "api-key",
     },
-    overridable: ["format"],
+    overridable: [],
+    modelFormat: true,
     imageOutput: false,
     catalog: "azure-deployments",
     note: "Models are deployment names",
+  },
+  {
+    id: "bedrock",
+    label: "Amazon Bedrock",
+    baseUrl: null,
+    baseUrlPlaceholder: "eu-central-1",
+    baseUrlLabel: "Region",
+    normalizeBaseUrl: bedrockBaseUrl,
+    // A typed URL elsewhere stays a URL; the region form round-trips.
+    displayBaseUrl: (url) =>
+      /^https:\/\/bedrock-mantle\.([a-z0-9-]+)\.api\.aws\/v1$/.exec(url)?.[1] ?? url,
+    keyRequired: true,
+    // Measured: every model but Claude takes Chat Completions, only gpt-oss
+    // Responses. Every model accepts reasoning_effort, and those without
+    // levels ignore it, so neither is a setting.
+    formats: ["chat-completions"],
+    defaults: { ...chat, reasoning: "flat" },
+    overridable: ["auth"],
+    // Claude refuses the OpenAI-compatible API there. Plain and inference profile ids.
+    messages: { models: /(^|\.)anthropic\./, url: bedrockMessagesUrl },
+    imageOutput: false,
+    catalog: "bedrock",
   },
   {
     id: "vercel",
@@ -217,9 +287,9 @@ export const PRESETS = definePresets([
     label: "xAI",
     baseUrl: "https://api.x.ai/v1",
     keyRequired: true,
-    formats: ["responses", "chat-completions"],
+    formats: ["responses"],
     defaults: { ...chat, format: "responses", reasoning: "flat" },
-    overridable: ["format"],
+    overridable: [],
     imageOutput: false,
     catalog: "openai-list",
   },
@@ -275,6 +345,7 @@ export const effectiveSettings = (
     cacheKey: preset.defaults.cacheKey,
     maxTokensField: preset.defaults.maxTokensField,
     streamUsage: pick("streamUsage") ?? preset.defaults.streamUsage,
+    auth: pick("auth") ?? preset.defaults.auth,
     ...(keyHeader ? { keyHeader } : {}),
   } satisfies ResolvedSettings;
 };
@@ -292,6 +363,7 @@ export const sanitizeSettings = (
     const value = overrides?.[key];
     if (value === undefined || value === preset.defaults[key]) continue;
     if (key === "format" && !preset.formats.includes(value as WireFormat)) continue;
+    if (key === "auth" && !(AUTH_KINDS as ReadonlyArray<unknown>).includes(value)) continue;
     if (key === "keyHeader" && !/^[A-Za-z0-9-]{1,64}$/.test(String(value))) continue;
     kept[key] = value;
   }
@@ -304,3 +376,24 @@ export const resolveBaseUrl = (preset: Preset, entered: string | null | undefine
   if (!url) return null;
   return (preset.normalizeBaseUrl ?? ((value: string) => value.replace(/\/+$/, "")))(url);
 };
+
+/**
+ * The API a model is called on: the preset's routing first, then the model's
+ * own choice where the preset has one, then the provider's format.
+ */
+export const formatFor = (
+  preset: Preset,
+  settings: Pick<ResolvedSettings, "format">,
+  model: string,
+  chosen?: WireFormat | null,
+): WireFormat => {
+  if (preset.messages?.models.test(model)) return "messages";
+  if (preset.modelFormat && chosen && preset.formats.includes(chosen)) return chosen;
+  return settings.format;
+};
+
+/** The base URL field's label and the stored URL as the admin entered it. */
+export const baseUrlField = (preset: Preset, stored?: string) => ({
+  label: preset.baseUrlLabel ?? "Base URL",
+  value: stored === undefined ? "" : (preset.displayBaseUrl?.(stored) ?? stored),
+});

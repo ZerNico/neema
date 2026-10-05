@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
 import { describe, expect } from "vitest";
 import { roundPrompt } from "./replay.ts";
-import { effect, harness, responsesSse, textOf } from "./test-harness.ts";
+import { chatSse, effect, harness, responsesSse, textOf } from "./test-harness.ts";
 
 // Synthetic fixtures following OpenAI's documented Responses event stream.
 
@@ -130,28 +130,55 @@ describe("Responses requests", () => {
 });
 
 describe("Azure deployments without Responses", () => {
-  effect("move to Chat Completions after one refusal, and stay there", () =>
+  effect("move a refusing deployment to Chat Completions and report it", () =>
     Effect.gen(function* () {
+      let reported = 0;
+      const chat = (text: string) =>
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
       const run = harness({
         preset: "azure",
         baseUrl: "https://res.services.ai.azure.com",
-        // A model id no other test uses: the fallback is remembered per process.
-        call: { model: "partner-model-fallback-test" },
+        call: { onChatFallback: Effect.sync(() => void reported++) },
         answers: [
           {
             status: 400,
             body: JSON.stringify({ error: { code: "BadRequest", message: "Model not supported" } }),
           },
-          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
-          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Again" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+          chat("Hi"),
         ],
       });
       expect(textOf(yield* run.stream("Q"))).toBe("Hi");
-      expect(textOf(yield* run.stream("Q"))).toBe("Again");
+      expect(reported).toBe(1);
       expect(run.exchanges.map((exchange) => exchange.url)).toEqual([
         "https://res.services.ai.azure.com/openai/v1/responses",
         "https://res.services.ai.azure.com/openai/v1/chat/completions",
+      ]);
+    }),
+  );
+
+  effect("start on the API the model has stored, and never fall back elsewhere", () =>
+    Effect.gen(function* () {
+      const stored = harness({
+        preset: "azure",
+        baseUrl: "https://res.services.ai.azure.com",
+        call: { format: "chat-completions" },
+        answers: [chatSse([])],
+      });
+      yield* stored.stream("Q");
+      expect(stored.exchanges[0]!.url).toBe(
         "https://res.services.ai.azure.com/openai/v1/chat/completions",
+      );
+      // OpenAI has no per-model API: a stored choice is ignored, a refusal stays one.
+      const openai = harness({
+        preset: "openai",
+        call: { format: "chat-completions" },
+        answers: [
+          { status: 400, body: JSON.stringify({ error: { message: "Model not supported" } }) },
+        ],
+      });
+      yield* openai.stream("Q").pipe(Effect.flip);
+      expect(openai.exchanges.map((exchange) => exchange.url)).toEqual([
+        "https://provider.test/v1/responses",
       ]);
     }),
   );

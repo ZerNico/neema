@@ -41,9 +41,9 @@ the whole input again on every turn.
 - Chat requests to OpenRouter carry the conversation id as `session_id` and
   `prompt_cache_key`, keeping a conversation on the provider that holds its cache. Other
   servers never see them.
-- Claude caches only at explicit points, so for an `anthropic/` model on OpenRouter or Vercel
-  the model client turns each anchor into `cache_control` (at most four, the first and the
-  latest). OpenAI, Gemini, DeepSeek, Grok and local servers
+- Claude caches only at explicit points, so for an `anthropic/` model on OpenRouter or Vercel,
+  and for every request on the Messages codec (Claude on Bedrock), the model client turns each
+  anchor into `cache_control` (at most four, the first and the latest). OpenAI, Gemini, DeepSeek, Grok and local servers
   cache a stable prefix by themselves and never see a marker, which also keeps strict
   OpenAI-compatible servers from rejecting an unknown field.
 - 9router discards client markers and places its own: its system text, last tool, and last

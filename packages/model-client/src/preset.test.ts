@@ -1,6 +1,7 @@
 import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  baseUrlField,
   effectiveSettings,
   getPreset,
   PRESETS,
@@ -18,8 +19,11 @@ describe("presets", () => {
   it("keep only the overrides a preset allows, and only real changes", () => {
     expect(sanitizeSettings(getPreset("openrouter"), { format: "responses" })).toEqual({});
     expect(sanitizeSettings(getPreset("openai"), { format: "responses" })).toEqual({});
-    expect(sanitizeSettings(getPreset("openai"), { format: "chat-completions" })).toEqual({
-      format: "chat-completions",
+    // OpenAI's API is fixed; Azure's is each model's, never the provider's.
+    expect(sanitizeSettings(getPreset("openai"), { format: "chat-completions" })).toEqual({});
+    expect(sanitizeSettings(getPreset("azure"), { format: "chat-completions" })).toEqual({});
+    expect(sanitizeSettings(getPreset("custom"), { format: "responses" })).toEqual({
+      format: "responses",
     });
     expect(sanitizeSettings(getPreset("custom"), { keyHeader: "x-api-key\nbad" })).toEqual({});
     expect(effectiveSettings(getPreset("custom"), { reasoning: "flat" }).reasoning).toBe("flat");
@@ -35,6 +39,25 @@ describe("presets", () => {
     );
     expect(resolveBaseUrl(azure, "")).toBeNull();
     expect(resolveBaseUrl(getPreset("openrouter"), "")).toBe("https://openrouter.ai/api/v1");
+  });
+
+  it("turns a Bedrock region into its endpoint and keeps a typed URL", () => {
+    const bedrock = getPreset("bedrock");
+    expect(resolveBaseUrl(bedrock, " eu-central-1 ")).toBe(
+      "https://bedrock-mantle.eu-central-1.api.aws/v1",
+    );
+    expect(
+      resolveBaseUrl(bedrock, "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/"),
+    ).toBe("https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1");
+    expect(resolveBaseUrl(bedrock, "")).toBeNull();
+    // The admin sees what they entered: a region round-trips, a URL stays one.
+    expect(baseUrlField(bedrock, resolveBaseUrl(bedrock, "eu-central-1")!)).toEqual({
+      label: "Region",
+      value: "eu-central-1",
+    });
+    const runtime = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
+    expect(baseUrlField(bedrock, runtime).value).toBe(runtime);
+    expect(baseUrlField(getPreset("azure")).label).toBe("Base URL");
   });
 });
 

@@ -2,7 +2,7 @@ import { Effect, Layer, Stream } from "effect";
 import { it } from "vitest";
 import { LanguageModel, type Prompt, type Toolkit } from "effect/unstable/ai";
 import { FetchHttpClient } from "effect/unstable/http";
-import { makeConnection, type ModelCall } from "./connection.ts";
+import { makeConnection, type Credentials, type ModelCall } from "./connection.ts";
 import { layer } from "./language-model.ts";
 import type { PresetId, ProviderSettings } from "./preset.ts";
 
@@ -10,6 +10,10 @@ import type { PresetId, ProviderSettings } from "./preset.ts";
 export const chatSse = (chunks: ReadonlyArray<unknown>, done = true) =>
   chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") +
   (done ? "data: [DONE]\n\n" : "");
+
+/** Messages SSE, which names each event's type like Responses. */
+export const messagesSse = (events: ReadonlyArray<{ type: string }>) =>
+  events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
 
 /** Responses SSE: every event names its type. */
 export const responsesSse = (events: ReadonlyArray<{ type: string }>) =>
@@ -41,6 +45,7 @@ export const harness = (input: {
   readonly preset: PresetId;
   readonly baseUrl?: string;
   readonly apiKey?: string | null;
+  readonly credentials?: Credentials;
   readonly settings?: ProviderSettings;
   readonly call?: Partial<ModelCall>;
   readonly answers: ReadonlyArray<Answer>;
@@ -73,7 +78,9 @@ export const harness = (input: {
     provider: "p1",
     preset: input.preset,
     baseUrl: input.baseUrl ?? "https://provider.test/v1",
-    apiKey: input.apiKey === undefined ? "sk-test" : input.apiKey,
+    credentials:
+      input.credentials ??
+      (input.apiKey === null ? null : { kind: "key", key: input.apiKey ?? "sk-test" }),
     settings: input.settings ?? null,
   })!;
   const model = layer(connection, {

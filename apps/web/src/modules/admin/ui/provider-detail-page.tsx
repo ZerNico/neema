@@ -14,14 +14,16 @@ import {
   createModel,
   deleteModel,
   deleteProvider,
-  testChatModel,
   updateProvider,
 } from "../server/functions.ts";
 import { groupsQuery } from "./groups-page.tsx";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
 import { ModelEditDialog, MODEL_DIALOG_CLASS } from "./model-edit-dialog.tsx";
+import { ModelTestResult } from "./model-test.tsx";
+import { useModelTest } from "./use-model-test.ts";
 import {
   emptyModelSettingsDraft,
+  type ModelSettingsDraft,
   MODEL_TYPE_LABELS,
   ModelSettingsFields,
   modelSettingsFromDraft,
@@ -29,14 +31,18 @@ import {
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
 import { modelsQuery, providersQuery } from "./providers-page.tsx";
 import {
+  baseUrlField,
   getPreset,
   effectiveSettings,
   type PresetId,
   type ProviderSettings,
+  type SettingKey,
 } from "@chat/model-client/presets";
 import { readServerError } from "~/server-error.ts";
+import { ProviderCredentialFields } from "./provider-credential-fields.tsx";
+import { credentialsInput, credentialsReady, EMPTY_CREDENTIALS } from "./provider-credentials.ts";
 import { ProviderSettingsFields } from "./provider-settings-fields.tsx";
-import { FORMAT_LABELS, REASONING_LABELS } from "./provider-settings-labels.ts";
+import { AUTH_LABELS, FORMAT_LABELS, REASONING_LABELS } from "./provider-settings-labels.ts";
 
 import { useConfirm } from "~/ui/confirm.tsx";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -62,7 +68,6 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/u
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
-import { cn } from "~/ui/utils";
 import { OptionalMark } from "~/ui/form/app-form.tsx";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
@@ -117,6 +122,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   }
   const preset = getPreset(provider.preset);
   const settings = effectiveSettings(preset, provider.settings);
+  const can = (key: SettingKey) => preset.overridable.includes(key);
 
   return (
     <Page
@@ -178,26 +184,33 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
             <span className="text-sm">{preset.label}</span>
           </ListRow>
           <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">Base URL</span>
-            <span className="min-w-0 truncate font-mono text-sm">{provider.baseUrl}</span>
+            <span className="text-muted-foreground w-24 shrink-0 text-sm">
+              {baseUrlField(preset).label}
+            </span>
+            <span className="min-w-0 truncate font-mono text-sm">
+              {baseUrlField(preset, provider.baseUrl).value}
+            </span>
           </ListRow>
-          <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">API</span>
-            <span className="text-sm">{FORMAT_LABELS[settings.format]}</span>
-          </ListRow>
+          {/* Only what the admin chose: fixed values would read as settings. */}
+          {can("format") && preset.formats.length > 1 ? (
+            <ListRow>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">API</span>
+              <span className="text-sm">{FORMAT_LABELS[settings.format]}</span>
+            </ListRow>
+          ) : null}
           {/* Responses always takes a level; on Chat Completions the provider names its field. */}
-          {settings.format === "chat-completions" ? (
+          {can("reasoning") && settings.format === "chat-completions" ? (
             <ListRow>
               <span className="text-muted-foreground w-24 shrink-0 text-sm">Reasoning level</span>
               <span className="text-sm">{REASONING_LABELS[settings.reasoning]}</span>
             </ListRow>
           ) : null}
-          <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">API key</span>
-            <span className="text-muted-foreground text-sm">
-              {provider.hasApiKey ? "Encrypted at rest" : "None"}
-            </span>
-          </ListRow>
+          {can("auth") ? (
+            <ListRow>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">Sign in with</span>
+              <span className="text-sm">{AUTH_LABELS[settings.auth]}</span>
+            </ListRow>
+          ) : null}
         </ListCard>
       </Section>
 
@@ -285,6 +298,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
 
       <ModelEditDialog
         model={editingModel}
+        presetId={provider.preset}
         open={editingModelOpen}
         onOpenChange={setEditingModelOpen}
       />
@@ -312,7 +326,12 @@ export function AddModelDialog({
   const selectedId = useRef<string | null>(null);
   const [pick, setPick] = useState<CatalogPick | null>(null);
   const [typed, setTyped] = useState("");
-  const [draft, setDraft] = useState(emptyModelSettingsDraft);
+  // Where each model has its own API, a new one starts on the preset's.
+  const initialDraft = (): ModelSettingsDraft => ({
+    ...emptyModelSettingsDraft(),
+    format: presetId && getPreset(presetId).modelFormat ? "responses" : null,
+  });
+  const [draft, setDraft] = useState(initialDraft);
 
   // Only an explicit selection opens the settings: a catalog row, or the
   // creatable "Add … as custom model" row for ids the catalog does not know.
@@ -320,27 +339,17 @@ export function AddModelDialog({
   // suggests a choice that has not been made.
   const effective: CatalogPick | null = pick && (typed === "" || typed === pick.id) ? pick : null;
   const settings = modelSettingsFromDraft(draft);
-  // A result belongs to the model it tested; picking another clears it.
-  const [tested, setTested] = useState<{
-    modelKey: string;
-    result: Awaited<ReturnType<typeof testChatModel>>;
-  } | null>(null);
-  const testResult = tested && tested.modelKey === effective?.id ? tested.result : null;
+  const test = useModelTest(providerId, (format) =>
+    setDraft((current) => ({ ...current, format })),
+  );
 
   const reset = () => {
     selectedId.current = null;
     setPick(null);
     setTyped("");
-    setDraft(emptyModelSettingsDraft());
-    setTested(null);
+    setDraft(initialDraft());
+    test.clear();
   };
-
-  const test = useMutation({
-    mutationFn: (modelKey: string) =>
-      testChatModel({ data: { providerId, modelKey } }).then((result) => ({ modelKey, result })),
-    onSuccess: setTested,
-    onError: (error) => toastError("Could not test the model.", error),
-  });
 
   const add = useMutation({
     mutationFn: () => {
@@ -435,7 +444,7 @@ export function AddModelDialog({
                   if (value === selectedId.current) return;
                   selectedId.current = null;
                   setPick(null);
-                  setDraft({ ...emptyModelSettingsDraft(), displayName: value.trim() });
+                  setDraft({ ...initialDraft(), displayName: value.trim() });
                 }}
               />
               {effective ? (
@@ -460,26 +469,15 @@ export function AddModelDialog({
             ) : null}
           </FieldGroup>
 
-          {testResult ? (
-            <p
-              role="status"
-              className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
-            >
-              {testResult.ok
-                ? testResult.reply
-                  ? `Works: replied “${testResult.reply}” in ${testResult.latencyMs}ms.`
-                  : `Works: answered in ${testResult.latencyMs}ms.`
-                : `Didn’t work: ${testResult.error}`}
-            </p>
-          ) : null}
+          <ModelTestResult test={test.resultFor(effective?.id)} />
           {add.isError ? <FieldError>Could not add the model.</FieldError> : null}
           <DialogFooter>
             {effective && draft.type === "chat" ? (
               <PendingButton
                 variant="outline"
-                pending={test.isPending}
+                pending={test.pending}
                 disabled={add.isPending}
-                onClick={() => test.mutate(effective.id)}
+                onClick={() => test.run(effective.id, draft.format)}
               >
                 Test
               </PendingButton>
@@ -501,7 +499,7 @@ export function AddModelDialog({
   );
 }
 
-function EditProviderDialog({
+export function EditProviderDialog({
   provider,
   open,
   onOpenChange,
@@ -520,14 +518,20 @@ function EditProviderDialog({
   const queryClient = useQueryClient();
   const preset = getPreset(provider.preset);
   // The default shows as the placeholder, so a provider on it opens with an empty field.
-  const initialBaseUrl = provider.baseUrl === preset.baseUrl ? "" : provider.baseUrl;
+  const initialBaseUrl =
+    provider.baseUrl === preset.baseUrl ? "" : baseUrlField(preset, provider.baseUrl).value;
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [settings, setSettings] = useState(provider.settings);
   // Empty means "keep the current key", since the stored key can't be shown.
-  const [apiKey, setApiKey] = useState("");
+  const [credentials, setCredentials] = useState(EMPTY_CREDENTIALS);
+  const stored = effectiveSettings(preset, provider.settings).auth;
   const needsBaseUrl = preset.baseUrl === null;
-  const complete = Boolean(name.trim() && (!needsBaseUrl || baseUrl.trim()));
+  const complete = Boolean(
+    name.trim() &&
+    (!needsBaseUrl || baseUrl.trim()) &&
+    credentialsReady(preset, settings, credentials, stored),
+  );
 
   const save = useMutation({
     mutationFn: () =>
@@ -537,7 +541,7 @@ function EditProviderDialog({
           name: name.trim(),
           baseUrl: baseUrl.trim(),
           settings,
-          ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+          ...credentialsInput(preset, settings, credentials),
         },
       }),
     onSuccess: async () => {
@@ -548,7 +552,7 @@ function EditProviderDialog({
       ]);
       setName(name.trim());
       setBaseUrl(baseUrl.trim());
-      setApiKey("");
+      setCredentials(EMPTY_CREDENTIALS);
       onOpenChange(false);
     },
   });
@@ -562,7 +566,7 @@ function EditProviderDialog({
           setName(provider.name);
           setBaseUrl(initialBaseUrl);
           setSettings(provider.settings);
-          setApiKey("");
+          setCredentials(EMPTY_CREDENTIALS);
         }
         onOpenChange(next);
       }}
@@ -570,7 +574,7 @@ function EditProviderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit provider</DialogTitle>
-          <DialogDescription>Leave the API key empty to keep the current one.</DialogDescription>
+          <DialogDescription>Leave credentials empty to keep the current ones.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -591,7 +595,7 @@ function EditProviderDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                Base URL {needsBaseUrl ? null : <OptionalMark />}
+                {baseUrlField(preset).label} {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
@@ -608,18 +612,16 @@ function EditProviderDialog({
               onChange={setSettings}
               disabled={save.isPending}
             />
-            <Field>
-              <FieldLabel htmlFor={`${id}-api-key`}>API key</FieldLabel>
-              <Input
-                id={`${id}-api-key`}
-                type="password"
-                autoComplete="off"
-                placeholder="Unchanged"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={save.isPending}
-              />
-            </Field>
+            <ProviderCredentialFields
+              id={id}
+              preset={preset}
+              settings={settings}
+              onSettingsChange={setSettings}
+              draft={credentials}
+              onChange={setCredentials}
+              stored={stored}
+              disabled={save.isPending}
+            />
           </FieldGroup>
           {save.isError ? (
             <FieldError>

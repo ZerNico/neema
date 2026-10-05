@@ -1,7 +1,8 @@
 import { Schema } from "effect";
 import { DefaultModelIds } from "~/modules/providers/default-models.ts";
-import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
-import { PRESET_IDS, REASONING_SHAPES, WIRE_FORMATS } from "@chat/model-client";
+import { MODEL_FORMATS, REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
+import { AUTH_KINDS, PRESET_IDS, REASONING_SHAPES, WIRE_FORMATS } from "@chat/model-client";
+import { AwsKeys } from "~/modules/providers/aws-keys.ts";
 import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
 export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
@@ -17,6 +18,7 @@ export const ProviderSettingsInput = Schema.Struct({
   sendReasoning: Schema.optionalKey(Schema.Boolean),
   streamUsage: Schema.optionalKey(Schema.Boolean),
   keyHeader: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9-]{1,64}$/))),
+  auth: Schema.optionalKey(Schema.Literals(AUTH_KINDS)),
 });
 
 export const CreateProviderInput = Schema.Struct({
@@ -24,6 +26,8 @@ export const CreateProviderInput = Schema.Struct({
   preset: Schema.Literals(PRESET_IDS),
   baseUrl: Schema.optionalKey(Schema.String),
   apiKey: Schema.optionalKey(Schema.String),
+  /** In place of `apiKey` on a provider that signs with AWS access keys. */
+  awsKeys: Schema.optionalKey(AwsKeys),
   settings: Schema.optionalKey(ProviderSettingsInput),
 });
 
@@ -32,6 +36,7 @@ export const UpdateProviderInput = Schema.Struct({
   name: Schema.optionalKey(Schema.String),
   baseUrl: Schema.optionalKey(Schema.String),
   apiKey: Schema.optionalKey(Schema.String),
+  awsKeys: Schema.optionalKey(AwsKeys),
   enabled: Schema.optionalKey(Schema.Boolean),
   settings: Schema.optionalKey(ProviderSettingsInput),
 });
@@ -80,6 +85,7 @@ const CommonModelSettings = {
   description: Schema.optionalKey(
     Schema.NullOr(Schema.String.check(Schema.isMaxLength(MODEL_DESCRIPTION_MAX))),
   ),
+  format: Schema.optionalKey(Schema.NullOr(Schema.Literals(MODEL_FORMATS))),
   contextLength: Schema.NullOr(PositiveInteger),
   enabled: Schema.Boolean,
   access: Schema.Literals(["public", "groups"]),
@@ -171,4 +177,5 @@ export const UpdateGroupMemberSharingInput = Schema.Struct({
 export const ProbeModelInput = Schema.Struct({
   providerId: Schema.String,
   modelKey: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  format: Schema.optionalKey(Schema.NullOr(Schema.Literals(MODEL_FORMATS))),
 });

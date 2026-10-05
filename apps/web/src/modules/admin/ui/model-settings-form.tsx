@@ -2,11 +2,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState, type Dispatch, type SetStateAction } from "react";
 import {
   EMPTY_CAPABILITIES,
+  MODEL_FORMATS,
   MODEL_TYPES,
   REASONING_EFFORTS,
   normalizeModelSettings,
   type ModelAccess,
   type ModelCapabilities,
+  type ModelFormat,
   type ModelSettings,
   type ModelType,
 } from "~/modules/providers/model-config.ts";
@@ -58,6 +60,16 @@ export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
 
 const MODEL_TYPE_ITEMS = MODEL_TYPES.map((value) => ({ value, label: MODEL_TYPE_LABELS[value] }));
 
+export const MODEL_FORMAT_LABELS: Record<ModelFormat, string> = {
+  responses: "Responses",
+  "chat-completions": "Chat Completions",
+};
+
+const MODEL_FORMAT_ITEMS = MODEL_FORMATS.map((value) => ({
+  value,
+  label: MODEL_FORMAT_LABELS[value],
+}));
+
 const ACCESS_ITEMS: { value: ModelAccess; label: string }[] = [
   { value: "public", label: "Public" },
   { value: "groups", label: "Private" },
@@ -83,6 +95,8 @@ export interface ModelSettingsDraft {
   enabled: boolean;
   access: ModelAccess;
   selectedGroups: PickableGroup[];
+  /** The model's API, where its preset lets models differ (Azure); null elsewhere. */
+  format: ModelFormat | null;
 }
 
 export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({
@@ -99,6 +113,7 @@ export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({
   enabled: true,
   access: "public",
   selectedGroups: [],
+  format: null,
 });
 
 const parsePrice = (raw: string): number | null | undefined => {
@@ -154,6 +169,7 @@ export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings
     displayName: draft.displayName.trim(),
     description: draft.description.trim() || null,
     type: "chat",
+    format: draft.format,
     contextLength,
     embeddingDimensions: null,
     capabilities: draft.capabilities,
@@ -255,6 +271,30 @@ export function ModelSettingsFields({
               </SelectContent>
             </Select>
           </Field>
+          {draft.type === "chat" && draft.format !== null ? (
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${id}-format`}>API</FieldLabel>
+              <Select
+                value={draft.format}
+                onValueChange={(value) => value && patch({ format: value as ModelFormat })}
+                items={MODEL_FORMAT_ITEMS}
+              >
+                <SelectTrigger id={`${id}-format`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_FORMAT_ITEMS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Switches to Chat Completions by itself when a deployment refuses Responses.
+              </FieldDescription>
+            </Field>
+          ) : null}
           {draft.type === "chat" ? (
             <Field className="sm:col-span-2">
               <FieldLabel htmlFor={`${id}-description`}>

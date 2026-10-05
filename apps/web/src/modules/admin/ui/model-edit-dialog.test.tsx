@@ -121,6 +121,8 @@ describe("ModelEditDialog", () => {
           displayName: "Tiny Chat Plus",
           description: "Quick everyday answers",
           type: "chat",
+          // No per-model API outside presets that have one.
+          format: null,
           contextLength: 200_000,
           embeddingDimensions: null,
           capabilities: {

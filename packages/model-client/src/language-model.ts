@@ -5,41 +5,40 @@ import { streamChat } from "./chat-completions.ts";
 import type { StreamPart } from "./common.ts";
 import type { Connection, ModelCall } from "./connection.ts";
 import { MODULE } from "./errors.ts";
+import { streamMessages } from "./messages.ts";
+import { formatFor } from "./preset.ts";
 import { streamResponses } from "./responses.ts";
-
-/**
- * Deployments that answered Responses with "model not supported", kept for the
- * life of the process. Azure serves most models on Responses, but not all, and
- * names no list; the first refusal decides for that deployment.
- */
-const chatOnly = new Set<string>();
 
 const isModelNotSupported = (error: AiError.AiError) =>
   error.reason._tag === "InvalidRequestError" && /model not supported/i.test(error.message);
 
+/**
+ * Azure serves most deployments on Responses but not all, and names no list.
+ * A refusal moves that call to Chat Completions and tells the caller, who
+ * stores the model's API, so the next call starts there and an admin sees it.
+ */
 const streamFor = (connection: Connection, call: ModelCall) => {
-  if (connection.settings.format !== "responses")
-    return (options: LanguageModel.ProviderOptions) => streamChat(connection, call, options);
-  const key = `${connection.provider}\u0000${connection.baseUrl}\u0000${call.model}`;
-  // Replay state is stamped with the format that produced it, so the fallback
-  // is a Chat Completions connection in every respect.
-  const chat: Connection = {
+  const format = formatFor(connection.preset, connection.settings, call.model, call.format);
+  // Replay state is stamped with the format that produced it, so each route
+  // is a connection of that format in every respect.
+  const as = (next: typeof format): Connection => ({
     ...connection,
-    settings: { ...connection.settings, format: "chat-completions" },
-  };
-  const canFallBack = connection.preset.formats.includes("chat-completions");
+    settings: { ...connection.settings, format: next },
+  });
+  if (format === "messages")
+    return (options: LanguageModel.ProviderOptions) => streamMessages(as(format), call, options);
+  if (format === "chat-completions")
+    return (options: LanguageModel.ProviderOptions) => streamChat(as(format), call, options);
   return (options: LanguageModel.ProviderOptions) =>
-    chatOnly.has(key)
-      ? streamChat(chat, call, options)
-      : streamResponses(connection, call, options).pipe(
-          Stream.catchIf(
-            (error) => canFallBack && isModelNotSupported(error),
-            () => {
-              chatOnly.add(key);
-              return streamChat(chat, call, options);
-            },
+    streamResponses(as(format), call, options).pipe(
+      Stream.catchIf(
+        (error) => connection.preset.modelFormat === true && isModelNotSupported(error),
+        () =>
+          Stream.fromEffect(call.onChatFallback ?? Effect.void).pipe(
+            Stream.flatMap(() => streamChat(as("chat-completions"), call, options)),
           ),
-        );
+      ),
+    );
 };
 
 /**

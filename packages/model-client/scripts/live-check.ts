@@ -5,7 +5,8 @@
  *     OPENAI_KEY=sk-... node packages/model-client/scripts/live-check.ts
  *
  * `key` names the environment variable holding the key, so keys never sit in
- * the target list. Per target: one short reply, one tool round with its
+ * the target list; `aws` names the two holding an access key id and secret
+ * instead, with `settings: {"auth":"aws"}`. Per target: one short reply, one tool round with its
  * continuation, and one repeated long prompt to see cache reads.
  */
 import { Effect, Layer, Schema, Stream } from "effect";
@@ -20,6 +21,7 @@ interface Target {
   preset: PresetId;
   model: string;
   key?: string;
+  aws?: [idVariable: string, secretVariable: string];
   baseUrl?: string;
   settings?: ProviderSettings;
   reasoning?: boolean;
@@ -68,7 +70,9 @@ const summarize = (parts: ReadonlyArray<Response.AnyPart>) => {
     replay: unit
       ? unit.format === "responses"
         ? `${unit.items.length} items`
-        : Object.keys(unit).filter((key) => !["v", "id", "identity", "format"].includes(key))
+        : unit.format === "messages"
+          ? `${unit.blocks.length} blocks`
+          : Object.keys(unit).filter((key) => !["v", "id", "identity", "format"].includes(key))
       : "none",
   };
 };
@@ -81,7 +85,15 @@ const check = (target: Target) =>
       provider: "live",
       preset: target.preset,
       baseUrl: target.baseUrl ?? null,
-      apiKey: target.key ? (process.env[target.key] ?? null) : null,
+      credentials: target.aws
+        ? {
+            kind: "aws",
+            accessKeyId: process.env[target.aws[0]] ?? "",
+            secretAccessKey: process.env[target.aws[1]] ?? "",
+          }
+        : target.key && process.env[target.key]
+          ? { kind: "key", key: process.env[target.key]! }
+          : null,
       settings: target.settings ?? null,
     });
     if (!connection) return yield* Effect.fail(new Error("no base URL"));

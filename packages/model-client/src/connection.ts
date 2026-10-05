@@ -1,6 +1,6 @@
-import { Effect, Redacted, Stream } from "effect";
+import { Clock, Effect, Redacted, Stream } from "effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
-import { httpError, networkError } from "./errors.ts";
+import { configurationError, httpError, networkError } from "./errors.ts";
 import {
   effectiveSettings,
   getPreset,
@@ -8,8 +8,17 @@ import {
   type Preset,
   type PresetId,
   type ProviderSettings,
+  type WireFormat,
 } from "./preset.ts";
 import type { ReplayIdentity } from "./replay.ts";
+import { amzDate, authorization, bedrockScope, sha256Hex } from "./sigv4.ts";
+
+type Secret = Redacted.Redacted<string> | string;
+
+/** What proves a request is the provider's own: a key, or AWS access keys that sign it. */
+export type Credentials =
+  | { readonly kind: "key"; readonly key: Secret }
+  | { readonly kind: "aws"; readonly accessKeyId: string; readonly secretAccessKey: Secret };
 
 /** A configured provider, resolved: everything a request needs to reach it. */
 export interface Connection {
@@ -17,7 +26,7 @@ export interface Connection {
   readonly provider: string;
   readonly preset: Preset;
   readonly baseUrl: string;
-  readonly apiKey: Redacted.Redacted<string> | string | null;
+  readonly credentials: Credentials | null;
   readonly settings: Preset["defaults"];
 }
 
@@ -25,7 +34,7 @@ export const makeConnection = (input: {
   readonly provider: string;
   readonly preset: PresetId;
   readonly baseUrl: string | null;
-  readonly apiKey: Redacted.Redacted<string> | string | null;
+  readonly credentials: Credentials | null;
   readonly settings?: ProviderSettings | null;
 }): Connection | null => {
   const preset = getPreset(input.preset);
@@ -35,7 +44,7 @@ export const makeConnection = (input: {
     provider: input.provider,
     preset,
     baseUrl,
-    apiKey: input.apiKey,
+    credentials: input.credentials,
     settings: effectiveSettings(preset, input.settings),
   };
 };
@@ -57,6 +66,10 @@ export interface ModelCall {
   readonly cacheKey?: string | undefined;
   /** Asks an image-capable model for image output on this call. */
   readonly imageOutput?: boolean | undefined;
+  /** The model's own API, where the preset lets each model choose. */
+  readonly format?: WireFormat | null | undefined;
+  /** Runs once when the model refused Responses and the call moved to Chat Completions. */
+  readonly onChatFallback?: Effect.Effect<void> | undefined;
 }
 
 export const identityOf = (connection: Connection, model: string): ReplayIdentity => ({
@@ -66,16 +79,60 @@ export const identityOf = (connection: Connection, model: string): ReplayIdentit
   model,
 });
 
-const keyValue = (key: Connection["apiKey"]) =>
-  key === null ? "" : Redacted.isRedacted(key) ? Redacted.value(key) : key;
+const reveal = (secret: Secret) => (Redacted.isRedacted(secret) ? Redacted.value(secret) : secret);
 
-/** The headers that authenticate a request, per the preset or the admin's header name. */
-export const authHeaders = (connection: Connection): Record<string, string> => {
-  const key = keyValue(connection.apiKey).trim();
-  if (!key) return {};
-  const header = connection.settings.keyHeader;
-  return header ? { [header]: key } : { authorization: `Bearer ${key}` };
-};
+/**
+ * The headers that authenticate one request: the key in the preset's or the
+ * admin's header, or a SigV4 signature over these exact bytes.
+ */
+export const authenticate = (
+  connection: Connection,
+  request: { readonly method: string; readonly url: string; readonly body: string },
+) =>
+  Effect.gen(function* () {
+    const credentials = connection.credentials;
+    if (credentials?.kind !== "aws") {
+      const key = credentials ? reveal(credentials.key).trim() : "";
+      if (!key) return {};
+      const header = connection.settings.keyHeader;
+      return header ? { [header]: key } : { authorization: `Bearer ${key}` };
+    }
+    const url = new URL(request.url);
+    const scope = bedrockScope(url);
+    if (!scope)
+      return yield* Effect.fail(
+        configurationError(`AWS access keys sign only Bedrock endpoints, not ${url.host}.`),
+      );
+    const date = new Date(yield* Clock.currentTimeMillis);
+    const payloadHash = yield* Effect.promise(() => sha256Hex(request.body));
+    const headers = { "x-amz-date": amzDate(date), "x-amz-content-sha256": payloadHash };
+    const signed = yield* Effect.promise(() =>
+      authorization({
+        method: request.method,
+        url,
+        headers,
+        payloadHash,
+        ...scope,
+        keys: {
+          accessKeyId: credentials.accessKeyId,
+          secretAccessKey: reveal(credentials.secretAccessKey),
+        },
+        date,
+      }),
+    );
+    return { ...headers, authorization: signed };
+  });
+
+/** A JSON POST serialised once, so a signature covers the bytes that go out. */
+export const jsonRequest = (connection: Connection, url: string, body: unknown) =>
+  Effect.gen(function* () {
+    const text = JSON.stringify(body);
+    const headers = yield* authenticate(connection, { method: "POST", url, body: text });
+    return HttpClientRequest.post(url).pipe(
+      HttpClientRequest.setHeaders(headers),
+      HttpClientRequest.bodyText(text, "application/json"),
+    );
+  });
 
 export const endpoint = (connection: Connection, path: string) =>
   `${connection.baseUrl.replace(/\/+$/, "")}${path}`;
@@ -86,16 +143,17 @@ const lowercase = (headers: Readonly<Record<string, string>>) =>
   Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
 
 /** POSTs a JSON body; a non-2xx answer becomes a classified AiError with the provider's words. */
-export const postJson = (connection: Connection, path: string, body: unknown) =>
+export const postJson = (
+  connection: Connection,
+  path: string,
+  body: unknown,
+  headers: Readonly<Record<string, string>> = {},
+) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
-    const url = endpoint(connection, path);
-    const request = HttpClientRequest.post(url).pipe(
-      HttpClientRequest.setHeaders({
-        accept: "text/event-stream, application/json",
-        ...authHeaders(connection),
-      }),
-      HttpClientRequest.bodyJsonUnsafe(body),
+    const url = /^https?:\/\//.test(path) ? path : endpoint(connection, path);
+    const request = (yield* jsonRequest(connection, url, body)).pipe(
+      HttpClientRequest.setHeaders({ accept: "text/event-stream, application/json", ...headers }),
     );
     const response = yield* http
       .execute(request)

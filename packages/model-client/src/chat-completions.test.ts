@@ -77,7 +77,7 @@ describe("request shapes per preset", () => {
       const azure = harness({
         preset: "azure",
         baseUrl: "https://res.openai.azure.com",
-        settings: { format: "chat-completions" },
+        call: { format: "chat-completions" },
         answers: [chatSse([usage()])],
       });
       yield* azure.stream("Hi");
@@ -173,8 +173,7 @@ describe("reading streams", () => {
     Effect.gen(function* () {
       const text = "R1 writes <think>plan</think> before it answers.";
       const run = harness({
-        preset: "openai",
-        settings: { format: "chat-completions" },
+        preset: "custom",
         answers: [
           chatSse([
             delta({ content: text.slice(0, 12) }),
@@ -192,8 +191,7 @@ describe("reading streams", () => {
   effect("finds the opening block after leading whitespace, on any service", () =>
     Effect.gen(function* () {
       const run = harness({
-        preset: "openai",
-        settings: { format: "chat-completions" },
+        preset: "custom",
         answers: [
           chatSse([
             delta({ content: "\n <think>plan" }),
@@ -229,8 +227,7 @@ describe("reading streams", () => {
   effect("tags a refusal as text", () =>
     Effect.gen(function* () {
       const run = harness({
-        preset: "openai",
-        settings: { format: "chat-completions" },
+        preset: "custom",
         answers: [chatSse([delta({ content: null, refusal: "No." }), usage()])],
       });
       const parts = yield* run.stream("Hi");
@@ -723,7 +720,7 @@ describe("errors", () => {
       const run = harness({
         preset: "azure",
         baseUrl: "https://res.openai.azure.com",
-        settings: { format: "chat-completions" },
+        call: { format: "chat-completions" },
         answers: [
           {
             status: 429,

@@ -65,6 +65,7 @@ async function setup() {
       getModel: unexpected,
       createModel: unexpected,
       updateModel: unexpected,
+      setModelFormat: unexpected,
       deleteModel: unexpected,
     },
   };

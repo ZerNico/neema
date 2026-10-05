@@ -507,6 +507,7 @@ function makeChatService() {
     const supportsReasoningEffort = Effect.fn("ChatService.supportsReasoningEffort")(function* (
       model: {
         providerId: string;
+        modelKey: string;
         capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
       },
       effort: ReasoningEffort,
@@ -515,7 +516,7 @@ function makeChatService() {
       const provider = (yield* providers.listProviders()).find(
         (row) => row.id === model.providerId,
       );
-      return !!provider && sendsReasoningEffort(provider);
+      return !!provider && sendsReasoningEffort(provider, model.modelKey);
     });
 
     const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
@@ -645,6 +646,7 @@ function makeChatService() {
           userId: string;
           model: {
             providerId: string;
+            modelKey: string;
             contextLength: number | null | undefined;
             capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
           };

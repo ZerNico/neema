@@ -22,6 +22,7 @@ import {
 import {
   actionableReasoningEfforts,
   normalizeModelSettings,
+  type ModelFormat,
   type ModelSettings,
   type ReasoningEffort,
 } from "../model-config.ts";
@@ -121,6 +122,8 @@ export class ProviderRepo extends Context.Service<
     ): Effect.Effect<ModelRow>;
     /** Updates model settings and replaces allowed-group links atomically. */
     updateModel(modelId: string, input: ModelSettings): Effect.Effect<void>;
+    /** Records the API a model turned out to need, after it refused another. */
+    setModelFormat(modelId: string, format: ModelFormat): Effect.Effect<void>;
     deleteModel(modelId: string): Effect.Effect<void>;
   }
 >()("chat/providers/ProviderRepo") {
@@ -256,6 +259,7 @@ export class ProviderRepo extends Context.Service<
               description: models.description,
               contextLength: models.contextLength,
               capabilities: models.capabilities,
+              modelKey: models.modelKey,
               providerName: providers.name,
               preset: providers.preset,
               settings: providers.settings,
@@ -274,13 +278,17 @@ export class ProviderRepo extends Context.Service<
             // model nobody has placed yet follows the placed ones alphabetically.
             .orderBy(asc(models.defaultPriority), asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
-          return markDefaultModel(rows).map(({ preset, settings, ...model }) => ({
+          return markDefaultModel(rows).map(({ preset, settings, modelKey, ...model }) => ({
             ...model,
             // A model's image output works only where its provider asks for it.
             capabilities: supportsImageOutput({ preset, settings })
               ? model.capabilities
               : { ...model.capabilities, imageOutput: false },
-            reasoningEfforts: actionableReasoningEfforts(model.capabilities, { preset, settings }),
+            reasoningEfforts: actionableReasoningEfforts(
+              model.capabilities,
+              { preset, settings },
+              modelKey,
+            ),
           }));
         }),
 
@@ -432,6 +440,14 @@ export class ProviderRepo extends Context.Service<
                 return rows[0]!;
               }),
             )
+            .pipe(Effect.orDie);
+        }),
+
+        setModelFormat: Effect.fn("ProviderRepo.setModelFormat")(function* (modelId, format) {
+          yield* db
+            .update(models)
+            .set({ format, updatedAt: new Date() })
+            .where(eq(models.id, modelId))
             .pipe(Effect.orDie);
         }),
 

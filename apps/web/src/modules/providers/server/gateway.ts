@@ -1,11 +1,15 @@
 import {
-  authHeaders,
   Catalog,
+  effectiveSettings,
   endpoint,
+  formatFor,
+  getPreset,
   isSensitivePrompt,
+  jsonRequest,
   layer as modelClientLayer,
   makeConnection,
   type Connection,
+  type Credentials,
 } from "@chat/model-client";
 import {
   Cause,
@@ -15,19 +19,22 @@ import {
   Exit,
   Layer,
   Option,
+  Redacted,
   Schema,
   Semaphore,
   Stream,
 } from "effect";
 import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
+import { decodeAwsKeys } from "../aws-keys.ts";
 import {
   EMPTY_CAPABILITIES,
   type ModelCapabilities,
+  type ModelFormat,
   type ModelPricing,
   type ModelType,
   type ReasoningEffort,
@@ -249,13 +256,27 @@ export interface EmbeddingResult {
   readonly inputTokens: number | null;
 }
 
-/** The package's view of a stored provider: its preset, endpoint, key and overrides. */
+/**
+ * The stored secret as the credentials its kind says it is. Keys that do not
+ * parse are none: the provider then refuses, rather than a key being guessed.
+ */
+const credentialsOf = (provider: ProviderWithKey): Credentials | null => {
+  if (!provider.apiKey) return null;
+  if (effectiveSettings(getPreset(provider.preset), provider.settings).auth !== "aws")
+    return { kind: "key", key: provider.apiKey };
+  const keys = decodeAwsKeys(Redacted.value(provider.apiKey));
+  return keys
+    ? { kind: "aws", accessKeyId: keys.accessKeyId, secretAccessKey: keys.secretAccessKey }
+    : null;
+};
+
+/** The package's view of a stored provider: its preset, endpoint, credentials and overrides. */
 const connectionOf = (provider: ProviderWithKey): Connection | null =>
   makeConnection({
     provider: provider.id,
     preset: provider.preset,
     baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
+    credentials: credentialsOf(provider),
     settings: provider.settings,
   });
 
@@ -268,11 +289,18 @@ const connect = (provider: ProviderWithKey, notFound: string) => {
 // Separate from the stored-model lookup so a model can be tried before it is saved.
 const buildModelLayer = (
   connection: Connection,
-  model: { providerId: string; modelKey: string; capabilities: ModelCapabilities },
+  model: {
+    providerId: string;
+    modelKey: string;
+    capabilities: ModelCapabilities;
+    format?: ModelFormat | null;
+  },
   config: {
     maxOutputTokens?: number;
     reasoningEffort?: ReasoningEffort | null;
     cacheKey?: string;
+    /** Runs when the model refused Responses and the call moved to Chat Completions. */
+    onChatFallback?: Effect.Effect<void>;
   } = {},
   imageOutput = false,
 ) => {
@@ -288,6 +316,8 @@ const buildModelLayer = (
     reasoningEffort: config.reasoningEffort,
     cacheKey: config.cacheKey,
     imageOutput: actualImageOutput,
+    format: model.format,
+    onChatFallback: config.onChatFallback,
   }).pipe(Layer.provide(FetchHttpClient.layer));
   // `capabilities.tools` means native tool calling. Without it the Hermes
   // polyfill sits between the adapter and the toolkit loop.
@@ -400,8 +430,10 @@ export class AiGateway extends Context.Service<
     probeChatModel(input: {
       providerId: string;
       modelKey: string;
+      format?: ModelFormat | null;
     }): Effect.Effect<
-      { reply: string },
+      /** `format` is the API that answered, where each model has its own. */
+      { reply: string; format?: ModelFormat },
       ProviderUnreachable | ProviderContextOverflow | ModelNotFound
     >;
     /**
@@ -462,7 +494,15 @@ export class AiGateway extends Context.Service<
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
         const connection = yield* connect(provider, modelId);
-        return buildModelLayer(connection, model, config, imageOutput);
+        // Stored, so the next call starts there and the admin sees the switch.
+        const onChatFallback = Effect.suspend(() =>
+          repo.setModelFormat(model.id, "chat-completions"),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("could not record a model's API", { modelId, cause }),
+          ),
+        );
+        return buildModelLayer(connection, model, { ...config, onChatFallback }, imageOutput);
       });
 
       // One place decides which provider rejections are recoverable, so chat
@@ -644,6 +684,7 @@ export class AiGateway extends Context.Service<
       const probeChatModel = Effect.fn("AiGateway.probeChatModel")(function* (input: {
         providerId: string;
         modelKey: string;
+        format?: ModelFormat | null;
       }) {
         const provider = yield* repo.getProviderWithKey(input.providerId);
         if (!provider?.enabled) return yield* new ModelNotFound({ modelId: input.providerId });
@@ -655,6 +696,7 @@ export class AiGateway extends Context.Service<
             diagnostic: { kind: "InvalidRequestError" },
           });
         const connection = yield* connect(provider, input.providerId);
+        let fellBack = false;
         // Room for a reasoning model to think before it says OK.
         const { layer } = buildModelLayer(
           connection,
@@ -662,8 +704,9 @@ export class AiGateway extends Context.Service<
             providerId: provider.id,
             modelKey,
             capabilities: { ...EMPTY_CAPABILITIES, tools: true },
+            format: input.format ?? null,
           },
-          { maxOutputTokens: 512 },
+          { maxOutputTokens: 512, onChatFallback: Effect.sync(() => void (fellBack = true)) },
         );
         const prompt = Prompt.make("Reply with the single word OK.");
         const stream = LanguageModel.streamText({ prompt }).pipe(
@@ -674,7 +717,14 @@ export class AiGateway extends Context.Service<
           Effect.timeout(Duration.seconds(60)),
           Effect.mapError(requestError(provider.id, prompt)),
         );
-        return { reply: result.text.trim().slice(0, 200) };
+        const used = fellBack
+          ? "chat-completions"
+          : formatFor(connection.preset, connection.settings, modelKey, input.format);
+        return {
+          reply: result.text.trim().slice(0, 200),
+          // Only where the model's API is its own choice, for the dialog to show it.
+          ...(connection.preset.modelFormat && used !== "messages" ? { format: used } : {}),
+        };
       });
 
       const probeEmbeddingDimensions = Effect.fn("AiGateway.probeEmbeddingDimensions")(
@@ -689,11 +739,11 @@ export class AiGateway extends Context.Service<
               diagnostic: { kind: "InvalidRequestError" },
             });
           const connection = yield* connect(provider, input.providerId);
-          const request = HttpClientRequest.post(endpoint(connection, "/embeddings")).pipe(
-            HttpClientRequest.setHeaders(authHeaders(connection)),
-            HttpClientRequest.bodyJsonUnsafe({ model: modelKey, input: ["dimension probe"] }),
-          );
-          const response = yield* httpClient.execute(request).pipe(
+          const response = yield* jsonRequest(connection, endpoint(connection, "/embeddings"), {
+            model: modelKey,
+            input: ["dimension probe"],
+          }).pipe(
+            Effect.flatMap((request) => httpClient.execute(request)),
             Effect.flatMap((res) =>
               res.status < 200 || res.status >= 300
                 ? Effect.fail(new Error(`HTTP ${res.status}`))
@@ -791,9 +841,13 @@ export class AiGateway extends Context.Service<
         // others may reject or ignore it. Detect recorded the model's width, so the
         // check below is the contract.
         const connection = yield* connect(provider, input.modelId);
-        const request = HttpClientRequest.post(endpoint(connection, "/embeddings")).pipe(
-          HttpClientRequest.setHeaders(authHeaders(connection)),
-          HttpClientRequest.bodyJsonUnsafe({ model: model.modelKey, input: input.inputs }),
+        const request = yield* jsonRequest(connection, endpoint(connection, "/embeddings"), {
+          model: model.modelKey,
+          input: input.inputs,
+        }).pipe(
+          Effect.mapError(
+            (error) => new ProviderUnreachable({ providerId, message: error.message }),
+          ),
         );
 
         if (input.beforeDispatch) yield* input.beforeDispatch();

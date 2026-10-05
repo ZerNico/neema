@@ -8,7 +8,7 @@ import { ProviderRepo } from "./repo.ts";
 
 // The real model client runs through the gateway; only the network is faked.
 const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
-let streams: string[] = [];
+let streams: Array<string | { status: number; body: string }> = [];
 
 vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
@@ -23,11 +23,11 @@ vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
               : new TextDecoder().decode(init.body as BufferSource),
           ),
   });
+  const next = streams.shift() ?? "";
   return Promise.resolve(
-    new Response(streams.shift() ?? "", {
-      status: 200,
-      headers: { "content-type": "text/event-stream" },
-    }),
+    typeof next === "string"
+      ? new Response(next, { status: 200, headers: { "content-type": "text/event-stream" } })
+      : new Response(next.body, { status: next.status }),
   );
 });
 
@@ -118,7 +118,7 @@ const gatewayFor = (kind: "openai" | "azure", reasoning = true) =>
     Layer.provide(repoWith(kind, reasoning)),
   );
 
-const reset = (...bodies: string[]) => {
+const reset = (...bodies: typeof streams) => {
   requests.length = 0;
   streams = bodies;
 };
@@ -397,12 +397,14 @@ describe("Responses providers", () => {
                       providerId: "p1",
                       modelKey: "gpt-5.6-sol",
                       capabilities: { reasoning: true, tools: true, vision: true, files: true },
+                      // Azure's API is the deployment's own.
+                      format: "chat-completions",
                     }),
                   getProviderWithKey: () =>
                     Effect.succeed({
                       id: "p1",
                       preset: "azure",
-                      settings: { format: "chat-completions" },
+                      settings: {},
                       apiKey: Redacted.make("sk-test"),
                       baseUrl: "https://resource.test/openai/v1",
                       enabled: true,
@@ -414,5 +416,66 @@ describe("Responses providers", () => {
         ),
       ),
     ),
+  );
+});
+
+describe("Azure deployments choosing their API", () => {
+  it.effect(
+    "records a deployment that refused Responses, after answering on Chat Completions",
+    () => {
+      const recorded: Array<[string, string]> = [];
+      return Effect.gen(function* () {
+        reset(
+          { status: 400, body: JSON.stringify({ error: { message: "Model not supported" } }) },
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+        );
+        yield* collect(
+          (yield* AiGateway).streamChat({ modelId: "m1", prompt: Prompt.make("Hello") }),
+        );
+        expect(requests.map((request) => request.url)).toEqual([
+          "https://resource.test/openai/v1/responses",
+          "https://resource.test/openai/v1/chat/completions",
+        ]);
+        expect(recorded).toEqual([["m1", "chat-completions"]]);
+      }).pipe(
+        Effect.provide(
+          AiGateway.layer.pipe(
+            Layer.provide(Layer.succeed(AnalyticsRepo, { record: () => Effect.void } as never)),
+            Layer.provide(
+              Layer.succeed(ProviderRepo)(
+                ProviderRepo.of(
+                  Object.assign({} as ProviderRepo["Service"], {
+                    getModel: () =>
+                      Effect.succeed({
+                        id: "m1",
+                        providerId: "p1",
+                        modelKey: "partner-model",
+                        capabilities: {
+                          reasoning: false,
+                          tools: true,
+                          vision: false,
+                          files: false,
+                        },
+                        format: null,
+                      }),
+                    getProviderWithKey: () =>
+                      Effect.succeed({
+                        id: "p1",
+                        preset: "azure",
+                        settings: {},
+                        apiKey: Redacted.make("sk-test"),
+                        baseUrl: "https://resource.test/openai/v1",
+                        enabled: true,
+                      }),
+                    setModelFormat: (modelId: string, format: string) =>
+                      Effect.sync(() => void recorded.push([modelId, format])),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
   );
 });

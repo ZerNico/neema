@@ -7,9 +7,13 @@ import {
   modelSettingsFromDraft,
   type ModelSettingsDraft,
 } from "./model-settings-form.tsx";
+import { ModelTestResult } from "./model-test.tsx";
+import { useModelTest } from "./use-model-test.ts";
+import { getPreset, type PresetId } from "@chat/model-client/presets";
 import type {
   ModelAccess,
   ModelCapabilities,
+  ModelFormat,
   ModelPricing,
   ModelType,
 } from "~/modules/providers/model-config.ts";
@@ -37,6 +41,7 @@ export interface EditableModel {
   id: string;
   providerId: string;
   modelKey: string;
+  format?: ModelFormat | null;
   displayName: string;
   description?: string | null;
   type: ModelType;
@@ -55,10 +60,13 @@ export interface EditableModel {
  */
 export function ModelEditDialog({
   model,
+  presetId,
   open,
   onOpenChange,
 }: {
   model: EditableModel | null;
+  /** Where the preset gives each model its own API, the form offers it. */
+  presetId?: PresetId | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -77,6 +85,7 @@ export function ModelEditDialog({
           <ModelEditForm
             key={model.id}
             model={model}
+            apiChoice={presetId !== undefined && getPreset(presetId).modelFormat === true}
             onClose={() => onOpenChange(false)}
             onSavingChange={setSaving}
           />
@@ -88,10 +97,12 @@ export function ModelEditDialog({
 
 function ModelEditForm({
   model,
+  apiChoice,
   onClose,
   onSavingChange,
 }: {
   model: EditableModel;
+  apiChoice: boolean;
   onClose: () => void;
   onSavingChange: (saving: boolean) => void;
 }) {
@@ -118,8 +129,12 @@ function ModelEditForm({
     enabled: model.enabled,
     access: model.access,
     selectedGroups: groups.filter((group) => allowedIds.has(group.id)),
+    format: apiChoice ? (model.format ?? "responses") : null,
   });
   const settings = modelSettingsFromDraft(draft);
+  const test = useModelTest(model.providerId, (format) =>
+    setDraft((current) => ({ ...current, format })),
+  );
 
   const save = useMutation({
     mutationFn: () => {
@@ -168,8 +183,19 @@ function ModelEditForm({
           />
         </FieldGroup>
 
+        <ModelTestResult test={test.resultFor(model.modelKey)} />
         {save.isError ? <FieldError>Could not save the model.</FieldError> : null}
         <DialogFooter>
+          {draft.type === "chat" ? (
+            <PendingButton
+              variant="outline"
+              pending={test.pending}
+              disabled={save.isPending}
+              onClick={() => test.run(model.modelKey, draft.format)}
+            >
+              Test
+            </PendingButton>
+          ) : null}
           <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
             Cancel
           </DialogClose>

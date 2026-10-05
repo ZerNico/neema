@@ -11,8 +11,11 @@ describe("actionableReasoningEfforts", () => {
       vision: false,
       files: false,
     };
-    const levels = (preset: "openrouter" | "azure" | "custom" | "mistral", settings = {}) =>
-      actionableReasoningEfforts(capabilities, { preset, settings });
+    const levels = (
+      preset: "openrouter" | "azure" | "custom" | "mistral" | "bedrock",
+      settings = {},
+      modelKey = "vendor/model",
+    ) => actionableReasoningEfforts(capabilities, { preset, settings }, modelKey);
     expect(levels("openrouter")).toEqual(["low", "high"]);
     expect(levels("custom", { reasoning: "flat" })).toEqual(["low", "high"]);
     expect(levels("custom", { reasoning: "nested" })).toEqual(["low", "high"]);
@@ -22,10 +25,14 @@ describe("actionableReasoningEfforts", () => {
     // Responses always takes the level.
     expect(levels("custom", { format: "responses" })).toEqual(["low", "high"]);
     expect(levels("azure")).toEqual(["low", "high"]);
+    // Claude on Bedrock speaks Messages, which always takes the level.
+    expect(levels("bedrock", {}, "us.anthropic.claude-sonnet-5")).toEqual(["low", "high"]);
+    expect(levels("bedrock", {}, "openai.gpt-oss-120b")).toEqual(["low", "high"]);
     expect(
       actionableReasoningEfforts(
         { ...capabilities, reasoning: false },
         { preset: "openrouter", settings: {} },
+        "vendor/model",
       ),
     ).toEqual([]);
   });
