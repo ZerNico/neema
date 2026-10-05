@@ -24,6 +24,7 @@ describe("integration row projection", () => {
           url: "https://docs.example.com/doc/plan",
           text: "secret",
         },
+        link: { title: "Plan", url: "https://docs.example.com/doc/plan" },
       },
       isFailure: false,
     });
@@ -52,13 +53,19 @@ describe("integration row projection", () => {
     ).toMatchObject({ status: "error", error: "Outline: boom" });
   });
 
-  it("does not link a page for a read, whose sources already cite it", () => {
+  it("links only what the adapter named, never a guess from the output's shape", () => {
     const activity = projectIntegrationToolResult({
       ...base,
-      access: "read",
       raw: { ok: true, result: { title: "Plan", url: "https://docs.example.com/doc/plan" } },
       isFailure: false,
     });
     expect(activity.link).toBeUndefined();
+    expect(
+      projectIntegrationToolResult({
+        ...base,
+        raw: { ok: true, result: {}, link: { title: "Plan", url: "javascript:alert(1)" } },
+        isFailure: false,
+      }).link,
+    ).toBeUndefined();
   });
 });

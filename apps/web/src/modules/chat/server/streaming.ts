@@ -144,6 +144,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
 import { findIntegration } from "~/modules/integrations/catalog.ts";
+import { summarizeCall } from "~/modules/integrations/manifest.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
@@ -2744,7 +2745,7 @@ export class StreamEngine extends Context.Service<
                           }
                           if (family === "integration") {
                             const entry = integrationTools!.names.get(part.name)!;
-                            const summary = entry.tool.summarize(args)?.slice(0, 200) ?? null;
+                            const summary = summarizeCall(entry.tool, args)?.slice(0, 200) ?? null;
                             integrationSummaries.set(part.id, summary);
                             // The handler may park on an approval, which names
                             // this row; release it only once the row exists.

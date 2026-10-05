@@ -6,7 +6,20 @@ export type ToolPermission = "allow" | "ask" | "block";
 /** What a schedule granted up front; null when a person is there to ask. */
 export type UnattendedGrant = "read" | "write" | null;
 
-export type Consent = "run" | "ask" | "refuse";
+/**
+ * Why a call may not run: the person blocked the tool, the schedule's grant
+ * does not reach that far, or the tool is destructive and nobody is there.
+ */
+export type RefusalReason = "blocked" | "grant" | "destructive";
+
+export type Consent =
+  | { readonly kind: "run" }
+  | { readonly kind: "ask" }
+  | { readonly kind: "refuse"; readonly reason: RefusalReason };
+
+const RUN: Consent = { kind: "run" };
+const ASK: Consent = { kind: "ask" };
+const refuse = (reason: RefusalReason): Consent => ({ kind: "refuse", reason });
 
 /** Reads are allowed and anything that changes the service asks, until set otherwise. */
 export const defaultPermission = (access: ToolAccess): ToolPermission =>
@@ -30,15 +43,15 @@ export const consentFor = (input: {
   allowedInChat: boolean;
   unattended: UnattendedGrant;
 }): Consent => {
-  if (input.permission === "block") return "refuse";
+  if (input.permission === "block") return refuse("blocked");
   if (input.unattended !== null) {
-    if (input.access === "read") return "run";
+    if (input.access === "read") return RUN;
     // Deleting is never granted ahead of time: nobody would see it happen.
-    if (input.access === "destructive") return "refuse";
-    return input.unattended === "write" ? "run" : "refuse";
+    if (input.access === "destructive") return refuse("destructive");
+    return input.unattended === "write" ? RUN : refuse("grant");
   }
-  if (input.permission === "allow") return "run";
+  if (input.permission === "allow") return RUN;
   // One approval in a chat can lift asks for changes, never for deleting.
-  if (input.allowedInChat && input.access !== "destructive") return "run";
-  return "ask";
+  if (input.allowedInChat && input.access !== "destructive") return RUN;
+  return ASK;
 };

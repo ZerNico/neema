@@ -10,13 +10,23 @@ changes anything.
 
 Each integration is two halves with one id. The **manifest** (`<id>/manifest.ts`,
 client-safe) is everything a screen needs: name, logo, admin fields, auth methods, the tool
-list with each tool's access class and a one-line argument summary, and whether it can be
-a knowledge source. The **adapter** (`<id>/server/adapter.ts`) is behaviour: config
-normalization, OAuth endpoints, `verify`, tool handlers and the knowledge browse, enumerate
-and fetch. `catalog.ts` and `server/adapters.ts` list them; `catalog.test.ts` checks that
-every manifest tool has a handler and the reverse. Admin, Settings, the composer, tool
-rows, approvals and the source picker render from the manifest alone, so a new integration
-is one manifest and one adapter.
+definitions and whether it can be a knowledge source. Each tool is defined once
+(`defineIntegrationTool`, in `<id>/tools.ts`): name, title, label, model description,
+access class, parameters and a one-line argument summary. The **adapter**
+(`<id>/server/adapter.ts`) is behaviour: config normalization, OAuth endpoints, `verify`, one
+handler per tool definition, and the knowledge browse, enumerate and fetch.
+`integrationHandlers` types each handler by its definition's parameters, so a missing, extra
+or mistyped handler does not compile; past that one function the handlers are erased for
+dynamic dispatch, which is safe because the toolkit decodes every call against the same
+definition first. Admin, Settings, the composer, tool rows, approvals and the source picker
+render from the manifest alone, so a new integration is one manifest and one adapter.
+
+A handler does not run a call, it **prepares** one: it checks the arguments, reads from the
+service whatever the call will touch, and returns a summary for the approval card with an
+`execute` effect. Approval decides on that prepared call and the same one executes, so what
+a person approved is what runs, never a second read made after the wait. What a result
+means is stated, not guessed: a source says whether it was read in full, and a write names
+the page it produced as `link`.
 
 Tools are `int_<integration>__<tool>`, family `integration`. As with custom tools, the
 prefix is only the durable marker for persisted rows; inside a generation the resolved
@@ -92,11 +102,15 @@ the current connection and requires the same connection row as the offer. A newl
 approval cannot be silently skipped by a call that was offered as allowed. Credential refresh
 checks availability again, without treating an admin disable as bad credentials.
 
-The approval card names the call's target from the manifest's summary of the arguments,
-unless the adapter's `describe` can look the target up in the service first: Outline's delete
-shows the page title and how many nested pages go with it, never just the id the model
-passed. That lookup failing falls back to the summary; it never blocks the ask. Outline's
-delete only moves to the trash, so a mistaken approval can be undone there.
+Cheap checks run before preparing: a blocked tool or a scheduled run without the grant is
+refused without touching the service, and a malformed call is explained without asking
+anyone. `consentFor` returns the reason with a refusal (blocked, beyond the grant,
+destructive while unattended), and the tool layer turns it into what the model reads. The
+approval card shows the prepared summary when the handler gave one, else the definition's
+summary of the arguments: Outline's delete shows the page title and how many nested pages
+go with it, never just the id the model passed. A preparation that fails fails the call, as
+running it would have. Outline's delete only moves to the trash, so a mistaken approval can
+be undone there.
 
 Asking parks the handler on `IntegrationApprovals`, a per-call `Deferred` keyed by the tool
 row id. The observer releases the handler only after that row exists, the same handoff

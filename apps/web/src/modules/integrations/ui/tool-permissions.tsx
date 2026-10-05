@@ -19,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import { findIntegration } from "../catalog.ts";
 import { permissionFor, type ToolPermission } from "../consent.ts";
-import type { IntegrationToolManifest } from "../manifest.ts";
+import type { IntegrationToolDefinition } from "../manifest.ts";
 
 const CHOICES: ReadonlyArray<{ value: ToolPermission; label: string; icon: typeof HandIcon }> = [
   { value: "allow", label: "Always allow", icon: CheckmarkCircle02Icon },
@@ -82,7 +82,7 @@ function ToolGroup({
   onChange,
 }: {
   title: string;
-  tools: ReadonlyArray<IntegrationToolManifest>;
+  tools: ReadonlyArray<IntegrationToolDefinition>;
   permissions: Readonly<Record<string, ToolPermission>>;
   disabled: boolean | undefined;
   onChange: (changes: Record<string, ToolPermission>) => void;

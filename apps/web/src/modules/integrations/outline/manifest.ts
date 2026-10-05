@@ -1,11 +1,6 @@
 import type { IntegrationManifest } from "../manifest.ts";
 import { OutlineLogo } from "./logo.tsx";
-
-const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
-const quoted = (value: unknown) => {
-  const found = text(value);
-  return found ? `“${found.length > 80 ? `${found.slice(0, 79)}…` : found}”` : null;
-};
+import { OUTLINE_TOOLS } from "./tools.ts";
 
 export const outlineManifest = {
   id: "outline",
@@ -31,49 +26,6 @@ export const outlineManifest = {
     placeholder: "ol_api_…",
     helpUrl: (config) => (config.baseUrl ? `${config.baseUrl.replace(/\/+$/, "")}/settings` : null),
   },
-  tools: [
-    {
-      name: "search",
-      title: "Search documents",
-      label: "Searched Outline",
-      access: "read",
-      summarize: (args) => quoted(args.query),
-    },
-    {
-      name: "read_document",
-      title: "Read a document",
-      label: "Read an Outline document",
-      access: "read",
-      summarize: (args) => text(args.id),
-    },
-    {
-      name: "list",
-      title: "Browse collections and pages",
-      label: "Browsed Outline",
-      access: "read",
-      summarize: () => null,
-    },
-    {
-      name: "create_document",
-      title: "Create documents",
-      label: "Create an Outline document",
-      access: "write",
-      summarize: (args) => quoted(args.title),
-    },
-    {
-      name: "update_document",
-      title: "Update documents",
-      label: "Update an Outline document",
-      access: "write",
-      summarize: (args) => quoted(args.title) ?? text(args.id),
-    },
-    {
-      name: "delete_document",
-      title: "Delete documents",
-      label: "Delete an Outline document",
-      access: "destructive",
-      summarize: (args) => text(args.id),
-    },
-  ],
+  tools: OUTLINE_TOOLS,
   knowledgeSource: true,
 } satisfies IntegrationManifest;

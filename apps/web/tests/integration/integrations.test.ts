@@ -468,16 +468,17 @@ describe("what a chat is offered", () => {
 });
 
 describe("chat tools", () => {
-  const deleteTool = outlineAdapter.tools.find((tool) => tool.name === "delete_document")!;
+  const deleteTool = outlineAdapter.handlers.delete_document!;
 
   it("names what a delete will take before asking, and only ever trashes", async () => {
     // Built here: `baseUrl` exists only once the fake server is listening.
     const target = { config: { baseUrl }, bearer: Effect.succeed("ol_api_good") };
     // The approval shows the service's title and what goes with it, not the model's id.
-    expect(await run(deleteTool.describe!(target, { id: "d1" }))).toBe(
-      "“Onboarding” and 1 nested page",
-    );
-    const result = await run(deleteTool.run(target, { id: "d1" }));
+    const prepared = await run(deleteTool(target, { id: "d1" }));
+    expect(prepared.summary).toBe("“Onboarding” and 1 nested page");
+    // Preparing only reads; the trash happens when the approved call runs.
+    expect(deleted).toEqual([]);
+    const result = await run(prepared.execute);
     expect(result.output).toMatchObject({ title: "Onboarding", nestedDocuments: 1 });
     expect(deleted).toEqual([{ id: "d1" }]);
   });
@@ -592,6 +593,83 @@ describe("approvals", () => {
       await configure();
     },
   );
+});
+
+describe("prepared calls", () => {
+  const offeredHandler = (
+    userId: string,
+    conversationId: string,
+    grants: ReadonlyArray<{ integrationId: string; access: "read" | "write" }> | null,
+    tool: string,
+  ) =>
+    Effect.gen(function* () {
+      const service = yield* IntegrationService;
+      const approvals = yield* IntegrationApprovals;
+      const offered = yield* service.resolveOffer({ userId, conversationId, grants });
+      const prepared = prepareIntegrationTools({
+        offered,
+        indexer: createSourceIndexer([]),
+        approvals,
+        owner: { userId, conversationId, messageId: "answer" },
+        permissionsFor: (integrationId) =>
+          service.permissionsFor(userId, conversationId, integrationId),
+        sessionFor: (integrationId) =>
+          service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+        rowIdFor: () => Effect.succeed("pending-call"),
+        reportAuthFailure: (session) =>
+          service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+      });
+      return prepared?.group.handlers[`int_outline__${tool}`] as (
+        args: Record<string, unknown>,
+        context: { toolCallId: string },
+      ) => Effect.Effect<IntegrationModelResult>;
+    });
+
+  const setup = async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    const conversationId = uuidv7();
+    await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
+    return { userId, conversationId };
+  };
+
+  it("explains a malformed call without asking anyone", async () => {
+    const { userId, conversationId } = await setup();
+    const result = await run(
+      Effect.gen(function* () {
+        const handler = yield* offeredHandler(userId, conversationId, null, "create_document");
+        return yield* handler({ text: "No title" }, { toolCallId: "call" });
+      }),
+    );
+    expect(result).toMatchObject({ ok: false, error: "Pass `title`." });
+    expect(await run(Effect.flatMap(IntegrationApprovals, (a) => a.pending(userId)))).toEqual([]);
+  });
+
+  it("names why a scheduled run may not make a change", async () => {
+    const { userId, conversationId } = await setup();
+    deleted.length = 0;
+    const fire = (access: "read" | "write", tool: string, args: Record<string, unknown>) =>
+      run(
+        Effect.gen(function* () {
+          const handler = yield* offeredHandler(
+            userId,
+            conversationId,
+            [{ integrationId: "outline", access }],
+            tool,
+          );
+          return yield* handler(args, { toolCallId: "call" });
+        }),
+      );
+    expect(
+      await fire("read", "create_document", { title: "Plan", collectionId: "c1" }),
+    ).toMatchObject({ refused: true, error: expect.stringContaining("only allowed to read") });
+    expect(await fire("write", "delete_document", { id: "d1" })).toMatchObject({
+      refused: true,
+      error: expect.stringContaining("never delete documents"),
+    });
+    expect(deleted).toEqual([]);
+  });
 });
 
 describe("knowledge sync", () => {

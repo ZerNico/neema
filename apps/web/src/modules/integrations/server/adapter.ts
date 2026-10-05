@@ -1,4 +1,5 @@
 import type { Effect, Schema } from "effect";
+import type { IntegrationToolDefinition } from "../manifest.ts";
 import type {
   IntegrationAuthFailed,
   IntegrationRejected,
@@ -20,37 +21,59 @@ export interface AdapterSource {
   readonly title: string;
   readonly url: string;
   readonly snippet: string;
+  /** The whole item was read, not just matched by a search. */
+  readonly read: boolean;
 }
 
 export interface AdapterToolResult {
   /** What the model reads. Bounded by the adapter. */
   readonly output: unknown;
   readonly sources?: ReadonlyArray<AdapterSource>;
+  /** The page a change produced, linked from the tool row. */
+  readonly link?: { readonly title: string; readonly url: string };
 }
 
-export interface AdapterTool {
-  /** Must match a manifest tool name; `adapters.test.ts` checks the pairing. */
-  readonly name: string;
-  readonly description: string;
-  /**
-   * Every field `Schema.optionalKey`: a key the model omits must reach the
-   * handler, which explains it, instead of failing the whole generation.
-   */
-  readonly parameters: Schema.Struct<Schema.Struct.Fields>;
-  readonly run: (
-    session: IntegrationSession,
-    args: Readonly<Record<string, unknown>>,
-  ) => Effect.Effect<AdapterToolResult, AdapterFailure>;
-  /**
-   * Names the target for an approval card from the service itself, so a person
-   * approves what the call will really touch rather than the model's wording.
-   * A failure falls back to the manifest summary; `run` still reports it.
-   */
-  readonly describe?: (
-    session: IntegrationSession,
-    args: Readonly<Record<string, unknown>>,
-  ) => Effect.Effect<string | null, AdapterFailure>;
+/**
+ * A call checked and ready, before anyone decides on it. Preparing reads what
+ * the call will touch from the service, so an approval names the real target
+ * and the call that runs is the one that was approved: `execute` is never
+ * prepared again after a wait.
+ */
+export interface PreparedCall {
+  /** Names the target for an approval card; null keeps the definition's summary. */
+  readonly summary: string | null;
+  readonly execute: Effect.Effect<AdapterToolResult, AdapterFailure>;
 }
+
+/** A call that needs nothing from the service before it runs. */
+export const ready = (execute: Effect.Effect<AdapterToolResult, AdapterFailure>): PreparedCall => ({
+  summary: null,
+  execute,
+});
+
+/** What the handler types read from a definition. */
+type ToolShape = Pick<IntegrationToolDefinition, "name"> & { readonly parameters: Schema.Top };
+
+type Handler<Args> = (
+  session: IntegrationSession,
+  args: Args,
+) => Effect.Effect<PreparedCall, AdapterFailure>;
+
+/** One handler per definition, typed by its parameters. A missing or extra one does not compile. */
+export type IntegrationHandlers<Tools extends ReadonlyArray<ToolShape>> = {
+  readonly [Tool in Tools[number] as Tool["name"]]: Handler<Tool["parameters"]["Type"]>;
+};
+
+export type ErasedHandler = Handler<unknown>;
+
+/**
+ * Where the per-tool types end. The toolkit decodes a call against the same
+ * definition before the handler runs, so the arguments match by construction.
+ */
+export const integrationHandlers =
+  <const Tools extends ReadonlyArray<ToolShape>>(_tools: Tools) =>
+  (handlers: IntegrationHandlers<Tools>): Readonly<Record<string, ErasedHandler>> =>
+    handlers as Readonly<Record<string, ErasedHandler>>;
 
 /** One remote document a source may mirror, with its place in the tree. */
 export interface RemoteDocument {
@@ -114,7 +137,8 @@ export interface IntegrationAdapter {
   } | null;
   /** Checks a credential and names the account it belongs to. */
   verify(session: IntegrationSession): Effect.Effect<{ accountLabel: string }, AdapterFailure>;
-  readonly tools: ReadonlyArray<AdapterTool>;
+  /** Keyed by the manifest's tool names; `catalog.test.ts` checks the pairing. */
+  readonly handlers: Readonly<Record<string, ErasedHandler>>;
   readonly knowledge: KnowledgeAdapter | null;
 }
 

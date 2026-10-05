@@ -75,22 +75,13 @@ export interface IntegrationModelResult {
   readonly refused?: boolean;
   readonly error?: string;
   readonly result?: unknown;
+  /** The page a change produced, as the adapter named it. */
+  readonly link?: { readonly title: string; readonly url: string };
   readonly citations?: ReadonlyArray<{ index: number; title: string; url: string }>;
 }
 
 const clamp = (value: string, max: number) =>
   value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-
-const linkOf = (result: unknown) => {
-  if (!result || typeof result !== "object") return undefined;
-  const { title, url } = result as { title?: unknown; url?: unknown };
-  return typeof title === "string" && typeof url === "string" && /^https?:\/\//.test(url)
-    ? {
-        title: clamp(title || "Untitled", INTEGRATION_ACTIVITY_LIMITS.name),
-        url: clamp(url, INTEGRATION_ACTIVITY_LIMITS.link),
-      }
-    : undefined;
-};
 
 /** The only persistence and wire projection for integration rows. */
 export function projectIntegrationToolResult(input: {
@@ -111,7 +102,13 @@ export function projectIntegrationToolResult(input: {
     : typeof result.error === "string"
       ? result.error
       : "The integration call failed.";
-  const link = ok && input.access !== "read" ? linkOf(result.result) : undefined;
+  const link =
+    ok && result.link && /^https?:\/\//.test(result.link.url)
+      ? {
+          title: clamp(result.link.title || "Untitled", INTEGRATION_ACTIVITY_LIMITS.name),
+          url: clamp(result.link.url, INTEGRATION_ACTIVITY_LIMITS.link),
+        }
+      : undefined;
   return {
     family: "integration",
     version: 1,

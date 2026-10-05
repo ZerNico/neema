@@ -1,13 +1,16 @@
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { IntegrationRejected } from "../../errors.ts";
 import { INTEGRATION_LIMITS, type BrowseNode } from "../../schema.ts";
-import type {
-  AdapterFailure,
-  AdapterTool,
-  IntegrationAdapter,
-  IntegrationSession,
-  RemoteDocument,
+import {
+  integrationHandlers,
+  ready,
+  type AdapterFailure,
+  type AdapterToolResult,
+  type IntegrationAdapter,
+  type IntegrationSession,
+  type RemoteDocument,
 } from "../../server/adapter.ts";
+import { OUTLINE_TOOLS } from "../tools.ts";
 import {
   absoluteUrl,
   outlineBase,
@@ -18,10 +21,7 @@ import {
   type OutlineNavigationNode,
 } from "./client.ts";
 
-const optionalText = (description: string) =>
-  Schema.optionalKey(Schema.String.annotate({ description }));
-
-const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
 const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
 
 // Search snippets arrive with <b> highlighting; the model wants plain text.
@@ -49,235 +49,191 @@ const collectionTree = (session: IntegrationSession, collectionId: string) =>
     Effect.map((response) => response.data),
   );
 
-const tools: ReadonlyArray<AdapterTool> = [
-  {
-    name: "search",
-    description:
-      "Full-text search across the Outline documents the user can access. Returns titles, links, ids and a short matching snippet; read a document for its full text.",
-    parameters: Schema.Struct({
-      query: optionalText("Keywords to search for."),
-      collectionId: optionalText("Only search this Outline collection."),
-    }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const query = text(args.query);
-        if (!query) return yield* reject("Pass `query` with the keywords to search for.");
-        const collectionId = text(args.collectionId);
-        const response = yield* outlineCall<Array<{ context: string; document: OutlineDocument }>>(
-          session,
-          "documents.search",
-          {
+const handlers = integrationHandlers(OUTLINE_TOOLS)({
+  search: (session, args) =>
+    Effect.gen(function* () {
+      const query = text(args.query);
+      if (!query) return yield* reject("Pass `query` with the keywords to search for.");
+      const collectionId = text(args.collectionId);
+      return ready(
+        Effect.gen(function* () {
+          const response = yield* outlineCall<
+            Array<{ context: string; document: OutlineDocument }>
+          >(session, "documents.search", {
             query,
             limit: INTEGRATION_LIMITS.searchResults,
             ...(collectionId ? { collectionId } : {}),
-          },
-        );
-        const results = response.data.map((hit) => ({
-          id: hit.document.id,
-          title: hit.document.title || "Untitled",
-          url: absoluteUrl(session.config, hit.document.url),
-          snippet: plain(hit.context),
-          updatedAt: hit.document.updatedAt,
-        }));
-        return {
-          output: results.length ? { results } : { results, note: "No documents matched." },
-          sources: results.map((result) => ({
-            externalId: result.id,
-            title: result.title,
-            url: result.url,
-            snippet: result.snippet,
-          })),
-        };
-      }),
-  },
-  {
-    name: "read_document",
-    description:
-      "Read one Outline document as Markdown by id. Long documents come back in parts; pass `offset` from the previous answer to continue.",
-    parameters: Schema.Struct({
-      id: optionalText("The document id from search or list."),
-      offset: Schema.optionalKey(
-        Schema.Number.annotate({ description: "Character offset to continue from." }),
-      ),
-    }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const id = text(args.id);
-        if (!id) return yield* reject("Pass `id` of the document to read.");
-        const offset =
-          typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 0;
-        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
-        const body = data.text ?? "";
-        const end = Math.min(body.length, offset + INTEGRATION_LIMITS.readChars);
-        const url = absoluteUrl(session.config, data.url);
-        return {
-          output: {
-            id: data.id,
-            title: data.title,
-            url,
-            updatedAt: data.updatedAt,
-            totalChars: body.length,
-            offset,
-            nextOffset: end < body.length ? end : null,
-            text: body.slice(offset, end),
-          },
-          sources: [
-            {
-              externalId: data.id,
-              title: data.title || "Untitled",
-              url,
-              snippet: body.slice(offset, offset + 300),
-            },
-          ],
-        };
-      }),
-  },
-  {
-    name: "list",
-    description:
-      "Browse Outline. With no arguments, lists collections. With `collectionId`, lists that collection's top-level documents; with `documentId`, that document's children.",
-    parameters: Schema.Struct({
-      collectionId: optionalText("Collection to list the documents of."),
-      documentId: optionalText("Document to list the children of."),
-    }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const collectionId = text(args.collectionId);
-        const documentId = text(args.documentId);
-        if (documentId) {
-          const { data } = yield* outlineCall<OutlineNavigationNode | OutlineNavigationNode[]>(
-            session,
-            "documents.documents",
-            { id: documentId },
-          );
-          const children = Array.isArray(data) ? data : (data.children ?? []);
-          return { output: { documents: navigationSummary(session, children) } };
-        }
-        if (collectionId) {
-          const nodes = yield* collectionTree(session, collectionId);
-          return { output: { documents: navigationSummary(session, nodes) } };
-        }
-        const collections = yield* outlineList<OutlineCollection>(
-          session,
-          "collections.list",
-          {},
-          INTEGRATION_LIMITS.listResults,
-        );
-        return {
-          output: {
-            collections: collections.map((collection) => ({
-              id: collection.id,
-              name: collection.name,
-              url: absoluteUrl(session.config, collection.url),
+          });
+          const results = response.data.map((hit) => ({
+            id: hit.document.id,
+            title: hit.document.title || "Untitled",
+            url: absoluteUrl(session.config, hit.document.url),
+            snippet: plain(hit.context),
+            updatedAt: hit.document.updatedAt,
+          }));
+          return {
+            output: results.length ? { results } : { results, note: "No documents matched." },
+            sources: results.map((result) => ({
+              externalId: result.id,
+              title: result.title,
+              url: result.url,
+              snippet: result.snippet,
+              read: false,
             })),
-          },
-        };
-      }),
-  },
-  {
-    name: "create_document",
-    description:
-      "Create a published Outline document from Markdown, in a collection or under a parent document.",
-    parameters: Schema.Struct({
-      title: optionalText("Document title, at most 100 characters."),
-      text: optionalText("Document body in Markdown."),
-      collectionId: optionalText("Collection to create it in."),
-      parentDocumentId: optionalText("Parent document to nest it under."),
+          };
+        }),
+      );
     }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const title = text(args.title);
-        const collectionId = text(args.collectionId);
-        const parentDocumentId = text(args.parentDocumentId);
-        if (!title) return yield* reject("Pass `title`.");
-        if (!collectionId && !parentDocumentId)
-          return yield* reject("Pass `collectionId` or `parentDocumentId`; use list to find one.");
-        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.create", {
+
+  read_document: (session, args) =>
+    Effect.gen(function* () {
+      const id = text(args.id);
+      if (!id) return yield* reject("Pass `id` of the document to read.");
+      const offset = args.offset !== undefined && args.offset > 0 ? Math.floor(args.offset) : 0;
+      return ready(
+        Effect.gen(function* () {
+          const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
+          const body = data.text ?? "";
+          const end = Math.min(body.length, offset + INTEGRATION_LIMITS.readChars);
+          const url = absoluteUrl(session.config, data.url);
+          return {
+            output: {
+              id: data.id,
+              title: data.title,
+              url,
+              updatedAt: data.updatedAt,
+              totalChars: body.length,
+              offset,
+              nextOffset: end < body.length ? end : null,
+              text: body.slice(offset, end),
+            },
+            sources: [
+              {
+                externalId: data.id,
+                title: data.title || "Untitled",
+                url,
+                snippet: body.slice(offset, offset + 300),
+                read: true,
+              },
+            ],
+          };
+        }),
+      );
+    }),
+
+  list: (session, args) =>
+    Effect.succeed(
+      ready(
+        Effect.gen(function* () {
+          const collectionId = text(args.collectionId);
+          const documentId = text(args.documentId);
+          if (documentId) {
+            const { data } = yield* outlineCall<OutlineNavigationNode | OutlineNavigationNode[]>(
+              session,
+              "documents.documents",
+              { id: documentId },
+            );
+            const children = Array.isArray(data) ? data : (data.children ?? []);
+            return { output: { documents: navigationSummary(session, children) } };
+          }
+          if (collectionId) {
+            const nodes = yield* collectionTree(session, collectionId);
+            return { output: { documents: navigationSummary(session, nodes) } };
+          }
+          const collections = yield* outlineList<OutlineCollection>(
+            session,
+            "collections.list",
+            {},
+            INTEGRATION_LIMITS.listResults,
+          );
+          return {
+            output: {
+              collections: collections.map((collection) => ({
+                id: collection.id,
+                name: collection.name,
+                url: absoluteUrl(session.config, collection.url),
+              })),
+            },
+          };
+        }),
+      ),
+    ),
+
+  create_document: (session, args) =>
+    Effect.gen(function* () {
+      const title = text(args.title);
+      const collectionId = text(args.collectionId);
+      const parentDocumentId = text(args.parentDocumentId);
+      if (!title) return yield* reject("Pass `title`.");
+      if (!collectionId && !parentDocumentId)
+        return yield* reject("Pass `collectionId` or `parentDocumentId`; use list to find one.");
+      return ready(
+        outlineCall<OutlineDocument>(session, "documents.create", {
           title: title.slice(0, 100),
-          text: typeof args.text === "string" ? args.text : "",
+          text: args.text ?? "",
           publish: true,
           ...(collectionId ? { collectionId } : {}),
           ...(parentDocumentId ? { parentDocumentId } : {}),
-        });
-        return {
-          output: { id: data.id, title: data.title, url: absoluteUrl(session.config, data.url) },
-        };
-      }),
-  },
-  {
-    name: "update_document",
-    description:
-      "Change an Outline document. `mode` is append, prepend, replace (the whole body) or patch (replace `findText` with `text`). Pass `title` to rename.",
-    parameters: Schema.Struct({
-      id: optionalText("The document id."),
-      text: optionalText("Markdown to add, or the replacement."),
-      mode: Schema.optionalKey(
-        Schema.String.annotate({ description: "append, prepend, replace or patch." }),
-      ),
-      findText: optionalText("For patch: the exact existing text to replace."),
-      title: optionalText("A new title."),
+        }).pipe(Effect.map(({ data }) => written(session, data))),
+      );
     }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const id = text(args.id);
-        if (!id) return yield* reject("Pass `id` of the document to change.");
-        const mode = text(args.mode) ?? "append";
-        if (!["append", "prepend", "replace", "patch"].includes(mode))
-          return yield* reject("`mode` must be append, prepend, replace or patch.");
-        const title = text(args.title);
-        const body = typeof args.text === "string" ? args.text : null;
-        if (body === null && !title) return yield* reject("Pass `text`, `title`, or both.");
-        const findText = typeof args.findText === "string" ? args.findText : null;
-        if (mode === "patch" && !findText)
-          return yield* reject("Patch needs `findText`, the exact text to replace.");
-        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.update", {
+
+  update_document: (session, args) =>
+    Effect.gen(function* () {
+      const id = text(args.id);
+      if (!id) return yield* reject("Pass `id` of the document to change.");
+      const mode = text(args.mode) ?? "append";
+      if (!["append", "prepend", "replace", "patch"].includes(mode))
+        return yield* reject("`mode` must be append, prepend, replace or patch.");
+      const title = text(args.title);
+      const body = args.text ?? null;
+      if (body === null && !title) return yield* reject("Pass `text`, `title`, or both.");
+      const findText = args.findText ?? null;
+      if (mode === "patch" && !findText)
+        return yield* reject("Patch needs `findText`, the exact text to replace.");
+      return ready(
+        outlineCall<OutlineDocument>(session, "documents.update", {
           id,
           ...(title ? { title: title.slice(0, 100) } : {}),
           ...(body !== null ? { text: body, editMode: mode } : {}),
           ...(mode === "patch" && findText ? { findText } : {}),
-        });
-        return {
-          output: { id: data.id, title: data.title, url: absoluteUrl(session.config, data.url) },
-        };
-      }),
-  },
-  {
-    name: "delete_document",
-    description:
-      "Move an Outline document to the trash, with every document nested under it. The user can restore it from Outline's trash. Only when the user asked for it.",
-    parameters: Schema.Struct({
-      id: optionalText("The document id."),
+        }).pipe(Effect.map(({ data }) => written(session, data))),
+      );
     }),
-    describe: (session, args) =>
-      Effect.gen(function* () {
-        const id = text(args.id);
-        if (!id) return null;
-        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
-        const nested = yield* nestedCount(session, id);
-        const title = `“${data.title || "Untitled"}”`;
-        return nested === 0
-          ? title
-          : `${title} and ${nested} nested page${nested === 1 ? "" : "s"}`;
-      }),
-    run: (session, args) =>
-      Effect.gen(function* () {
-        const id = text(args.id);
-        if (!id) return yield* reject("Pass `id` of the document to delete.");
-        const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
-        const nested = yield* nestedCount(session, id);
+
+  delete_document: (session, args) =>
+    Effect.gen(function* () {
+      const id = text(args.id);
+      if (!id) return yield* reject("Pass `id` of the document to delete.");
+      // Read once: the approval names what goes, and the call reports the same.
+      const { data } = yield* outlineCall<OutlineDocument>(session, "documents.info", { id });
+      const nested = yield* nestedCount(session, id);
+      const title = `“${data.title || "Untitled"}”`;
+      return {
+        summary:
+          nested === 0 ? title : `${title} and ${nested} nested page${nested === 1 ? "" : "s"}`,
         // Not `permanent`: the trash is how a person undoes a mistaken approval.
-        yield* outlineCall(session, "documents.delete", { id });
-        return {
-          output: {
-            id: data.id,
-            title: data.title,
-            movedToTrash: true,
-            nestedDocuments: nested,
-          },
-        };
-      }),
-  },
-];
+        execute: outlineCall(session, "documents.delete", { id }).pipe(
+          Effect.as({
+            output: {
+              id: data.id,
+              title: data.title,
+              movedToTrash: true,
+              nestedDocuments: nested,
+            },
+          }),
+        ),
+      };
+    }),
+});
+
+const written = (session: IntegrationSession, data: OutlineDocument): AdapterToolResult => {
+  const url = absoluteUrl(session.config, data.url);
+  return {
+    output: { id: data.id, title: data.title, url },
+    link: { title: data.title || "Untitled", url },
+  };
+};
 
 const count = (nodes: ReadonlyArray<OutlineNavigationNode>): number =>
   nodes.reduce((total, node) => total + 1 + count(node.children ?? []), 0);
@@ -415,7 +371,7 @@ export const outlineAdapter: IntegrationAdapter = {
         return { accountLabel: data.team?.name ? `${person} · ${data.team.name}` : person };
       }),
     ),
-  tools,
+  handlers,
   knowledge: {
     browse: (session, parentId) =>
       Effect.gen(function* () {

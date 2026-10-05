@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { consentFor, permissionFor } from "./consent.ts";
 
 const person = { allowedInChat: false, unattended: null } as const;
+const run = { kind: "run" };
+const ask = { kind: "ask" };
+const refused = (reason: string) => ({ kind: "refuse", reason });
 
 describe("integration consent", () => {
   it("defaults to allowing reads and asking before changes", () => {
@@ -12,16 +15,18 @@ describe("integration consent", () => {
   });
 
   it("follows each tool's own permission while someone is present", () => {
-    expect(consentFor({ ...person, access: "read", permission: "allow" })).toBe("run");
-    expect(consentFor({ ...person, access: "read", permission: "ask" })).toBe("ask");
-    expect(consentFor({ ...person, access: "write", permission: "allow" })).toBe("run");
-    expect(consentFor({ ...person, access: "write", permission: "block" })).toBe("refuse");
+    expect(consentFor({ ...person, access: "read", permission: "allow" })).toEqual(run);
+    expect(consentFor({ ...person, access: "read", permission: "ask" })).toEqual(ask);
+    expect(consentFor({ ...person, access: "write", permission: "allow" })).toEqual(run);
+    expect(consentFor({ ...person, access: "write", permission: "block" })).toEqual(
+      refused("blocked"),
+    );
   });
 
   it("lets “always allow in this chat” lift an ask, never a block", () => {
     const here = { access: "write", allowedInChat: true, unattended: null } as const;
-    expect(consentFor({ ...here, permission: "ask" })).toBe("run");
-    expect(consentFor({ ...here, permission: "block" })).toBe("refuse");
+    expect(consentFor({ ...here, permission: "ask" })).toEqual(run);
+    expect(consentFor({ ...here, permission: "block" })).toEqual(refused("blocked"));
   });
 
   it("keeps deleting behind an explicit choice", () => {
@@ -33,9 +38,9 @@ describe("integration consent", () => {
         allowedInChat: true,
         unattended: null,
       }),
-    ).toBe("ask");
+    ).toEqual(ask);
     // Allowing it in Settings does, with someone present.
-    expect(consentFor({ ...person, access: "destructive", permission: "allow" })).toBe("run");
+    expect(consentFor({ ...person, access: "destructive", permission: "allow" })).toEqual(run);
     // A schedule never runs it, whatever it was granted.
     expect(
       consentFor({
@@ -44,15 +49,15 @@ describe("integration consent", () => {
         allowedInChat: false,
         unattended: "write",
       }),
-    ).toBe("refuse");
+    ).toEqual(refused("destructive"));
   });
 
   it("never waits during a schedule fire: the grant is the ceiling", () => {
     const fire = (access: "read" | "write", unattended: "read" | "write") =>
       consentFor({ access, permission: "ask", allowedInChat: false, unattended });
-    expect(fire("read", "read")).toBe("run");
-    expect(fire("write", "read")).toBe("refuse");
-    expect(fire("write", "write")).toBe("run");
+    expect(fire("read", "read")).toEqual(run);
+    expect(fire("write", "read")).toEqual(refused("grant"));
+    expect(fire("write", "write")).toEqual(run);
     expect(
       consentFor({
         access: "read",
@@ -60,6 +65,6 @@ describe("integration consent", () => {
         allowedInChat: false,
         unattended: "write",
       }),
-    ).toBe("refuse");
+    ).toEqual(refused("blocked"));
   });
 });

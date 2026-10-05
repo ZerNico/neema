@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import type { ComponentProps, ComponentType } from "react";
 
 /**
@@ -8,17 +9,51 @@ import type { ComponentProps, ComponentType } from "react";
  */
 export type ToolAccess = "read" | "write" | "destructive";
 
-export interface IntegrationToolManifest {
-  /** The adapter's key; the model sees `int_<integration>__<name>`. */
-  readonly name: string;
+/**
+ * One model-callable function, defined once and read by both halves: the
+ * client renders it (Settings, tool rows, approvals) and the server offers it
+ * and runs its handler, which `IntegrationHandlers` keys by `name`.
+ */
+/** Parameters that decode without services, so a summary can decode them anywhere. */
+export type ToolFields = {
+  readonly [key: string]: Schema.Top & { readonly DecodingServices: never };
+};
+
+export interface IntegrationToolDefinition<
+  Name extends string = string,
+  Fields extends ToolFields = ToolFields,
+> {
+  /** The handler's key; the model sees `int_<integration>__<name>`. */
+  readonly name: Name;
   /** What the tool does, for Settings: "Search documents". */
   readonly title: string;
   /** What a call did, for the transcript: "Searched Outline". */
   readonly label: string;
+  /** What the model reads when choosing it. */
+  readonly description: string;
   readonly access: ToolAccess;
+  /**
+   * Every field `Schema.optionalKey`: a key the model omits must reach the
+   * handler, which explains it, instead of failing the whole generation.
+   */
+  readonly parameters: Schema.Struct<Fields>;
   /** One line for the tool row and approval card, from the model's arguments. */
-  readonly summarize: (args: Readonly<Record<string, unknown>>) => string | null;
+  summarize(args: Schema.Struct.Type<Fields>): string | null;
 }
+
+export const defineIntegrationTool = <const Name extends string, Fields extends ToolFields>(
+  tool: IntegrationToolDefinition<Name, Fields>,
+) => tool;
+
+/**
+ * The row summary from raw call arguments. They are decoded first, as the
+ * handler gets them; arguments that do not decode get no summary, since the
+ * handler will refuse them anyway.
+ */
+export const summarizeCall = (tool: IntegrationToolDefinition, args: unknown) => {
+  const decoded = Schema.decodeUnknownOption(tool.parameters)(args);
+  return decoded._tag === "Some" ? tool.summarize(decoded.value) : null;
+};
 
 export interface IntegrationAdminField {
   readonly key: string;
@@ -49,7 +84,7 @@ export interface IntegrationManifest {
     /** Where in the service a person creates one, from the admin config. */
     readonly helpUrl: (config: Readonly<Record<string, string>>) => string | null;
   } | null;
-  readonly tools: ReadonlyArray<IntegrationToolManifest>;
+  readonly tools: ReadonlyArray<IntegrationToolDefinition>;
   /** Whether a knowledge collection can mirror part of it. */
   readonly knowledgeSource: boolean;
 }

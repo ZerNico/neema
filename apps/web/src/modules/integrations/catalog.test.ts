@@ -1,7 +1,14 @@
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { INTEGRATIONS } from "./catalog.ts";
-import { integrationToolName, parseIntegrationToolName } from "./manifest.ts";
+import {
+  defineIntegrationTool,
+  integrationToolName,
+  parseIntegrationToolName,
+  summarizeCall,
+} from "./manifest.ts";
 import { outlineAdapter } from "./outline/server/adapter.ts";
+import { integrationHandlers, ready } from "./server/adapter.ts";
 import { ADAPTERS } from "./server/adapters.ts";
 
 describe("integration catalog", () => {
@@ -9,7 +16,7 @@ describe("integration catalog", () => {
     expect(ADAPTERS.map((adapter) => adapter.id)).toEqual(INTEGRATIONS.map((entry) => entry.id));
     for (const manifest of INTEGRATIONS) {
       const adapter = ADAPTERS.find((entry) => entry.id === manifest.id)!;
-      expect(adapter.tools.map((tool) => tool.name).toSorted()).toEqual(
+      expect(Object.keys(adapter.handlers).toSorted()).toEqual(
         manifest.tools.map((tool) => tool.name).toSorted(),
       );
       expect(Boolean(adapter.knowledge)).toBe(manifest.knowledgeSource);
@@ -30,6 +37,43 @@ describe("integration catalog", () => {
       }
     expect(parseIntegrationToolName("custom_weather__now")).toBeNull();
     expect(parseIntegrationToolName("int_broken")).toBeNull();
+  });
+});
+
+describe("tool definitions", () => {
+  const lookup = defineIntegrationTool({
+    name: "lookup",
+    title: "Look up",
+    label: "Looked up",
+    description: "Look something up.",
+    access: "read",
+    parameters: Schema.Struct({ query: Schema.optionalKey(Schema.String) }),
+    summarize: (args) => args.query ?? null,
+  });
+  const tools = [lookup] as const;
+  const done = ready(Effect.succeed({ output: null }));
+
+  it("types each handler by its definition", () => {
+    const handlers = integrationHandlers(tools)({
+      lookup: (_session, args) => Effect.succeed(args.query === undefined ? done : done),
+    });
+    expect(Object.keys(handlers)).toEqual(["lookup"]);
+    // @ts-expect-error a definition without its handler
+    integrationHandlers(tools)({});
+    integrationHandlers(tools)({
+      lookup: () => Effect.succeed(done),
+      // @ts-expect-error a handler without a definition
+      other: () => Effect.succeed(done),
+    });
+    integrationHandlers(tools)({
+      // @ts-expect-error arguments typed by the definition's parameters
+      lookup: (_session, args: { query: number }) => Effect.succeed(args.query ? done : done),
+    });
+  });
+
+  it("summarizes the decoded arguments, and nothing that does not decode", () => {
+    expect(summarizeCall(lookup, { query: "rates" })).toBe("rates");
+    expect(summarizeCall(lookup, { query: 4 })).toBeNull();
   });
 });
 
