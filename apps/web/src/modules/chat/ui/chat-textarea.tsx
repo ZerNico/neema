@@ -21,7 +21,8 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { MentionList, filterMentionItems, type MentionItem } from "~/ui/mention-list.tsx";
+import { MentionList, type MentionItem } from "~/ui/mention-list.tsx";
+import { filterMentionItems } from "~/ui/filter-mention-items.ts";
 import { cn } from "~/ui/utils";
 import type { ContextTag } from "../tags.ts";
 import {
@@ -34,11 +35,6 @@ import {
   textToDoc,
   textToSlice,
 } from "./composer-doc.tsx";
-
-export const CHAT_INPUT_SHELL_CLASS = cn(
-  "border-border bg-background w-full rounded-composer border shadow-sm transition-shadow",
-  "focus-within:border-ring/40 focus-within:shadow-md",
-);
 
 /** Offerable rows plus what to do with the one that is picked. */
 export interface TextareaMentions {

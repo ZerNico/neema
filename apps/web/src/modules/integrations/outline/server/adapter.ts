@@ -279,17 +279,14 @@ const tools: ReadonlyArray<AdapterTool> = [
   },
 ];
 
+const count = (nodes: ReadonlyArray<OutlineNavigationNode>): number =>
+  nodes.reduce((total, node) => total + 1 + count(node.children ?? []), 0);
+
 /** Every document under one, at any depth: deleting it trashes them too. */
 const nestedCount = (session: IntegrationSession, id: string) =>
   outlineCall<OutlineNavigationNode | OutlineNavigationNode[]>(session, "documents.documents", {
     id,
-  }).pipe(
-    Effect.map(({ data }) => {
-      const count = (nodes: ReadonlyArray<OutlineNavigationNode>): number =>
-        nodes.reduce((total, node) => total + 1 + count(node.children ?? []), 0);
-      return count(Array.isArray(data) ? data : (data.children ?? []));
-    }),
-  );
+  }).pipe(Effect.map(({ data }) => count(Array.isArray(data) ? data : (data.children ?? []))));
 
 function navigationSummary(
   session: IntegrationSession,

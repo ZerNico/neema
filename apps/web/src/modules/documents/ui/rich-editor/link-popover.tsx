@@ -4,16 +4,7 @@ import { Button } from "~/ui/primitives/button";
 import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
-import { SAFE_LINK } from "../../editor/extensions.ts";
-
-/** A bare domain gets https; a scheme the editor would not open is refused. */
-export const linkTarget = (raw: string): string | null => {
-  const value = raw.trim();
-  if (!value) return null;
-  if (SAFE_LINK.test(value)) return value;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
-  return `https://${value}`;
-};
+import { linkTarget } from "./links.ts";
 
 /**
  * Adds, changes or removes the link on the selection. It has no trigger of

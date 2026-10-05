@@ -24,10 +24,11 @@ vi.mock("../server/functions.ts", () => ({
   getGroupCapabilities: vi.fn(),
   updateGroupCapabilities: vi.fn(),
 }));
-vi.mock("./users-page.tsx", () => ({
+vi.mock("../client/queries.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../client/queries.ts")>()),
   usersQuery: { queryKey: ["admin", "users"], queryFn: async () => [] },
 }));
-vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
+vi.mock("~/ui/confirm-context.ts", () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,

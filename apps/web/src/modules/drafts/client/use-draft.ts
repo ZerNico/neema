@@ -1,7 +1,7 @@
 import { useStore } from "@tanstack/react-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import type { ConversationDraft, DraftKind } from "../draft-schema.ts";
 import { draftQuery } from "./draft-queries.ts";
 import {

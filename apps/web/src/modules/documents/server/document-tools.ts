@@ -207,6 +207,15 @@ const quietly = (effect: Effect.Effect<unknown, unknown>, state: { failed: boole
     ),
   );
 
+const reference = (document: EditableDocument) => ({
+  documentId: document.id,
+  ...(document.conversationId
+    ? { documentConversationId: document.conversationId }
+    : { documentProjectId: document.projectId! }),
+  title: document.title,
+  revision: document.revision,
+});
+
 export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function* (input: {
   service: DocumentToolService;
   userId: string;
@@ -247,14 +256,6 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     revision: document.revision,
     lastEditedBy: document.lastEditedBy,
     chars: document.content.length,
-  });
-  const reference = (document: EditableDocument) => ({
-    documentId: document.id,
-    ...(document.conversationId
-      ? { documentConversationId: document.conversationId }
-      : { documentProjectId: document.projectId! }),
-    title: document.title,
-    revision: document.revision,
   });
   const listing = (): Result => ({
     outcome: "listed",

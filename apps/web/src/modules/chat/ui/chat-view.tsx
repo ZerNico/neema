@@ -6,7 +6,7 @@ import {
   type ScheduleDraftHandle,
 } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
-import { useDetailPanelSelectedId } from "~/ui/detail-panel.tsx";
+import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import { DocumentToolName, projectDocumentResult } from "~/modules/documents/tool-schema.ts";
 
@@ -63,7 +63,8 @@ import { HeaderContent } from "~/ui/header-slot.tsx";
 import { Toggle } from "~/ui/primitives/toggle";
 import { AnimatePresence } from "motion/react";
 import * as motion from "motion/react-m";
-import { MotionSwap, motionEase, useAppReducedMotion } from "~/ui/motion.tsx";
+import { MotionSwap } from "~/ui/motion.tsx";
+import { motionEase } from "~/ui/motion-presets.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import {
@@ -72,20 +73,18 @@ import {
   useLocalMachineId,
 } from "~/modules/desktop/client/bridge.ts";
 import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
-import {
-  ForeignMachineBanner,
-  foreignMachineStamp,
-} from "~/modules/desktop/ui/foreign-machine-banner.tsx";
+import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
+import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
 import { useConversationQueue } from "./use-conversation-queue.ts";
 import type { AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
-import { FileReferenceContext } from "./file-reference.tsx";
+import { FileReferenceContext } from "./file-reference-context.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
-import { useWorkApprovals } from "~/modules/desktop/client/work-host.tsx";
+import { useWorkApprovals } from "~/modules/desktop/client/work-context.ts";
 import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
 
-import { agentIcon } from "./context-picker.tsx";
+import { agentIcon } from "./agent-icons.ts";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
@@ -99,8 +98,8 @@ import { PLACED_CALL_PREFIX } from "./live-message.ts";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
-import { ResearchPanelOwner } from "./research-panel.tsx";
-import { SourcesPanelOwner } from "./sources-panel.tsx";
+import { ResearchPanelOwner } from "./research-panel-owner.tsx";
+import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
 import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
@@ -110,8 +109,8 @@ import { type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { prefersReducedMotion } from "~/ui/motion.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { useAppReducedMotion, prefersReducedMotion } from "~/ui/reduced-motion.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
@@ -205,6 +204,17 @@ const shownIds = (
   messages: DisplayMessage[],
   pick: (activity: ToolActivity) => string | undefined,
 ) => new Set(messages.flatMap((message) => message.toolActivities.flatMap((a) => pick(a) ?? [])));
+
+const placed = (message: DisplayMessage, index: number, id: string) => ({
+  status: "complete" as const,
+  callId: `${PLACED_CALL_PREFIX}${id}`,
+  turnIndex: Number.MAX_SAFE_INTEGER,
+  callIndex: index,
+  textOffset: message.content.length,
+});
+
+/** Shared, so a conversation with nothing forgotten keeps its memos stable. */
+const NO_IDS: ReadonlySet<string> = new Set();
 
 export function ChatView({
   conversationId,
@@ -318,7 +328,7 @@ export function ChatView({
   if (streamingMessage && streamingMessage.id !== overlayId) {
     setOverlayId(streamingMessage.id);
   }
-  // oxlint-disable react/memo-dependencies -- pendingChunks are a snapshot for this streaming generation
+  // oxlint-disable react/memo-dependencies, react-hooks/exhaustive-deps -- pendingChunks are a snapshot for this streaming generation
   const initialStream = useMemo(() => {
     if (!streamingMessage) return null;
     const text = data.pendingChunks
@@ -373,7 +383,7 @@ export function ChatView({
       lastSeq,
     };
   }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
-  // oxlint-enable react/memo-dependencies
+  // oxlint-enable react/memo-dependencies, react-hooks/exhaustive-deps
 
   // A sync refresh can see the terminal row before SSE has delivered its last
   // chunks and done marker. Keep that subscription alive so the sticky overlay
@@ -499,14 +509,16 @@ export function ChatView({
     ids: ReadonlySet<string>;
   }>({ conversationId, ids: new Set() });
   const scopedForgottenDrafts =
-    forgottenDrafts.conversationId === conversationId ? forgottenDrafts.ids : new Set<string>();
+    forgottenDrafts.conversationId === conversationId ? forgottenDrafts.ids : NO_IDS;
   const draftIds = useMemo(
-    () => [...discoveredDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).sort(),
+    () => [...discoveredDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).toSorted(),
     [discoveredDrafts, scopedForgottenDrafts],
   );
   const scheduleDraftIds = useMemo(
     () =>
-      [...discoveredScheduleDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).sort(),
+      [...discoveredScheduleDrafts]
+        .filter((draftId) => !scopedForgottenDrafts.has(draftId))
+        .toSorted(),
     [discoveredScheduleDrafts, scopedForgottenDrafts],
   );
   // Draft ids are UUIDs, so one set serves both kinds.
@@ -530,14 +542,12 @@ export function ChatView({
     ids: ReadonlySet<string>;
   }>({ conversationId, ids: new Set() });
   const scopedForgottenDocuments =
-    forgottenDocuments.conversationId === conversationId
-      ? forgottenDocuments.ids
-      : new Set<string>();
+    forgottenDocuments.conversationId === conversationId ? forgottenDocuments.ids : NO_IDS;
   const documentIds = useMemo(
     () =>
       [...discoveredDocuments]
         .filter((documentId) => !scopedForgottenDocuments.has(documentId))
-        .sort(),
+        .toSorted(),
     [discoveredDocuments, scopedForgottenDocuments],
   );
   const forgetDocument = useCallback(
@@ -881,7 +891,7 @@ export function ChatView({
         resetSearchEnabled();
       }
       setEditingMessageId(null);
-      setRetryEpoch((epoch) => epoch + 1);
+      setRetryEpoch((e) => e + 1);
     },
     onError: async (_error, input) => {
       cancelAnchor();
@@ -900,7 +910,7 @@ export function ChatView({
 
   // Retry rewinds the conversation to that response: retrying anything but
   // the last one deletes the messages after it, so it asks first.
-  const lastAssistantId = [...data.messages].reverse().find((m) => m.role === "assistant")?.id;
+  const lastAssistantId = [...data.messages].toReversed().find((m) => m.role === "assistant")?.id;
   const generating =
     sendMutation.isPending || answerMutation.isPending || stream.status === "streaming";
   // What may still be writing to a document: a row the server says is streaming,
@@ -1610,16 +1620,17 @@ export function ChatView({
       generationDisabled,
       work.readOnly,
       saveQuestionEdit,
-      // Carries `editSkillIds` and `editContext` in: both are its own
-      // dependencies, so picking a skill mid-edit gives this a new identity and
-      // the chips refresh. Dropping either from its list strands them here.
       saveEdit,
+      editSkillIds,
+      editContext,
+      editableSkills.data,
       searchEnabled,
       setSearchEnabled,
       reasoningEffort,
       setReasoningEffort,
       editResearchEnabled,
       stream.compactions,
+      stream.files,
       stream.live,
       stream.reading,
       stream.status,
@@ -1656,13 +1667,6 @@ export function ChatView({
       item,
     ]),
   );
-  const placed = (message: DisplayMessage, index: number, id: string) => ({
-    status: "complete" as const,
-    callId: `${PLACED_CALL_PREFIX}${id}`,
-    turnIndex: Number.MAX_SAFE_INTEGER,
-    callIndex: index,
-    textOffset: message.content.length,
-  });
   const withPlacedCards = placeStranded(
     display,
     [

@@ -9,7 +9,7 @@ import { knowledgeCollectionsQuery } from "../client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { CollectionIdentityInput, KNOWLEDGE_LIMITS, type CollectionSummary } from "../schema.ts";
 import { createKnowledgeCollection, updateKnowledgeCollection } from "../server/functions.ts";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import {
   EmptyState,
   ErrorState,
@@ -31,7 +31,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 
-export const collectionStatusLabel = (collection: CollectionSummary): string => {
+const collectionStatusLabel = (collection: CollectionSummary): string => {
   const parts: string[] = [`${collection.documentCount} documents`];
   if (collection.pendingCount > 0) parts.push(`${collection.pendingCount} preparing`);
   if (collection.failedCount > 0) parts.push(`${collection.failedCount} failed`);
@@ -136,6 +136,7 @@ export function KnowledgePage() {
   const atLimit = own.length >= KNOWLEDGE_LIMITS.maxCollectionsPerUser;
   // Recipients still open a collection to read its documents; only the owner
   // gets Edit, which is the same page with its mutation controls.
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- collectionRows renders this page's rows beside it
   const collectionRows = (items: CollectionSummary[]) => (
     <ListCard>
       {items.map((collection) => (

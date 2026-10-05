@@ -7,13 +7,14 @@ import { createPortal } from "react-dom";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { DocumentMarkdownView } from "./markdown-view.tsx";
-import { documentExtensions, SAFE_LINK } from "../../editor/extensions.ts";
+import { documentExtensions } from "../../editor/extensions.ts";
 import { DOCUMENT_FIELD } from "../../text.ts";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
 import { SizeCap } from "./size-cap.ts";
 import { SlashCommand } from "./slash-command.tsx";
 import { DocumentTaskItem } from "./task-item.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
+import { openLink } from "./links.ts";
 
 export type DocumentEditorMode = "live" | "source";
 /** Only the shared document and presence: the connection itself stays with the caller. */
@@ -44,20 +45,6 @@ export default function DocumentEditor({
     <DocumentMarkdownView doc={sync.doc} />
   );
 }
-
-/**
- * Opens a link with Cmd or Ctrl held, since a plain click places the caret;
- * someone who cannot edit opens it with any click. Only web and mail
- * addresses open, always in a new tab.
- */
-export const openLink = (editable: boolean, event: MouseEvent) => {
-  const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  const href = link?.getAttribute("href") ?? "";
-  if (!link || (editable && !event.metaKey && !event.ctrlKey) || !SAFE_LINK.test(href))
-    return false;
-  window.open(href, "_blank", "noopener,noreferrer");
-  return true;
-};
 
 // The browser draws tasks with the app's checkbox; the schema is unchanged.
 const editorExtensions = documentExtensions.map((extension) =>

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { membershipsQuery } from "~/modules/admin/ui/groups-page.tsx";
-import { UsersPage, usersQuery } from "~/modules/admin/ui/users-page.tsx";
-import { pendingAccountsQuery } from "~/modules/auth/ui/pending-accounts.tsx";
+import { membershipsQuery, usersQuery } from "~/modules/admin/client/queries.ts";
+import { UsersPage } from "~/modules/admin/ui/users-page.tsx";
+import { pendingAccountsQuery } from "~/modules/auth/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/users")({
   loader: async ({ context }) => {

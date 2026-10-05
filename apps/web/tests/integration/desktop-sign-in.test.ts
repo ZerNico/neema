@@ -376,16 +376,24 @@ describe("listing and revoking devices", () => {
     const { status, body } = await browser.devices();
     expect(status).toBe(200);
     expect(body).toHaveLength(2);
-    expect(body.map((d: { id: string; current: boolean }) => [d.id, d.current]).sort()).toEqual(
+    expect(body.map((d: { id: string; current: boolean }) => [d.id, d.current]).toSorted()).toEqual(
       [
         [browserId, true],
         [desktopId, false],
-      ].sort(),
+      ].toSorted(),
     );
     for (const device of body) {
       expect(device).not.toHaveProperty("token");
-      expect(Object.keys(device).sort()).toEqual(
-        ["createdAt", "current", "expiresAt", "id", "ipAddress", "updatedAt", "userAgent"].sort(),
+      expect(Object.keys(device).toSorted()).toEqual(
+        [
+          "createdAt",
+          "current",
+          "expiresAt",
+          "id",
+          "ipAddress",
+          "updatedAt",
+          "userAgent",
+        ].toSorted(),
       );
     }
     expect(body.find((d: { id: string }) => d.id === desktopId).userAgent).toBe(DESKTOP_UA);

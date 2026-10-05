@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { findBuiltin, OIDC_DEFAULT_SCOPES, type OAuthBuiltin } from "../oauth.ts";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";

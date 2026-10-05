@@ -1,9 +1,8 @@
 import { InputRule, Node, type Editor, type JSONContent } from "@tiptap/core";
-import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 import { integrationForName, integrationNamePattern } from "~/modules/integrations/mentions.ts";
-import { IntegrationTag } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { splitMessageTags, tagMarkup, type ContextTag } from "../tags.ts";
-import { ContextTagView } from "./message-tag.tsx";
+import { ContextTagNodeView, MentionView } from "./composer-node-views.tsx";
 
 /*
  * The composer edits a document but hands everyone else a string: one paragraph
@@ -45,18 +44,6 @@ export const textToSlice = (value: string): JSONContent[] =>
   value.includes("\n") ? value.split("\n").map(paragraph) : lineContent(value);
 
 export const docToText = (editor: Editor) => editor.getText({ blockSeparator: "\n" });
-
-function MentionView({ node }: NodeViewProps) {
-  return (
-    <NodeViewWrapper as="span" contentEditable={false}>
-      <IntegrationTag
-        integrationId={node.attrs.integrationId as string}
-        fallback={node.attrs.text as string}
-        tone="field"
-      />
-    </NodeViewWrapper>
-  );
-}
 
 export interface IntegrationMentionOptions {
   /** A mention typed out in full rather than picked: turn it on like picking it. */
@@ -142,14 +129,6 @@ function wholeTagKeys(editor: Editor, type: string) {
     return editor.commands.deleteRange({ from, to: from + node.nodeSize });
   };
   return { Backspace: remove("before"), Delete: remove("after") };
-}
-
-function ContextTagNodeView({ node }: NodeViewProps) {
-  return (
-    <NodeViewWrapper as="span" contentEditable={false}>
-      <ContextTagView tag={node.attrs as ContextTag} tone="field" />
-    </NodeViewWrapper>
-  );
 }
 
 /**

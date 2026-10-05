@@ -55,6 +55,7 @@ const hasFarFutureRun = (cron: string, timezone: string) =>
 
 export const isValidTimezone = (timezone: string): boolean => {
   try {
+    // oxlint-disable-next-line no-new -- constructing it is the validation: an unknown zone throws
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
     return true;
   } catch {

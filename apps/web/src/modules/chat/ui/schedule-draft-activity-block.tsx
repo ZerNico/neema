@@ -6,7 +6,7 @@ import { activityRowClassName } from "./activity-row.ts";
 import { DraftWidget } from "./draft-widget.tsx";
 
 /** Rows without a draft reference; anything naming a draft renders the widget. */
-export function scheduleDraftActivityLabel(activity: ScheduleDraftToolActivity) {
+function scheduleDraftActivityLabel(activity: ScheduleDraftToolActivity) {
   if (activity.status === "running") {
     if (activity.name === "draft_schedule") return "Preparing the schedule draft";
     return activity.name === "update_schedule_draft"

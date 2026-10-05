@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ToolsPage } from "~/modules/tools/ui/tools-page.tsx";
 import {
   memoryToolQuery,
   officeFilesToolQuery,
-  ToolsPage,
   urlReaderToolQuery,
   webSearchToolQuery,
-} from "~/modules/tools/ui/tools-page.tsx";
-import { searchProvidersQuery } from "~/modules/tools/ui/search-providers.tsx";
-import { presentationFontsQuery } from "~/modules/presentations/ui/presentation-fonts.tsx";
+  searchProvidersQuery,
+} from "~/modules/tools/client/queries.ts";
+import { presentationFontsQuery } from "~/modules/presentations/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/tools")({
   loader: ({ context }) =>

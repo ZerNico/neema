@@ -1,6 +1,6 @@
 import type { PgClient } from "@effect/sql-pg";
 import { Cause, Duration, Effect, Queue, Redacted, Stream } from "effect";
-import pg from "pg";
+import { Client } from "pg";
 import { NOTIFICATION_CHANNEL } from "./signals.ts";
 
 export type NotificationFrame = { type: "ready" } | { type: "payload"; payload: string };
@@ -15,7 +15,7 @@ export const listenNotifications = (config: PgClient.PgClientConfig) =>
       // The pool may take the password as an effect it re-reads on each
       // connection attempt (rotating credentials); every reconnect here does too.
       const password = Effect.isEffect(config.password) ? yield* config.password : config.password;
-      const client = new pg.Client({
+      const client = new Client({
         connectionString: config.url ? Redacted.value(config.url) : undefined,
         host: config.host,
         port: config.port,

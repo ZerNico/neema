@@ -3,7 +3,7 @@ import { useStore } from "@tanstack/react-form";
 import { Link } from "@tanstack/react-router";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
-import { withForm } from "~/ui/form/app-form.tsx";
+import { withForm } from "~/ui/form/app-form.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   Combobox,

@@ -294,7 +294,7 @@ describe("tool-created agent drafts", () => {
     const owner = await createUser();
     const fence = await ordinary(owner);
     const results = await Promise.all([open(owner, fence), open(owner, fence)]);
-    expect(results.map((result) => result.outcome).sort()).toEqual(["drafted", "read"]);
+    expect(results.map((result) => result.outcome).toSorted()).toEqual(["drafted", "read"]);
     expect(results[0]!.draft).toEqual(results[1]!.draft);
     expect(results[0]!.draft.revision).toBe(1);
     expect(await countAgents(owner)).toBe(0);
@@ -335,7 +335,7 @@ describe("tool-created agent drafts", () => {
     const drafts = await run(
       Effect.flatMap(AgentDraftService, (service) => service.list(owner, fence.conversationId)),
     );
-    expect(drafts.map((draft) => draft.id)).toEqual([first.id, second.draft.id].sort());
+    expect(drafts.map((draft) => draft.id)).toEqual([first.id, second.draft.id].toSorted());
   });
 
   it("keeps two drafts of the same chat independent through save and discard", async () => {
@@ -627,7 +627,7 @@ describe("persistent agent drafts", () => {
       patch(owner, draft, { name: "A" }),
       patch(owner, draft, { name: "B" }),
     ]);
-    expect(results.map(({ outcome }) => outcome).sort()).toEqual(["conflict", "updated"]);
+    expect(results.map(({ outcome }) => outcome).toSorted()).toEqual(["conflict", "updated"]);
     expect(results[0]!.draft).toEqual(results[1]!.draft);
     expect((await get(owner, draft))!.revision).toBe(2);
   });
@@ -818,7 +818,7 @@ describe("persistent agent drafts", () => {
     const second = (await patch(owner, await initialize(owner, agentId), { name: "Second editor" }))
       .draft;
     const results = await Promise.all([save(owner, first), save(owner, second)]);
-    expect(results.map(({ outcome }) => outcome).sort()).toEqual(["agent_changed", "saved"]);
+    expect(results.map(({ outcome }) => outcome).toSorted()).toEqual(["agent_changed", "saved"]);
     expect((await loadAgent(owner, agentId))!.row.configRevision).toBe(2);
   });
 

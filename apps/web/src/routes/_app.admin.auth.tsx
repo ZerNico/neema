@@ -1,9 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  OAuthPage,
-  oauthProvidersQuery,
-  signupPolicyQuery,
-} from "~/modules/auth/ui/oauth-page.tsx";
+import { OAuthPage } from "~/modules/auth/ui/oauth-page.tsx";
+import { oauthProvidersQuery, signupPolicyQuery } from "~/modules/auth/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/auth")({
   loader: ({ context }) =>

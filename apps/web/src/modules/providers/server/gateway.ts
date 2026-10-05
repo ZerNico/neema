@@ -357,6 +357,63 @@ const collectSideGeneration = (stream: Stream.Stream<ChatStreamPart, unknown, ne
     },
   );
 
+// One place decides which provider rejections are recoverable, so chat
+// and the side generations cannot drift apart on it.
+const classify = (providerId: string, cause: unknown) => {
+  if (cause instanceof ProviderContextOverflow || cause instanceof ProviderUnreachable) {
+    return cause;
+  }
+  const message = providerErrorMessage(cause);
+  if (isContextOverflow(message)) return new ProviderContextOverflow({ providerId, message });
+  // Preserve only the adapter's fixed reason tag and HTTP status for durable
+  // diagnostics. Descriptions, bodies and headers can contain private data.
+  const reason = AiError.isAiError(cause) ? cause.reason : undefined;
+  const status = reason && "http" in reason ? reason.http?.response?.status : undefined;
+  // SSE error values are plain objects, not AiErrors. Their code is a
+  // provider code, not the HTTP status of the already-open stream.
+  const streamedError = Schema.decodeUnknownOption(StreamedProviderError)(cause);
+  const namedError = Schema.decodeUnknownOption(StreamedErrorCode)(cause);
+  return new ProviderUnreachable({
+    providerId,
+    message,
+    ...(reason
+      ? { diagnostic: { kind: reason._tag, ...(status === undefined ? {} : { status }) } }
+      : Option.isSome(streamedError)
+        ? { diagnostic: { kind: "ProviderStreamError", code: streamedError.value.code } }
+        : Option.isSome(namedError)
+          ? {
+              diagnostic: {
+                kind: RESPONSES_ERROR_KINDS[namedError.value.code] ?? "ProviderStreamError",
+              },
+            }
+          : {}),
+  });
+};
+
+const requestError = (providerId: string, prompt: Prompt.Prompt, imageOutput = false) => {
+  const sensitive = imageOutput || isSensitivePrompt(prompt);
+  return (cause: unknown) => {
+    const error = classify(providerId, cause);
+    // Provider/decode failures may quote image bytes or opaque replay signatures.
+    // Preserve categories and bounded diagnostic codes, never that quoted text.
+    if (!sensitive) return error;
+    return error instanceof ProviderContextOverflow
+      ? new ProviderContextOverflow({
+          providerId,
+          message: imageOutput
+            ? "The image request exceeded the provider context window."
+            : "The request exceeded the provider context window.",
+        })
+      : new ProviderUnreachable({
+          providerId,
+          message: imageOutput
+            ? "The image provider could not complete this request."
+            : "The provider could not complete this request.",
+          ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+        });
+  };
+};
+
 /**
  * Talks to configured AI providers: model catalog for admin autocomplete, and
  * streaming chat completions for generation.
@@ -504,63 +561,6 @@ export class AiGateway extends Context.Service<
         );
         return buildModelLayer(connection, model, { ...config, onChatFallback }, imageOutput);
       });
-
-      // One place decides which provider rejections are recoverable, so chat
-      // and the side generations cannot drift apart on it.
-      const classify = (providerId: string, cause: unknown) => {
-        if (cause instanceof ProviderContextOverflow || cause instanceof ProviderUnreachable) {
-          return cause;
-        }
-        const message = providerErrorMessage(cause);
-        if (isContextOverflow(message)) return new ProviderContextOverflow({ providerId, message });
-        // Preserve only the adapter's fixed reason tag and HTTP status for durable
-        // diagnostics. Descriptions, bodies and headers can contain private data.
-        const reason = AiError.isAiError(cause) ? cause.reason : undefined;
-        const status = reason && "http" in reason ? reason.http?.response?.status : undefined;
-        // SSE error values are plain objects, not AiErrors. Their code is a
-        // provider code, not the HTTP status of the already-open stream.
-        const streamedError = Schema.decodeUnknownOption(StreamedProviderError)(cause);
-        const namedError = Schema.decodeUnknownOption(StreamedErrorCode)(cause);
-        return new ProviderUnreachable({
-          providerId,
-          message,
-          ...(reason
-            ? { diagnostic: { kind: reason._tag, ...(status === undefined ? {} : { status }) } }
-            : Option.isSome(streamedError)
-              ? { diagnostic: { kind: "ProviderStreamError", code: streamedError.value.code } }
-              : Option.isSome(namedError)
-                ? {
-                    diagnostic: {
-                      kind: RESPONSES_ERROR_KINDS[namedError.value.code] ?? "ProviderStreamError",
-                    },
-                  }
-                : {}),
-        });
-      };
-
-      const requestError = (providerId: string, prompt: Prompt.Prompt, imageOutput = false) => {
-        const sensitive = imageOutput || isSensitivePrompt(prompt);
-        return (cause: unknown) => {
-          const error = classify(providerId, cause);
-          // Provider/decode failures may quote image bytes or opaque replay signatures.
-          // Preserve categories and bounded diagnostic codes, never that quoted text.
-          if (!sensitive) return error;
-          return error instanceof ProviderContextOverflow
-            ? new ProviderContextOverflow({
-                providerId,
-                message: imageOutput
-                  ? "The image request exceeded the provider context window."
-                  : "The request exceeded the provider context window.",
-              })
-            : new ProviderUnreachable({
-                providerId,
-                message: imageOutput
-                  ? "The image provider could not complete this request."
-                  : "The provider could not complete this request.",
-                ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
-              });
-        };
-      };
 
       const streamChat = (input: {
         modelId: string;
@@ -930,6 +930,7 @@ export class AiGateway extends Context.Service<
           // Malformed or mismatched output is a contract failure of the model,
           // not provider weather: retrying the same request cannot change the
           // vector width it returns, so the job must settle as failed at once.
+          // oxlint-disable-next-line unicorn/consistent-function-scoping -- reads providerId from the enclosing job
           const fail = (message: string) =>
             Effect.fail(
               new ProviderUnreachable({

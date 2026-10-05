@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { redeemDesktopTicket } from "~/modules/auth/client.ts";
 import { toast } from "sonner";
 import { challengeOf } from "~/modules/auth/desktop-ticket.ts";
-import { identityNavigation } from "~/modules/auth/identity-boundary.tsx";
+import { identityNavigation } from "~/modules/auth/identity-context.ts";
 import { DesktopSignIn } from "./desktop-sign-in.tsx";
 
 vi.mock("~/modules/auth/client.ts", () => ({ redeemDesktopTicket: vi.fn() }));

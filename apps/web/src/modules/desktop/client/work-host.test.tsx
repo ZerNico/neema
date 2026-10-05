@@ -17,12 +17,8 @@ import {
 import { Effect } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
-import {
-  DesktopWorkProvider,
-  useWorkApprovals,
-  WorkAttention,
-  WorkConnectionNotice,
-} from "./work-host.tsx";
+import { DesktopWorkProvider, WorkAttention, WorkConnectionNotice } from "./work-host.tsx";
+import { useWorkApprovals } from "./work-context.ts";
 
 const PAUSED = /work on this computer is paused/;
 
@@ -56,7 +52,7 @@ vi.mock("~/modules/chat/server/functions.ts", () => ({
   getWorkTurnReservation: api.reservationStatus,
   dispatchQueuedMessage: api.dispatch,
 }));
-vi.mock("~/modules/auth/identity-boundary.tsx", () => ({ useIdentityBoundary: () => null }));
+vi.mock("~/modules/auth/identity-context.ts", () => ({ useIdentityBoundary: () => null }));
 const shell = {
   executionSession: () => Effect.succeed({ id: "executor" }),
   listPendingPromotions: () => Effect.promise(() => api.pendingPromotions()),

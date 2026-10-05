@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { GroupsPage, groupsQuery } from "~/modules/admin/ui/groups-page.tsx";
+import { GroupsPage } from "~/modules/admin/ui/groups-page.tsx";
+import { groupsQuery } from "~/modules/admin/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/groups/")({
   loader: async ({ context }) => {

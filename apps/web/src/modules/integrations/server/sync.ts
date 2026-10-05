@@ -77,6 +77,19 @@ export class KnowledgeSourceService extends Context.Service<
   static readonly manualLayer = Layer.effect(KnowledgeSourceService, make(false));
 }
 
+const toView = (row: SourceRow, connected: boolean, canEdit: boolean): KnowledgeSourceView => ({
+  id: row.id,
+  canEdit,
+  collectionId: row.collectionId,
+  integrationId: row.integrationId,
+  root: row.root,
+  status: row.status,
+  lastError: row.lastError,
+  lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+  stats: row.stats,
+  connected,
+});
+
 function make(background: boolean) {
   return Effect.gen(function* () {
     const db = yield* Db;
@@ -99,19 +112,6 @@ function make(background: boolean) {
           Effect.orDie,
           Effect.map((rows) => rows.length > 0),
         );
-
-    const toView = (row: SourceRow, connected: boolean, canEdit: boolean): KnowledgeSourceView => ({
-      id: row.id,
-      canEdit,
-      collectionId: row.collectionId,
-      integrationId: row.integrationId,
-      root: row.root,
-      status: row.status,
-      lastError: row.lastError,
-      lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
-      stats: row.stats,
-      connected,
-    });
 
     const list = Effect.fn("KnowledgeSourceService.list")(function* (
       userId: string,

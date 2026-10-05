@@ -303,7 +303,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
 
   const skillContext = (): Prompt.MessageEncoded[] => [...(skillTools?.messages() ?? [])];
   for (const [index, entry] of (deps.config.skills ?? [])
-    .filter((entry) => entry.explicit)
+    .filter((skill) => skill.explicit)
     .entries()) {
     const rowId = uuidv7();
     const activity = {
@@ -582,7 +582,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             else if (isSkill) {
               const params = part.params as Record<string, unknown>;
               const entry = deps.config.skills?.find(
-                (entry) => entry.skillId === params["skillId"],
+                (skill) => skill.skillId === params["skillId"],
               );
               yield* deps.emit({
                 v: 1,

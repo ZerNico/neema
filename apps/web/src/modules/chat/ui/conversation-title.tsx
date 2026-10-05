@@ -1,24 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { relativeAgeLabel } from "./timestamps.ts";
-import { useAppReducedMotion } from "~/ui/motion.tsx";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-
-/**
- * Which conversations have been seen untitled, and which have already played
- * their reveal. Owned by the mounted sidebar rather than by a row (so it
- * survives refetches and reordering) and never module-global, which on the
- * server would be shared across users.
- */
-export interface TitleRevealRegistry {
-  readonly pending: Set<string>;
-  readonly revealed: Set<string>;
-}
-
-export const createTitleRevealRegistry = (): TitleRevealRegistry => ({
-  pending: new Set(),
-  revealed: new Set(),
-});
+import type { TitleRevealRegistry } from "./title-reveal-registry.ts";
 
 const REVEAL_DURATION_MS = 600;
 const TITLE_TOOLTIP_DELAY_MS = 600;

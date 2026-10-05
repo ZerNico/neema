@@ -1,21 +1,19 @@
-import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
-import { NumberField, integerBetween } from "~/modules/tools/ui/tool-fields.tsx";
+import { NumberField } from "~/modules/tools/ui/tool-fields.tsx";
+import { integerBetween } from "~/modules/tools/ui/integer-between.ts";
 import { toastError } from "~/ui/error-toast.ts";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
-import { getProjectFileSettings, updateProjectFileSettings } from "../server/functions.ts";
+import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
+import { updateProjectFileSettings } from "../server/functions.ts";
+import { projectFileSettingsQuery } from "../client/queries.ts";
 
 const MB = 1024 * 1024;
 /** The same bounds the server takes in bytes, in the unit people think in. */
 const CapMegabytes = integerBetween(10, 1024 * 1024);
 const CapForm = Schema.toStandardSchemaV1(Schema.Struct({ megabytes: CapMegabytes }));
-
-export const projectFileSettingsQuery = queryOptions({
-  queryKey: ["admin", "project-files"],
-  queryFn: () => getProjectFileSettings(),
-});
 
 /** How much each project may keep in files, history included. */
 export function ProjectFileSettingsSection() {

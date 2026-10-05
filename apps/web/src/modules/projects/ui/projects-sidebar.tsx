@@ -3,12 +3,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import {
-  ConversationMenu,
-  useConversationActions,
-} from "~/modules/chat/ui/conversation-actions.tsx";
+import { ConversationMenu } from "~/modules/chat/ui/conversation-actions.tsx";
+import { useConversationActions } from "~/modules/chat/ui/use-conversation-actions.tsx";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import { DisclosureContent, disclosureChevronMotionClassName } from "~/ui/disclosure.tsx";
+import { DisclosureContent } from "~/ui/disclosure.tsx";
+import { disclosureChevronMotionClassName } from "~/ui/disclosure-classes.ts";
 import { Collapsible, CollapsibleTrigger } from "~/ui/primitives/collapsible";
 import {
   SidebarGroup,

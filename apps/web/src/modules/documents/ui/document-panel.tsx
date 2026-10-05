@@ -3,12 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { Suspense, lazy, useState } from "react";
-import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Toggle } from "~/ui/primitives/toggle";
-import { motionEase, useAppReducedMotion } from "~/ui/motion";
+import { motionEase } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
@@ -16,28 +16,6 @@ import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
 const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
-
-export const documentSubtitle = (controller: Controller, userId?: string) => {
-  const document = controller.document;
-  if (!document) return "Document";
-  const age = relativeAgeLabel(document.updatedAt);
-  // Kept short: the panel header gives the title whatever this leaves. In a
-  // project someone else's edit goes unnamed rather than crowding it out.
-  const editor =
-    document.lastEditedBy === "model"
-      ? "by the assistant"
-      : !document.projectId || !document.lastEditorUserId || document.lastEditorUserId === userId
-        ? "by you"
-        : null;
-  return [
-    // One word, so a shared document reads apart from this chat's own.
-    document.projectId ? "Project" : null,
-    document.canEdit ? null : "View only",
-    ["Edited", editor, age].filter(Boolean).join(" "),
-  ]
-    .filter(Boolean)
-    .join(" · ");
-};
 
 /**
  * What is on screen, not the stored copy a second behind it: an open

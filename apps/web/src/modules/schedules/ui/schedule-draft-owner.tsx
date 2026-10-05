@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode, Ref } from "react";
 import {
   DraftOwner,
-  useDraftPanel,
   type DraftHandle,
   type DraftKindUi,
 } from "~/modules/drafts/ui/draft-owner.tsx";
@@ -52,8 +51,6 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
     createEffect: "The schedule is created only when you choose Create schedule.",
   },
 };
-
-export const useScheduleDraftPanel = (draftId: string) => useDraftPanel("schedule", draftId);
 
 export function ScheduleDraftOwner(props: {
   draftIds: ReadonlyArray<string>;

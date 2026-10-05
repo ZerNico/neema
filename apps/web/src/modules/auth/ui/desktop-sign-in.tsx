@@ -9,8 +9,8 @@ import {
   isTicketShaped,
   normaliseTicket,
 } from "~/modules/auth/desktop-ticket.ts";
-import { identityNavigation } from "~/modules/auth/identity-boundary.tsx";
-import { desktopSignInPath } from "~/modules/auth/ui/desktop-sign-in-page.tsx";
+import { identityNavigation } from "~/modules/auth/identity-context.ts";
+import { desktopSignInPath } from "~/modules/auth/ui/desktop-sign-in-path.ts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";

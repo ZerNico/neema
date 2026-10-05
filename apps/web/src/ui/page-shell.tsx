@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useMatches } from "@tanstack/react-router";
 import type { IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
-import { cardSurfaceClassName } from "~/ui/card.tsx";
+import { cardSurfaceClassName } from "~/ui/card-surface.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   Empty,

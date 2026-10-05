@@ -146,9 +146,9 @@ const harness = (
     utility?: { id: string; enabled: boolean } | null;
   } = {},
 ) => {
-  const generateText = vi.fn((input: { modelId: string }) =>
+  const generateText = vi.fn((request: { modelId: string }) =>
     (
-      options.byModel?.[input.modelId] ??
+      options.byModel?.[request.modelId] ??
       options.generate ??
       Effect.succeed("Postgres vs SQLite")
     ).pipe(Effect.map((text) => ({ text, usage: emptyUsage, finishMetadata: undefined }))),

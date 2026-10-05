@@ -109,7 +109,7 @@ describe("WorkspaceRegistry", () => {
         );
       }),
     );
-    expect(staged.map((file) => file.name).sort()).toEqual(["Report-1.PDF", "Report.PDF"]);
+    expect(staged.map((file) => file.name).toSorted()).toEqual(["Report-1.PDF", "Report.PDF"]);
     expect(await stat(join(root, CONVERSATION)).catch(() => null)).toBeNull();
     expect(await readdir(join(root, ".staging", CONVERSATION, SUBMISSION))).toEqual([
       "Report-1.PDF",

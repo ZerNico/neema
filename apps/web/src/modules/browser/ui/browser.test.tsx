@@ -4,12 +4,8 @@ import type { BrowserFavicon, BrowserOpenTab, DesktopBrowser } from "@chat/deskt
 import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppMotionProvider } from "~/ui/motion";
-import {
-  DetailPanelProvider,
-  DetailPanelRail,
-  useDetailPanel,
-  type DetailPanelApi,
-} from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail, type DetailPanelApi } from "~/ui/detail-panel.tsx";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { browserTabs } from "../client/browser-store.ts";
 import { BrowserHost } from "./browser-host.tsx";
 import { BROWSER_TAB_PREFIX, browserNewTab } from "./browser-request.tsx";

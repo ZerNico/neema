@@ -1,12 +1,9 @@
-import { createFormHook, createFormHookContexts } from "@tanstack/react-form";
 import type { ComponentProps } from "react";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
-
-export const { fieldContext, formContext, useFieldContext, useFormContext } =
-  createFormHookContexts();
+import { useFieldContext, useFormContext } from "./form-contexts.ts";
 
 /**
  * Marks an optional field inside its label, so it is part of the accessible name. Required
@@ -16,7 +13,7 @@ export function OptionalMark() {
   return <span className="text-muted-foreground font-normal">(optional)</span>;
 }
 
-function TextField({
+export function TextField({
   label,
   optional = false,
   description,
@@ -67,7 +64,7 @@ function TextField({
   );
 }
 
-function TextareaField({
+export function TextareaField({
   label,
   optional = false,
   description,
@@ -118,10 +115,12 @@ function TextareaField({
   );
 }
 
-// Submit button wired to the form's canSubmit/isSubmitting. The pending
-// presentation itself lives in PendingButton, shared with the mutations that
-// have no form to subscribe to.
-function SubmitButton({
+/**
+ * Submit button wired to the form's canSubmit/isSubmitting. The pending
+ * presentation itself lives in PendingButton, shared with the mutations that
+ * have no form to subscribe to.
+ */
+export function SubmitButton({
   children,
   disabled,
   ...props
@@ -142,10 +141,3 @@ function SubmitButton({
     </form.Subscribe>
   );
 }
-
-export const { useAppForm, withForm } = createFormHook({
-  fieldContext,
-  formContext,
-  fieldComponents: { TextField, TextareaField },
-  formComponents: { SubmitButton },
-});

@@ -1,14 +1,14 @@
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import {
   getScanReading,
   retryOcrModelDownload,
   testMistralOcr,
   updateScanReading,
 } from "~/modules/tools/server/functions.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { FormActions, ListRow } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -21,23 +21,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
-import { SaveLabel, useSaveStatus } from "~/ui/save-status.tsx";
+import { SaveLabel } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { cn } from "~/ui/utils";
+import { scanReadingQuery } from "../../tools/client/queries.ts";
 
 type Mode = "off" | "local" | "mistral" | "model";
 type Quality = "accurate" | "fast";
 type Settings = NonNullable<Awaited<ReturnType<typeof getScanReading>>>;
 type FileStatus = Settings["localFiles"][Quality];
-
-export const scanReadingQuery = queryOptions({
-  queryKey: ["admin", "tools", "scan-reading"],
-  queryFn: () => getScanReading(),
-  // The model files' download reports progress only when asked.
-  refetchInterval: (query) =>
-    Object.values(query.state.data?.localFiles ?? {}).some((file) => file.state === "downloading")
-      ? 1000
-      : false,
-});
 
 const MODES: ReadonlyArray<{ value: Mode; label: string; detail: string }> = [
   {

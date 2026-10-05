@@ -164,6 +164,25 @@ export type ScheduleAuthoringServices = {
   drafts: ScheduleDraftService["Service"];
   providers: ProviderRepo["Service"];
 };
+
+const summary = (draft: ScheduleDraft): typeof DraftSummary.Type => ({
+  draftId: draft.id,
+  name: draft.settings.name,
+  revision: draft.revision,
+  scheduleSaved: draft.targetId !== null,
+  hasUnsavedChanges: draft.savedDraftRevision !== draft.revision,
+});
+const state = (draft: ScheduleDraft): typeof DraftState.Type => ({
+  ...summary(draft),
+  settings: draft.settings,
+});
+const reference = (draft: ScheduleDraft) => ({
+  draftId: draft.id,
+  draftConversationId: draft.conversationId,
+  revision: draft.revision,
+  draft: state(draft),
+});
+
 export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTools")(
   function* (input: {
     services: ScheduleAuthoringServices;
@@ -189,23 +208,6 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     let focusedDraftId: string | null = null;
     // The models this user can pick, marked with the one answering right now.
     let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];
-    const summary = (draft: ScheduleDraft): typeof DraftSummary.Type => ({
-      draftId: draft.id,
-      name: draft.settings.name,
-      revision: draft.revision,
-      scheduleSaved: draft.targetId !== null,
-      hasUnsavedChanges: draft.savedDraftRevision !== draft.revision,
-    });
-    const state = (draft: ScheduleDraft): typeof DraftState.Type => ({
-      ...summary(draft),
-      settings: draft.settings,
-    });
-    const reference = (draft: ScheduleDraft) => ({
-      draftId: draft.id,
-      draftConversationId: draft.conversationId,
-      revision: draft.revision,
-      draft: state(draft),
-    });
     const unavailable: Result = {
       outcome: "unavailable",
       message: "No schedule draft is available in this chat. Use draft_schedule to prepare one.",

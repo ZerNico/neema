@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   getProject,
+  getProjectFileSettings,
   getProjectMembers,
   listProjectChats,
   listProjectFiles,
@@ -50,3 +51,8 @@ export const projectFileVersionsQuery = (fileId: string) =>
     queryFn: () => listProjectFileVersions({ data: { fileId } }),
     staleTime: 30_000,
   });
+
+export const projectFileSettingsQuery = queryOptions({
+  queryKey: ["admin", "project-files"],
+  queryFn: () => getProjectFileSettings(),
+});

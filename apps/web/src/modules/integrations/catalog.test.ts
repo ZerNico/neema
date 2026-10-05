@@ -9,8 +9,8 @@ describe("integration catalog", () => {
     expect(ADAPTERS.map((adapter) => adapter.id)).toEqual(INTEGRATIONS.map((entry) => entry.id));
     for (const manifest of INTEGRATIONS) {
       const adapter = ADAPTERS.find((entry) => entry.id === manifest.id)!;
-      expect(adapter.tools.map((tool) => tool.name).sort()).toEqual(
-        manifest.tools.map((tool) => tool.name).sort(),
+      expect(adapter.tools.map((tool) => tool.name).toSorted()).toEqual(
+        manifest.tools.map((tool) => tool.name).toSorted(),
       );
       expect(Boolean(adapter.knowledge)).toBe(manifest.knowledgeSource);
       expect(Boolean(adapter.oauth)).toBe(manifest.oauth !== null);

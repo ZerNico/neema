@@ -108,6 +108,13 @@ const snapshot = (cells: readonly Cell[]) =>
       .map((cell) => [`${columnLetters(cell.col)}${cell.row}`, outcomeOf(cell.value)] as const)
       .filter(([, outcome]) => outcome.type !== "none"),
   );
+const clear = (cell: Cell, anchor: boolean) => {
+  const value = cell.value;
+  if (anchor && isFormulaValue(value)) {
+    const { cachedValue: _value, cachedValueType: _type, ...formula } = value;
+    cell.value = formula;
+  } else if (!anchor) cell.value = null;
+};
 
 /**
  * Every case in an Excel-saved workbook: Excel's result, then ours after
@@ -130,13 +137,6 @@ export async function compareWithExcel(bytes: Uint8Array): Promise<ParityCase[]>
     wasMarked?: boolean;
   }> = [];
   const authored = new Set<Cell>();
-  const clear = (cell: Cell, anchor: boolean) => {
-    const value = cell.value;
-    if (anchor && isFormulaValue(value)) {
-      const { cachedValue: _value, cachedValueType: _type, ...formula } = value;
-      cell.value = formula;
-    } else if (!anchor) cell.value = null;
-  };
   for (let row = 1; ; row++) {
     const cell = getCell(legacy, row, 2);
     if (!cell || !isFormulaValue(cell.value)) break;

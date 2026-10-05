@@ -42,6 +42,7 @@ export function SkillsPage() {
       ]}
     />
   );
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- list renders this page's rows beside it
   const list = (items: SkillSummary[]) => (
     <ListCard>
       {items.map((skill) => (

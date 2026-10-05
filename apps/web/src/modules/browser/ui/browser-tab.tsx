@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useDetailPanel, useDetailPanelTabs } from "~/ui/detail-panel.tsx";
+import { useDetailPanel, useDetailPanelTabs } from "~/ui/detail-panel-context.ts";
 import {
   browserTabs,
   useBrowserOwners,

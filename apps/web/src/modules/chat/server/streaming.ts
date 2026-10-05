@@ -303,6 +303,21 @@ const promptMessages = (prompt: { content: unknown }) =>
 const shortErrorMessage = (error: unknown): string =>
   String(error).split("\n", 1)[0]!.slice(0, 200);
 
+// A block's first line names it ("Application-provided documents…"),
+// so an updated block is matched to its earlier snapshot by that line.
+const headerOf = (message: Prompt.MessageEncoded) => {
+  const text =
+    typeof message.content === "string"
+      ? message.content
+      : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  return (
+    text
+      .split("\n")
+      .find((line) => line.trim())
+      ?.slice(0, 160) ?? ""
+  );
+};
+
 /**
  * Runs assistant generations detached from any HTTP request, persists chunks
  * for resumability, and republishes them for live subscribers.
@@ -658,9 +673,9 @@ export class StreamEngine extends Context.Service<
         // the provider counted for its first model call, against what we had
         // predicted for that same prompt.
         const priorUsage =
-          completed
-            .filter((m) => m.role === "assistant" && m.usage?.firstInputTokens !== undefined)
-            .at(-1)?.usage ?? null;
+          completed.findLast(
+            (m) => m.role === "assistant" && m.usage?.firstInputTokens !== undefined,
+          )?.usage ?? null;
 
         const earlierUsage = resuming ? currentMessage.usage : null;
         // The resume claim set the row's text to what its chunks spell.
@@ -1707,25 +1722,10 @@ export class StreamEngine extends Context.Service<
           // their policies say a later copy replaces an earlier one.
           let answerContext: ReadonlyArray<Prompt.MessageEncoded> | null = null;
           const startContext = () => (answerContext ??= trailingContext());
-          // A block's first line names it ("Application-provided documents…"),
-          // so an updated block is matched to its earlier snapshot by that line.
-          const headerOf = (message: Prompt.MessageEncoded) => {
-            const text =
-              typeof message.content === "string"
-                ? message.content
-                : message.content
-                    .flatMap((part) => (part.type === "text" ? [part.text] : []))
-                    .join("\n");
-            return (
-              text
-                .split("\n")
-                .find((line) => line.trim())
-                ?.slice(0, 160) ?? ""
-            );
-          };
           const contextUpdates = (): Prompt.MessageEncoded[] => {
             if (!answerContext) return [];
             const now = trailingContext();
+            // oxlint-disable-next-line unicorn/consistent-function-scoping -- key is a one-line comparison read where it is used
             const key = (message: Prompt.MessageEncoded) => JSON.stringify(message.content);
             const before = new Set(answerContext.map(key));
             const headers = new Set(now.map(headerOf));
@@ -1948,7 +1948,7 @@ export class StreamEngine extends Context.Service<
               .map((call) => (call.result as { skillId?: unknown } | null)?.skillId),
           );
           for (const [index, entry] of (config.skills ?? [])
-            .filter((entry) => entry.explicit)
+            .filter((skill) => skill.explicit)
             .entries()) {
             // Still pinned in the prompt; only the row a resumed answer shows is not repeated.
             if (pinnedBefore.has(entry.skillId)) continue;
@@ -2410,7 +2410,7 @@ export class StreamEngine extends Context.Service<
                               eventIndex: seq + 1,
                               seq: seq + 1,
                             }).pipe(
-                              Effect.flatMap((image) =>
+                              Effect.flatMap((accepted) =>
                                 Effect.gen(function* () {
                                   seq += 1;
                                   yield* PubSub.publish(pubsub, {
@@ -2419,9 +2419,9 @@ export class StreamEngine extends Context.Service<
                                     runId: fence.generationId,
                                     seq,
                                     chunkKind: "file",
-                                    delta: JSON.stringify(image),
+                                    delta: JSON.stringify(accepted),
                                   });
-                                  return image;
+                                  return accepted;
                                 }),
                               ),
                               Effect.uninterruptible,
@@ -2786,7 +2786,7 @@ export class StreamEngine extends Context.Service<
                           }
                           if (family === "skill") {
                             const entry = config.skills?.find(
-                              (entry) => entry.skillId === args["skillId"],
+                              (skill) => skill.skillId === args["skillId"],
                             );
                             yield* pushToolChunk({
                               v: 1,
@@ -3803,9 +3803,9 @@ export class StreamEngine extends Context.Service<
                       return yield* Effect.fail(error);
                     }
 
-                    const factor = currentCalibration();
+                    const overflowFactor = currentCalibration();
                     const beforeEstimate = Math.ceil(
-                      estimateRequestPrompt(!toolRoundsLeft) * factor,
+                      estimateRequestPrompt(!toolRoundsLeft) * overflowFactor,
                     );
                     if (recoveryStage === 0 && activeRounds.length > 0) {
                       const reduced: ActiveRoundCompactionDecision =
@@ -3825,7 +3825,7 @@ export class StreamEngine extends Context.Service<
                             beforeTurnIndex: turn,
                             textOffset: assembled.length,
                             passIndex: nextPassIndex(turn),
-                            calibrationFactor: factor,
+                            calibrationFactor: overflowFactor,
                             sourceManifest: sourceManifest(),
                             ...(currentReminderPrompt()
                               ? { trailingPrompt: currentReminderPrompt()! }
@@ -3860,7 +3860,7 @@ export class StreamEngine extends Context.Service<
                       renderedMessageGroups: historyGroups,
                       fixedPrefix: [...fixedPrefix, ...promptMessages(activeOnly)],
                       trailingMessages: historyBudgetTail(!toolRoundsLeft),
-                      calibrationFactor: factor,
+                      calibrationFactor: overflowFactor,
                     });
                     if (!shrunk) return yield* Effect.fail(error);
 

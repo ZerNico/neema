@@ -1,12 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { pendingIntegrationCallsQuery } from "~/modules/integrations/client/queries.ts";
-import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
-  disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
+import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { serverNow } from "../client/use-message-stream.ts";
 import { useElapsed } from "./use-elapsed.ts";

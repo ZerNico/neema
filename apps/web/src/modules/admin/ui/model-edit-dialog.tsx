@@ -1,12 +1,9 @@
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { probeEmbeddingDimensions, listModelAccess, updateModel } from "../server/functions.ts";
-import { groupsQuery } from "./groups-page.tsx";
-import {
-  ModelSettingsFields,
-  modelSettingsFromDraft,
-  type ModelSettingsDraft,
-} from "./model-settings-form.tsx";
+import { probeEmbeddingDimensions, updateModel } from "../server/functions.ts";
+import { groupsQuery, modelAccessQuery } from "../client/queries.ts";
+import { ModelSettingsFields } from "./model-settings-form.tsx";
+import { modelSettingsFromDraft, type ModelSettingsDraft } from "./model-settings-draft.ts";
 import { ModelTestResult } from "./model-test.tsx";
 import { useModelTest } from "./use-model-test.ts";
 import { getPreset, type PresetId } from "@chat/model-client/presets";
@@ -29,13 +26,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { FieldError, FieldGroup } from "~/ui/primitives/field";
-
-export const modelAccessQuery = queryOptions({
-  queryKey: ["admin", "model-access"],
-  queryFn: () => listModelAccess(),
-});
-
-export const MODEL_DIALOG_CLASS = "sm:max-w-2xl";
+import { MODEL_DIALOG_CLASS } from "./model-dialog.ts";
 
 export interface EditableModel {
   id: string;

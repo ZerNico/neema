@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
-import { createTitleRevealRegistry } from "./conversation-title.tsx";
+import { createTitleRevealRegistry } from "./title-reveal-registry.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 

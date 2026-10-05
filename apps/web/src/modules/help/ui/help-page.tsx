@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { availableFeatures } from "../features.ts";
-import { useReplayTour } from "./feature-tour.tsx";
+import { useReplayTour } from "./replay-tour-context.ts";
 import {
   Card,
   CardContent,

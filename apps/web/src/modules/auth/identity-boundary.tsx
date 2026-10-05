@@ -1,15 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { Activity, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { authClient } from "./client.ts";
 import { getSessionIdentity } from "./server/functions.ts";
@@ -19,16 +9,12 @@ import {
   sameIdentity,
   type SessionIdentity,
 } from "./identity.ts";
-
-export const IDENTITY_CHANGE_KEY = "chat.identity-change";
-export const identityNavigation = { replace: (path: string) => window.location.replace(path) };
-type Destination = "/" | "/admin/users" | "/login";
-interface IdentityBoundaryActions {
-  reconcile: () => Promise<boolean>;
-  changeIdentity: (operation: () => Promise<void>, destination: Destination) => Promise<void>;
-}
-const IdentityContext = createContext<IdentityBoundaryActions | null>(null);
-export const useIdentityBoundary = () => useContext(IdentityContext);
+import {
+  IDENTITY_CHANGE_KEY,
+  identityNavigation,
+  IdentityContext,
+  type Destination,
+} from "./identity-context.ts";
 
 /**
  * Guards one signed-in identity for the lifetime of the authenticated tree.

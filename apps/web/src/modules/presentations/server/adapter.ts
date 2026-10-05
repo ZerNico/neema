@@ -50,6 +50,16 @@ export async function createPresentationDraft(): Promise<Uint8Array> {
   return bytes;
 }
 
+const failed = (error: unknown, path: string) => {
+  if (error instanceof PresentationError)
+    return new PresentationError(error.code, `${path}: ${error.message}`);
+  const detail = error instanceof Error ? error.message.slice(0, 200) : "";
+  return new PresentationError(
+    "processing_error",
+    `${path}: PowerPoint could not apply this change.${detail ? ` ${detail}` : ""}`,
+  );
+};
+
 export async function editPresentation(
   input: Uint8Array,
   rawOperations: unknown,
@@ -105,15 +115,6 @@ export async function editPresentation(
   refs.slides.set("first", session.ids.get(toPart(getSlidePartName(getSlides(session.deck)[0]!)))!);
   const describe = (from: number, to: number) =>
     from === to ? `operations[${from}] ${operations[from]!.kind}` : `operations[${from}]–[${to}]`;
-  const failed = (error: unknown, path: string) => {
-    if (error instanceof PresentationError)
-      return new PresentationError(error.code, `${path}: ${error.message}`);
-    const detail = error instanceof Error ? error.message.slice(0, 200) : "";
-    return new PresentationError(
-      "processing_error",
-      `${path}: PowerPoint could not apply this change.${detail ? ` ${detail}` : ""}`,
-    );
-  };
   // The first operation whose change is still unsaved, for naming a failed save.
   let pending = 0;
   const settle = async (through: number) => {

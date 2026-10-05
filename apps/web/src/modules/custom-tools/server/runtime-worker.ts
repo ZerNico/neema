@@ -408,13 +408,9 @@ const requestFile = (jobId: number, reference: string) =>
   new Promise<NonNullable<WorkerFileReply["file"]>>((resolve, reject) => {
     const requestId = nextFileRequest++;
     fileReplies.set(requestId, { resolve, reject });
+    const request = { id: jobId, type: "file", requestId, reference } satisfies WorkerResponse;
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.
-    parentPort!.postMessage({
-      id: jobId,
-      type: "file",
-      requestId,
-      reference,
-    } satisfies WorkerResponse);
+    parentPort!.postMessage(request);
   });
 
 const invoke = async (request: WorkerInvokeRequest): Promise<WorkerRunResult> => {

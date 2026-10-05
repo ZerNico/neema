@@ -1,12 +1,10 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
@@ -46,6 +44,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     if (expanded && active && paneRef.current) {
       paneRef.current.scrollTop = paneRef.current.scrollHeight;
     }
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- new reasoning text is what re-runs the scroll
   }, [reasoning, expanded, active]);
 
   // Hidden-reasoning providers: indicator while active, nothing afterwards.

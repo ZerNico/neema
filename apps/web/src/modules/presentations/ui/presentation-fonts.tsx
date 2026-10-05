@@ -1,12 +1,12 @@
 import { Delete02Icon, TextFontIcon, Upload01Icon, Upload04Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import * as m from "motion/react-m";
 import { useRef } from "react";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
-import { useAppReducedMotion } from "~/ui/motion.tsx";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { ListRow } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Switch } from "~/ui/primitives/switch";
@@ -17,11 +17,7 @@ import {
   setPresentationFontEmbed,
   uploadPresentationFont,
 } from "../server/font-functions.ts";
-
-export const presentationFontsQuery = queryOptions({
-  queryKey: ["admin", "presentation-fonts"],
-  queryFn: () => listPresentationFonts(),
-});
+import { presentationFontsQuery } from "../client/queries.ts";
 
 type Font = Awaited<ReturnType<typeof listPresentationFonts>>[number];
 

@@ -629,10 +629,12 @@ describe("manual schedule fires", () => {
       await first.runPromise(ScheduleService);
       const { owner, manual, due } = await run(
         Effect.gen(function* () {
-          const owner = yield* makeUser();
-          const manual = yield* insert(owner, { nextFireAt: new Date(Date.now() + 3_600_000) });
-          const due = yield* insert(owner, { nextFireAt: new Date(Date.now() - 60_000) });
-          return { owner, manual, due };
+          const userId = yield* makeUser();
+          return {
+            owner: userId,
+            manual: yield* insert(userId, { nextFireAt: new Date(Date.now() + 3_600_000) }),
+            due: yield* insert(userId, { nextFireAt: new Date(Date.now() - 60_000) }),
+          };
         }),
       );
       expectedScheduleIds.add(manual.id);
@@ -666,7 +668,9 @@ describe("manual schedule fires", () => {
         }),
       );
       expect(pending.every((row) => row.status === "pending")).toBe(true);
-      expect(pending.map((row) => row.scheduleId).sort()).toEqual([due.id, manual.id].sort());
+      expect(pending.map((row) => row.scheduleId).toSorted()).toEqual(
+        [due.id, manual.id].toSorted(),
+      );
       expect(started).toBe(2);
       await first.runPromise(Deferred.succeed(release, undefined));
       await first.runPromise(Deferred.await(settled));
@@ -725,10 +729,10 @@ describe("manual schedule fires", () => {
       try {
         const { owner, schedule } = await run(
           Effect.gen(function* () {
-            const owner = yield* makeUser();
+            const userId = yield* makeUser();
             return {
-              owner,
-              schedule: yield* insert(owner, { nextFireAt: new Date(Date.now() + 3_600_000) }),
+              owner: userId,
+              schedule: yield* insert(userId, { nextFireAt: new Date(Date.now() + 3_600_000) }),
             };
           }),
         );

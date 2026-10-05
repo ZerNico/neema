@@ -3,9 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -16,13 +14,19 @@ import {
 } from "react";
 import { useDocument } from "../client/use-document.ts";
 import { taskProgress } from "../task-items.ts";
-import { DocumentPanelActions, DocumentPanelBody, documentSubtitle } from "./document-panel.tsx";
+import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
+import { documentSubtitle } from "./document-subtitle.ts";
 import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
 import {
   useDetailPanel,
   useDetailPanelReconciler,
   useDetailPanelSelectedId,
-} from "~/ui/detail-panel.tsx";
+} from "~/ui/detail-panel-context.ts";
+import {
+  EMPTY_DOCUMENT_IDS,
+  DocumentPanelContext,
+  type DocumentPanelEntry,
+} from "./document-panel-context.ts";
 
 export interface DocumentOwnerHandle {
   /** Every mounted document, so a send never races typing it has not stored yet. */
@@ -37,42 +41,10 @@ interface DocumentOwnerProps {
   /** Documents the answer being watched just created; their panel opens by itself. */
   autoOpenIds?: ReadonlySet<string> | undefined;
 }
-interface DocumentPanelEntry {
-  title: string | null;
-  status: string;
-  /** Rendered as the card's meta line, so the transcript shows checklist progress. */
-  tasks: { done: number; total: number } | null;
-  /** Shared with the project rather than kept in this chat; null until loaded. */
-  inProject: boolean | null;
-  chars: number;
-  expanded: boolean;
-  open: (() => void) | null;
-  retry: (() => void) | null;
-}
 interface Session {
   entry: DocumentPanelEntry;
   flush: () => Promise<boolean>;
 }
-interface DocumentPanelScope {
-  owned: ReadonlySet<string>;
-  gone: ReadonlySet<string>;
-  entries: ReadonlyMap<string, DocumentPanelEntry>;
-}
-const EMPTY_DOCUMENT_IDS = new Set<string>();
-const DocumentPanelContext = createContext<DocumentPanelScope>({
-  owned: EMPTY_DOCUMENT_IDS,
-  gone: EMPTY_DOCUMENT_IDS,
-  entries: new Map(),
-});
-
-export const useDocumentPanel = (documentId: string) => {
-  const scope = useContext(DocumentPanelContext);
-  return {
-    owned: scope.owned.has(documentId),
-    gone: scope.gone.has(documentId),
-    entry: scope.entries.get(documentId) ?? null,
-  };
-};
 
 /** Controllers stay mounted when transcript rows or panel bodies are replaced. */
 export function DocumentOwner({

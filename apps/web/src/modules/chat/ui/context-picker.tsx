@@ -3,22 +3,16 @@ import { AnimatePresence } from "motion/react";
 import { CollapseItem } from "~/ui/motion.tsx";
 import {
   Book02Icon,
-  BriefcaseIcon,
   Calendar03Icon,
   Cancel01Icon,
-  ChartIcon,
   FolderLibraryIcon,
-  PenTool03Icon,
   Robot01Icon,
-  Search01Icon,
-  SourceCodeIcon,
-  SparklesIcon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
-import type { AgentIcon, AgentSummary } from "~/modules/agents/schema.ts";
+import type { AgentSummary } from "~/modules/agents/schema.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { schedulesQuery } from "~/modules/schedules/client/queries.ts";
 import type { MessageReference } from "../references.ts";
@@ -34,20 +28,8 @@ import {
 } from "~/ui/primitives/combobox";
 import { DropdownMenuItem, DropdownMenuSeparator } from "~/ui/primitives/dropdown-menu";
 import { cn } from "~/ui/utils";
-
-/** Icon identifiers are an app-side set; never a URL. */
-export const AGENT_ICONS: Record<AgentIcon, IconSvgElement> = {
-  robot: Robot01Icon,
-  sparkles: SparklesIcon,
-  code: SourceCodeIcon,
-  book: Book02Icon,
-  search: Search01Icon,
-  pen: PenTool03Icon,
-  chart: ChartIcon,
-  briefcase: BriefcaseIcon,
-};
-export const agentIcon = (icon: string): IconSvgElement =>
-  AGENT_ICONS[icon as AgentIcon] ?? Robot01Icon;
+import { agentIcon } from "./agent-icons.ts";
+import { collectionStatus } from "./collection-status.ts";
 
 /**
  * What the composer knows about its agent and collections. Ids come from the
@@ -196,13 +178,6 @@ export function AgentPicker({
   );
 }
 
-export const collectionStatus = (collection: CollectionSummary) =>
-  collection.pendingCount > 0
-    ? `${collection.pendingCount} preparing`
-    : collection.failedCount > 0
-      ? `${collection.failedCount} failed`
-      : `${collection.documentCount} docs`;
-
 const sameIds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) =>
   a.length === b.length && a.every((id, index) => id === b[index]);
 
@@ -343,7 +318,7 @@ export interface ContextChipItem {
   readonly note?: string | undefined;
 }
 
-export function contextChipItems(
+function contextChipItems(
   selection: ContextSelection,
   options: {
     agentCollectionIds: ReadonlySet<string>;

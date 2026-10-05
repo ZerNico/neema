@@ -9,7 +9,7 @@ import { activityRowClassName } from "./activity-row.ts";
  * app failing: it reads as a quiet outcome, never as a fault to act on. Only a
  * save that never completed (transport, defect, interruption) is an error.
  */
-export function memoryActivityLabel(activity: MemoryToolActivity): string {
+function memoryActivityLabel(activity: MemoryToolActivity): string {
   if (activity.status === "running") return "Saving to memory";
   const project = activity.scope === "project";
   if (activity.outcome === "created")
@@ -21,7 +21,7 @@ export function memoryActivityLabel(activity: MemoryToolActivity): string {
   return "Couldn’t save memory";
 }
 
-export const isMemoryFailure = (activity: MemoryToolActivity) =>
+const isMemoryFailure = (activity: MemoryToolActivity) =>
   activity.status === "error" && activity.outcome !== "rejected";
 
 /**

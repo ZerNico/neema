@@ -554,7 +554,7 @@ describe("knowledge application boundary", () => {
       }),
     );
     await drainIndexer();
-    const ordered = [...references].reverse();
+    const ordered = [...references].toReversed();
     const bodies = await run(
       Effect.flatMap(KnowledgeService, (service) => service.readBodies(owner, ordered)),
     );
@@ -3212,8 +3212,8 @@ describe("knowledge search", () => {
       status: "ready",
       config: { spaceId: "admin-config" },
     });
-    expect(Object.keys(detail).sort()).toEqual(["config", "enabled", "status"]);
-    expect(Object.keys(detail.config.approvedConnection!).sort()).toEqual([
+    expect(Object.keys(detail).toSorted()).toEqual(["config", "enabled", "status"]);
+    expect(Object.keys(detail.config.approvedConnection!).toSorted()).toEqual([
       "baseUrl",
       "modelDimensions",
       "modelKey",
@@ -3903,7 +3903,7 @@ describe("saved agent configurations", () => {
                 agentId: id,
                 expectedRevision: 1,
                 name,
-                collectionIds: [...collections].reverse(),
+                collectionIds: [...collections].toReversed(),
               }),
             ),
           ),
@@ -3914,7 +3914,7 @@ describe("saved agent configurations", () => {
     const current = await detail(owner, id);
     expect(current.configRevision).toBe(2);
     expect(current.collections.map((collection) => collection.id)).toEqual(
-      [...collections].reverse(),
+      [...collections].toReversed(),
     );
   });
 

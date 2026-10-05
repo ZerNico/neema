@@ -5,13 +5,11 @@ import { useState } from "react";
 import type { IntegrationToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { ActivityChevron, ActivityFace, ActivityNote } from "~/modules/chat/ui/activity-face.tsx";
 import { activityRowClassName } from "~/modules/chat/ui/activity-row.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/primitives/card";
@@ -19,7 +17,8 @@ import { cn } from "~/ui/utils";
 import { pendingIntegrationCallsQuery } from "../client/queries.ts";
 import type { IntegrationDecision, PendingIntegrationCall } from "../schema.ts";
 import { decideIntegrationCall } from "../server/functions.ts";
-import { IntegrationLogo, integrationName } from "./integration-logo.tsx";
+import { IntegrationLogo } from "./integration-logo.tsx";
+import { integrationName } from "./integration-name.ts";
 
 /**
  * One call into a connected service. While it runs it may be parked on the

@@ -77,7 +77,7 @@ describe("walkFiles", () => {
 
   it("honours nested .gitignore files, skips .git, and never follows a symlink", async () => {
     const { files, truncated } = await walkFiles(root, 1000);
-    expect(files.map((file) => file.relative).sort()).toEqual([
+    expect(files.map((file) => file.relative).toSorted()).toEqual([
       ".gitignore",
       "src/.gitignore",
       "src/index.ts",
@@ -100,7 +100,7 @@ describe("walkFiles", () => {
       (rel) => globMatches(matcher, rel),
       (rel) => matcher.test(rel),
     );
-    const paths = files.map((file) => file.relative).sort();
+    const paths = files.map((file) => file.relative).toSorted();
     expect(paths).toContain("src/nested/");
     expect(paths).toContain("src/nested/deep.ts");
     expect(paths).not.toContain("src/index.ts");

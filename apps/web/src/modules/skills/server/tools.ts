@@ -121,7 +121,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         if (!explicit && remaining <= 0)
           return result(undefined, skillId, "SKILL.md", "", "Skill operation limit reached.");
         if (!explicit) remaining--;
-        const entry = catalogue.find((entry) => entry.skillId === skillId);
+        const entry = catalogue.find((skill) => skill.skillId === skillId);
         if (!entry)
           return result(
             undefined,
@@ -159,7 +159,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
         return result(entry, skillId, "SKILL.md");
       }),
     );
-  for (const entry of input.manifest.filter((entry) => entry.explicit)) {
+  for (const entry of input.manifest.filter((skill) => skill.explicit)) {
     const root = yield* load(entry.skillId, true);
     if (!root.ok)
       return yield* new SkillRejected({ reason: root.error ?? "Could not load selected skill." });
@@ -171,7 +171,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
       if (remaining <= 0)
         return result(undefined, args.skillId, "", "", "Skill operation limit reached.");
       remaining--;
-      const entry = input.manifest.find((entry) => entry.skillId === args.skillId);
+      const entry = input.manifest.find((skill) => skill.skillId === args.skillId);
       if (!entry || !(loaded.has(entry.skillId) || earlier.has(entry.skillId)))
         return result(
           entry,
@@ -245,7 +245,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     Effect.gen(function* () {
       const roots = new Map<string, string>();
       for (const skillId of skillIds) {
-        const entry = catalogue.find((entry) => entry.skillId === skillId);
+        const entry = catalogue.find((skill) => skill.skillId === skillId);
         if (!entry || entry.explicit) continue;
         const root = yield* Effect.result(service.readPinned(input.userId, entry, "SKILL.md"));
         if (Result.isSuccess(root) && root.success?.kind === "text")

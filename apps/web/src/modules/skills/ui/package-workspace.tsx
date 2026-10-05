@@ -14,7 +14,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { lazy, Suspense, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import type { ReactNode } from "react";
-import { cardSurfaceClassName } from "~/ui/card.tsx";
+import { cardSurfaceClassName } from "~/ui/card-surface.ts";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -26,7 +26,7 @@ import {
 } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { ViewToggle } from "~/ui/view-toggle.tsx";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { cn } from "~/ui/utils.ts";

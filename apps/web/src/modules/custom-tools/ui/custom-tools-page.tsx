@@ -1,16 +1,11 @@
 import { ArrowRight01Icon, CodeIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { buttonVariants } from "~/ui/primitives/button";
-import { listCustomTools } from "../server/functions.ts";
-
-export const customToolsQuery = queryOptions({
-  queryKey: ["admin", "custom-tools"],
-  queryFn: () => listCustomTools(),
-});
+import { customToolsQuery } from "../client/queries.ts";
 
 const plural = (count: number, singular: string, pluralForm = `${singular}s`) =>
   `${count} ${count === 1 ? singular : pluralForm}`;

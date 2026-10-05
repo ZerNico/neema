@@ -8,7 +8,7 @@ import {
 import type { CredentialDraft } from "./provider-credentials.ts";
 import { AUTH_LABELS } from "./provider-settings-labels.ts";
 import { ChoiceField } from "./provider-settings-fields.tsx";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 

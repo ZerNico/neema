@@ -38,6 +38,17 @@ export interface DocumentExcerpt extends DocumentReference {
 
 const MAX_READ_CHARS = 16_000;
 
+const name = (value: string) =>
+  value.trim().length > 0 && value.trim().length <= KNOWLEDGE_LIMITS.maxNameLength;
+const validateIdentity = (input: { name: string; description: string }) =>
+  name(input.name) && input.description.length <= KNOWLEDGE_LIMITS.maxDescriptionLength
+    ? Effect.void
+    : Effect.fail(
+        new KnowledgeRejected({
+          reason: "enter a name of 1–120 characters and a description of at most 500 characters",
+        }),
+      );
+
 /** Actor ids are supplied by authenticated server handlers, never request data. */
 export class KnowledgeService extends Context.Service<
   KnowledgeService,
@@ -179,17 +190,6 @@ export class KnowledgeService extends Context.Service<
           return yield* new KnowledgeNotAvailable({ resourceId: collectionId });
         return collection;
       });
-      const name = (value: string) =>
-        value.trim().length > 0 && value.trim().length <= KNOWLEDGE_LIMITS.maxNameLength;
-      const validateIdentity = (input: { name: string; description: string }) =>
-        name(input.name) && input.description.length <= KNOWLEDGE_LIMITS.maxDescriptionLength
-          ? Effect.void
-          : Effect.fail(
-              new KnowledgeRejected({
-                reason:
-                  "enter a name of 1–120 characters and a description of at most 500 characters",
-              }),
-            );
       // A mirrored document changes at its source; an edit here would be
       // overwritten by the next sync, and a delete would come straight back.
       const notSynced = Effect.fn(function* (userId: string, documentId: string) {

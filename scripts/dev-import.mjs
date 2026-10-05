@@ -96,8 +96,10 @@ export async function assertIdle(admin, instance) {
 
 const snapshotPattern = (instance) => new RegExp(`^chat_dev_${instance.id}_[a-f0-9]{16}$`);
 
-// A database outlives the checkout that made it, and the name only carries a one-way hash.
-// Recording the path lets a later sweep name what it is about to drop; Postgres does the quoting.
+/**
+ * A database outlives the checkout that made it, and the name only carries a one-way hash.
+ * Recording the path lets a later sweep name what it is about to drop; Postgres does the quoting.
+ */
 export async function tagCheckout(admin, database, checkoutRoot) {
   const { rows } = await admin.query(
     "SELECT format('COMMENT ON DATABASE %I IS %L', $1::text, $2::text) AS sql",
@@ -106,7 +108,7 @@ export async function tagCheckout(admin, database, checkoutRoot) {
   await admin.query(rows[0].sql);
 }
 
-// Grouped by instance id so an orphan is retired as one unit: base, snapshots and role together.
+/** Grouped by instance id so an orphan is retired as one unit: base, snapshots and role together. */
 export async function instanceGroups(admin) {
   const { rows } =
     await admin.query(`SELECT datname, shobj_description(oid, 'pg_database') AS checkout

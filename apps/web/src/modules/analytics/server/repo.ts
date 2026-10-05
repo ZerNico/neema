@@ -98,6 +98,12 @@ export interface UsageByUser {
   cost: number;
 }
 
+const inWindow = (scope: UsageScope) =>
+  and(gte(usageEvents.createdAt, scope.from), lt(usageEvents.createdAt, scope.to));
+
+const inScope = (scope: UsageScope) =>
+  scope.userId ? and(inWindow(scope), eq(usageEvents.userId, scope.userId)) : inWindow(scope);
+
 export class AnalyticsRepo extends Context.Service<
   AnalyticsRepo,
   {
@@ -113,12 +119,6 @@ export class AnalyticsRepo extends Context.Service<
     AnalyticsRepo,
     Effect.gen(function* () {
       const db = yield* Db;
-
-      const inWindow = (scope: UsageScope) =>
-        and(gte(usageEvents.createdAt, scope.from), lt(usageEvents.createdAt, scope.to));
-
-      const inScope = (scope: UsageScope) =>
-        scope.userId ? and(inWindow(scope), eq(usageEvents.userId, scope.userId)) : inWindow(scope);
 
       // Sums are null over zero rows; coalesce keeps the shape numeric.
       const sums = {

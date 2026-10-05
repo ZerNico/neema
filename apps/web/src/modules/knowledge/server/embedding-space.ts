@@ -24,6 +24,13 @@ import {
 export type { EmbeddingTarget } from "./embedding-connection.ts";
 export type { EmbeddingConfigurationChange } from "../schema.ts";
 
+const checkRevision = (config: KnowledgeSearchConfig, expectedRevision: string | null) =>
+  config.connectionRevision === expectedRevision
+    ? Effect.void
+    : Effect.fail(
+        new KnowledgeRejected({ reason: "configuration changed; reload before confirming" }),
+      );
+
 export class EmbeddingSpace extends Context.Service<
   EmbeddingSpace,
   {
@@ -95,12 +102,6 @@ export class EmbeddingSpace extends Context.Service<
               Effect.logWarning("embedding configuration changed but resource invalidation failed"),
             ),
           );
-      const checkRevision = (config: KnowledgeSearchConfig, expectedRevision: string | null) =>
-        config.connectionRevision === expectedRevision
-          ? Effect.void
-          : Effect.fail(
-              new KnowledgeRejected({ reason: "configuration changed; reload before confirming" }),
-            );
 
       return EmbeddingSpace.of({
         current: () => readEmbeddingTarget(db).pipe(Effect.orDie),

@@ -7,13 +7,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { OFFICE_FAMILIES, type OfficeFamily } from "~/modules/office/families.ts";
 import type { OfficeActivity } from "../client/use-message-stream.ts";
@@ -28,14 +26,6 @@ const slides = (count: number) => `${count} ${count === 1 ? "slide" : "slides"}`
 const sheets = (count: number) => `${count} ${count === 1 ? "sheet" : "sheets"}`;
 const blocks = (count: number) =>
   `${count} ${count === 1 ? "paragraph or table" : "paragraphs and tables"}`;
-
-/**
- * One word for a working file's state wherever the transcript shows it. An
- * unpublished file after the answer ended is a draft: it may well be kept, so
- * the label says nothing about saving.
- */
-export const workingFileState = (published: boolean, terminal: boolean) =>
-  published ? "Published" : terminal ? "Draft" : "Working";
 
 /** "slide 5", "slides 3–6" when consecutive, else "slides 1, 4 and 9". */
 function positions(numbers: ReadonlyArray<number>) {

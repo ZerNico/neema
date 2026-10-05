@@ -10,12 +10,9 @@ import { Button, buttonVariants } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 import { AuthScreen } from "./auth-screen.tsx";
+import { desktopSignInPath } from "./desktop-sign-in-path.ts";
 
-export const DESKTOP_SIGN_IN_SCHEME_URL = "chat-desktop://sign-in";
-
-/** The browser page the shell opens; the challenge rides along when there is one. */
-export const desktopSignInPath = (challenge?: string) =>
-  challenge ? `/desktop/sign-in?challenge=${encodeURIComponent(challenge)}` : "/desktop/sign-in";
+const DESKTOP_SIGN_IN_SCHEME_URL = "chat-desktop://sign-in";
 
 /**
  * The browser half of desktop sign-in. The person is already signed in here

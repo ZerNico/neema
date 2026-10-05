@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertDialog,
@@ -10,19 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/ui/primitives/alert-dialog";
-
-export interface ConfirmOptions {
-  title: string;
-  description?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  /** Style the confirm button as destructive (default true, since deletes are the common case). */
-  destructive?: boolean;
-}
-
-type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
-
-const ConfirmContext = createContext<ConfirmFn | null>(null);
+import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "./confirm-context.ts";
 
 /**
  * Promise-based confirmation dialog:
@@ -77,10 +65,4 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       </AlertDialog>
     </ConfirmContext.Provider>
   );
-}
-
-export function useConfirm(): ConfirmFn {
-  const confirm = useContext(ConfirmContext);
-  if (!confirm) throw new Error("useConfirm must be used within a ConfirmProvider");
-  return confirm;
 }

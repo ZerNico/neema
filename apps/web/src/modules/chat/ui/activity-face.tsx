@@ -1,7 +1,7 @@
 import { Alert02Icon, ArrowDown01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
-import { disclosureChevronMotionClassName } from "~/ui/disclosure.tsx";
+import { disclosureChevronMotionClassName } from "~/ui/disclosure-classes.ts";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { cn } from "~/ui/utils";

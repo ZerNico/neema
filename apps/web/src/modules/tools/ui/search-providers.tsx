@@ -1,11 +1,11 @@
 import { Delete02Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { readServerError } from "~/server-error.ts";
 import { toastError } from "~/ui/error-toast.ts";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { ListRow } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import {
@@ -45,11 +45,7 @@ import {
   testSearchProvider,
   updateSearchProvider,
 } from "../server/functions.ts";
-
-export const searchProvidersQuery = queryOptions({
-  queryKey: ["admin", "tools", "search-providers"],
-  queryFn: () => listSearchProviders(),
-});
+import { searchProvidersQuery } from "../client/queries.ts";
 
 type Provider = Awaited<ReturnType<typeof listSearchProviders>>[number];
 type TestResult =

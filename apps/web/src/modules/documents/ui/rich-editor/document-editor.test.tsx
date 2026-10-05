@@ -5,10 +5,10 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { readMarkdown, writeMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
-import DocumentEditor, { openLink, type DocumentEditorMode } from "./document-editor.tsx";
-import { linkTarget } from "./link-popover.tsx";
+import DocumentEditor, { type DocumentEditorMode } from "./document-editor.tsx";
+import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
-import { fittingControls } from "./toolbar.tsx";
+import { fittingControls } from "./fitting-controls.ts";
 
 beforeAll(() => {
   // jsdom lays nothing out; ProseMirror measures the selection to scroll it into view.

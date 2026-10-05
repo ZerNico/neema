@@ -15,11 +15,11 @@ import { agentsQuery } from "../client/queries.ts";
 import { AGENT_LIMITS, type AgentSummary } from "../schema.ts";
 import { agentAuthoringRequest } from "../authoring.ts";
 import { deleteAgent } from "../server/functions.ts";
-import { agentIcon } from "~/modules/chat/ui/context-picker.tsx";
+import { agentIcon } from "~/modules/chat/ui/agent-icons.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { CreateSplitButton } from "~/ui/create-split-button.tsx";
 import {
   EmptyState,
@@ -41,6 +41,18 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
 
+// Without a description the row still says something true about the agent,
+// the way a collection row falls back to its document count.
+const detail = (agent: AgentSummary) => {
+  const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt);
+  return [
+    agent.description || (age ? `Updated ${age}` : null),
+    agent.ownerName ? `Shared by ${agent.ownerName}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+};
+
 export function AgentsPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -56,17 +68,6 @@ export function AgentsPage() {
   const own = rows.filter((agent) => agent.canEdit);
   const shared = rows.filter((agent) => !agent.canEdit);
   const atLimit = own.length >= AGENT_LIMITS.maxPerUser;
-  // Without a description the row still says something true about the agent,
-  // the way a collection row falls back to its document count.
-  const detail = (agent: AgentSummary) => {
-    const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt);
-    return [
-      agent.description || (age ? `Updated ${age}` : null),
-      agent.ownerName ? `Shared by ${agent.ownerName}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  };
   const list = (items: AgentSummary[]) => (
     <ListCard>
       {items.map((agent) => (

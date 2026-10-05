@@ -100,7 +100,7 @@ export const resolveSkillManifest = (
       });
     const result: SkillManifestEntry[] = [];
     // Stable row-lock order across concurrent attempts and editor saves.
-    for (const skillId of [...ids].sort()) {
+    for (const skillId of [...ids].toSorted()) {
       const [row] = yield* tx
         .select()
         .from(skills)
@@ -123,6 +123,37 @@ export const resolveSkillManifest = (
       });
     }
     return ids.map((id) => result.find((entry) => entry.skillId === id)!);
+  });
+
+const collectUnused = (tx: DbTx, skillId: string) =>
+  Effect.gen(function* () {
+    const keys: string[] = [];
+    // First release superseded local revisions, then their now-unused baselines.
+    for (let pass = 0; pass < 2; pass++) {
+      const unused = yield* tx
+        .select({ id: skillRevisions.id })
+        .from(skillRevisions)
+        .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
+        .where(
+          and(
+            eq(skills.id, skillId),
+            sql`not (${skills.deletedAt} is null and ${skillRevisions.revision} = ${skills.revision})`,
+            sql`not exists(select 1 from ${messageSkills} where ${messageSkills.revisionId} = ${skillRevisions.id})`,
+            sql`not exists(select 1 from skill_revisions baseline_owner where baseline_owner.baseline_revision_id = ${skillRevisions.id} and baseline_owner.id <> ${skillRevisions.id})`,
+          ),
+        );
+      if (!unused.length) break;
+      const ids = unused.map((row) => row.id);
+      const blobs = yield* tx
+        .select({ id: skillFiles.blobId })
+        .from(skillFiles)
+        .where(inArray(skillFiles.revisionId, ids));
+      const blobIds = blobs.map((blob) => blob.id);
+      yield* lockBlobs(tx, blobIds);
+      yield* tx.delete(skillRevisions).where(inArray(skillRevisions.id, ids));
+      keys.push(...(yield* collectOrphanedBlobs(tx, blobIds)));
+    }
+    return keys;
   });
 
 export class SkillRepo extends Context.Service<
@@ -175,36 +206,6 @@ export class SkillRepo extends Context.Service<
           if (!rows.some((row) => row.id === id))
             return yield* new SkillNotAvailable({ skillId: id });
       });
-      const collectUnused = (tx: DbTx, skillId: string) =>
-        Effect.gen(function* () {
-          const keys: string[] = [];
-          // First release superseded local revisions, then their now-unused baselines.
-          for (let pass = 0; pass < 2; pass++) {
-            const unused = yield* tx
-              .select({ id: skillRevisions.id })
-              .from(skillRevisions)
-              .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
-              .where(
-                and(
-                  eq(skills.id, skillId),
-                  sql`not (${skills.deletedAt} is null and ${skillRevisions.revision} = ${skills.revision})`,
-                  sql`not exists(select 1 from ${messageSkills} where ${messageSkills.revisionId} = ${skillRevisions.id})`,
-                  sql`not exists(select 1 from skill_revisions baseline_owner where baseline_owner.baseline_revision_id = ${skillRevisions.id} and baseline_owner.id <> ${skillRevisions.id})`,
-                ),
-              );
-            if (!unused.length) break;
-            const ids = unused.map((row) => row.id);
-            const blobs = yield* tx
-              .select({ id: skillFiles.blobId })
-              .from(skillFiles)
-              .where(inArray(skillFiles.revisionId, ids));
-            const blobIds = blobs.map((blob) => blob.id);
-            yield* lockBlobs(tx, blobIds);
-            yield* tx.delete(skillRevisions).where(inArray(skillRevisions.id, ids));
-            keys.push(...(yield* collectOrphanedBlobs(tx, blobIds)));
-          }
-          return keys;
-        });
       return SkillRepo.of({
         // What the model may discover on its own: readable, current, and not
         // marked manual-only. Nothing here is a dependency of the attempt.
@@ -342,7 +343,7 @@ export class SkillRepo extends Context.Service<
             .orderBy(asc(skillFiles.path))
             .pipe(Effect.orDie);
           if (!rows.length) return yield* new SkillNotAvailable({ skillId: entry.skillId });
-          return [...rows].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+          return [...rows].toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
         }),
         admitSave: Effect.fn("SkillRepo.admitSave")(function* (userId, input) {
           const [allowed] = yield* db
@@ -473,7 +474,7 @@ export class SkillRepo extends Context.Service<
                     targetRevisionId: baselineId!,
                   })),
                 ];
-                for (const { file, targetRevisionId } of registrations.sort((a, b) =>
+                for (const { file, targetRevisionId } of registrations.toSorted((a, b) =>
                   a.file.sha256.localeCompare(b.file.sha256),
                 )) {
                   // Kept or uploaded bytes must still be stored: never re-register a

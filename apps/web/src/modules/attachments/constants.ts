@@ -4,8 +4,10 @@
 
 import { LIMITS } from "@chat/desktop-rpc/schema";
 
-// One bound for a whole file anywhere: an attachment, a working draft, a file
-// the desktop reads or saves. The subpath brings in the limits, not the RPC group.
+/**
+ * One bound for a whole file anywhere: an attachment, a working draft, a file
+ * the desktop reads or saves. The subpath brings in the limits, not the RPC group.
+ */
 export const MAX_ATTACHMENT_BYTES = LIMITS.binaryBytes;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 

@@ -12,8 +12,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { searchState, type KnowledgeDocument } from "~/modules/knowledge/schema.ts";
 import { rebuildKnowledgeIndex } from "~/modules/knowledge/server/functions.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { useDetailPanel } from "~/ui/detail-panel.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -33,8 +33,7 @@ import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { cn } from "~/ui/utils";
-import { findIntegration } from "../catalog.ts";
-import { knowledgeSourcesQuery, myIntegrationsQuery } from "../client/queries.ts";
+import { knowledgeSourcesQuery } from "../client/queries.ts";
 import type { BrowseNode, KnowledgeSourceView, SourceRoot, SourceRule } from "../schema.ts";
 import {
   browseIntegration,
@@ -42,24 +41,14 @@ import {
   saveKnowledgeSource,
   syncKnowledgeSource,
 } from "../server/functions.ts";
-import { IntegrationLogo, integrationName } from "./integration-logo.tsx";
-import { openSyncedPages } from "./synced-pages-panel.tsx";
+import { IntegrationLogo } from "./integration-logo.tsx";
+import { integrationName } from "./integration-name.ts";
+import { openSyncedPages } from "./open-synced-pages.tsx";
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /** What the picker works on: a new source for an integration, or an existing one. */
 export type SourceTarget = { integrationId: string; sourceId?: string };
-
-/** Connected integrations this person can sync a collection from. */
-export function useSyncableIntegrations() {
-  const mine = useQuery(myIntegrationsQuery);
-  return (mine.data ?? []).filter(
-    (integration) =>
-      integration.available &&
-      integration.connection?.status === "active" &&
-      findIntegration(integration.id)?.knowledgeSource,
-  );
-}
 
 const pages = (count: number) => `${count} ${count === 1 ? "page" : "pages"}`;
 

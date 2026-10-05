@@ -21,7 +21,9 @@ export function compareSkillUpdate(
   const maps = [baseline, local, upstream].map(
     (files) => new Map(files.map((file) => [file.path, file])),
   );
-  const paths = [...new Set([...baseline, ...local, ...upstream].map((file) => file.path))].sort();
+  const paths = [
+    ...new Set([...baseline, ...local, ...upstream].map((file) => file.path)),
+  ].toSorted();
   return paths.map((path) => {
     const before = maps[0]!.get(path) ?? null;
     const current = maps[1]!.get(path) ?? null;

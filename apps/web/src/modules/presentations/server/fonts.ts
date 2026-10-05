@@ -67,6 +67,8 @@ const record = (row: typeof presentationFonts.$inferSelect): FontRecord => ({
   createdAt: row.createdAt,
 });
 
+const reject = (reason: string) => Effect.fail(new FontRejected({ reason }));
+
 /**
  * Font faces an admin uploaded, shared by every presentation render. A face is
  * accepted only after the renderer has drawn a sample with it in a worker, so
@@ -167,7 +169,7 @@ export class PresentationFonts extends Context.Service<
               },
             ];
           }),
-        ).pipe(Effect.map((faces) => faces.flat()));
+        ).pipe(Effect.map((groups) => groups.flat()));
         yield* Ref.set(cached, loaded);
         return loaded;
       });
@@ -181,7 +183,6 @@ export class PresentationFonts extends Context.Service<
         bytes: Uint8Array;
         userId: string;
       }) {
-        const reject = (reason: string) => Effect.fail(new FontRejected({ reason }));
         if (bytes.length > FONT_LIMITS.fileBytes)
           return yield* reject(
             `Fonts must be under ${megabytes(FONT_LIMITS.fileBytes)} MB per file.`,
@@ -295,9 +296,9 @@ export class PresentationFonts extends Context.Service<
       const fetchFamily = Effect.fn("PresentationFonts.fetchFamily")(function* (
         family: GoogleFontFamily,
       ) {
-        const faces = yield* source.fetchFamily(family);
+        const fetched = yield* source.fetchFamily(family);
         let stored = 0;
-        for (const face of faces) {
+        for (const face of fetched) {
           // The tables are measured as for an upload, and the face must call
           // itself what the catalogue asked for.
           let info;

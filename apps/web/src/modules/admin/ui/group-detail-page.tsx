@@ -5,27 +5,21 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import {
   addGroupMember,
   deleteGroup,
-  listGroupMembers,
   removeGroupMember,
   renameGroup,
   updateGroupMemberSharing,
 } from "../server/functions.ts";
-import { CapabilitySettings, groupsQuery, isConflict } from "./groups-page.tsx";
+import { CapabilitySettings } from "./groups-page.tsx";
+import { isConflict } from "./group-conflict.ts";
+import { groupsQuery, usersQuery, membersQuery } from "../client/queries.ts";
 import type { GroupMember, MemberSharing } from "~/modules/groups/server/repo.ts";
-import { usersQuery } from "./users-page.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { initials } from "~/ui/initials";
 import {
   EmptyState,
@@ -70,12 +64,6 @@ import { GROUP_NAME_MAX } from "../schema.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { toastError } from "~/ui/error-toast.ts";
-
-export const membersQuery = (groupId: string) =>
-  queryOptions({
-    queryKey: ["admin", "group-members", groupId],
-    queryFn: () => listGroupMembers({ data: { groupId } }),
-  });
 
 interface PickableUser {
   id: string;

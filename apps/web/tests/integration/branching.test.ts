@@ -524,7 +524,7 @@ describe("branching a conversation", () => {
         const delivered = yield* attachmentRepo.listWithBlobsForMessages([answer.id]);
         const idOf = (name: string) => delivered.find((file) => file.fileName === name)!.id;
         let callIndex = 0;
-        const call = (toolName: string, result: JsonValue) =>
+        const call = (toolName: string, toolResult: JsonValue) =>
           Effect.gen(function* () {
             const id = uuidv7();
             yield* repo.insertToolCall({
@@ -536,7 +536,7 @@ describe("branching a conversation", () => {
               toolName,
               arguments: {},
             });
-            yield* repo.completeToolCall({ id, status: "complete", result });
+            yield* repo.completeToolCall({ id, status: "complete", result: toolResult });
           });
         const workingFileId = uuidv7();
         yield* call("publish_file", {

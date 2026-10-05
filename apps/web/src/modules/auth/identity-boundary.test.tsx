@@ -4,12 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { createPortal } from "react-dom";
 import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IdentityBoundary } from "./identity-boundary.tsx";
 import {
-  IdentityBoundary,
   IDENTITY_CHANGE_KEY,
   identityNavigation,
   useIdentityBoundary,
-} from "./identity-boundary.tsx";
+} from "./identity-context.ts";
 import type { SessionIdentity } from "./identity.ts";
 import { AccountMenu } from "./account-menu.tsx";
 import { SidebarProvider } from "~/ui/primitives/sidebar";
@@ -70,14 +70,14 @@ vi.mock("./client.ts", () => ({
     queryFn: async () => ({ userId: "admin", impersonatedBy: null }),
   },
 }));
-vi.mock("~/modules/admin/ui/groups-page.tsx", () => ({
+vi.mock("~/modules/admin/client/queries.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/modules/admin/client/queries.ts")>()),
   membershipsQuery: { queryKey: ["memberships"], queryFn: async () => [] },
 }));
 // The approval queue is the users page's other half and has its own tests;
 // here it would only add a suspense boundary to the impersonation controls.
 vi.mock("./ui/pending-accounts.tsx", () => ({
   PendingAccounts: () => null,
-  pendingAccountsQuery: { queryKey: ["admin", "pending-accounts"], queryFn: async () => [] },
 }));
 
 const original = { userId: "admin", impersonatedBy: null };

@@ -66,6 +66,7 @@ export const formatRangeLabel = (from: string, to: string): string => {
   // The window ends at midnight *after* the last day the user picked.
   const end = new Date(new Date(to).getTime() - 24 * 60 * 60 * 1000);
   const sameYear = start.getUTCFullYear() === end.getUTCFullYear();
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- day is a one-line helper read where it is used
   const day = (date: Date) => formatDay(date.toISOString().slice(0, 10));
   const label = day(start) === day(end) ? day(start) : `${day(start)} \u2013 ${day(end)}`;
   return sameYear ? `${label}, ${end.getUTCFullYear()}` : `${label} ${end.getUTCFullYear()}`;

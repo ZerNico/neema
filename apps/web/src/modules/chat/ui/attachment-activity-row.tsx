@@ -4,7 +4,7 @@ import type { AttachmentToolActivity } from "../client/use-message-stream.ts";
 import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
-export function attachmentActivityLabel(activity: AttachmentToolActivity) {
+function attachmentActivityLabel(activity: AttachmentToolActivity) {
   const read = activity.read;
   if (activity.status === "running") return "Reading a file";
   if (!read?.ok)

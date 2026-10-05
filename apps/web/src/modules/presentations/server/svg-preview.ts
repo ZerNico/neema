@@ -34,6 +34,13 @@ const cheapFilters = new Set([
 ]);
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
+/** The ids an element points at, through `url(#…)` or a local href. */
+const references = (node: XmlElement) =>
+  [...node.attributes].flatMap((attribute) => [
+    ...[...attribute.value.matchAll(/url\(\s*['"]?#([^'")\s]+)/g)].map((match) => match[1]!),
+    ...(attribute.name.split(":").at(-1) === "href" ? [attribute.value.trim().slice(1)] : []),
+  ]);
+
 /** What drawing an SVG costs once `use` and `url(#…)` references expand, or null when it can't be bounded. */
 export function drawCost(data: Uint8Array): Cost | null {
   if (data.length > pictureBudget.bytes) return null;
@@ -69,11 +76,6 @@ export function drawCost(data: Uint8Array): Cost | null {
     const id = node.getAttribute("id");
     if (id) ids.set(id, [...(ids.get(id) ?? []), node]);
   }
-  const references = (node: XmlElement) =>
-    [...node.attributes].flatMap((attribute) => [
-      ...[...attribute.value.matchAll(/url\(\s*['"]?#([^'")\s]+)/g)].map((match) => match[1]!),
-      ...(attribute.name.split(":").at(-1) === "href" ? [attribute.value.trim().slice(1)] : []),
-    ]);
   const known = new Map<XmlElement, Cost>();
   const active = new Set<XmlElement>();
   const expand = (node: XmlElement, depth: number): Cost | null => {

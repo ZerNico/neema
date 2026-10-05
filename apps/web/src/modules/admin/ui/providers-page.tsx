@@ -1,9 +1,9 @@
 import { ArrowRight01Icon, CloudServerIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { createProvider, listModels, listProviders } from "../server/functions.ts";
+import { createProvider } from "../server/functions.ts";
 import { ModelOrderDialog } from "./model-order.tsx";
 import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
@@ -36,17 +36,8 @@ import {
 } from "~/ui/primitives/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
-
-export const providersQuery = queryOptions({
-  queryKey: ["admin", "providers"],
-  queryFn: () => listProviders(),
-});
-
-export const modelsQuery = queryOptions({
-  queryKey: ["admin", "models"],
-  queryFn: () => listModels(),
-});
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
+import { providersQuery, modelsQuery } from "../client/queries.ts";
 
 const EMPTY_DRAFT: {
   name: string;

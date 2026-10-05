@@ -1,21 +1,13 @@
-import { File01Icon, Link01Icon } from "@hugeicons/core-free-icons";
+import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { documentLocationLabel } from "~/modules/tools/sources.ts";
-import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
-import { useCallback, useMemo, useState } from "react";
+import { useDocumentSourcePanel } from "~/modules/knowledge/ui/use-document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
-import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
-import { Favicon, hostOf } from "./favicon.tsx";
-import { collectSources, selectAnswerSources } from "./citations.ts";
-import { NO_INHERITED_SOURCES } from "./inherited-sources.ts";
-import type { DisplayMessage } from "./message-list.tsx";
-import {
-  useDetailPanel,
-  useDetailPanelTabContent,
-  useDetailPanelTabIds,
-  type DetailPanelRequest,
-} from "~/ui/detail-panel";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
+import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
+import { Favicon } from "./favicon.tsx";
+import { hostOf } from "./host-of.ts";
 
 function SourceRow({ source }: { source: ToolSource }) {
   if (source.kind === "document") return <DocumentSourceRow source={source} />;
@@ -77,73 +69,6 @@ function DocumentSourceRow({ source }: { source: DocumentSource }) {
       </button>
     </li>
   );
-}
-
-const SOURCES_PREFIX = "sources:";
-
-const sourcesRequest = (messageId: string, sources: ToolSource[]): DetailPanelRequest => ({
-  id: `${SOURCES_PREFIX}${messageId}`,
-  title: "Sources",
-  subtitle: `${sources.length}`,
-  icon: Link01Icon,
-  restorable: true,
-  body: <SourcesPanelBody sources={sources} />,
-});
-
-/**
- * Opens this message's sources in the detail panel.
- *
- * `sources` is snapshotted into the panel body on each open; `SourcesPanelOwner`
- * keeps an open tab current from then on.
- */
-export function useSourcesPanel(messageId: string, sources: ToolSource[]) {
-  const panel = useDetailPanel();
-  return useCallback(
-    () => panel.open(sourcesRequest(messageId, sources)),
-    [panel, messageId, sources],
-  );
-}
-
-/**
- * Mounted by ChatView beside `ResearchPanelOwner`: a sources tab outlives the
- * transcript row that opened it, and a restored one has only its message id.
- */
-export function SourcesPanelOwner({ messages }: { messages: ReadonlyArray<DisplayMessage> }) {
-  const tabIds = useDetailPanelTabIds();
-  return tabIds
-    .filter((id) => id.startsWith(SOURCES_PREFIX))
-    .map((id) => (
-      <SourcesTabOwner
-        key={id}
-        id={id}
-        message={messages.find((message) => `${SOURCES_PREFIX}${message.id}` === id)}
-      />
-    ));
-}
-
-function SourcesTabOwner({ id, message }: { id: string; message: DisplayMessage | undefined }) {
-  const sources = message
-    ? selectAnswerSources(
-        message.content,
-        collectSources(message.toolActivities),
-        message.inheritedSources ?? NO_INHERITED_SOURCES,
-      )
-    : null;
-  // The list is recomputed on every streamed token; the panel only changes
-  // when the sources themselves do.
-  const key = sources?.map((source) => source.index).join(",") ?? null;
-  const [held, setHeld] = useState({ key, sources });
-  if (held.key !== key) setHeld({ key, sources });
-  const messageId = message?.id;
-  const request = useMemo(
-    () =>
-      messageId && held.sources && held.sources.length > 0
-        ? sourcesRequest(messageId, held.sources)
-        : null,
-    [messageId, held.sources],
-  );
-  useDetailPanelTabContent(id, request);
-  return null;
 }
 
 /**

@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
-import { DocumentActivityBlock, documentActivityLabel } from "./document-activity-block.tsx";
+import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { documentActivityLabel } from "./document-activity-label.ts";
 
 const activity = (overrides: Partial<DocumentToolActivity> = {}): DocumentToolActivity => ({
   family: "document",

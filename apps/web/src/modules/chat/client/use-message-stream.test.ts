@@ -173,7 +173,7 @@ describe("ask_user replay", () => {
 
 describe("applyToolChunk", () => {
   it("projects publication start, success and failure without exposing file bytes", () => {
-    const start = env({
+    const publishStart = env({
       family: "tool-file",
       phase: "start",
       name: "publish_file",
@@ -182,7 +182,7 @@ describe("applyToolChunk", () => {
       callIndex: 1,
       textOffset: 12,
     });
-    const pending = applyToolChunk([], start);
+    const pending = applyToolChunk([], publishStart);
     expect(pending[0]).toMatchObject({ family: "tool-file", status: "running", textOffset: 12 });
     const ready = applyToolChunk(
       pending,
@@ -196,7 +196,7 @@ describe("applyToolChunk", () => {
       }),
     );
     expect(ready[0]).toMatchObject({ status: "complete", attachmentId: "attachment-1" });
-    expect(applyToolChunk(ready, start)).toBe(ready);
+    expect(applyToolChunk(ready, publishStart)).toBe(ready);
     const failed = applyToolChunk(
       [],
       env({

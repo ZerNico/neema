@@ -10,7 +10,7 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { Schema } from "effect";
@@ -18,8 +18,9 @@ import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { PreviewAction } from "~/modules/attachments/ui/preview-action.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
 import {
   Dialog,
   DialogClose,
@@ -63,7 +64,6 @@ import {
 import {
   checkCustomTool,
   deleteCustomTool,
-  getCustomTool,
   saveCustomTool,
   setCustomToolEnabled,
   testCustomTool,
@@ -74,13 +74,9 @@ import { attachmentKind, attachmentKindForFileName } from "~/modules/attachments
 import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { toastError } from "~/ui/error-toast.ts";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
-
-export const customToolQuery = (toolId: string) =>
-  queryOptions({
-    queryKey: ["admin", "custom-tools", toolId],
-    queryFn: () => settled(getCustomTool({ data: { toolId } })),
-  });
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
+import { settled, errorMessage } from "../client/settled.ts";
+import { customToolQuery } from "../client/queries.ts";
 
 // Same surface as the skill editor: app tokens, a bounded pane that scrolls
 // its own content, and the text cursor the host stylesheet resets.
@@ -147,29 +143,6 @@ const slugFromName = (name: string) =>
     .replace(/^[^a-z]+|_+$/g, "")
     .slice(0, CUSTOM_TOOL_LIMITS.slug);
 
-/** A failed validator answers with its issue list as JSON; show the messages, not the envelope. */
-const validationMessages = (body: string): string | null => {
-  try {
-    const issues: unknown = JSON.parse(body);
-    if (!Array.isArray(issues) || issues.length === 0) return null;
-    const messages = issues.flatMap((issue: unknown) =>
-      issue && typeof issue === "object" && "message" in issue ? [String(issue.message)] : [],
-    );
-    return messages.length === issues.length ? messages.join("\n") : null;
-  } catch {
-    return null;
-  }
-};
-
-const errorMessage = async (error: unknown): Promise<string> => {
-  if (error instanceof Response) {
-    const body = await error.text();
-    return validationMessages(body) ?? (body || `${error.status}`);
-  }
-  if (error instanceof Error) return error.message;
-  return "Something went wrong.";
-};
-
 /** A build refusal, split so the parts a line number belongs to can go to the editor. */
 export interface BuildProblem {
   readonly message: string;
@@ -184,7 +157,7 @@ const tscLine = /^(?:.*[\\/])?tool\.ts\((\d+),(\d+)\): (?:error|warning) (TS\d+:
  * `tool.ts(line,col): error TSxxxx: …` per problem, each possibly followed
  * by indented continuation lines. Everything else is a single problem.
  */
-export const parseBuildProblems = (text: string): ReadonlyArray<BuildProblem> => {
+const parseBuildProblems = (text: string): ReadonlyArray<BuildProblem> => {
   const problems: BuildProblem[] = [];
   // Index of the problem that indented continuation lines belong to.
   let open = -1;
@@ -204,17 +177,6 @@ export const parseBuildProblems = (text: string): ReadonlyArray<BuildProblem> =>
   return problems.length
     ? problems
     : [{ message: text.trim() || "The module could not be built." }];
-};
-
-/**
- * A refused server function can arrive as the Response it threw rather than
- * as a rejection (see skill-import-page.tsx), so the value is not a result
- * until it is one.
- */
-const settled = async <T,>(call: Promise<T>): Promise<T> => {
-  const result = await call;
-  if (result instanceof Response) throw new Error(await errorMessage(result));
-  return result;
 };
 
 const invalidateLists = (queryClient: ReturnType<typeof useQueryClient>) =>
@@ -576,6 +538,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
         ) : (
           <div className="flex flex-col gap-2">
             {dependencies.map((dependency, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- rows are controlled inputs holding no state of their own
               <div key={index} className="grid grid-cols-[1fr_10rem_auto] items-end gap-2">
                 <Field>
                   <FieldLabel htmlFor={`${id}-dep-${index}-name`}>Package</FieldLabel>
@@ -920,6 +883,7 @@ function BuildStatus({
           className="border-destructive/40 flex max-h-64 flex-col gap-2 overflow-y-auto rounded-md border p-3 text-xs"
         >
           {problems.map((problem, index) => (
+            // oxlint-disable-next-line react/no-array-index-key -- the list is rebuilt whole on every build
             <li key={index} className="[overflow-wrap:anywhere] whitespace-pre-wrap">
               {problem.line ? (
                 <button

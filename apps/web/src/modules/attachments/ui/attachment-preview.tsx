@@ -135,6 +135,7 @@ export function FilePreviewBody({
       className="max-h-[70vh] w-full rounded-2xl object-contain"
     />
   ) : target.kind === "pdf" ? (
+    // oxlint-disable-next-line react/iframe-missing-sandbox -- Chrome's PDF viewer does not run in a sandboxed frame
     <iframe
       src={target.url}
       title={target.fileName}

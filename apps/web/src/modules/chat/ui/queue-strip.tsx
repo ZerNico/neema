@@ -21,7 +21,8 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-import { collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
+import { collapseMotion } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
 
 /** What the strip renders; the loader row carries more, none of it visual. */
@@ -33,7 +34,7 @@ export interface QueuedMessage {
 }
 
 /** A row's name for buttons and truncation: its words, or its files when it has none. */
-export const queuedLabel = (entry: QueuedMessage) =>
+const queuedLabel = (entry: QueuedMessage) =>
   tagWords(entry.content).trim() || entry.attachments.map((file) => file.fileName).join(", ");
 
 /**

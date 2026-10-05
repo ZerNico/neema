@@ -2,14 +2,7 @@ import { GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { cn } from "~/ui/utils";
-
-export const hostOf = (url: string): string => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-};
+import { hostOf } from "./host-of.ts";
 
 /**
  * Favicon via our own /api/favicon proxy: the browser never contacts a third

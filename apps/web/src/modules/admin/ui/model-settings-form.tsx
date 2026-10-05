@@ -1,18 +1,14 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState, type Dispatch, type SetStateAction } from "react";
 import {
-  EMPTY_CAPABILITIES,
   MODEL_FORMATS,
   MODEL_TYPES,
   REASONING_EFFORTS,
-  normalizeModelSettings,
   type ModelAccess,
-  type ModelCapabilities,
   type ModelFormat,
-  type ModelSettings,
   type ModelType,
 } from "~/modules/providers/model-config.ts";
-import { CAPABILITY_META } from "~/modules/providers/ui/capability-icons.tsx";
+import { CAPABILITY_META } from "~/modules/providers/ui/capability-meta.ts";
 import {
   Combobox,
   ComboboxChip,
@@ -47,23 +43,16 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
-
-/**
- * Sentence-case labels for the type enum wherever it is shown to a person
- * (badges, selects). The enum values themselves stay lowercase on the wire.
- */
-export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
-  chat: "Chat",
-  embedding: "Embedding",
-};
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
+import {
+  parsePositiveInteger,
+  parsePrice,
+  type ModelSettingsDraft,
+  type PickableGroup,
+} from "./model-settings-draft.ts";
+import { MODEL_TYPE_LABELS, MODEL_FORMAT_LABELS } from "./model-settings-labels.ts";
 
 const MODEL_TYPE_ITEMS = MODEL_TYPES.map((value) => ({ value, label: MODEL_TYPE_LABELS[value] }));
-
-export const MODEL_FORMAT_LABELS: Record<ModelFormat, string> = {
-  responses: "Responses",
-  "chat-completions": "Chat Completions",
-};
 
 const MODEL_FORMAT_ITEMS = MODEL_FORMATS.map((value) => ({
   value,
@@ -74,119 +63,6 @@ const ACCESS_ITEMS: { value: ModelAccess; label: string }[] = [
   { value: "public", label: "Public" },
   { value: "groups", label: "Private" },
 ];
-
-export interface PickableGroup {
-  id: string;
-  name: string;
-}
-
-export interface ModelSettingsDraft {
-  displayName: string;
-  description: string;
-  type: ModelType;
-  contextLength: string;
-  embeddingDimensions: string;
-  capabilities: ModelCapabilities;
-  inputPrice: string;
-  outputPrice: string;
-  /** Optional: blank prices a cached read or a cache write as ordinary input. */
-  cacheReadPrice: string;
-  cacheWritePrice: string;
-  enabled: boolean;
-  access: ModelAccess;
-  selectedGroups: PickableGroup[];
-  /** The model's API, where its preset lets models differ (Azure); null elsewhere. */
-  format: ModelFormat | null;
-}
-
-export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({
-  displayName: "",
-  description: "",
-  type: "chat",
-  contextLength: "",
-  embeddingDimensions: "",
-  capabilities: { ...EMPTY_CAPABILITIES },
-  inputPrice: "",
-  outputPrice: "",
-  cacheReadPrice: "",
-  cacheWritePrice: "",
-  enabled: true,
-  access: "public",
-  selectedGroups: [],
-  format: null,
-});
-
-const parsePrice = (raw: string): number | null | undefined => {
-  if (raw.trim() === "") return null;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : undefined;
-};
-
-const parsePositiveInteger = (raw: string): number | null | undefined => {
-  if (raw.trim() === "") return null;
-  const value = Number(raw);
-  return Number.isInteger(value) && value >= 1 ? value : undefined;
-};
-
-export const modelSettingsFromDraft = (draft: ModelSettingsDraft): ModelSettings | null => {
-  const contextLength = parsePositiveInteger(draft.contextLength);
-  if (draft.displayName.trim() === "" || contextLength === undefined) return null;
-
-  const inputPrice = parsePrice(draft.inputPrice);
-  if (inputPrice === undefined) return null;
-
-  if (draft.type === "embedding") {
-    const embeddingDimensions = parsePositiveInteger(draft.embeddingDimensions);
-    if (embeddingDimensions === undefined) return null;
-    return normalizeModelSettings({
-      displayName: draft.displayName.trim(),
-      description: draft.description.trim() || null,
-      type: "embedding",
-      contextLength,
-      embeddingDimensions,
-      capabilities: draft.capabilities,
-      pricing: inputPrice === null ? null : { input: inputPrice, output: null },
-      enabled: draft.enabled,
-      access: draft.access,
-      groupIds: draft.selectedGroups.map((group) => group.id),
-    });
-  }
-
-  const outputPrice = parsePrice(draft.outputPrice);
-  const cacheRead = parsePrice(draft.cacheReadPrice);
-  const cacheWrite = parsePrice(draft.cacheWritePrice);
-  const clearingPricing = inputPrice === null && outputPrice === null;
-  if (
-    outputPrice === undefined ||
-    cacheRead === undefined ||
-    cacheWrite === undefined ||
-    (!clearingPricing && (inputPrice === null || outputPrice === null))
-  ) {
-    return null;
-  }
-
-  return normalizeModelSettings({
-    displayName: draft.displayName.trim(),
-    description: draft.description.trim() || null,
-    type: "chat",
-    format: draft.format,
-    contextLength,
-    embeddingDimensions: null,
-    capabilities: draft.capabilities,
-    pricing:
-      inputPrice === null || outputPrice === null
-        ? null
-        : {
-            input: inputPrice,
-            output: outputPrice,
-            ...(cacheRead === null ? {} : { cacheRead }),
-            ...(cacheWrite === null ? {} : { cacheWrite }),
-          },
-    enabled: draft.enabled,
-    access: draft.access,
-    groupIds: draft.selectedGroups.map((group) => group.id),
-  });
-};
 
 export function ModelSettingsFields({
   draft,

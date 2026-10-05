@@ -293,7 +293,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       // otherwise its text, so switching models later never fails on it.
       const filePart = (file: (typeof files)[number]) =>
         Effect.gen(function* () {
-          const row = attached?.find((row) => row.id === file.attachment.id);
+          const row = attached?.find((stored) => stored.id === file.attachment.id);
           if (!row || file.textOffset > message.content.length)
             return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
           const kind = attachmentKind(row.mediaType);
@@ -388,7 +388,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
           if (text) parts.push({ type: "text", text });
         };
         let cursor = turn.startOffset;
-        for (const file of files.filter((file) => turn.owns(file.turnIndex))) {
+        for (const file of files.filter((candidate) => turn.owns(candidate.turnIndex))) {
           if (file.textOffset < cursor || file.textOffset > turn.endOffset)
             return yield* new AttachmentNotAvailable({ attachmentId: file.attachment.id });
           if (file.textOffset > cursor) appendText(cursor, file.textOffset);
@@ -701,7 +701,7 @@ export const resumedRounds = (input: {
     let offset = cursor;
     let placed = false;
     for (const file of turnFiles
-      .filter((file) => file.attachment.kind === "image")
+      .filter((candidate) => candidate.attachment.kind === "image")
       .toSorted((a, b) => a.textOffset - b.textOffset)) {
       const part = input.imageParts?.get(file.attachment.id);
       if (!part) continue;

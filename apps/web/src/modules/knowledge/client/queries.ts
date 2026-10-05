@@ -1,5 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getKnowledgeCollection, listKnowledgeCollections } from "../server/functions.ts";
+import {
+  getEmbeddingConfiguration,
+  getKnowledgeCollection,
+  listKnowledgeCollections,
+} from "../server/functions.ts";
 
 export const knowledgeCollectionsQuery = queryOptions({
   queryKey: ["knowledge", "collections"],
@@ -14,3 +18,8 @@ export const knowledgeCollectionQuery = (collectionId: string) =>
     // Indexing progress changes underneath the page; sync invalidates it too.
     staleTime: 10_000,
   });
+
+export const embeddingConfigurationQuery = queryOptions({
+  queryKey: ["admin", "tools", "embeddings"],
+  queryFn: () => getEmbeddingConfiguration(),
+});

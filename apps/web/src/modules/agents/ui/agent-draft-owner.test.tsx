@@ -15,9 +15,9 @@ import {
   DetailPanelProvider,
   DetailPanelRail,
   DetailPanelToggle,
-  useDetailPanel,
   type DetailPanelApi,
 } from "~/ui/detail-panel.tsx";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion";
 import { AgentDraftActivityBlock } from "~/modules/chat/ui/agent-draft-activity-block.tsx";
@@ -360,7 +360,7 @@ describe("conversation-owned agent draft", () => {
   it("reports the agent as saved after Create even when the row comes back with reordered keys", async () => {
     // Postgres returns jsonb with its own key order; equality must be per field.
     const reordered = (settings: AgentDraft["settings"]): AgentDraft["settings"] =>
-      Object.fromEntries(Object.entries(settings).reverse()) as AgentDraft["settings"];
+      Object.fromEntries(Object.entries(settings).toReversed()) as AgentDraft["settings"];
     vi.mocked(saveAgentDraft).mockImplementation(async ({ data }) => {
       if (data.expectedRevision !== server!.revision)
         return { outcome: "conflict", draft: server! };

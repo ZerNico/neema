@@ -1,6 +1,5 @@
-import { readDesktopChrome, type DesktopChrome } from "@chat/desktop-rpc";
+import { readDesktopChrome } from "@chat/desktop-rpc";
 import {
-  createContext,
   useContext,
   useEffect,
   useMemo,
@@ -9,18 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { desktopChromeInitScript } from "./boot-scripts.ts";
 import { useTheme } from "./theme.tsx";
-
-export { desktopChromeInitScript };
+import { ChromeContext } from "./desktop-chrome-context.ts";
 
 const subscribeToNothing = () => () => {};
-const ChromeContext = createContext<{
-  chrome: DesktopChrome | null;
-  target: HTMLDivElement | null;
-  panelTarget: HTMLDivElement | null;
-  cornerTarget: HTMLDivElement | null;
-}>({ chrome: null, target: null, panelTarget: null, cornerTarget: null });
 
 const TITLEBAR_TARGET = "desktop-titlebar-content";
 const PANEL_TARGET = "desktop-titlebar-panel";
@@ -91,9 +82,6 @@ export function DesktopChromeProvider({ children }: { children: ReactNode }) {
 
   return <ChromeContext value={context}>{children}</ChromeContext>;
 }
-
-/** The shell's platform when it draws its own titlebar, else null. */
-export const useDesktopChromePlatform = () => useContext(ChromeContext).chrome?.platform ?? null;
 
 /** The portal keeps sidebar and Work contexts without moving their providers. */
 export function AppHeader({ children }: { children: ReactNode }) {

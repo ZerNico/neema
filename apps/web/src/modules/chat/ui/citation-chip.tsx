@@ -3,10 +3,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { documentLocationLabel } from "~/modules/tools/sources.ts";
-import { useDocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
+import { useDocumentSourcePanel } from "~/modules/knowledge/ui/use-document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
-import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
-import { Favicon, hostOf } from "./favicon.tsx";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
+import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
+import { Favicon } from "./favicon.tsx";
+import { hostOf } from "./host-of.ts";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
 
 const NO_MORE_SOURCES: ReadonlyArray<ToolSource> = [];

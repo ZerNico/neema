@@ -115,6 +115,7 @@ export const makeHandlers = (shell: Shell) =>
     const workspaces = yield* WorkspaceRegistry;
     // Every grant is looked up under the origin the shell is connected to, so
     // the handlers cannot forget to scope one.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- key reads shell from the enclosing handler set
     const key = (conversationId: string) => ({ origin: shell.serverOrigin(), conversationId });
     const grants = {
       lookup: (conversationId: string) => store.lookup(key(conversationId)),
@@ -686,7 +687,7 @@ export const makeHandlers = (shell: Shell) =>
               ),
             );
             // Newest first: the file just changed is the one being asked about.
-            const sorted = walked.files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+            const sorted = walked.files.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
             // The absolute path is the address the model sends back, so the
             // result lists those, not the display form. A directory's relative
             // ends in `/`; keep the mark on the absolute form too.

@@ -189,8 +189,8 @@ describe("listConversations generating flag", () => {
           { id: uuidv7(), conversationId: "gen-idle", role: "assistant", status: "complete" },
         ]);
         const repo = yield* ChatRepo;
-        const page = yield* repo.listConversations({ userId, limit: 10 });
-        return page.conversations.map((c) => ({ id: c.id, generating: c.generating }));
+        const listed = yield* repo.listConversations({ userId, limit: 10 });
+        return listed.conversations.map((c) => ({ id: c.id, generating: c.generating }));
       }),
     );
     expect(rows).toEqual([
@@ -213,8 +213,8 @@ describe("listConversations generating flag", () => {
           { id: uuidv7(), conversationId: "gen-stop", role: "assistant", status: "aborted" },
         ]);
         const repo = yield* ChatRepo;
-        const page = yield* repo.listConversations({ userId, limit: 10 });
-        return page.conversations.map((c) => c.generating);
+        const listed = yield* repo.listConversations({ userId, limit: 10 });
+        return listed.conversations.map((c) => c.generating);
       }),
     );
     expect(rows).toEqual([false, false]);

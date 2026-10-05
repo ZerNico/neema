@@ -7,18 +7,11 @@ import {
   type SkillFile,
   type SkillFinding,
   type SkillTextFile,
-  isBinarySkillFile,
 } from "../package.ts";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { Textarea } from "~/ui/primitives/textarea";
-
-/** Whether the form can show this skill; one without readable frontmatter is edited as files. */
-export const canEditSimply = (files: readonly SkillFile[]) => {
-  const root = files.find((file) => file.path === "SKILL.md");
-  return !!root && !isBinarySkillFile(root) && readSkillDocument(root.content) !== null;
-};
 
 const findingFor = (findings: readonly SkillFinding[], key: string) =>
   findings

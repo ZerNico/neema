@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  CustomToolEditorPage,
-  customToolQuery,
-} from "~/modules/custom-tools/ui/custom-tool-editor-page.tsx";
+import { CustomToolEditorPage } from "~/modules/custom-tools/ui/custom-tool-editor-page.tsx";
+import { customToolQuery } from "~/modules/custom-tools/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/custom-tools/$toolId")({
   loader: ({ context, params }) =>

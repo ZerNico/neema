@@ -30,14 +30,9 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/u
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
 import { projectsQuery } from "../client/queries.ts";
-import { PROJECT_LIMITS, type ProjectRole, type ProjectSummary } from "../schema.ts";
+import { PROJECT_LIMITS, type ProjectSummary } from "../schema.ts";
 import { createProject } from "../server/functions.ts";
-
-export const roleLabel: Record<ProjectRole, string> = {
-  owner: "Owner",
-  editor: "Can edit",
-  viewer: "Can view",
-};
+import { roleLabel } from "./role-labels.ts";
 
 const detail = (project: ProjectSummary) =>
   [
@@ -60,6 +55,7 @@ export function ProjectsPage() {
       New project
     </Button>
   ) : null;
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- list renders this page's rows beside it
   const list = (items: ProjectSummary[]) => (
     <ListCard>
       {items.map((project) => (

@@ -12,13 +12,14 @@ import type { CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
-import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
+import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
 import { ScheduleChatField } from "./schedule-chat-field.tsx";
 import { ScheduleTimingFields } from "./schedule-timing-fields.tsx";
-import { withForm } from "~/ui/form/app-form.tsx";
+import { withForm } from "~/ui/form/app-form.ts";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -84,6 +85,7 @@ export const ScheduleSettingsFields = withForm({
                       onChange={(modelId) => field.handleChange(modelId)}
                       side="bottom"
                       align="end"
+                      // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
                       header={({ close }) => (
                         <div className="p-1.5 pb-0">
                           <button

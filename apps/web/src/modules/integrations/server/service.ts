@@ -85,6 +85,39 @@ type RefreshResult =
 const oauthReady = (row: IntegrationConfigRow | null) =>
   Boolean(row?.oauthClientId && row.oauthClientSecretCiphertext);
 
+const toAdmin = (
+  id: string,
+  row: (IntegrationConfigRow & { connectionCount: number }) | null,
+): AdminIntegration => ({
+  id,
+  saved: row !== null,
+  enabled: row?.enabled ?? false,
+  config: row?.config ?? {},
+  oauthClientId: row?.oauthClientId ?? null,
+  oauthSecretConfigured: Boolean(row?.oauthClientSecretCiphertext),
+  allowApiKeys: row?.allowApiKeys ?? true,
+  audience: row?.audience ?? "instance",
+  connectionCount: row?.connectionCount ?? 0,
+});
+
+/** A session for a credential not stored yet, to verify it before saving. */
+const probe = (config: Record<string, string>, token: string): IntegrationSession => ({
+  config,
+  bearer: Effect.succeed(token),
+});
+
+const verified = (adapter: IntegrationAdapter, config: Record<string, string>, token: string) =>
+  adapter.verify(probe(config, token)).pipe(
+    Effect.catchTags({
+      IntegrationAuthFailed: () =>
+        Effect.fail(
+          new IntegrationRejected({ reason: "The service did not accept that credential." }),
+        ),
+      IntegrationRequestFailed: (error) =>
+        Effect.fail(new IntegrationRejected({ reason: error.message })),
+    }),
+  );
+
 export class IntegrationService extends Context.Service<
   IntegrationService,
   {
@@ -167,21 +200,6 @@ export class IntegrationService extends Context.Service<
         bus
           .publish(userId, { type: "integrations.changed" })
           .pipe(Effect.catchCause(() => Effect.void));
-
-      const toAdmin = (
-        id: string,
-        row: (IntegrationConfigRow & { connectionCount: number }) | null,
-      ): AdminIntegration => ({
-        id,
-        saved: row !== null,
-        enabled: row?.enabled ?? false,
-        config: row?.config ?? {},
-        oauthClientId: row?.oauthClientId ?? null,
-        oauthSecretConfigured: Boolean(row?.oauthClientSecretCiphertext),
-        allowApiKeys: row?.allowApiKeys ?? true,
-        audience: row?.audience ?? "instance",
-        connectionCount: row?.connectionCount ?? 0,
-      });
 
       /** The adapter plus normalized config, or why it cannot be used right now. */
       const available = Effect.fn(function* (userId: string, integrationId: string) {
@@ -295,28 +313,6 @@ export class IntegrationService extends Context.Service<
           }
           return yield* new IntegrationRequestFailed({ status: null, message: result.message });
         });
-
-      /** A session for a credential not stored yet, to verify it before saving. */
-      const probe = (config: Record<string, string>, token: string): IntegrationSession => ({
-        config,
-        bearer: Effect.succeed(token),
-      });
-
-      const verified = (
-        adapter: IntegrationAdapter,
-        config: Record<string, string>,
-        token: string,
-      ) =>
-        adapter.verify(probe(config, token)).pipe(
-          Effect.catchTags({
-            IntegrationAuthFailed: () =>
-              Effect.fail(
-                new IntegrationRejected({ reason: "The service did not accept that credential." }),
-              ),
-            IntegrationRequestFailed: (error) =>
-              Effect.fail(new IntegrationRejected({ reason: error.message })),
-          }),
-        );
 
       const sessionFor = Effect.fn("IntegrationService.session")(function* (
         userId: string,

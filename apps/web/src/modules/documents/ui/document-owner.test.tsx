@@ -2,18 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
+import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.ts";
 import type { EditableDocument } from "../schema.ts";
 import { getDocument, pushDocument } from "../server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import {
-  DetailPanelProvider,
-  DetailPanelRail,
-  useDetailPanel,
-  type DetailPanelApi,
-} from "~/ui/detail-panel.tsx";
+import { DetailPanelProvider, DetailPanelRail, type DetailPanelApi } from "~/ui/detail-panel.tsx";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { AppMotionProvider } from "~/ui/motion";
 
 const blocker = vi.hoisted(() => ({
@@ -28,7 +24,7 @@ vi.mock("../server/document-functions.ts", () => ({
   listDocuments: vi.fn(),
 }));
 vi.mock("./rich-editor/document-editor.tsx", async () => ({
-  default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
+  default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>

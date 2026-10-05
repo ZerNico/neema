@@ -1,4 +1,4 @@
-import type { CellBox } from "../../operations.ts";
+import { columnLetters, type CellBox } from "../../operations.ts";
 import {
   errorIn,
   FUNCTIONS,
@@ -399,17 +399,12 @@ class Evaluation {
   }
 }
 
+const corner = (row: string, column: string) => `${columnLetters(Number(column))}${row}`;
+
 /** "R2C3" or "Sheet!R1C1:R2C2" (absolute only) as A1 text. */
 function fromR1C1(text: string): string | null {
   const match = /^(?:(.+)!)?R(\d+)C(\d+)(?::R(\d+)C(\d+))?$/i.exec(text);
   if (!match) return null;
-  const letters = (index: number) => {
-    let out = "";
-    for (let rest = index; rest > 0; rest = Math.floor((rest - 1) / 26))
-      out = String.fromCharCode(65 + ((rest - 1) % 26)) + out;
-    return out;
-  };
-  const corner = (row: string, column: string) => `${letters(Number(column))}${row}`;
   const area = match[4]
     ? `${corner(match[2]!, match[3]!)}:${corner(match[4], match[5]!)}`
     : corner(match[2]!, match[3]!);
@@ -453,6 +448,7 @@ function lift(
   );
   const height = Math.max(...shapes.map((shape) => shape.h));
   const width = Math.max(...shapes.map((shape) => shape.w));
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- a module-level at would shadow the at used elsewhere in this file
   const at = (value: Scalar | Grid, row: number, column: number): Scalar => {
     if (!(value instanceof Grid)) return value;
     const r = value.height === 1 ? 0 : row;
@@ -461,7 +457,7 @@ function lift(
   };
   return new Grid(
     Array.from({ length: height }, (_, row) =>
-      Array.from({ length: width }, (_, column) =>
+      Array.from({ length: width }, (_cell, column) =>
         apply(values.map((value) => at(value, row, column))),
       ),
     ),

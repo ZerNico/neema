@@ -34,7 +34,7 @@ import {
   MarkdownReferenceSpan,
   type MarkdownComponents,
 } from "./assistant-markdown.tsx";
-import { FileReferenceMachine } from "./file-reference.tsx";
+import { FileReferenceMachine } from "./file-reference-context.ts";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
 import {
   projectAssistantBody,
@@ -53,7 +53,8 @@ import {
   selectAnswerSources,
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
-import { useResearchPanel, type ResearchStepActivity } from "./research-panel.tsx";
+import { type ResearchStepActivity } from "./research-panel.tsx";
+import { useResearchPanel } from "./use-research-panel.tsx";
 import { researchPosition } from "./research-panel-id.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -73,10 +74,8 @@ import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx"
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
 import { ProjectFileActivityRow } from "./project-file-activity-row.tsx";
-import {
-  SaveToProjectActions,
-  useWritableChatProject,
-} from "~/modules/projects/ui/save-to-project.tsx";
+import { SaveToProjectActions } from "~/modules/projects/ui/save-to-project.tsx";
+import { useWritableChatProject } from "~/modules/projects/ui/writable-chat-project-context.ts";
 import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
@@ -86,7 +85,7 @@ import { MessageActions, ResumeMenu } from "./message-actions.tsx";
 import { ReasoningBlock } from "./reasoning-block.tsx";
 import { WorkGroupBlock } from "./work-group-block.tsx";
 import { stepActivities } from "./work-steps.ts";
-import { useSourcesPanel } from "./sources-panel.tsx";
+import { useSourcesPanel } from "./use-sources-panel.tsx";
 import type { MessageTime } from "./timestamps.ts";
 import { ToolActivityBlock } from "./tool-activity-block.tsx";
 import type { AttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
@@ -101,18 +100,16 @@ import {
   useDetailPanelAvailable,
   useDetailPanelTabContent,
   useDetailPanelTabIds,
-} from "~/ui/detail-panel.tsx";
+} from "~/ui/detail-panel-context.ts";
 import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureChevronMotionClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 

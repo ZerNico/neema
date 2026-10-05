@@ -1,17 +1,15 @@
 import { CodeIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import type { CustomToolActivity } from "../client/use-message-stream.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace, ActivityNote } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
-import { workingFileState } from "./working-file-activity-block.tsx";
+import { workingFileState } from "./working-file-state.ts";
 
 /**
  * One admin-authored code tool call. The row carries the tool's display name

@@ -1365,16 +1365,17 @@ export function useMessageStream(
       }
     });
 
-    source.onerror = () => {
+    source.addEventListener("error", () => {
       // EventSource auto-reconnects; nothing to do. If the server is gone the
       // browser keeps retrying, which is the desired resume behavior.
-    };
+    });
 
     return () => {
       closed = true;
       source.close();
     };
     // initial is intentionally captured only when the generation changes
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the resume point is read once, when this generation subscribes
   }, [messageId, epoch, runId, terminalFailure, conversationId, queryClient, generationKey, live]);
 
   // Completion is only reported once the words are all on screen; the pacer

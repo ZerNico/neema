@@ -1,13 +1,11 @@
 import { FolderLibraryIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import type { KnowledgeToolActivity } from "../client/use-message-stream.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 

@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import type { DetailPanelApi, DetailPanelTabSummary } from "~/ui/detail-panel-state.ts";
-import { useAppReducedMotion } from "~/ui/motion";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";

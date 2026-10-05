@@ -7,14 +7,14 @@ import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
 export const networkGrantsDirectory = (userData: string) => join(userData, "network-grants");
 
-/** A protected path cannot be changed directly or by replacing an ancestor. */
-export const conflictsWithNetworkGrants = (directory: string, path: string) => {
-  const inside = (parent: string, child: string) => {
-    const rest = relative(parent, child);
-    return rest === "" || (rest !== ".." && !rest.startsWith(`..${sep}`) && !rest.startsWith(sep));
-  };
-  return inside(directory, path) || inside(path, directory);
+const inside = (parent: string, child: string) => {
+  const rest = relative(parent, child);
+  return rest === "" || (rest !== ".." && !rest.startsWith(`..${sep}`) && !rest.startsWith(sep));
 };
+
+/** A protected path cannot be changed directly or by replacing an ancestor. */
+export const conflictsWithNetworkGrants = (directory: string, path: string) =>
+  inside(directory, path) || inside(path, directory);
 
 export const normalizeNetworkGrant = (host: string): NetworkGrant | null => {
   if (typeof host !== "string" || host.length > 253) return null;
@@ -76,7 +76,7 @@ export const loadNetworkGrants = async (directory: string): Promise<NetworkGrant
   };
   return {
     directory,
-    list: () => [...hosts].sort().map((host) => ({ host })),
+    list: () => [...hosts].toSorted().map((host) => ({ host })),
     has: (grant) => hosts.has(grant.host),
     add: (grant) => change(grant, true),
     remove: (grant) => change(grant, false),

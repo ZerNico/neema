@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PendingButton } from "./pending-button.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "./save-status.tsx";
+import { SaveLabel, SaveStatus } from "./save-status.tsx";
+import { useSaveStatus } from "./use-save-status.ts";
 
 function Editor() {
   const { justSaved, markSaved } = useSaveStatus();

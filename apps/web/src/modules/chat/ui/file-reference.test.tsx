@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { AssistantMarkdown } from "./assistant-markdown.tsx";
-import { FileReferenceContext, FileReferenceMachine } from "./file-reference.tsx";
+import { FileReferenceContext, FileReferenceMachine } from "./file-reference-context.ts";
 
 vi.mock("~/modules/desktop/client/bridge.ts", () => ({ useDesktop: () => null }));
 

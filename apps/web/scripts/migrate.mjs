@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import pg from "pg";
+import { Client } from "pg";
 
 /**
  * Applies pending migrations for a deployment. Bundled by `build-migrate.mjs`
@@ -15,7 +15,7 @@ if (!url) throw new Error("DATABASE_URL is required to migrate.");
 const migrationsFolder =
   process.env.MIGRATIONS_FOLDER ?? fileURLToPath(new URL("./drizzle", import.meta.url));
 
-const client = new pg.Client({ connectionString: url });
+const client = new Client({ connectionString: url });
 await client.connect();
 try {
   // drizzle's migrator takes no lock, and two replicas starting together would

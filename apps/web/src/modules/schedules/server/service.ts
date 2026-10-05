@@ -256,8 +256,8 @@ export class ScheduleService extends Context.Service<
           if (!isValidTimezone(input.timezone))
             return yield* new ScheduleRejected({ reason: "unknown timezone" });
           const endAt = input.endAt ? new Date(input.endAt) : null;
-          return previewFires(input.cron, input.timezone, 5, new Date(), endAt).map((fire) =>
-            fire.toISOString(),
+          return previewFires(input.cron, input.timezone, 5, new Date(), endAt).map((at) =>
+            at.toISOString(),
           );
         }),
         tick,

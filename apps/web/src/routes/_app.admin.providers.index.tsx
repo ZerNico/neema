@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { modelsQuery, ProvidersPage, providersQuery } from "~/modules/admin/ui/providers-page.tsx";
+import { ProvidersPage } from "~/modules/admin/ui/providers-page.tsx";
+import { modelsQuery, providersQuery } from "~/modules/admin/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/providers/")({
   loader: async ({ context }) => {

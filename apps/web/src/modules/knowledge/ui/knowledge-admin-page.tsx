@@ -8,43 +8,35 @@ import {
   DialogClose,
 } from "~/ui/primitives/dialog";
 import { FileValidationIcon } from "@hugeicons/core-free-icons";
-import { useMutation, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
   configureEmbeddings,
   disableEmbeddings,
-  getEmbeddingConfiguration,
   rebuildAllKnowledgeIndexes,
 } from "../server/functions.ts";
-import {
-  getDocumentParserTool,
-  updateDocumentParserTool,
-} from "~/modules/tools/server/functions.ts";
-import {
-  NumberField,
-  integerBetween,
-  useInvalidateTools,
-} from "~/modules/tools/ui/tool-fields.tsx";
+import { updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
+import { NumberField } from "~/modules/tools/ui/tool-fields.tsx";
+import { useInvalidateTools } from "~/modules/tools/client/use-invalidate-tools.ts";
+import { integerBetween } from "~/modules/tools/ui/integer-between.ts";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { ScanReadingRow } from "~/modules/pdf/ui/scan-reading-row.tsx";
 import { ProjectFileSettingsSection } from "~/modules/projects/ui/project-file-settings-section.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
+import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
-
-export const embeddingConfigurationQuery = queryOptions({
-  queryKey: ["admin", "tools", "embeddings"],
-  queryFn: () => getEmbeddingConfiguration(),
-});
+import { documentParserToolQuery } from "../../tools/client/queries.ts";
+import { embeddingConfigurationQuery } from "../client/queries.ts";
 
 /**
  * Everything an admin decides about how documents become searchable: how text
@@ -401,11 +393,7 @@ function DocumentParserSection() {
   );
 }
 
-export const DocumentParserForm = Schema.Struct({
+const DocumentParserForm = Schema.Struct({
   maxChars: integerBetween(1000, 500_000),
   maxPages: integerBetween(1, 2000),
-});
-export const documentParserToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "document-parser"],
-  queryFn: () => getDocumentParserTool(),
 });

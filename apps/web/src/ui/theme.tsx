@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { THEME_STORAGE_KEY, themeInitScript } from "./boot-scripts.ts";
-import { prefersReducedMotion } from "./motion.tsx";
+import { prefersReducedMotion } from "./reduced-motion.ts";
 
 export type Theme = "light" | "dark" | "system";
 export { themeInitScript };
@@ -27,6 +27,7 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   // While in system mode, follow live OS appearance changes.
   const media = window.matchMedia("(prefers-color-scheme: dark)");
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- each subscriber needs its own listener, or one unsubscribe removes all
   const onMedia = () => {
     if (readTheme() === "system") applyTheme("system");
   };

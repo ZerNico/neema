@@ -1,10 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ConversationTitle,
-  createTitleRevealRegistry,
-  type TitleRevealRegistry,
-} from "./conversation-title.tsx";
+import { ConversationTitle } from "./conversation-title.tsx";
+import { createTitleRevealRegistry, type TitleRevealRegistry } from "./title-reveal-registry.ts";
 
 const TITLE = "Postgres vs SQLite";
 

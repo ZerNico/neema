@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { authClient } from "./client.ts";
-import { useIdentityBoundary } from "./identity-boundary.tsx";
+import { useIdentityBoundary } from "./identity-context.ts";
 import { useDesktopAuth } from "~/modules/desktop/client/bridge.ts";
 import { initials } from "~/ui/initials";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";

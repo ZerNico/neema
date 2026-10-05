@@ -105,6 +105,73 @@ export interface Workspaces {
 const STALE_TRANSIENT_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_NAME_ATTEMPTS = 10_000;
 
+const exists = (path: string) =>
+  stat(path).then(
+    () => true,
+    () => false,
+  );
+
+const landFile = async (
+  target: string,
+  fileName: string,
+  write: (tmp: string) => Promise<number>,
+): Promise<StagedFileReceipt> => {
+  await mkdir(target, { recursive: true });
+  const tmp = join(target, `.tmp-${randomSuffix()}`);
+  try {
+    const bytes = await write(tmp);
+    const name = sanitizeName(fileName);
+    const ext = extname(name);
+    const stem = name.slice(0, name.length - ext.length);
+    for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
+      const candidate = attempt === 0 ? name : `${stem}-${attempt}${ext}`;
+      try {
+        await link(tmp, join(target, candidate));
+        return { name: candidate, bytes };
+      } catch (cause) {
+        if (isExistsError(cause)) continue;
+        throw cause;
+      }
+    }
+    throw failed("Could not choose a unique name for that file.");
+  } finally {
+    await rm(tmp, { force: true }).catch(() => {});
+  }
+};
+
+const measure = async (source: string) => {
+  let bytes = 0;
+  let entries = 0;
+  let truncated = false;
+  const walk = async (current: string, depth: number): Promise<void> => {
+    if (depth > LIMITS.cloneDepth) {
+      truncated = true;
+      return;
+    }
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      entries += 1;
+      if (entries > LIMITS.cloneEntries) {
+        truncated = true;
+        return;
+      }
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) await walk(full, depth + 1);
+      else if (entry.isFile()) bytes += (await stat(full)).size;
+      if (truncated || bytes > LIMITS.cloneBytes) return;
+    }
+  };
+  await walk(source, 0);
+  return { bytes, entries, truncated };
+};
+
+const stale = async (path: string) => {
+  try {
+    return Date.now() - (await stat(path)).mtimeMs > STALE_TRANSIENT_MS;
+  } catch {
+    return false;
+  }
+};
+
 const makeWorkspaces = (root: string): Workspaces => {
   const dir = (conversationId: string) => join(root, workspaceId(conversationId));
   const stagingRoot = join(root, ".staging");
@@ -113,12 +180,6 @@ const makeWorkspaces = (root: string): Workspaces => {
     join(stagingRoot, workspaceId(conversationId), transactionId(submissionId));
   const journalPath = (reservationId: string) =>
     join(promotionsRoot, `${transactionId(reservationId)}.json`);
-
-  const exists = (path: string) =>
-    stat(path).then(
-      () => true,
-      () => false,
-    );
 
   const writeJournal = async (journal: PromotionJournal) => {
     await mkdir(promotionsRoot, { recursive: true });
@@ -173,34 +234,6 @@ const makeWorkspaces = (root: string): Workspaces => {
       names.filter((name) => name.endsWith(".json")).map((name) => readJournal(name.slice(0, -5))),
     );
     return journals.filter((journal): journal is PromotionJournal => journal !== null);
-  };
-
-  const landFile = async (
-    target: string,
-    fileName: string,
-    write: (tmp: string) => Promise<number>,
-  ): Promise<StagedFileReceipt> => {
-    await mkdir(target, { recursive: true });
-    const tmp = join(target, `.tmp-${randomSuffix()}`);
-    try {
-      const bytes = await write(tmp);
-      const name = sanitizeName(fileName);
-      const ext = extname(name);
-      const stem = name.slice(0, name.length - ext.length);
-      for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
-        const candidate = attempt === 0 ? name : `${stem}-${attempt}${ext}`;
-        try {
-          await link(tmp, join(target, candidate));
-          return { name: candidate, bytes };
-        } catch (cause) {
-          if (isExistsError(cause)) continue;
-          throw cause;
-        }
-      }
-      throw failed("Could not choose a unique name for that file.");
-    } finally {
-      await rm(tmp, { force: true }).catch(() => {});
-    }
   };
 
   const stageFromBytes = async (
@@ -279,31 +312,6 @@ const makeWorkspaces = (root: string): Workspaces => {
       release();
       if (locks.get(key) === tail) locks.delete(key);
     }
-  };
-
-  const measure = async (source: string) => {
-    let bytes = 0;
-    let entries = 0;
-    let truncated = false;
-    const walk = async (current: string, depth: number): Promise<void> => {
-      if (depth > LIMITS.cloneDepth) {
-        truncated = true;
-        return;
-      }
-      for (const entry of await readdir(current, { withFileTypes: true })) {
-        entries += 1;
-        if (entries > LIMITS.cloneEntries) {
-          truncated = true;
-          return;
-        }
-        const full = join(current, entry.name);
-        if (entry.isDirectory()) await walk(full, depth + 1);
-        else if (entry.isFile()) bytes += (await stat(full)).size;
-        if (truncated || bytes > LIMITS.cloneBytes) return;
-      }
-    };
-    await walk(source, 0);
-    return { bytes, entries, truncated };
   };
 
   const ensure = (conversationId: string) =>
@@ -411,7 +419,7 @@ const makeWorkspaces = (root: string): Workspaces => {
             const staged = stageDir(conversationId, submissionId);
             const entries = (await readdir(staged, { withFileTypes: true }))
               .filter((entry) => entry.isFile() && !entry.name.startsWith(".tmp-"))
-              .sort((left, right) => left.name.localeCompare(right.name));
+              .toSorted((left, right) => left.name.localeCompare(right.name));
             if (entries.length === 0) throw failed("There are no staged files to send.");
             const workspace = dir(conversationId);
             await mkdir(workspace, { recursive: true });
@@ -572,13 +580,6 @@ const makeWorkspaces = (root: string): Workspaces => {
             (journal) => `${journal.conversationId}/${journal.submissionId}`,
           ),
         );
-        const stale = async (path: string) => {
-          try {
-            return Date.now() - (await stat(path)).mtimeMs > STALE_TRANSIENT_MS;
-          } catch {
-            return false;
-          }
-        };
         try {
           for (const conversation of await readdir(stagingRoot, { withFileTypes: true })) {
             if (!conversation.isDirectory()) continue;

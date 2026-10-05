@@ -24,16 +24,14 @@ import {
   type PendingKind,
 } from "~/modules/desktop/client/approvals.ts";
 import { deletePathsOf, stringArg as text } from "~/modules/desktop/tool-schema.ts";
-import { useLocalFilePreview } from "~/modules/desktop/ui/local-file-preview.tsx";
+import { useLocalFilePreview } from "~/modules/desktop/ui/use-local-file-preview.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/card.tsx";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace, ActivityNote } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
@@ -112,7 +110,7 @@ const shortPath = (path: string, roots: ReadonlyArray<{ name: string; path: stri
     if (path.startsWith(root.path + "/") && (!owner || root.path.length > owner.path.length))
       owner = root;
   if (owner) return `${owner.name}/${path.slice(owner.path.length + 1)}`;
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+  return path.split("/").findLast(Boolean) ?? path;
 };
 
 const PATH_TOOLS = new Set([

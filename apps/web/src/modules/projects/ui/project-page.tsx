@@ -18,9 +18,10 @@ import {
   createProjectDocument,
   deleteProjectDocument,
 } from "~/modules/documents/server/document-functions.ts";
-import { DocumentOwner, useDocumentPanel } from "~/modules/documents/ui/document-owner.tsx";
+import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
+import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import {
   EmptyState,
@@ -60,7 +61,7 @@ import { deleteProject, updateProject } from "../server/functions.ts";
 import { ProjectMembersDialog } from "./project-members-dialog.tsx";
 import { ProjectFilesSection } from "./project-files-section.tsx";
 import { ProjectMemorySection } from "./project-memory-section.tsx";
-import { roleLabel } from "./projects-page.tsx";
+import { roleLabel } from "./role-labels.ts";
 
 const notFound = (error: unknown) => error instanceof Error && /not found/i.test(error.message);
 

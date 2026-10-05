@@ -746,6 +746,36 @@ export const joinChunks = (
     .map((chunk) => chunk.delta)
     .join("");
 
+const lockWorkTurn = (tx: DbTx, conversationId: string) =>
+  tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${conversationId}, 94731))`);
+const expireWorkTurns = (tx: DbTx) =>
+  tx
+    .update(workTurnReservations)
+    .set({ status: "expired", updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(workTurnReservations.status, "reserved"),
+        sql`${workTurnReservations.expiresAt} <= now()`,
+      ),
+    );
+const rejectReservedWorkTurn = (tx: DbTx, conversationId: string) =>
+  Effect.gen(function* () {
+    yield* lockWorkTurn(tx, conversationId).pipe(Effect.orDie);
+    yield* expireWorkTurns(tx).pipe(Effect.orDie);
+    const live = yield* tx
+      .select({ id: workTurnReservations.id })
+      .from(workTurnReservations)
+      .where(
+        and(
+          eq(workTurnReservations.conversationId, conversationId),
+          eq(workTurnReservations.status, "reserved"),
+        ),
+      )
+      .limit(1)
+      .pipe(Effect.orDie);
+    if (live.length > 0) return yield* new ConversationBusy({ conversationId });
+  });
+
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
@@ -1250,35 +1280,6 @@ export class ChatRepo extends Context.Service<
       const db = yield* Db;
       const attachments = yield* AttachmentRepo;
       const research = createResearchStore(db);
-      const lockWorkTurn = (tx: DbTx, conversationId: string) =>
-        tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${conversationId}, 94731))`);
-      const expireWorkTurns = (tx: DbTx) =>
-        tx
-          .update(workTurnReservations)
-          .set({ status: "expired", updatedAt: sql`now()` })
-          .where(
-            and(
-              eq(workTurnReservations.status, "reserved"),
-              sql`${workTurnReservations.expiresAt} <= now()`,
-            ),
-          );
-      const rejectReservedWorkTurn = (tx: DbTx, conversationId: string) =>
-        Effect.gen(function* () {
-          yield* lockWorkTurn(tx, conversationId).pipe(Effect.orDie);
-          yield* expireWorkTurns(tx).pipe(Effect.orDie);
-          const live = yield* tx
-            .select({ id: workTurnReservations.id })
-            .from(workTurnReservations)
-            .where(
-              and(
-                eq(workTurnReservations.conversationId, conversationId),
-                eq(workTurnReservations.status, "reserved"),
-              ),
-            )
-            .limit(1)
-            .pipe(Effect.orDie);
-          if (live.length > 0) return yield* new ConversationBusy({ conversationId });
-        });
       const generationWrite = <A, E, R>(run: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
           const fence = yield* GenerationFence;
@@ -1793,7 +1794,7 @@ export class ChatRepo extends Context.Service<
                     );
                     const userMessage = turnMessages
                       .slice(0, assistantIndex)
-                      .reverse()
+                      .toReversed()
                       .find((message) => message.role === "user");
                     const assistant = turnMessages[assistantIndex];
                     if (!conversationRows[0] || !assistant || !userMessage)
@@ -3086,18 +3087,18 @@ export class ChatRepo extends Context.Service<
         }),
 
         appendChunks: Effect.fn("ChatRepo.appendChunks")(function* (messageId, chunks) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
               // The periodic flusher calls this with an empty batch; renewing
               // before the early return is what keeps the lease alive between
               // chunks. The fence above makes a late renewal impossible.
-              yield* db
+              yield* tx
                 .update(messages)
                 .set({ generationLeaseUntil: sql`clock_timestamp() + ${GENERATION_LEASE}` })
                 .where(eq(messages.id, messageId))
                 .pipe(Effect.orDie);
               if (chunks.length === 0) return;
-              yield* db
+              yield* tx
                 .insert(messageChunks)
                 .values(
                   chunks.map((c) => ({ messageId, seq: c.seq, kind: c.kind, delta: c.delta })),
@@ -3251,9 +3252,9 @@ export class ChatRepo extends Context.Service<
         }),
 
         insertToolCall: Effect.fn("ChatRepo.insertToolCall")(function* (input) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
-              yield* db
+              yield* tx
                 .insert(messageToolCalls)
                 .values({ ...input, status: "running" })
                 .pipe(Effect.orDie);
@@ -3262,8 +3263,8 @@ export class ChatRepo extends Context.Service<
         }),
 
         settleToolCall: Effect.fn("ChatRepo.settleToolCall")(function* (input) {
-          return yield* generationWrite((db) =>
-            db
+          return yield* generationWrite((tx) =>
+            tx
               .update(messageToolCalls)
               .set({ status: input.status, error: input.error, completedAt: new Date() })
               .where(eq(messageToolCalls.id, input.id))
@@ -3271,9 +3272,9 @@ export class ChatRepo extends Context.Service<
           );
         }),
         completeToolCall: Effect.fn("ChatRepo.completeToolCall")(function* (input) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
-              yield* db
+              yield* tx
                 .update(messageToolCalls)
                 .set({
                   result: input.result,
@@ -3323,9 +3324,9 @@ export class ChatRepo extends Context.Service<
         }),
         failRunningToolCalls: Effect.fn("ChatRepo.failRunningToolCalls")(
           function* (messageId, message) {
-            return yield* generationWrite((db) =>
+            return yield* generationWrite((tx) =>
               Effect.gen(function* () {
-                yield* db
+                yield* tx
                   .update(messageToolCalls)
                   .set({
                     status: "error",
@@ -3359,9 +3360,9 @@ export class ChatRepo extends Context.Service<
         }),
 
         createCompactionEvent: Effect.fn("ChatRepo.createCompactionEvent")(function* (input) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
-              yield* db
+              yield* tx
                 .insert(messageCompactionEvents)
                 .values({ ...input, status: "running" })
                 .pipe(Effect.orDie);
@@ -3370,9 +3371,9 @@ export class ChatRepo extends Context.Service<
         }),
 
         completeCompactionEvent: Effect.fn("ChatRepo.completeCompactionEvent")(function* (input) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
-              yield* db
+              yield* tx
                 .update(messageCompactionEvents)
                 .set({
                   status: input.status,
@@ -3390,9 +3391,9 @@ export class ChatRepo extends Context.Service<
 
         failRunningCompactionEvents: Effect.fn("ChatRepo.failRunningCompactionEvents")(
           function* (messageId, message) {
-            return yield* generationWrite((db) =>
+            return yield* generationWrite((tx) =>
               Effect.gen(function* () {
-                yield* db
+                yield* tx
                   .update(messageCompactionEvents)
                   .set({
                     status: "error",
@@ -3477,9 +3478,9 @@ export class ChatRepo extends Context.Service<
         }),
 
         finalizeMessage: Effect.fn("ChatRepo.finalizeMessage")(function* (input) {
-          return yield* generationWrite((db) =>
+          return yield* generationWrite((tx) =>
             Effect.gen(function* () {
-              yield* db
+              yield* tx
                 .update(messages)
                 .set({
                   status: input.status,
@@ -3493,11 +3494,11 @@ export class ChatRepo extends Context.Service<
                 .pipe(Effect.orDie);
               if (input.ledger) {
                 // Terminal state and accounting must either both commit or both roll back.
-                yield* db
+                yield* tx
                   .insert(usageEvents)
                   .values({ id: uuidv7(), ...input.ledger })
                   .pipe(Effect.orDie);
-                yield* db
+                yield* tx
                   .update(conversations)
                   .set({ lastMessageAt: new Date() })
                   .where(eq(conversations.id, input.ledger.conversationId))

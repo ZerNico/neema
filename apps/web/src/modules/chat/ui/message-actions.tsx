@@ -121,6 +121,7 @@ function RetryMenu({
         disabled={disabled}
         side="bottom"
         emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+        // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
         header={({ close }) => (
           <SameModelHeader
             label="Retry same"
@@ -179,6 +180,7 @@ export function ResumeMenu({
       disabled={disabled}
       side="bottom"
       emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+      // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
       header={({ close }) => (
         <SameModelHeader
           label="Resume same"

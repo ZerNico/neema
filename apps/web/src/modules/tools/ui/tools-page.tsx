@@ -1,23 +1,22 @@
-import { NumberField, integerBetween, useInvalidateTools } from "./tool-fields.tsx";
+import { NumberField } from "./tool-fields.tsx";
+import { useInvalidateTools } from "../client/use-invalidate-tools.ts";
+import { integerBetween } from "./integer-between.ts";
 import {
   Brain02Icon,
   GlobalSearchIcon,
   Link01Icon,
   Presentation01Icon,
 } from "@hugeicons/core-free-icons";
-import { useMutation, useQueryClient, useSuspenseQuery, queryOptions } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { toast } from "sonner";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
+import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
-  getMemoryTool,
-  getOfficeFilesTool,
-  getUrlReaderTool,
-  getWebSearchTool,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -26,26 +25,12 @@ import {
 import { toastError } from "~/ui/error-toast.ts";
 import { PresentationFontsRow } from "~/modules/presentations/ui/presentation-fonts.tsx";
 import { SearchProviderRows } from "./search-providers.tsx";
-
-export const memoryToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "memory"],
-  queryFn: () => getMemoryTool(),
-});
-
-export const webSearchToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "web-search"],
-  queryFn: () => getWebSearchTool(),
-});
-
-export const urlReaderToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "url-reader"],
-  queryFn: () => getUrlReaderTool(),
-});
-
-export const officeFilesToolQuery = queryOptions({
-  queryKey: ["admin", "tools", "office-files"],
-  queryFn: () => getOfficeFilesTool(),
-});
+import {
+  memoryToolQuery,
+  webSearchToolQuery,
+  urlReaderToolQuery,
+  officeFilesToolQuery,
+} from "../client/queries.ts";
 
 const WebSearchForm = Schema.Struct({
   maxResults: integerBetween(1, 20),

@@ -57,6 +57,7 @@ export function setDetailPanelWidth(width: number, persist: boolean) {
 
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- each subscriber needs its own listeners, or one unsubscribe removes all
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) {
       override = null;
@@ -64,6 +65,7 @@ const subscribe = (listener: () => void) => {
     }
   };
   window.addEventListener("storage", onStorage);
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- each subscriber needs its own listeners, or one unsubscribe removes all
   const onResize = () => emit();
   window.addEventListener("resize", onResize);
   return () => {

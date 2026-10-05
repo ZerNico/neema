@@ -1,5 +1,5 @@
 import type { ResearchStepActivity } from "./research-panel.tsx";
-import { hostOf } from "./favicon.tsx";
+import { hostOf } from "./host-of.ts";
 
 /** The newest running target, else the newest target seen: what it is on now. */
 export const currentDetail = (

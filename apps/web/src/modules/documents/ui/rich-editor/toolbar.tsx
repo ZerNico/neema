@@ -48,6 +48,7 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Toggle } from "~/ui/primitives/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { LinkPopover } from "./link-popover.tsx";
+import { fittingControls } from "./fitting-controls.ts";
 
 type Chain = ReturnType<Editor["chain"]>;
 type Icon = HugeiconsIconProps["icon"];
@@ -301,16 +302,6 @@ const CONTROLS: Control[] = [
     command: (c) => c.redo(),
   },
 ];
-
-/** An icon button and the gap after it. */
-const SLOT = 34;
-
-/**
- * How many of `total` controls fit in `room` pixels, keeping a slot for More
- * when not all do. Unmeasured (no layout yet, or none at all) shows them all.
- */
-export const fittingControls = (room: number, total: number) =>
-  room <= 0 || total * SLOT <= room ? total : Math.max(0, Math.floor(room / SLOT) - 1);
 
 /** How many controls fit beside the text style. */
 const useFitting = (total: number) => {

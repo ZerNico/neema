@@ -5,7 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { shareRecipientsQuery } from "~/modules/sharing/client/queries.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { initials } from "~/ui/initials";
 import { ErrorState } from "~/ui/page-shell.tsx";

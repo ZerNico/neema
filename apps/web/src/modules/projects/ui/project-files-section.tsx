@@ -17,7 +17,7 @@ import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";

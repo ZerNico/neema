@@ -140,7 +140,7 @@ export class AgentService extends Context.Service<
         // else shows as unavailable here, exactly as it will at send time.
         const customToolRows = yield* customToolRepo.listUsableBy(userId);
         const customTools = customToolIds.map((id) => {
-          const stored = customToolRows.find((row) => row.id === id);
+          const stored = customToolRows.find((tool) => tool.id === id);
           return { id, name: stored?.name ?? null, available: stored !== undefined };
         });
         yield* available(userId, agentId, ownerOnly);

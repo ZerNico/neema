@@ -7,7 +7,8 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
-import { IdentityBoundary, useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
+import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
+import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import type { SessionIdentity } from "~/modules/auth/identity.ts";
 import {
   approvalStatusQuery,

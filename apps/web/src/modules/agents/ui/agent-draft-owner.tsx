@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode, Ref } from "react";
 import {
   DraftOwner,
-  useDraftPanel,
   type DraftHandle,
   type DraftKindUi,
 } from "~/modules/drafts/ui/draft-owner.tsx";
@@ -58,8 +57,6 @@ const ui: DraftKindUi<DraftSettings> = {
     createEffect: "The agent is created only when you choose Create agent.",
   },
 };
-
-export const useAgentDraftPanel = (draftId: string) => useDraftPanel("agent", draftId);
 
 export function AgentDraftOwner(props: {
   draftIds: ReadonlyArray<string>;

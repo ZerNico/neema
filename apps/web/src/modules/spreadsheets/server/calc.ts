@@ -182,6 +182,17 @@ export function recalculate(workbook: Workbook, options: CalcOptions = {}): Calc
   return report.result;
 }
 
+/** Empties the plain values left in an array's area, outside `keep` and the anchor. */
+const clear = (sheet: Worksheet, box: CellBox | null, keep: CellBox | null, anchor: Cell) => {
+  if (!box) return;
+  for (let row = box.top; row <= box.bottom; row++)
+    for (let column = box.left; column <= box.right; column++) {
+      if (inside(keep, row, column) || (row === anchor.row && column === anchor.col)) continue;
+      const cell = getCell(sheet, row, column);
+      if (cell && cell.value !== null && !isFormulaValue(cell.value)) cell.value = null;
+    }
+};
+
 function pass(workbook: Workbook, options: CalcOptions) {
   const authored = options.authored ?? new Set<Cell>();
   const sheets = new Map<string, Worksheet>();
@@ -291,10 +302,10 @@ function pass(workbook: Workbook, options: CalcOptions) {
     columns.set(formula.cell.col, [...(columns.get(formula.cell.col) ?? []), id]);
     if (formula.area) {
       areas.push({ sheet: formula.sheet, box: formula.area, id });
-      const columns = areasByColumn.get(formula.sheet) ?? new Map<number, number[]>();
-      areasByColumn.set(formula.sheet, columns);
+      const areaColumns = areasByColumn.get(formula.sheet) ?? new Map<number, number[]>();
+      areasByColumn.set(formula.sheet, areaColumns);
       for (let column = formula.area.left; column <= formula.area.right; column++)
-        columns.set(column, [...(columns.get(column) ?? []), areas.length - 1]);
+        areaColumns.set(column, [...(areaColumns.get(column) ?? []), areas.length - 1]);
     }
   });
   for (const columns of byColumn.values())
@@ -493,15 +504,6 @@ function pass(workbook: Workbook, options: CalcOptions) {
       return { ...base, cachedValue: result.code, cachedValueType: "error" };
     }
     return { ...base, cachedValue: result ?? 0 };
-  };
-  const clear = (sheet: Worksheet, box: CellBox | null, keep: CellBox | null, anchor: Cell) => {
-    if (!box) return;
-    for (let row = box.top; row <= box.bottom; row++)
-      for (let column = box.left; column <= box.right; column++) {
-        if (inside(keep, row, column) || (row === anchor.row && column === anchor.col)) continue;
-        const cell = getCell(sheet, row, column);
-        if (cell && cell.value !== null && !isFormulaValue(cell.value)) cell.value = null;
-      }
   };
   // Cells spilled into during this pass, by the formula that claimed them.
   const claimed = new Map<string, number>();

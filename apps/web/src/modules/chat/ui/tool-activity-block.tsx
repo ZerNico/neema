@@ -2,14 +2,13 @@ import { Alert02Icon, ArrowRight01Icon, GlobalSearchIcon } from "@hugeicons/core
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { ToolPageStatus, WebToolActivity } from "../client/use-message-stream.ts";
-import { Favicon, hostOf } from "./favicon.tsx";
+import { Favicon } from "./favicon.tsx";
+import { hostOf } from "./host-of.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace, ActivityNote, ActivityQueries } from "./activity-face.tsx";
 

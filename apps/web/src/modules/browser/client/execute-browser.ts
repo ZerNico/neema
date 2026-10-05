@@ -193,6 +193,9 @@ export interface BrowserDeps {
   readonly saveToWorkspace?: (file: { name: string; base64: string }) => Promise<string>;
 }
 
+// The tab as the store has it now; a handle taken earlier may be stale.
+const now = (tab: BrowserTab) => browserTabs.get(tab.id) ?? tab;
+
 export async function executeBrowserTool(
   call: BrowserCall,
   remainingMs: number,
@@ -302,8 +305,6 @@ export async function executeBrowserTool(
       return guest === null ? unreachable : work(now(target), guest);
     });
   };
-
-  const now = (tab: BrowserTab) => browserTabs.get(tab.id) ?? tab;
 
   try {
     const reply = await (async (): Promise<DesktopToolResult> => {

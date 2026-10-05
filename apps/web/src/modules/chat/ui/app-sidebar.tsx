@@ -17,8 +17,9 @@ import * as m from "motion/react-m";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
 import { conversationQuery, conversationsInfiniteQuery } from "../client/queries.ts";
-import { ConversationMenu, useConversationActions } from "./conversation-actions.tsx";
-import { createTitleRevealRegistry } from "./conversation-title.tsx";
+import { ConversationMenu } from "./conversation-actions.tsx";
+import { useConversationActions } from "./use-conversation-actions.tsx";
+import { createTitleRevealRegistry } from "./title-reveal-registry.ts";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { useBrowsingChats } from "~/modules/browser/client/use-browsing-chats.ts";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
@@ -41,7 +42,8 @@ import {
 } from "~/ui/primitives/sidebar";
 import { ProjectsSidebarGroup } from "~/modules/projects/ui/projects-sidebar.tsx";
 import { ClosesOnLink } from "~/ui/sidebar-links.tsx";
-import { collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
+import { collapseMotion } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
 
 export function AppSidebar({

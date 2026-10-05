@@ -9,7 +9,7 @@ import type { PublicTool } from "~/modules/tools/server/repo.ts";
 import { configureEmbeddings, rebuildAllKnowledgeIndexes } from "../server/functions.ts";
 import { updateProjectFileSettings } from "~/modules/projects/server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { scanReadingQuery } from "~/modules/pdf/ui/scan-reading-row.tsx";
+import { scanReadingQuery } from "~/modules/tools/client/queries.ts";
 import { toast } from "sonner";
 
 vi.mock("../server/functions.ts", () => ({

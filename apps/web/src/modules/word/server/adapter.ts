@@ -607,6 +607,16 @@ const toLetters = (value: number) => {
   }
   return out;
 };
+const written = (value: number, format: string) =>
+  format === "lowerRoman"
+    ? toRoman(value)
+    : format === "upperRoman"
+      ? toRoman(value).toUpperCase()
+      : format === "lowerLetter"
+        ? toLetters(value)
+        : format === "upperLetter"
+          ? toLetters(value).toUpperCase()
+          : String(value);
 
 /**
  * List markers as Word counts them: numbers per list and level, deeper levels
@@ -636,16 +646,6 @@ function listMarkers(doc: Docx) {
     ].map(([, num, abstract]) => [Number(num), abstract!]),
   );
   const counters = new Map<number, number[]>();
-  const written = (value: number, format: string) =>
-    format === "lowerRoman"
-      ? toRoman(value)
-      : format === "upperRoman"
-        ? toRoman(value).toUpperCase()
-        : format === "lowerLetter"
-          ? toLetters(value)
-          : format === "upperLetter"
-            ? toLetters(value).toUpperCase()
-            : String(value);
   return (numId: number, level: number) => {
     const defined = levels.get(abstractOf.get(numId) ?? "");
     const own = defined?.get(level);
@@ -693,20 +693,20 @@ export function previewWordFile(bytes: Uint8Array) {
     const alt = (described && attributeOf(described, "descr")) ?? "";
     const blip = elementsNamed(drawing, "blip")[0];
     const part = parts.get((blip && attributeOf(blip, "embed")) ?? "");
-    const bytes = part ? data.get(part) : undefined;
-    const kind = bytes ? pictureOf(bytes) : null;
+    const imageBytes = part ? data.get(part) : undefined;
+    const kind = imageBytes ? pictureOf(imageBytes) : null;
     const fits =
-      bytes &&
+      imageBytes &&
       kind &&
-      bytes.length <= WORD_LIMITS.previewPictureBytes &&
-      pictureBytes + bytes.length <= WORD_LIMITS.previewPicturesBytes;
+      imageBytes.length <= WORD_LIMITS.previewPictureBytes &&
+      pictureBytes + imageBytes.length <= WORD_LIMITS.previewPicturesBytes;
     if (!fits) return { width, height, alt: clip(alt, 300) };
-    pictureBytes += bytes.length;
+    pictureBytes += imageBytes.length;
     return {
       width,
       height,
       alt: clip(alt, 300),
-      src: `data:${kind.mediaType};base64,${Buffer.from(bytes).toString("base64")}`,
+      src: `data:${kind.mediaType};base64,${Buffer.from(imageBytes).toString("base64")}`,
     };
   };
   for (const item of blocks) {
@@ -849,10 +849,10 @@ function fill(doc: Docx, paragraph: WmlParagraph, text: string, base: RunFormatt
 
 /** Paragraph styles the document defines: id and display name. */
 function paragraphStyles(doc: Docx) {
-  return (stylesPart(doc)?.styles ?? []).flatMap((element) => {
-    if (attributeOf(element, "type") !== "paragraph") return [];
-    const id = attributeOf(element, "styleId");
-    const named = element.children.find(
+  return (stylesPart(doc)?.styles ?? []).flatMap((style) => {
+    if (attributeOf(style, "type") !== "paragraph") return [];
+    const id = attributeOf(style, "styleId");
+    const named = style.children.find(
       (child): child is XmlElement => child.kind === "element" && child.name.local === "name",
     );
     return id ? [{ id, name: (named && attributeOf(named, "val")) ?? id }] : [];
@@ -960,8 +960,8 @@ const EMU_PER_CM = 360_000;
 const TEXT_WIDTH_CM = 16;
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const REFERENCE = { header: "headerReference", footer: "footerReference" } as const;
-const attributeOf = (element: XmlElement, local: string) =>
-  element.attrs.find((attr) => attr.name.local === local)?.value;
+const attributeOf = (node: XmlElement, local: string) =>
+  node.attrs.find((attr) => attr.name.local === local)?.value;
 
 /** Whether any earlier section has its own properties (and may share this one's headers). */
 const sectioned = (doc: Docx) =>
@@ -1651,10 +1651,10 @@ export function editWordFile(bytes: Uint8Array, rawOperations: unknown) {
         return;
       }
       case "insertImage": {
-        const bytes: unknown = operation.imageRef;
-        if (!(bytes instanceof Uint8Array))
+        const imageBytes: unknown = operation.imageRef;
+        if (!(imageBytes instanceof Uint8Array))
           return fail("invalid_operation", `${path}: the image was not resolved.`);
-        const picture = pictureOf(bytes);
+        const picture = pictureOf(imageBytes);
         if (!picture || !picture.width || !picture.height)
           return fail("invalid_operation", `${path}: the image is not a PNG or JPEG picture.`);
         // Its own size at 96 dpi, capped at the text width unless a width was asked for.
@@ -1663,7 +1663,7 @@ export function editWordFile(bytes: Uint8Array, rawOperations: unknown) {
         const heightEmu = Math.round((widthEmu * picture.height) / picture.width);
         const paragraph = appendParagraph(doc, "");
         paragraph.children.length = 0;
-        insertImageInto(doc, paragraph, bytes, {
+        insertImageInto(doc, paragraph, imageBytes, {
           widthEmu,
           heightEmu,
           contentType: picture.mediaType,

@@ -49,6 +49,7 @@ const useHighlighted = (text: string, language: string): Tokens | null => {
       retry,
     );
     return result === null ? null : dropTrailingBlank(result.tokens, text);
+    // oxlint-disable-next-line react/memo-dependencies -- version and retry re-run highlighting once the grammar loads
   }, [text, supported, eligible, version, retry]);
 };
 
@@ -77,6 +78,7 @@ export function CodeViewer({
     <div className={cn("bg-muted overflow-auto rounded-2xl font-mono text-xs", className)}>
       <div className="min-w-max py-3">
         {(tokens ?? plainLines).map((line, index) => (
+          // oxlint-disable-next-line react/no-array-index-key -- a line's number is its identity
           <div key={index} className="group flex leading-[1.6]">
             <span
               aria-hidden
@@ -94,6 +96,7 @@ export function CodeViewer({
                 ? line
                 : line.map((token, tokenIndex) => (
                     <span
+                      // oxlint-disable-next-line react/no-array-index-key -- tokens are a fixed split of one line
                       key={tokenIndex}
                       data-shiki-token
                       // htmlStyle carries the light colour plus a --shiki-dark

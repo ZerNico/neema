@@ -1,6 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { approvalStatusQuery, sessionUserQuery } from "~/modules/auth/client.ts";
-import { desktopSignInPath, DesktopSignInPage } from "~/modules/auth/ui/desktop-sign-in-page.tsx";
+import { DesktopSignInPage } from "~/modules/auth/ui/desktop-sign-in-page.tsx";
+import { desktopSignInPath } from "~/modules/auth/ui/desktop-sign-in-path.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";

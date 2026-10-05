@@ -545,7 +545,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
               skillIds: [skillId],
               resolve: (tx: DbTx) =>
                 resolveAttemptSkills(tx, userId, [skillId], []).pipe(
-                  Effect.map((skills) => ({ ...PLAIN_GENERATION, skills })),
+                  Effect.map((resolved) => ({ ...PLAIN_GENERATION, skills: resolved })),
                 ),
             }
           : {}),

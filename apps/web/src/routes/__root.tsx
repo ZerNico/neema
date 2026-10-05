@@ -10,11 +10,8 @@ import type { ReactNode } from "react";
 import appCss from "~/styles/app.css?url";
 import { Toaster } from "~/ui/primitives/sonner";
 import { themeInitScript } from "~/ui/theme.tsx";
-import {
-  DesktopChromeFrame,
-  DesktopChromeProvider,
-  desktopChromeInitScript,
-} from "~/ui/desktop-chrome.tsx";
+import { DesktopChromeFrame, DesktopChromeProvider } from "~/ui/desktop-chrome.tsx";
+import { desktopChromeInitScript } from "~/ui/boot-scripts.ts";
 import { RouteError, RouteNotFound } from "~/ui/route-error.tsx";
 import { StartupPending } from "~/ui/startup-pending.tsx";
 

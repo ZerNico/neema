@@ -428,7 +428,7 @@ const historyOf = Effect.fn("test.historyOf")(function* (conversationId: string)
   const repo = yield* ChatRepo;
   const rows = yield* repo.listMessages(conversationId);
   return {
-    messageId: rows.filter((m) => m.role === "assistant").at(-1)!.id,
+    messageId: rows.findLast((m) => m.role === "assistant")!.id,
     messages: rows.map((m) => ({ id: m.id, role: m.role, content: m.content })),
     renderedMessages: rows.map((m) => ({
       role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),

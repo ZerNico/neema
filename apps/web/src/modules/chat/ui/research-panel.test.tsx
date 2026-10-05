@@ -7,7 +7,8 @@ import type {
   WebToolActivity,
 } from "../client/use-message-stream.ts";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
-import { ResearchActivityBody, ResearchPanelOwner } from "./research-panel.tsx";
+import { ResearchActivityBody } from "./research-panel.tsx";
+import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import type { ResearchTaskProgress } from "../research-schema.ts";
 import { DetailPanelProvider, DetailPanelRail, DetailPanelToggle } from "~/ui/detail-panel.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
@@ -542,7 +543,7 @@ describe("research panel", () => {
 
 describe("the research overview", () => {
   it("sums the run's sources by site behind its milestone, with no tick on a page that loaded", () => {
-    const source = (index: number, url: string) => ({
+    const webSource = (index: number, url: string) => ({
       kind: "web" as const,
       index,
       url,
@@ -564,9 +565,9 @@ describe("the research overview", () => {
               targets: ["hormone therapy berlin"],
               resultCount: 3,
               sources: [
-                source(1, "https://awmf.org/a"),
-                source(2, "https://awmf.org/b"),
-                source(3, "https://bfarm.de/x"),
+                webSource(1, "https://awmf.org/a"),
+                webSource(2, "https://awmf.org/b"),
+                webSource(3, "https://bfarm.de/x"),
               ],
             },
             {

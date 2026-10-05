@@ -13,8 +13,6 @@ import {
   createGroup,
   getDefaultCapabilities,
   getGroupCapabilities,
-  listGroupMemberships,
-  listGroups,
   updateDefaultCapabilities,
   updateGroupCapabilities,
 } from "../server/functions.ts";
@@ -38,30 +36,8 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { GROUP_NAME_MAX } from "../schema.ts";
-
-export const groupsQuery = queryOptions({
-  queryKey: ["admin", "groups"],
-  queryFn: () => listGroups(),
-});
-
-export const membershipsQuery = queryOptions({
-  queryKey: ["admin", "group-memberships"],
-  queryFn: () => listGroupMemberships(),
-});
-
-/**
- * The group server functions answer a taken name with a bare 409 Response
- * (`Effect.die(new Response(..., { status: 409 }))`), which the server-fn
- * client surfaces as an untyped Error carrying the response text. There is no
- * tagged field to check on the client, so the sniffing lives here alone.
- */
-export const isConflict = (error: unknown): boolean => {
-  if (error instanceof Response) return error.status === 409;
-  if (error instanceof Error) {
-    return error.message.includes("409") || /already taken/i.test(error.message);
-  }
-  return false;
-};
+import { groupsQuery } from "../client/queries.ts";
+import { isConflict } from "./group-conflict.ts";
 
 export function GroupsPage() {
   const { data: groups } = useSuspenseQuery(groupsQuery);

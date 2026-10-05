@@ -44,7 +44,7 @@ vi.mock("~/modules/sharing/server/functions.ts", () => ({
   revokeResourceGroup: vi.fn(),
   publishResource: vi.fn(),
 }));
-vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => confirm }));
+vi.mock("~/ui/confirm-context.ts", () => ({ useConfirm: () => confirm }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,

@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";

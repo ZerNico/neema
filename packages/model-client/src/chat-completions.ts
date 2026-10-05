@@ -518,9 +518,9 @@ export const makeChatDecoder = (
         }
       } else {
         // One field per chunk: relays that fill both send the same text twice.
-        const content = str(delta["reasoning_content"]);
-        const reasoning = content ?? str(delta["reasoning"]);
-        if (content) reasoningContentField += content;
+        const reasoningContent = str(delta["reasoning_content"]);
+        const reasoning = reasoningContent ?? str(delta["reasoning"]);
+        if (reasoningContent) reasoningContentField += reasoningContent;
         if (reasoning) parts.push(...(yield* writeText("reasoning", reasoning)));
       }
 

@@ -38,15 +38,19 @@ export const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 
-// The engine requires the runtime even when no module is pinned; a call here
-// means an attempt pinned custom tools the suite did not set up.
+/**
+ * The engine requires the runtime even when no module is pinned; a call here
+ * means an attempt pinned custom tools the suite did not set up.
+ */
 export const FakeCustomToolRuntime = Layer.succeed(CustomToolRuntime, {
   inspect: () => Effect.die("no custom tool builds in these tests"),
   run: () => Effect.die("no custom tool calls in these tests"),
 });
 
-// Nobody in these suites connects an integration, so every attempt is offered
-// none; a call to anything else means a suite reached integrations unprepared.
+/**
+ * Nobody in these suites connects an integration, so every attempt is offered
+ * none; a call to anything else means a suite reached integrations unprepared.
+ */
 export const NoIntegrations = Layer.mergeAll(
   Layer.succeed(IntegrationService, {
     adminList: () => Effect.die("no integrations in these tests"),

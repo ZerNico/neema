@@ -14,8 +14,8 @@ import {
   DesktopChromeProvider,
   PanelTitlebar,
   TitlebarCorner,
-  desktopChromeInitScript,
 } from "./desktop-chrome.tsx";
+import { desktopChromeInitScript } from "./boot-scripts.ts";
 import { setTheme } from "./theme.tsx";
 
 const stateListeners = new Set<(state: DesktopChromeState) => void>();

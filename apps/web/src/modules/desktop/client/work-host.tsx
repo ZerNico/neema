@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
+import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Alert02Icon, NoInternetIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -12,15 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Effect, Schema } from "effect";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   claimDesktopTool,
   desktopWorkSnapshot,
@@ -33,27 +25,13 @@ import {
 } from "~/modules/chat/server/functions.ts";
 import { readDesktopBrowser } from "@chat/desktop-rpc";
 import { browserTabs } from "~/modules/browser/client/browser-store.ts";
-import {
-  cancelBrowserCall,
-  describeTarget,
-  executeBrowserTool,
-} from "~/modules/browser/client/execute-browser.ts";
+import { cancelBrowserCall, executeBrowserTool } from "~/modules/browser/client/execute-browser.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
-import { type ApprovalChoice, type PendingKind } from "./approvals.ts";
 import { sendFieldsFor, useDesktop } from "./bridge.ts";
 import { executeDesktopTool } from "./execute-tool.ts";
 import { WorkController } from "./work-controller.ts";
-
-const WorkContext = createContext<{
-  controller: WorkController | null;
-  revision: number;
-  paused: boolean;
-}>({
-  controller: null,
-  revision: 0,
-  paused: false,
-});
+import { WorkContext } from "./work-context.ts";
 
 export function DesktopWorkProvider({ children, userId }: { children: ReactNode; userId: string }) {
   const client = useDesktop();
@@ -341,30 +319,6 @@ export function WorkConnectionNotice() {
       />
       Can’t reach the server, so work on this computer is paused until the connection is back.
     </div>
-  );
-}
-
-/**
- * Stable until the controller reports a change: this feeds the message list's
- * display memo, so a fresh object per render would re-render every message on
- * every stream chunk.
- */
-export function useWorkApprovals(conversationId: string) {
-  const { controller, revision } = useContext(WorkContext);
-  return useMemo(
-    () => ({
-      pending: controller?.pending(conversationId) ?? new Map<string, PendingKind>(),
-      decide: (callId: string, choice: ApprovalChoice) => controller?.decide(callId, choice),
-      args: (callId: string) => {
-        const args = controller?.args(callId) ?? null;
-        // A browser action names an element by reference; the card says what it is.
-        const target = args && describeTarget(conversationId, args);
-        return target && args ? { ...args, target } : args;
-      },
-      /** The controller's change counter, so this value is new exactly when its contents are. */
-      revision,
-    }),
-    [controller, conversationId, revision],
   );
 }
 

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PackageWorkspace, SkillPreview } from "./package-workspace.tsx";
 import type { SkillFile } from "../package.ts";
-vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => async () => true }));
+vi.mock("~/ui/confirm-context.ts", () => ({ useConfirm: () => async () => true }));
 vi.mock("./text-editor.tsx", () => ({
   default: function MockTextEditor({
     value,

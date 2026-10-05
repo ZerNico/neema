@@ -736,10 +736,10 @@ describe("conversational agent authoring", () => {
       );
       await collectDraftTurn(assistantMessageId);
       expect(prompts).toHaveLength(2);
-      const messages = (input: GatewayInput) =>
+      const serialized = (input: GatewayInput) =>
         input.prompt.content.map((message) => JSON.stringify(message));
-      const first = messages(prompts[0]!);
-      const second = messages(prompts[1]!);
+      const first = serialized(prompts[0]!);
+      const second = serialized(prompts[1]!);
       // The first request's prompt, minus its per-request tail, opens the second.
       const tail = first.findIndex((message) => message.includes("<system-reminder>"));
       const stable = tail === -1 ? first : first.slice(0, tail);
@@ -934,7 +934,7 @@ describe("conversational agent authoring", () => {
         const detail = await runtime.runPromise(
           loadConversationDetail(seed.userId, conversationId),
         );
-        expect(detail.agentDrafts.map((draft) => draft.id)).toEqual([draft!.id]);
+        expect(detail.agentDrafts.map((loaded) => loaded.id)).toEqual([draft!.id]);
         expect(detail.agent).toBeNull();
         expect(detail.messages).toHaveLength(2);
         expect(detail.messages.at(-1)?.status).toBe("complete");
@@ -1598,7 +1598,7 @@ describe("conversational agent authoring", () => {
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
-      expect(detail.agentDrafts.map((draft) => draft.name).sort()).toEqual([
+      expect(detail.agentDrafts.map((draft) => draft.name).toSorted()).toEqual([
         "Release notes",
         "Tickets",
       ]);
@@ -1778,7 +1778,7 @@ describe("conversation documents", () => {
     JSON.stringify(input.prompt.content.filter((message) => message.role === "tool"));
   const trailing = (input: GatewayInput) => {
     const message = [...input.prompt.content]
-      .reverse()
+      .toReversed()
       .find(
         (candidate) =>
           candidate.role === "assistant" &&
@@ -2077,7 +2077,7 @@ describe("conversation documents", () => {
         title: "Release checklist",
         revision: 3,
       });
-      expect(Object.keys(missed.result as object).sort()).toEqual([
+      expect(Object.keys(missed.result as object).toSorted()).toEqual([
         "documentConversationId",
         "documentId",
         "message",
@@ -4893,9 +4893,9 @@ describe("reasoning effort attempts", () => {
             sourceConversationId: seed.conversation.id,
             throughMessageId: sent.assistantMessageId,
           });
-          const branchAnswer = (yield* repo.listMessages(branch.id))
-            .filter((message) => message.role === "assistant")
-            .at(-1)!;
+          const branchAnswer = (yield* repo.listMessages(branch.id)).findLast(
+            (message) => message.role === "assistant",
+          )!;
           const branched = yield* repo.getGenerationConfig(branchAnswer.id);
           yield* chat.retryMessage({
             userId: seed.userId,
@@ -5183,7 +5183,7 @@ describe("generated image streaming", () => {
           const editedId = edited!.assistantOutput!.files[0]!.attachment.id;
           expect(editedId).not.toBe(initialId);
           const event = editedEvents.find(
-            (event) => event.kind === "chunk" && event.chunkKind === "file",
+            (candidate) => candidate.kind === "chunk" && candidate.chunkKind === "file",
           );
           expect(event && event.kind === "chunk" ? JSON.parse(event.delta) : null).toMatchObject({
             attachment: { id: editedId },
@@ -7422,7 +7422,7 @@ describe("local tools on the user's machine", () => {
         authoringFinish(),
       );
     };
-    const send = (content: string) =>
+    const sendPrompt = (content: string) =>
       runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
@@ -7455,7 +7455,7 @@ describe("local tools on the user's machine", () => {
         }),
       );
     try {
-      const looked = await send("Look at the page");
+      const looked = await sendPrompt("Look at the page");
       const first = await answered(looked.assistantMessageId);
       expect(
         first.attachments.filter((row) => row.messageId === looked.assistantMessageId),
@@ -7463,7 +7463,7 @@ describe("local tools on the user's machine", () => {
       // Never kept for a later answer either: the page changes, so it takes another.
       expect(first.workingFiles).toEqual([]);
 
-      const shown = await send("Show me the page");
+      const shown = await sendPrompt("Show me the page");
       const second = await answered(shown.assistantMessageId);
       expect(
         second.attachments
@@ -7897,7 +7897,7 @@ describe("local tools on the user's machine", () => {
           repo.createConversation({ userId: seed.userId, modelId: textModelId }),
         ),
       );
-      const plain = await runtime.runPromise(
+      const plainSent = await runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
             userId: seed.userId,
@@ -7916,7 +7916,7 @@ describe("local tools on the user's machine", () => {
       );
       await runtime.runPromise(
         Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(plain.assistantMessageId, 0)),
+          Stream.runDrain(engine.subscribe(plainSent.assistantMessageId, 0)),
         ),
       );
       expect(
@@ -8213,16 +8213,16 @@ describe("resuming an interrupted answer", () => {
   it("resumes a reaped crash with its steers in place, retargets a queued steer and keeps a late research row", async () => {
     const seed = await runtime.runPromise(
       Effect.gen(function* () {
-        const seed = yield* setupConversation;
+        const seeded = yield* setupConversation;
         const repo = yield* ChatRepo;
         const db = yield* Db;
         const content = "Checking the machine. ";
         yield* db
           .insert(messageChunks)
-          .values({ messageId: seed.assistant.id, seq: 1, kind: "text", delta: content });
+          .values({ messageId: seeded.assistant.id, seq: 1, kind: "text", delta: content });
         yield* repo.insertToolCall({
           id: uuidv7(),
-          messageId: seed.assistant.id,
+          messageId: seeded.assistant.id,
           turnIndex: 0,
           callIndex: 0,
           textOffset: content.length,
@@ -8233,7 +8233,7 @@ describe("resuming an interrupted answer", () => {
         const researchRow = uuidv7();
         yield* repo.insertToolCall({
           id: researchRow,
-          messageId: seed.assistant.id,
+          messageId: seeded.assistant.id,
           turnIndex: 0,
           callIndex: 1,
           textOffset: content.length,
@@ -8243,14 +8243,14 @@ describe("resuming an interrupted answer", () => {
         });
         // A steer the crashed attempt took in after its first round.
         const steer = yield* repo.insertMessage({
-          conversationId: seed.conversation.id,
+          conversationId: seeded.conversation.id,
           role: "user",
           content: "use the staging box",
         });
         yield* db
           .update(messages)
           .set({
-            steeredIntoMessageId: seed.assistant.id,
+            steeredIntoMessageId: seeded.assistant.id,
             steerTurnIndex: 0,
             steerTextOffset: content.length,
           })
@@ -8258,23 +8258,23 @@ describe("resuming an interrupted answer", () => {
         const entryId = uuidv7();
         yield* db.insert(conversationQueueEntries).values({
           id: entryId,
-          conversationId: seed.conversation.id,
-          userId: seed.userId,
+          conversationId: seeded.conversation.id,
+          userId: seeded.userId,
           content: "and check the logs",
           input: { modelId: textModelId, searchEnabled: false, researchEnabled: false },
-          steerMessageId: seed.assistant.id,
-          steerGenerationId: seed.assistant.generationId,
+          steerMessageId: seeded.assistant.id,
+          steerGenerationId: seeded.assistant.generationId,
         });
         yield* db
           .update(messages)
           .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
-          .where(eq(messages.id, seed.assistant.id));
+          .where(eq(messages.id, seeded.assistant.id));
         yield* (yield* StreamEngine).reapOrphans;
         // A run settles its own call after the generation ended (research.md).
         yield* db.execute(
           sql`update message_tool_calls set status = 'complete', result = '{"outcome":"evidence"}'::jsonb where id = ${researchRow}`,
         );
-        return { ...seed, entryId, researchRow };
+        return { ...seeded, entryId, researchRow };
       }),
     );
     const reaped = await runtime.runPromise(ChatRepo.use((r) => r.getMessage(seed.assistant.id)));
@@ -8453,9 +8453,9 @@ describe("resuming an interrupted answer", () => {
       await runtime.runPromise(send(userId, conversationId, "Thanks, and now?"));
       const [resumedPrompt, followup] = streamPrompts.slice(promptsBefore + 1);
       for (const prompt of [resumedPrompt!, followup!]) {
-        const text = JSON.stringify(prompt.content);
-        expect(text).not.toContain('"type":"file"');
-        expect(text).toContain(
+        const serialized = JSON.stringify(prompt.content);
+        expect(serialized).not.toContain('"type":"file"');
+        expect(serialized).toContain(
           JSON.stringify(
             imageStandIn(resumed!.assistantOutput!.files[0]!.attachment.fileName),
           ).slice(1, -1),
@@ -8516,7 +8516,7 @@ describe("resuming an interrupted answer", () => {
   it("continues on another model and drops the old model's signed turns", async () => {
     const seed = await runtime.runPromise(
       Effect.gen(function* () {
-        const seed = yield* failedAnswer("Partial ");
+        const seeded = yield* failedAnswer("Partial ");
         yield* (yield* Db)
           .update(messages)
           .set({
@@ -8543,8 +8543,8 @@ describe("resuming an interrupted answer", () => {
               ],
             },
           })
-          .where(eq(messages.id, seed.assistant.id));
-        return seed;
+          .where(eq(messages.id, seeded.assistant.id));
+        return seeded;
       }),
     );
     await runtime.runPromise(
@@ -8656,11 +8656,11 @@ describe("resuming an interrupted answer", () => {
   it("continues past the row positions the answer already used", async () => {
     const seed = await runtime.runPromise(
       Effect.gen(function* () {
-        const seed = yield* failedAnswer("Otters hold hands [^3]. ");
+        const seeded = yield* failedAnswer("Otters hold hands [^3]. ");
         const db = yield* Db;
         const row = (overrides: Partial<typeof messageToolCalls.$inferInsert>) => ({
           id: uuidv7(),
-          messageId: seed.assistant.id,
+          messageId: seeded.assistant.id,
           turnIndex: 0,
           callIndex: 0,
           textOffset: 0,
@@ -8703,14 +8703,14 @@ describe("resuming an interrupted answer", () => {
         ]);
         yield* db.insert(messageCompactionEvents).values({
           id: uuidv7(),
-          messageId: seed.assistant.id,
+          messageId: seeded.assistant.id,
           beforeTurnIndex: 0,
           passIndex: 0,
           scope: "history",
           status: "complete",
           outcome: "hard_truncation",
         });
-        return seed;
+        return seeded;
       }),
     );
     let round = 0;

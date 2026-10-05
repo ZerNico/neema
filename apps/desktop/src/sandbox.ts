@@ -306,7 +306,7 @@ export const makeSandbox = (
       Effect.gen(function* () {
         const { argv, env } = yield* Effect.tryPromise({
           try: async () => {
-            const { argv, env } = await manager.wrapWithSandboxArgv(
+            const wrapped = await manager.wrapWithSandboxArgv(
               commandWithEnvironment(input.command, input.cwd),
               undefined,
               // The grant, per call. The denies are repeated rather than
@@ -327,7 +327,7 @@ export const makeSandbox = (
               // each other's denials. The call id is unique by construction.
               { commandId: input.callId, commandText: input.command },
             );
-            return { argv: forSandboxedChild(argv, input.cwd), env };
+            return { argv: forSandboxedChild(wrapped.argv, input.cwd), env: wrapped.env };
           },
           catch: (cause) =>
             new DesktopError({

@@ -1,17 +1,14 @@
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { createContext, use, useState, type ReactNode } from "react";
+import { use, useState, type ReactNode } from "react";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
-import {
-  useLocalFileConversation,
-  useLocalFilePreview,
-} from "~/modules/desktop/ui/local-file-preview.tsx";
+import { useLocalFilePreview } from "~/modules/desktop/ui/use-local-file-preview.tsx";
+import { useLocalFileConversation } from "~/modules/desktop/ui/local-file-context.ts";
 import { inlineTagClassName } from "~/ui/inline-tag.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
-import type { FileReferenceAliases } from "../file-reference-aliases.ts";
 import {
   attachmentReferenceUrl,
   localFileName,
@@ -19,14 +16,7 @@ import {
   referenceAttachment,
   resolveLocalReference,
 } from "../file-references.ts";
-
-export const FileReferenceContext = createContext<{
-  attachments: ReadonlyMap<string, Attachment>;
-  aliases: FileReferenceAliases | null;
-  machineId: string | null;
-}>({ attachments: new Map(), aliases: null, machineId: null });
-
-export const FileReferenceMachine = createContext<string | null>(null);
+import { FileReferenceContext, FileReferenceMachine } from "./file-reference-context.ts";
 
 function FileTag({ name, title, onClick }: { name: string; title: string; onClick?: () => void }) {
   return (

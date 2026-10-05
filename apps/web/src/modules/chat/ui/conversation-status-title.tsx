@@ -4,7 +4,9 @@ import type { ComponentProps } from "react";
 import { Calendar03Icon, GitBranchIcon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ConversationTitle } from "./conversation-title.tsx";
-import { MotionSwap, motionEase, useAppReducedMotion } from "~/ui/motion.tsx";
+import { MotionSwap } from "~/ui/motion.tsx";
+import { motionEase } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Spinner } from "~/ui/primitives/spinner";
 
 export function ConversationStatusTitle({

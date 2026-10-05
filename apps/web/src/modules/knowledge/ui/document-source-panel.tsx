@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { documentLocationLabel, sourceIdentity } from "~/modules/tools/sources.ts";
-import { useDetailPanel } from "~/ui/detail-panel.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { readKnowledgeDocument } from "../server/functions.ts";
@@ -51,11 +50,13 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
       <p className="text-muted-foreground text-xs">{documentLocationLabel(source)}</p>
       <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
         {segments.map((segment, index) => {
+          // oxlint-disable-next-line react/no-array-index-key -- segments are a fixed split of one text
           if (index % 2 === 0) return <span key={index}>{segment.replace(/^\n/, "")}</span>;
           const page = Number(segment);
           if (page === labelledPage && index === 1 && segments[0]!.trim() === "") return null;
           return (
             <div
+              // oxlint-disable-next-line react/no-array-index-key -- segments are a fixed split of one text
               key={index}
               className="text-muted-foreground border-border my-3 border-t pt-2 text-2xs font-medium tracking-wide uppercase"
             >
@@ -91,16 +92,4 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
       </div>
     </div>
   );
-}
-
-export function useDocumentSourcePanel(source: DocumentSource) {
-  const panel = useDetailPanel();
-  return useCallback(() => {
-    const id = `document-source:${sourceIdentity(source)}`;
-    panel.open({
-      id,
-      title: source.title || "Document source",
-      body: <DocumentSourcePanel key={crypto.randomUUID()} source={source} />,
-    });
-  }, [panel, source]);
 }

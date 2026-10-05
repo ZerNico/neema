@@ -94,6 +94,13 @@ const replayItem = (item: Json): Json | null => {
   }
 };
 
+const callItem = (call: Prompt.ToolCallPart) => ({
+  type: "function_call",
+  call_id: call.id,
+  name: call.name,
+  arguments: typeof call.params === "string" ? call.params : JSON.stringify(call.params ?? {}),
+});
+
 const assistantItems = (message: Prompt.AssistantMessage, units: ReadonlyArray<ResponsesUnit>) => {
   const items: Json[] = [];
   const calls = message.content.filter((part) => part.type === "tool-call");
@@ -111,12 +118,6 @@ const assistantItems = (message: Prompt.AssistantMessage, units: ReadonlyArray<R
   // Signed state is never sent beside text that changed since: then only the
   // reasoning goes back as received and the rest is rebuilt from the prompt.
   const exact = stored.length > 0 && storedText === text;
-  const callItem = (call: Prompt.ToolCallPart) => ({
-    type: "function_call",
-    call_id: call.id,
-    name: call.name,
-    arguments: typeof call.params === "string" ? call.params : JSON.stringify(call.params ?? {}),
-  });
   const covered = new Set<string>();
   for (const item of stored) {
     if (item["type"] === "reasoning") {

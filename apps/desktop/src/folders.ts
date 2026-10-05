@@ -62,7 +62,7 @@ const existingAncestor = (target: string, named: string) =>
     const trail: string[] = [];
     let current = target;
     for (;;) {
-      if (yield* exists(current)) return { base: current, trail: trail.reverse() };
+      if (yield* exists(current)) return { base: current, trail: trail.toReversed() };
       const { dir, base, root } = parse(current);
       // A path whose every component is missing cannot be contained by anything
       // we can prove, so treat it as outside rather than guessing.

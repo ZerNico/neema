@@ -574,7 +574,7 @@ describe("presentation core adapter", () => {
       .match(/<p:pic>[\s\S]*?<\/p:pic>/)![0]
       .replace(/<p:cNvPr id="\d+"/, '<p:cNvPr id="90"');
     const embed = pictureXml.match(/r:embed="([^"]+)"/)![1]!;
-    const media = new TextDecoder()
+    const logoTarget = new TextDecoder()
       .decode(slideParts.get("ppt/slides/_rels/slide1.xml.rels"))
       .match(new RegExp(`Id="${embed}"[^>]*Target="([^"]+)"`))![1]!;
     let templated = replacePart(withPicture.bytes, "ppt/slideLayouts/slideLayout1.xml", (xml) =>
@@ -583,7 +583,7 @@ describe("presentation core adapter", () => {
     templated = replacePart(templated, "ppt/slideLayouts/_rels/slideLayout1.xml.rels", (xml) =>
       xml.replace(
         "</Relationships>",
-        `<Relationship Id="rId90" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${media}"/></Relationships>`,
+        `<Relationship Id="rId90" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${logoTarget}"/></Relationships>`,
       ),
     );
     const inspected = await inspect(templated, {
@@ -613,8 +613,8 @@ describe("presentation core adapter", () => {
     const after = readPresentationArchive(edited.bytes);
     // The slide's own picture and media stay untouched; the layout gets new media.
     expect(after.get("ppt/slides/slide1.xml")).toEqual(before.get("ppt/slides/slide1.xml"));
-    expect(after.get(media.replace("../", "ppt/"))).toEqual(
-      before.get(media.replace("../", "ppt/")),
+    expect(after.get(logoTarget.replace("../", "ppt/"))).toEqual(
+      before.get(logoTarget.replace("../", "ppt/")),
     );
     expect(new TextDecoder().decode(after.get("ppt/slideMasters/slideMaster1.xml"))).toContain(
       'val="FAF7F2"',
@@ -818,7 +818,7 @@ describe("presentation core adapter", () => {
       { kind: "setText", slideRef: "first", placeholder: "title", text: "Short title" },
     ]);
     expect(fits.overflow).toEqual([]);
-    const crowded = await editPresentation(draft, [
+    const overrun = await editPresentation(draft, [
       {
         kind: "addText",
         slideRef: "first",
@@ -830,8 +830,8 @@ describe("presentation core adapter", () => {
         ref: "note",
       },
     ]);
-    const target = crowded.refs.shapes.note!;
-    expect(crowded.overflow).toEqual([
+    const target = overrun.refs.shapes.note!;
+    expect(overrun.overflow).toEqual([
       expect.objectContaining({
         ...target,
         direction: "vertical",
@@ -839,23 +839,23 @@ describe("presentation core adapter", () => {
         beforeByPoints: null,
       }),
     ]);
-    const unchanged = await editPresentation(crowded.bytes, [nudge({ slideId: target.slideId })]);
+    const unchanged = await editPresentation(overrun.bytes, [nudge({ slideId: target.slideId })]);
     expect(unchanged.overflow[0]).toMatchObject({
       classification: "existing",
-      beforeByPoints: crowded.overflow[0]!.byPoints,
-      byPoints: crowded.overflow[0]!.byPoints,
+      beforeByPoints: overrun.overflow[0]!.byPoints,
+      byPoints: overrun.overflow[0]!.byPoints,
     });
     // Notes cannot change how text fits, so such an edit is not audited at all.
-    const notes = await editPresentation(crowded.bytes, [
+    const notes = await editPresentation(overrun.bytes, [
       { kind: "setNotes", slideId: target.slideId, text: "Review" },
     ]);
     expect(notes.overflow).toEqual([]);
     expect(notes.overflowSummary.total).toBe(0);
-    const minor = await editPresentation(crowded.bytes, [
+    const minor = await editPresentation(overrun.bytes, [
       { kind: "setBounds", ...target, width: 200, height: 36 },
     ]);
     expect(minor.overflow[0]!.classification).toBe("existing");
-    const increased = await editPresentation(crowded.bytes, [
+    const increased = await editPresentation(overrun.bytes, [
       {
         kind: "setText",
         ...target,

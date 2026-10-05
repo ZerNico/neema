@@ -12,7 +12,7 @@ import {
   shareResourceWithEmail,
   shareResourceWithGroup,
 } from "../server/functions.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { initials } from "~/ui/initials";
 import { ErrorState } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";

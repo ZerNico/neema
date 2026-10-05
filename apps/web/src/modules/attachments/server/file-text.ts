@@ -64,7 +64,7 @@ function presentationText(bytes: Uint8Array) {
   const entries = readEntries(bytes, (name) => slide.test(name));
   if (!entries) return null;
   return [...entries.keys()]
-    .sort((a, b) => numbered(a, slide) - numbered(b, slide))
+    .toSorted((a, b) => numbered(a, slide) - numbered(b, slide))
     .map((name) => {
       const lines = paragraphs(utf8(entries.get(name)), "a:p", "a:t");
       return `## Slide ${numbered(name, slide)}\n${lines.join("\n")}`;
@@ -96,7 +96,7 @@ function workbookText(bytes: Uint8Array) {
   ].map((match) => decodeXmlText(match[1]!));
   return [...entries.keys()]
     .filter((name) => sheet.test(name))
-    .sort((a, b) => numbered(a, sheet) - numbered(b, sheet))
+    .toSorted((a, b) => numbered(a, sheet) - numbered(b, sheet))
     .map((name) => {
       const index = numbered(name, sheet);
       const rows = [...utf8(entries.get(name)).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map(

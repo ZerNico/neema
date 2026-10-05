@@ -24,7 +24,7 @@ import { DetailPanelProvider, DetailPanelRail } from "~/ui/detail-panel.tsx";
 const render = (ui: Parameters<typeof renderUnwrapped>[0]) =>
   renderUnwrapped(ui, { wrapper: DetailPanelProvider });
 import { composerText, setComposerText } from "./composer-test-utils.ts";
-import { FileReferenceContext } from "./file-reference.tsx";
+import { FileReferenceContext } from "./file-reference-context.ts";
 
 // Sources an earlier message registered, as the view hands them to a row.
 const inheritedFrom = (sources: ToolSource[]) => inheritSources([sources, []])[1]!;

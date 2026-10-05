@@ -198,6 +198,25 @@ export type AgentAuthoringServices = {
   skills: SkillRepo["Service"];
   knowledge: KnowledgeRepo["Service"];
 };
+
+const summary = (draft: AgentDraft): typeof DraftSummary.Type => ({
+  draftId: draft.id,
+  name: draft.settings.name,
+  revision: draft.revision,
+  agentSaved: draft.targetId !== null,
+  hasUnsavedChanges: draft.savedDraftRevision !== draft.revision,
+});
+const state = (draft: AgentDraft): typeof DraftState.Type => ({
+  ...summary(draft),
+  settings: draft.settings,
+});
+const reference = (draft: AgentDraft) => ({
+  draftId: draft.id,
+  draftConversationId: draft.conversationId,
+  revision: draft.revision,
+  draft: state(draft),
+});
+
 export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(function* (input: {
   services: AgentAuthoringServices;
   userId: string;
@@ -268,30 +287,13 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
           !query ||
           `${row.name} ${row.description}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
       )
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       .filter((row) => !cursor || row.id > cursor);
     const page = matches.slice(0, 20);
     return {
       options: page,
       ...(matches.length > page.length ? { nextCursor: page.at(-1)!.id } : {}),
     };
-  });
-  const summary = (draft: AgentDraft): typeof DraftSummary.Type => ({
-    draftId: draft.id,
-    name: draft.settings.name,
-    revision: draft.revision,
-    agentSaved: draft.targetId !== null,
-    hasUnsavedChanges: draft.savedDraftRevision !== draft.revision,
-  });
-  const state = (draft: AgentDraft): typeof DraftState.Type => ({
-    ...summary(draft),
-    settings: draft.settings,
-  });
-  const reference = (draft: AgentDraft) => ({
-    draftId: draft.id,
-    draftConversationId: draft.conversationId,
-    revision: draft.revision,
-    draft: state(draft),
   });
   const unavailable: Result = {
     outcome: "unavailable",

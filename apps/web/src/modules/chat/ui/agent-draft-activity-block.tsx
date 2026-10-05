@@ -10,7 +10,7 @@ import { DraftWidget } from "./draft-widget.tsx";
  * renders the widget instead, so the outcomes here are the ones that touched
  * no draft at all.
  */
-export function agentDraftActivityLabel(activity: AgentDraftToolActivity) {
+function agentDraftActivityLabel(activity: AgentDraftToolActivity) {
   if (activity.status === "running") {
     if (activity.name === "draft_agent") return "Preparing the agent draft";
     return activity.name === "update_agent_draft"

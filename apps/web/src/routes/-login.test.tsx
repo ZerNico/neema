@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authClient } from "~/modules/auth/client.ts";
 import { getSessionIdentity, getSessionUser } from "~/modules/auth/server/functions.ts";
 import { getApprovalStatus } from "~/modules/auth/server/signup-functions.ts";
-import { signInProvidersQuery } from "~/modules/auth/ui/sign-in-providers.tsx";
+import { signInProvidersQuery } from "~/modules/auth/queries.ts";
 import { Route as AppRoute } from "./_app.tsx";
 import { Route as LoginRoute } from "./login.tsx";
 import { Route as RegisterRoute } from "./register.tsx";

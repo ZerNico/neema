@@ -38,6 +38,3 @@ export function IntegrationLogo({
     </div>
   );
 }
-
-export const integrationName = (integrationId: string) =>
-  findIntegration(integrationId)?.name ?? integrationId;

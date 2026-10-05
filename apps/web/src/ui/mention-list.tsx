@@ -14,17 +14,6 @@ export interface MentionItem {
   search?: string | undefined;
 }
 
-const MAX_RESULTS = 8;
-
-export const filterMentionItems = (items: readonly MentionItem[], query: string) =>
-  items
-    .filter((item) =>
-      (item.search ?? `${item.label} ${item.description ?? ""}`)
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    )
-    .slice(0, MAX_RESULTS);
-
 /**
  * The type-ahead list a composer trigger opens, anchored to the caret. It never
  * takes focus: the caret keeps it and the typing, so opening the list moves

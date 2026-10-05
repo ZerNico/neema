@@ -44,6 +44,15 @@ export type OpenDraftResult<S> =
   | { outcome: "drafted" | "read"; draft: ConversationDraft<S> }
   | { outcome: "target_unavailable" };
 
+const blank = <S>(config: DraftKindConfig<S>, draft: ConversationDraft<S>) =>
+  draft.targetId === null &&
+  draft.revision === 1 &&
+  draft.savedDraftRevision === null &&
+  Object.entries(config.empty as Record<string, unknown>).every(
+    ([field, empty]) =>
+      JSON.stringify((draft.settings as Record<string, unknown>)[field]) === JSON.stringify(empty),
+  );
+
 /**
  * The machinery every conversation draft shares: idempotent open (same target
  * resolves to its draft; an untargeted open reuses an untouched blank one),
@@ -122,15 +131,6 @@ export class DraftService extends Context.Service<
             draftId: draft.id,
           })
           .pipe(Effect.catchCause(() => Effect.logWarning("draft invalidation failed")));
-      const blank = <S>(config: DraftKindConfig<S>, draft: ConversationDraft<S>) =>
-        draft.targetId === null &&
-        draft.revision === 1 &&
-        draft.savedDraftRevision === null &&
-        Object.entries(config.empty as Record<string, unknown>).every(
-          ([field, empty]) =>
-            JSON.stringify((draft.settings as Record<string, unknown>)[field]) ===
-            JSON.stringify(empty),
-        );
       return DraftService.of({
         get: (userId, draftId, kind) =>
           drafts.get(userId, draftId, kind) as Effect.Effect<ConversationDraft<never> | null>,

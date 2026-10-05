@@ -2,7 +2,7 @@ import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useRouter, type RouterHistory } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useDesktopChromePlatform } from "./desktop-chrome.tsx";
+import { useDesktopChromePlatform } from "./desktop-chrome-context.ts";
 import { Button } from "./primitives/button";
 import { Kbd } from "./primitives/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./primitives/tooltip";

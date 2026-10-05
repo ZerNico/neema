@@ -1,4 +1,4 @@
-import { MODEL_FORMAT_LABELS } from "./model-settings-form.tsx";
+import { MODEL_FORMAT_LABELS } from "./model-settings-labels.ts";
 import type { ModelTest } from "./use-model-test.ts";
 import { cn } from "~/ui/utils";
 

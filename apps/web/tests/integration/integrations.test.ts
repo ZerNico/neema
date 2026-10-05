@@ -136,7 +136,7 @@ const startOutline = () =>
               ? []
               : [...bodies]
                   // Newest change first, as the adapter asks.
-                  .sort(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
+                  .toSorted(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
                   .map(([id, doc]) => ({
                     id,
                     title: titles[id],
@@ -459,7 +459,7 @@ describe("what a chat is offered", () => {
     await allow("update_document");
     await allow("update_document");
     await allow("read_document");
-    expect([...(await permissions(first)).allowedInChat].sort()).toEqual([
+    expect([...(await permissions(first)).allowedInChat].toSorted()).toEqual([
       "read_document",
       "update_document",
     ]);
@@ -601,7 +601,7 @@ describe("knowledge sync", () => {
         .select({ externalId: knowledgeDocuments.externalId })
         .from(knowledgeDocuments)
         .where(eq(knowledgeDocuments.collectionId, collectionId)),
-    ).then((rows) => rows.map((row) => row.externalId).sort());
+    ).then((rows) => rows.map((row) => row.externalId).toSorted());
   const versions = (collectionId: string) =>
     insert((db) =>
       db
@@ -888,7 +888,7 @@ describe("knowledge sync", () => {
       owners
         .filter((row) => row.sourceId === page.id)
         .map((row) => row.externalId)
-        .sort(),
+        .toSorted(),
     ).toEqual(["document:d1", "document:d2"]);
   });
 

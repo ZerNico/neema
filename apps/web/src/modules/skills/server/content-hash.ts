@@ -11,7 +11,7 @@ export const skillContentHash = (files: readonly SkillFile[]): string =>
     .update(
       JSON.stringify(
         [...files]
-          .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+          .toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
           .map((file) => {
             if (!isBinarySkillFile(file)) return { path: file.path, content: file.content };
             if (!file.binary.sha256) throw new Error(`Binary skill file unhashed: ${file.path}`);

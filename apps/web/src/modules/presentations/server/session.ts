@@ -220,6 +220,12 @@ type Target = {
 };
 const boundsMessage = (count: number, index: number) =>
   `index ${index} exceeds the current bounds 0..${count - 1} (${count} slides after preceding operations; indices are zero-based).`;
+const templateShapeId = (target: { shapeId?: number }) =>
+  target.shapeId ??
+  fail(
+    "invalid_operation",
+    "A template shape is addressed by shapeId from inspect's template.shapes.",
+  );
 
 export async function apply(
   session: Session,
@@ -243,12 +249,6 @@ export async function apply(
     allowed.add(part);
     return part;
   };
-  const templateShapeId = (target: { shapeId?: number }) =>
-    target.shapeId ??
-    fail(
-      "invalid_operation",
-      "A template shape is addressed by shapeId from inspect's template.shapes.",
-    );
   const slideOf = (target: Target) => {
     const id = target.slideRef !== undefined ? refs.slides.get(target.slideRef)! : target.slideId!;
     const slide =

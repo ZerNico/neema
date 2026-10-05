@@ -1,16 +1,12 @@
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { initials } from "~/ui/initials";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
-import { decideAccount, listPendingAccounts } from "../server/signup-functions.ts";
+import { decideAccount } from "../server/signup-functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
-
-export const pendingAccountsQuery = queryOptions({
-  queryKey: ["admin", "pending-accounts"],
-  queryFn: () => listPendingAccounts(),
-});
+import { pendingAccountsQuery } from "../queries.ts";
 
 /**
  * Only rendered while somebody is waiting. An empty queue is the ordinary

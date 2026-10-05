@@ -119,6 +119,12 @@ const isRemoteSender = (event: IpcMainInvokeEvent) =>
     mainWindow?.webContents,
     (url) => serverOrigin !== null && toOrigin(url) === serverOrigin,
   );
+// Same checks as the rest: the configured origin's main frame only.
+const fromPage = (event: IpcMainInvokeEvent) => {
+  if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+};
+const isConnectSender = (event: IpcMainInvokeEvent) =>
+  isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
 let tray: Tray | undefined;
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
@@ -590,10 +596,6 @@ void app.whenReady().then(async () => {
     if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
     await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
   });
-  // Same checks as the rest: the configured origin's main frame only.
-  const fromPage = (event: IpcMainInvokeEvent) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-  };
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {
@@ -623,8 +625,6 @@ void app.whenReady().then(async () => {
       return { ok: false, message: "Not allowed from this page." };
     return connectFlow.openChooser();
   });
-  const isConnectSender = (event: IpcMainInvokeEvent) =>
-    isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
   ipcMain.handle(CONNECT_CURRENT, (event) => {
     if (!isConnectSender(event)) throw new Error("Not allowed from this page.");
     return connectCurrent;

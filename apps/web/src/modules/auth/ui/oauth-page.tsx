@@ -5,10 +5,10 @@ import {
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { toast } from "sonner";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -22,26 +22,13 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { OAUTH_BUILTINS } from "../oauth.ts";
-import {
-  deleteOAuthProvider,
-  listOAuthProviders,
-  setOAuthProviderEnabled,
-} from "../server/oauth-functions.ts";
+import { deleteOAuthProvider, setOAuthProviderEnabled } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
-import { getSignupPolicy, setSignupPolicy } from "../server/signup-functions.ts";
+import { setSignupPolicy } from "../server/signup-functions.ts";
 import { SIGNUP_POLICIES, SIGNUP_POLICY_LABELS, type SignupPolicy } from "../signup.ts";
 import { OAuthProviderDialog } from "./oauth-provider-dialog.tsx";
 import { toastError } from "~/ui/error-toast.ts";
-
-export const oauthProvidersQuery = queryOptions({
-  queryKey: ["admin", "oauth"],
-  queryFn: () => listOAuthProviders(),
-});
-
-export const signupPolicyQuery = queryOptions({
-  queryKey: ["admin", "signup-policy"],
-  queryFn: () => getSignupPolicy(),
-});
+import { oauthProvidersQuery, signupPolicyQuery } from "../queries.ts";
 
 const POLICY_ITEMS = SIGNUP_POLICIES.map((value) => ({
   value,

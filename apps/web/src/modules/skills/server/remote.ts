@@ -302,7 +302,7 @@ export async function reviewGitHubSkill(
         if (rest === ref || rest.startsWith(`${ref}/`)) matches.push(ref);
       }
     }
-    const ref = [...matches].sort((a, b) => b.length - a.length)[0];
+    const ref = [...matches].toSorted((a, b) => b.length - a.length)[0];
     if (!ref)
       throw new SkillRemoteError(
         "Could not resolve the branch or tag. Use an immutable commit URL.",

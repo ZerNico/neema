@@ -187,6 +187,7 @@ export function createWorkerPool(options: WorkerPoolOptions) {
     },
     async close() {
       closed = true;
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- refuse reads options from the enclosing pool
       const refuse = (job: Pending) =>
         settle(job, { ok: false, error: options.failure({ reason: "closed" }) });
       for (const job of [...lanes.foreground.splice(0), ...lanes.background.splice(0)]) refuse(job);

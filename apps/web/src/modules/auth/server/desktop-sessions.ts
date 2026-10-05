@@ -25,6 +25,7 @@ const IDENTIFIER_PREFIX = "desktop-ticket:";
 // One message for wrong, expired and already-used codes, so a guess learns
 // nothing about which codes exist.
 const INVALID_TICKET = "That code is not valid.";
+const invalid = () => new APIError("BAD_REQUEST", { message: INVALID_TICKET });
 
 const TicketBody = Schema.toStandardSchemaV1(
   Schema.Struct({ challenge: Schema.optionalKey(Schema.String) }),
@@ -97,7 +98,6 @@ export const desktopSessions = ({
         "/desktop/session",
         { method: "POST", body: RedeemBody },
         async (ctx) => {
-          const invalid = () => new APIError("BAD_REQUEST", { message: INVALID_TICKET });
           const ticket = normaliseTicket(ctx.body.ticket);
           // Shape check first so malformed input never reaches the store.
           if (!isTicketShaped(ticket)) throw invalid();

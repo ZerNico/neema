@@ -775,7 +775,7 @@ describe("deep research as a tool call", () => {
     expect(
       workers.every(
         (request) =>
-          Object.keys(request.toolkit!.tools).sort().join(",") ===
+          Object.keys(request.toolkit!.tools).toSorted().join(",") ===
           "load_skill,read_skill_file,read_url,web_search",
       ),
     ).toBe(true);
@@ -1120,7 +1120,7 @@ describe("durable deep research", () => {
         const tasks = yield* db.select().from(researchTasks).where(eq(researchTasks.runId, run.id));
         expect(tasks.every((task) => task.report?.includes("A bounded finding"))).toBe(true);
         // The evidence reaches the host through the tool result, not the transcript.
-        const answer = requests.filter((request) => phaseOf(request) === "host").at(-1)!;
+        const answer = requests.findLast((request) => phaseOf(request) === "host")!;
         expect(promptText(answer)).toContain("A bounded finding");
       }),
     );
@@ -1882,8 +1882,8 @@ describe("what the investigation may see", () => {
     expect(promptText(hosts[0]!)).toContain(privateHistory);
     const coordinator = requests.find((request) => phaseOf(request) === "coordinator")!;
     expect(promptText(coordinator)).toContain(hostBrief);
-    for (const request of requests.filter((request) =>
-      ["coordinator", "worker", "report"].includes(phaseOf(request)),
+    for (const request of requests.filter((candidate) =>
+      ["coordinator", "worker", "report"].includes(phaseOf(candidate)),
     )) {
       expect(promptText(request)).not.toContain(privateMemory);
       expect(promptText(request)).not.toContain(privateHistory);
@@ -2005,7 +2005,7 @@ describe("what the investigation may see", () => {
       }),
     );
     // The host is told the investigation hit its ceiling, so its answer can say so.
-    const answer = requests.filter((request) => phaseOf(request) === "host").at(-1)!;
+    const answer = requests.findLast((request) => phaseOf(request) === "host")!;
     expect(promptText(answer)).toContain("search/read ceiling");
   });
 

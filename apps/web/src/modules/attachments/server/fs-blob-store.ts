@@ -62,6 +62,12 @@ const isMissing = (error: unknown): boolean =>
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const attempt = <A>(operation: BlobStoreError["operation"], key: string, run: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: run,
+    catch: (error) => new BlobStoreError({ operation, key, message: message(error) }),
+  });
+
 /**
  * Filesystem BlobStore. The bytes never pass through Postgres; only the
  * metadata does. Buffering a whole file in memory is fine at the 20 MiB cap;
@@ -99,16 +105,6 @@ export const fsBlobStoreLayer: Layer.Layer<BlobStore> = Layer.effect(
           });
         }
         return path;
-      });
-
-    const attempt = <A>(
-      operation: BlobStoreError["operation"],
-      key: string,
-      run: () => Promise<A>,
-    ) =>
-      Effect.tryPromise({
-        try: run,
-        catch: (error) => new BlobStoreError({ operation, key, message: message(error) }),
       });
 
     const put = Effect.fn("BlobStore.put")(function* (key: string, bytes: Uint8Array) {

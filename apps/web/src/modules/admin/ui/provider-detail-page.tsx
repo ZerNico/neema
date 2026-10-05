@@ -16,20 +16,20 @@ import {
   deleteProvider,
   updateProvider,
 } from "../server/functions.ts";
-import { groupsQuery } from "./groups-page.tsx";
+import { groupsQuery, modelsQuery, providersQuery } from "../client/queries.ts";
 import { type CatalogPick, ModelCombobox } from "./model-combobox.tsx";
-import { ModelEditDialog, MODEL_DIALOG_CLASS } from "./model-edit-dialog.tsx";
+import { ModelEditDialog } from "./model-edit-dialog.tsx";
+import { MODEL_DIALOG_CLASS } from "./model-dialog.ts";
 import { ModelTestResult } from "./model-test.tsx";
 import { useModelTest } from "./use-model-test.ts";
+import { ModelSettingsFields } from "./model-settings-form.tsx";
+import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
 import {
   emptyModelSettingsDraft,
   type ModelSettingsDraft,
-  MODEL_TYPE_LABELS,
-  ModelSettingsFields,
   modelSettingsFromDraft,
-} from "./model-settings-form.tsx";
+} from "./model-settings-draft.ts";
 import { CapabilityIcons, ContextBadge } from "~/modules/providers/ui/capability-icons.tsx";
-import { modelsQuery, providersQuery } from "./providers-page.tsx";
 import {
   baseUrlField,
   getPreset,
@@ -44,7 +44,7 @@ import { credentialsInput, credentialsReady, EMPTY_CREDENTIALS } from "./provide
 import { ProviderSettingsFields } from "./provider-settings-fields.tsx";
 import { AUTH_LABELS, FORMAT_LABELS, REASONING_LABELS } from "./provider-settings-labels.ts";
 
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
@@ -68,7 +68,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/u
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
-import { OptionalMark } from "~/ui/form/app-form.tsx";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const id = useId();

@@ -1,11 +1,11 @@
 import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { authClient, sessionIdentityQuery } from "~/modules/auth/client.ts";
-import { useIdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
-import { membershipsQuery } from "./groups-page.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
+import { membershipsQuery, usersQuery } from "../client/queries.ts";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { PendingAccounts } from "~/modules/auth/ui/pending-accounts.tsx";
 import { initials } from "~/ui/initials";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
@@ -22,17 +22,6 @@ import { toastError } from "~/ui/error-toast.ts";
 
 // Group badges shown per row before collapsing into a "+N more" badge.
 const MAX_GROUP_BADGES = 2;
-
-export const usersQuery = queryOptions({
-  queryKey: ["admin", "users"],
-  queryFn: async () => {
-    const { data, error } = await authClient.admin.listUsers({
-      query: { limit: 100, sortBy: "createdAt", sortDirection: "asc" },
-    });
-    if (error) throw new Error(error.message);
-    return data.users;
-  },
-});
 
 export function UsersPage() {
   const queryClient = useQueryClient();

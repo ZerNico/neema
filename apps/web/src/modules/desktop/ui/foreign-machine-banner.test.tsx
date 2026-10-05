@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foreignMachineStamp } from "./foreign-machine-banner.tsx";
+import { foreignMachineStamp } from "./foreign-machine-stamp.ts";
 
 const attempts = (entries: Array<[string, string | null]>) =>
   entries.map(([messageId, id]) => ({

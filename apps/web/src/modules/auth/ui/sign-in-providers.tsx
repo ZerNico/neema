@@ -1,15 +1,10 @@
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { Separator } from "~/ui/primitives/separator";
-import { getSignInProviders } from "../server/oauth-functions.ts";
-
-export const signInProvidersQuery = queryOptions({
-  queryKey: ["sign-in-providers"],
-  queryFn: () => getSignInProviders(),
-});
+import { signInProvidersQuery } from "../queries.ts";
 
 /**
  * One button per enabled provider. Both built-in and OpenID Connect entries go

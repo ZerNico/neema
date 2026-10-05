@@ -343,7 +343,10 @@ console.log("Checked the production Word worker.");
 const publicDirectory = resolve(".output/public");
 const shell = await readFile(resolve(publicDirectory, "_shell.html"), "utf8");
 // The startup frame is StartupPending plus the titlebar target.
-if (!shell.includes('data-slot="startup-pending"') || !shell.includes('id="desktop-titlebar-content"')) {
+if (
+  !shell.includes('data-slot="startup-pending"') ||
+  !shell.includes('id="desktop-titlebar-content"')
+) {
   throw new Error("The production SPA shell is missing its startup frame.");
 }
 const assets = new Set(

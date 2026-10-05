@@ -255,7 +255,7 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
   return {
     files: input
       .map((file) => ({ ...file }))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+      .toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
     metadata,
     findings,
   };

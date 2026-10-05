@@ -99,6 +99,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
     const ownedSubmissionId = submissionId;
     return () => {
       for (const item of itemsRef.current)
+        // oxlint-disable-next-line react-hooks/exhaustive-deps -- one Set for the hook's life, read as it is at unmount
         if (item.status === "importing") cancelled.current.add(item.localId);
       if (!promoted.current) discardSubmission(ownedSubmissionId);
     };

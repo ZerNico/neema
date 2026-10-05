@@ -1,13 +1,10 @@
 import type { IconSvgElement } from "@hugeicons/react";
 import { useBlocker } from "@tanstack/react-router";
 import {
-  type Context,
   type FunctionComponent,
   type ReactNode,
   type Ref,
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -19,36 +16,25 @@ import {
   useDetailPanel,
   useDetailPanelReconciler,
   useDetailPanelSelectedId,
-} from "~/ui/detail-panel.tsx";
+} from "~/ui/detail-panel-context.ts";
 import { ErrorState, FormActions, ListSkeleton } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import { SaveLabel, SaveStatus, useSaveStatus } from "~/ui/save-status.tsx";
+import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
+import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import type { DraftKind } from "../draft-schema.ts";
 import type { DraftController } from "../client/use-draft.ts";
+import { scopes, type DraftPanelEntry } from "./draft-panel-context.ts";
 
 export interface DraftHandle {
   /** Every mounted draft, so one unresolved conflict still blocks a send. */
   flush: () => Promise<boolean>;
 }
-export interface DraftPanelEntry {
-  name: string | null;
-  status: string;
-  expanded: boolean;
-  open: (() => void) | null;
-  retry: (() => void) | null;
-}
 interface Session {
   entry: DraftPanelEntry;
   flush: () => Promise<boolean>;
-}
-// Transcript references get only an opener and an authorized summary, never a form copy.
-interface DraftPanelScope {
-  /** Drafts this conversation owns; a branch-copied reference is absent. */
-  owned: ReadonlySet<string>;
-  entries: ReadonlyMap<string, DraftPanelEntry>;
 }
 
 /**
@@ -76,18 +62,6 @@ export interface DraftKindUi<S extends Record<string, unknown>> {
     createEffect: string;
   };
 }
-
-// One context per kind, so an agent widget and a schedule widget in the same
-// chat each read their own owner, and both can nest without shadowing.
-const emptyScope: DraftPanelScope = { owned: new Set(), entries: new Map() };
-const scopes: Record<DraftKind, Context<DraftPanelScope>> = {
-  agent: createContext(emptyScope),
-  schedule: createContext(emptyScope),
-};
-export const useDraftPanel = (kind: DraftKind, draftId: string) => {
-  const scope = useContext(scopes[kind]);
-  return { owned: scope.owned.has(draftId), entry: scope.entries.get(draftId) ?? null };
-};
 
 /**
  * Saved to the target with nothing edited since, so the draft holds no work
@@ -204,6 +178,7 @@ function DraftSession<S extends Record<string, unknown>>({
   onGone: (draftId: string) => void;
   autoOpen: boolean;
 }) {
+  // oxlint-disable-next-line react/hooks -- each kind passes one module-level ui, so the hook never changes
   const controller = ui.useController(draftId);
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();

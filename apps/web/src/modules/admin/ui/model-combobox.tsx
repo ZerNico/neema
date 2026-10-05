@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchProviderCatalog } from "../server/functions.ts";
-import { MODEL_TYPE_LABELS } from "./model-settings-form.tsx";
+import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
 import type {
   ModelCapabilities,
   ModelPricing,

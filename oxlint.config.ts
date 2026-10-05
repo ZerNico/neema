@@ -26,6 +26,18 @@ export default defineConfig({
   env: { browser: true, node: true, es2024: true },
   rules: {
     "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    // Names others fix: Effect's discriminant, TanStack Router's history key,
+    // the desktop bridge's window global and a Vite build define.
+    "no-underscore-dangle": [
+      "warn",
+      { allow: ["_tag", "__TSR_index", "__chatDesktop", "__BUILD_STAMP__"] },
+    ],
+    // Both ask for in-place mutation, the opposite of the immutable updates used throughout.
+    "oxc/no-map-spread": "off",
+    "oxc/no-accumulating-spread": "off",
+    // Plain async loops here are ordered on purpose (streams, redirects, journaled
+    // file steps, byte budgets); concurrency is chosen through Effect.forEach.
+    "no-await-in-loop": "off",
     "import/no-cycle": "error",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
@@ -58,6 +70,20 @@ export default defineConfig({
     ...slop("warn", "prefer-jsdoc"),
   },
   overrides: [
+    {
+      // Tests and scripts keep helpers beside the cases that use them.
+      files: ["**/*.test.ts", "**/*.test.tsx", "**/tests/**", "**/scripts/**", "scripts/**"],
+      rules: { "unicorn/consistent-function-scoping": "off" },
+    },
+    {
+      // Generated from the shadcn registry; edits would be lost on regenerate.
+      files: ["apps/web/src/ui/primitives/**"],
+      rules: {
+        "no-shadow": "off",
+        "react/no-unstable-nested-components": "off",
+        "react/no-array-index-key": "off",
+      },
+    },
     {
       // Route modules export their Route, which the router plugin handles, and
       // shadcn primitives export their variants by design.

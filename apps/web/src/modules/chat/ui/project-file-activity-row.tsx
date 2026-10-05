@@ -4,7 +4,7 @@ import type { ProjectFileToolActivity } from "../client/use-message-stream.ts";
 import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 
-export function projectFileActivityLabel(activity: ProjectFileToolActivity) {
+function projectFileActivityLabel(activity: ProjectFileToolActivity) {
   const name = activity.result?.fileName;
   if (activity.status === "running") {
     if (activity.name === "save_project_file") return "Saving to the project";

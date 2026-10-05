@@ -277,7 +277,7 @@ describe("attachment storage", () => {
       }),
     );
 
-    expect(Object.keys(dto).sort()).toEqual(["fileName", "id", "kind", "mediaType", "size"]);
+    expect(Object.keys(dto).toSorted()).toEqual(["fileName", "id", "kind", "mediaType", "size"]);
     // Path components are stripped before the name is ever stored.
     expect(dto.fileName).toBe("passwd");
     expect(JSON.stringify(dto)).not.toContain("blobs/");
@@ -829,7 +829,7 @@ describe("attachment cleanup", () => {
           swept: [...keys],
           abandonedKey,
           bytesGone: !(yield* store.exists(abandonedKey)),
-          left: left.map((row) => row.fileName).sort(),
+          left: left.map((row) => row.fileName).toSorted(),
         };
       }),
     );

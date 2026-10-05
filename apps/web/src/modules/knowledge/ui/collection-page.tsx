@@ -1,12 +1,13 @@
-import { IntegrationLogo, integrationName } from "~/modules/integrations/ui/integration-logo.tsx";
+import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
+import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
 import {
   KnowledgeSourcesSection,
   SourcePickerDialog,
-  useSyncableIntegrations,
   type SourceTarget,
 } from "~/modules/integrations/ui/knowledge-sources-section.tsx";
+import { useSyncableIntegrations } from "~/modules/integrations/client/use-syncable-integrations.ts";
 import { DocumentSourcePanel } from "./document-source-panel.tsx";
-import { useDetailPanel } from "~/ui/detail-panel.tsx";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import {
   Delete02Icon,
   Download04Icon,
@@ -42,8 +43,8 @@ import {
 } from "../server/functions.ts";
 import { CollectionDialog } from "./knowledge-page.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import {
   EmptyState,
   ErrorState,
@@ -73,7 +74,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { useAppReducedMotion } from "~/ui/motion.tsx";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import * as m from "motion/react-m";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
@@ -564,6 +565,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                     <Button
                       size="sm"
                       variant="ghost"
+                      // oxlint-disable-next-line react/no-unstable-nested-components -- opens a panel with an element; nothing renders here
                       onClick={() =>
                         panel.open({
                           id: `knowledge-note:${document.versionId}`,

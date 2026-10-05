@@ -65,7 +65,7 @@ export class SkillReader extends Context.Service<
           if (builtin)
             return path === "SKILL.md" ? { kind: "text" as const, content: builtin.root } : null;
           const files = yield* repo.files(userId, entry);
-          const file = files.find((file) => file.path === path);
+          const file = files.find((candidate) => candidate.path === path);
           if (!file) return null;
           if (file.mediaType !== null) {
             yield* repo.authorize(userId, [entry.skillId]);

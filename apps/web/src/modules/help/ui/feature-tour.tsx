@@ -2,7 +2,7 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { seenFeaturesQuery } from "../client/queries.ts";
 import { availableFeatures, unseenFeatures, type Feature } from "../features.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -18,15 +18,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { cn } from "~/ui/utils";
-
-const ReplayContext = createContext<(() => void) | null>(null);
-
-/** Reopens the full tour, for the Help page; seen state is left as it is. */
-export function useReplayTour() {
-  const replay = useContext(ReplayContext);
-  if (!replay) throw new Error("useReplayTour must be used within FeatureTourProvider");
-  return replay;
-}
+import { ReplayContext } from "./replay-tour-context.ts";
 
 /**
  * Shows what someone hasn't been told about yet, once. Nothing seen means a

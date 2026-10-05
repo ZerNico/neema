@@ -3,7 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { pendingIntegrationCallsQuery } from "../client/queries.ts";
-import { integrationName } from "./integration-logo.tsx";
+import { integrationName } from "./integration-name.ts";
 
 /**
  * Announces a waiting integration call once when its chat is not on screen.

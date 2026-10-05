@@ -2,13 +2,11 @@ import { CheckListIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { PlanToolActivity } from "../client/use-message-stream.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace } from "./activity-face.tsx";

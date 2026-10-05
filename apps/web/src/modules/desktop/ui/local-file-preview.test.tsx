@@ -14,7 +14,10 @@ import {
 import type { DesktopToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { DesktopActivityBlock } from "~/modules/chat/ui/desktop-activity-block.tsx";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
-import { FileReferenceContext, FileReferenceMachine } from "~/modules/chat/ui/file-reference.tsx";
+import {
+  FileReferenceContext,
+  FileReferenceMachine,
+} from "~/modules/chat/ui/file-reference-context.ts";
 import { LocalFileConversationProvider } from "./local-file-preview.tsx";
 
 const bridge = vi.hoisted(() => ({ client: null as DesktopClient | null }));

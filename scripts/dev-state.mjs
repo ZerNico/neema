@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// Errors marked safe are user-actionable and carry no connection secrets.
+/** Errors marked safe are user-actionable and carry no connection secrets. */
 export function safeError(message, options) {
   return Object.assign(new Error(message, options), { safe: true });
 }
@@ -75,7 +75,7 @@ export async function loadInstance(root, create = false) {
   };
 }
 
-// One rename selects the database, blobs, profile and keys together.
+/** One rename selects the database, blobs, profile and keys together. */
 export async function activateSnapshot(instance, snapshot, providerSecret) {
   if (!/^[a-f0-9]{16}$/.test(snapshot) || !/^[A-Za-z0-9+/]{43}=$/.test(providerSecret)) {
     throw new Error("Invalid snapshot configuration.");

@@ -396,7 +396,7 @@ describe("reasoning effort requests", () => {
 describe("side generations", () => {
   it.effect("completes against a provider that omits system_fingerprint", () =>
     Effect.gen(function* () {
-      const requests = stubProvider(
+      const recorded = stubProvider(
         sse([
           chunk({ role: "assistant", content: "" }),
           chunk({ content: "TYPO3 release " }),
@@ -411,8 +411,8 @@ describe("side generations", () => {
       expect(result.usage.inputTokens.total).toBe(7);
       expect(result.usage.outputTokens.total).toBe(3);
       // Streaming, not the one-shot completion whose schema demands the field.
-      expect(requests[0]?.url).toBe("https://provider.test/v1/chat/completions");
-      expect(requests[0]?.body).toMatchObject({ stream: true });
+      expect(recorded[0]?.url).toBe("https://provider.test/v1/chat/completions");
+      expect(recorded[0]?.body).toMatchObject({ stream: true });
     }),
   );
 
@@ -1392,7 +1392,7 @@ describe("provider catalog", () => {
       const catalog = yield* Effect.flatMap(AiGateway, (gateway) =>
         gateway.fetchCatalog("p1"),
       ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repo))));
-      expect(requests.map((request) => request.url).sort()).toEqual([
+      expect(requests.map((request) => request.url).toSorted()).toEqual([
         "https://provider.test/v1/models",
         "https://provider.test/v1/models?output_modalities=embeddings",
       ]);

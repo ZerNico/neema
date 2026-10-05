@@ -8,43 +8,14 @@ import {
   revokeDesktopDevice,
   type DesktopSession,
 } from "~/modules/auth/client.ts";
-import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
 import { TicketCode } from "~/modules/auth/ui/ticket-code.tsx";
-import { useConfirm } from "~/ui/confirm.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { toastError } from "~/ui/error-toast.ts";
-
-/** Coarse and forgiving: a wrong guess here costs a label, not access. */
-export function describeSession(userAgent: string | null | undefined): string {
-  const ua = userAgent ?? "";
-  const os = /Windows/.test(ua)
-    ? "Windows"
-    : /Android/.test(ua)
-      ? "Android"
-      : /iPhone|iPad/.test(ua)
-        ? "iOS"
-        : /Mac OS X|Macintosh/.test(ua)
-          ? "macOS"
-          : /Linux|X11/.test(ua)
-            ? "Linux"
-            : null;
-  if (hasDesktopMarker(ua)) return os ? `neema Desktop on ${os}` : "neema Desktop";
-  const browser = /Edg\//.test(ua)
-    ? "Edge"
-    : /OPR\//.test(ua)
-      ? "Opera"
-      : /Firefox\//.test(ua)
-        ? "Firefox"
-        : /Chrome\//.test(ua)
-          ? "Chrome"
-          : /Safari\//.test(ua)
-            ? "Safari"
-            : null;
-  if (browser && os) return `${browser} on ${os}`;
-  return browser ?? (os ? `Browser on ${os}` : "Browser");
-}
+import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
+import { describeSession } from "./describe-session.ts";
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const when = (value: Date | string) => dateFormat.format(new Date(value));
@@ -70,7 +41,7 @@ export function DevicesPage() {
   });
   const mint = useMutation({ mutationFn: () => createDesktopTicket() });
 
-  const ordered = [...sessions].sort((a, b) => {
+  const ordered = [...sessions].toSorted((a, b) => {
     if (a.current) return -1;
     if (b.current) return 1;
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();

@@ -10,11 +10,13 @@ import {
   DetailPanelRail,
   DetailPanelToggle,
   PanelToggleSpace,
+  type DetailPanelApi,
+} from "./detail-panel.tsx";
+import {
   useDetailPanel,
   useDetailPanelReconciler,
   useDetailPanelSelectedId,
-  type DetailPanelApi,
-} from "./detail-panel.tsx";
+} from "./detail-panel-context.ts";
 
 const environment = vi.hoisted(() => ({
   mobile: false,

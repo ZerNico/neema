@@ -1,26 +1,10 @@
-import {
-  AiBrain01Icon,
-  Attachment01Icon,
-  Image01Icon,
-  ToolsIcon,
-  ViewIcon,
-} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ModelCapabilities } from "../model-config.ts";
 import { cn } from "~/ui/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
+import { CAPABILITY_META } from "./capability-meta.ts";
 
 export type Capabilities = ModelCapabilities;
-
-export const CAPABILITY_META = [
-  { key: "imageOutput" as const, label: "Image generation", icon: Image01Icon },
-  { key: "reasoning" as const, label: "Reasoning", icon: AiBrain01Icon },
-  // Native support only: models without it still get tools through the
-  // gateway's prompt-based fallback (`hermes-tools.ts`).
-  { key: "tools" as const, label: "Native tool calling", icon: ToolsIcon },
-  { key: "vision" as const, label: "Vision", icon: ViewIcon },
-  { key: "files" as const, label: "File input", icon: Attachment01Icon },
-];
 
 /** Compact icon row for a model's capabilities (picker, admin lists). */
 export function CapabilityIcons({

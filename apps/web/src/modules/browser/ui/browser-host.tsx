@@ -1,7 +1,7 @@
 import type { DesktopBrowser } from "@chat/desktop-rpc";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDetailPanel, useDetailPanelAvailable } from "~/ui/detail-panel.tsx";
+import { useDetailPanel, useDetailPanelAvailable } from "~/ui/detail-panel-context.ts";
 import {
   browserTabs,
   useBrowserOwners,

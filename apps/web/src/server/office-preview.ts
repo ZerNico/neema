@@ -99,6 +99,11 @@ const cache = createPreviewCache();
 /** Fails like the family's worker: a code, and a message written for people. */
 type PreviewError = Error & { readonly code: string };
 
+const serve = (preview: Preview) =>
+  new Response(preview.body as BodyInit, {
+    headers: { ...previewHeaders, "Content-Type": preview.type },
+  });
+
 /**
  * The GET handler every Office preview route shares: the session, access to
  * the file, its stored type (decided from the bytes, so nothing else reaches a
@@ -123,10 +128,6 @@ export function officePreviewHandler<Q>(config: {
   readonly isError: (error: unknown) => error is PreviewError;
 }) {
   const { app, mediaType } = OFFICE_FAMILIES[config.family];
-  const serve = (preview: Preview) =>
-    new Response(preview.body as BodyInit, {
-      headers: { ...previewHeaders, "Content-Type": preview.type },
-    });
   return async ({
     request,
     params,

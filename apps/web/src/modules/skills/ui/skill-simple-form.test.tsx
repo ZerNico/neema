@@ -2,7 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { NEW_SKILL_FILES, type SkillFile } from "../package.ts";
-import { SkillSimpleForm, canEditSimply } from "./skill-simple-form.tsx";
+import { SkillSimpleForm } from "./skill-simple-form.tsx";
+import { canEditSimply } from "./can-edit-simply.ts";
 
 const root = (files: SkillFile[]) => {
   const file = files.find((entry) => entry.path === "SKILL.md")!;

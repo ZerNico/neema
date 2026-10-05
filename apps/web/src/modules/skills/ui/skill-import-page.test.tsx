@@ -12,7 +12,7 @@ vi.mock("../server/import-functions.ts", () => ({
   importReviewedSkill: (...args: unknown[]) => importReviewedSkill(...args),
 }));
 vi.mock("../server/functions.ts", () => ({ saveSkill: vi.fn() }));
-vi.mock("~/ui/confirm.tsx", () => ({ useConfirm: () => async () => true }));
+vi.mock("~/ui/confirm-context.ts", () => ({ useConfirm: () => async () => true }));
 vi.mock("./text-editor.tsx", () => ({
   default: ({ label }: { label: string }) => <textarea aria-label={label} readOnly />,
 }));

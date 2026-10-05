@@ -2,7 +2,8 @@ import userEvent from "@testing-library/user-event";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Image01Icon, ViewIcon } from "@hugeicons/core-free-icons";
-import { CAPABILITY_META, CapabilityIcons } from "./capability-icons.tsx";
+import { CapabilityIcons } from "./capability-icons.tsx";
+import { CAPABILITY_META } from "./capability-meta.ts";
 const capabilities = {
   imageOutput: false,
   tools: true,

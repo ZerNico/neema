@@ -190,20 +190,20 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
       },
     };
   });
-  const invokeStage = Effect.fn("research.coordinator")(function* (input: {
+  const invokeStage = Effect.fn("research.coordinator")(function* (stageInput: {
     notice: string;
     toolkit: Toolkit.WithHandler<any> | undefined;
   }) {
-    const prepared = yield* stage(input.notice);
+    const prepared = yield* stage(stageInput.notice);
     return yield* invoke({
       spec: specs.coordinator,
-      toolkit: input.toolkit,
+      toolkit: stageInput.toolkit,
       prompt: prepared.prompt,
     }).pipe(
       Effect.catchTag("ProviderContextOverflow", (error) => {
         const repaired = prepared.repair();
         return repaired
-          ? invoke({ spec: specs.coordinator, toolkit: input.toolkit, prompt: repaired })
+          ? invoke({ spec: specs.coordinator, toolkit: stageInput.toolkit, prompt: repaired })
           : Effect.fail(error);
       }),
     );

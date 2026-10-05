@@ -69,6 +69,56 @@ const summaryOf = (row: {
 }): ProjectFileSummary => ({ ...row, updatedAt: row.updatedAt.toISOString() });
 
 /**
+ * Drops what retention no longer keeps, then, over the cap, the oldest
+ * unpinned history until it fits. The current version of every file
+ * and every pinned one always stay. Returns storage keys to delete.
+ */
+const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
+  Effect.gen(function* () {
+    const ranked = yield* tx
+      .select({
+        id: projectFileVersions.id,
+        blobId: projectFileVersions.blobId,
+        size: projectFileVersions.size,
+        pinned: projectFileVersions.pinned,
+        rank: sql<number>`row_number() over (partition by ${projectFileVersions.fileId} order by ${projectFileVersions.number} desc)::int`,
+        expired: sql<boolean>`${projectFileVersions.createdAt} < now() - make_interval(days => ${PROJECT_FILE_LIMITS.historyDays})`,
+      })
+      .from(projectFileVersions)
+      .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
+      .where(eq(projectFiles.projectId, projectId))
+      .orderBy(asc(projectFileVersions.createdAt))
+      .pipe(Effect.orDie);
+    const prunable = (row: (typeof ranked)[number]) => row.rank > 1 && !row.pinned;
+    const drop = new Set(
+      ranked
+        .filter(
+          (row) => prunable(row) && (row.expired || row.rank > PROJECT_FILE_LIMITS.historyVersions),
+        )
+        .map((row) => row.id),
+    );
+    let total = ranked.filter((row) => !drop.has(row.id)).reduce((sum, row) => sum + row.size, 0);
+    for (const row of ranked) {
+      if (total <= maxBytes) break;
+      if (!prunable(row) || drop.has(row.id)) continue;
+      drop.add(row.id);
+      total -= row.size;
+    }
+    if (total > maxBytes)
+      return yield* new ProjectRejected({
+        reason: "this project's file storage is full; delete a file or ask an admin for more room",
+      });
+    if (!drop.size) return [];
+    const blobIds = ranked.filter((row) => drop.has(row.id)).map((row) => row.blobId);
+    yield* lockBlobs(tx, blobIds).pipe(Effect.orDie);
+    yield* tx
+      .delete(projectFileVersions)
+      .where(inArray(projectFileVersions.id, [...drop]))
+      .pipe(Effect.orDie);
+    return yield* collectOrphanedBlobs(tx, blobIds).pipe(Effect.orDie);
+  });
+
+/**
  * Working files shared in a project. Each write is a whole new version; the
  * current one is the highest number and is never pruned. Older unpinned
  * versions go after 30 days or past 25 per file, and the oldest of them go
@@ -245,60 +295,6 @@ export class ProjectFileService extends Context.Service<
             .orderBy(asc(projectFiles.name))
             .pipe(Effect.orDie);
           return rows.map(summaryOf);
-        });
-
-      /**
-       * Drops what retention no longer keeps, then, over the cap, the oldest
-       * unpinned history until it fits. The current version of every file
-       * and every pinned one always stay. Returns storage keys to delete.
-       */
-      const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
-        Effect.gen(function* () {
-          const ranked = yield* tx
-            .select({
-              id: projectFileVersions.id,
-              blobId: projectFileVersions.blobId,
-              size: projectFileVersions.size,
-              pinned: projectFileVersions.pinned,
-              rank: sql<number>`row_number() over (partition by ${projectFileVersions.fileId} order by ${projectFileVersions.number} desc)::int`,
-              expired: sql<boolean>`${projectFileVersions.createdAt} < now() - make_interval(days => ${PROJECT_FILE_LIMITS.historyDays})`,
-            })
-            .from(projectFileVersions)
-            .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
-            .where(eq(projectFiles.projectId, projectId))
-            .orderBy(asc(projectFileVersions.createdAt))
-            .pipe(Effect.orDie);
-          const prunable = (row: (typeof ranked)[number]) => row.rank > 1 && !row.pinned;
-          const drop = new Set(
-            ranked
-              .filter(
-                (row) =>
-                  prunable(row) && (row.expired || row.rank > PROJECT_FILE_LIMITS.historyVersions),
-              )
-              .map((row) => row.id),
-          );
-          let total = ranked
-            .filter((row) => !drop.has(row.id))
-            .reduce((sum, row) => sum + row.size, 0);
-          for (const row of ranked) {
-            if (total <= maxBytes) break;
-            if (!prunable(row) || drop.has(row.id)) continue;
-            drop.add(row.id);
-            total -= row.size;
-          }
-          if (total > maxBytes)
-            return yield* new ProjectRejected({
-              reason:
-                "this project's file storage is full; delete a file or ask an admin for more room",
-            });
-          if (!drop.size) return [];
-          const blobIds = ranked.filter((row) => drop.has(row.id)).map((row) => row.blobId);
-          yield* lockBlobs(tx, blobIds).pipe(Effect.orDie);
-          yield* tx
-            .delete(projectFileVersions)
-            .where(inArray(projectFileVersions.id, [...drop]))
-            .pipe(Effect.orDie);
-          return yield* collectOrphanedBlobs(tx, blobIds).pipe(Effect.orDie);
         });
 
       /** Registers bytes under the project owner; returns the blob and any key to discard. */

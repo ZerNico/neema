@@ -157,7 +157,7 @@ export const createResearchStore = (db: Db["Service"]) => {
     const complete = calls
       .filter((call) => call.phase !== "compaction")
       .every((call) => call.usageComplete && call.status === "complete");
-    for (const call of calls.filter((call) => call.phase === "compaction")) {
+    for (const call of calls.filter((candidate) => candidate.phase === "compaction")) {
       const usage = call.usage ?? emptyUsageTotals();
       yield* tx
         .insert(usageEvents)

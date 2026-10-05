@@ -1,15 +1,13 @@
 import { FolderAddIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createContext, use, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { toast } from "sonner";
 import { toastError } from "~/ui/error-toast.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { saveAttachmentToProject } from "../server/functions.ts";
-
-/** The project of the chat on screen, when the reader may change its files. */
-export const WritableChatProject = createContext<{ id: string; name: string } | null>(null);
+import { WritableChatProject } from "./writable-chat-project-context.ts";
 
 export function WritableChatProjectProvider({
   project,
@@ -20,8 +18,6 @@ export function WritableChatProjectProvider({
 }) {
   return <WritableChatProject value={project}>{children}</WritableChatProject>;
 }
-
-export const useWritableChatProject = () => use(WritableChatProject);
 
 /**
  * Preview actions for a stored chat file in a project chat: keep it with the

@@ -45,7 +45,7 @@ import {
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
-import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.tsx";
+import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
@@ -74,7 +74,7 @@ vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   listDocuments: vi.fn(),
 }));
 vi.mock("~/modules/documents/ui/rich-editor/document-editor.tsx", async () => ({
-  default: (await import("../../../../tests/fixtures/document-server.tsx")).FakeSourceEditor,
+  default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,
 }));
 vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
   default: ({
@@ -192,6 +192,7 @@ vi.mock("./virtual-message-list.tsx", () => ({
           )}
           {(message.compactionActivities as ReadonlyArray<{ summary?: string }> | undefined)?.map(
             (activity, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- a fixture list that never reorders
               <output key={index} data-testid="compaction-activity">
                 {`${String(message.id)}: ${activity.summary ?? "running"}`}
               </output>
@@ -2188,6 +2189,7 @@ describe("ChatView documents", () => {
     const DocumentFeed = server.EventSource;
     vi.stubGlobal(
       "EventSource",
+      // oxlint-disable-next-line typescript/no-extraneous-class -- stands in for EventSource, whose constructor picks the feed
       class {
         constructor(url: string) {
           return url.startsWith("/api/documents/")

@@ -5,24 +5,12 @@ import { useState } from "react";
 import { knowledgeCollectionQuery } from "~/modules/knowledge/client/queries.ts";
 import { searchState, type KnowledgeDocument } from "~/modules/knowledge/schema.ts";
 import { DocumentSourcePanel } from "~/modules/knowledge/ui/document-source-panel.tsx";
-import { useDetailPanel, type DetailPanelApi } from "~/ui/detail-panel.tsx";
+import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
-import { IntegrationLogo, integrationName } from "./integration-logo.tsx";
-
-/** Opens the side panel listing what one source brought into a collection. */
-export const openSyncedPages = (
-  panel: DetailPanelApi,
-  collectionId: string,
-  sourceId: string,
-  title: string,
-) =>
-  panel.open({
-    id: `synced-pages:${sourceId}`,
-    title,
-    body: <SyncedPagesPanel collectionId={collectionId} sourceId={sourceId} title={title} />,
-  });
+import { IntegrationLogo } from "./integration-logo.tsx";
+import { integrationName } from "./integration-name.ts";
 
 const isPreparing = (document: KnowledgeDocument) =>
   document.status === "queued" ||
@@ -34,14 +22,17 @@ const isPreparing = (document: KnowledgeDocument) =>
  * Reads the collection live rather than taking a snapshot, so a sync that
  * lands while the panel is open shows up in it.
  */
-function SyncedPagesPanel({
+export function SyncedPagesPanel({
   collectionId,
   sourceId,
   title,
+  onBack,
 }: {
   collectionId: string;
   sourceId: string;
   title: string;
+  /** Reopens this list from a page read inside it. */
+  onBack: () => void;
 }) {
   const panel = useDetailPanel();
   const detail = useQuery(knowledgeCollectionQuery(collectionId));
@@ -67,11 +58,7 @@ function SyncedPagesPanel({
       id: `knowledge-note:${document.versionId}`,
       title: document.title,
       actions: (
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => openSyncedPages(panel, collectionId, sourceId, title)}
-        >
+        <Button size="sm" variant="ghost" onClick={onBack}>
           <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} data-icon="inline-start" />
           {title}
         </Button>

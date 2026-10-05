@@ -11,7 +11,8 @@ import {
 } from "~/modules/auth/client.ts";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { describeSession, DevicesPage } from "./devices-page.tsx";
+import { DevicesPage } from "./devices-page.tsx";
+import { describeSession } from "./describe-session.ts";
 
 vi.mock("~/modules/auth/client.ts", () => ({
   authClient: { revokeOtherSessions: vi.fn() },

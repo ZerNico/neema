@@ -3,18 +3,17 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { BROWSER_ACTIVITY } from "~/modules/browser/ui/browser-activity.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
+import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
-  Disclosure,
-  DisclosureContent,
-  DisclosureTrigger,
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
-} from "~/ui/disclosure.tsx";
+} from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
-import { Favicon, hostOf } from "./favicon.tsx";
+import { Favicon } from "./favicon.tsx";
+import { hostOf } from "./host-of.ts";
 
 type Page = { url: string; title: string };
 

@@ -389,8 +389,8 @@ describe("projectAssistantBody steers", () => {
       eventIndex: 1,
       callIndex: 0,
     };
-    const project = (tools: ToolActivity[], content = "", files = [file]) =>
-      projectAssistantBody({ content, streaming: true, tools, compactions: [], files }).parts;
+    const project = (tools: ToolActivity[], text = "", files = [file]) =>
+      projectAssistantBody({ content: text, streaming: true, tools, compactions: [], files }).parts;
 
     it("folds a draft's steps and its publish into one step, its file a part of its own", () => {
       const parts = project([step("a", 0, "d1"), step("b", 1, "d1"), publish(2, "d1", "deck")]);

@@ -314,7 +314,6 @@ describe("who gets an account", () => {
   });
 
   it("lets a trusted provider skip the queue while an untrusted one waits", async () => {
-    const gate = makeSignupGate((effect) => runtime.runPromise(effect));
     await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) =>
         Effect.gen(function* () {

@@ -17,8 +17,9 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { keepConversation, setConversationArchived } from "../server/functions.ts";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
 import { Badge } from "~/ui/primitives/badge";
-import { agentIcon } from "./context-picker.tsx";
-import { ConversationTitle, createTitleRevealRegistry } from "./conversation-title.tsx";
+import { agentIcon } from "./agent-icons.ts";
+import { ConversationTitle } from "./conversation-title.tsx";
+import { createTitleRevealRegistry } from "./title-reveal-registry.ts";
 
 interface ScheduleOrigin {
   scheduleId: string;

@@ -9,8 +9,8 @@ import { ScheduleSettings } from "../schema.ts";
 import { createSchedule } from "../server/functions.ts";
 import { ScheduleSettingsFields } from "./schedule-settings-fields.tsx";
 import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
-import { useConfirm } from "~/ui/confirm.tsx";
-import { useAppForm } from "~/ui/form/app-form.tsx";
+import { useConfirm } from "~/ui/confirm-context.ts";
+import { useAppForm } from "~/ui/form/app-form.ts";
 import { Page } from "~/ui/page-shell.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 

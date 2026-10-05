@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { EMPTY_AGENT_DRAFT } from "../draft-schema.ts";
 import { AGENT_LIMITS, AgentIcon } from "../schema.ts";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
-import { AGENT_ICONS } from "~/modules/chat/ui/context-picker.tsx";
+import { AGENT_ICONS } from "~/modules/chat/ui/agent-icons.ts";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
 import { INTEGRATIONS } from "~/modules/integrations/catalog.ts";
@@ -19,7 +19,7 @@ import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/sc
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
-import { withForm } from "~/ui/form/app-form.tsx";
+import { withForm } from "~/ui/form/app-form.ts";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -472,6 +472,7 @@ export const AgentSettingsFields = withForm({
                       onChange={(modelId) => field.handleChange(modelId)}
                       side="bottom"
                       align="end"
+                      // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
                       header={({ close }) => (
                         <div className="p-1.5 pb-0">
                           <button

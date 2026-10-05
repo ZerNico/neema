@@ -3,7 +3,8 @@ import { Effect } from "effect";
 import { attachmentKindForFileName } from "~/modules/attachments/constants.ts";
 import { AttachmentChip } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { useDesktop } from "../client/bridge.ts";
-import { useLocalFileConversation, useLocalFilePreview } from "./local-file-preview.tsx";
+import { useLocalFilePreview } from "./use-local-file-preview.tsx";
+import { useLocalFileConversation } from "./local-file-context.ts";
 
 /**
  * A file a send committed to the chat workspace. The provider already owns the

@@ -30,11 +30,8 @@ import {
   webSearchAvailabilityQuery,
 } from "../client/queries.ts";
 import { resolveChatModel } from "../client/selected-model.ts";
-import {
-  CHAT_INPUT_SHELL_CLASS,
-  ChatTextarea,
-  type ComposerFieldHandle,
-} from "./chat-textarea.tsx";
+import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
+import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";
 import { ModelPicker } from "./model-picker.tsx";
 import {
   AgentPicker,
@@ -44,10 +41,10 @@ import {
   ReferenceChip,
   ContextMenuItems,
   MAX_SELECTED_COLLECTIONS,
-  collectionStatus,
   type ContextPickerKind,
   type ComposerContext,
 } from "./context-picker.tsx";
+import { collectionStatus } from "./collection-status.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
@@ -80,7 +77,9 @@ import { cn } from "~/ui/utils";
 import { useFileDrop } from "~/ui/use-file-drop.ts";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { CollapseItem, MotionSwap, collapseMotion, useAppReducedMotion } from "~/ui/motion.tsx";
+import { CollapseItem, MotionSwap } from "~/ui/motion.tsx";
+import { collapseMotion } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
@@ -98,6 +97,14 @@ const effortLabels: Record<ReasoningEffort, string> = {
   high: "High",
   xhigh: "Extra high",
   max: "Maximum",
+};
+
+// Stored chips preview from the authenticated route; an image still in
+// flight previews from its local object URL.
+const previewFor = (item: AttachmentUpload): string | null => {
+  if (item.status === "complete" && item.attachment) return attachmentUrl(item.attachment.id);
+  if (item.kind === "image") return item.previewUrl;
+  return null;
 };
 
 export const ChatInput = forwardRef<
@@ -400,14 +407,6 @@ export const ChatInput = forwardRef<
     ) {
       return `${selectedModel.displayName} cannot read PDFs and document parsing is disabled. Ask an admin to enable it or pick another model.`;
     }
-    return null;
-  };
-
-  // Stored chips preview from the authenticated route; an image still in
-  // flight previews from its local object URL.
-  const previewFor = (item: AttachmentUpload): string | null => {
-    if (item.status === "complete" && item.attachment) return attachmentUrl(item.attachment.id);
-    if (item.kind === "image") return item.previewUrl;
     return null;
   };
 

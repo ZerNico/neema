@@ -1,10 +1,10 @@
 import { ArrowRight01Icon, File01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useDocumentPanel } from "~/modules/documents/ui/document-owner.tsx";
+import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
-import { disclosureTriggerClassName } from "~/ui/disclosure.tsx";
+import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { ActivityFace } from "./activity-face.tsx";
 import {
@@ -12,30 +12,7 @@ import {
   activityCardInteractiveClassName,
   activityRowClassName,
 } from "./activity-row.ts";
-
-export function documentActivityLabel(activity: DocumentToolActivity) {
-  const title = activity.result?.title;
-  if (activity.status === "running") {
-    if (activity.name === "create_document") return "Creating a document";
-    if (activity.name === "edit_document" || activity.name === "replace_document")
-      return "Updating the document";
-    return "Reading documents";
-  }
-  switch (activity.result?.outcome) {
-    case "created":
-      return title ? `Created ${title}` : "Created a document";
-    case "updated":
-      return title ? `Updated ${title}` : "Updated a document";
-    case "unchanged":
-      return title ? `${title} unchanged` : "Document unchanged";
-    case "read":
-      return title ? `Read ${title}` : "Read a document";
-    case "listed":
-      return "Checked documents";
-    default:
-      return "Couldn’t update the document";
-  }
-}
+import { documentActivityLabel } from "./document-activity-label.ts";
 
 export function DocumentWidget({ documentId, title }: { documentId: string; title?: string }) {
   const { owned, gone, entry } = useDocumentPanel(documentId);
