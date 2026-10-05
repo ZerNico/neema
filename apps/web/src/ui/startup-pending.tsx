@@ -7,6 +7,7 @@ import { NeemaGlyph } from "./brand";
 export function StartupPending() {
   return (
     <div
+      data-slot="startup-pending"
       role="status"
       aria-label="Loading"
       className="text-muted-foreground flex h-svh max-h-full items-center justify-center"

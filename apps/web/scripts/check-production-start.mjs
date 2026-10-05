@@ -90,7 +90,7 @@ try {
       assert.ok(attributes.includes(`nonce="${nonce}"`), `${path}: ${tag}`);
     }
     assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.match(html, /data-slot="spinner"/);
+    assert.match(html, /data-slot="startup-pending"/);
     assert.match(html, /id="desktop-titlebar-content"/);
     console.log(`Shell: ${path}`);
   }
@@ -98,7 +98,7 @@ try {
     const response = await fetch(new URL(path, origin), { signal: AbortSignal.timeout(10000) });
     const body = await response.text();
     assert.equal(response.status, 404, `${path}: ${body.slice(0, 200)}`);
-    assert.doesNotMatch(body, /data-slot="spinner"/);
+    assert.doesNotMatch(body, /data-slot="startup-pending"/);
     console.log(`Not a shell: ${path} (${response.status})`);
   }
   // Server functions refuse anything not proven same-origin (src/start.ts).
