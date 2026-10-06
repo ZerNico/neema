@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import {
   listAdminIntegrations,
   listChatIntegrations,
+  listIntegrationScopeOptions,
   listKnowledgeSources,
   listMyIntegrations,
   listPendingIntegrationCalls,
@@ -40,4 +41,11 @@ export const knowledgeSourcesQuery = (collectionId: string) =>
   queryOptions({
     queryKey: ["knowledge", "sources", collectionId],
     queryFn: () => listKnowledgeSources({ data: { collectionId } }),
+  });
+
+/** What a connection can be limited to; under `integrations` so a reconnect refreshes it. */
+export const integrationScopeOptionsQuery = (integrationId: string) =>
+  queryOptions({
+    queryKey: ["integrations", "scope-options", integrationId],
+    queryFn: () => listIntegrationScopeOptions({ data: { integrationId } }),
   });

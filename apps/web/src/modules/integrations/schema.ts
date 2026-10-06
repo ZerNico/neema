@@ -35,7 +35,16 @@ export interface IntegrationConnectionView {
   offerByDefault: boolean;
   /** Only tools set away from their default. */
   toolPermissions: Record<string, ToolPermission>;
+  /** The manifest scope's items it is limited to; null is everything. */
+  scope: string[] | null;
   createdAt: string;
+}
+
+/** One item a connection can be limited to; `detail` is a short handle shown beside it. */
+export interface ScopeOption {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
 }
 
 /** One integration as the signed-in person sees it in Settings and the composer. */
@@ -79,6 +88,12 @@ export const UpdateConnectionInput = Schema.Struct({
   /** Merged into what is stored; one tool or a whole group at a time. */
   toolPermissions: Schema.optionalKey(
     Schema.Record(Schema.String.check(Schema.isMaxLength(64)), ToolPermission),
+  ),
+  /** The whole new limit; null lifts it. */
+  scope: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(200)),
+    ),
   ),
 });
 

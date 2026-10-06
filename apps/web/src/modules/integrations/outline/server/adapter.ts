@@ -213,6 +213,7 @@ const handlers = integrationHandlers(OUTLINE_TOOLS)({
         summary:
           nested === 0 ? title : `${title} and ${nested} nested page${nested === 1 ? "" : "s"}`,
         reach: null,
+        scope: null,
         // Not `permanent`: the trash is how a person undoes a mistaken approval.
         execute: outlineCall(session, "documents.delete", { id }).pipe(
           Effect.as({
@@ -373,6 +374,7 @@ export const outlineAdapter: IntegrationAdapter = {
       }),
     ),
   handlers,
+  scopeOptions: null,
   knowledge: {
     browse: (session, parentId) =>
       Effect.gen(function* () {

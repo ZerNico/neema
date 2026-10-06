@@ -109,7 +109,12 @@ export class IntegrationRepo extends Context.Service<
     updatePreferences(
       userId: string,
       integrationId: string,
-      input: { offerByDefault?: boolean; toolPermissions?: Record<string, ToolPermission> },
+      input: {
+        offerByDefault?: boolean;
+        toolPermissions?: Record<string, ToolPermission>;
+        /** Null lifts the limit. */
+        scope?: string[] | null;
+      },
     ): Effect.Effect<IntegrationConnectionRow | null>;
     removeConnection(userId: string, integrationId: string): Effect.Effect<void>;
     markNeedsReauth(connectionId: string): Effect.Effect<void>;
@@ -349,6 +354,7 @@ export class IntegrationRepo extends Context.Service<
                   : {
                       toolPermissions: sql`${integrationConnections.toolPermissions} || ${JSON.stringify(input.toolPermissions)}::jsonb`,
                     }),
+                ...(input.scope === undefined ? {} : { scope: input.scope }),
                 updatedAt: new Date(),
               })
               .where(

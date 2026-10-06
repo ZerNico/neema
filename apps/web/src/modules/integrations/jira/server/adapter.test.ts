@@ -1,6 +1,11 @@
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Credential, IntegrationSession } from "../../server/adapter.ts";
+import type { IntegrationApprovals } from "../../server/approvals.ts";
+import type { ConnectedSession } from "../../server/service.ts";
+import { prepareIntegrationTools } from "../../server/tools.ts";
+import type { IntegrationModelResult } from "../../tool-schema.ts";
+import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { jiraAdapter } from "./adapter.ts";
 
 const SITE = "https://acme.atlassian.net";
@@ -24,7 +29,12 @@ const json = (status: number, body?: unknown, headers?: Record<string, string>) 
 const issue = (key: string, summary: string, status = "To Do") => ({
   id: key,
   key,
-  fields: { summary, status: { name: status }, issuetype: { name: "Task" } },
+  fields: {
+    summary,
+    status: { name: status },
+    issuetype: { name: "Task" },
+    project: { key: key.split("-")[0] },
+  },
 });
 
 const people = [
@@ -52,7 +62,10 @@ const jira = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/myself")
     return json(200, { accountId: "u-me", displayName: "Me", emailAddress: "me@acme.test" });
   if (path === "/search/jql")
-    return json(200, { issues: [issue("PROJ-1", "Fix login")], nextPageToken: "t2" });
+    return json(200, {
+      issues: [issue("PROJ-1", "Fix login"), issue("OPS-3", "Rotate keys")],
+      nextPageToken: "t2",
+    });
   if (path === "/issue/PROJ-1" && method === "GET")
     return json(200, {
       ...issue("PROJ-1", "Fix login", "In Progress"),
@@ -66,6 +79,10 @@ const jira = async (input: RequestInfo | URL, init?: RequestInit) => {
           ],
         },
         issuelinks: [
+          {
+            type: { name: "Relates", inward: "relates to", outward: "relates to" },
+            inwardIssue: { key: "SEC-9", fields: { summary: "Audit", status: { name: "Done" } } },
+          },
           {
             type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
             outwardIssue: {
@@ -144,9 +161,13 @@ afterEach(() => {
 });
 
 const apiKey: Credential = { kind: "api_key", values: { email: "me@acme.test", token: "t0k" } };
-const sessionWith = (credential: Credential): IntegrationSession => ({
+const sessionWith = (
+  credential: Credential,
+  scope: ReadonlyArray<string> | null = null,
+): IntegrationSession => ({
   config: { site: SITE },
   credential: Effect.succeed(credential),
+  scope: Effect.succeed(scope),
 });
 const session = sessionWith(apiKey);
 const handlers = jiraAdapter.handlers;
@@ -196,7 +217,10 @@ describe("jira adapter", () => {
     expect(sent("POST", "/search/jql")[0]?.body).toMatchObject({
       jql: 'text ~ "login \\"SSO\\"" ORDER BY updated DESC',
     });
-    expect(result.output).toMatchObject({ issues: [{ key: "PROJ-1" }], nextPageToken: "t2" });
+    expect(result.output).toMatchObject({
+      issues: [{ key: "PROJ-1" }, { key: "OPS-3" }],
+      nextPageToken: "t2",
+    });
     expect(result.sources?.[0]).toMatchObject({ url: `${SITE}/browse/PROJ-1`, read: false });
     expect(await refusal("search_issues", { jql: "project = X", text: "y" })).toMatch(/either/);
   });
@@ -207,7 +231,10 @@ describe("jira adapter", () => {
       key: "PROJ-1",
       status: "In Progress",
       description: "Users cannot sign in.",
-      links: [{ relation: "blocks", key: "PROJ-2" }],
+      links: [
+        { relation: "relates to", key: "SEC-9" },
+        { relation: "blocks", key: "PROJ-2" },
+      ],
       transitions: ["Start review (to In Review)", "Done"],
       comments: [{ author: "Ana Lopez", body: "On it" }],
       nextCommentsFrom: null,
@@ -323,5 +350,98 @@ describe("jira adapter", () => {
       "Jira: Issue does not exist or you do not have permission to see it.",
     );
     expect(await refusal("add_comment", { key: "not a key", body: "hi" })).toMatch(/issue key/);
+  });
+});
+
+describe("a connection limited to some projects", () => {
+  const limited = sessionWith(apiKey, ["PROJ"]);
+
+  it("searches only inside them, even when the query tries to leave", async () => {
+    const result = await run(
+      (
+        await run(
+          handlers.search_issues!(limited, {
+            jql: 'project = OPS OR summary ~ "order by" ORDER BY updated DESC',
+          }),
+        )
+      ).execute,
+    );
+    expect(sent("POST", "/search/jql")[0]?.body).toMatchObject({
+      jql: 'project in ("PROJ") AND (project = OPS OR summary ~ "order by") ORDER BY updated DESC',
+    });
+    // The fake ignores JQL; what it returns from elsewhere is dropped.
+    expect(result.output).toMatchObject({ issues: [{ key: "PROJ-1" }] });
+    expect(result.sources).toHaveLength(1);
+  });
+
+  it("names the project a call touches, and hides related issues elsewhere", async () => {
+    const read = await run(handlers.read_issue!(limited, { key: "PROJ-1" }));
+    expect(read.scope).toEqual(["PROJ"]);
+    expect((await run(read.execute)).output).toMatchObject({
+      links: [{ relation: "blocks", key: "PROJ-2" }],
+    });
+    const link = await run(
+      handlers.link_issues!(limited, { from: "PROJ-1", type: "blocks", to: "PROJ-2" }),
+    );
+    expect(link.scope).toEqual(["PROJ", "PROJ"]);
+    const create = await run(
+      handlers.create_issue!(limited, { project: "ops", type: "Task", summary: "x" }),
+    );
+    expect(create.scope).toEqual(["OPS"]);
+  });
+
+  it("refuses a change outside them in the tool layer, before anyone is asked", async () => {
+    const request = vi.fn(() => Effect.succeed("allow" as const));
+    const approvals: IntegrationApprovals["Service"] = {
+      request,
+      decide: () => Effect.succeed(false),
+      get: () => Effect.succeed(null),
+      pending: () => Effect.succeed([]),
+    };
+    const connected: ConnectedSession = {
+      ...sessionWith(apiKey, ["OPS"]),
+      connectionId: "c",
+      adapter: jiraAdapter,
+    };
+    const tools = prepareIntegrationTools({
+      offered: [
+        {
+          integrationId: "jira",
+          session: connected,
+          scope: ["OPS"],
+          unattended: null,
+          permissions: {},
+        },
+      ],
+      indexer: createSourceIndexer([]),
+      approvals,
+      owner: { userId: "u1", conversationId: "c1", messageId: "m1" },
+      permissionsFor: () => Effect.succeed({ permissions: {}, allowedInChat: [] }),
+      sessionFor: () => Effect.succeed(connected),
+      rowIdFor: (id) => Effect.succeed(`row-${id}`),
+      reportAuthFailure: () => Effect.void,
+      allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
+    })!;
+    const call = (tool: string, args: unknown) =>
+      Effect.runPromise(
+        (
+          tools.group.handlers[`int_jira__${tool}`] as (
+            args: unknown,
+            context: { toolCallId: string },
+          ) => Effect.Effect<IntegrationModelResult>
+        )(args, { toolCallId: "call" }),
+      );
+    const comment = await call("add_comment", { key: "PROJ-1", body: "hi" });
+    expect(comment).toMatchObject({ ok: false, refused: true });
+    expect(comment.ok ? null : comment.error).toMatch(
+      /limited Jira to the projects OPS, and this touches PROJ/,
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(sent("POST", "/comment")).toEqual([]);
+    expect(await call("read_issue", { key: "PROJ-1" })).toMatchObject({ ok: false, refused: true });
+    // The model is told the limit up front.
+    expect(tools.group.toolkit.tools["int_jira__search_issues"]?.description).toMatch(
+      /limited Jira to these projects: OPS/,
+    );
   });
 });

@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
-import { connectIntegrationApiKey } from "../server/functions.ts";
+import { connectIntegrationApiKey, updateIntegrationConnection } from "../server/functions.ts";
 import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -16,6 +17,13 @@ vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
   updateIntegrationConnection: vi.fn(),
   connectIntegrationApiKey: vi.fn(),
+  listIntegrationScopeOptions: vi.fn(async () => ({
+    ok: true,
+    options: [
+      { id: "PROJ", label: "Product", detail: "PROJ" },
+      { id: "OPS", label: "Operations", detail: "OPS" },
+    ],
+  })),
 }));
 
 const outline = (connection: Partial<UserIntegration["connection"]> | null): UserIntegration => ({
@@ -30,6 +38,7 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
     status: "active",
     offerByDefault: true,
     toolPermissions: {},
+    scope: null,
     createdAt: "2026-09-24T10:00:00Z",
     ...connection,
   },
@@ -108,6 +117,34 @@ describe("integration account row", () => {
     await waitFor(() =>
       expect(connectIntegrationApiKey).toHaveBeenCalledWith({
         data: { integrationId: "jira", values: { email: "me@acme.test", token: "t0k" } },
+      }),
+    );
+  });
+
+  it("limits a connection to the projects picked", async () => {
+    const user = userEvent.setup();
+    mount({ ...outline({}), id: "jira" });
+    vi.mocked(updateIntegrationConnection).mockResolvedValue({ ok: true });
+    expect(screen.getByRole("radio", { name: "All projects" })).toBeChecked();
+    await user.click(screen.getByRole("radio", { name: "Only selected projects" }));
+    // The choice is saved at once; with nothing ticked the connection reaches nothing.
+    await waitFor(() =>
+      expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
+        data: { integrationId: "jira", scope: [] },
+      }),
+    );
+    expect(screen.getByText("None selected")).toBeInTheDocument();
+    await user.click(await screen.findByRole("checkbox", { name: /Operations/ }));
+    await waitFor(() =>
+      expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
+        data: { integrationId: "jira", scope: ["OPS"] },
+      }),
+    );
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "All projects" }));
+    await waitFor(() =>
+      expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
+        data: { integrationId: "jira", scope: null },
       }),
     );
   });

@@ -6,7 +6,7 @@ import type {
   IntegrationRejected,
   IntegrationRequestFailed,
 } from "../errors.ts";
-import type { BrowseNode, SourceRoot } from "../schema.ts";
+import type { BrowseNode, ScopeOption, SourceRoot } from "../schema.ts";
 
 export type AdapterFailure = IntegrationAuthFailed | IntegrationRequestFailed | IntegrationRejected;
 
@@ -23,6 +23,11 @@ export type Credential =
 export interface IntegrationSession {
   readonly config: Readonly<Record<string, string>>;
   readonly credential: Effect.Effect<Credential, IntegrationAuthFailed | IntegrationRequestFailed>;
+  /**
+   * The items of the manifest's scope this connection is limited to, read
+   * fresh each time; null is everything. Reads return nothing outside it.
+   */
+  readonly scope: Effect.Effect<ReadonlyArray<string> | null>;
 }
 
 /** A citable item a tool returned; the tool layer numbers it. */
@@ -58,6 +63,14 @@ export interface PreparedCall {
    * check sees what `execute` sends. Null contacts nobody.
    */
   readonly reach: Reach | null;
+  /**
+   * The scope items the call touches, read from the service where it names a
+   * stored item (an issue's project), so a limited connection is checked
+   * against where things are, not where the model says. A change in a scoped
+   * integration must name them; null touches none by name (a search the
+   * adapter narrows itself).
+   */
+  readonly scope: ReadonlyArray<string> | null;
   readonly execute: Effect.Effect<AdapterToolResult, AdapterFailure>;
 }
 
@@ -65,6 +78,7 @@ export interface PreparedCall {
 export const ready = (execute: Effect.Effect<AdapterToolResult, AdapterFailure>): PreparedCall => ({
   summary: null,
   reach: null,
+  scope: null,
   execute,
 });
 
@@ -154,6 +168,10 @@ export interface IntegrationAdapter {
   } | null;
   /** Checks a credential and names the account it belongs to. */
   verify(session: IntegrationSession): Effect.Effect<{ accountLabel: string }, AdapterFailure>;
+  /** The choices for the manifest's scope, for the person limiting their connection. */
+  readonly scopeOptions:
+    | ((session: IntegrationSession) => Effect.Effect<ReadonlyArray<ScopeOption>, AdapterFailure>)
+    | null;
   /** Keyed by the manifest's tool names; `catalog.test.ts` checks the pairing. */
   readonly handlers: Readonly<Record<string, ErasedHandler>>;
   readonly knowledge: KnowledgeAdapter | null;

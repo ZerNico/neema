@@ -110,6 +110,7 @@ export const updateIntegrationConnection = createServerFn({ method: "POST" })
             ...(data.toolPermissions === undefined
               ? {}
               : { toolPermissions: data.toolPermissions }),
+            ...(data.scope === undefined ? {} : { scope: data.scope ? [...data.scope] : null }),
           }),
         ),
       ),
@@ -201,6 +202,26 @@ export const listKnowledgeSources = createServerFn({ method: "GET" })
     runtime.runPromise(
       KnowledgeSourceService.use((sources) =>
         sources.list(context.session.user.id, data.collectionId),
+      ),
+    ),
+  );
+
+/** What a connection can be limited to, for its Settings page. */
+export const listIntegrationScopeOptions = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      IntegrationService.use((service) =>
+        service.scopeOptions(context.session.user.id, data.integrationId),
+      ).pipe(
+        Effect.map((options) => ({ ok: true as const, options })),
+        Effect.catch((error) =>
+          Effect.succeed({
+            ok: false as const,
+            error: "reason" in error ? error.reason : "Connect this integration first.",
+          }),
+        ),
       ),
     ),
   );

@@ -57,6 +57,7 @@ export const NoIntegrations = Layer.mergeAll(
     saveConfig: () => Effect.die("no integrations in these tests"),
     listForUser: () => Effect.succeed([]),
     connectApiKey: () => Effect.die("no integrations in these tests"),
+    scopeOptions: () => Effect.die("no integrations in these tests"),
     beginOAuth: () => Effect.die("no integrations in these tests"),
     completeOAuth: () => Effect.die("no integrations in these tests"),
     updatePreferences: () => Effect.die("no integrations in these tests"),

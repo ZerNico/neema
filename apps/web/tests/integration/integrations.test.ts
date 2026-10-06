@@ -240,6 +240,60 @@ afterAll(async () => {
 });
 
 describe("connections", () => {
+  it("limits a connection to scope items, applied to calls already running", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    // Outline declares nothing to limit.
+    const refused = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        Effect.flip(s.updatePreferences(userId, "outline", { scope: ["x"] })),
+      ),
+    );
+    expect(refused).toMatchObject({ reason: "This integration has no limits." });
+
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id: "jira",
+          enabled: true,
+          config: { site: "acme.atlassian.net" },
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.saveConnection({
+          userId,
+          integrationId: "jira",
+          authKind: "api_key",
+          credentials: { kind: "api_key", values: { email: "a@acme.test", token: "t" } },
+          accountLabel: "a@acme.test",
+          fingerprint: "acme.atlassian.net",
+        }),
+      ),
+    );
+    const session = await run(Effect.flatMap(IntegrationService, (s) => s.session(userId, "jira")));
+    expect(await run(session.scope)).toBeNull();
+    const limit = (scope: string[] | null) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) => s.updatePreferences(userId, "jira", { scope })),
+      );
+    await limit([" PROJ ", "OPS", "PROJ"]);
+    // The same session sees the new limit: it is read per call.
+    expect(await run(session.scope)).toEqual(["PROJ", "OPS"]);
+    const jira = (await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)))).find(
+      (entry) => entry.id === "jira",
+    );
+    expect(jira?.connection?.scope).toEqual(["PROJ", "OPS"]);
+    // Choosing a limit and ticking nothing reaches nothing; it is not "all".
+    await limit([]);
+    expect(await run(session.scope)).toEqual([]);
+    await limit(null);
+    expect(await run(session.scope)).toBeNull();
+  });
+
   it("verifies an API key with the service before storing it, encrypted", async () => {
     const userId = await newUser();
     const refused = await runtime.runPromiseExit(
@@ -519,6 +573,7 @@ describe("chat tools", () => {
         kind: "api_key" as const,
         values: { key: "ol_api_good" },
       }),
+      scope: Effect.succeed(null),
     };
     // The approval shows the service's title and what goes with it, not the model's id.
     const prepared = await run(deleteTool(target, { id: "d1" }));

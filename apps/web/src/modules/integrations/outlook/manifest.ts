@@ -65,5 +65,6 @@ export const outlookManifest = {
       cap: 3,
     },
   ],
+  scope: null,
   knowledgeSource: false,
 } satisfies IntegrationManifest;

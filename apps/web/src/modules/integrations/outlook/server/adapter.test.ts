@@ -106,6 +106,7 @@ afterEach(() => {
 const session: ConnectedSession = {
   config: { tenant: "organizations" },
   credential: Effect.succeed({ kind: "oauth", accessToken: "token" }),
+  scope: Effect.succeed(null),
   connectionId: "connection",
   adapter: outlookAdapter,
 };
@@ -208,7 +209,7 @@ describe("sending under a schedule's allowance", () => {
   const tools = (unattended: UnattendedGrant, permissions = {}) => {
     counted.clear();
     const prepared = prepareIntegrationTools({
-      offered: [{ integrationId: "outlook", session, unattended, permissions }],
+      offered: [{ integrationId: "outlook", session, scope: null, unattended, permissions }],
       indexer: createSourceIndexer([]),
       approvals,
       owner: { userId: "u1", conversationId: "c1", messageId: "m1" },

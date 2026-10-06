@@ -391,6 +391,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
         summary: `“${subject}” · ${start}`,
         // Graph invites every attendee the moment the event exists.
         reach: { allowance: "invite", targets: attendees },
+        scope: null,
         execute: graphCall<GraphEvent>(session, "POST", "/me/events", {
           body: {
             subject,
@@ -448,6 +449,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
         return {
           summary: `“${subject || "(no subject)"}” to ${recipientLine(targets)}`,
           reach: { allowance: "send", targets },
+          scope: null,
           // Pin the recipients to the ones checked, so an edit made in the
           // meantime cannot add someone, then send that same draft.
           execute: graphCall<unknown>(
@@ -483,6 +485,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
       return {
         summary: `“${subject}” to ${recipientLine(targets)}`,
         reach: { allowance: "send", targets },
+        scope: null,
         execute: graphCall<unknown>(session, "POST", "/me/sendMail", {
           body: {
             message: {
@@ -526,5 +529,6 @@ export const outlookAdapter: IntegrationAdapter = {
       })),
     ),
   handlers,
+  scopeOptions: null,
   knowledge: null,
 };

@@ -96,6 +96,9 @@ export const integrationConnections = pgTable(
       .$type<Record<string, "allow" | "ask" | "block">>()
       .notNull()
       .default({}),
+    // The manifest scope's items (Jira project keys) every call stays inside;
+    // null is everything the account can reach.
+    scope: jsonb().$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

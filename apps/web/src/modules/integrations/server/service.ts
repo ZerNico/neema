@@ -13,7 +13,7 @@ import {
 } from "../errors.ts";
 import type { ToolPermission, UnattendedGrant } from "../consent.ts";
 import type { IntegrationGrant } from "../grant.ts";
-import type { AdminIntegration, UserIntegration } from "../schema.ts";
+import type { AdminIntegration, ScopeOption, UserIntegration } from "../schema.ts";
 import { readFields } from "../fields.ts";
 import type { Credential, IntegrationAdapter, IntegrationSession } from "./adapter.ts";
 import { findAdapter } from "./adapters.ts";
@@ -63,6 +63,8 @@ export interface ChatIntegration {
 export interface ResolvedOffer {
   integrationId: string;
   session: ConnectedSession;
+  /** The connection's limit as the generation starts, to tell the model; calls read it fresh. */
+  scope: ReadonlyArray<string> | null;
   unattended: UnattendedGrant;
   /** As the generation starts; a blocked tool is not offered at all. */
   permissions: Record<string, ToolPermission>;
@@ -101,7 +103,11 @@ const toAdmin = (
 const probe = (config: Record<string, string>, credential: Credential): IntegrationSession => ({
   config,
   credential: Effect.succeed(credential),
+  scope: Effect.succeed(null),
 });
+
+/** At most this many items in one connection's limit. */
+const MAX_SCOPE_ITEMS = 200;
 
 const verified = (
   adapter: IntegrationAdapter,
@@ -148,7 +154,12 @@ export class IntegrationService extends Context.Service<
       userId: string,
       integrationId: string,
       input: Parameters<IntegrationRepo["Service"]["updatePreferences"]>[2],
-    ): Effect.Effect<void, IntegrationNotAvailable>;
+    ): Effect.Effect<void, IntegrationNotAvailable | IntegrationRejected>;
+    /** What a connection can be limited to, from the service as this person sees it. */
+    scopeOptions(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<ReadonlyArray<ScopeOption>, IntegrationNotAvailable | IntegrationRejected>;
     disconnect(userId: string, integrationId: string): Effect.Effect<void>;
     /**
      * A working session as this person, or `IntegrationNotAvailable` when the
@@ -351,6 +362,13 @@ export class IntegrationService extends Context.Service<
           adapter,
           config,
           credential: credentialFor(connection, row, adapter),
+          // Read fresh, so narrowing it applies to an answer already running.
+          // A connection gone meanwhile reaches nothing.
+          scope: findIntegration(integrationId)?.scope
+            ? repo
+                .getConnectionById(connection.id)
+                .pipe(Effect.map((current) => (current ? current.scope : [])))
+            : Effect.succeed(null),
         };
         return session;
       });
@@ -425,15 +443,18 @@ export class IntegrationService extends Context.Service<
             const session = yield* sessionFor(input.userId, entry.integrationId).pipe(
               Effect.option,
             );
-            if (session._tag === "Some")
+            if (session._tag === "Some") {
+              const connection = yield* repo.getConnection(input.userId, entry.integrationId);
               offers.push({
                 integrationId: entry.integrationId,
                 session: session.value,
+                scope: findIntegration(entry.integrationId)?.scope
+                  ? (connection?.scope ?? null)
+                  : null,
                 unattended: entry.unattended,
-                permissions:
-                  (yield* repo.getConnection(input.userId, entry.integrationId))?.toolPermissions ??
-                  {},
+                permissions: connection?.toolPermissions ?? {},
               });
+            }
           }
           return offers;
         }),
@@ -551,6 +572,7 @@ export class IntegrationService extends Context.Service<
                     status: stale ? "needs_reauth" : connection.status,
                     offerByDefault: connection.offerByDefault,
                     toolPermissions: connection.toolPermissions,
+                    scope: connection.scope,
                     createdAt: connection.createdAt.toISOString(),
                   }
                 : null,
@@ -688,9 +710,43 @@ export class IntegrationService extends Context.Service<
 
         updatePreferences: Effect.fn("IntegrationService.updatePreferences")(
           function* (userId, integrationId, input) {
-            const updated = yield* repo.updatePreferences(userId, integrationId, input);
+            let scope = input.scope;
+            if (scope) {
+              if (!findIntegration(integrationId)?.scope)
+                return yield* new IntegrationRejected({
+                  reason: "This integration has no limits.",
+                });
+              // Empty is a choice too: the connection then reaches nothing.
+              scope = [...new Set(scope.map((item) => item.trim()).filter(Boolean))];
+              if (scope.length > MAX_SCOPE_ITEMS)
+                return yield* new IntegrationRejected({
+                  reason: `Pick at most ${MAX_SCOPE_ITEMS}.`,
+                });
+            }
+            const updated = yield* repo.updatePreferences(userId, integrationId, {
+              ...input,
+              ...(scope === undefined ? {} : { scope }),
+            });
             if (!updated) return yield* new IntegrationNotAvailable({ integrationId });
             yield* changed(userId);
+          },
+        ),
+
+        scopeOptions: Effect.fn("IntegrationService.scopeOptions")(
+          function* (userId, integrationId) {
+            const session = yield* sessionFor(userId, integrationId);
+            if (!session.adapter.scopeOptions)
+              return yield* new IntegrationRejected({ reason: "This integration has no limits." });
+            return yield* session.adapter.scopeOptions(session).pipe(
+              Effect.catchTags({
+                IntegrationAuthFailed: () =>
+                  Effect.fail(
+                    new IntegrationRejected({ reason: "The saved sign-in no longer works." }),
+                  ),
+                IntegrationRequestFailed: (error) =>
+                  Effect.fail(new IntegrationRejected({ reason: error.message })),
+              }),
+            );
           },
         ),
 

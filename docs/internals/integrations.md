@@ -55,6 +55,17 @@ route for services we will not write an adapter for.
   values. Adapters receive a `Credential` (an OAuth access token or those values) and alone
   decide how the service wants it sent. A stored document this version cannot decode reads
   as `needs_reauth`, so changing the stored shape costs a reconnect, never a crash.
+- A manifest may declare a `scope` (Jira: projects), and a person may limit their
+  connection to some of its items. The limit is stored as the choice plus the items: null is
+  everything, and an empty list is a limit that reaches nothing, so a selected project
+  deleted later narrows the connection instead of widening it back to all. Every chat, agent and schedule using the connection
+  stays inside it; agents and schedules cannot narrow it further yet. Only the adapter knows
+  where a call lands, so the work is split: reads are narrowed by the adapter (a filter in
+  the query, then a filter on what comes back, so a query that escapes its parentheses still
+  returns nothing), and every prepared change names the items it touches, read from the
+  service, which the tool layer checks against the limit before approval and again after
+  the wait. A change that names nothing is refused, so a forgotten declaration fails closed.
+  The session reads the limit per call, so narrowing it applies to an answer already running.
 - The adapter's config fingerprint (Outline: the normalized base URL) is stored with each
   connection. A different fingerprint reads as `needs_reauth`, and saving a new one marks
   every connection so, since the credentials name another server.

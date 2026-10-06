@@ -38,5 +38,6 @@ export const outlineManifest = {
   },
   tools: OUTLINE_TOOLS,
   allowances: [],
+  scope: null,
   knowledgeSource: true,
 } satisfies IntegrationManifest;

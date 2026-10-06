@@ -23,6 +23,7 @@ import type { UserIntegration } from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
 import { ApiKeyDialog, ConnectActions, SignInButton } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
+import { IntegrationScopeSection } from "./integration-scope.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
 function StatusBadge({ integration }: { integration: UserIntegration }) {
@@ -114,6 +115,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
           {usable ? <DefaultRow integration={integration} /> : null}
         </ListCard>
       </Section>
+      {usable && manifest.scope ? <ScopeSection integration={integration} /> : null}
       {usable ? (
         <Section
           title="Tool permissions"
@@ -139,6 +141,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
 type ConnectionChanges = {
   offerByDefault?: boolean;
   toolPermissions?: Record<string, ToolPermission>;
+  scope?: string[] | null;
 };
 
 // Optimistic, so a click changes one control instead of disabling them all
@@ -165,6 +168,7 @@ const useConnectionUpdate = (integrationId: string) => {
                     ? {}
                     : { offerByDefault: input.offerByDefault }),
                   toolPermissions: { ...item.connection.toolPermissions, ...input.toolPermissions },
+                  ...(input.scope === undefined ? {} : { scope: input.scope }),
                 },
               }
             : item,
@@ -296,6 +300,16 @@ function DefaultRow({ integration }: { integration: UserIntegration }) {
         onCheckedChange={(offerByDefault) => update.mutate({ offerByDefault })}
       />
     </ListRow>
+  );
+}
+
+function ScopeSection({ integration }: { integration: UserIntegration }) {
+  const update = useConnectionUpdate(integration.id);
+  return (
+    <IntegrationScopeSection
+      integration={integration}
+      onChange={(scope) => update.mutate({ scope })}
+    />
   );
 }
 

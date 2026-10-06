@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { IntegrationRejected } from "../../errors.ts";
-import { INTEGRATION_LIMITS } from "../../schema.ts";
+import { INTEGRATION_LIMITS, type ScopeOption } from "../../schema.ts";
 import {
   integrationHandlers,
   ready,
@@ -28,7 +28,15 @@ const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivi
 
 const SEARCH_RESULTS = 20;
 const COMMENTS_PER_READ = 20;
-const LIST_FIELDS = ["summary", "status", "issuetype", "priority", "assignee", "updated"];
+const LIST_FIELDS = [
+  "summary",
+  "status",
+  "issuetype",
+  "priority",
+  "assignee",
+  "updated",
+  "project",
+];
 const ISSUE_KEY = /^[A-Z][A-Z0-9_]*-[1-9][0-9]*$/;
 const PROJECT_KEY = /^[A-Z][A-Z0-9_]*$/;
 
@@ -97,6 +105,45 @@ const source = (
   read,
 });
 
+/** Where an issue lives now; its key's prefix only says where it was created. */
+const projectOf = (issue: JiraIssue) => issue.fields.project?.key ?? keyProject(issue.key);
+/** For related issues Jira lists without their project. */
+const keyProject = (key: string) => key.slice(0, key.lastIndexOf("-"));
+const allowed = (scope: ReadonlyArray<string> | null, project: string) =>
+  scope === null || scope.includes(project);
+
+/** A query's condition and its ORDER BY clause, split outside quoted strings. */
+const splitOrder = (jql: string) => {
+  let quote: string | null = null;
+  let at = -1;
+  for (let index = 0; index < jql.length; index++) {
+    const char = jql[index]!;
+    if (quote) {
+      if (char === "\\") index++;
+      else if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (
+      (index === 0 || /[\s)]/.test(jql[index - 1]!)) &&
+      /^order\s+by\b/i.test(jql.slice(index))
+    )
+      at = index;
+  }
+  return at < 0
+    ? { where: jql.trim(), order: "" }
+    : { where: jql.slice(0, at).trim(), order: jql.slice(at).trim() };
+};
+
+/**
+ * The query within a limited connection's projects. Results are filtered
+ * again by where each issue lives, so a query that escapes the parentheses
+ * still returns nothing outside them.
+ */
+const limitQuery = (jql: string, scope: ReadonlyArray<string>) => {
+  const { where, order } = splitOrder(jql);
+  const projects = `project in (${scope.map(jqlString).join(", ")})`;
+  return [where ? `${projects} AND (${where})` : projects, order].filter(Boolean).join(" ");
+};
+
 /** What an approval card says the call is about. */
 const headline = (issue: JiraIssue) => `${issue.key} · ${issue.fields.summary ?? ""}`;
 
@@ -159,25 +206,30 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
           : "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC");
       return ready(
         Effect.gen(function* () {
+          const scope = yield* session.scope;
+          if (scope?.length === 0)
+            return { output: { issues: [], note: "This connection reaches no projects." } };
+          const sent = scope ? limitQuery(jql, scope) : jql;
           const page = yield* jiraCall<{ issues: JiraIssue[]; nextPageToken?: string }>(
             session,
             "POST",
             "/search/jql",
             {
-              jql,
+              jql: sent,
               maxResults: SEARCH_RESULTS,
               fields: LIST_FIELDS,
               ...(text(args.pageToken) ? { nextPageToken: text(args.pageToken) } : {}),
             },
           );
+          const issues = page.issues.filter((issue) => allowed(scope, projectOf(issue)));
           return {
             output: {
-              jql,
-              issues: page.issues.map(brief),
+              jql: sent,
+              issues: issues.map(brief),
               nextPageToken: page.nextPageToken ?? null,
-              ...(page.issues.length ? {} : { note: "No issues matched." }),
+              ...(issues.length ? {} : { note: "No issues matched." }),
             },
-            sources: page.issues.map((issue) =>
+            sources: issues.map((issue) =>
               source(
                 session,
                 issue,
@@ -198,19 +250,26 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
         args.commentsFrom !== undefined && args.commentsFrom > 0
           ? Math.floor(args.commentsFrom)
           : 0;
-      return ready(
-        Effect.gen(function* () {
-          const path = `/issue/${encodeURIComponent(key)}`;
-          const [issue, comments, transitions] = yield* Effect.all(
+      const path = `/issue/${encodeURIComponent(key)}`;
+      // Read now, so a limited connection is checked against its project.
+      const issue = yield* jiraCall<JiraIssue>(
+        session,
+        "GET",
+        jiraPath(path, {
+          fields:
+            "summary,description,status,issuetype,priority,assignee,reporter,labels,created,updated,duedate,resolution,project,parent,subtasks,issuelinks",
+        }),
+      );
+      return {
+        summary: headline(issue),
+        reach: null,
+        scope: [projectOf(issue)],
+        execute: Effect.gen(function* () {
+          const scope = yield* session.scope;
+          // Related issues elsewhere stay out of a limited connection's view.
+          const visible = (related: JiraLinkedIssue) => allowed(scope, keyProject(related.key));
+          const [comments, transitions] = yield* Effect.all(
             [
-              jiraCall<JiraIssue>(
-                session,
-                "GET",
-                jiraPath(path, {
-                  fields:
-                    "summary,description,status,issuetype,priority,assignee,reporter,labels,created,updated,duedate,resolution,project,parent,subtasks,issuelinks",
-                }),
-              ),
               jiraCall<{ comments: JiraComment[]; total: number }>(
                 session,
                 "GET",
@@ -241,9 +300,17 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
               created: issue.fields.created ?? null,
               due: issue.fields.duedate ?? null,
               resolution: issue.fields.resolution?.name ?? null,
-              parent: issue.fields.parent ? linked(issue.fields.parent) : null,
-              subtasks: (issue.fields.subtasks ?? []).map(linked),
-              links: (issue.fields.issuelinks ?? []).map(linkLine).filter(Boolean),
+              parent:
+                issue.fields.parent && visible(issue.fields.parent)
+                  ? linked(issue.fields.parent)
+                  : null,
+              subtasks: (issue.fields.subtasks ?? []).filter(visible).map(linked),
+              links: (issue.fields.issuelinks ?? [])
+                .filter((link) => {
+                  const other = link.outwardIssue ?? link.inwardIssue;
+                  return other !== undefined && visible(other);
+                })
+                .map(linkLine),
               transitions: transitions.transitions.map((transition) =>
                 transition.to?.name && transition.to.name !== transition.name
                   ? `${transition.name} (to ${transition.to.name})`
@@ -264,7 +331,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
             sources: [source(session, issue, description, true)],
           };
         }),
-      );
+      };
     }),
 
   list_projects: (session, args) =>
@@ -290,15 +357,18 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
               expand: "issueTypes",
             }),
           );
+          const scope = yield* session.scope;
           return {
             output: {
-              projects: page.values.map((project) => ({
-                key: project.key,
-                name: project.name,
-                issueTypes: (project.issueTypes ?? []).map((type) =>
-                  type.subtask ? `${type.name} (subtask)` : type.name,
-                ),
-              })),
+              projects: page.values
+                .filter((project) => allowed(scope, project.key))
+                .map((project) => ({
+                  key: project.key,
+                  name: project.name,
+                  issueTypes: (project.issueTypes ?? []).map((type) =>
+                    type.subtask ? `${type.name} (subtask)` : type.name,
+                  ),
+                })),
               nextStartAt: page.isLast === false ? startAt + page.values.length : null,
             },
           };
@@ -316,7 +386,10 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       if (!type) return yield* reject("Pass `type`, an issue type name such as Task.");
       if (!summary) return yield* reject("Pass `summary`.");
       const labels = yield* labelList(args.labels);
-      const parent = args.parent === undefined ? null : yield* issueKey(args.parent, "parent");
+      const parent =
+        args.parent === undefined
+          ? null
+          : yield* loadIssue(session, yield* issueKey(args.parent, "parent"));
       const query = text(args.assignee);
       // Resolved before approval, so the card names the person, not the guess.
       const person = query ? yield* assignee(session, query, { project }) : null;
@@ -324,6 +397,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       return {
         summary: `${project} · “${summary}”${person ? ` → ${person.name}` : ""}`,
         reach: null,
+        scope: parent ? [project, projectOf(parent)] : [project],
         execute: jiraCall<{ key: string }>(session, "POST", "/issue", {
           fields: {
             project: { key: project },
@@ -332,7 +406,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
             ...(text(args.description) ? { description: markdownToAdf(args.description!) } : {}),
             ...(labels ? { labels } : {}),
             ...(priority ? { priority: { name: priority } } : {}),
-            ...(parent ? { parent: { key: parent } } : {}),
+            ...(parent ? { parent: { key: parent.key } } : {}),
             ...(person ? { assignee: { accountId: person.accountId } } : {}),
           },
         }).pipe(
@@ -368,6 +442,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       return {
         summary: `${headline(issue)}: ${changed.join(", ")}`,
         reach: null,
+        scope: [projectOf(issue)],
         execute: jiraCall<unknown>(session, "PUT", `/issue/${encodeURIComponent(key)}`, {
           fields,
         }).pipe(
@@ -413,6 +488,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
           first.fields.summary ?? ""
         }`,
         reach: null,
+        scope: [projectOf(first), projectOf(second)],
         // Jira's REST names run opposite to its wording: the issue sent as
         // `inwardIssue` is the one shown with the outward words.
         execute: jiraCall<unknown>(session, "POST", "/issueLink", {
@@ -437,6 +513,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       return {
         summary: headline(issue),
         reach: null,
+        scope: [projectOf(issue)],
         execute: jiraCall<{ id: string }>(
           session,
           "POST",
@@ -466,6 +543,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       return {
         summary: `${headline(issue)} → ${person.name}`,
         reach: null,
+        scope: [projectOf(issue)],
         execute: jiraCall<unknown>(session, "PUT", `/issue/${encodeURIComponent(key)}/assignee`, {
           accountId: person.accountId,
         }).pipe(
@@ -511,6 +589,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       return {
         summary: `${headline(issue)}: ${issue.fields.status?.name ?? "?"} → ${status}`,
         reach: null,
+        scope: [projectOf(issue)],
         // A comment is added on its own: the transition's screen may not take one.
         execute: jiraCall<unknown>(session, "POST", `${path}/transitions`, {
           transition: { id: chosen.id },
@@ -560,5 +639,33 @@ export const jiraAdapter: IntegrationAdapter = {
       })),
     ),
   handlers,
+  scopeOptions: (session) =>
+    Effect.gen(function* () {
+      const projects: ScopeOption[] = [];
+      // Ten pages is far more projects than a picker can show sensibly.
+      for (let page = 0; page < 10; page++) {
+        const result = yield* jiraCall<{
+          values: Array<{ key: string; name: string }>;
+          isLast?: boolean;
+        }>(
+          session,
+          "GET",
+          jiraPath("/project/search", {
+            startAt: projects.length,
+            maxResults: 50,
+            orderBy: "name",
+          }),
+        );
+        projects.push(
+          ...result.values.map((project) => ({
+            id: project.key,
+            label: project.name,
+            detail: project.key,
+          })),
+        );
+        if (result.isLast !== false || result.values.length === 0) break;
+      }
+      return projects;
+    }),
   knowledge: null,
 };

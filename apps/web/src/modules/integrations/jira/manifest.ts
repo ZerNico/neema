@@ -57,5 +57,6 @@ export const jiraManifest = {
   },
   tools: JIRA_TOOLS,
   allowances: [],
+  scope: { label: "Projects", noun: "project" },
   knowledgeSource: false,
 } satisfies IntegrationManifest;

@@ -90,6 +90,18 @@ export interface IntegrationField {
 }
 
 /**
+ * What a connection can be limited to. The adapter lists the choices and
+ * enforces them: it narrows what reads return, and every change names the
+ * items it touches so the tool layer can refuse one outside the limit.
+ */
+export interface IntegrationScope {
+  /** The settings section: "Projects". */
+  readonly label: string;
+  /** One of them, in a sentence: "project". */
+  readonly noun: string;
+}
+
+/**
  * How an admin registers the OAuth app, shown as numbered steps beside the
  * redirect URI. `values` are things to copy exactly, such as scopes.
  */
@@ -127,6 +139,12 @@ export interface IntegrationManifest {
   } | null;
   readonly tools: ReadonlyArray<IntegrationToolDefinition>;
   readonly allowances: ReadonlyArray<IntegrationAllowance>;
+  /**
+   * Present when a person can limit their connection to some of the
+   * service's containers (Jira projects). Every call then stays inside them,
+   * in chats, agents and schedules alike.
+   */
+  readonly scope: IntegrationScope | null;
   /** Whether a knowledge collection can mirror part of it. */
   readonly knowledgeSource: boolean;
 }
