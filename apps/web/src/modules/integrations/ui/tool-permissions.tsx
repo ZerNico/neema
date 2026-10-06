@@ -48,13 +48,21 @@ export function ToolPermissions({
   /** Only the tools that changed; the server merges them in. */
   onChange: (changes: Record<string, ToolPermission>) => void;
 }) {
-  const tools = findIntegration(integrationId)?.tools ?? [];
+  const manifest = findIntegration(integrationId);
+  const tools = manifest?.tools ?? [];
+  // Their own group, so allowing every change at once never also lets mail go out unasked.
+  const reaching = new Set(manifest?.allowances.flatMap((allowance) => allowance.tools) ?? []);
   const groups = [
     { key: "read", title: "Read-only tools", tools: tools.filter((t) => t.access === "read") },
     {
       key: "write",
       title: "Write and delete tools",
-      tools: tools.filter((t) => t.access !== "read"),
+      tools: tools.filter((t) => t.access !== "read" && !reaching.has(t.name)),
+    },
+    {
+      key: "reach",
+      title: "Tools that contact people",
+      tools: tools.filter((t) => reaching.has(t.name)),
     },
   ].filter((group) => group.tools.length > 0);
 

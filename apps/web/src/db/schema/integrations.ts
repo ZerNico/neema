@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { agents } from "./agents.ts";
 import { user } from "./auth.ts";
-import { conversations } from "./chat.ts";
+import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
 
 /**
@@ -137,4 +137,22 @@ export const agentIntegrations = pgTable(
     primaryKey({ columns: [t.agentId, t.integrationId] }),
     index("agent_integrations_integration_idx").on(t.integrationId),
   ],
+);
+
+/**
+ * How many calls of one answer went out under an allowance, counted before
+ * each is sent. Kept per answer rather than in memory so a resumed answer
+ * cannot start over; a call whose outcome is unknown keeps its count.
+ */
+export const integrationAllowanceUses = pgTable(
+  "integration_allowance_uses",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    allowanceId: text("allowance_id").notNull(),
+    uses: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.integrationId, t.allowanceId] })],
 );

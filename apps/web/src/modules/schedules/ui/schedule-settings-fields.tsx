@@ -2,7 +2,7 @@ import { Cancel01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { toast } from "sonner";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
@@ -17,6 +17,7 @@ import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
+import { ScheduleAllowanceFields } from "./schedule-allowance-fields.tsx";
 import { ScheduleChatField } from "./schedule-chat-field.tsx";
 import { ScheduleTimingFields } from "./schedule-timing-fields.tsx";
 import { withForm } from "~/ui/form/app-form.ts";
@@ -330,43 +331,49 @@ export const ScheduleSettingsFields = withForm({
                   {connected.map((integration) => {
                     const grant = grants.find((entry) => entry.integrationId === integration.id);
                     const value = grant?.access ?? "none";
+                    const rest = grants.filter((entry) => entry.integrationId !== integration.id);
                     return (
-                      <ListRow key={integration.id}>
-                        <IntegrationLogo integrationId={integration.id} variant="tile" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">
-                            {integrationName(integration.id)}
-                          </p>
-                          <p className="text-muted-foreground truncate text-xs">
-                            {integration.connection?.status === "active"
-                              ? integration.connection.accountLabel
-                              : "Not connected: runs will fail until you reconnect."}
-                          </p>
-                        </div>
-                        <ToggleGroup
-                          value={[value]}
-                          onValueChange={(values) => {
-                            const next = values.at(-1);
-                            const rest = grants.filter(
-                              (entry) => entry.integrationId !== integration.id,
-                            );
-                            if (next === "read" || next === "write")
-                              field.handleChange([
-                                ...rest,
-                                { integrationId: integration.id, access: next },
-                              ]);
-                            else if (next === "none") field.handleChange(rest);
-                          }}
-                          variant="outline"
-                          size="sm"
-                          spacing={0}
-                          aria-label={`${integrationName(integration.id)} during runs`}
-                        >
-                          <ToggleGroupItem value="none">Off</ToggleGroupItem>
-                          <ToggleGroupItem value="read">Read</ToggleGroupItem>
-                          <ToggleGroupItem value="write">Read and write</ToggleGroupItem>
-                        </ToggleGroup>
-                      </ListRow>
+                      <Fragment key={integration.id}>
+                        <ListRow>
+                          <IntegrationLogo integrationId={integration.id} variant="tile" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {integrationName(integration.id)}
+                            </p>
+                            <p className="text-muted-foreground truncate text-xs">
+                              {integration.connection?.status === "active"
+                                ? integration.connection.accountLabel
+                                : "Not connected: runs will fail until you reconnect."}
+                            </p>
+                          </div>
+                          <ToggleGroup
+                            value={[value]}
+                            onValueChange={(values) => {
+                              const next = values.at(-1);
+                              if (next === "read" || next === "write")
+                                field.handleChange([
+                                  ...rest,
+                                  { integrationId: integration.id, access: next },
+                                ]);
+                              else if (next === "none") field.handleChange(rest);
+                            }}
+                            variant="outline"
+                            size="sm"
+                            spacing={0}
+                            aria-label={`${integrationName(integration.id)} during runs`}
+                          >
+                            <ToggleGroupItem value="none">Off</ToggleGroupItem>
+                            <ToggleGroupItem value="read">Read</ToggleGroupItem>
+                            <ToggleGroupItem value="write">Read and write</ToggleGroupItem>
+                          </ToggleGroup>
+                        </ListRow>
+                        {grant ? (
+                          <ScheduleAllowanceFields
+                            grant={grant}
+                            onChange={(next) => field.handleChange([...rest, next])}
+                          />
+                        ) : null}
+                      </Fragment>
                     );
                   })}
                 </ListCard>

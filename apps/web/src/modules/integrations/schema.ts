@@ -155,7 +155,10 @@ export interface PendingIntegrationCall {
   messageId: string;
   integrationId: string;
   tool: string;
+  /** The call's own: destructive when it would contact people. */
   access: "read" | "write" | "destructive";
   summary: string | null;
+  /** Everyone the call would contact, exactly as it would send. */
+  targets: ReadonlyArray<string>;
   expiresAt: number;
 }

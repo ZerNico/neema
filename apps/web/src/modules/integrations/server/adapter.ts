@@ -1,4 +1,5 @@
 import type { Effect, Schema } from "effect";
+import type { Reach } from "../consent.ts";
 import type { IntegrationToolDefinition } from "../manifest.ts";
 import type {
   IntegrationAuthFailed,
@@ -42,12 +43,19 @@ export interface AdapterToolResult {
 export interface PreparedCall {
   /** Names the target for an approval card; null keeps the definition's summary. */
   readonly summary: string | null;
+  /**
+   * Whom the call would contact under one of the manifest's allowances, read
+   * from the service where the call names a stored item (a draft), so the
+   * check sees what `execute` sends. Null contacts nobody.
+   */
+  readonly reach: Reach | null;
   readonly execute: Effect.Effect<AdapterToolResult, AdapterFailure>;
 }
 
 /** A call that needs nothing from the service before it runs. */
 export const ready = (execute: Effect.Effect<AdapterToolResult, AdapterFailure>): PreparedCall => ({
   summary: null,
+  reach: null,
   execute,
 });
 

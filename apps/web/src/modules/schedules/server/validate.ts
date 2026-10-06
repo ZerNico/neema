@@ -7,6 +7,9 @@ import {
   knowledgeCollections,
   skills,
 } from "~/db/schema/index.ts";
+import { findIntegration } from "~/modules/integrations/catalog.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import { parseMailbox } from "~/modules/integrations/mailbox.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -22,13 +25,37 @@ export type ValidatedSchedule = Omit<
   "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId" | "integrationGrants"
 > & {
   /** Absent keeps what is saved; see ScheduleSettings. */
-  integrationGrants?: Array<{ integrationId: string; access: "read" | "write" }>;
+  integrationGrants?: IntegrationGrant[];
   endAt: Date | null;
   collectionIds: string[];
   skillIds: string[];
   chatMode: "new" | "same";
   /** Always null in `new` mode, so a stale pick never lingers on the row. */
   chatId: string | null;
+};
+
+/**
+ * A grant with its allowances checked against the manifest: each one exists
+ * for that integration, comes with write access, and names at least one exact
+ * address, stored as the mailbox parser writes it. Returns the reason otherwise.
+ */
+export const normalizeGrant = (grant: IntegrationGrant): IntegrationGrant | string => {
+  const entries = Object.entries(grant.allowances ?? {});
+  if (entries.length === 0) return { integrationId: grant.integrationId, access: grant.access };
+  const manifest = findIntegration(grant.integrationId);
+  if (grant.access !== "write") return "only read-and-write access can let runs contact people";
+  const allowances: Record<string, { targets: string[] }> = {};
+  for (const [id, entry] of entries) {
+    const allowance = manifest?.allowances.find((candidate) => candidate.id === id);
+    if (!allowance) return "unknown integration allowance";
+    const targets = entry.targets.map(parseMailbox);
+    if (targets.some((target) => target === null))
+      return `“${entry.targets[targets.indexOf(null)]}” is not a plain email address`;
+    const unique = [...new Set(targets as string[])];
+    if (unique.length === 0) return `add an address for “${allowance.label}”`;
+    allowances[id] = { targets: unique };
+  }
+  return { integrationId: grant.integrationId, access: grant.access, allowances };
 };
 
 /**
@@ -75,6 +102,9 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
       return yield* new ScheduleRejected({ reason: "selected agent is unavailable" });
   }
   const { integrationGrants, ...fields } = settings;
+  const grants = integrationGrants?.map(normalizeGrant);
+  const invalid = grants?.find((grant) => typeof grant === "string");
+  if (invalid) return yield* new ScheduleRejected({ reason: invalid });
   const validated: ValidatedSchedule = {
     ...fields,
     name: settings.name.trim(),
@@ -83,11 +113,13 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     skillIds: [...new Set(settings.skillIds)],
     chatMode: settings.chatMode ?? "new",
     chatId: settings.chatMode === "same" ? (settings.chatId ?? null) : null,
-    ...(integrationGrants
+    ...(grants
       ? {
           integrationGrants: [
             ...new Map(
-              integrationGrants.map((grant) => [grant.integrationId, { ...grant }]),
+              grants
+                .filter((grant) => typeof grant !== "string")
+                .map((grant) => [grant.integrationId, grant]),
             ).values(),
           ],
         }

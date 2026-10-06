@@ -62,6 +62,7 @@ import { resumeFirstTurn } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { QueueSweepInterval, TemporarySweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 /**
  * One folder the sending machine named, by its real path. The path is the
@@ -432,7 +433,7 @@ export class ChatService extends Context.Service<
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
-      integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
+      integrationGrants?: ReadonlyArray<IntegrationGrant>;
       timeZone: string;
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
     }): Effect.Effect<
@@ -670,7 +671,7 @@ function makeChatService() {
            * A schedule fire's up-front consent. Every other attempt, a retry of
            * a fired answer included, has a person present and passes none.
            */
-          integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
+          integrationGrants?: ReadonlyArray<IntegrationGrant>;
         } & (
           | {
               attempt: "retry";
@@ -1301,7 +1302,7 @@ function makeChatService() {
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
       /** Consent given when the schedule was saved; the fire asks nobody. */
-      integrationGrants?: ReadonlyArray<{ integrationId: string; access: "read" | "write" }>;
+      integrationGrants?: ReadonlyArray<IntegrationGrant>;
       timeZone: string;
       /**
        * A fresh chat, tagged with the schedule and its agent; or an existing

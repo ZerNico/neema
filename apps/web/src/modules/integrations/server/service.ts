@@ -12,6 +12,7 @@ import {
   IntegrationRequestFailed,
 } from "../errors.ts";
 import type { ToolPermission, UnattendedGrant } from "../consent.ts";
+import type { IntegrationGrant } from "../grant.ts";
 import type { AdminIntegration, UserIntegration } from "../schema.ts";
 import type { IntegrationAdapter, IntegrationSession } from "./adapter.ts";
 import { findAdapter } from "./adapters.ts";
@@ -56,11 +57,6 @@ export interface ChatIntegration {
   enabled: boolean;
   /** What `enabled` would be without this chat's own choice. */
   defaultEnabled: boolean;
-}
-
-export interface IntegrationGrant {
-  integrationId: string;
-  access: "read" | "write";
 }
 
 export interface ResolvedOffer {
@@ -187,6 +183,8 @@ export class IntegrationService extends Context.Service<
       integrationId: string,
       input: { enabled?: boolean | null; allowTool?: string },
     ): Effect.Effect<void, IntegrationNotAvailable>;
+    reserveAllowance: IntegrationRepo["Service"]["reserveAllowance"];
+    releaseAllowance: IntegrationRepo["Service"]["releaseAllowance"];
   }
 >()("chat/integrations/IntegrationService") {
   static readonly layer = Layer.effect(
@@ -378,12 +376,22 @@ export class IntegrationService extends Context.Service<
 
       return IntegrationService.of({
         chatIntegrations,
+        reserveAllowance: repo.reserveAllowance,
+        releaseAllowance: repo.releaseAllowance,
 
         resolveOffer: Effect.fn("IntegrationService.resolveOffer")(function* (input) {
           const chosen: Array<{ integrationId: string; unattended: UnattendedGrant }> = input.grants
             ? input.grants.map((grant) => ({
                 integrationId: grant.integrationId,
-                unattended: grant.access,
+                unattended: {
+                  access: grant.access,
+                  allowances: Object.fromEntries(
+                    Object.entries(grant.allowances ?? {}).map(([id, entry]) => [
+                      id,
+                      entry.targets,
+                    ]),
+                  ),
+                },
               }))
             : (yield* chatIntegrations(input.userId, input.conversationId))
                 .filter((entry) => entry.enabled)

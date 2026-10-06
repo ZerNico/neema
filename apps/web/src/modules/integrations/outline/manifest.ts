@@ -27,5 +27,6 @@ export const outlineManifest = {
     helpUrl: (config) => (config.baseUrl ? `${config.baseUrl.replace(/\/+$/, "")}/settings` : null),
   },
   tools: OUTLINE_TOOLS,
+  allowances: [],
   knowledgeSource: true,
 } satisfies IntegrationManifest;

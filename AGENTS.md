@@ -67,9 +67,11 @@ edit the wrong thing.
   `fileInput` and return files; returned ones become attachments of the answer. Workers contain hangs, not authority: code is
   trusted and has the server’s filesystem, environment, network and process access.
 - **integration / connection / source**: an integration is a service the code ships an
-  adapter for (Outline), set up by an admin. A connection is one person's credentials for
-  it, never shared; chats, agents and schedules use the sender's own. A knowledge source
-  mirrors part of an integration into a collection as the collection owner.
+  adapter for (Outline, Outlook), set up by an admin. A connection is one person's
+  credentials for it, never shared; chats, agents and schedules use the sender's own. A
+  knowledge source mirrors part of an integration into a collection as the collection owner.
+  An allowance is a manifest-declared way calls reach people (sending mail, inviting); a
+  schedule grants it for exact addresses only, capped per run.
 - **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
   permission. `ambient` skills are offered automatically; explicit ones are pinned.
 - **memory**: a saved user fact the model may reference or write. One save attempt

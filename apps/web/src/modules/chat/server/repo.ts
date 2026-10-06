@@ -97,6 +97,7 @@ import {
   QuestionUnavailable,
   WorkDesktopRequired,
 } from "../errors.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 export type TurnContent =
   | { content: string; questionResponse?: never }
@@ -141,10 +142,7 @@ export interface GenerationConfig {
   /** Workspace files this turn's send claimed; empty for every other attempt. */
   readonly workspaceFiles?: ReadonlyArray<string>;
   /** A schedule fire's up-front integration consent; null with a person present. */
-  readonly integrationGrants?: ReadonlyArray<{
-    readonly integrationId: string;
-    readonly access: "read" | "write";
-  }> | null;
+  readonly integrationGrants?: ReadonlyArray<IntegrationGrant> | null;
 }
 export interface DraftSummary {
   id: string;

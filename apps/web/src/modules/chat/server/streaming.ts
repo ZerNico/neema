@@ -1287,6 +1287,21 @@ export class StreamEngine extends Context.Service<
                     userId: input.userId,
                     connectionId: session.connectionId,
                   }),
+                allowanceUses: {
+                  reserve: (integrationId, allowance) =>
+                    integrations.reserveAllowance({
+                      messageId: input.messageId,
+                      integrationId,
+                      allowanceId: allowance.id,
+                      cap: allowance.cap,
+                    }),
+                  release: (integrationId, allowance) =>
+                    integrations.releaseAllowance({
+                      messageId: input.messageId,
+                      integrationId,
+                      allowanceId: allowance.id,
+                    }),
+                },
               })
             : undefined;
           let knowledgeContext: PreparedKnowledgeContext | null = null;
@@ -3463,7 +3478,7 @@ export class StreamEngine extends Context.Service<
                           const integrationEntry = integrationTools?.names.get(part.name);
                           if (integrationEntry) {
                             if (isPreliminary) return;
-                            const sources = integrationTools!.takeSources(part.id);
+                            const { sources, access } = integrationTools!.take(part.id);
                             for (const source of sources)
                               sourcesByIndex.set(
                                 source.index,
@@ -3474,7 +3489,8 @@ export class StreamEngine extends Context.Service<
                               integrationId: integrationEntry.integrationId,
                               tool: integrationEntry.tool.name,
                               label: integrationEntry.tool.label,
-                              access: integrationEntry.tool.access,
+                              // A call that reached people is recorded as destructive.
+                              access: access ?? integrationEntry.tool.access,
                               summary: integrationSummaries.get(part.id) ?? null,
                               raw: part.result,
                               isFailure: part.isFailure,

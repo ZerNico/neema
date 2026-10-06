@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { boolean, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { conversations } from "./chat.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 /**
  * A recurring or one-shot prompt the server fires into a conversation: a new
@@ -38,7 +39,7 @@ export const schedules = pgTable(
      * to the model, never waited on.
      */
     integrationGrants: jsonb("integration_grants")
-      .$type<Array<{ integrationId: string; access: "read" | "write" }>>()
+      .$type<IntegrationGrant[]>()
       .notNull()
       .default([]),
     /**

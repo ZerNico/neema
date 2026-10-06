@@ -12,6 +12,7 @@ import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 /**
  * A saved chat configuration: instructions, a preferred model, tool defaults
@@ -204,6 +205,5 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
    * decided before anybody could be asked. Null means a person is present
    * and the chat's own integration choices and approvals apply.
    */
-  integrationGrants:
-    jsonb("integration_grants").$type<Array<{ integrationId: string; access: "read" | "write" }>>(),
+  integrationGrants: jsonb("integration_grants").$type<IntegrationGrant[]>(),
 });

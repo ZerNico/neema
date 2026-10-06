@@ -11,6 +11,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure-classes.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/primitives/card";
 import { cn } from "~/ui/utils";
@@ -128,7 +129,10 @@ function ApprovalCard({
       queryClient.invalidateQueries({ queryKey: pendingIntegrationCallsQuery.queryKey }),
     onError: (error) => toastError("Could not send your answer.", error),
   });
-  const verb = call.access === "read" ? "read" : call.access === "write" ? "change" : "delete";
+  const consequence =
+    call.targets.length > 0
+      ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from your ${name} account.`
+      : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with your ${name} account.`;
   return (
     <Card className="mb-3 gap-0 py-4">
       <CardContent className="flex min-w-0 flex-col gap-3 px-4">
@@ -141,9 +145,16 @@ function ApprovalCard({
         {call.summary ? (
           <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">{call.summary}</p>
         ) : null}
-        <p className="text-muted-foreground text-xs">
-          This will {verb} with your {name} account.
-        </p>
+        {call.targets.length > 0 ? (
+          <ul className="flex flex-wrap gap-1" aria-label="Recipients">
+            {call.targets.map((target) => (
+              <li key={target}>
+                <Badge variant="secondary">{target}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <p className="text-muted-foreground text-xs">{consequence}</p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate("once")}>
             Allow

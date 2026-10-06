@@ -55,6 +55,25 @@ export const summarizeCall = (tool: IntegrationToolDefinition, args: unknown) =>
   return decoded._tag === "Some" ? tool.summarize(decoded.value) : null;
 };
 
+/**
+ * A way some calls reach people beyond the account, such as sending mail.
+ * Such a call counts as destructive whatever its tool declares, so it is
+ * asked about in a chat. A schedule may grant it for named targets only, and
+ * runs at most `cap` such calls per run.
+ */
+export interface IntegrationAllowance {
+  readonly id: string;
+  /** The schedule editor's switch: "Send mail". */
+  readonly label: string;
+  /** What the switch lets runs do, for the schedule editor. */
+  readonly description: string;
+  /** The tools whose calls may reach targets under it. */
+  readonly tools: ReadonlyArray<string>;
+  /** Only email addresses exist so far; each kind brings its own exact parser. */
+  readonly targets: "email";
+  readonly cap: number;
+}
+
 export interface IntegrationAdminField {
   readonly key: string;
   readonly label: string;
@@ -85,6 +104,7 @@ export interface IntegrationManifest {
     readonly helpUrl: (config: Readonly<Record<string, string>>) => string | null;
   } | null;
   readonly tools: ReadonlyArray<IntegrationToolDefinition>;
+  readonly allowances: ReadonlyArray<IntegrationAllowance>;
   /** Whether a knowledge collection can mirror part of it. */
   readonly knowledgeSource: boolean;
 }

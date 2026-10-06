@@ -13,6 +13,7 @@ import {
   knowledgeCollections,
   knowledgeDocuments,
   knowledgeDocumentVersions,
+  messages,
   user,
 } from "~/db/schema/index.ts";
 import { outlineAdapter } from "~/modules/integrations/outline/server/adapter.ts";
@@ -20,6 +21,7 @@ import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { KnowledgeSourceService } from "~/modules/integrations/server/sync.ts";
@@ -69,6 +71,8 @@ const bodies = new Map([
 ]);
 const titles: Record<string, string> = { d1: "Onboarding", d2: "Laptop", d3: "Holidays" };
 const deleted: Record<string, unknown>[] = [];
+// Outline declares no allowances, so nothing here ever reserves one.
+const unlimited = { reserve: () => Effect.succeed(true), release: () => Effect.void };
 const created: Record<string, unknown>[] = [];
 
 const readBody = (request: IncomingMessage) =>
@@ -372,9 +376,7 @@ describe("what a chat is offered", () => {
     await connectKey(userId);
     const conversationId = uuidv7();
     await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
-    const offered = (
-      grants: ReadonlyArray<{ integrationId: string; access: "read" | "write" }> | null,
-    ) =>
+    const offered = (grants: ReadonlyArray<IntegrationGrant> | null) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
           s.resolveOffer({ userId, conversationId, grants }),
@@ -390,7 +392,7 @@ describe("what a chat is offered", () => {
     expect(await offered(null)).toEqual([]);
     // A fire ignores the chat's toggles: its grants are the whole offer.
     expect(await offered([{ integrationId: "outline", access: "read" }])).toEqual([
-      ["outline", "read"],
+      ["outline", { access: "read", allowances: {} }],
     ]);
     expect(await offered([])).toEqual([]);
   });
@@ -493,6 +495,7 @@ describe("approvals", () => {
     tool: "create_document",
     access: "write" as const,
     summary: "“Plan”",
+    targets: [],
   });
   // Waits on the registration itself rather than on time.
   const waitForPending = (userId: string) =>
@@ -554,6 +557,7 @@ describe("approvals", () => {
             rowIdFor: () => Effect.succeed("pending-call"),
             reportAuthFailure: (session) =>
               service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+            allowanceUses: unlimited,
           });
           const handler = prepared?.group.handlers.int_outline__create_document as
             | ((
@@ -599,7 +603,7 @@ describe("prepared calls", () => {
   const offeredHandler = (
     userId: string,
     conversationId: string,
-    grants: ReadonlyArray<{ integrationId: string; access: "read" | "write" }> | null,
+    grants: ReadonlyArray<IntegrationGrant> | null,
     tool: string,
   ) =>
     Effect.gen(function* () {
@@ -618,6 +622,7 @@ describe("prepared calls", () => {
         rowIdFor: () => Effect.succeed("pending-call"),
         reportAuthFailure: (session) =>
           service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+        allowanceUses: unlimited,
       });
       return prepared?.group.handlers[`int_outline__${tool}`] as (
         args: Record<string, unknown>,
@@ -669,6 +674,70 @@ describe("prepared calls", () => {
       error: expect.stringContaining("never delete documents"),
     });
     expect(deleted).toEqual([]);
+  });
+});
+
+describe("allowance uses", () => {
+  const answer = async () => {
+    const userId = await newUser();
+    const conversationId = uuidv7();
+    const messageId = uuidv7();
+    await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
+    await insert((db) =>
+      db.insert(messages).values({
+        id: messageId,
+        conversationId,
+        generationId: uuidv7(),
+        role: "assistant",
+        status: "streaming",
+      }),
+    );
+    return messageId;
+  };
+
+  it("hands out at most the cap, however many calls race for it", async () => {
+    const messageId = await answer();
+    const use = { messageId, integrationId: "outlook", allowanceId: "send" };
+    const taken = await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        Effect.all(
+          Array.from({ length: 8 }, () => repo.reserveAllowance({ ...use, cap: 3 })),
+          { concurrency: "unbounded" },
+        ),
+      ),
+    );
+    expect(taken.filter(Boolean)).toHaveLength(3);
+    // Each allowance and each answer counts on its own.
+    expect(
+      await run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.reserveAllowance({ ...use, allowanceId: "invite", cap: 3 }),
+        ),
+      ),
+    ).toBe(true);
+    const other = await answer();
+    expect(
+      await run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.reserveAllowance({ ...use, messageId: other, cap: 3 }),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("lets a use given back be taken again", async () => {
+    const messageId = await answer();
+    const use = { messageId, integrationId: "outlook", allowanceId: "send" };
+    const again = await run(
+      Effect.gen(function* () {
+        const repo = yield* IntegrationRepo;
+        yield* repo.reserveAllowance({ ...use, cap: 1 });
+        const full = yield* repo.reserveAllowance({ ...use, cap: 1 });
+        yield* repo.releaseAllowance(use);
+        return { full, after: yield* repo.reserveAllowance({ ...use, cap: 1 }) };
+      }),
+    );
+    expect(again).toEqual({ full: false, after: true });
   });
 });
 

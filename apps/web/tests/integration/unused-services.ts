@@ -68,6 +68,8 @@ export const NoIntegrations = Layer.mergeAll(
     resolveOffer: () => Effect.succeed([]),
     permissionsFor: () => Effect.succeed({ permissions: {}, allowedInChat: [] }),
     setConversationIntegration: () => Effect.die("no integrations in these tests"),
+    reserveAllowance: () => Effect.die("no integrations in these tests"),
+    releaseAllowance: () => Effect.die("no integrations in these tests"),
   }),
   Layer.succeed(IntegrationApprovals, {
     request: () => Effect.die("no integrations in these tests"),

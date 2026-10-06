@@ -1,7 +1,7 @@
 # Integrations
 
-An integration lets a person's own account in another service (Outline first) reach chat as
-tools and reach knowledge as a synced source. It is the first feature here that carries real
+An integration lets a person's own account in another service (Outline, Outlook)
+reach chat as tools and reach knowledge as a synced source. It is the first feature here that carries real
 authority into a chat: every call runs as the sender with credentials they supplied. Most of
 the design follows from keeping that authority tied to the person and asking before it
 changes anything.
@@ -10,7 +10,7 @@ changes anything.
 
 Each integration is two halves with one id. The **manifest** (`<id>/manifest.ts`,
 client-safe) is everything a screen needs: name, logo, admin fields, auth methods, the tool
-definitions and whether it can be a knowledge source. Each tool is defined once
+definitions, the allowances and whether it can be a knowledge source. Each tool is defined once
 (`defineIntegrationTool`, in `<id>/tools.ts`): name, title, label, model description,
 access class, parameters and a one-line argument summary. The **adapter**
 (`<id>/server/adapter.ts`) is behaviour: config normalization, OAuth endpoints, `verify`, one
@@ -23,7 +23,9 @@ render from the manifest alone, so a new integration is one manifest and one ada
 
 A handler does not run a call, it **prepares** one: it checks the arguments, reads from the
 service whatever the call will touch, and returns a summary for the approval card with an
-`execute` effect. Approval decides on that prepared call and the same one executes, so what
+`execute` effect, and, for a call that would contact people, its **reach**: the
+allowance it falls under and the exact addresses, read from the service where the call names
+a stored item. Approval decides on that prepared call and the same one executes, so what
 a person approved is what runs, never a second read made after the wait. What a result
 means is stated, not guessed: a source says whether it was read in full, and a write names
 the page it produced as `link`.
@@ -94,8 +96,14 @@ service asking, so a tool added to an adapter later starts safe. A blocked tool 
 of the offer entirely; `consentFor` refuses it too, since Settings can change mid-answer.
 An approval's "Always allow in this chat" records that one tool on
 `conversation_integrations.allowed_tools`; it lifts an ask in that chat and never a block.
-A destructive tool is the exception: only an explicit "allow" in Settings runs it unasked, a
-one-off approval cannot, and a scheduled run never does, whatever it was granted.
+A destructive call is the exception: only an explicit "allow" in Settings runs it unasked, a
+one-off approval cannot, and a scheduled run never does unless an allowance covers it.
+A call with a non-empty reach is destructive whatever its tool declares (`effectiveAccess`),
+because a message that left cannot be taken back: an event without attendees is a plain
+write, the same event inviting people is not. That effective access is what the approval
+card, "Always allow in this chat", the streamed and stored tool row, reload and branch all
+see. Settings lists tools under an allowance as their own group, so allowing every change at
+once does not also let mail go out unasked; allowing that group does.
 Consent is checked both before an approval wait and immediately before execution; an
 approval cannot override a newly blocked or unavailable integration. Execution also resolves
 the current connection and requires the same connection row as the offer. A newly required
@@ -104,8 +112,10 @@ checks availability again, without treating an admin disable as bad credentials.
 
 Cheap checks run before preparing: a blocked tool or a scheduled run without the grant is
 refused without touching the service, and a malformed call is explained without asking
-anyone. `consentFor` returns the reason with a refusal (blocked, beyond the grant,
-destructive while unattended), and the tool layer turns it into what the model reads. The
+anyone. Whom a call reaches is known only once prepared, so `consentFor` decides again with
+the reach. It returns the reason with a refusal (blocked, beyond the grant, destructive while
+unattended, no such allowance, or the addresses outside it), and the tool layer turns it into
+what the model reads, naming the addresses that were refused. The
 approval card shows the prepared summary when the handler gave one, else the definition's
 summary of the arguments: Outline's delete shows the page title and how many nested pages
 go with it, never just the id the model passed. A preparation that fails fails the call, as
@@ -129,6 +139,47 @@ replace the chat's choices entirely and nothing ever waits: anything beyond the 
 refused to the model. The fire first checks every granted connection and ends the run as an
 error when one is gone, the way a lost collection does. A person retrying that answer later
 is present again, so a retry carries no grants.
+
+An integration may declare **allowances** in its manifest: a way some calls reach people,
+the tools that do it, the kind of target and a cap per run. Outlook has two, "Send
+mail" (`send_mail`) and "Invite people" (`create_event` with attendees), kept apart so
+permission to send a report never also lets a run fill calendars. A grant with write access
+may carry, per allowance, a list of exact addresses (at most 20). A scheduled call that
+reaches people runs only when every address it would contact is on that allowance's list;
+otherwise it is refused, never asked. Grant and payload pass through one parser
+(`mailbox.ts`): bare addresses only, display-name forms and lists refused, lowercased, the
+domain in IDNA, no `*`. An address is authorized as written: when it is a distribution list,
+everyone on it is reached, and that is the owner's choice. The owner's own address counts
+like any other.
+
+Checked equals sent. For a saved draft (including replies, whose recipients Outlook fills
+in), preparing reads the draft's To and Cc from the service, not from the model's arguments,
+and refuses a draft with Bcc: Bcc is never sent from here. Executing first writes exactly the
+checked To and Cc back with Bcc emptied, then sends the draft by id, so attachments and
+threading stay and a recipient added in the meantime is dropped. Changing calls on one
+connection run one at a time within an answer, so nothing edits the draft between the two.
+
+The cap is counted in `integration_allowance_uses`, keyed by the answer's message, by one
+insert-or-increment that only succeeds below the cap, taken right before the call goes out.
+Parallel calls in one round cannot overshoot it, and a resumed answer cannot start over. A
+use goes back only when the call certainly sent nothing (the adapter refused it, or the
+service rejected the request with a 4xx other than 408 or 429); a timeout or a server error
+may have sent it, so the use stays spent. Sends are not retried except on 429, which means
+the request was not processed.
+
+## Outlook
+
+Mail and calendar through Microsoft Graph with delegated permissions (`offline_access
+User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite`), OAuth only. It is scoped to
+Outlook on purpose: another Microsoft service such as SharePoint becomes its own
+integration, with its own id, connection, scopes and tool permissions, even though a person
+signs in with the same account. One integration per service keeps what a connection may
+touch, and what disconnecting removes, as narrow as its name. The admin's tenant
+field (default `organizations`) is the connections' fingerprint, so changing it asks
+everyone to reconnect. Graph is a fixed origin and redirects are refused. Entra rotates
+refresh tokens; the refresh path stores whichever one comes back. Times without an offset
+are UTC on the way in, never the server's zone; a list or availability view returns times in
+the zone the model asks for.
 
 ## Knowledge sources
 

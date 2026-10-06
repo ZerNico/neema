@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /** 5-field cron expression; the module's cron.ts validates it parses. */
@@ -34,9 +35,7 @@ export const ScheduleSettings = Schema.Struct({
    * written in chat leaves it out, which keeps what is saved.
    */
   integrationGrants: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({ integrationId: ResourceId, access: Schema.Literals(["read", "write"]) }),
-    ).check(Schema.isMaxLength(10)),
+    Schema.Array(IntegrationGrant).check(Schema.isMaxLength(10)),
   ),
 });
 export type ScheduleSettings = typeof ScheduleSettings.Type;

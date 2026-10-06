@@ -7,6 +7,7 @@ import {
   conversationIntegrations,
   conversations,
   groupMembers,
+  integrationAllowanceUses,
   integrationConfigs,
   integrationConnections,
   integrationGroupGrants,
@@ -56,6 +57,12 @@ export interface SaveConfig {
   /** Absent keeps the stored secret; empty string clears it. */
   readonly oauthClientSecret?: string | undefined;
   readonly allowApiKeys: boolean;
+}
+
+export interface AllowanceUse {
+  messageId: string;
+  integrationId: string;
+  allowanceId: string;
 }
 
 export class IntegrationRepo extends Context.Service<
@@ -121,6 +128,10 @@ export class IntegrationRepo extends Context.Service<
     ): Effect.Effect<boolean>;
     /** The integrations a chat's installed agent attached, or null for plain chat. */
     agentIntegrationIds(conversationId: string): Effect.Effect<ReadonlyArray<string> | null>;
+    /** Takes one use of an allowance for an answer; false once it reached `cap`. */
+    reserveAllowance(input: AllowanceUse & { cap: number }): Effect.Effect<boolean>;
+    /** Gives back a use whose call certainly sent nothing. */
+    releaseAllowance(input: AllowanceUse): Effect.Effect<void>;
   }
 >()("chat/integrations/IntegrationRepo") {
   static readonly layer = Layer.effect(
@@ -458,6 +469,45 @@ export class IntegrationRepo extends Context.Service<
             return rows.map((row) => row.integrationId);
           },
         ),
+
+        // One statement, so parallel calls of an answer cannot both take the last use.
+        reserveAllowance: Effect.fn("IntegrationRepo.reserveAllowance")(function* (input) {
+          if (input.cap < 1) return false;
+          const rows = yield* db
+            .insert(integrationAllowanceUses)
+            .values({
+              messageId: input.messageId,
+              integrationId: input.integrationId,
+              allowanceId: input.allowanceId,
+              uses: 1,
+            })
+            .onConflictDoUpdate({
+              target: [
+                integrationAllowanceUses.messageId,
+                integrationAllowanceUses.integrationId,
+                integrationAllowanceUses.allowanceId,
+              ],
+              set: { uses: sql`${integrationAllowanceUses.uses} + 1` },
+              setWhere: sql`${integrationAllowanceUses.uses} < ${input.cap}`,
+            })
+            .returning({ uses: integrationAllowanceUses.uses })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
+
+        releaseAllowance: Effect.fn("IntegrationRepo.releaseAllowance")(function* (input) {
+          yield* db
+            .update(integrationAllowanceUses)
+            .set({ uses: sql`greatest(${integrationAllowanceUses.uses} - 1, 0)` })
+            .where(
+              and(
+                eq(integrationAllowanceUses.messageId, input.messageId),
+                eq(integrationAllowanceUses.integrationId, input.integrationId),
+                eq(integrationAllowanceUses.allowanceId, input.allowanceId),
+              ),
+            )
+            .pipe(Effect.orDie);
+        }),
       });
     }),
   );

@@ -5,6 +5,7 @@ import { conversations, scheduleRuns, schedules } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 export type ScheduleRow = typeof schedules.$inferSelect;
 type RunRow = typeof scheduleRuns.$inferSelect;
@@ -44,7 +45,7 @@ export class ScheduleRepo extends Context.Service<
         skillIds: string[];
         chatMode: "new" | "same";
         chatId: string | null;
-        integrationGrants?: Array<{ integrationId: string; access: "read" | "write" }>;
+        integrationGrants?: IntegrationGrant[];
         nextFireAt: Date | null;
       },
       tx?: DbTx,
