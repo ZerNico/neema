@@ -1,5 +1,5 @@
 import { and, count, eq, sql, type SQL } from "drizzle-orm";
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   agentIntegrations,
@@ -25,15 +25,22 @@ export type IntegrationConfigRow = typeof integrationConfigs.$inferSelect;
 export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;
 
 /** What a connection stores, encrypted as one JSON document. */
-export type StoredCredentials =
-  | { kind: "api_key"; apiKey: string }
-  | {
-      kind: "oauth";
-      accessToken: string;
-      refreshToken: string | null;
-      /** Epoch milliseconds; null when the service gave no lifetime. */
-      expiresAt: number | null;
-    };
+const StoredCredentials = Schema.Union([
+  /** The manifest's API key fields as `readFields` returned them. */
+  Schema.Struct({
+    kind: Schema.Literal("api_key"),
+    values: Schema.Record(Schema.String, Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("oauth"),
+    accessToken: Schema.String,
+    refreshToken: Schema.NullOr(Schema.String),
+    /** Epoch milliseconds; null when the service gave no lifetime. */
+    expiresAt: Schema.NullOr(Schema.Number),
+  }),
+]);
+export type StoredCredentials = typeof StoredCredentials.Type;
+const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(StoredCredentials));
 
 /**
  * Who may connect: everyone signed in when the audience is the instance,
@@ -106,7 +113,8 @@ export class IntegrationRepo extends Context.Service<
     ): Effect.Effect<IntegrationConnectionRow | null>;
     removeConnection(userId: string, integrationId: string): Effect.Effect<void>;
     markNeedsReauth(connectionId: string): Effect.Effect<void>;
-    decrypt(row: IntegrationConnectionRow): Effect.Effect<StoredCredentials>;
+    /** Null when the stored document is not one this version reads; the person reconnects. */
+    decrypt(row: IntegrationConnectionRow): Effect.Effect<StoredCredentials | null>;
     encrypt(credentials: StoredCredentials): Effect.Effect<string>;
     dependents(
       userId: string,
@@ -143,7 +151,7 @@ export class IntegrationRepo extends Context.Service<
       const decrypt = (row: IntegrationConnectionRow) =>
         cipher
           .decrypt(row.credentialsCiphertext)
-          .pipe(Effect.map((secret) => JSON.parse(Redacted.value(secret)) as StoredCredentials));
+          .pipe(Effect.map((secret) => Option.getOrNull(decodeStored(Redacted.value(secret)))));
 
       return IntegrationRepo.of({
         listConfigs: Effect.fn("IntegrationRepo.listConfigs")(function* () {

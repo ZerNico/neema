@@ -64,7 +64,10 @@ export const SaveIntegrationConfigInput = Schema.Struct({
 
 export const ConnectApiKeyInput = Schema.Struct({
   integrationId: IntegrationId,
-  apiKey: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_000)),
+  /** The manifest's API key fields by key; the service checks them against it. */
+  values: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))).check(
+    Schema.isMaxProperties(10),
+  ),
 });
 
 export const ToolPermission = Schema.Literals(["allow", "ask", "block"]);

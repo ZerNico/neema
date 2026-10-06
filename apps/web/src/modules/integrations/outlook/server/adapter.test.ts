@@ -105,7 +105,7 @@ afterEach(() => {
 
 const session: ConnectedSession = {
   config: { tenant: "organizations" },
-  bearer: Effect.succeed("token"),
+  credential: Effect.succeed({ kind: "oauth", accessToken: "token" }),
   connectionId: "connection",
   adapter: outlookAdapter,
 };

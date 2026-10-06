@@ -74,10 +74,16 @@ export interface IntegrationAllowance {
   readonly cap: number;
 }
 
-export interface IntegrationAdminField {
+/**
+ * One input of a form the manifest declares: the admin's setup, or what a
+ * person pastes to connect without OAuth. The kind picks the control and,
+ * for a person's credential, the check made before the service is asked.
+ */
+export interface IntegrationField {
   readonly key: string;
   readonly label: string;
-  readonly kind: "url" | "text";
+  /** `secret` is never shown again once saved. */
+  readonly kind: "url" | "text" | "email" | "secret";
   readonly placeholder?: string;
   readonly description?: string;
   readonly required: boolean;
@@ -93,13 +99,16 @@ export interface IntegrationManifest {
   readonly name: string;
   readonly description: string;
   readonly logo: ComponentType<ComponentProps<"svg">>;
-  readonly adminFields: ReadonlyArray<IntegrationAdminField>;
+  readonly adminFields: ReadonlyArray<IntegrationField>;
   /** Present when the service can act as an OAuth provider for us. */
   readonly oauth: { readonly setup: string } | null;
-  /** Present when a personal API key can stand in for OAuth. */
+  /**
+   * Present when a person can connect by pasting an API key instead of
+   * OAuth. The fields are everything the service needs with it (some want
+   * the account's email beside the key); the adapter decides how to send them.
+   */
   readonly apiKey: {
-    readonly label: string;
-    readonly placeholder?: string;
+    readonly fields: ReadonlyArray<IntegrationField>;
     /** Where in the service a person creates one, from the admin config. */
     readonly helpUrl: (config: Readonly<Record<string, string>>) => string | null;
   } | null;

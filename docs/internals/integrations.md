@@ -49,6 +49,12 @@ route for services we will not write an adapter for.
 - `integration_connections` is one row per (user, integration). Credentials are one
   `KeyCipher` JSON document and never leave the server, tool rows or logs. A connection is
   never shared: an agent or schedule reaches only the sender's own.
+- An API key is whatever the manifest's `apiKey.fields` declare, not one string: some
+  services want the account's email beside the token. `readFields` checks the values by
+  kind and drops undeclared keys before `verify` sees them, and the connection stores those
+  values. Adapters receive a `Credential` (an OAuth access token or those values) and alone
+  decide how the service wants it sent. A stored document this version cannot decode reads
+  as `needs_reauth`, so changing the stored shape costs a reconnect, never a crash.
 - The adapter's config fingerprint (Outline: the normalized base URL) is stored with each
   connection. A different fingerprint reads as `needs_reauth`, and saving a new one marks
   every connection so, since the credentials name another server.

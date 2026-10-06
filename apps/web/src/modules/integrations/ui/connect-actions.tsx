@@ -12,12 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
+import { FieldDescription, FieldError, FieldGroup } from "~/ui/primitives/field";
 import { findIntegration } from "../catalog.ts";
 import { connectUrl } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
 import { connectIntegrationApiKey } from "../server/functions.ts";
+import { IntegrationFieldControl } from "./integration-field.tsx";
 
 /**
  * The ways to connect one integration: an API key, OAuth, or both, as the
@@ -90,13 +90,14 @@ export function ApiKeyDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const manifest = findIntegration(integration.id)!;
+  const fields = manifest.apiKey?.fields ?? [];
   const fieldId = useId();
   const queryClient = useQueryClient();
-  const [key, setKey] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const complete = fields.every((field) => !field.required || values[field.key]?.trim());
   const save = useMutation({
-    mutationFn: () =>
-      connectIntegrationApiKey({ data: { integrationId: integration.id, apiKey: key.trim() } }),
+    mutationFn: () => connectIntegrationApiKey({ data: { integrationId: integration.id, values } }),
     onSuccess: async (result) => {
       if (!result.ok) {
         setError(result.error);
@@ -129,43 +130,42 @@ export function ApiKeyDialog({
           onSubmit={(event) => {
             event.preventDefault();
             setError(null);
-            if (key.trim()) save.mutate();
+            if (complete) save.mutate();
           }}
         >
-          <Field>
-            <FieldLabel htmlFor={`${fieldId}-key`}>
-              {manifest.apiKey?.label ?? "API key"}
-            </FieldLabel>
-            <Input
-              id={`${fieldId}-key`}
-              type="password"
-              autoComplete="off"
-              placeholder={manifest.apiKey?.placeholder}
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              disabled={save.isPending}
-            />
-            {integration.apiKeyHelpUrl ? (
-              <FieldDescription>
-                Create one in{" "}
-                <a
-                  href={integration.apiKeyHelpUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-4"
-                >
-                  {manifest.name} settings
-                </a>
-                .
-              </FieldDescription>
-            ) : null}
-          </Field>
+          <FieldGroup>
+            {fields.map((field) => (
+              <IntegrationFieldControl
+                key={field.key}
+                id={`${fieldId}-${field.key}`}
+                field={field}
+                value={values[field.key] ?? ""}
+                onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
+                disabled={save.isPending}
+              >
+                {field.kind === "secret" && integration.apiKeyHelpUrl ? (
+                  <FieldDescription>
+                    Create one in{" "}
+                    <a
+                      href={integration.apiKeyHelpUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline underline-offset-4"
+                    >
+                      {manifest.name} settings
+                    </a>
+                    .
+                  </FieldDescription>
+                ) : null}
+              </IntegrationFieldControl>
+            ))}
+          </FieldGroup>
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel
             </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!key.trim()}>
+            <PendingButton type="submit" pending={save.isPending} disabled={!complete}>
               Connect
             </PendingButton>
           </DialogFooter>

@@ -10,10 +10,19 @@ import type { BrowseNode, SourceRoot } from "../schema.ts";
 
 export type AdapterFailure = IntegrationAuthFailed | IntegrationRequestFailed | IntegrationRejected;
 
-/** What a handler gets: the admin's config and a fresh bearer on demand. */
+/**
+ * How a person connected: a fresh OAuth access token, or the values of the
+ * manifest's API key fields as they were checked. Only the adapter knows how
+ * the service wants either sent.
+ */
+export type Credential =
+  | { readonly kind: "oauth"; readonly accessToken: string }
+  | { readonly kind: "api_key"; readonly values: Readonly<Record<string, string>> };
+
+/** What a handler gets: the admin's config and a usable credential on demand. */
 export interface IntegrationSession {
   readonly config: Readonly<Record<string, string>>;
-  readonly bearer: Effect.Effect<string, IntegrationAuthFailed | IntegrationRequestFailed>;
+  readonly credential: Effect.Effect<Credential, IntegrationAuthFailed | IntegrationRequestFailed>;
 }
 
 /** A citable item a tool returned; the tool layer numbers it. */

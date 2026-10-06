@@ -24,6 +24,7 @@ import { findIntegration } from "../catalog.ts";
 import { adminIntegrationsQuery } from "../client/queries.ts";
 import type { AdminIntegration } from "../schema.ts";
 import { saveIntegrationConfig } from "../server/functions.ts";
+import { IntegrationFieldControl } from "./integration-field.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
 
 type AdminRow = AdminIntegration & { redirectUri: string | null };
@@ -187,24 +188,14 @@ function IntegrationConfigDialog({
               </FieldDescription>
             </Field>
             {manifest.adminFields.map((field) => (
-              <Field key={field.key}>
-                <FieldLabel htmlFor={`${fieldId}-${field.key}`}>
-                  {field.label} {field.required ? null : <OptionalMark />}
-                </FieldLabel>
-                <Input
-                  id={`${fieldId}-${field.key}`}
-                  type={field.kind === "url" ? "url" : "text"}
-                  value={config[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  onChange={(event) =>
-                    setConfig((current) => ({ ...current, [field.key]: event.target.value }))
-                  }
-                  disabled={save.isPending}
-                />
-                {field.description ? (
-                  <FieldDescription>{field.description}</FieldDescription>
-                ) : null}
-              </Field>
+              <IntegrationFieldControl
+                key={field.key}
+                id={`${fieldId}-${field.key}`}
+                field={field}
+                value={config[field.key] ?? ""}
+                onChange={(value) => setConfig((current) => ({ ...current, [field.key]: value }))}
+                disabled={save.isPending}
+              />
             ))}
             {manifest.oauth ? (
               <>

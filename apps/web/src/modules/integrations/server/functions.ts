@@ -92,7 +92,7 @@ export const connectIntegrationApiKey = createServerFn({ method: "POST" })
     runtime.runPromise(
       outcome(
         IntegrationService.use((service) =>
-          service.connectApiKey(context.session.user.id, data.integrationId, data.apiKey),
+          service.connectApiKey(context.session.user.id, data.integrationId, data.values),
         ),
       ),
     ),

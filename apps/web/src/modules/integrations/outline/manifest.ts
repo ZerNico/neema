@@ -22,8 +22,9 @@ export const outlineManifest = {
       "In Outline, open Settings → Applications, create an application with this redirect URI, and paste its client ID and secret here.",
   },
   apiKey: {
-    label: "API key",
-    placeholder: "ol_api_…",
+    fields: [
+      { key: "key", label: "API key", kind: "secret", placeholder: "ol_api_…", required: true },
+    ],
     helpUrl: (config) => (config.baseUrl ? `${config.baseUrl.replace(/\/+$/, "")}/settings` : null),
   },
   tools: OUTLINE_TOOLS,

@@ -86,7 +86,11 @@ export const graphCall = <A>(
   options: { body?: unknown; headers?: Record<string, string> } = {},
 ): Effect.Effect<A, IntegrationAuthFailed | IntegrationRequestFailed> =>
   Effect.gen(function* () {
-    const token = yield* session.bearer;
+    const credential = yield* session.credential;
+    // The manifest offers no API key; Graph only takes OAuth tokens.
+    if (credential.kind !== "oauth")
+      return yield* new IntegrationAuthFailed({ integrationId: "outlook" });
+    const token = credential.accessToken;
     const once = Effect.tryPromise({
       try: (signal) =>
         fetch(`${GRAPH}${path}`, {

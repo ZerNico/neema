@@ -35,6 +35,7 @@ process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
 
 type Services =
   | Db
+  | KeyCipher
   | IntegrationRepo
   | IntegrationService
   | IntegrationApprovals
@@ -204,7 +205,11 @@ const configure = () =>
   );
 
 const connectKey = (userId: string) =>
-  run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(userId, "outline", "ol_api_good")));
+  run(
+    Effect.flatMap(IntegrationService, (s) =>
+      s.connectApiKey(userId, "outline", { key: "ol_api_good" }),
+    ),
+  );
 
 const insert = <A>(f: (db: Db["Service"]) => Effect.Effect<A, unknown>) =>
   run(Effect.flatMap(Db, f));
@@ -238,9 +243,20 @@ describe("connections", () => {
   it("verifies an API key with the service before storing it, encrypted", async () => {
     const userId = await newUser();
     const refused = await runtime.runPromiseExit(
-      Effect.flatMap(IntegrationService, (s) => s.connectApiKey(userId, "outline", "ol_api_bad")),
+      Effect.flatMap(IntegrationService, (s) =>
+        s.connectApiKey(userId, "outline", { key: "ol_api_bad" }),
+      ),
     );
     expect(Exit.isFailure(refused)).toBe(true);
+    // A missing field is refused by the manifest's form before the service is asked.
+    const calls = apiCalls.length;
+    const empty = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        Effect.flip(s.connectApiKey(userId, "outline", { other: "x" })),
+      ),
+    );
+    expect(empty).toMatchObject({ reason: "Enter the API key." });
+    expect(apiCalls.length).toBe(calls);
 
     await connectKey(userId);
     const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
@@ -334,11 +350,11 @@ describe("connections", () => {
     );
     const tokens = await run(
       Effect.all(
-        Array.from({ length: 5 }, () => session.bearer),
+        Array.from({ length: 5 }, () => session.credential),
         { concurrency: "unbounded" },
       ),
     );
-    expect(new Set(tokens)).toEqual(new Set(["a2"]));
+    expect(tokens).toEqual(Array.from({ length: 5 }, () => ({ kind: "oauth", accessToken: "a2" })));
     expect(tokenCalls.slice(before)).toEqual(["refresh_token"]);
   });
 
@@ -364,7 +380,30 @@ describe("connections", () => {
     const session = await run(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
-    expect(Exit.isFailure(await runtime.runPromiseExit(session.bearer))).toBe(true);
+    expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
+    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    expect(mine?.connection?.status).toBe("needs_reauth");
+  });
+
+  it("asks for reconnecting when the stored credential is not one it reads", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    // A document in a shape this version no longer writes.
+    await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const cipher = yield* KeyCipher;
+        const ciphertext = yield* cipher.encrypt(JSON.stringify({ kind: "api_key", apiKey: "x" }));
+        yield* db
+          .update(integrationConnections)
+          .set({ credentialsCiphertext: ciphertext })
+          .where(eq(integrationConnections.userId, userId));
+      }),
+    );
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
     const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
     expect(mine?.connection?.status).toBe("needs_reauth");
   });
@@ -474,7 +513,13 @@ describe("chat tools", () => {
 
   it("names what a delete will take before asking, and only ever trashes", async () => {
     // Built here: `baseUrl` exists only once the fake server is listening.
-    const target = { config: { baseUrl }, bearer: Effect.succeed("ol_api_good") };
+    const target = {
+      config: { baseUrl },
+      credential: Effect.succeed({
+        kind: "api_key" as const,
+        values: { key: "ol_api_good" },
+      }),
+    };
     // The approval shows the service's title and what goes with it, not the model's id.
     const prepared = await run(deleteTool(target, { id: "d1" }));
     expect(prepared.summary).toBe("“Onboarding” and 1 nested page");

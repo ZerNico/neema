@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
+import { connectIntegrationApiKey } from "../server/functions.ts";
 import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -59,9 +60,20 @@ describe("integration account row", () => {
     expect(await screen.findByRole("menuitem", { name: "Use an API key instead" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Disconnect" })).toBeVisible();
     fireEvent.click(screen.getByRole("menuitem", { name: "Use an API key instead" }));
-    expect(
-      await screen.findByRole("dialog", { name: "Connect Outline with an API key" }),
-    ).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Connect Outline with an API key" });
+    // The manifest's fields are the form, and their values are what is sent.
+    const connect = within(dialog).getByRole("button", { name: "Connect" });
+    expect(connect).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("API key"), {
+      target: { value: "ol_api_x" },
+    });
+    vi.mocked(connectIntegrationApiKey).mockResolvedValue({ ok: true });
+    fireEvent.click(connect);
+    await waitFor(() =>
+      expect(connectIntegrationApiKey).toHaveBeenCalledWith({
+        data: { integrationId: "outline", values: { key: "ol_api_x" } },
+      }),
+    );
   });
 
   it("keeps a working connection's row to its account and a menu", async () => {
