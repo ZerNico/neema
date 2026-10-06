@@ -187,6 +187,25 @@ refresh tokens; the refresh path stores whichever one comes back. Times without 
 are UTC on the way in, never the server's zone; a list or availability view returns times in
 the zone the model asks for.
 
+## Jira
+
+Jira Cloud only (`*.atlassian.net`); Data Center has another API and its own sign-in, so
+it would be its own integration. The admin's site is the fingerprint and pins every request
+to Atlassian, so no address exemption is needed. The two ways in take different routes: an
+OAuth token only works through Atlassian's gateway, `api.atlassian.com/ex/jira/<cloud id>`,
+where the cloud id comes from the token's accessible resources matched to the configured
+site (a person who picked another site at consent is told so); an API token is sent with its
+account's email as Basic auth, straight to the site, and must be one without scopes.
+Descriptions and comments are Atlassian Document Format: the model writes Markdown,
+converted to ADF in the tree Jira validates, and reads ADF back as Markdown.
+
+Names the model gives (a person, a transition, a link wording) are resolved during prepare,
+so an approval names the real person and status and the call runs with ids. Jira's issue
+link endpoint is the reverse of its wording: the issue sent as `inwardIssue` is the one
+shown with the outward words ("A blocks B" sends A as `inwardIssue`). Jira has no
+allowances: its changes stay inside the team's site, and the notifications they cause are
+Jira's own, as with Outline.
+
 ## Knowledge sources
 
 A `knowledge_sources` row mirrors one part of an integration into a collection: its root,

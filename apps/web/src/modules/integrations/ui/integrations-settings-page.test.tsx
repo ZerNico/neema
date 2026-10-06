@@ -42,7 +42,7 @@ const mount = (integration: UserIntegration) => {
   render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
-        <IntegrationSettingsPage integrationId="outline" />
+        <IntegrationSettingsPage integrationId={integration.id} />
       </ConfirmProvider>
     </QueryClientProvider>,
   );
@@ -90,5 +90,25 @@ describe("integration account row", () => {
     expect(screen.getByRole("button", { name: "Use an API key" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign in with Outline" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Account actions" })).not.toBeInTheDocument();
+  });
+
+  it("asks for every field the integration's API key needs", async () => {
+    mount({ ...outline(null), id: "jira" });
+    fireEvent.click(screen.getByRole("button", { name: "Use an API key" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect Jira with an API key" });
+    const connect = within(dialog).getByRole("button", { name: "Connect" });
+    fireEvent.change(within(dialog).getByLabelText("API token"), { target: { value: "t0k" } });
+    // The token alone is not enough for Jira.
+    expect(connect).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Atlassian account email"), {
+      target: { value: "me@acme.test" },
+    });
+    vi.mocked(connectIntegrationApiKey).mockResolvedValue({ ok: true });
+    fireEvent.click(connect);
+    await waitFor(() =>
+      expect(connectIntegrationApiKey).toHaveBeenCalledWith({
+        data: { integrationId: "jira", values: { email: "me@acme.test", token: "t0k" } },
+      }),
+    );
   });
 });

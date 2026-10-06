@@ -67,7 +67,7 @@ edit the wrong thing.
   `fileInput` and return files; returned ones become attachments of the answer. Workers contain hangs, not authority: code is
   trusted and has the server’s filesystem, environment, network and process access.
 - **integration / connection / source**: an integration is a service the code ships an
-  adapter for (Outline, Outlook), set up by an admin. A connection is one person's
+  adapter for (Outline, Outlook, Jira), set up by an admin. A connection is one person's
   credentials for it, never shared; chats, agents and schedules use the sender's own. A
   knowledge source mirrors part of an integration into a collection as the collection owner.
   An allowance is a manifest-declared way calls reach people (sending mail, inviting); a
