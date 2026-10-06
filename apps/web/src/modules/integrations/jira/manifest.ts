@@ -19,8 +19,22 @@ export const jiraManifest = {
     },
   ],
   oauth: {
-    setup:
-      "In the Atlassian developer console (developer.atlassian.com/console/myapps), create an OAuth 2.0 integration. Under Permissions add the Jira API with the scopes read:jira-work, write:jira-work and read:jira-user; under Authorization add this redirect URI; under Distribution turn on sharing so others in your organization can connect. Paste its client ID and secret here.",
+    setup: {
+      console: {
+        label: "Atlassian developer console",
+        url: () => "https://developer.atlassian.com/console/myapps/",
+      },
+      steps: [
+        { text: "Create an OAuth 2.0 integration with Resource-level access." },
+        {
+          text: "Under Permissions, add the Jira API with these scopes:",
+          values: ["read:jira-work", "write:jira-work", "read:jira-user"],
+        },
+        { text: "Under Authorization, add the redirect URI above as its callback URL." },
+        { text: "Under Distribution, turn on sharing so others in your organization can connect." },
+        { text: "Paste the client ID and secret from Settings below." },
+      ],
+    },
   },
   apiKey: {
     fields: [

@@ -26,6 +26,7 @@ import type { AdminIntegration } from "../schema.ts";
 import { saveIntegrationConfig } from "../server/functions.ts";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
+import { OAuthSetupGuide } from "./oauth-setup-guide.tsx";
 
 type AdminRow = AdminIntegration & { redirectUri: string | null };
 
@@ -199,11 +200,13 @@ function IntegrationConfigDialog({
             ))}
             {manifest.oauth ? (
               <>
-                <Field>
-                  <FieldLabel htmlFor={`${fieldId}-redirect`}>Redirect URI</FieldLabel>
-                  <Input id={`${fieldId}-redirect`} readOnly value={redirectUri} />
-                  <FieldDescription>{manifest.oauth.setup}</FieldDescription>
-                </Field>
+                <OAuthSetupGuide
+                  id={`${fieldId}-redirect`}
+                  setup={manifest.oauth.setup}
+                  redirectUri={redirectUri}
+                  config={config}
+                  configured={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
+                />
                 <Field>
                   <FieldLabel htmlFor={`${fieldId}-client`}>
                     OAuth client ID <OptionalMark />

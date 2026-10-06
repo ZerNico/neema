@@ -90,6 +90,19 @@ export interface IntegrationField {
 }
 
 /**
+ * How an admin registers the OAuth app, shown as numbered steps beside the
+ * redirect URI. `values` are things to copy exactly, such as scopes.
+ */
+export interface OAuthSetup {
+  /** Where the app is registered; the first step links to it. */
+  readonly console: {
+    readonly label: string;
+    readonly url: (config: Readonly<Record<string, string>>) => string | null;
+  };
+  readonly steps: ReadonlyArray<{ readonly text: string; readonly values?: ReadonlyArray<string> }>;
+}
+
+/**
  * Everything the client needs to render an integration anywhere: settings,
  * admin, the composer, tool rows, approvals and knowledge sources. Behaviour
  * lives in the server adapter with the same id.
@@ -101,7 +114,7 @@ export interface IntegrationManifest {
   readonly logo: ComponentType<ComponentProps<"svg">>;
   readonly adminFields: ReadonlyArray<IntegrationField>;
   /** Present when the service can act as an OAuth provider for us. */
-  readonly oauth: { readonly setup: string } | null;
+  readonly oauth: { readonly setup: OAuthSetup } | null;
   /**
    * Present when a person can connect by pasting an API key instead of
    * OAuth. The fields are everything the service needs with it (some want

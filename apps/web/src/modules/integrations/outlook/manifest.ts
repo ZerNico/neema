@@ -20,8 +20,30 @@ export const outlookManifest = {
     },
   ],
   oauth: {
-    setup:
-      "In the Microsoft Entra admin center, register an application (App registrations → New registration) with this redirect URI as a Web platform URI. Add the delegated Microsoft Graph permissions offline_access, User.Read, Mail.ReadWrite, Mail.Send and Calendars.ReadWrite, create a client secret under Certificates & secrets, and paste the application (client) ID and the secret's value here.",
+    setup: {
+      console: {
+        label: "Microsoft Entra admin center",
+        url: () =>
+          "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+      },
+      steps: [
+        {
+          text: "Under App registrations, register an application with the redirect URI above as a Web redirect URI.",
+        },
+        {
+          text: "Under API permissions, add these delegated Microsoft Graph permissions:",
+          values: [
+            "offline_access",
+            "User.Read",
+            "Mail.ReadWrite",
+            "Mail.Send",
+            "Calendars.ReadWrite",
+          ],
+        },
+        { text: "Under Certificates & secrets, create a client secret." },
+        { text: "Paste the application (client) ID and the secret’s value below." },
+      ],
+    },
   },
   apiKey: null,
   tools: OUTLOOK_TOOLS,

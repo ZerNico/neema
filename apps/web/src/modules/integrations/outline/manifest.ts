@@ -18,8 +18,17 @@ export const outlineManifest = {
     },
   ],
   oauth: {
-    setup:
-      "In Outline, open Settings → Applications, create an application with this redirect URI, and paste its client ID and secret here.",
+    setup: {
+      console: {
+        label: "Outline’s application settings",
+        url: (config) =>
+          config.baseUrl ? `${config.baseUrl.replace(/\/+$/, "")}/settings/applications` : null,
+      },
+      steps: [
+        { text: "Create an application with the redirect URI above as its callback URL." },
+        { text: "Paste its client ID and secret below." },
+      ],
+    },
   },
   apiKey: {
     fields: [
