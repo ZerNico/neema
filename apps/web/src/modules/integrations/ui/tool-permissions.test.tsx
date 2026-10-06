@@ -10,7 +10,7 @@ const pressed = (tool: string) =>
 
 describe("tool permissions", () => {
   it("shows reads allowed and changes needing approval when nothing is saved", () => {
-    render(<ToolPermissions integrationId="outline" permissions={{}} onChange={() => {}} />);
+    render(<ToolPermissions kind="outline" permissions={{}} onChange={() => {}} />);
     expect(pressed("Search documents")).toEqual(["Always allow"]);
     expect(pressed("Create documents")).toEqual(["Needs approval"]);
     expect(screen.getByRole("combobox", { name: "Read-only tools permission" })).toHaveTextContent(
@@ -21,7 +21,7 @@ describe("tool permissions", () => {
   it("reads Custom once one tool in a group differs", () => {
     render(
       <ToolPermissions
-        integrationId="outline"
+        kind="outline"
         permissions={{ create_document: "allow" }}
         onChange={() => {}}
       />,
@@ -33,7 +33,7 @@ describe("tool permissions", () => {
 
   it("changes just the one tool clicked", () => {
     const onChange = vi.fn();
-    render(<ToolPermissions integrationId="outline" permissions={{}} onChange={onChange} />);
+    render(<ToolPermissions kind="outline" permissions={{}} onChange={onChange} />);
     fireEvent.click(
       within(screen.getByRole("group", { name: "Update documents permission" })).getByRole(
         "button",

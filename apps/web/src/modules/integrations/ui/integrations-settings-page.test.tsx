@@ -28,6 +28,8 @@ vi.mock("../server/functions.ts", () => ({
 
 const outline = (connection: Partial<UserIntegration["connection"]> | null): UserIntegration => ({
   id: "outline",
+  kind: "outline",
+  name: "Outline",
   available: true,
   methods: { oauth: true, apiKey: true },
   apiKeyHelpUrl: null,
@@ -102,7 +104,7 @@ describe("integration account row", () => {
   });
 
   it("asks for every field the integration's API key needs", async () => {
-    mount({ ...outline(null), id: "jira" });
+    mount({ ...outline(null), id: "jira", kind: "jira", name: "Jira" });
     fireEvent.click(screen.getByRole("button", { name: "Use an API key" }));
     const dialog = await screen.findByRole("dialog", { name: "Connect Jira with an API key" });
     const connect = within(dialog).getByRole("button", { name: "Connect" });
@@ -123,7 +125,7 @@ describe("integration account row", () => {
 
   it("limits a connection to the projects picked", async () => {
     const user = userEvent.setup();
-    mount({ ...outline({}), id: "jira" });
+    mount({ ...outline({}), id: "jira", kind: "jira", name: "Jira" });
     vi.mocked(updateIntegrationConnection).mockResolvedValue({ ok: true });
     expect(screen.getByRole("radio", { name: "All projects" })).toBeChecked();
     await user.click(screen.getByRole("radio", { name: "Only selected projects" }));

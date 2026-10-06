@@ -1,5 +1,5 @@
 import { inlineTagClassName } from "~/ui/inline-tag.ts";
-import { findIntegration } from "../catalog.ts";
+import { useIntegration } from "../client/directory.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
 
 /** An `@Name` integration mention as a tag, in the composer or the sent message. */
@@ -16,7 +16,15 @@ export function IntegrationTag({
   return (
     <span className={inlineTagClassName(tone)}>
       <IntegrationLogo integrationId={integrationId} className="size-3.5" />
-      {findIntegration(integrationId)?.name ?? fallback}
+      {useIntegration(integrationId)?.name ?? fallback}
     </span>
   );
+}
+
+/**
+ * An integration's name by id, as text. Its own component so a view showing
+ * integration sources among others reads the directory only for them.
+ */
+export function IntegrationNameText({ integrationId }: { integrationId: string }) {
+  return useIntegration(integrationId)?.name ?? integrationId;
 }

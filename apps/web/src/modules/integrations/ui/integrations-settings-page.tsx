@@ -17,7 +17,7 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
@@ -37,7 +37,7 @@ function StatusBadge({ integration }: { integration: UserIntegration }) {
 
 export function IntegrationsSettingsPage() {
   const { data } = useSuspenseQuery(myIntegrationsQuery);
-  const listed = data.filter((integration) => findIntegration(integration.id));
+  const listed = data.filter((integration) => findIntegrationType(integration.kind));
   return (
     <Page
       title="Integrations"
@@ -54,7 +54,7 @@ export function IntegrationsSettingsPage() {
       ) : (
         <ListCard>
           {listed.map((integration) => {
-            const manifest = findIntegration(integration.id)!;
+            const manifest = findIntegrationType(integration.kind)!;
             return (
               <Link
                 key={integration.id}
@@ -66,7 +66,7 @@ export function IntegrationsSettingsPage() {
                   <IntegrationLogo integrationId={integration.id} variant="tile" />
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 text-sm font-medium">
-                      {manifest.name}
+                      {integration.name}
                       <StatusBadge integration={integration} />
                     </p>
                     <p className="text-muted-foreground truncate text-xs">{manifest.description}</p>
@@ -89,7 +89,7 @@ export function IntegrationsSettingsPage() {
 export function IntegrationSettingsPage({ integrationId }: { integrationId: string }) {
   const { data } = useSuspenseQuery(myIntegrationsQuery);
   const integration = data.find((item) => item.id === integrationId);
-  const manifest = findIntegration(integrationId);
+  const manifest = integration ? findIntegrationType(integration.kind) : null;
   if (!integration || !manifest)
     return (
       <Page title="Integration" backTo="/settings/integrations" backLabel="Integrations">
@@ -104,7 +104,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
   const usable = connection && integration.available && connection.status === "active";
   return (
     <Page
-      title={manifest.name}
+      title={integration.name}
       description={manifest.description}
       backTo="/settings/integrations"
       backLabel="Integrations"
@@ -191,7 +191,6 @@ const plural = (count: number, noun: string) =>
   count === 0 ? null : `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 function AccountRow({ integration }: { integration: UserIntegration }) {
-  const manifest = findIntegration(integration.id)!;
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const disconnect = useMutation({
@@ -209,7 +208,7 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
   const confirmDisconnect = async () => {
     if (
       await confirm({
-        title: `Disconnect ${manifest.name}?`,
+        title: `Disconnect ${integration.name}?`,
         description: affected.length
           ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
           : "Chats lose its tools until you connect again.",
@@ -237,10 +236,10 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
           {!integration.available
             ? "An admin turned this integration off."
             : needsReauth
-              ? `Sign in to ${manifest.name} again to keep using it.`
+              ? `Sign in to ${integration.name} again to keep using it.`
               : connection
-                ? `Chats use ${manifest.name} as this account.`
-                : `Connect your ${manifest.name} account to use it in chats.`}
+                ? `Chats use ${integration.name} as this account.`
+                : `Connect your ${integration.name} account to use it in chats.`}
         </span>
       </div>
       {canConnect && !connection ? <ConnectActions integration={integration} /> : null}
@@ -317,7 +316,7 @@ function PermissionsEditor({ integration }: { integration: UserIntegration }) {
   const update = useConnectionUpdate(integration.id);
   return (
     <ToolPermissions
-      integrationId={integration.id}
+      kind={integration.kind}
       permissions={integration.connection!.toolPermissions}
       onChange={(toolPermissions) => update.mutate({ toolPermissions })}
     />

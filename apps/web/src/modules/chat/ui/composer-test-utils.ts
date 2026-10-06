@@ -1,6 +1,14 @@
 import { act } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
-import { MENTION_NODE, TAG_NODE, docToText, textToDoc } from "./composer-doc.tsx";
+import { QueryClient } from "@tanstack/react-query";
+import { integrationDirectoryQuery } from "~/modules/integrations/client/directory.ts";
+import {
+  MENTION_NODE,
+  TAG_NODE,
+  docToText,
+  textToDoc,
+  type IntegrationMentionOptions,
+} from "./composer-doc.tsx";
 
 /** Tiptap keeps its editor on the editable element, which is how tests reach it. */
 export const composerEditor = (field: HTMLElement) =>
@@ -27,7 +35,18 @@ export const composerText = (field: HTMLElement) => docToText(composerEditor(fie
 export function setComposerText(field: HTMLElement, text: string) {
   act(() => {
     const editor = composerEditor(field);
-    editor.chain().focus().setContent(textToDoc(text), { emitUpdate: true }).focus("end").run();
+    // The names the composer itself would turn into tags.
+    const mention = editor.extensionManager.extensions.find(
+      (extension) => extension.name === MENTION_NODE,
+    );
+    const integrations =
+      (mention?.options as IntegrationMentionOptions | undefined)?.integrations() ?? [];
+    editor
+      .chain()
+      .focus()
+      .setContent(textToDoc(text, integrations), { emitUpdate: true })
+      .focus("end")
+      .run();
   });
 }
 
@@ -53,4 +72,16 @@ export function setComposerCaret(field: HTMLElement, offset: number) {
     // Position 1 is the start of the first paragraph.
     composerEditor(field).commands.setTextSelection(offset + 1);
   });
+}
+
+/**
+ * A query client that already knows this server's integrations, as the app's
+ * does once loaded, so a tag can draw its logo and name without a request.
+ */
+export function clientWithIntegrations() {
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  client.setQueryData(integrationDirectoryQuery.queryKey, [
+    { id: "outline", kind: "outline", name: "Outline" },
+  ]);
+  return client;
 }

@@ -1,4 +1,4 @@
-import { splitIntegrationMentions } from "~/modules/integrations/mentions.ts";
+import { splitIntegrationMentions, type Mentionable } from "~/modules/integrations/mentions.ts";
 
 /**
  * A skill or collection picked into a message. Like an agent reference
@@ -56,11 +56,11 @@ export type MessageSegment =
  * collection links and `@Integration` mentions. `start` is each segment's
  * offset, unique, so it doubles as a key; joining the texts gives the input back.
  */
-export function splitMessageTags(text: string): MessageSegment[] {
+export function splitMessageTags(text: string, integrations: Mentionable): MessageSegment[] {
   const segments: MessageSegment[] = [];
   const plain = (from: number, to: number) => {
     if (to <= from) return;
-    for (const segment of splitIntegrationMentions(text.slice(from, to)))
+    for (const segment of splitIntegrationMentions(text.slice(from, to), integrations))
       segments.push(
         segment.kind === "mention"
           ? {

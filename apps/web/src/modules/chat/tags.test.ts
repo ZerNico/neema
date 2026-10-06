@@ -26,7 +26,7 @@ describe("message tags", () => {
 
   it("splits tags and @integration mentions out of the text and joins back", () => {
     const text = `Ask @Outline about ${tagMarkup(contracts)}, then ${tagMarkup(review)}.`;
-    const segments = splitMessageTags(text);
+    const segments = splitMessageTags(text, [{ id: "outline", name: "Outline" }]);
     expect(segments.map((segment) => segment.kind)).toEqual([
       "text",
       "integration",

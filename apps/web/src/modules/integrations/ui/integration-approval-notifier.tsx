@@ -3,7 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { pendingIntegrationCallsQuery } from "../client/queries.ts";
-import { integrationName } from "./integration-name.ts";
+import { useIntegrationDirectory } from "../client/directory.ts";
 
 /**
  * Announces a waiting integration call once when its chat is not on screen.
@@ -15,6 +15,7 @@ export function IntegrationApprovalNotifier() {
   const navigate = useNavigate();
   const path = useRouterState({ select: (state) => state.location.pathname });
   const announced = useRef(new Map<string, string | number>());
+  const { name } = useIntegrationDirectory();
 
   useEffect(() => {
     const waiting = new Set((data ?? []).map((call) => call.callId));
@@ -31,7 +32,7 @@ export function IntegrationApprovalNotifier() {
         continue;
       }
       if (shown !== undefined) continue;
-      const id = toast(`${integrationName(call.integrationId)} is waiting for your approval.`, {
+      const id = toast(`${name(call.integrationId)} is waiting for your approval.`, {
         duration: Infinity,
         action: {
           label: "Review",
@@ -44,7 +45,7 @@ export function IntegrationApprovalNotifier() {
       });
       announced.current.set(call.callId, id);
     }
-  }, [data, path, navigate]);
+  }, [data, path, navigate, name]);
 
   return null;
 }

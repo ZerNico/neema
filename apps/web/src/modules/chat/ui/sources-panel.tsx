@@ -5,7 +5,7 @@ import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/use-document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
+import { IntegrationNameText } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { Favicon } from "./favicon.tsx";
 import { hostOf } from "./host-of.ts";
 
@@ -26,9 +26,11 @@ function SourceRow({ source }: { source: ToolSource }) {
             <Favicon url={source.url} className="size-4" />
           )}
           <span className="text-muted-foreground min-w-0 truncate text-xs">
-            {source.kind === "integration"
-              ? integrationName(source.integrationId)
-              : hostOf(source.url)}
+            {source.kind === "integration" ? (
+              <IntegrationNameText integrationId={source.integrationId} />
+            ) : (
+              hostOf(source.url)
+            )}
           </span>
         </div>
         <p className="group-hover:text-primary text-sm leading-snug font-medium transition-colors">

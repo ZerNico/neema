@@ -7,6 +7,7 @@ import {
   ConnectApiKeyInput,
   ConversationIntegrationInput,
   DecideIntegrationCallInput,
+  CreateIntegrationInput,
   IntegrationIdInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
@@ -55,6 +56,34 @@ export const listAdminIntegrations = createServerFn({ method: "GET" })
     };
   });
 
+/** Every integration's id, type and name, so any stored reference can be named and drawn. */
+export const listIntegrationDirectory = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(() => runtime.runPromise(IntegrationService.use((service) => service.directory())));
+
+export const createIntegration = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(CreateIntegrationInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      IntegrationService.use((service) =>
+        service.createIntegration({ kind: data.kind, name: data.name }),
+      ).pipe(
+        Effect.map((created) => ({ ok: true as const, id: created.id })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const deleteIntegration = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ data }) =>
+    runtime.runPromise(
+      outcome(IntegrationService.use((service) => service.deleteIntegration(data.integrationId))),
+    ),
+  );
+
 export const saveIntegrationConfig = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SaveIntegrationConfigInput))
@@ -64,6 +93,7 @@ export const saveIntegrationConfig = createServerFn({ method: "POST" })
         IntegrationService.use((service) =>
           service.saveConfig({
             id: data.integrationId,
+            name: data.name,
             enabled: data.enabled,
             config: data.config,
             oauthClientId: data.oauthClientId,

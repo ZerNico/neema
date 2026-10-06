@@ -3,7 +3,7 @@ import { JiraLogo } from "./logo.tsx";
 import { JIRA_TOOLS } from "./tools.ts";
 
 export const jiraManifest = {
-  id: "jira",
+  kind: "jira",
   name: "Jira",
   description:
     "Search and read Jira issues, create and edit them, comment, assign and move them along.",

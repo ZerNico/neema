@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { integrationConnections, verification } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import { findIntegration, INTEGRATIONS } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import {
   IntegrationAuthFailed,
   IntegrationNotAvailable,
@@ -16,7 +16,7 @@ import type { IntegrationGrant } from "../grant.ts";
 import type { AdminIntegration, ScopeOption, UserIntegration } from "../schema.ts";
 import { readFields } from "../fields.ts";
 import type { Credential, IntegrationAdapter, IntegrationSession } from "./adapter.ts";
-import { findAdapter } from "./adapters.ts";
+import { findAdapterType } from "./adapters.ts";
 import {
   authorizeUrl,
   callbackPath,
@@ -48,12 +48,16 @@ interface OAuthStateValue {
 
 export interface ConnectedSession extends IntegrationSession {
   readonly connectionId: string;
+  /** Which integration this is: its id, the type it runs on and its name. */
+  readonly integration: { readonly id: string; readonly kind: string; readonly name: string };
   readonly adapter: IntegrationAdapter;
 }
 
 /** One integration as a chat sees it: whether it is on here, and how much it asks. */
 export interface ChatIntegration {
   integrationId: string;
+  kind: string;
+  name: string;
   accountLabel: string;
   enabled: boolean;
   /** What `enabled` would be without this chat's own choice. */
@@ -84,20 +88,22 @@ type RefreshResult =
 const oauthReady = (row: IntegrationConfigRow | null) =>
   Boolean(row?.oauthClientId && row.oauthClientSecretCiphertext);
 
-const toAdmin = (
-  id: string,
-  row: (IntegrationConfigRow & { connectionCount: number }) | null,
-): AdminIntegration => ({
-  id,
-  saved: row !== null,
-  enabled: row?.enabled ?? false,
-  config: row?.config ?? {},
-  oauthClientId: row?.oauthClientId ?? null,
-  oauthSecretConfigured: Boolean(row?.oauthClientSecretCiphertext),
-  allowApiKeys: row?.allowApiKeys ?? true,
-  audience: row?.audience ?? "instance",
-  connectionCount: row?.connectionCount ?? 0,
+const toAdmin = (row: IntegrationConfigRow & { connectionCount: number }): AdminIntegration => ({
+  id: row.id,
+  kind: row.kind,
+  name: row.name,
+  enabled: row.enabled,
+  config: row.config,
+  oauthClientId: row.oauthClientId,
+  oauthSecretConfigured: Boolean(row.oauthClientSecretCiphertext),
+  allowApiKeys: row.allowApiKeys,
+  audience: row.audience,
+  connectionCount: row.connectionCount,
 });
+
+const NAME_MAX = 60;
+
+const byName = <A extends { name: string }>(a: A, b: A) => a.name.localeCompare(b.name);
 
 /** A session for a credential not stored yet, to verify it before saving. */
 const probe = (config: Record<string, string>, credential: Credential): IntegrationSession => ({
@@ -129,6 +135,15 @@ export class IntegrationService extends Context.Service<
   IntegrationService,
   {
     adminList(): Effect.Effect<ReadonlyArray<AdminIntegration>>;
+    /** Every integration's id, type and name, for showing stored references anywhere. */
+    directory(): Effect.Effect<ReadonlyArray<{ id: string; kind: string; name: string }>>;
+    /** A new integration of a shipped type, off until set up. */
+    /** Adds an integration of a type; the server picks its id. */
+    createIntegration(input: {
+      kind: string;
+      name: string;
+    }): Effect.Effect<AdminIntegration, IntegrationRejected>;
+    deleteIntegration(id: string): Effect.Effect<void, IntegrationRejected>;
     saveConfig(
       input: Omit<SaveConfig, "fingerprint">,
     ): Effect.Effect<AdminIntegration, IntegrationRejected>;
@@ -216,15 +231,21 @@ export class IntegrationService extends Context.Service<
           .publish(userId, { type: "integrations.changed" })
           .pipe(Effect.catchCause(() => Effect.void));
 
-      /** The adapter plus normalized config, or why it cannot be used right now. */
+      /** The integration with its type, adapter and normalized config, or why it cannot be used. */
       const available = Effect.fn(function* (userId: string, integrationId: string) {
-        const adapter = findAdapter(integrationId);
         const row = yield* repo.getConfig(integrationId);
-        if (!adapter || !row?.enabled || !(yield* repo.isUsable(userId, integrationId)))
+        const manifest = row ? findIntegrationType(row.kind) : null;
+        const adapter = row ? findAdapterType(row.kind) : null;
+        if (
+          !row?.enabled ||
+          !manifest ||
+          !adapter ||
+          !(yield* repo.isUsable(userId, integrationId))
+        )
           return yield* new IntegrationNotAvailable({ integrationId });
         const normalized = adapter.normalizeConfig(row.config);
         if ("error" in normalized) return yield* new IntegrationNotAvailable({ integrationId });
-        return { adapter, row, ...normalized };
+        return { manifest, adapter, row, ...normalized };
       });
 
       const refresh = (
@@ -319,8 +340,8 @@ export class IntegrationService extends Context.Service<
         Effect.gen(function* () {
           const current = yield* repo.getConnectionById(connection.id);
           if (!current || current.status !== "active")
-            return yield* new IntegrationAuthFailed({ integrationId: adapter.id });
-          const enabled = yield* available(connection.userId, adapter.id).pipe(
+            return yield* new IntegrationAuthFailed({ integrationId: row.id });
+          const enabled = yield* available(connection.userId, row.id).pipe(
             Effect.orElseSucceed(() => null),
           );
           if (!enabled || current.configFingerprint !== enabled.fingerprint)
@@ -340,7 +361,7 @@ export class IntegrationService extends Context.Service<
           if (result.kind === "credential") return result.credential;
           if (result.kind === "revoked") {
             yield* changed(connection.userId);
-            return yield* new IntegrationAuthFailed({ integrationId: adapter.id });
+            return yield* new IntegrationAuthFailed({ integrationId: row.id });
           }
           return yield* new IntegrationRequestFailed({ status: null, message: result.message });
         });
@@ -349,7 +370,10 @@ export class IntegrationService extends Context.Service<
         userId: string,
         integrationId: string,
       ) {
-        const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
+        const { manifest, adapter, row, config, fingerprint } = yield* available(
+          userId,
+          integrationId,
+        );
         const connection = yield* repo.getConnection(userId, integrationId);
         if (
           !connection ||
@@ -359,12 +383,13 @@ export class IntegrationService extends Context.Service<
           return yield* new IntegrationNotAvailable({ integrationId });
         const session: ConnectedSession = {
           connectionId: connection.id,
+          integration: { id: row.id, kind: row.kind, name: row.name },
           adapter,
           config,
           credential: credentialFor(connection, row, adapter),
           // Read fresh, so narrowing it applies to an answer already running.
           // A connection gone meanwhile reaches nothing.
-          scope: findIntegration(integrationId)?.scope
+          scope: manifest.scope
             ? repo
                 .getConnectionById(connection.id)
                 .pipe(Effect.map((current) => (current ? current.scope : [])))
@@ -376,15 +401,18 @@ export class IntegrationService extends Context.Service<
       /** Connections that work right now, keyed by integration. */
       const usableConnections = Effect.fn(function* (userId: string) {
         const rows = yield* repo.listForUser(userId);
-        const usable = new Map<string, IntegrationConnectionRow>();
+        const usable = new Map<
+          string,
+          { connection: IntegrationConnectionRow; config: IntegrationConfigRow }
+        >();
         for (const row of rows) {
-          const adapter = findAdapter(row.config.id);
+          const adapter = findAdapterType(row.config.kind);
           if (!adapter || !row.config.enabled || !row.usable || !row.connection) continue;
           const normalized = adapter.normalizeConfig(row.config.config);
           if ("error" in normalized) continue;
           if (row.connection.status !== "active") continue;
           if (row.connection.configFingerprint !== normalized.fingerprint) continue;
-          usable.set(row.config.id, row.connection);
+          usable.set(row.config.id, { connection: row.connection, config: row.config });
         }
         return usable;
       });
@@ -397,15 +425,17 @@ export class IntegrationService extends Context.Service<
         const settings = conversationId ? yield* repo.conversationSettings(conversationId) : [];
         const attached = conversationId ? yield* repo.agentIntegrationIds(conversationId) : null;
         const result: ChatIntegration[] = [];
-        for (const manifest of INTEGRATIONS) {
-          const connection = usable.get(manifest.id);
-          if (!connection) continue;
-          const own = settings.find((entry) => entry.integrationId === manifest.id);
+        for (const { connection, config } of [...usable.values()].toSorted((a, b) =>
+          byName(a.config, b.config),
+        )) {
+          const own = settings.find((entry) => entry.integrationId === config.id);
           const defaultEnabled = attached
-            ? attached.includes(manifest.id)
+            ? attached.includes(config.id)
             : connection.offerByDefault;
           result.push({
-            integrationId: manifest.id,
+            integrationId: config.id,
+            kind: config.kind,
+            name: config.name,
             accountLabel: connection.accountLabel,
             enabled: own?.enabled ?? defaultEnabled,
             defaultEnabled,
@@ -448,7 +478,7 @@ export class IntegrationService extends Context.Service<
               offers.push({
                 integrationId: entry.integrationId,
                 session: session.value,
-                scope: findIntegration(entry.integrationId)?.scope
+                scope: findIntegrationType(session.value.integration.kind)?.scope
                   ? (connection?.scope ?? null)
                   : null,
                 unattended: entry.unattended,
@@ -473,7 +503,7 @@ export class IntegrationService extends Context.Service<
 
         setConversationIntegration: Effect.fn("IntegrationService.setConversationIntegration")(
           function* (userId, conversationId, integrationId, input) {
-            if (!findIntegration(integrationId))
+            if (!(yield* repo.getConfig(integrationId)))
               return yield* new IntegrationNotAvailable({ integrationId });
             const saved = yield* repo.setConversationSetting(
               userId,
@@ -488,16 +518,58 @@ export class IntegrationService extends Context.Service<
 
         adminList: Effect.fn("IntegrationService.adminList")(function* () {
           const rows = yield* repo.listConfigs();
-          return INTEGRATIONS.map((manifest) =>
-            toAdmin(manifest.id, rows.find((row) => row.id === manifest.id) ?? null),
-          );
+          return rows
+            .filter((row) => findIntegrationType(row.kind))
+            .toSorted(byName)
+            .map(toAdmin);
+        }),
+
+        directory: Effect.fn("IntegrationService.directory")(function* () {
+          const rows = yield* repo.listConfigs();
+          return rows
+            .toSorted(byName)
+            .map((row) => ({ id: row.id, kind: row.kind, name: row.name }));
+        }),
+
+        createIntegration: Effect.fn("IntegrationService.createIntegration")(function* (input) {
+          if (!findIntegrationType(input.kind) || !findAdapterType(input.kind))
+            return yield* new IntegrationRejected({ reason: "Unknown integration type." });
+          const name = input.name.trim();
+          if (!name || name.length > NAME_MAX)
+            return yield* new IntegrationRejected({ reason: "Give it a name." });
+          if (yield* repo.nameTaken(name, null))
+            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+          const id = yield* repo.createConfig({ kind: input.kind, name });
+          if (!id) return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+          yield* bus
+            .publishGlobal({ type: "integrations.changed" })
+            .pipe(Effect.catchCause(() => Effect.void));
+          const created = (yield* repo.listConfigs()).find((entry) => entry.id === id);
+          return toAdmin(created!);
+        }),
+
+        deleteIntegration: Effect.fn("IntegrationService.deleteIntegration")(function* (id) {
+          const outcome = yield* repo.deleteConfig(id);
+          if (!outcome.deleted)
+            return yield* new IntegrationRejected({
+              reason: `${outcome.sources} knowledge ${outcome.sources === 1 ? "source mirrors" : "sources mirror"} it. Remove ${outcome.sources === 1 ? "it" : "them"} first.`,
+            });
+          yield* bus
+            .publishGlobal({ type: "integrations.changed" })
+            .pipe(Effect.catchCause(() => Effect.void));
         }),
 
         saveConfig: Effect.fn("IntegrationService.saveConfig")(function* (input) {
-          const manifest = findIntegration(input.id);
-          const adapter = findAdapter(input.id);
-          if (!manifest || !adapter)
+          const stored = yield* repo.getConfig(input.id);
+          const manifest = stored ? findIntegrationType(stored.kind) : null;
+          const adapter = stored ? findAdapterType(stored.kind) : null;
+          if (!stored || !manifest || !adapter)
             return yield* new IntegrationRejected({ reason: "Unknown integration." });
+          const name = input.name.trim();
+          if (!name || name.length > NAME_MAX)
+            return yield* new IntegrationRejected({ reason: "Give it a name." });
+          if (yield* repo.nameTaken(name, input.id))
+            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           const known = new Set(manifest.adminFields.map((field) => field.key));
           const config = Object.fromEntries(
             Object.entries(input.config).filter(([key]) => known.has(key)),
@@ -505,11 +577,10 @@ export class IntegrationService extends Context.Service<
           const normalized = adapter.normalizeConfig(config);
           if ("error" in normalized)
             return yield* new IntegrationRejected({ reason: normalized.error });
-          const stored = yield* repo.getConfig(input.id);
           const clientId = input.oauthClientId?.trim() || null;
           const willHaveSecret =
             input.oauthClientSecret === undefined
-              ? Boolean(stored?.oauthClientSecretCiphertext)
+              ? Boolean(stored.oauthClientSecretCiphertext)
               : input.oauthClientSecret !== "";
           if (clientId && !willHaveSecret && manifest.oauth)
             return yield* new IntegrationRejected({ reason: "Enter the OAuth client secret too." });
@@ -520,24 +591,26 @@ export class IntegrationService extends Context.Service<
             });
           const row = yield* repo.saveConfig({
             ...input,
+            name,
             oauthClientId: clientId,
             config: normalized.config,
             fingerprint: normalized.fingerprint,
           });
+          if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
           yield* bus
             .publishGlobal({ type: "integrations.changed" })
             .pipe(Effect.catchCause(() => Effect.void));
-          const counted = (yield* repo.listConfigs()).find((entry) => entry.id === row.id) ?? null;
-          return toAdmin(row.id, counted);
+          const counted = (yield* repo.listConfigs()).find((entry) => entry.id === row.id);
+          return toAdmin(counted!);
         }),
 
         listForUser: Effect.fn("IntegrationService.listForUser")(function* (userId) {
           const rows = yield* repo.listForUser(userId);
           const result: UserIntegration[] = [];
-          for (const manifest of INTEGRATIONS) {
-            const entry = rows.find((row) => row.config.id === manifest.id);
-            const adapter = findAdapter(manifest.id);
-            if (!entry || !adapter) continue;
+          for (const entry of rows.toSorted((a, b) => byName(a.config, b.config))) {
+            const manifest = findIntegrationType(entry.config.kind);
+            const adapter = findAdapterType(entry.config.kind);
+            if (!manifest || !adapter) continue;
             const normalized = adapter.normalizeConfig(entry.config.config);
             const configured = !("error" in normalized);
             const methods = {
@@ -558,7 +631,9 @@ export class IntegrationService extends Context.Service<
               configured &&
               connection.configFingerprint !== normalized.fingerprint;
             result.push({
-              id: manifest.id,
+              id: entry.config.id,
+              kind: entry.config.kind,
+              name: entry.config.name,
               available: open,
               methods,
               apiKeyHelpUrl: configured
@@ -577,7 +652,7 @@ export class IntegrationService extends Context.Service<
                   }
                 : null,
               dependents: connection
-                ? yield* repo.dependents(userId, manifest.id)
+                ? yield* repo.dependents(userId, entry.config.id)
                 : { sources: 0, schedules: 0 },
             });
           }
@@ -586,8 +661,11 @@ export class IntegrationService extends Context.Service<
 
         connectApiKey: Effect.fn("IntegrationService.connectApiKey")(
           function* (userId, integrationId, input) {
-            const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
-            const form = findIntegration(integrationId)?.apiKey;
+            const { manifest, adapter, row, config, fingerprint } = yield* available(
+              userId,
+              integrationId,
+            );
+            const form = manifest.apiKey;
             if (!row.allowApiKeys || !form)
               return yield* new IntegrationRejected({
                 reason: "API keys are turned off for this integration.",
@@ -712,7 +790,8 @@ export class IntegrationService extends Context.Service<
           function* (userId, integrationId, input) {
             let scope = input.scope;
             if (scope) {
-              if (!findIntegration(integrationId)?.scope)
+              const row = yield* repo.getConfig(integrationId);
+              if (!(row && findIntegrationType(row.kind)?.scope))
                 return yield* new IntegrationRejected({
                   reason: "This integration has no limits.",
                 });

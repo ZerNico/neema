@@ -401,6 +401,7 @@ describe("a connection limited to some projects", () => {
     const connected: ConnectedSession = {
       ...sessionWith(apiKey, ["OPS"]),
       connectionId: "c",
+      integration: { id: "jira", kind: "jira", name: "Jira" },
       adapter: jiraAdapter,
     };
     const tools = prepareIntegrationTools({

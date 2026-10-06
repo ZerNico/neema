@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "~/ui/primitives/dialog";
 import { FieldDescription, FieldError, FieldGroup } from "~/ui/primitives/field";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { connectUrl } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
 import { connectIntegrationApiKey } from "../server/functions.ts";
@@ -30,7 +30,7 @@ export function ConnectActions({
   integration: UserIntegration;
   returnTo?: string;
 }) {
-  const manifest = findIntegration(integration.id);
+  const manifest = findIntegrationType(integration.kind);
   const [keyOpen, setKeyOpen] = useState(false);
   if (!manifest) return null;
   const reconnect = integration.connection?.status === "needs_reauth";
@@ -89,7 +89,7 @@ export function ApiKeyDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const manifest = findIntegration(integration.id)!;
+  const manifest = findIntegrationType(integration.kind)!;
   const fields = manifest.apiKey?.fields ?? [];
   const fieldId = useId();
   const queryClient = useQueryClient();
@@ -119,7 +119,7 @@ export function ApiKeyDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect {manifest.name} with an API key</DialogTitle>
+          <DialogTitle>Connect {integration.name} with an API key</DialogTitle>
           <DialogDescription>
             The key is checked with {manifest.name}, encrypted, and never shown again. Chats act
             with everything it can reach.

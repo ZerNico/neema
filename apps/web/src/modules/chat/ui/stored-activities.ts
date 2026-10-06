@@ -1,6 +1,5 @@
 import { OFFICE_FAMILIES, officeFamilyOfTool } from "~/modules/office/families.ts";
 import { ToolFileActivity } from "../tool-file-schema.ts";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
 import { IntegrationToolActivity as StoredIntegrationActivity } from "~/modules/integrations/tool-schema.ts";
 import {
@@ -290,9 +289,9 @@ export function toActivity(row: {
         turnIndex: row.turnIndex,
         callIndex: row.callIndex,
       };
-    const tool = findIntegration(integrationCall.integrationId)?.tools.find(
-      (entry) => entry.name === integrationCall.tool,
-    );
+    // Which type the integration is lives on the server; a row still running
+    // on reload is named from its tool until the result brings the label.
+    const words = integrationCall.tool.replaceAll("_", " ");
     return {
       family: "integration",
       ...position,
@@ -303,8 +302,8 @@ export function toActivity(row: {
       status: row.status,
       integrationId: integrationCall.integrationId,
       tool: integrationCall.tool,
-      label: tool?.label ?? integrationCall.tool,
-      access: tool?.access ?? "read",
+      label: `${words.charAt(0).toUpperCase()}${words.slice(1)}`,
+      access: "read",
       summary: null,
       ...(row.error ? { error: row.error.message } : {}),
     };

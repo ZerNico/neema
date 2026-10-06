@@ -1,7 +1,7 @@
 import { PlugSocketIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "~/ui/utils";
-import { findIntegration } from "../catalog.ts";
+import { useIntegration } from "../client/directory.ts";
 
 /**
  * The one way an integration is identified on screen. `tile` sits in a list
@@ -16,7 +16,7 @@ export function IntegrationLogo({
   variant?: "inline" | "tile";
   className?: string;
 }) {
-  const Logo = findIntegration(integrationId)?.logo;
+  const Logo = useIntegration(integrationId)?.manifest.logo;
   const mark = Logo ? (
     <Logo className={cn("size-4 shrink-0", variant === "inline" && className)} />
   ) : (

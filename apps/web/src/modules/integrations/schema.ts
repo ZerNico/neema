@@ -16,8 +16,9 @@ export const INTEGRATION_LIMITS = {
 
 export interface AdminIntegration {
   id: string;
-  /** False until first saved; access can only be managed once a row exists. */
-  saved: boolean;
+  /** The shipped type it runs on. */
+  kind: string;
+  name: string;
   enabled: boolean;
   config: Record<string, string>;
   oauthClientId: string | null;
@@ -50,6 +51,8 @@ export interface ScopeOption {
 /** One integration as the signed-in person sees it in Settings and the composer. */
 export interface UserIntegration {
   id: string;
+  kind: string;
+  name: string;
   /** Enabled by an admin, configured, and shared with this person. */
   available: boolean;
   methods: { oauth: boolean; apiKey: boolean };
@@ -61,8 +64,22 @@ export interface UserIntegration {
 
 export const IntegrationIdInput = Schema.Struct({ integrationId: IntegrationId });
 
+/** The service checks the id's stricter shape and that the type ships. */
+export const CreateIntegrationInput = Schema.Struct({
+  kind: IntegrationId,
+  name: Schema.String.check(Schema.isMaxLength(100)),
+});
+
+/** One integration as anyone may see it: enough to name and draw a stored reference. */
+export interface IntegrationDirectoryEntry {
+  id: string;
+  kind: string;
+  name: string;
+}
+
 export const SaveIntegrationConfigInput = Schema.Struct({
   integrationId: IntegrationId,
+  name: Schema.String.check(Schema.isMaxLength(100)),
   enabled: Schema.Boolean,
   config: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))),
   oauthClientId: Schema.String.check(Schema.isMaxLength(500)),

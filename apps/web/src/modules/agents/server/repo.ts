@@ -1,8 +1,8 @@
-import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
+  integrationConfigs,
   agents,
   agentCollections,
   agentCustomTools,
@@ -133,8 +133,14 @@ export class AgentRepo extends Context.Service<
             integrationIds = [],
             ...settings
           } = input;
-          if (integrationIds.some((integrationId) => !findIntegration(integrationId)))
-            return yield* new AgentRejected({ reason: "a selected integration does not exist" });
+          if (integrationIds.length) {
+            const existing = yield* tx
+              .select({ id: integrationConfigs.id })
+              .from(integrationConfigs)
+              .where(inArray(integrationConfigs.id, [...integrationIds]));
+            if (existing.length !== new Set(integrationIds).size)
+              return yield* new AgentRejected({ reason: "a selected integration does not exist" });
+          }
           if (skillIds.length) {
             const available = yield* tx
               .select({ id: skills.id })

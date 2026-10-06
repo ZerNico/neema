@@ -506,7 +506,7 @@ const loginBase = (config: Readonly<Record<string, string>>) =>
   `https://login.microsoftonline.com/${encodeURIComponent(config.tenant || "organizations")}/oauth2/v2.0`;
 
 export const outlookAdapter: IntegrationAdapter = {
-  id: "outlook",
+  kind: "outlook",
   normalizeConfig: (config) => {
     const tenant = (config.tenant ?? "").trim().toLowerCase() || "organizations";
     if (!TENANT.test(tenant))

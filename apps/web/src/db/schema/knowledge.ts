@@ -16,6 +16,7 @@ import { attachmentBlobs } from "./attachments.ts";
 import { user } from "./auth.ts";
 import { messages } from "./chat.ts";
 import { groups } from "./groups.ts";
+import { integrationConfigs } from "./integrations.ts";
 
 // Reusable document collections. A collection is owned by one user and can be
 // selected in an ordinary chat or attached to an agent; the two are the same
@@ -140,7 +141,10 @@ export const knowledgeSources = pgTable(
     collectionId: text("collection_id")
       .notNull()
       .references(() => knowledgeCollections.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
+    // Restrict: an integration is not deleted while a collection mirrors it.
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "restrict" }),
     root: jsonb().$type<KnowledgeSourceRoot>().notNull(),
     status: text({ enum: ["idle", "syncing", "error"] })
       .notNull()

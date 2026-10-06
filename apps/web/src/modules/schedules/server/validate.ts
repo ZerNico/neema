@@ -7,7 +7,7 @@ import {
   knowledgeCollections,
   skills,
 } from "~/db/schema/index.ts";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
+import { findIntegrationType } from "~/modules/integrations/catalog.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { parseMailbox } from "~/modules/integrations/mailbox.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
@@ -35,27 +35,35 @@ export type ValidatedSchedule = Omit<
 };
 
 /**
- * A grant with its allowances checked against the manifest: each one exists
- * for that integration, comes with write access, and names at least one exact
- * address, stored as the mailbox parser writes it. Returns the reason otherwise.
+ * A grant's allowances in the form they are compared: write access, and at
+ * least one exact address each, as the mailbox parser writes it. Whether the
+ * integration's type declares them is checked with the integration itself,
+ * in `checkScheduleResources`. Returns the reason otherwise.
  */
 export const normalizeGrant = (grant: IntegrationGrant): IntegrationGrant | string => {
   const entries = Object.entries(grant.allowances ?? {});
   if (entries.length === 0) return { integrationId: grant.integrationId, access: grant.access };
-  const manifest = findIntegration(grant.integrationId);
   if (grant.access !== "write") return "only read-and-write access can let runs contact people";
   const allowances: Record<string, { targets: string[] }> = {};
   for (const [id, entry] of entries) {
-    const allowance = manifest?.allowances.find((candidate) => candidate.id === id);
-    if (!allowance) return "unknown integration allowance";
     const targets = entry.targets.map(parseMailbox);
     if (targets.some((target) => target === null))
       return `“${entry.targets[targets.indexOf(null)]}” is not a plain email address`;
     const unique = [...new Set(targets as string[])];
-    if (unique.length === 0) return `add an address for “${allowance.label}”`;
+    if (unique.length === 0) return "add at least one address to each allowance";
     allowances[id] = { targets: unique };
   }
   return { integrationId: grant.integrationId, access: grant.access, allowances };
+};
+
+/** An allowance the grant names that its integration's type does not declare, if any. */
+export const undeclaredAllowance = (grant: IntegrationGrant, kind: string) => {
+  const declared = findIntegrationType(kind)?.allowances ?? [];
+  return (
+    Object.keys(grant.allowances ?? {}).find(
+      (id) => !declared.some((allowance) => allowance.id === id),
+    ) ?? null
+  );
 };
 
 /**
@@ -139,7 +147,7 @@ export const checkScheduleResources = (
     // collection needs to be readable; a fire rechecks it.
     for (const grant of settings.integrationGrants ?? []) {
       const [connection] = yield* tx
-        .select({ status: integrationConnections.status })
+        .select({ status: integrationConnections.status, kind: integrationConfigs.kind })
         .from(integrationConnections)
         .innerJoin(
           integrationConfigs,
@@ -158,6 +166,8 @@ export const checkScheduleResources = (
         return yield* new ScheduleRejected({
           reason: "connect the integration in Settings before letting a schedule use it",
         });
+      if (undeclaredAllowance(grant, connection.kind))
+        return yield* new ScheduleRejected({ reason: "unknown integration allowance" });
     }
     // A chosen chat must be the owner's and a plain chat: a work chat needs
     // the desktop app, which an unattended fire never has, and a temporary one

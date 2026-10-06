@@ -42,7 +42,7 @@ import {
   syncKnowledgeSource,
 } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
-import { integrationName } from "./integration-name.ts";
+import { useIntegrationDirectory } from "../client/directory.ts";
 import { openSyncedPages } from "./open-synced-pages.tsx";
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -105,7 +105,7 @@ function SourceRow({
   const panel = useDetailPanel();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-  const name = integrationName(source.integrationId);
+  const name = useIntegrationDirectory().name(source.integrationId);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["knowledge"] });
   const sync = useMutation({
     mutationFn: () => syncKnowledgeSource({ data: { sourceId: source.id } }),
@@ -345,7 +345,7 @@ function SourcePicker({
   );
   const [step, setStep] = useState<"where" | "what">(initial ? "what" : "where");
   const [error, setError] = useState<string | null>(null);
-  const name = integrationName(integrationId);
+  const name = useIntegrationDirectory().name(integrationId);
   const save = useMutation({
     mutationFn: (chosen: DraftRoot) =>
       saveKnowledgeSource({

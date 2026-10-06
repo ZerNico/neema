@@ -47,6 +47,15 @@ const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(StoredCred
  * admins always, otherwise a user or group grant. SQL, so the settings list,
  * connect and every attempt apply the same rule.
  */
+/** A type's own kind for its first integration, then numbered: `jira`, `jira-2`. */
+const freeId = (kind: string, taken: ReadonlyArray<string>) => {
+  const used = new Set(taken);
+  if (!used.has(kind)) return kind;
+  let n = 2;
+  while (used.has(`${kind}-${n}`)) n++;
+  return `${kind}-${n}`;
+};
+
 export const integrationUsableBy = (userId: string): SQL => sql`(
   ${integrationConfigs.audience} = 'instance'
   or exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')
@@ -57,6 +66,7 @@ export const integrationUsableBy = (userId: string): SQL => sql`(
 
 export interface SaveConfig {
   readonly id: string;
+  readonly name: string;
   readonly enabled: boolean;
   readonly config: Record<string, string>;
   readonly fingerprint: string;
@@ -83,7 +93,23 @@ export class IntegrationRepo extends Context.Service<
      * Saves instance setup. A changed fingerprint (another base URL) marks
      * every connection for reconnecting: its credentials name another server.
      */
-    saveConfig(input: SaveConfig): Effect.Effect<IntegrationConfigRow>;
+    saveConfig(input: SaveConfig): Effect.Effect<IntegrationConfigRow | null>;
+    /** A new integration, off and unconfigured; false when the id or name is taken. */
+    /**
+     * Adds an integration under the first free id of its type (`jira`, then
+     * `jira-2`), or returns null when the name is already in use.
+     */
+    createConfig(input: { kind: string; name: string }): Effect.Effect<string | null>;
+    /**
+     * Removes an integration with everything that only meant something with it
+     * (connections, grants, chat and agent settings, through their foreign keys)
+     * and takes it out of schedules. Refused while knowledge sources mirror it.
+     */
+    deleteConfig(
+      id: string,
+    ): Effect.Effect<{ deleted: true } | { deleted: false; sources: number }>;
+    /** Whether another integration already uses this name, ignoring case. */
+    nameTaken(name: string, exceptId: string | null): Effect.Effect<boolean>;
     /** Integrations this person may use, enabled or not, with their connection if any. */
     listForUser(userId: string): Effect.Effect<
       ReadonlyArray<{
@@ -158,6 +184,23 @@ export class IntegrationRepo extends Context.Service<
           .decrypt(row.credentialsCiphertext)
           .pipe(Effect.map((secret) => Option.getOrNull(decodeStored(Redacted.value(secret)))));
 
+      const nameTaken = Effect.fn("IntegrationRepo.nameTaken")(function* (
+        name: string,
+        exceptId: string | null,
+      ) {
+        const rows = yield* db
+          .select({ id: integrationConfigs.id })
+          .from(integrationConfigs)
+          .where(
+            and(
+              sql`lower(${integrationConfigs.name}) = lower(${name})`,
+              exceptId ? sql`${integrationConfigs.id} <> ${exceptId}` : undefined,
+            ),
+          )
+          .pipe(Effect.orDie);
+        return rows.length > 0;
+      });
+
       return IntegrationRepo.of({
         listConfigs: Effect.fn("IntegrationRepo.listConfigs")(function* () {
           const rows = yield* db
@@ -196,28 +239,19 @@ export class IntegrationRepo extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 const rows = yield* tx
-                  .insert(integrationConfigs)
-                  .values({
-                    id: input.id,
+                  .update(integrationConfigs)
+                  .set({
+                    name: input.name,
                     enabled: input.enabled,
                     config: input.config,
                     oauthClientId: input.oauthClientId,
-                    oauthClientSecretCiphertext: secret ?? null,
+                    ...(secret === undefined ? {} : { oauthClientSecretCiphertext: secret }),
                     allowApiKeys: input.allowApiKeys,
                     updatedAt: now,
                   })
-                  .onConflictDoUpdate({
-                    target: integrationConfigs.id,
-                    set: {
-                      enabled: input.enabled,
-                      config: input.config,
-                      oauthClientId: input.oauthClientId,
-                      ...(secret === undefined ? {} : { oauthClientSecretCiphertext: secret }),
-                      allowApiKeys: input.allowApiKeys,
-                      updatedAt: now,
-                    },
-                  })
+                  .where(eq(integrationConfigs.id, input.id))
                   .returning();
+                if (!rows[0]) return null;
                 yield* tx
                   .update(integrationConnections)
                   .set({ status: "needs_reauth", updatedAt: now })
@@ -227,11 +261,68 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
-                return rows[0]!;
+                return rows[0];
               }),
             )
             .pipe(Effect.orDie);
         }),
+
+        createConfig: Effect.fn("IntegrationRepo.createConfig")(function* (input) {
+          // The id and the lowercased name are both unique, and either clash inserts
+          // nothing: a taken name ends it, a taken id means another admin just added
+          // one of this type, so the next free id is tried.
+          for (;;) {
+            const taken = yield* db
+              .select({ id: integrationConfigs.id })
+              .from(integrationConfigs)
+              .pipe(Effect.orDie);
+            const id = freeId(
+              input.kind,
+              taken.map((row) => row.id),
+            );
+            const rows = yield* db
+              .insert(integrationConfigs)
+              .values({ id, kind: input.kind, name: input.name })
+              .onConflictDoNothing()
+              .returning({ id: integrationConfigs.id })
+              .pipe(Effect.orDie);
+            if (rows.length) return id;
+            if (yield* nameTaken(input.name, null)) return null;
+          }
+        }),
+
+        deleteConfig: Effect.fn("IntegrationRepo.deleteConfig")(function* (id) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const [locked] = yield* tx
+                  .select({ id: integrationConfigs.id })
+                  .from(integrationConfigs)
+                  .where(eq(integrationConfigs.id, id))
+                  .for("update");
+                if (!locked) return { deleted: true as const };
+                const [sources] = yield* tx
+                  .select({ value: count() })
+                  .from(knowledgeSources)
+                  .where(eq(knowledgeSources.integrationId, id));
+                if (sources && sources.value > 0)
+                  return { deleted: false as const, sources: sources.value };
+                yield* tx
+                  .update(schedules)
+                  .set({
+                    integrationGrants: sql`coalesce((select jsonb_agg(grant_entry) from jsonb_array_elements(${schedules.integrationGrants}) as grant_entry where grant_entry->>'integrationId' <> ${id}), '[]'::jsonb)`,
+                  })
+                  .where(
+                    sql`${schedules.integrationGrants} @> ${JSON.stringify([{ integrationId: id }])}::jsonb`,
+                  );
+                yield* tx.delete(integrationConfigs).where(eq(integrationConfigs.id, id));
+                return { deleted: true as const };
+              }),
+            )
+            .pipe(Effect.orDie);
+        }),
+
+        nameTaken,
 
         listForUser: Effect.fn("IntegrationRepo.listForUser")(function* (userId) {
           const rows = yield* db

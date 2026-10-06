@@ -3,7 +3,7 @@ import { OutlookLogo } from "./logo.tsx";
 import { OUTLOOK_TOOLS } from "./tools.ts";
 
 export const outlookManifest = {
-  id: "outlook",
+  kind: "outlook",
   name: "Outlook",
   description:
     "Search and read Outlook mail, check calendars, draft and send mail, and create events.",

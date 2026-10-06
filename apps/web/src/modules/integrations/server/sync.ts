@@ -14,7 +14,7 @@ import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import type { BrowseNode, KnowledgeSourceView, SourceRoot } from "../schema.ts";
 import { isSelected, type AdapterFailure } from "./adapter.ts";
@@ -455,14 +455,14 @@ function make(background: boolean) {
       list,
 
       save: Effect.fn("KnowledgeSourceService.save")(function* (userId, input) {
-        if (!findIntegration(input.integrationId)?.knowledgeSource)
-          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
         if (!(yield* ownedCollection(userId, input.collectionId)))
           return yield* new IntegrationRejected({
             reason: "Only the collection’s owner can sync into it.",
           });
         // Saving needs a working connection now; later syncs look it up again.
-        yield* integrations.session(userId, input.integrationId);
+        const session = yield* integrations.session(userId, input.integrationId);
+        if (!findIntegrationType(session.integration.kind)?.knowledgeSource)
+          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
         const root = { ...input.root, rules: [...input.root.rules] };
         const [row] = input.sourceId
           ? yield* db

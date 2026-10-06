@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toastError } from "~/ui/error-toast.ts";
-import { findIntegration } from "../catalog.ts";
 import { setConversationIntegration } from "../server/functions.ts";
 import { chatIntegrationsQuery, myIntegrationsQuery } from "./queries.ts";
 
@@ -48,7 +47,7 @@ export function useChatIntegrations(conversationId: string | null): ComposerInte
         : undefined;
     return {
       integrationId: entry.integrationId,
-      name: findIntegration(entry.integrationId)?.name ?? entry.integrationId,
+      name: entry.name,
       accountLabel: entry.accountLabel,
       enabled: pendingSave ?? local.get(entry.integrationId) ?? entry.enabled,
     };

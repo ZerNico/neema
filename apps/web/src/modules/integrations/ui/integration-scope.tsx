@@ -6,7 +6,7 @@ import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { integrationScopeOptionsQuery } from "../client/queries.ts";
 import type { IntegrationScope } from "../manifest.ts";
 import type { ScopeOption, UserIntegration } from "../schema.ts";
@@ -35,7 +35,7 @@ export function IntegrationScopeSection({
   integration: UserIntegration;
   onChange: (scope: string[] | null) => void;
 }) {
-  const manifest = findIntegration(integration.id)!;
+  const manifest = findIntegrationType(integration.kind)!;
   const scope = manifest.scope!;
   const saved = integration.connection!.scope;
   const noun = scope.label.toLowerCase();
@@ -87,7 +87,7 @@ export function IntegrationScopeSection({
           }}
           aria-label={`Which ${noun} chats reach`}
         >
-          {choice("all", `All ${noun}`, `Everything this account can see in ${manifest.name}.`)}
+          {choice("all", `All ${noun}`, `Everything this account can see in ${integration.name}.`)}
           {choice(
             "some",
             `Only selected ${noun}`,

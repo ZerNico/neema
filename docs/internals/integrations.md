@@ -1,25 +1,55 @@
 # Integrations
 
-An integration lets a person's own account in another service (Outline, Outlook)
+An integration lets a person's own account in another service (Outline, Outlook, Jira)
 reach chat as tools and reach knowledge as a synced source. It is the first feature here that carries real
 authority into a chat: every call runs as the sender with credentials they supplied. Most of
 the design follows from keeping that authority tied to the person and asking before it
 changes anything.
 
+## Types and integrations
+
+The code ships integration **types** (Outline, Outlook, Jira); an admin sets up
+**integrations**, instances of a type, so one server can have two Outlines or a Jira per
+site. An integration has its own id, name, admin config, OAuth client, fingerprint and
+sharing, and everything that stores an `integrationId` (connections, grants, chat and agent
+settings, knowledge sources, allowance uses, tool names) means the integration, never the
+type. The type is reached only through `integration_configs.kind`, with
+`findIntegrationType(kind)` and `findAdapterType(kind)`: an id is never looked up as a type,
+so the two cannot be confused once an admin adds a second Outline.
+
+The server picks the id at creation: the type's kind, numbered from the second one on
+(`jira`, `jira-2`), within `INTEGRATION_ID`. Nobody chooses it and it never changes, because
+it is in every model-facing tool name, which providers cap at 64 characters, in the OAuth
+callback path registered with the service, and in stored rows. Renaming it would break sign-in
+until the admin re-registered the callback, and old tool calls would replay under names
+nothing offers, while the name already covers everything people and the model read. Not
+deriving it from the name keeps a rename from leaving a misleading id behind. The name is free to
+change and unique ignoring case, since an `@` mention picks an integration by name. Tool
+descriptions lead with the name, so the model can tell two of one type apart.
+Integrations that existed before types were split kept their ids (the type's), so nothing
+stored was rewritten. The client reads ids it only has as references (a tool row, a
+citation, an agent's attachments) through one directory of every integration's id, type and
+name; a deleted one falls back to its stored label.
+
+Deleting an integration refuses while a knowledge source mirrors it (a restricting foreign
+key), takes it out of schedules' grants in the same transaction, and lets foreign keys
+remove its connections, sharing, chat and agent settings and allowance counters. Past
+answers keep their rows and labels.
+
 ## Manifest and adapter
 
-Each integration is two halves with one id. The **manifest** (`<id>/manifest.ts`,
+Each type is two halves with one `kind`. The **manifest** (`<kind>/manifest.ts`,
 client-safe) is everything a screen needs: name, logo, admin fields, auth methods, the tool
 definitions, the allowances and whether it can be a knowledge source. Each tool is defined once
-(`defineIntegrationTool`, in `<id>/tools.ts`): name, title, label, model description,
+(`defineIntegrationTool`, in `<kind>/tools.ts`): name, title, label, model description,
 access class, parameters and a one-line argument summary. The **adapter**
-(`<id>/server/adapter.ts`) is behaviour: config normalization, OAuth endpoints, `verify`, one
+(`<kind>/server/adapter.ts`) is behaviour: config normalization, OAuth endpoints, `verify`, one
 handler per tool definition, and the knowledge browse, enumerate and fetch.
 `integrationHandlers` types each handler by its definition's parameters, so a missing, extra
 or mistyped handler does not compile; past that one function the handlers are erased for
 dynamic dispatch, which is safe because the toolkit decodes every call against the same
 definition first. Admin, Settings, the composer, tool rows, approvals and the source picker
-render from the manifest alone, so a new integration is one manifest and one adapter.
+render from the manifest alone, so a new type is one manifest and one adapter.
 
 A handler does not run a call, it **prepares** one: it checks the arguments, reads from the
 service whatever the call will touch, and returns a summary for the approval card with an
@@ -42,8 +72,8 @@ route for services we will not write an adapter for.
 
 ## Configuration, connections and credentials
 
-- `integration_configs` is one row per integration an admin has touched: enabled, the
-  admin fields (base URL), an OAuth client, and whether personal API keys are allowed.
+- `integration_configs` is one row per integration: its type, name, enabled, the admin
+  fields (base URL), an OAuth client, and whether personal API keys are allowed.
   Who may connect uses `SharingService` (`integration` resource, admin-managed), checked in
   SQL by `integrationUsableBy` at connect, at every attempt and at every sync.
 - `integration_connections` is one row per (user, integration). Credentials are one
@@ -188,10 +218,10 @@ the request was not processed.
 
 Mail and calendar through Microsoft Graph with delegated permissions (`offline_access
 User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite`), OAuth only. It is scoped to
-Outlook on purpose: another Microsoft service such as SharePoint becomes its own
-integration, with its own id, connection, scopes and tool permissions, even though a person
-signs in with the same account. One integration per service keeps what a connection may
-touch, and what disconnecting removes, as narrow as its name. The admin's tenant
+Outlook on purpose: another Microsoft service such as SharePoint becomes its own type, with
+its own connection, scopes and tool permissions, even though a person signs in with the same
+account. One type per service keeps what a connection may touch, and what disconnecting
+removes, as narrow as its name. The admin's tenant
 field (default `organizations`) is the connections' fingerprint, so changing it asks
 everyone to reconnect. Graph is a fixed origin and redirects are refused. Entra rotates
 refresh tokens; the refresh path stores whichever one comes back. Times without an offset
@@ -201,7 +231,7 @@ the zone the model asks for.
 ## Jira
 
 Jira Cloud only (`*.atlassian.net`); Data Center has another API and its own sign-in, so
-it would be its own integration. The admin's site is the fingerprint and pins every request
+it would be its own type. Each site is its own integration. The admin's site is the fingerprint and pins every request
 to Atlassian, so no address exemption is needed. The two ways in take different routes: an
 OAuth token only works through Atlassian's gateway, `api.atlassian.com/ex/jira/<cloud id>`,
 where the cloud id comes from the token's accessible resources matched to the configured

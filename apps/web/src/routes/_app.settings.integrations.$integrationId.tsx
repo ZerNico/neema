@@ -1,7 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
 import { IntegrationSettingsPage } from "~/modules/integrations/ui/integrations-settings-page.tsx";
 
@@ -24,9 +23,13 @@ function IntegrationRoute() {
   const { integrationId } = Route.useParams();
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const { queryClient } = Route.useRouteContext();
   useEffect(() => {
     if (!search.connected && !search.error) return;
-    const name = findIntegration(integrationId)?.name ?? "The integration";
+    const name =
+      queryClient
+        .getQueryData(myIntegrationsQuery.queryKey)
+        ?.find((integration) => integration.id === integrationId)?.name ?? "The integration";
     if (search.connected) toast.success(`${name} is connected.`);
     else if (search.error) toast.error(search.error);
     void navigate({
@@ -35,6 +38,6 @@ function IntegrationRoute() {
       search: {},
       replace: true,
     });
-  }, [search, navigate, integrationId]);
+  }, [search, navigate, integrationId, queryClient]);
   return <IntegrationSettingsPage integrationId={integrationId} />;
 }

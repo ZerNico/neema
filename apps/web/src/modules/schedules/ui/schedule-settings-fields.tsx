@@ -13,7 +13,6 @@ import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
@@ -337,9 +336,7 @@ export const ScheduleSettingsFields = withForm({
                         <ListRow>
                           <IntegrationLogo integrationId={integration.id} variant="tile" />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">
-                              {integrationName(integration.id)}
-                            </p>
+                            <p className="truncate text-sm font-medium">{integration.name}</p>
                             <p className="text-muted-foreground truncate text-xs">
                               {integration.connection?.status === "active"
                                 ? integration.connection.accountLabel
@@ -360,7 +357,7 @@ export const ScheduleSettingsFields = withForm({
                             variant="outline"
                             size="sm"
                             spacing={0}
-                            aria-label={`${integrationName(integration.id)} during runs`}
+                            aria-label={`${integration.name} during runs`}
                           >
                             <ToggleGroupItem value="none">Off</ToggleGroupItem>
                             <ToggleGroupItem value="read">Read</ToggleGroupItem>
@@ -369,6 +366,7 @@ export const ScheduleSettingsFields = withForm({
                         </ListRow>
                         {grant ? (
                           <ScheduleAllowanceFields
+                            kind={integration.kind}
                             grant={grant}
                             onChange={(next) => field.handleChange([...rest, next])}
                           />

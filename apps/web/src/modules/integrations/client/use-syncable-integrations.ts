@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { myIntegrationsQuery } from "./queries.ts";
 
 /** Connected integrations this person can sync a collection from. */
@@ -9,6 +9,6 @@ export function useSyncableIntegrations() {
     (integration) =>
       integration.available &&
       integration.connection?.status === "active" &&
-      findIntegration(integration.id)?.knowledgeSource,
+      findIntegrationType(integration.kind)?.knowledgeSource,
   );
 }

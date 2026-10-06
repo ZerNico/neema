@@ -13,10 +13,14 @@ import {
   knowledgeCollections,
   knowledgeDocuments,
   knowledgeDocumentVersions,
+  knowledgeSources,
+  conversationIntegrations,
+  schedules,
   messages,
   user,
 } from "~/db/schema/index.ts";
 import { outlineAdapter } from "~/modules/integrations/outline/server/adapter.ts";
+import type { IntegrationRejected } from "~/modules/integrations/errors.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -193,15 +197,28 @@ const newUser = () =>
 const configure = () =>
   run(
     Effect.flatMap(IntegrationService, (service) =>
-      service.saveConfig({
-        id: "outline",
-        enabled: true,
-        config: { baseUrl },
-        oauthClientId: "client",
-        oauthClientSecret: "secret",
-        allowApiKeys: true,
-      }),
+      // Created on the first call; later calls only put the settings back.
+      service.createIntegration({ kind: "outline", name: "Outline" }).pipe(
+        Effect.ignore,
+        Effect.andThen(
+          service.saveConfig({
+            id: "outline",
+            name: "Outline",
+            enabled: true,
+            config: { baseUrl },
+            oauthClientId: "client",
+            oauthClientSecret: "secret",
+            allowApiKeys: true,
+          }),
+        ),
+      ),
     ),
+  );
+
+/** This person's Outline row in Settings, among whatever else is set up. */
+const outlineFor = (userId: string) =>
+  run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId))).then((rows) =>
+    rows.find((row) => row.id === "outline"),
   );
 
 const connectKey = (userId: string) =>
@@ -253,13 +270,18 @@ describe("connections", () => {
 
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.saveConfig({
-          id: "jira",
-          enabled: true,
-          config: { site: "acme.atlassian.net" },
-          oauthClientId: "",
-          allowApiKeys: true,
-        }),
+        s.createIntegration({ kind: "jira", name: "Jira" }).pipe(
+          Effect.andThen(
+            s.saveConfig({
+              id: "jira",
+              name: "Jira",
+              enabled: true,
+              config: { site: "acme.atlassian.net" },
+              oauthClientId: "",
+              allowApiKeys: true,
+            }),
+          ),
+        ),
       ),
     );
     await run(
@@ -313,7 +335,7 @@ describe("connections", () => {
     expect(apiCalls.length).toBe(calls);
 
     await connectKey(userId);
-    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    const mine = await outlineFor(userId);
     expect(mine?.connection).toMatchObject({
       accountLabel: "ada@example.com · Acme",
       status: "active",
@@ -331,6 +353,7 @@ describe("connections", () => {
       Effect.flatMap(IntegrationService, (s) =>
         s.saveConfig({
           id: "outline",
+          name: "Outline",
           enabled: true,
           config: { baseUrl: "https://elsewhere.example.com" },
           oauthClientId: "client",
@@ -338,7 +361,7 @@ describe("connections", () => {
         }),
       ),
     );
-    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    const mine = await outlineFor(userId);
     expect(mine?.connection?.status).toBe("needs_reauth");
     const session = await runtime.runPromiseExit(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
@@ -373,7 +396,7 @@ describe("connections", () => {
 
     expect(Exit.isFailure(await complete("another-browser"))).toBe(true);
     expect(Exit.isSuccess(await complete(started.state))).toBe(true);
-    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    const mine = await outlineFor(userId);
     expect(mine?.connection).toMatchObject({ authKind: "oauth", status: "active" });
     // The state is spent once used.
     expect(Exit.isFailure(await complete(started.state))).toBe(true);
@@ -435,7 +458,7 @@ describe("connections", () => {
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
     expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
-    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    const mine = await outlineFor(userId);
     expect(mine?.connection?.status).toBe("needs_reauth");
   });
 
@@ -458,7 +481,7 @@ describe("connections", () => {
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
     expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
-    const [mine] = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)));
+    const mine = await outlineFor(userId);
     expect(mine?.connection?.status).toBe("needs_reauth");
   });
 });
@@ -681,6 +704,7 @@ describe("approvals", () => {
           if (change === "disable")
             yield* service.saveConfig({
               id: "outline",
+              name: "Outline",
               enabled: false,
               config: { baseUrl },
               oauthClientId: "client",
@@ -797,7 +821,7 @@ describe("allowance uses", () => {
 
   it("hands out at most the cap, however many calls race for it", async () => {
     const messageId = await answer();
-    const use = { messageId, integrationId: "outlook", allowanceId: "send" };
+    const use = { messageId, integrationId: "outline", allowanceId: "send" };
     const taken = await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         Effect.all(
@@ -827,7 +851,7 @@ describe("allowance uses", () => {
 
   it("lets a use given back be taken again", async () => {
     const messageId = await answer();
-    const use = { messageId, integrationId: "outlook", allowanceId: "send" };
+    const use = { messageId, integrationId: "outline", allowanceId: "send" };
     const again = await run(
       Effect.gen(function* () {
         const repo = yield* IntegrationRepo;
@@ -1191,5 +1215,179 @@ describe("knowledge sync", () => {
     const [after] = await sources((s) => s.list(userId, collectionId));
     expect(after).toMatchObject({ status: "error", connected: false });
     expect(await mirrored(collectionId)).toEqual(["document:d2"]);
+  });
+});
+
+describe("several integrations of one type", () => {
+  // A second Outline, with its own accounts, to tell where each call lands.
+  let second: Server;
+  let secondUrl: string;
+  const secondCalls: string[] = [];
+  beforeAll(
+    () =>
+      new Promise<void>((resolve) => {
+        second = createServer(async (request, response) => {
+          await readBody(request);
+          const json = (value: unknown) =>
+            response
+              .writeHead(200, { "content-type": "application/json" })
+              .end(JSON.stringify(value));
+          if (request.headers.authorization !== "Bearer ol_api_second")
+            return response.writeHead(401).end("{}");
+          secondCalls.push(request.url ?? "");
+          if (request.url === "/api/auth.info")
+            return json({ data: { user: { email: "ada@example.com" }, team: { name: "Second" } } });
+          return json({ data: [], pagination: {} });
+        }).listen(0, "127.0.0.1", () => {
+          const address = second.address();
+          secondUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+          resolve();
+        });
+      }),
+  );
+  afterAll(() => {
+    second?.close();
+  });
+
+  const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
+    run(Effect.flatMap(IntegrationService, f));
+  const refusal = <A>(
+    f: (s: IntegrationService["Service"]) => Effect.Effect<A, IntegrationRejected>,
+  ) => service((s) => Effect.flip(f(s))).then((error) => error.reason);
+
+  it("keeps two Outlines apart, from their names to where each call goes", async () => {
+    await configure();
+    // The second of a type gets the type's id, numbered.
+    const docsB = await service((s) => s.createIntegration({ kind: "outline", name: "Docs B" }));
+    expect(docsB.id).toBe("outline-2");
+    await service((s) =>
+      s.saveConfig({
+        id: "outline-2",
+        name: "Docs B",
+        enabled: true,
+        config: { baseUrl: secondUrl },
+        oauthClientId: "",
+        allowApiKeys: true,
+      }),
+    );
+    // A name names one integration only.
+    expect(await refusal((s) => s.createIntegration({ kind: "outline", name: "docs b" }))).toBe(
+      "“docs b” is already in use.",
+    );
+    expect(
+      await refusal((s) => s.createIntegration({ kind: "notion", name: "Notion" })),
+    ).toBe("Unknown integration type.");
+
+    const userId = await newUser();
+    await connectKey(userId);
+    await service((s) => s.connectApiKey(userId, "outline-2", { key: "ol_api_second" }));
+    const mine = await service((s) => s.listForUser(userId));
+    expect(
+      mine
+        .filter((entry) => entry.kind === "outline")
+        .map((entry) => [entry.id, entry.name, entry.connection?.accountLabel]),
+    ).toEqual([
+      ["outline-2", "Docs B", "ada@example.com · Second"],
+      ["outline", "Outline", "ada@example.com · Acme"],
+    ]);
+
+    const conversationId = uuidv7();
+    await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
+    const before = apiCalls.length;
+    const { names, description, result } = await run(
+      Effect.gen(function* () {
+        const integrations = yield* IntegrationService;
+        const approvals = yield* IntegrationApprovals;
+        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants: null });
+        const prepared = prepareIntegrationTools({
+          offered,
+          indexer: createSourceIndexer([]),
+          approvals,
+          owner: { userId, conversationId, messageId: "answer" },
+          permissionsFor: (integrationId) =>
+            integrations.permissionsFor(userId, conversationId, integrationId),
+          sessionFor: (integrationId) =>
+            integrations.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+          rowIdFor: () => Effect.succeed("call"),
+          reportAuthFailure: () => Effect.void,
+          allowanceUses: unlimited,
+        })!;
+        const search = prepared.group.handlers["int_outline-2__search"] as (
+          args: Record<string, unknown>,
+          context: { toolCallId: string },
+        ) => Effect.Effect<IntegrationModelResult>;
+        return {
+          names: [...prepared.names.keys()].filter((name) => name.endsWith("__search")),
+          description: prepared.group.toolkit.tools["int_outline-2__search"]?.description,
+          result: yield* search({ query: "plan" }, { toolCallId: "call" }),
+        };
+      }),
+    );
+    expect(names.toSorted()).toEqual(["int_outline-2__search", "int_outline__search"]);
+    // The model can tell the two apart by name.
+    expect(description).toMatch(/^Docs B: /);
+    expect(result).toMatchObject({ ok: true });
+    expect(secondCalls).toContain("/api/documents.search");
+    expect(apiCalls.length).toBe(before);
+
+    // Deleting one waits for its knowledge sources, then takes its settings with it.
+    await service((s) =>
+      s.setConversationIntegration(userId, conversationId, "outline-2", { enabled: false }),
+    );
+    const collectionId = uuidv7();
+    await insert((db) =>
+      db.insert(knowledgeCollections).values({ id: collectionId, userId, name: "B" }),
+    );
+    const sourceId = uuidv7();
+    await insert((db) =>
+      db.insert(knowledgeSources).values({
+        id: sourceId,
+        collectionId,
+        integrationId: "outline-2",
+        root: { nodeId: "collection:c1", title: "Handbook", mode: "all", rules: [] },
+      }),
+    );
+    expect(await refusal((s) => s.deleteIntegration("outline-2"))).toBe(
+      "1 knowledge source mirrors it. Remove it first.",
+    );
+    await insert((db) => db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId)));
+    const scheduleId = uuidv7();
+    await insert((db) =>
+      db.insert(schedules).values({
+        id: scheduleId,
+        userId,
+        name: "Weekly",
+        prompt: "Summarize",
+        scheduleText: "Every Monday",
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        integrationGrants: [
+          { integrationId: "outline", access: "read" },
+          { integrationId: "outline-2", access: "write" },
+        ],
+      }),
+    );
+    await service((s) => s.deleteIntegration("outline-2"));
+    // A schedule keeps its other grants and loses only the deleted one.
+    const [schedule] = await insert((db) =>
+      db
+        .select({ grants: schedules.integrationGrants })
+        .from(schedules)
+        .where(eq(schedules.id, scheduleId)),
+    );
+    expect(schedule?.grants).toEqual([{ integrationId: "outline", access: "read" }]);
+    const left = await service((s) => s.listForUser(userId));
+    expect(left.map((entry) => entry.id)).not.toContain("outline-2");
+    expect(
+      await insert((db) =>
+        db
+          .select()
+          .from(conversationIntegrations)
+          .where(eq(conversationIntegrations.conversationId, conversationId)),
+      ),
+    ).toEqual([]);
+    expect((await service((s) => s.directory())).map((entry) => entry.id)).not.toContain(
+      "outline-2",
+    );
   });
 });

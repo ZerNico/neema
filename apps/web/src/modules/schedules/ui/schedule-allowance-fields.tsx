@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
+import { findIntegrationType } from "~/modules/integrations/catalog.ts";
 import { ALLOWANCE_LIMITS, type IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { IntegrationAllowance } from "~/modules/integrations/manifest.ts";
 import { parseMailbox } from "~/modules/integrations/mailbox.ts";
@@ -20,13 +20,16 @@ import { Switch } from "~/ui/primitives/switch";
  * write"; on, it takes the exact addresses runs may contact that way.
  */
 export function ScheduleAllowanceFields({
+  kind,
   grant,
   onChange,
 }: {
+  /** The integration's type, which declares the allowances. */
+  kind: string;
   grant: IntegrationGrant;
   onChange: (grant: IntegrationGrant) => void;
 }) {
-  const allowances = findIntegration(grant.integrationId)?.allowances ?? [];
+  const allowances = findIntegrationType(kind)?.allowances ?? [];
   if (grant.access !== "write" || allowances.length === 0) return null;
   const current = grant.allowances ?? {};
   const set = (id: string, targets: ReadonlyArray<string> | null) => {

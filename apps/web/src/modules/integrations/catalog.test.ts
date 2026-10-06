@@ -1,8 +1,9 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { INTEGRATIONS } from "./catalog.ts";
+import { INTEGRATION_TYPES } from "./catalog.ts";
 import {
   defineIntegrationTool,
+  INTEGRATION_ID,
   integrationToolName,
   parseIntegrationToolName,
   summarizeCall,
@@ -13,9 +14,11 @@ import { ADAPTERS } from "./server/adapters.ts";
 
 describe("integration catalog", () => {
   it("pairs every manifest with an adapter offering exactly its tools", () => {
-    expect(ADAPTERS.map((adapter) => adapter.id)).toEqual(INTEGRATIONS.map((entry) => entry.id));
-    for (const manifest of INTEGRATIONS) {
-      const adapter = ADAPTERS.find((entry) => entry.id === manifest.id)!;
+    expect(ADAPTERS.map((adapter) => adapter.kind)).toEqual(
+      INTEGRATION_TYPES.map((entry) => entry.kind),
+    );
+    for (const manifest of INTEGRATION_TYPES) {
+      const adapter = ADAPTERS.find((entry) => entry.kind === manifest.kind)!;
       expect(Object.keys(adapter.handlers).toSorted()).toEqual(
         manifest.tools.map((tool) => tool.name).toSorted(),
       );
@@ -25,16 +28,25 @@ describe("integration catalog", () => {
   });
 
   it("keeps model-facing names within the common provider limit and reversible", () => {
-    for (const manifest of INTEGRATIONS)
+    // Ids are a type's kind, numbered from the second one on.
+    for (const manifest of INTEGRATION_TYPES)
+      expect(INTEGRATION_ID.test(`${manifest.kind}-999`)).toBe(true);
+    // The longest id the pattern allows, with every shipped tool.
+    const id = "a".repeat(24);
+    expect(INTEGRATION_ID.test(id)).toBe(true);
+    expect(INTEGRATION_ID.test(`${id}a`)).toBe(false);
+    for (const manifest of INTEGRATION_TYPES)
       for (const tool of manifest.tools) {
-        const name = integrationToolName(manifest.id, tool.name);
+        const name = integrationToolName(id, tool.name);
         expect(name.length).toBeLessThanOrEqual(64);
         expect(name).toMatch(/^[a-zA-Z0-9_-]+$/);
-        expect(parseIntegrationToolName(name)).toEqual({
-          integrationId: manifest.id,
-          tool: tool.name,
-        });
+        expect(parseIntegrationToolName(name)).toEqual({ integrationId: id, tool: tool.name });
       }
+    // An id with dashes still splits at the double underscore.
+    expect(parseIntegrationToolName("int_jira-ops__search_issues")).toEqual({
+      integrationId: "jira-ops",
+      tool: "search_issues",
+    });
     expect(parseIntegrationToolName("custom_weather__now")).toBeNull();
     expect(parseIntegrationToolName("int_broken")).toBeNull();
   });

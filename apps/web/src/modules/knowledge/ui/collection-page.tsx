@@ -1,5 +1,5 @@
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
+import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
 import {
   KnowledgeSourcesSection,
   SourcePickerDialog,
@@ -260,6 +260,7 @@ const documentCount = (count: number) => {
 };
 
 export function CollectionPage({ collectionId }: { collectionId: string }) {
+  const integrations = useIntegrationDirectory();
   const queryClient = useQueryClient();
   const panel = useDetailPanel();
   const navigate = useNavigate();
@@ -477,7 +478,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         onClick={() => setSyncing({ integrationId: integration.id })}
                       >
                         <IntegrationLogo integrationId={integration.id} />
-                        Sync from {integrationName(integration.id)}
+                        Sync from {integration.name}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -601,7 +602,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                       rel="noreferrer"
                       className={buttonVariants({ size: "sm", variant: "ghost" })}
                     >
-                      Open in {integrationName(document.source.integrationId)}
+                      Open in {integrations.name(document.source.integrationId)}
                     </a>
                   ) : null}
                   {canEdit && !document.source ? (

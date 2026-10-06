@@ -1,6 +1,10 @@
 import { InputRule, Node, type Editor, type JSONContent } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
-import { integrationForName, integrationNamePattern } from "~/modules/integrations/mentions.ts";
+import {
+  integrationForName,
+  mentionNamePattern,
+  type Mentionable,
+} from "~/modules/integrations/mentions.ts";
 import { splitMessageTags, tagMarkup, type ContextTag } from "../tags.ts";
 import { ContextTagNodeView, MentionView } from "./composer-node-views.tsx";
 
@@ -19,8 +23,8 @@ export const contextTagContent = (tag: ContextTag): JSONContent => ({
   attrs: { kind: tag.kind, id: tag.id, name: tag.name },
 });
 
-const lineContent = (line: string): JSONContent[] =>
-  splitMessageTags(line).map((segment) =>
+const lineContent = (line: string, integrations: Mentionable): JSONContent[] =>
+  splitMessageTags(line, integrations).map((segment) =>
     segment.kind === "integration"
       ? {
           type: MENTION_NODE,
@@ -31,23 +35,28 @@ const lineContent = (line: string): JSONContent[] =>
         : { type: "text", text: segment.text },
   );
 
-const paragraph = (line: string): JSONContent =>
-  line ? { type: "paragraph", content: lineContent(line) } : { type: "paragraph" };
+const paragraph = (line: string, integrations: Mentionable): JSONContent =>
+  line ? { type: "paragraph", content: lineContent(line, integrations) } : { type: "paragraph" };
 
-export const textToDoc = (value: string): JSONContent => ({
+/** `integrations` are the names an "@" may turn into a tag. */
+export const textToDoc = (value: string, integrations: Mentionable): JSONContent => ({
   type: "doc",
-  content: value.split("\n").map(paragraph),
+  content: value.split("\n").map((line) => paragraph(line, integrations)),
 });
 
 /** What a paste inserts: inline content for one line, paragraphs for several. */
-export const textToSlice = (value: string): JSONContent[] =>
-  value.includes("\n") ? value.split("\n").map(paragraph) : lineContent(value);
+export const textToSlice = (value: string, integrations: Mentionable): JSONContent[] =>
+  value.includes("\n")
+    ? value.split("\n").map((line) => paragraph(line, integrations))
+    : lineContent(value, integrations);
 
 export const docToText = (editor: Editor) => editor.getText({ blockSeparator: "\n" });
 
 export interface IntegrationMentionOptions {
   /** A mention typed out in full rather than picked: turn it on like picking it. */
   onTyped: (integrationId: string) => void;
+  /** The names a typed "@" may complete, read when the rule runs. */
+  integrations: () => Mentionable;
 }
 
 /**
@@ -63,7 +72,7 @@ export const IntegrationMention = Node.create<IntegrationMentionOptions>({
   selectable: false,
 
   addOptions() {
-    return { onTyped: () => undefined };
+    return { onTyped: () => undefined, integrations: () => [] };
   },
 
   addAttributes() {
@@ -98,13 +107,22 @@ export const IntegrationMention = Node.create<IntegrationMentionOptions>({
     return [
       new InputRule({
         // Runs as the space after the name is typed, before it is inserted.
-        find: new RegExp(String.raw`(?:^|\s)(@(${integrationNamePattern}))\s$`, "iu"),
+        // The names are the integrations offered now, so the pattern is built per run.
+        find: (text) => {
+          const names = mentionNamePattern(this.options.integrations());
+          if (!names) return null;
+          const found = new RegExp(String.raw`(?:^|\s)(@(${names}))\s$`, "iu").exec(text);
+          return found
+            ? { index: found.index, text: found[0], data: { mention: found[1], name: found[2] } }
+            : null;
+        },
         handler: ({ state, range, match }) => {
-          const integration = integrationForName(match[2]!);
+          const { mention, name } = match.data as { mention: string; name: string };
+          const integration = integrationForName(name, this.options.integrations());
           if (!integration) return null;
-          const from = range.to - match[1]!.length;
+          const from = range.to - mention.length;
           state.tr.replaceWith(from, range.to, [
-            this.type.create({ integrationId: integration.id, text: match[1] }),
+            this.type.create({ integrationId: integration.id, text: mention }),
             state.schema.text(" "),
           ]);
           this.options.onTyped(integration.id);

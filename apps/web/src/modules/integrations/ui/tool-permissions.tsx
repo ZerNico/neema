@@ -17,7 +17,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { permissionFor, type ToolPermission } from "../consent.ts";
 import type { IntegrationToolDefinition } from "../manifest.ts";
 
@@ -37,18 +37,19 @@ const GROUP_ITEMS = [
  * A group's select sets every tool in it and reads "Custom" once they differ.
  */
 export function ToolPermissions({
-  integrationId,
+  kind,
   permissions,
   disabled,
   onChange,
 }: {
-  integrationId: string;
+  /** The integration type whose tools these are. */
+  kind: string;
   permissions: Readonly<Record<string, ToolPermission>>;
   disabled?: boolean;
   /** Only the tools that changed; the server merges them in. */
   onChange: (changes: Record<string, ToolPermission>) => void;
 }) {
-  const manifest = findIntegration(integrationId);
+  const manifest = findIntegrationType(kind);
   const tools = manifest?.tools ?? [];
   // Their own group, so allowing every change at once never also lets mail go out unasked.
   const reaching = new Set(manifest?.allowances.flatMap((allowance) => allowance.tools) ?? []);

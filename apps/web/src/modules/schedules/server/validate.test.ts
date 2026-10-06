@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeGrant } from "./validate.ts";
+import { normalizeGrant, undeclaredAllowance } from "./validate.ts";
 
 describe("schedule integration grants", () => {
   it("stores allowance addresses as the mailbox parser writes them", () => {
@@ -22,10 +22,6 @@ describe("schedule integration grants", () => {
       /read-and-write/,
     ],
     [
-      { access: "write" as const, allowances: { forward: { targets: ["ana@example.com"] } } },
-      /unknown/,
-    ],
-    [
       { access: "write" as const, allowances: { send: { targets: ["Ana <ana@example.com>"] } } },
       /not a plain email/,
     ],
@@ -35,19 +31,20 @@ describe("schedule integration grants", () => {
     ],
     [
       { access: "write" as const, allowances: { invite: { targets: [] } } },
-      /add an address for “Invite people”/,
+      /add at least one address/,
     ],
   ])("refuses %j", (grant, reason) => {
     expect(normalizeGrant({ integrationId: "outlook", ...grant })).toMatch(reason);
   });
 
-  it("refuses an allowance an integration does not declare", () => {
-    expect(
-      normalizeGrant({
-        integrationId: "outline",
-        access: "write",
-        allowances: { send: { targets: ["ana@example.com"] } },
-      }),
-    ).toMatch(/unknown/);
+  it("finds an allowance the integration's type does not declare", () => {
+    const grant = {
+      integrationId: "docs",
+      access: "write" as const,
+      allowances: { send: { targets: ["ana@example.com"] } },
+    };
+    // Checked by type, whatever the integration is called.
+    expect(undeclaredAllowance(grant, "outline")).toBe("send");
+    expect(undeclaredAllowance({ ...grant, integrationId: "mail-2" }, "outlook")).toBeNull();
   });
 });

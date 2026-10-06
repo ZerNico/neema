@@ -10,7 +10,7 @@ import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { IntegrationLogo } from "./integration-logo.tsx";
-import { integrationName } from "./integration-name.ts";
+import { useIntegrationDirectory } from "../client/directory.ts";
 
 const isPreparing = (document: KnowledgeDocument) =>
   document.status === "queued" ||
@@ -37,6 +37,7 @@ export function SyncedPagesPanel({
   const panel = useDetailPanel();
   const detail = useQuery(knowledgeCollectionQuery(collectionId));
   const [filter, setFilter] = useState("");
+  const directory = useIntegrationDirectory();
   if (detail.isPending)
     return (
       <div className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -51,7 +52,7 @@ export function SyncedPagesPanel({
   const shown = query
     ? pages.filter((document) => document.title.toLowerCase().includes(query))
     : pages;
-  const name = integrationName(integrationId);
+  const name = directory.name(integrationId);
 
   const read = (document: KnowledgeDocument) =>
     panel.open({

@@ -6,7 +6,7 @@ import { documentLocationLabel } from "~/modules/tools/sources.ts";
 import { useDocumentSourcePanel } from "~/modules/knowledge/ui/use-document-source-panel.tsx";
 import type { ToolSource } from "../client/use-message-stream.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import { integrationName } from "~/modules/integrations/ui/integration-name.ts";
+import { IntegrationNameText } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { Favicon } from "./favicon.tsx";
 import { hostOf } from "./host-of.ts";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "~/ui/primitives/hover-card";
@@ -47,11 +47,13 @@ const describeSource = (source: ToolSource) => {
   const document = source.kind === "document";
   return {
     label: source.title?.trim() || (document ? "Document" : hostOf(source.url)),
-    location: document
-      ? documentLocationLabel(source)
-      : source.kind === "integration"
-        ? integrationName(source.integrationId)
-        : hostOf(source.url),
+    location: document ? (
+      documentLocationLabel(source)
+    ) : source.kind === "integration" ? (
+      <IntegrationNameText integrationId={source.integrationId} />
+    ) : (
+      hostOf(source.url)
+    ),
     // A connected service's page sits behind the user's sign-in, so its logo
     // stands in for a favicon the server could not fetch anyway.
     icon: document ? (

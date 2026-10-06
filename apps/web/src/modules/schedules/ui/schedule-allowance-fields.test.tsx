@@ -9,7 +9,7 @@ function Host({ initial }: { initial: IntegrationGrant }) {
   const [grant, setGrant] = useState(initial);
   return (
     <>
-      <ScheduleAllowanceFields grant={grant} onChange={setGrant} />
+      <ScheduleAllowanceFields kind={grant.integrationId} grant={grant} onChange={setGrant} />
       <output data-testid="grant">{JSON.stringify(grant)}</output>
     </>
   );

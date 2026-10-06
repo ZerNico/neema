@@ -1,8 +1,11 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render as renderUi, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTextarea } from "./chat-textarea.tsx";
 import {
+  clientWithIntegrations,
   composerEditor,
   composerTagCount,
   composerText,
@@ -11,6 +14,9 @@ import {
 } from "./composer-test-utils.ts";
 
 const noop = () => undefined;
+
+const render = (ui: ReactElement) =>
+  renderUi(<QueryClientProvider client={clientWithIntegrations()}>{ui}</QueryClientProvider>);
 
 /** Owns the value, as the composer does, so an edit lands in the next render. */
 function Controlled({
@@ -38,14 +44,11 @@ function Controlled({
         onSubmit={onSubmit}
         onCancel={onCancel}
         ariaLabel="Message"
-        {...(onSelectIntegration
-          ? {
-              integrations: {
-                items: [{ id: "outline", label: "Outline" }],
-                onSelect: onSelectIntegration,
-              },
-            }
-          : {})}
+        // The integrations offered here, which are what an "@" can name.
+        integrations={{
+          items: [{ id: "outline", label: "Outline" }],
+          onSelect: onSelectIntegration ?? noop,
+        }}
       />
       <button type="button" onClick={() => setValue("")}>
         Clear from outside

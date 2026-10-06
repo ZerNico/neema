@@ -3,7 +3,7 @@ import { OutlineLogo } from "./logo.tsx";
 import { OUTLINE_TOOLS } from "./tools.ts";
 
 export const outlineManifest = {
-  id: "outline",
+  kind: "outline",
   name: "Outline",
   description: "Search, read and write documents in an Outline knowledge base.",
   logo: OutlineLogo,

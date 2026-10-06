@@ -9,32 +9,42 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { agents } from "./agents.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
 
 /**
- * Instance setup for one integration the code ships. The primary key is the
- * manifest id, so a row exists only for integrations an admin has touched;
- * without one an integration is simply off. Shared like custom tools: who may
- * connect is `audience` plus the grant tables below, admins always.
+ * One integration an admin set up: an instance of a type the code ships
+ * (`kind`), so a server can have two Outlines or two Jira sites. The id is
+ * chosen once and never changes, since tool names (`int_<id>__…`), the OAuth
+ * callback and every stored reference carry it. Shared like custom tools: who
+ * may connect is `audience` plus the grant tables below, admins always.
  */
-export const integrationConfigs = pgTable("integration_configs", {
-  id: text().primaryKey(),
-  enabled: boolean().notNull().default(false),
-  // Non-secret settings named by the manifest's admin fields (base URL…).
-  config: jsonb().$type<Record<string, string>>().notNull().default({}),
-  oauthClientId: text("oauth_client_id"),
-  // AES-256-GCM via KeyCipher, like provider API keys
-  oauthClientSecretCiphertext: text("oauth_client_secret_ciphertext"),
-  allowApiKeys: boolean("allow_api_keys").notNull().default(true),
-  audience: text({ enum: ["private", "instance"] })
-    .notNull()
-    .default("instance"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const integrationConfigs = pgTable(
+  "integration_configs",
+  {
+    id: text().primaryKey(),
+    /** The manifest and adapter it runs on. */
+    kind: text().notNull(),
+    /** What people see; unique, so an @mention names one integration. */
+    name: text().notNull(),
+    enabled: boolean().notNull().default(false),
+    // Non-secret settings named by the manifest's admin fields (base URL…).
+    config: jsonb().$type<Record<string, string>>().notNull().default({}),
+    oauthClientId: text("oauth_client_id"),
+    // AES-256-GCM via KeyCipher, like provider API keys
+    oauthClientSecretCiphertext: text("oauth_client_secret_ciphertext"),
+    allowApiKeys: boolean("allow_api_keys").notNull().default(true),
+    audience: text({ enum: ["private", "instance"] })
+      .notNull()
+      .default("instance"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("integration_configs_name_idx").on(sql`lower(${t.name})`)],
+);
 
 export const integrationUserGrants = pgTable(
   "integration_user_grants",
@@ -117,7 +127,9 @@ export const conversationIntegrations = pgTable(
     conversationId: text("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
     enabled: boolean(),
     // Tools the person said to always allow in this chat, from an approval.
     allowedTools: jsonb("allowed_tools").$type<string[]>().notNull().default([]),
@@ -133,7 +145,9 @@ export const agentIntegrations = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
     position: integer().notNull().default(0),
   },
   (t) => [
@@ -153,7 +167,9 @@ export const integrationAllowanceUses = pgTable(
     messageId: text("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
     allowanceId: text("allowance_id").notNull(),
     uses: integer().notNull(),
   },

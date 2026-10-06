@@ -11,7 +11,7 @@ import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { AGENT_ICONS } from "~/modules/chat/ui/agent-icons.ts";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
-import { INTEGRATIONS } from "~/modules/integrations/catalog.ts";
+import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import { ResourcePicker } from "~/ui/resource-picker.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
@@ -41,6 +41,7 @@ import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 export const AgentSettingsFields = withForm({
   defaultValues: EMPTY_AGENT_DRAFT,
   render: function AgentSettingsFields({ form }) {
+    const integrations = useIntegrationDirectory();
     const modelsQuery = useQuery(chatModelsQuery);
     const models = modelsQuery.data ?? [];
     const collections = useQuery(knowledgeCollectionsQuery);
@@ -404,13 +405,13 @@ export const AgentSettingsFields = withForm({
               const ids = field.state.value ?? [];
               return (
                 <ListCard>
-                  {INTEGRATIONS.map((integration) => (
+                  {integrations.list.map((integration) => (
                     <ListRow key={integration.id}>
                       <IntegrationLogo integrationId={integration.id} variant="tile" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{integration.name}</p>
                         <p className="text-muted-foreground truncate text-xs">
-                          {integration.description}
+                          {integration.manifest.description}
                         </p>
                       </div>
                       <Switch

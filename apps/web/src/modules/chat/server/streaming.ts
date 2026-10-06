@@ -143,7 +143,6 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { summarizeCall } from "~/modules/integrations/manifest.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -1786,7 +1785,10 @@ export class StreamEngine extends Context.Service<
               ? [
                   ...new Set(
                     [...integrationTools.names.values()].map(
-                      (entry) => findIntegration(entry.integrationId)?.name ?? entry.integrationId,
+                      (entry) =>
+                        integrationOffer.find(
+                          (offer) => offer.integrationId === entry.integrationId,
+                        )?.session.integration.name ?? entry.integrationId,
                     ),
                   ),
                 ]

@@ -1,6 +1,5 @@
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
 import { ChatService } from "~/modules/chat/server/service.ts";
-import { findIntegration } from "~/modules/integrations/catalog.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
 
@@ -77,10 +76,16 @@ export class ScheduleFire extends Context.Service<
           .pipe(
             Effect.andThen(() => start(row, runId)),
             Effect.catchTag("IntegrationNotAvailable", (error) =>
-              Effect.fail({
-                _tag: "GrantUnavailable" as const,
-                integrationId: error.integrationId,
-              }),
+              integrations.directory().pipe(
+                Effect.flatMap((directory) =>
+                  Effect.fail({
+                    _tag: "GrantUnavailable" as const,
+                    name:
+                      directory.find((entry) => entry.id === error.integrationId)?.name ??
+                      error.integrationId,
+                  }),
+                ),
+              ),
             ),
           )
           .pipe(
@@ -120,7 +125,7 @@ export class ScheduleFire extends Context.Service<
               GrantUnavailable: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: `${findIntegration(error.integrationId)?.name ?? error.integrationId} is not connected or needs reconnecting`,
+                  error: `${error.name} is not connected or needs reconnecting`,
                 }),
             }),
             // The remaining failures are composer-path errors a scheduled turn

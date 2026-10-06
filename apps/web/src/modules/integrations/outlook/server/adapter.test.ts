@@ -108,6 +108,7 @@ const session: ConnectedSession = {
   credential: Effect.succeed({ kind: "oauth", accessToken: "token" }),
   scope: Effect.succeed(null),
   connectionId: "connection",
+  integration: { id: "outlook", kind: "outlook", name: "Outlook" },
   adapter: outlookAdapter,
 };
 const handlers = outlookAdapter.handlers;

@@ -19,7 +19,7 @@ import { pendingIntegrationCallsQuery } from "../client/queries.ts";
 import type { IntegrationDecision, PendingIntegrationCall } from "../schema.ts";
 import { decideIntegrationCall } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
-import { integrationName } from "./integration-name.ts";
+import { useIntegrationDirectory } from "../client/directory.ts";
 
 /**
  * One call into a connected service. While it runs it may be parked on the
@@ -33,7 +33,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
     ? (pending.data?.find((call) => call.callId === activity.callId) ?? null)
     : null;
   const [open, setOpen] = useState(false);
-  const name = integrationName(activity.integrationId);
+  const name = useIntegrationDirectory().name(activity.integrationId);
   const failed = activity.status === "error";
   const label = waiting
     ? `Waiting for your approval: ${activity.label}`

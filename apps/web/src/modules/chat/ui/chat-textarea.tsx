@@ -36,6 +36,10 @@ import {
   textToSlice,
 } from "./composer-doc.tsx";
 
+/** The "@" rows as names a typed mention may complete. */
+const mentionable = (source: TextareaMentions | undefined) =>
+  (source?.items ?? []).map((item) => ({ id: item.id, name: item.label }));
+
 /** Offerable rows plus what to do with the one that is picked. */
 export interface TextareaMentions {
   items: readonly MentionItem[];
@@ -333,6 +337,7 @@ export const ChatTextarea = forwardRef<
     Placeholder.configure({ placeholder: () => latest.current.placeholder ?? "" }),
     ContextTagNode,
     IntegrationMention.configure({
+      integrations: () => mentionable(latest.current.sources["@"]),
       // A typed-out mention is the same keyboard route as picking it.
       onTyped: (integrationId) => {
         const source = latest.current.sources["@"];
@@ -346,7 +351,7 @@ export const ChatTextarea = forwardRef<
 
   const editor = useEditor({
     extensions,
-    content: textToDoc(value),
+    content: textToDoc(value, mentionable(integrations)),
     autofocus: autoFocus ? "end" : false,
     editable: !disabled,
     shouldRerenderOnTransaction: false,
@@ -372,7 +377,10 @@ export const ChatTextarea = forwardRef<
         if (!text) return false;
         // Plain words only: formatting has nowhere to go in a message, and an
         // "@Name" in the pasted text becomes a tag as typed text does.
-        const content = Fragment.fromJSON(view.state.schema, textToSlice(text));
+        const content = Fragment.fromJSON(
+          view.state.schema,
+          textToSlice(text, mentionable(latest.current.sources["@"])),
+        );
         // Several lines arrive as paragraphs whose ends join the current one.
         const open = text.includes("\n") ? 1 : 0;
         view.dispatch(view.state.tr.replaceSelection(new Slice(content, open, open)));
@@ -397,7 +405,9 @@ export const ChatTextarea = forwardRef<
     editor
       .chain()
       .setMeta("addToHistory", false)
-      .setContent(textToDoc(value), { emitUpdate: false })
+      .setContent(textToDoc(value, mentionable(latest.current.sources["@"])), {
+        emitUpdate: false,
+      })
       .command(({ tr }) => {
         tr.setSelection(TextSelection.atEnd(tr.doc));
         return true;

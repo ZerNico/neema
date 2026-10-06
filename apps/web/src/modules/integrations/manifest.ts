@@ -120,7 +120,8 @@ export interface OAuthSetup {
  * lives in the server adapter with the same id.
  */
 export interface IntegrationManifest {
-  readonly id: string;
+  /** The type: what instances name as their `kind`, and the adapter with the same key. */
+  readonly kind: string;
   readonly name: string;
   readonly description: string;
   readonly logo: ComponentType<ComponentProps<"svg">>;
@@ -150,6 +151,12 @@ export interface IntegrationManifest {
 }
 
 const TOOL_PREFIX = "int_";
+
+/**
+ * An integration's id: chosen once, carried by tool names (`int_<id>__…`, 64
+ * characters at most) and the OAuth callback path, so short and plain.
+ */
+export const INTEGRATION_ID = /^[a-z][a-z0-9-]{1,23}$/;
 
 /**
  * Both halves are slugs, so the name stays within the common 64-character

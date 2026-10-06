@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTextarea } from "./chat-textarea.tsx";
 import {
+  clientWithIntegrations,
   composerEditor,
   composerTagCount,
   composerText,
@@ -44,7 +46,11 @@ function Harness({ select, initial }: { select: (id: string) => void; initial: s
 
 const setup = (initial: string, caret: number) => {
   const select = vi.fn();
-  render(<Harness select={select} initial={initial} />);
+  render(
+    <QueryClientProvider client={clientWithIntegrations()}>
+      <Harness select={select} initial={initial} />
+    </QueryClientProvider>,
+  );
   const textbox = screen.getByRole("textbox");
   focusComposer(textbox);
   setComposerCaret(textbox, caret);

@@ -343,7 +343,7 @@ const enumerate = (session: IntegrationSession, roots: ReadonlyArray<string>, si
   });
 
 export const outlineAdapter: IntegrationAdapter = {
-  id: "outline",
+  kind: "outline",
   normalizeConfig: (config) => {
     const raw = (config.baseUrl ?? "").trim();
     let url: URL;

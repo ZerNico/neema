@@ -153,7 +153,8 @@ export interface KnowledgeAdapter {
 }
 
 export interface IntegrationAdapter {
-  readonly id: string;
+  /** The manifest `kind` it implements. */
+  readonly kind: string;
   /**
    * Validates and normalizes the admin config. The fingerprint names what
    * credentials were issued against; a change to it invalidates connections.

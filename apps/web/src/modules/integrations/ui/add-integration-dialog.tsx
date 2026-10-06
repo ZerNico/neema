@@ -14,7 +14,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
-import { findIntegration } from "../catalog.ts";
+import { findIntegrationType } from "../catalog.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { ComposerIntegrations } from "../client/use-chat-integrations.ts";
 import { ConnectActions } from "./connect-actions.tsx";
@@ -61,7 +61,7 @@ export function AddIntegrationDialog({
         ) : (
           <ul className="flex min-w-0 flex-col gap-2">
             {list.map((integration) => {
-              const manifest = findIntegration(integration.id);
+              const manifest = findIntegrationType(integration.kind);
               if (!manifest) return null;
               const connection = integration.connection;
               const ready = integration.available && connection?.status === "active";
@@ -74,7 +74,7 @@ export function AddIntegrationDialog({
                   <IntegrationLogo integrationId={integration.id} variant="tile" />
                   <div className="flex min-w-0 flex-1 basis-40 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
-                      {manifest.name}
+                      {integration.name}
                       {connection?.status === "needs_reauth" ? (
                         <Badge variant="destructive">Reconnect</Badge>
                       ) : null}
@@ -86,7 +86,7 @@ export function AddIntegrationDialog({
                   {ready && here ? (
                     <Switch
                       checked={here.enabled}
-                      aria-label={`Use ${manifest.name} in this chat`}
+                      aria-label={`Use ${integration.name} in this chat`}
                       onCheckedChange={(enabled) => chat.setEnabled(integration.id, enabled)}
                     />
                   ) : integration.available ? (

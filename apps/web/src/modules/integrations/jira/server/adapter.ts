@@ -613,7 +613,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
 const SITE = /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/;
 
 export const jiraAdapter: IntegrationAdapter = {
-  id: "jira",
+  kind: "jira",
   normalizeConfig: (config) => {
     const raw = (config.site ?? "").trim().toLowerCase();
     const host = URL.canParse(/^https?:\/\//.test(raw) ? raw : `https://${raw}`)
