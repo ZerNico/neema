@@ -39,7 +39,7 @@ export const electronBinary = () => {
 };
 
 // Run directly (`pnpm start`): launch the built shell once.
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (import.meta.main) {
   const child = spawn(electronBinary(), ["dist/main.cjs"], {
     stdio: "inherit",
     env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },

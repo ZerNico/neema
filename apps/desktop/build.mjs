@@ -44,6 +44,6 @@ export const buildOptions = () => ({
 });
 
 // Run directly: one build. Imported by dev.mjs: the options only.
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+if (import.meta.main) {
   await build(buildOptions());
 }
