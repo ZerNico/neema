@@ -1,10 +1,9 @@
 name: Release
 
-# Push a tag like v1.2.3 (or v1.2.3-rc.1 for a prerelease). The notes are the
-# tag's section of CHANGELOG.md, or GitHub's generated notes without one. The
-# release stays a draft until CI, the image and every installer have succeeded,
-# so a published release is never missing an asset. A failed run leaves the
-# draft to re-run.
+# Push a tag like v1.2.3 (or v1.2.3-rc.1 for a prerelease). This builds a draft
+# release with GitHub's generated notes and every installer attached. Someone then
+# rewrites the notes and publishes it by hand, so nothing is announced unread. A
+# failed run leaves the draft to re-run.
 
 on:
   push:
@@ -31,34 +30,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: CHANGELOG.md
-          sparse-checkout-cone-mode: false
-
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "Release $TAG exists; reusing it."
+            echo "Release $TAG exists, reusing it."
             exit 0
           fi
-          # The lines under "## [1.2.3]" or "## 1.2.3", up to the next "## ".
-          awk -v v="$VERSION" '
-            /^## / { if (found) exit; found = ($2 == v || $2 == "[" v "]"); next }
-            found
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          flags=(--draft --verify-tag --title "$TAG")
-          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            flags+=(--notes-file "$RUNNER_TEMP/notes.md")
-          else
-            flags+=(--generate-notes)
-          fi
+          flags=(--draft --verify-tag --generate-notes --title "$TAG")
           [[ "$TAG" == *-* ]] && flags+=(--prerelease)
           gh release create "$TAG" "${flags[@]}"
 
@@ -82,7 +64,7 @@ jobs:
     with:
       version: ${{ needs.draft.outputs.version }}
 
-  publish:
+  assets:
     needs: [docker, desktop]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -99,11 +81,12 @@ jobs:
         working-directory: assets
         run: sha256sum -- * > SHA256SUMS.txt
 
-      - name: Upload assets and publish
+      - name: Upload assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           gh release upload "$TAG" assets/* --clobber
-          gh release edit "$TAG" --draft=false
+          url=$(gh release view "$TAG" --json url --jq .url)
+          echo "Draft ready: rewrite the notes and publish at $url" >> "$GITHUB_STEP_SUMMARY"
