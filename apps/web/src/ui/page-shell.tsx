@@ -34,11 +34,14 @@ export function SectionShell({
   title,
   rootPath,
   items,
+  footer,
   children,
 }: {
   title: string;
   rootPath: string;
   items: SectionNavItem[];
+  /** Quiet text pinned below the nav items. */
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const matches = useMatches();
@@ -81,6 +84,7 @@ export function SectionShell({
             );
           })}
         </div>
+        {footer && <div className="text-muted-foreground mt-auto px-2.5 text-xs">{footer}</div>}
       </nav>
       {/* Page provides the scroll container, so a page body never has two. */}
       <div className={cn("min-w-0 min-h-0 flex-1", atRoot && "hidden md:block")}>{children}</div>

@@ -22,6 +22,16 @@ env:
   PUSH: ${{ github.event_name != 'pull_request' }}
   # Release builds start cold rather than trust a cache written by another ref.
   CACHE: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # Shared by both metadata steps, so the version baked into the build and its
+  # labels match the published tags. latest=auto: only a stable semver tag
+  # moves `latest`.
+  TAGS: |
+    type=semver,pattern={{version}}
+    type=semver,pattern={{major}}.{{minor}}
+    type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+    type=edge,branch=main
+    type=sha,enable=${{ github.ref == 'refs/heads/main' }}
+    type=ref,event=pr
 
 jobs:
   build:
@@ -49,6 +59,7 @@ jobs:
         id: meta
         with:
           images: ${{ steps.image.outputs.name }}
+          tags: ${{ env.TAGS }}
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -65,6 +76,9 @@ jobs:
           context: .
           platforms: linux/${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+            APP_REVISION=${{ github.sha }}
           outputs: ${{ env.PUSH == 'true' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', steps.image.outputs.name) || 'type=cacheonly' }}
           cache-from: ${{ env.CACHE == 'true' && format('type=gha,scope=docker-{0}', matrix.arch) || '' }}
           cache-to: ${{ env.CACHE == 'true' && format('type=gha,mode=max,scope=docker-{0}', matrix.arch) || '' }}
@@ -114,13 +128,7 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ${{ steps.image.outputs.name }}
-          # latest=auto: only a stable semver tag moves `latest`.
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-            type=edge,branch=main
-            type=sha,enable=${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ env.TAGS }}
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

@@ -21,7 +21,12 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY . .
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --offline --frozen-lockfile --store-dir /pnpm/store --filter "@chat/web..."
-RUN pnpm --filter @chat/web build
+# Shown in the admin area. Declared here, after install, so a new version
+# never invalidates the dependency layers.
+ARG APP_VERSION=dev
+ARG APP_REVISION=
+RUN VITE_APP_VERSION="$APP_VERSION" VITE_APP_REVISION="$APP_REVISION" \
+    pnpm --filter @chat/web build
 
 FROM node AS runtime
 RUN apt-get update \
