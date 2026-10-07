@@ -48,7 +48,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
 const MEMORY_CONTENT = "Prefers concise answers";
 const SETTINGS_UPDATED_AT = "2026-01-01T00:00:00.000Z";

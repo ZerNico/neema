@@ -286,7 +286,7 @@ async function serve(instance, mode) {
   await mkdir(instance.profile, { recursive: true });
   await writeFile(instance.origin, origin);
   console.log(`Chat: ${origin}\nDatabase: ${instance.database}\nState: ${instance.directory}`);
-  const env = { ...instanceEnv(instance), BETTER_AUTH_URL: origin, CHAT_DESKTOP_SERVER: origin };
+  const env = { ...instanceEnv(instance), PUBLIC_URL: origin, CHAT_DESKTOP_SERVER: origin };
   const require = createRequire(join(root, "apps/web/package.json"));
   const vite = join(dirname(require.resolve("vite/package.json")), "bin/vite.js");
   const tasks = [

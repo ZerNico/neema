@@ -26,7 +26,7 @@ export const providers = pgTable("providers", {
   // What an admin changed from the preset, only keys the preset lets them change.
   settings: jsonb().$type<ProviderSettings>().notNull().default({}),
   baseUrl: text("base_url").notNull(),
-  // AES-256-GCM encrypted with PROVIDER_KEY_SECRET; never returned to clients.
+  // AES-256-GCM encrypted with ENCRYPTION_KEY; never returned to clients.
   // Null for a self-hosted server that takes no key.
   apiKeyCiphertext: text("api_key_ciphertext"),
   enabled: boolean().notNull().default(true),

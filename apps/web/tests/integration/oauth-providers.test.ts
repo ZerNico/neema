@@ -12,7 +12,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 9).toString("base64");
 
 const origin = "http://localhost:9877";
 let database: TestDatabase;

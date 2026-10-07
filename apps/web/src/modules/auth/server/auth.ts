@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
 import { createAppAuth } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
@@ -41,8 +42,8 @@ const build = async (): Promise<Auth> =>
     // The Better Auth pool is memoized, so a rebuild costs one provider query
     // and a new options object, not a reconnect.
     db: getDb(),
-    baseURL: process.env.BETTER_AUTH_URL,
-    secret: process.env.BETTER_AUTH_SECRET,
+    baseURL: publicUrl(),
+    secret: process.env.AUTH_SECRET,
     purgeUserFiles,
     signup,
     onDesktopRedeemed,

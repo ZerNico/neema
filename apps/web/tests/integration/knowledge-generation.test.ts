@@ -41,7 +41,7 @@ import { makeFakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { FakeDocumentParser, FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 9).toString("base64");
 
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
 const requests: GatewayInput[] = [];

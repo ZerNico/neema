@@ -21,7 +21,7 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
 /**
  * Modules and sharing at the repository layer: what an attempt resolves, what

@@ -99,8 +99,8 @@ export function instanceEnv(instance, inherited = process.env) {
   return {
     ...inherited,
     DATABASE_URL: `postgres://chat_dev_${instance.id}:${instance.databasePassword}@127.0.0.1:5433/${instance.database}`,
-    BETTER_AUTH_SECRET: instance.authSecret,
-    PROVIDER_KEY_SECRET: instance.providerSecret,
+    AUTH_SECRET: instance.authSecret,
+    ENCRYPTION_KEY: instance.providerSecret,
     BLOB_STORE_ROOT: instance.blobs,
     CHAT_DESKTOP_PROFILE: instance.profile,
     // Pinned, verified files that never change: shared by every snapshot of this checkout.

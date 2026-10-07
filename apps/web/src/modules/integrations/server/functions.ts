@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
+import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   BrowseInput,
@@ -38,8 +39,7 @@ const outcome = <E extends { _tag: string }, R>(effect: Effect.Effect<void, E, R
 
 /** Where callbacks land, for the admin to register with the service. */
 export const appOrigin = (request?: Request) =>
-  process.env.BETTER_AUTH_URL?.replace(/\/+$/, "") ??
-  (request ? new URL(request.url).origin : null);
+  publicUrl() ?? (request ? new URL(request.url).origin : null);
 
 export const listAdminIntegrations = createServerFn({ method: "GET" })
   .middleware([requireAdmin])

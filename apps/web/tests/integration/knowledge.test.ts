@@ -36,7 +36,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 5).toString("base64");
 
 // A deterministic stand-in for a real embedding model: a handful of concept
 // dimensions, so a paraphrase lands near its source without sharing a word.

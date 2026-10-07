@@ -48,7 +48,7 @@ import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
 // Knowledge-backed generations are exercised in knowledge.test.ts; here no
 // message carries a manifest, so the session is never opened.

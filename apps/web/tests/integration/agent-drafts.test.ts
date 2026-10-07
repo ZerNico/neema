@@ -40,7 +40,7 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 9).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 9).toString("base64");
 let database: TestDatabase;
 type Services = Db | DraftRepo | AgentDraftService | AgentRepo | AgentService;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;

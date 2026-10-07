@@ -35,7 +35,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 5).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 5).toString("base64");
 
 type Services =
   | Db

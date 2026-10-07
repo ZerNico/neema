@@ -1,7 +1,7 @@
 # Example single-host deployment: the app, Postgres with pgvector, and SearXNG
 # for web search. Copy .env.example to .env beside this file, fill it in, then:
 #   docker compose up -d
-# Put a TLS-terminating reverse proxy in front of port 3000; BETTER_AUTH_URL
+# Put a TLS-terminating reverse proxy in front of port 3000. PUBLIC_URL
 # must be the public origin it serves, and its request body limit must admit
 # 20 MB attachments (nginx allows 1 MB by default: client_max_body_size 25m;),
 # and it must not buffer responses, which would stall streaming answers.

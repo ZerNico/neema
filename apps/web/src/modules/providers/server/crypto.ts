@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Config, Context, Effect, Layer, Redacted } from "effect";
 
 /**
- * AES-256-GCM encryption for provider API keys at rest.
+ * AES-256-GCM encryption for stored credentials at rest.
  * Format: base64(iv).base64(tag).base64(ciphertext)
  */
 export class KeyCipher extends Context.Service<
@@ -15,8 +15,15 @@ export class KeyCipher extends Context.Service<
   static readonly layer = Layer.effect(
     KeyCipher,
     Effect.gen(function* () {
-      const secret = yield* Config.Redacted("PROVIDER_KEY_SECRET").pipe(Effect.orDie);
+      const secret = yield* Config.Redacted("ENCRYPTION_KEY").pipe(Effect.orDie);
       const key = Buffer.from(Redacted.value(secret), "base64");
+      // A wrong size would otherwise only surface at the first encrypt.
+      if (key.length !== 32)
+        return yield* Effect.die(
+          new Error(
+            "ENCRYPTION_KEY must be 32 bytes, base64-encoded. Generate one with: openssl rand -base64 32",
+          ),
+        );
 
       const encrypt = (plaintext: string) =>
         Effect.sync(() => {

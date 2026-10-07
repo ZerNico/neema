@@ -9,7 +9,7 @@ import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 let database: TestDatabase;
 type Services = ProviderRepo | GroupRepo | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;

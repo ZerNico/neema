@@ -401,7 +401,8 @@ Differs from most Effect 3 material online.
   installed version only (1.7.1 added `account.issuer`, 1.7.3 removed it). After
   an upgrade, diff `@better-auth/core`'s `dist/db/get-tables.mjs` and verify a
   fresh signup.
-- Provider API keys are AES-256-GCM at rest (`PROVIDER_KEY_SECRET`); ciphertext
+- Stored credentials (provider and tool API keys, OAuth client secrets, integration
+  accounts) are AES-256-GCM at rest (`ENCRYPTION_KEY`); ciphertext
   never leaves the server.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
   ticket. The 90-day refresh and the Devices label "neema Desktop on …" key on

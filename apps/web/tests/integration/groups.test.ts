@@ -40,7 +40,7 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 7).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
 // Knowledge-backed generations are exercised in knowledge.test.ts; here no
 // message carries a manifest, so the session is never opened.

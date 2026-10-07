@@ -21,7 +21,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-process.env.PROVIDER_KEY_SECRET ??= Buffer.alloc(32, 11).toString("base64");
+process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 11).toString("base64");
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<MemoryRepo | MemoryService | ToolsRepo | Db, unknown>;

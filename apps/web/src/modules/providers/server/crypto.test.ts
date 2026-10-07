@@ -1,9 +1,9 @@
-import { expect, layer } from "@effect/vitest";
-import { Effect, Redacted } from "effect";
+import { expect, it, layer } from "@effect/vitest";
+import { Cause, ConfigProvider, Effect, Exit, Layer, Redacted } from "effect";
 import { KeyCipher } from "./crypto.ts";
 
-// KeyCipher reads PROVIDER_KEY_SECRET from the environment.
-process.env.PROVIDER_KEY_SECRET = Buffer.alloc(32, 7).toString("base64");
+// KeyCipher reads ENCRYPTION_KEY from the environment.
+process.env.ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 layer(KeyCipher.layer)("KeyCipher", (it) => {
   it.effect("roundtrips a secret", () =>
@@ -25,3 +25,15 @@ layer(KeyCipher.layer)("KeyCipher", (it) => {
     }),
   );
 });
+
+it.effect("refuses a key that isn't 32 bytes", () =>
+  Effect.gen(function* () {
+    const config = ConfigProvider.layer(
+      ConfigProvider.fromUnknown({ ENCRYPTION_KEY: Buffer.alloc(16, 7).toString("base64") }),
+    );
+    const exit = yield* Effect.exit(
+      Layer.build(KeyCipher.layer.pipe(Layer.provide(config))).pipe(Effect.scoped),
+    );
+    expect(Exit.isFailure(exit) && String(Cause.squash(exit.cause))).toContain("must be 32 bytes");
+  }),
+);

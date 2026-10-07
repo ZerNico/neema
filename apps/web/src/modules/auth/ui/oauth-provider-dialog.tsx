@@ -249,7 +249,7 @@ export function OAuthProviderDialog({
               <FieldDescription>
                 {baseURL
                   ? "Register this with the provider before signing in."
-                  : "Set BETTER_AUTH_URL so this URL is complete, then register it with the provider."}
+                  : "Set PUBLIC_URL so this URL is complete, then register it with the provider."}
               </FieldDescription>
             </Field>
 

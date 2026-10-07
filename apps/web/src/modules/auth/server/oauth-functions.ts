@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import type { JsonValue } from "~/db/schema/providers.ts";
+import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   findBuiltin,
@@ -38,13 +39,13 @@ const save = (input: UpsertOAuthProvider) =>
 /**
  * The callback URL rides along because every provider console asks for it and
  * getting it wrong is the usual first failure. It is null when
- * `BETTER_AUTH_URL` is unset, which is also when Better Auth would guess it
+ * `PUBLIC_URL` is unset, which is also when Better Auth would guess it
  * from the request, so the page falls back to the browser's own origin.
  */
 export const listOAuthProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(async () => ({
-    baseURL: process.env.BETTER_AUTH_URL ?? null,
+    baseURL: publicUrl() ?? null,
     providers: await runtime.runPromise(OAuthRepo.use((repo) => repo.list())),
   }));
 
