@@ -3,7 +3,7 @@
 A self-hosted chat app for talking to LLMs: conversations, resumable streaming, web
 search, deep research, knowledge collections, saved agents, skills and memory. Single
 tenant, one Node process, Postgres. Stack: TanStack Start, React 19, Effect 4 (rc),
-Drizzle 1 (rc), Better Auth, Base UI/shadcn, Vitest. `README.md` has the layout and
+Drizzle 1 (rc), Better Auth, Base UI/shadcn, Vitest. `CONTRIBUTING.md` has the layout and
 the commands; this file has what you need before you touch anything.
 
 The web package is `apps/web/`, the desktop shell is `apps/desktop/`, and shared
@@ -253,6 +253,10 @@ skipped one on purpose.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
   (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
   containment and previews.
+- `docs/internals/streaming.md`: answers generated apart from the request, numbered chunks,
+  subscribe before replay so a reload or a second tab joins a running answer.
+- `docs/internals/deployment.md`: the image, migrations on start, the shell-mode trap, and
+  releases as drafts that a person rewrites and publishes.
 - `docs/internals/resume.md`: continuing a failed or stopped last answer. Same row, new
   generation, one continuous chunk and turn space, earlier rounds read as records.
 - `docs/internals/web-search.md`: the provider chain, why empty ends it, cooldowns that

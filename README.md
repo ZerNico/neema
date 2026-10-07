@@ -1,171 +1,145 @@
-# Chat
+<p align="center">
+  <img src="apps/web/public/icon-512.png" width="96" height="96" alt="">
+</p>
 
-A self-hosted, ChatGPT-style chat app built as a modular monolith.
+<h1 align="center">neema</h1>
 
-- **Runtime**: Node 24, pnpm
-- **Framework**: TanStack Start + Router + Query + Form, React 19, Vite 8
-- **Styling**: Tailwind CSS 4, Base UI (`@base-ui/react`) shadcn-style components (`base-luma`), Hugeicons, Geist
-- **Effects**: Effect 4 (rc) — services, DI layers, typed errors, streams, retries, resources
-- **Database**: PostgreSQL, Drizzle ORM 1.0 (rc) with the Effect client (`drizzle-orm/effect-postgres` on `@effect/sql-pg`), generated migrations
-- **Auth**: Better Auth (Drizzle adapter, admin plugin). The **first registered user becomes the instance admin**.
-- **AI**: any OpenAI-like service (OpenRouter, OpenAI, Azure, hosted vendors, self-hosted servers, gateways) through our own `@chat/model-client` and its presets; providers and models are managed in the admin panel, with autocomplete backed by each provider's live catalog
-- **Tests**: Vitest 5, `@effect/vitest`, Testing Library + jsdom, Testcontainers
-- **Lint/format**: oxlint (`oxlint.config.ts`) + oxfmt, with `eslint-plugin-slop` loaded as an oxlint JS plugin with full inspection
+<p align="center">
+  A self-hosted AI chat app for you and your team.<br>
+  Bring any model, keep your data, and let it work with the web, your documents and your files.
+</p>
 
-## Getting started
+<p align="center">
+  <a href="https://github.com/ZerNico/neema/releases/latest">Download</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-```sh
-pnpm install
-pnpm dev:setup               # Docker required; isolated Postgres on 127.0.0.1:5433
-pnpm dev                    # Portless web URL and an isolated desktop profile
-```
+---
 
-Portless creates a local HTTPS certificate and may prompt for sudo on first use.
-Run `pnpm exec portless proxy start` in a terminal first if launching through an
-agent. For an unprivileged proxy, use
-`pnpm exec portless proxy start --port 1355 --https`; URLs then include `:1355`.
+## Features
 
-Open the printed URL and register: the first account is the admin. Open the
-user menu (bottom-left) → **Admin** → add a provider and pick models.
-Development starts empty by default. The primary checkout’s selected generated dev
-instance is the seed source for every worktree. Run `pnpm dev:import` in a
-worktree and confirm; the primary app can keep running, only the worktree’s own
-server must be stopped. In a T3 Code worktree, choose
-**Seed development data** from its scripts menu to run the same staged copy without
-a prompt. It copies the primary database and blobs and reuses its provider encryption
-key. The source stays unchanged; a failed import keeps the current dev state, and a
-successful one replaces it and removes the copy it superseded. Imported provider keys
-are real, so new generations can incur charges. Sign in with an existing
-email/password; OAuth is disabled in the copy, and OAuth-only snapshots are refused.
+**Chat with any model.** Connect OpenAI, Azure, Amazon Bedrock, OpenRouter or any
+OpenAI-compatible server, including models you host yourself. Admins choose which
+models people see and in what order.
 
-### Worktrees
+**Answers that don't get lost.** Reload the page, switch devices or open a second tab
+and a running answer carries on. Retry, edit, branch a chat, or queue the next message
+while the model is still answering.
 
-Run `pnpm install --frozen-lockfile && pnpm dev:setup` in each new checkout.
-T3 Code does this through `t3.json`. Plain Git worktrees work the same way.
-Portless names the main checkout `chat.localhost` and prefixes linked worktrees
-with their branch name. Each checkout has a separate database, blob directory,
-secrets and Electron profile in the shared development stack defined by root
-`docker-compose.yml`. That stack is local development only, named `chat-development`,
-and binds Postgres only on port 5433.
+**Research.** Web search with cited sources, reading of pages and PDFs (scanned ones too),
+and deep research that investigates a question across many sources.
 
-`pnpm dev:setup` is safe to repeat and applies pending migrations. `pnpm dev:info`
-prints the database, storage paths and last launched URL, without credentials.
-Retire a checkout with `pnpm dev:destroy` **before removing its worktree**: it drops
-only this checkout’s databases and role, then removes its state. If that order was
-missed, `pnpm dev:destroy --orphans` reports tagged databases whose recorded checkout
-path is gone and asks before dropping them. Untagged legacy databases are reported,
-never deleted. The shared container and every other checkout are untouched.
-Generated state stays in `.data/dev/`; do not copy it between checkouts or delete
-its secrets while retaining its database. The harness never reads `apps/web/.env`.
-Root `db:migrate`, `db:push` and `db:studio` target this isolated development database.
-For intentional deployment migrations, invoke the web package’s `db:migrate`
-with an explicitly supplied `DATABASE_URL` instead.
+**Your knowledge.** Knowledge collections the model can search, saved agents with their
+own instructions, skills it loads when needed, and a memory of what you've told it.
 
-`pnpm dev:setup` starts shared Postgres and SearXNG. Add a SearXNG search provider at
-`http://localhost:8081` under Admin → Tools in each development instance.
-OAuth providers may reject `.localhost` callbacks; use local email/password login,
-or configure Portless with a domain accepted by your provider.
-See [development isolation](docs/internals/development.md) for lifecycle and safety constraints.
+**Projects.** Shared instructions, documents you edit together live, files and memory
+for ongoing work, with each person's chats staying their own.
 
-## Architecture
+**Office files.** Create and edit Word, Excel and PowerPoint files in a chat, with
+previews.
 
-```
-apps/web/src/
-  server/            composition root: Effect Layer graph + shared ManagedRuntime
-  modules/
-    auth/            Better Auth config, session middleware, client
-    chat/            conversations, messages, stream engine, chat UI
-    providers/       provider/model registry, API-key crypto, AI gateway
-    admin/           admin server functions + panel UI
-    sync/            user-scoped event bus (PubSub + LISTEN/NOTIFY), SSE plumbing
-  db/                drizzle schema, relations, plain client (Better Auth only)
-  ui/                shadcn-generated primitives + app form kit
-  routes/            TanStack file routes (thin; delegate into modules)
-```
+**Automation.** Scheduled prompts, custom tools written in TypeScript, and integrations
+with Outline, Outlook and Jira, each person connecting their own account.
 
-Modules own their domain end to end (`server/`, `client/`, `ui/`, schemas, errors).
-The only cross-module code sits at the top level: `db/` (the schema is shared by
-design — relations span modules) and `ui/` (the design system; shadcn's CLI is
-configured to generate into it via `components.json`).
+**Desktop app.** For macOS, Windows and Linux. Lets the model work in folders you grant
+it, in a sandbox, and use a built-in browser with your approval.
 
-### Resumable streams
+**Made for teams.** Sign-in with email or any OAuth/OpenID Connect provider, open,
+approval-based or closed sign-up, groups for sharing, and usage analytics.
 
-Assistant generation runs **detached from the HTTP request** in the Effect runtime
-(`StreamEngine`): deltas are numbered by `seq`, batched into `message_chunks`, and
-published to an in-process PubSub. Clients subscribe via SSE
-(`GET /api/messages/:id/stream?after=<seq>`): the server subscribes to live events
-first, replays persisted chunks after `seq` from Postgres, then switches to the live
-tail (deduped by seq) and ends with a terminal `done` event. Reloading, opening a
-second tab, or another browser mid-generation all resume seamlessly; the conversation
-loader ships already-persisted chunks inline so first paint is complete.
+## Install
 
-### Cross-session sync
+neema is one container image, `ghcr.io/zernico/neema`. Run it however you run
+containers. It needs:
 
-Domain events (conversation created/renamed/deleted, message created, status changes)
-go through `SyncBus`: published to Postgres `NOTIFY`, relayed into each instance's
-PubSub, and fanned out per user over `GET /api/sync` SSE. The client applies them as
-TanStack Query invalidations, so the sidebar and open chats stay in sync across tabs,
-browsers, and instances.
+- **PostgreSQL 17 with [pgvector](https://github.com/pgvector/pgvector).** The database
+  user must be allowed to create the `vector`, `pg_trgm` and `unaccent` extensions, or
+  you create them beforehand.
+- **A volume at `/data`** for uploads, custom tools and downloaded OCR models.
+- **A reverse proxy with TLS** in front of port 3000. It must serve the address you set
+  as `PUBLIC_URL`, accept request bodies of at least 25 MB and not buffer responses,
+  which would stall streaming answers.
+- **An API key** for at least one model provider.
 
-## Working on it
+### Example: Docker Compose
 
-`AGENTS.md` is the entry point for anyone (or any agent) changing the code: glossary,
-the ways to hurt yourself, what to check before finishing, and how to verify.
-`docs/internals/` holds the decisions and traps per area; `AGENTS.md` links them.
-
-## Commands
+[`infra/production/compose.yaml`](infra/production/compose.yaml) runs neema with
+PostgreSQL and [SearXNG](https://github.com/searxng/searxng) for web search on one host.
+Write its `.env` with fresh secrets, then start it:
 
 ```sh
-pnpm dev:setup        # start shared Postgres/SearXNG and provision this checkout
-pnpm dev:setup:seeded # provision, then import normal development data without a prompt
-pnpm dev:info         # show isolated paths and the last launched URL
-pnpm dev:import       # copy the primary checkout’s selected state into this worktree
-pnpm dev:destroy      # drop this checkout’s databases, role and isolated state
-pnpm dev:destroy --orphans # report and optionally clean up removed tagged worktrees
-pnpm dev            # Portless web app and desktop shell, rebuilt and relaunched on change
-pnpm dev:web        # the web app alone
-pnpm dev:desktop    # the shell alone, using this checkout’s last web origin
-pnpm build          # production build (nitro) -> .output/, with .output/migrate.mjs
-pnpm start          # run production server
-pnpm --filter @chat/desktop package  # unsigned installers for this OS -> apps/desktop/release/
-pnpm test           # all vitest projects (unit, integration*, ui)
-pnpm typecheck
-pnpm lint / format
-pnpm db:generate    # drizzle-kit generate from schema changes
-pnpm db:migrate
+git clone https://github.com/ZerNico/neema.git
+cd neema/infra/production
+cat > .env <<EOF
+PUBLIC_URL=https://chat.example.com
+AUTH_SECRET=$(openssl rand -base64 32)
+ENCRYPTION_KEY=$(openssl rand -base64 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+SEARXNG_SECRET=$(openssl rand -hex 32)
+EOF
+docker compose up -d
 ```
 
-The browser and Electron use the same SPA frontend. `pnpm start` enables Start’s
-shell mode before loading the Nitro server. Deployments invoking
-`apps/web/.output/server/index.mjs` directly must set `TSS_SHELL=true`; the backend
-still serves authentication, server functions, API routes and SSE. `pnpm build`
-checks the emitted shell and production deep links with database access disabled,
-serving a copy of `.output` from outside the repository so a module missing from
-the build cannot resolve from `node_modules`.
+neema then listens on `127.0.0.1:3000` for your reverse proxy.
 
-\* integration tests start a disposable Postgres via Testcontainers (Docker required).
+### First steps
 
-## Deploying and releasing
+Open the site and register. **The first account becomes the admin.** From the user
+menu, open **Admin** to:
 
-The root `Dockerfile` builds the production image. On start it applies pending
-migrations (`.output/migrate.mjs`, under an advisory lock) and then serves on port
-3000; set `MIGRATE_ON_START=false` to run that step yourself. Uploads and custom tool
-builds live in `/data`. `infra/production/compose.yaml` is a single-host example
-with Postgres and SearXNG.
+1. add a model provider under **Providers** and pick its models,
+2. add a search provider under **Tools** (`http://searxng:8080` with the compose example),
+3. choose who may sign up under **Sign-in**.
 
-GitHub Actions runs format, lint, typecheck and tests on every pull request (`ci-ok`
-is the one check to require), builds the image, and publishes it to GHCR as `edge`
-from `main`. To release, write the version's section in `CHANGELOG.md`, commit it,
-and push a tag:
+### Configuration
 
-```sh
-git tag v1.2.3 && git push origin v1.2.3   # v1.2.3-rc.1 makes a prerelease
-```
+Required
 
-That creates a draft release with that section as its notes (GitHub's generated notes
-if there is none), reruns CI, publishes the
-multi-arch image (`1.2.3`, `1.2`, `1`, `latest`), packages the desktop shell for
-macOS, Windows and Linux, and publishes the release only once every asset is attached.
-The admin area shows the version and commit the image was built from.
-The installers are unsigned: macOS asks for approval under System Settings → Privacy
-& Security on first launch, and Windows SmartScreen warns once.
+| Variable         | Example                                   |
+| ---------------- | ----------------------------------------- |
+| `DATABASE_URL`   | `postgres://neema:password@db:5432/neema` |
+| `PUBLIC_URL`     | `https://chat.example.com`                |
+| `AUTH_SECRET`    | output of `openssl rand -base64 32`       |
+| `ENCRYPTION_KEY` | output of `openssl rand -base64 32`       |
+
+> [!WARNING]
+> Don't lose `ENCRYPTION_KEY`. It can't be recovered, and without it every stored API key
+> and connected account is lost for good. Back it up somewhere safe, separate from the
+> server.
+
+Optional
+
+| Variable               | Default                      |
+| ---------------------- | ---------------------------- |
+| `MIGRATE_ON_START`     | `true`                       |
+| `CUSTOM_TOOL_REGISTRY` | `https://registry.npmjs.org` |
+
+Everything else, from model providers to sign-in methods, is configured in the admin area.
+
+### Updating
+
+Pin a version tag such as `ghcr.io/zernico/neema:0.1.0` rather than following
+`latest`. To update, change the tag and restart the container. Back up the database and
+`/data` first. Migrations run on start. What changed, including any configuration you
+need to adjust, is in the [release notes](https://github.com/ZerNico/neema/releases).
+
+## Desktop app
+
+Download the installer for your system from the
+[latest release](https://github.com/ZerNico/neema/releases/latest) and enter your
+server's address on first launch.
+
+The installers aren't signed yet. On macOS, allow the app under **System Settings →
+Privacy & Security** the first time it opens. On Windows, SmartScreen warns once.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setting up a development environment, how the
+code is organised and how releases are made.
+
+## License
+
+neema is licensed under the [GNU Affero General Public License v3.0](LICENSE). If you
+run a modified version as a service for others, you must offer them its source code.
