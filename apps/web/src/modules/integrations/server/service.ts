@@ -540,7 +540,8 @@ export class IntegrationService extends Context.Service<
           if (yield* repo.nameTaken(name, null))
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           const id = yield* repo.createConfig({ kind: input.kind, name });
-          if (!id) return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+          if (!id)
+            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           yield* bus
             .publishGlobal({ type: "integrations.changed" })
             .pipe(Effect.catchCause(() => Effect.void));

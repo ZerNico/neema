@@ -1274,9 +1274,9 @@ describe("several integrations of one type", () => {
     expect(await refusal((s) => s.createIntegration({ kind: "outline", name: "docs b" }))).toBe(
       "“docs b” is already in use.",
     );
-    expect(
-      await refusal((s) => s.createIntegration({ kind: "notion", name: "Notion" })),
-    ).toBe("Unknown integration type.");
+    expect(await refusal((s) => s.createIntegration({ kind: "notion", name: "Notion" }))).toBe(
+      "Unknown integration type.",
+    );
 
     const userId = await newUser();
     await connectKey(userId);

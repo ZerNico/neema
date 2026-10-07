@@ -248,11 +248,7 @@ function AddIntegrationDialog({
             <DialogClose render={<Button variant="outline" disabled={create.isPending} />}>
               Cancel
             </DialogClose>
-            <PendingButton
-              type="submit"
-              pending={create.isPending}
-              disabled={!name.trim()}
-            >
+            <PendingButton type="submit" pending={create.isPending} disabled={!name.trim()}>
               Add
             </PendingButton>
           </DialogFooter>
