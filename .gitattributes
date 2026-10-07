@@ -1,0 +1,3 @@
+# Check out LF everywhere. Windows runners default to CRLF, which breaks pnpm's
+# patch parser and anything else that compares bytes with what npm ships.
+* text=auto eol=lf
