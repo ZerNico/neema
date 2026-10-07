@@ -45,6 +45,8 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 linux:
+  # Otherwise derived from the package name, whose @ and / Linux targets refuse.
+  executableName: neema
   icon: static/icons/icon.png
   category: Utility
   target: [AppImage, deb]

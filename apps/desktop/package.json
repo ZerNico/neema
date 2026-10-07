@@ -1,6 +1,7 @@
 {
   "name": "@chat/desktop",
   "version": "0.0.0",
+  "homepage": "https://github.com/ZerNico/neema",
   "private": true,
   "description": "neema desktop shell",
   "author": "Nico Franke",
