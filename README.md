@@ -155,14 +155,17 @@ with Postgres and SearXNG.
 
 GitHub Actions runs format, lint, typecheck and tests on every pull request (`ci-ok`
 is the one check to require), builds the image, and publishes it to GHCR as `edge`
-from `main`. To release, push a tag:
+from `main`. To release, write the version's section in `CHANGELOG.md`, commit it,
+and push a tag:
 
 ```sh
 git tag v1.2.3 && git push origin v1.2.3   # v1.2.3-rc.1 makes a prerelease
 ```
 
-That creates a draft release with generated notes, reruns CI, publishes the
+That creates a draft release with that section as its notes (GitHub's generated notes
+if there is none), reruns CI, publishes the
 multi-arch image (`1.2.3`, `1.2`, `1`, `latest`), packages the desktop shell for
 macOS, Windows and Linux, and publishes the release only once every asset is attached.
+The admin area shows the version and commit the image was built from.
 The installers are unsigned: macOS asks for approval under System Settings → Privacy
 & Security on first launch, and Windows SmartScreen warns once.

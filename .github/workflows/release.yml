@@ -1,8 +1,10 @@
 name: Release
 
-# Push a tag like v1.2.3 (or v1.2.3-rc.1 for a prerelease). The release stays a
-# draft until CI, the image and every installer have succeeded, so a published
-# release is never missing an asset. A failed run leaves the draft to re-run.
+# Push a tag like v1.2.3 (or v1.2.3-rc.1 for a prerelease). The notes are the
+# tag's section of CHANGELOG.md, or GitHub's generated notes without one. The
+# release stays a draft until CI, the image and every installer have succeeded,
+# so a published release is never missing an asset. A failed run leaves the
+# draft to re-run.
 
 on:
   push:
@@ -29,17 +31,34 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG exists; reusing it."
             exit 0
           fi
-          flags=(--draft --verify-tag --generate-notes --title "$TAG")
+          # The lines under "## [1.2.3]" or "## 1.2.3", up to the next "## ".
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; found = ($2 == v || $2 == "[" v "]"); next }
+            found
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          flags=(--draft --verify-tag --title "$TAG")
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            flags+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            flags+=(--generate-notes)
+          fi
           [[ "$TAG" == *-* ]] && flags+=(--prerelease)
           gh release create "$TAG" "${flags[@]}"
 
