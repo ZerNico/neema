@@ -1,0 +1,64 @@
+name: Promote
+
+# The release run pushes only the exact version (`1.2.3`), because nothing is
+# announced until a person publishes the draft. Publishing points the moving tags
+# (`1.2`, `1`, `latest`) at that same image, without rebuilding it. Prereleases
+# move none of them.
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Image name
+        id: image
+        # GHCR requires a lowercase repository path.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          # latest=auto: a stable semver version also gets `latest`.
+          tags: |
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ !startsWith(github.event.release.tag_name, 'v0.') }}
+          flavor: latest=auto
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point the moving tags at the release image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          source="$IMAGE:${TAG#v}"
+          if ! docker buildx imagetools inspect "$source" > /dev/null; then
+            echo "::error::$source doesn't exist yet. Publish after the release run has finished, then re-run this workflow."
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag; do args+=(--tag "$tag"); done \
+            < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          docker buildx imagetools create "${args[@]}" "$source"
+          docker buildx imagetools inspect "$IMAGE:latest"

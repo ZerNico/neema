@@ -1,9 +1,10 @@
 name: Docker
 
 # Pull requests build amd64 without pushing, which is also the production build
-# check. main publishes `edge`; a release tag publishes semver tags and
-# `latest` through release.yml. Each architecture builds on its own native
-# runner and pushes by digest; one job then joins the digests under the tags.
+# check. main publishes `edge`. A release tag publishes only its exact version
+# through release.yml, and promote.yml moves `latest`, `1.2` and `1` once the
+# release is published. Each architecture builds on its own native runner and
+# pushes by digest, and one job then joins the digests under the tags.
 
 on:
   pull_request:
@@ -23,12 +24,9 @@ env:
   # Release builds start cold rather than trust a cache written by another ref.
   CACHE: ${{ !startsWith(github.ref, 'refs/tags/') }}
   # Shared by both metadata steps, so the version baked into the build and its
-  # labels match the published tags. latest=auto: only a stable semver tag
-  # moves `latest`.
+  # labels match the published tags.
   TAGS: |
     type=semver,pattern={{version}}
-    type=semver,pattern={{major}}.{{minor}}
-    type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
     type=edge,branch=main
     type=sha,enable=${{ github.ref == 'refs/heads/main' }}
     type=ref,event=pr
@@ -60,6 +58,7 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: ${{ env.TAGS }}
+          flavor: latest=false
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -129,6 +128,7 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: ${{ env.TAGS }}
+          flavor: latest=false
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
