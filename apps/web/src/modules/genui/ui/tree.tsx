@@ -4,7 +4,14 @@
 
 import katex from "katex";
 import { use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  PauseIcon,
+  PlayIcon,
+  RotateLeft01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -589,6 +596,97 @@ function MathNode({ node }: { node: ValidNode }) {
   );
 }
 
+const clock = (totalSeconds: number) => {
+  const whole = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const sec = String(whole % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
+
+/**
+ * Counts in the page, never in the block: QuickJS has no timers, and a tick
+ * per second through the Worker would cost a handler call for nothing.
+ */
+function TimerNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const total = num(p.seconds);
+  const label = str(p.label);
+  const done = useHandler(handlerOf(p.ondone), { event: "change", tag: "timer" });
+  // Time already counted, plus the moment the current run started.
+  const [banked, setBanked] = useState(0);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const elapsed = (banked + (startedAt === null ? 0 : now - startedAt)) / 1000;
+  const finished = total !== undefined && elapsed >= total;
+  const running = startedAt !== null && !finished;
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const announced = useRef(false);
+  useEffect(() => {
+    if (!finished || announced.current) return;
+    announced.current = true;
+    setStartedAt(null);
+    setBanked((total ?? 0) * 1000);
+    toast.success(label ? `${label} is done` : "Timer done");
+    done?.([]);
+  }, [finished, total, label, done]);
+
+  const start = () => {
+    const at = Date.now();
+    setNow(at);
+    setStartedAt(at);
+  };
+  const pause = () => {
+    setBanked(elapsed * 1000);
+    setStartedAt(null);
+  };
+  const reset = () => {
+    announced.current = false;
+    setBanked(0);
+    setStartedAt(null);
+  };
+  const shown = total === undefined ? elapsed : total - elapsed;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-col">
+          {label ? <span className="text-muted-foreground text-xs">{label}</span> : null}
+          <span className="text-3xl font-semibold tabular-nums" role="timer" aria-live="off">
+            {finished ? "Done" : clock(shown)}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          {running ? (
+            <Button size="sm" variant="outline" onClick={pause}>
+              <HugeiconsIcon icon={PauseIcon} strokeWidth={2} data-icon="inline-start" />
+              Pause
+            </Button>
+          ) : (
+            <Button size="sm" onClick={start} disabled={finished}>
+              <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
+              {elapsed > 0 && !finished ? "Resume" : "Start"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={reset} disabled={elapsed === 0}>
+            <HugeiconsIcon icon={RotateLeft01Icon} strokeWidth={2} data-icon="inline-start" />
+            Reset
+          </Button>
+        </div>
+      </div>
+      {total !== undefined ? (
+        <Progress value={Math.min(100, (elapsed / total) * 100)} aria-label={label ?? "Timer"} />
+      ) : null}
+    </div>
+  );
+}
+
 /** Copies its own text, no handler involved: the click is the reader's. */
 function CopyNode({ node }: { node: ValidNode }) {
   const p = node.props;
@@ -843,6 +941,8 @@ function Node({ node }: { node: ValidNode }) {
       return <StepsNode node={node} />;
     case "wizard":
       return <WizardNode node={node} />;
+    case "timer":
+      return <TimerNode node={node} />;
     case "copy":
       return <CopyNode node={node} />;
     case "suggestions":

@@ -112,7 +112,7 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 
 - Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source.
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
-- There is no network, no timers, no DOM and no \`window\`. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
+- There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - \`toLocaleString\` covers common cases, but \`<num>\` and \`<date>\` format in the reader's own locale and are better.
 - Images: \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Leave them out unless the answer ends at a real fork the reader has to choose, such as which option to explore next. Most blocks need none, and the reader can always just type.

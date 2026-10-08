@@ -169,6 +169,27 @@ describe("ui blocks in answers", () => {
     expect(container.querySelector("[data-genui-block] a")).toBeNull();
   });
 
+  it("counts a timer down in the page and tells the block when it ends", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let rang = $state(false);</script>",
+        '<timer seconds={1} label="Tea" ondone={() => rang = true}/>',
+        "{#if rang}<text>Rang</text>{/if}",
+        "```",
+      ].join("\n"),
+      "m-timer",
+    );
+    expect(await screen.findByRole("timer")).toHaveTextContent("0:01");
+    const start = screen.getByRole("button", { name: "Start" });
+    await act(async () => {
+      fireEvent.click(start);
+    });
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    expect(await screen.findByText("Done", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByText("Rang")).toBeInTheDocument();
+  });
+
   it("walks a wizard one step at a time", async () => {
     draw(
       [

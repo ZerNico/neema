@@ -285,6 +285,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "inline",
   },
+  timer: {
+    group: "input",
+    doc: "Countdown with start, pause and reset; without seconds it counts up. ondone() fires at zero.",
+    props: { seconds: int(1, 86_400), label: text(80), ondone: handler() },
+    children: "none",
+  },
   copy: {
     group: "input",
     doc: "Button that copies its text to the clipboard, e.g. a shopping list.",
