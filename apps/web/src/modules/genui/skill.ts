@@ -100,6 +100,13 @@ export const SKILL_EXAMPLES = {
   </steps>
   <timer seconds={1800} label="Resting"/>
 </card>`,
+  quiz: `<script>
+  let answers = $state([]);
+</script>
+<quiz title="Dative articles" more="Another dative quiz, a little harder" answers={answers} onchange={(a) => answers = a}>
+  <question options={["dem", "den", "der"]} answer="dem" hint="Which case does helfen take?" feedback={["helfen takes the dative; der becomes dem.", "Den is accusative or dative plural.", "Der is dative only for feminine nouns."]}>Ich helfe ___ Mann.</question>
+  <question options={["der", "die"]} answer="der" explain="mit always takes the dative.">Ich fahre mit ___ Bahn.</question>
+</quiz>`,
   map: `<script>
   let stop = $state("museum");
 </script>
@@ -131,7 +138,7 @@ description: ${INTERACTIVE_UI_SKILL_DESCRIPTION}
 
 # Interactive UI
 
-An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the app's own components and can hold state the reader changes: sliders, toggles, tabs, steppers. Use one when interaction or a visual makes the answer clearer than prose: a calculator, a comparison the reader filters, a chart, a small diagram, a gallery. Keep explanations in normal Markdown around the block. Most answers need no block.
+An answer may contain \`\`\`ui fenced blocks, drawn with the app's own components and holding state the reader changes. Keep explanations in Markdown around them.
 
 ## Language
 
@@ -146,10 +153,10 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 - Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source. Inside \`{#each items as item, i}\`, write through the state (\`items[i].done = true\`), never to \`item\`. Keep everything the reader changes in \`$state\`: a \`Set\`, \`Map\` or closure variable is lost when the block reloads.
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
-- \`toLocaleString\` covers common cases, but \`<num>\` and \`<date>\` format in the reader's own locale and are better.
+- Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale.
 - Images: show physical things (places, products, dishes, animals) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
 - Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal, specific enough to find ("Museum Barberini, Potsdam", not "the museum"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
-- \`<suggestion>\` text is sent as the reader's next message when clicked. Leave them out unless the answer ends at a real fork the reader has to choose, such as which option to explore next. Most blocks need none, and the reader can always just type.
+- \`<suggestion>\` text is sent as the reader's next message when clicked. Use them only at a real fork the reader has to choose; most blocks need none.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
 
 ## Catalog
@@ -173,6 +180,10 @@ ${fence(SKILL_EXAMPLES.drawing)}
 A plan with a checklist, a copy button and a timer:
 
 ${fence(SKILL_EXAMPLES.plan)}
+
+A quiz that explains each option:
+
+${fence(SKILL_EXAMPLES.quiz)}
 
 A map whose pins the reader taps:
 

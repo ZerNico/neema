@@ -44,6 +44,12 @@ const NUMBER_FORMAT = matching(
   /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/,
   '"decimal:2" | "percent" | "compact" | "currency:EUR"',
 );
+/**
+ * A value list used by several tags, printed once in the catalog's legend
+ * and by name at each prop, so the reference does not repeat it.
+ */
+const named = <const L extends readonly [string, ...string[]]>(name: string, values: L) =>
+  prop(Schema.Literals(values), name);
 const handler = () =>
   prop(
     Schema.Struct({ $h: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), rev: Schema.Int }),
@@ -51,6 +57,7 @@ const handler = () =>
   );
 
 const TONES = ["default", "muted", "primary", "success", "warning", "destructive"] as const;
+const VARIANTS = ["default", "secondary", "outline", "ghost"] as const;
 /** Map colours follow the chart palette, plus the meaning-bearing tones. */
 const MAP_COLORS = [
   "primary",
@@ -110,8 +117,8 @@ interface TagSpec {
 const INLINE_TAGS = new Set(["b", "i", "code", "link", "num", "date", "badge", "math"]);
 
 const SVG_SHAPE = {
-  fill: oneOf(SVG_PAINT),
-  stroke: oneOf(SVG_PAINT),
+  fill: named("paint", SVG_PAINT),
+  stroke: named("paint", SVG_PAINT),
   strokeWidth: between(0, 100),
   opacity: between(0, 1),
   fillOpacity: between(0, 1),
@@ -221,7 +228,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   text: {
     group: "text",
     doc: "Paragraph.",
-    props: { tone: oneOf(TONES), size: oneOf(["sm", "md", "lg"]) },
+    props: { tone: named("tone", TONES), size: oneOf(["sm", "md", "lg"]) },
     children: "inline",
   },
   b: { group: "text", doc: "Bold.", props: {}, children: "inline" },
@@ -233,7 +240,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     props: { href: required(matching(/^https?:\/\//i, "http(s) URL", 2000)) },
     children: "inline",
   },
-  badge: { group: "text", doc: "Small label.", props: { tone: oneOf(TONES) }, children: "inline" },
+  badge: {
+    group: "text",
+    doc: "Small label.",
+    props: { tone: named("tone", TONES) },
+    children: "inline",
+  },
   stat: {
     group: "text",
     doc: "Metric with label.",
@@ -246,7 +258,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
         ),
       ),
       delta: text(60),
-      tone: oneOf(TONES),
+      tone: named("tone", TONES),
     },
     children: "none",
   },
@@ -293,7 +305,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Button.",
     props: {
       onclick: handler(),
-      variant: oneOf(["default", "secondary", "outline", "ghost"]),
+      variant: named("variant", VARIANTS),
       disabled: flag(),
     },
     children: "inline",
@@ -309,7 +321,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Button that copies its text to the clipboard, e.g. a shopping list.",
     props: {
       text: required(text(4096)),
-      variant: oneOf(["default", "secondary", "outline", "ghost"]),
+      variant: named("variant", VARIANTS),
     },
     children: "inline",
   },
@@ -584,20 +596,20 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   pin: {
     group: "map",
-    doc: 'Marker. place="Ferry Building, San Francisco" is looked up; or give lat and lng. Its content shows when tapped.',
+    doc: "Marker at a place or lat/lng. Its content shows when tapped.",
     props: {
       id: text(80),
       place: text(200),
       lat: between(-90, 90),
       lng: between(-180, 180),
       label: text(120),
-      color: oneOf(MAP_COLORS),
+      color: named("mapColor", MAP_COLORS),
     },
     children: "inline",
   },
   route: {
     group: "map",
-    doc: "Route through stops (place names or {lat, lng}). mode drive, walk or bike follows roads; straight draws a direct line.",
+    doc: "Route through stops.",
     props: {
       stops: required(
         prop(
@@ -615,7 +627,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       ),
       mode: oneOf(["drive", "walk", "bike", "straight"]),
       label: text(120),
-      color: oneOf(MAP_COLORS),
+      color: named("mapColor", MAP_COLORS),
     },
     children: "none",
   },
@@ -627,7 +639,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       lng: required(between(-180, 180)),
       radius: required(between(10, 200_000)),
       label: text(120),
-      color: oneOf(MAP_COLORS),
+      color: named("mapColor", MAP_COLORS),
     },
     children: "none",
   },
@@ -710,7 +722,7 @@ const SVG_TEXT: TagSpec = {
     y: num(),
     fontSize: between(1, 200),
     textAnchor: oneOf(["start", "middle", "end"]),
-    fill: oneOf(SVG_PAINT),
+    fill: named("paint", SVG_PAINT),
     opacity: between(0, 1),
   },
   children: "plain",
@@ -894,8 +906,16 @@ const SHAPE_NOTE = `Every shape below also takes ${Object.entries(SVG_SHAPE)
   .join(", ")}.`;
 
 /** The catalog as reference text for the skill. Stable: generated, never edited. */
+const quote = (values: readonly string[]) => values.map((v) => `"${v}"`).join(" | ");
+const LEGEND = [
+  `tone: ${quote(TONES)}`,
+  `variant: ${quote(VARIANTS)}`,
+  `paint: ${quote(SVG_PAINT)}`,
+  `mapColor: ${quote(MAP_COLORS)}`,
+].join("\n");
+
 export function catalogReference(): string {
-  const sections: string[] = [];
+  const sections: string[] = [`Named values:\n${LEGEND}`];
   for (const group of GROUP_ORDER) {
     const lines = Object.entries(CATALOG)
       .filter(([, spec]) => spec.group === group)

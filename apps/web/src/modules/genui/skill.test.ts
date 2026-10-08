@@ -34,7 +34,8 @@ describe("the interactive-ui skill", () => {
       if (!reply.ok) throw new Error(`${reply.reason}: ${reply.error ?? ""}`);
       // A model copies examples closely: a dropped prop here would teach it a mistake.
       expect(reply.diagnostics).toEqual([]);
-      expect(tags(reply.nodes).length).toBeGreaterThan(3);
+      // Something real, not an empty shell: a quiz is three tags, a quiz and its questions.
+      expect(tags(reply.nodes).length).toBeGreaterThanOrEqual(3);
       for (const ref of handlers(reply.nodes)) {
         const called = engine.call({
           block: `skill:${name}`,
