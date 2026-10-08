@@ -442,6 +442,8 @@ function ButtonNode({ node }: { node: ValidNode }) {
   return (
     <Button
       size="sm"
+      // A lone button in a column keeps its own width instead of stretching.
+      className="w-fit"
       variant={
         variant === "secondary" || variant === "outline" || variant === "ghost"
           ? variant
@@ -698,6 +700,7 @@ function CopyNode({ node }: { node: ValidNode }) {
   return (
     <Button
       size="sm"
+      className="w-fit"
       variant={
         variant === "default" || variant === "secondary" || variant === "ghost"
           ? variant
