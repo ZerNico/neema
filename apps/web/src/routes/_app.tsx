@@ -53,7 +53,8 @@ export const Route = createFileRoute("/_app")({
     const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
     if (approval !== "approved") throw redirect({ to: "/pending" });
     // Known before anything renders, so a cache can be read for the first frame.
-    setDeviceCacheOwner(cacheOwnerOf(identity));
+    // Browser only: on a server, module state would be shared by every request.
+    if (typeof window !== "undefined") setDeviceCacheOwner(cacheOwnerOf(identity));
     return { user, identity };
   },
   loader: async ({ context }) => {

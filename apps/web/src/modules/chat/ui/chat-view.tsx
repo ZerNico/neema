@@ -1465,6 +1465,7 @@ export function ChatView({
         reasoning,
         files: message.assistantOutput?.files ?? [],
         uiLookups: lookupsOf(message.assistantOutput),
+        temporary: data.conversation.temporary,
         ...(uiStatesByMessage.has(message.id)
           ? { uiStates: uiStatesByMessage.get(message.id)! }
           : {}),
@@ -1569,6 +1570,7 @@ export function ChatView({
     steersByAnswer,
     toolCallsByMessage,
     uiStatesByMessage,
+    data.conversation.temporary,
     visibleMessages,
     data.priorSources,
   ]);

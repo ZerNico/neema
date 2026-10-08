@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
 import { BlockEngine } from "../client/engine.ts";
-import { keepTree } from "../client/tree-cache.ts";
+import { cachedTree, keepTree } from "../client/tree-cache.ts";
 import type { GenuiClient } from "../client/host.ts";
 import { routeKey } from "../extract.ts";
 import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
@@ -605,6 +605,44 @@ describe("a block shown before its runtime is ready", () => {
     expect(await screen.findByText("Typed ab")).toBeInTheDocument();
   });
 
+  it("shows the source when a cached tree is one this build cannot draw", async () => {
+    const engine = new BlockEngine(quickjs);
+    const { client } = heldClient(engine);
+    const drawn = new BlockEngine(quickjs).render({ block: "x", code, saved: null, now: 0 });
+    if (!drawn.ok) throw new Error("no tree");
+    // Kept by an older build: children that are no longer an array.
+    keepTree("m-broken:g1:0", code, {
+      ...drawn,
+      // Parsed, as a stored entry would be: no type stands behind it.
+      nodes: JSON.parse('[{ "tag": "text", "props": {}, "children": null }]'),
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    mount(client, "m-broken");
+    expect(await screen.findByText(/let n = \$state\(0\)/)).toBeInTheDocument();
+    errors.mockRestore();
+  });
+
+  it("keeps nothing on the device for a temporary chat", async () => {
+    const engine = new BlockEngine(quickjs);
+    render(
+      <GenuiClientContext value={inProcess(engine)}>
+        <GenuiMessageContext
+          value={{
+            messageId: "m-temp",
+            createdAt: 0,
+            streaming: false,
+            generationId: "g1",
+            temporary: true,
+          }}
+        >
+          <AssistantMarkdown content={keyUiFences(COUNTER, 0)} streaming={false} />
+        </GenuiMessageContext>
+      </GenuiClientContext>,
+    );
+    expect(await screen.findByText("Count 0")).toBeInTheDocument();
+    expect(cachedTree("m-temp:g1:0", code)).toBeUndefined();
+  });
+
   it("drops a click when the live block turns out different from the cached one", async () => {
     const engine = new BlockEngine(quickjs);
     const { client, release } = heldClient(engine);
@@ -696,7 +734,8 @@ describe("what blocks may do", () => {
   });
 
   it("puts a handler's message in the composer and saves the new state", async () => {
-    const actions = drawWith({});
+    // Its own block: blocks are remembered by key across tests, as across remounts.
+    const actions = drawWith({}, "m-step", BLOCK, "m-step");
     const stepButton = await screen.findByRole("button", { name: "Step" });
     await act(async () => {
       fireEvent.click(stepButton);
@@ -707,7 +746,7 @@ describe("what blocks may do", () => {
     // Saves wait for the reader to settle.
     await waitFor(() => expect(actions.save).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(actions.save).toHaveBeenCalledWith({
-      messageId: "m1",
+      messageId: "m-step",
       generationId: "g1",
       ordinal: 0,
       // The hash the server computes from the stored message, or every save is refused.

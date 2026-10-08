@@ -3,6 +3,8 @@
 // has a block. Every failure falls back to the block's source.
 
 import {
+  Component,
+  type ReactNode,
   use,
   useCallback,
   useEffect,
@@ -50,6 +52,33 @@ function Source({ code }: { code: string }) {
 
 const noop = () => () => {};
 
+/**
+ * Shows a block's source when its tree throws while rendering, such as a
+ * cached tree an older build drew. It costs that block, never the chat, and
+ * a new source tries again.
+ */
+class BlockBoundary extends Component<
+  { code: string; children: ReactNode },
+  { failed: boolean; code: string }
+> {
+  state = { failed: false, code: this.props.code };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  static getDerivedStateFromProps(
+    props: { code: string },
+    state: { failed: boolean; code: string },
+  ) {
+    return props.code === state.code ? null : { failed: false, code: props.code };
+  }
+
+  render() {
+    return this.state.failed ? <Source code={this.props.code} /> : this.props.children;
+  }
+}
+
 /** Text a block may send or copy; anything longer is cut off as a mistake. */
 const SEND_CHARS = 500;
 /**
@@ -70,6 +99,8 @@ interface BlockProps {
   now: number;
   /** State to start from when this session has none: the stored row for this source. */
   persisted: string | null;
+  /** Keep the drawn tree in the device cache; never for a temporary chat. */
+  keep: boolean;
   onActions: (actions: readonly BlockAction[], trusted: TrustedEvent) => void;
   onState: (state: string) => void;
 }
@@ -82,13 +113,26 @@ interface BlockProps {
 const shapeOf = (tree: DrawnTree) =>
   `${tree.state ?? ""}|${JSON.stringify(tree.nodes, (key, value) => (key === "rev" ? 0 : value))}`;
 
+/**
+ * A click on a tree that is not live yet, by block, replayed once it is.
+ * Outside React: the block often remounts (Streamdown, the virtual list)
+ * between the click and its live render, and the click must not go with it.
+ */
+const queuedClicks = new Map<string, Queued>();
+
 interface Queued {
   readonly handler: number;
   readonly args: readonly unknown[];
   readonly trusted: TrustedEvent;
   /** The tree the reader clicked in. */
   readonly shape: string;
+  /** The Worker it was meant for, and when: a click outlives a remount, not a visit. */
+  readonly client: GenuiClient;
+  readonly at: number;
 }
+
+/** Long enough for a remount and the first live render, short of a return visit. */
+const QUEUED_CLICK_MS = 2000;
 
 function useBlock({
   client,
@@ -97,6 +141,7 @@ function useBlock({
   streaming,
   now,
   persisted,
+  keep,
   onActions,
   onState,
 }: BlockProps) {
@@ -104,7 +149,10 @@ function useBlock({
   // cache, so a remount or reload shows the block at once. It is not live:
   // its handlers belong to a runtime that is gone until the Worker redraws it.
   const [reply, setReply] = useState<RenderReply | Unavailable | null>(
-    () => recall(block, code)?.reply ?? (streaming ? undefined : cachedTree(block, code)) ?? null,
+    () =>
+      recall(block, code)?.reply ??
+      (streaming || !keep ? undefined : cachedTree(block, code)) ??
+      null,
   );
   const [live, setLive] = useState(false);
   // Replies are stamped with the Worker generation that produced them: a
@@ -112,8 +160,6 @@ function useBlock({
   const [stamp, setStamp] = useState(client.epoch());
   const epoch = useSyncExternalStore(client.subscribe, client.epoch, () => 0);
   const lastRender = useRef(0);
-  // A click on a tree that is not live yet, replayed once it is.
-  const queued = useRef<Queued | null>(null);
   const run = useRef<(tree: DrawnTree, handler: number, q: Queued, at: number) => Promise<void>>(
     async () => {},
   );
@@ -129,7 +175,7 @@ function useBlock({
 
   // The device cache may still have been loading when this mounted.
   useEffect(() => {
-    if (streaming) return;
+    if (streaming || !keep) return;
     let cancelled = false;
     void warmTrees().then(() => {
       const tree = cachedTree(block, code);
@@ -138,23 +184,29 @@ function useBlock({
     return () => {
       cancelled = true;
     };
-  }, [block, code, streaming]);
+  }, [block, code, streaming, keep]);
 
   const show = useCallback(
     (next: RenderReply | Unavailable, at: number, source: string) => {
       if (next.ok || next.reason !== "unavailable") remember(block, source, next);
-      if (next.ok && !streaming) keepTree(block, source, next);
+      if (next.ok && !streaming && keep) keepTree(block, source, next);
       setReply(next);
       setStamp(at);
       setLive(true);
-      const click = queued.current;
-      queued.current = null;
+      const click = queuedClicks.get(block);
+      queuedClicks.delete(block);
       // Only into the same tree: anything else would run a handler the reader never saw.
-      if (click && next.ok && shapeOf(next) === click.shape) {
+      if (
+        click &&
+        next.ok &&
+        click.client === client &&
+        Date.now() - click.at < QUEUED_CLICK_MS &&
+        shapeOf(next) === click.shape
+      ) {
         void run.current(next, click.handler, click, at);
       }
     },
-    [block, streaming],
+    [block, client, streaming, keep],
   );
 
   useEffect(() => {
@@ -200,16 +252,23 @@ function useBlock({
   const dispatch: Dispatch = useCallback(
     async (ref, args, trusted) => {
       if (!reply?.ok) return;
-      const click = { handler: ref.$h, args, trusted, shape: shapeOf(reply) };
+      const click = {
+        handler: ref.$h,
+        args,
+        trusted,
+        shape: shapeOf(reply),
+        client,
+        at: Date.now(),
+      };
       if (!live) {
-        queued.current = click;
+        queuedClicks.set(block, click);
         return;
       }
       if (stamp !== client.epoch() || ref.rev !== reply.rev) return;
       // Awaited, so a control waits for this reply before sending its next value.
       await run.current(reply, ref.$h, click, client.epoch());
     },
-    [client, live, reply, stamp],
+    [block, client, live, reply, stamp],
   );
 
   return { reply, dispatch };
@@ -411,18 +470,22 @@ function KeyedBlock({
   const persisted = stored && stored.sourceHash === hashSource(code) ? stored.state : null;
   return (
     <>
-      <Block
-        client={client}
-        block={block}
-        ordinal={ordinal}
-        code={code}
-        streaming={incomplete || message.streaming}
-        now={message.createdAt}
-        persisted={persisted}
-        onActions={onActions}
-        onState={onState}
-        suggest={suggest}
-      />
+      {/* A tree this build cannot render costs its block, shown as source, not the chat. */}
+      <BlockBoundary code={code}>
+        <Block
+          client={client}
+          block={block}
+          ordinal={ordinal}
+          code={code}
+          streaming={incomplete || message.streaming}
+          now={message.createdAt}
+          persisted={persisted}
+          keep={message.temporary !== true}
+          onActions={onActions}
+          onState={onState}
+          suggest={suggest}
+        />
+      </BlockBoundary>
       {dialog}
     </>
   );

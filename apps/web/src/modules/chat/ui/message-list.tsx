@@ -238,6 +238,8 @@ export interface DisplayMessage {
   generationId?: string | null;
   /** Saved ```ui block state by ordinal. */
   uiStates?: ReadonlyMap<number, SavedUiState>;
+  /** In a temporary chat, which leaves nothing behind on the device either. */
+  temporary?: boolean;
   /** What the answer's ```ui blocks looked up: images, places, routes. */
   uiLookups?: UiLookups;
   /**
@@ -720,8 +722,17 @@ const AssistantBody = memo(function AssistantBody({
       generationId: message.generationId ?? null,
       saved: message.uiStates ?? NO_UI_STATES,
       lookups: message.uiLookups ?? NO_LOOKUPS,
+      temporary: message.temporary === true,
     }),
-    [message.id, iso, streaming, message.generationId, message.uiStates, message.uiLookups],
+    [
+      message.id,
+      iso,
+      streaming,
+      message.generationId,
+      message.uiStates,
+      message.uiLookups,
+      message.temporary,
+    ],
   );
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   // Working files a publish in this answer delivered, whichever tool made them.

@@ -34,7 +34,8 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
           // QuickJS: start them with the data. The code is briefly waited for,
           // so the answer appears whole rather than with placeholders that resize.
           if (detail.messages.some((message) => /(?:```|~~~)ui\b/.test(message.content)))
-            await Promise.race([prewarmGenui(), new Promise((done) => setTimeout(done, 300))]);
+            // Under the 200 ms pendingMs, so the wait never shows the pending view.
+            await Promise.race([prewarmGenui(), new Promise((done) => setTimeout(done, 180))]);
           if (detail.conversation.mode === "work")
             await prepareWorkFolder(
               context.queryClient,

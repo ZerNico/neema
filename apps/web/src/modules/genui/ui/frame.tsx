@@ -3,7 +3,7 @@
 // the code, waiting for QuickJS, streaming and the finished block all happen
 // in one container that glides between sizes instead of swapping boxes.
 
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { CustomRendererProps } from "streamdown";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { loadedUiBlock, loadUiBlock } from "./load-block.ts";
@@ -20,7 +20,8 @@ export function BlockSkeleton() {
 }
 
 export default function UiBlockFrame(props: CustomRendererProps) {
-  const Loaded = loadedUiBlock();
+  // Chosen once per frame: switching from the lazy path mid-life would remount the block.
+  const [Loaded] = useState(loadedUiBlock);
   return (
     <SmoothHeight>
       {Loaded ? (

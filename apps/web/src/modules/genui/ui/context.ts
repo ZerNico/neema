@@ -20,6 +20,8 @@ export interface GenuiMessage {
   readonly saved?: ReadonlyMap<number, SavedUiState>;
   /** What the server looked up for this answer's blocks: images, places, routes. */
   readonly lookups?: UiLookups;
+  /** A temporary chat's blocks are not kept in the device cache. */
+  readonly temporary?: boolean;
 }
 
 export interface UiStateSave {
