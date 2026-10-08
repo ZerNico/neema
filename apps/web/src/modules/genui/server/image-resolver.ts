@@ -103,6 +103,7 @@ export const makeImageResolver = (
               attachmentId: stored.value.id,
               pageUrl: hit.pageUrl,
               title: hit.title,
+              size: image.value.bytes.length,
               width: image.value.size.width,
               height: image.value.size.height,
             });

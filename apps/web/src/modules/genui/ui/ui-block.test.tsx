@@ -1,5 +1,5 @@
 import variant from "@jitl/quickjs-wasmfile-release-sync";
-import { act, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from "quickjs-emscripten-core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
@@ -81,7 +81,14 @@ describe("ui blocks in answers", () => {
       {
         "gear hub": {
           status: "resolved",
-          items: [{ attachmentId: "a1", pageUrl: "https://www.bikes.example/hub", title: "Hub" }],
+          items: [
+            {
+              attachmentId: "a1",
+              pageUrl: "https://www.bikes.example/hub",
+              title: "Hub",
+              size: 2048,
+            },
+          ],
         },
         cassette: { status: "search_off", items: [] },
       },
@@ -89,6 +96,11 @@ describe("ui blocks in answers", () => {
     const hub = await screen.findByRole("img", { name: "A hub" });
     expect(hub).toHaveAttribute("src", "/api/files/a1");
     expect(screen.getByRole("link", { name: "bikes.example" })).toBeInTheDocument();
+    // A found image opens in the same preview as any attached one.
+    fireEvent.click(screen.getByRole("button", { name: "Preview A hub" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("img")).toHaveAttribute("src", "/api/files/a1");
+    expect(within(dialog).getByText("2 KB")).toBeInTheDocument();
     expect(screen.getByText("Images need web search")).toBeInTheDocument();
     // Never resolved, and the answer is finished.
     expect(screen.getByText("Image unavailable")).toBeInTheDocument();

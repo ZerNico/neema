@@ -33,6 +33,8 @@ export const UiImage = Schema.Struct({
   attachmentId: Schema.String,
   pageUrl: Schema.String,
   title: Schema.String,
+  /** Stored bytes, for the preview; absent on images stored before it was kept. */
+  size: Schema.optional(Schema.Number),
   width: Schema.optional(Schema.Number),
   height: Schema.optional(Schema.Number),
 });

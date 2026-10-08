@@ -2,8 +2,10 @@
 // the answer streamed and stored what it found with the message, so a tile
 // only ever shows our own copy, never a URL the block chose.
 
-import { use } from "react";
+import { use, useState } from "react";
 import type { UiImage as Found, UiImageResult } from "~/modules/chat/assistant-output.ts";
+import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
+import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
@@ -51,8 +53,7 @@ function Tile({
   aspect: string;
   caption?: string | undefined;
 }) {
-  if ("pending" in lookup)
-    return <Skeleton className="w-full" style={{ aspectRatio: aspect }} />;
+  if ("pending" in lookup) return <Skeleton className="w-full" style={{ aspectRatio: aspect }} />;
   if ("missing" in lookup)
     return (
       <div
@@ -62,18 +63,54 @@ function Tile({
         {lookup.missing}
       </div>
     );
-  const { found } = lookup;
+  return <FoundTile found={lookup.found} aspect={aspect} caption={caption} />;
+}
+
+function FoundTile({
+  found,
+  aspect,
+  caption,
+}: {
+  found: Found;
+  aspect: string;
+  caption?: string | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const url = `/api/files/${encodeURIComponent(found.attachmentId)}`;
+  const name = caption ?? found.title;
   const host = hostOf(found.pageUrl);
+  const image = (
+    <img
+      src={url}
+      alt={name}
+      loading="lazy"
+      decoding="async"
+      className="bg-muted w-full rounded-xl object-cover"
+      style={{ aspectRatio: aspect }}
+    />
+  );
   return (
     <figure className="flex min-w-0 flex-col gap-1">
-      <img
-        src={`/api/files/${encodeURIComponent(found.attachmentId)}`}
-        alt={caption ?? found.title}
-        loading="lazy"
-        decoding="async"
-        className="bg-muted w-full rounded-xl object-cover"
-        style={{ aspectRatio: aspect }}
-      />
+      {/* Images stored before their size was kept open nowhere: the preview would show a wrong size. */}
+      {found.size === undefined ? (
+        image
+      ) : (
+        <>
+          <button
+            type="button"
+            aria-label={`Preview ${name}`}
+            className={cn("cursor-zoom-in rounded-xl", focusRingClassName)}
+            onClick={() => setOpen(true)}
+          >
+            {image}
+          </button>
+          <AttachmentPreviewDialog
+            target={{ fileName: name, size: found.size, kind: "image", url }}
+            open={open}
+            onOpenChange={setOpen}
+          />
+        </>
+      )}
       <figcaption className="text-muted-foreground flex min-w-0 flex-col text-xs">
         {caption ? <span>{caption}</span> : null}
         {host && /^https?:\/\//i.test(found.pageUrl) ? (
