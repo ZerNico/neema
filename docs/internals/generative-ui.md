@@ -15,7 +15,7 @@ A rebuilt block must equal the live one, because runtimes are evicted, workers r
 - `script.ts` rejects the whole script when any assignment, update or `delete` targets something other than a `$state` name, a member of a `$state` value, or a local declared inside a function. A rejected block renders as source.
 - After the script runs, every other top-level value is deep-frozen (`__freeze` in the compiled block).
 - Rendering reads a frozen copy of state through a proxy that throws on writes, so `{n = 5}` fails that expression and changes nothing.
-- The clock is frozen at the message's `createdAt` (`now`, `Date.now()`, `new Date()`). A retry keeps the row, so its clock is the first attempt's. `random()` throws while rendering and is a seeded generator in handlers, its seed kept in state. QuickJS has no `Intl`, so locale formatting is the host's job (`<num>`, `<date>`).
+- The clock is frozen at the message's `createdAt` (`now`, `Date.now()`, `new Date()`). A retry keeps the row, so its clock is the first attempt's. `random()` throws while rendering and is a seeded generator in handlers, its seed kept in state. QuickJS has no `Intl`, and no model is trained on this format, so they write `toLocaleString` and `Intl.NumberFormat` as in any web page. `intl-shim.ts` covers the everyday cases for the main locales and degrades anything else to plain formatting, never to a blank. It formats dates in UTC so every reader sees the same. `<num>` and `<date>` stay preferred: the host formats them in the reader's own locale.
 
 ## The boundary
 
