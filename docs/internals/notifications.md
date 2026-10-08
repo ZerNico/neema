@@ -26,6 +26,15 @@ found by the run row naming that message and generation, so a retry, edit, resum
 is never offered it. The call does not send anything: it keeps the text on the run row, one
 call per answer, and settlement sends it once the answer has ended. A stopped or replaced
 answer therefore sends nothing, and the tool row records only the text that was kept.
+A later reply in that chat sees the run's call in history but not the tool, and models
+then concluded they had never called it. The trailing reminder (after history, so the
+cached prefix is untouched) says such calls were runs and only a run can notify.
+
+Offering `notify_user` and withholding `ask_user` changes the tool list, which leads the
+cached prefix, so a switch between a run and a person's reply reads that prompt uncached
+once. Runs are at least an hour apart, so a run's cache has usually expired anyway; the cost
+is the first reply after it. Keeping one list for both would mean advertising tools that
+the other kind of attempt must refuse.
 
 ## Channels
 

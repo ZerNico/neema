@@ -18,7 +18,7 @@ export const notifyUserTool = Tool.make("notify_user", {
     "Call it once, when the schedule's instructions say the result is worth telling them now; " +
     "do not call it to report that nothing changed. " +
     `message is the notification itself: plain text, one or two sentences, at most ${NOTIFY_MESSAGE_MAX} characters. ` +
-    "It is sent when this answer ends.",
+    "The owner receives it when you finish; your answer need say no more than that you notified them.",
   parameters: Params,
   success: NotifyToolResult,
   failureMode: "return",

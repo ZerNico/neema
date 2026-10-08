@@ -24,6 +24,7 @@ import {
   conversations,
   conversationWorkingFiles,
   schedules,
+  scheduleRuns,
   groups,
   groupMembers,
   attachmentBlobs,
@@ -4437,6 +4438,91 @@ describe("resumable streaming pipeline", () => {
 });
 
 describe("scheduled turns", () => {
+  it("lets a conditional fire notify but not ask, and tells a later reply why it cannot notify", async () => {
+    const offered: string[][] = [];
+    const prompts: string[] = [];
+    authoringScript = (input) => {
+      offered.push(Object.keys(input.toolkit?.tools ?? {}));
+      prompts.push(JSON.stringify(input.prompt));
+      if (offered.length === 1) return authoringTool(input, "notify_user", { message: "It fell." });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const fired = await runtime.runPromise(
+        Effect.gen(function* () {
+          const seed = yield* setupConversation;
+          const chat = yield* ChatService;
+          const engine = yield* StreamEngine;
+          const db = yield* Db;
+          const scheduleId = uuidv7();
+          const runId = uuidv7();
+          yield* db.insert(schedules).values({
+            id: scheduleId,
+            userId: seed.userId,
+            name: "Watch",
+            prompt: "Tell me only if it falls.",
+            scheduleText: "hourly",
+            cron: "0 * * * *",
+            timezone: "UTC",
+            notify: "conditional",
+          });
+          yield* db.insert(scheduleRuns).values({ id: runId, scheduleId, status: "pending" });
+          const turn = yield* chat.runScheduledTurn({
+            userId: seed.userId,
+            scheduleId,
+            scheduleRunId: runId,
+            prompt: "Tell me only if it falls.",
+            modelId: textModelId,
+            agentId: null,
+            searchEnabled: false,
+            researchEnabled: false,
+            collectionIds: [],
+            skillIds: [],
+            timeZone: "UTC",
+            target: { kind: "new" },
+          });
+          yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runDrain);
+          const [run] = yield* db
+            .select({ notifyMessage: scheduleRuns.notifyMessage })
+            .from(scheduleRuns)
+            .where(eq(scheduleRuns.id, runId));
+          return { userId: seed.userId, conversationId: turn.conversationId, run };
+        }),
+      );
+      // Nobody is there to answer a question; the schedule leaves notifying to the answer.
+      expect(offered[0]).toContain("notify_user");
+      expect(offered[0]).not.toContain("ask_user");
+      expect(fired.run?.notifyMessage).toBe("It fell.");
+
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const chat = yield* ChatService;
+          const engine = yield* StreamEngine;
+          const sent = yield* chat.sendMessage({
+            userId: fired.userId,
+            conversation: { kind: "existing", id: fired.conversationId },
+            modelId: textModelId,
+            content: "Can you notify me again?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+        }),
+      );
+      // The person's own reply cannot notify, and is told so rather than
+      // reading the earlier call as one it never made.
+      expect(offered.at(-1)).not.toContain("notify_user");
+      expect(offered.at(-1)).toContain("ask_user");
+      expect(prompts.at(-1)).toContain("Only a run can notify");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("fires into a fresh sidebar conversation and degrades a missing agent", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {

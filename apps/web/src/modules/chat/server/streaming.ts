@@ -1693,6 +1693,10 @@ export class StreamEngine extends Context.Service<
             historySuffix.some(
               (message) => message.role === "assistant" && /\[\^\d+\]/.test(message.content),
             );
+          // A reply in a schedule's chat sees earlier runs' notify_user calls
+          // but not the tool, and read its absence as never having had it.
+          const notifiedBefore =
+            !notifyTools && priorToolCalls.some((call) => call.toolName === "notify_user");
           let currentRound = 0;
           // The round whose results a steer followed; its next call alone is told how to read it.
           let steeredAfter: number | null = null;
@@ -1725,6 +1729,9 @@ export class StreamEngine extends Context.Service<
                 ? "The user sent the message above while you were working. Address it briefly, then continue the task unless it asks you to stop or change course."
                 : null,
               knowledgeReminder(),
+              notifiedBefore
+                ? "Earlier answers here that called notify_user were scheduled runs, and those notifications were sent. Only a run can notify; this reply is not one, so you cannot notify now. The next run can."
+                : null,
               skillTools && skillTools.remaining() < SKILL_LIMITS.operations
                 ? `Skill operations remaining: ${skillTools.remaining()} of ${SKILL_LIMITS.operations}.`
                 : null,
