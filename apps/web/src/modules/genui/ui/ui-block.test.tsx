@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
 import { BlockEngine } from "../client/engine.ts";
 import type { GenuiClient } from "../client/host.ts";
-import { keyUiFences } from "../fences.ts";
+import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
 import {
   GenuiActionsContext,
   GenuiClientContext,
@@ -214,7 +214,8 @@ describe("what blocks may do", () => {
       messageId: "m1",
       generationId: "g1",
       ordinal: 0,
-      sourceHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      // The hash the server computes from the stored message, or every save is refused.
+      sourceHash: hashSource(scanUiFences(BLOCK)[0]!.code),
       state: '{"n":1,"__seed":0}',
     });
   });

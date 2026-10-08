@@ -133,9 +133,12 @@ export function fenceKey(meta: string | undefined): number | null {
 /**
  * FNV-1a over UTF-16 code units, as 16 hex digits. Isomorphic and sync: the
  * state fence compares a hash the browser computed with one the server
- * computes from stored content. Not a security boundary.
+ * computes from stored content. Not a security boundary. Trailing newlines
+ * are ignored: Streamdown hands the renderer the body with one, the scanner
+ * without, and a hash that saw the difference would refuse every save.
  */
-export function hashSource(code: string): string {
+export function hashSource(raw: string): string {
+  const code = raw.replace(/\n+$/, "");
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;
   for (let i = 0; i < code.length; i++) {
