@@ -61,6 +61,8 @@ is its permission, which the settings page asks for only while push is on and it
 - Email goes through the SMTP server an admin set under Admin → Email, one row with the
   password under `KeyCipher`. The host is the admin's choice and may be an internal relay, so,
   like the SearXNG base URL, it is exempt from the public-address rule.
-- Every channel tags the notification with the run id, so several tabs show it once. A tab
-  in a browser with a push subscription shows nothing itself and leaves it to the service
-  worker, which always shows what it receives: Chrome penalises a push that shows nothing.
+- Every channel tags the notification with the run id, so tabs and the service worker
+  show it once between them. A tab always shows its own rather than leaving it to the
+  worker: a subscription the browser holds may be one the server no longer has, and then
+  nothing would appear. The worker always shows what it receives, since Chrome penalises
+  a push that shows nothing.

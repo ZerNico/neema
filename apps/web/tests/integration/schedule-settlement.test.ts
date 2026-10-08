@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { conversations, messages, scheduleRuns, schedules, user } from "~/db/schema/index.ts";
 import type { AppNotification } from "~/modules/notifications/schema.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
-import { prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
+import { findScheduleFire, prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
 import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -100,21 +100,21 @@ async function startedRun(notify: "off" | "always" | "conditional" = "always") {
           .where(eq(conversations.id, conversationId)),
       )
     )[0]!.unread;
-  const tool = () =>
-    db((d) => prepareNotifyTool(d, { messageId, generationId })).then((prepared) =>
-      prepared
-        ? (message: unknown) =>
-            runtime.runPromise(
-              (
-                prepared.group.handlers as Record<
-                  string,
-                  (params: { message?: unknown }) => Effect.Effect<unknown>
-                >
-              ).notify_user!({ message }),
-            )
-        : null,
+  // What streaming does for this attempt: a fire is unattended, and only a
+  // conditional one gets notify_user.
+  const fire = () => db((d) => findScheduleFire(d, { messageId, generationId }));
+  const tool = async () => {
+    if ((await fire())?.notify !== "conditional") return null;
+    const { group } = await db((d) =>
+      Effect.succeed(prepareNotifyTool(d, { messageId, generationId })),
     );
-  return { scheduleId, conversationId, runId, answer, unread, tool };
+    const handlers = group.handlers as Record<
+      string,
+      (params: { message?: unknown }) => Effect.Effect<unknown>
+    >;
+    return (message: unknown) => runtime.runPromise(handlers.notify_user!({ message }));
+  };
+  return { scheduleId, conversationId, runId, answer, unread, tool, fire };
 }
 
 it("tells the owner once, however many settlers see the answer end", async () => {
@@ -186,7 +186,10 @@ it("points a run that never started at its schedule", async () => {
 });
 
 it("offers notify_user only to a conditional fire, and sends what its answer said once", async () => {
-  expect(await (await startedRun("always")).tool()).toBeNull();
+  const always = await startedRun("always");
+  // Still a fire, so it is not offered ask_user either.
+  expect(await always.fire()).toEqual({ notify: "always" });
+  expect(await always.tool()).toBeNull();
   const fire = await startedRun("conditional");
   const notify = (await fire.tool())!;
   expect(await notify("")).toMatchObject({ outcome: "rejected" });
@@ -206,6 +209,6 @@ it("offers notify_user only to a conditional fire, and sends what its answer sai
       path: `/chat/${fire.conversationId}`,
     },
   ]);
-  // A settled run is past notifying.
-  expect(await fire.tool()).toBeNull();
+  // A settled run is past notifying, and a later attempt is the person's.
+  expect(await fire.fire()).toBeNull();
 });

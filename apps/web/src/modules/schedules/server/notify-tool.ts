@@ -24,27 +24,39 @@ export const notifyUserTool = Tool.make("notify_user", {
   failureMode: "return",
 });
 
-/**
- * Offered only to a fire's own attempt whose schedule notifies when the answer
- * decides. The text waits on the run row; settlement sends it once the answer
- * ends, so a stopped or replaced answer sends nothing.
- */
-export const prepareNotifyTool = Effect.fn("schedules.prepareNotifyTool")(function* (
-  db: Db["Service"],
-  attempt: { messageId: string; generationId: string },
-) {
-  const fireOf = and(
+const fireOf = (attempt: { messageId: string; generationId: string }) =>
+  and(
     eq(scheduleRuns.messageId, attempt.messageId),
     eq(scheduleRuns.generationId, attempt.generationId),
     isNull(scheduleRuns.settledAt),
   );
+
+/**
+ * The schedule run this attempt is, if a fire started it: nobody is there to
+ * answer it. A retry, edit or resume is a new attempt, and the person's.
+ */
+export const findScheduleFire = Effect.fn("schedules.findScheduleFire")(function* (
+  db: Db["Service"],
+  attempt: { messageId: string; generationId: string },
+) {
   const [run] = yield* db
     .select({ notify: schedules.notify })
     .from(scheduleRuns)
     .innerJoin(schedules, eq(schedules.id, scheduleRuns.scheduleId))
-    .where(fireOf)
+    .where(fireOf(attempt))
     .pipe(Effect.orDie);
-  if (run?.notify !== "conditional") return null;
+  return run ?? null;
+});
+
+/**
+ * Offered to a fire whose schedule notifies when the answer decides. The text
+ * waits on the run row; settlement sends it once the answer ends, so a stopped
+ * or replaced answer sends nothing.
+ */
+export function prepareNotifyTool(
+  db: Db["Service"],
+  attempt: { messageId: string; generationId: string },
+) {
   let sent = false;
   const handler = (params: { readonly message?: unknown }) =>
     Effect.gen(function* (): Effect.fn.Return<NotifyToolResult> {
@@ -60,7 +72,7 @@ export const prepareNotifyTool = Effect.fn("schedules.prepareNotifyTool")(functi
       const kept = yield* db
         .update(scheduleRuns)
         .set({ notifyMessage: message })
-        .where(fireOf)
+        .where(fireOf(attempt))
         .returning({ id: scheduleRuns.id })
         .pipe(Effect.orDie);
       if (kept.length === 0)
@@ -73,4 +85,4 @@ export const prepareNotifyTool = Effect.fn("schedules.prepareNotifyTool")(functi
     handlers: { notify_user: handler },
   };
   return { group };
-});
+}

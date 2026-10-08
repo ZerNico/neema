@@ -51,6 +51,9 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   instead. Retry, edit and structured answers work there as normal; if nobody answers a
   clarification, the message lease reaps the turn. Branching a run chat produces a normal
   conversation (`scheduleId` null on the copy).
+- A fire's own attempt is unattended, found by its run row naming that message and
+  generation, so it is never offered `ask_user`: nobody would answer, and the question
+  would be the whole answer. A person's retry or edit in the run chat is theirs and is.
 - `same` mode fires `createTurn` with `{ kind: "existing" }`. An agent cannot change after a
   chat's creation, so an existing chat keeps its own agent and the schedule's `agentId` only
   applies to chats a fire creates. Work chats run their tools in the desktop app, which an
