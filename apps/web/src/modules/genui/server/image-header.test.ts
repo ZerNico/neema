@@ -29,7 +29,15 @@ const jpeg = (w: number, h: number) =>
     [0xff, 0xc0, 0x00, 0x11, 0x08, (h >> 8) & 255, h & 255, (w >> 8) & 255, w & 255, 0x03],
   );
 const riff = (chunk: string, body: number[]) =>
-  bytes("RIFF", [0, 0, 0, 0], "WEBP", chunk, [0, 0, 0, 0], body, Array.from({ length: 16 }, () => 0));
+  bytes(
+    "RIFF",
+    [0, 0, 0, 0],
+    "WEBP",
+    chunk,
+    [0, 0, 0, 0],
+    body,
+    Array.from({ length: 16 }, () => 0),
+  );
 const vp8x = (w: number, h: number) => riff("VP8X", [0, 0, 0, 0, ...le24(w - 1), ...le24(h - 1)]);
 const vp8 = (w: number, h: number) =>
   riff("VP8 ", [0, 0, 0, 0x9d, 0x01, 0x2a, ...le16(w), ...le16(h)]);
