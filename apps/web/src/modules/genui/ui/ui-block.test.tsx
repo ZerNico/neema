@@ -1,6 +1,7 @@
 import variant from "@jitl/quickjs-wasmfile-release-sync";
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from "quickjs-emscripten-core";
+import { toast } from "sonner";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
 import { BlockEngine } from "../client/engine.ts";
@@ -86,7 +87,8 @@ describe("ui blocks in answers", () => {
     expect(container.querySelectorAll('input[type="range"]')).toHaveLength(1);
   });
 
-  it("copies a copy button's text, not its label", async () => {
+  it("copies a copy button's text, not its label, and shows what it copied", async () => {
+    const shown = vi.spyOn(toast, "success");
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     draw(
@@ -103,6 +105,9 @@ describe("ui blocks in answers", () => {
     });
     expect(writeText).toHaveBeenCalledWith("2 kg lamb, 1.5 kg potatoes");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    // The label need not say what was copied, so the toast does.
+    expect(shown).toHaveBeenCalledWith("Copied", { description: "2 kg lamb, 1.5 kg potatoes" });
+    shown.mockRestore();
   });
 
   it("ticks a checklist into the block's state, and keeps local ticks without one", async () => {

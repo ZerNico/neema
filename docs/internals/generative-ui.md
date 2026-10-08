@@ -49,7 +49,7 @@ A block's code is model-written and can be prompt-injected through web content, 
 - The one direct send is a `<suggestion>` chip: its label is the message, shown in full before the click, so the chip wraps and whitespace is collapsed as displayed. A label with a link or over 120 characters goes to the composer instead: the end of a long one is easy to skim past. It sends plain text with no composer files and no research offer, like a structured answer.
 - Only clicks on a button act. A slider or input change can never send, open or copy. Suggestions and sends work only on the conversation's last answer, once it finished.
 - Text with invisible characters (format characters such as zero-width or bidi marks and Unicode tags, except the joiner emoji need) is refused, and the catalog strips them from everything a block shows, so what the reader sees is what would be sent.
-- `open(url)` goes through the leave dialog. `copy(text)` takes at most 4 KB and the toast shows what was copied.
+- `open(url)` goes through the leave dialog. `copy(text)` takes at most 4 KB. It and the `<copy>` button, whose label need not match its text, show the copied text in a toast, with how many characters follow when it is long, so a paste holds nothing the reader was not shown.
 
 ## Saved state
 

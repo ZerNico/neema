@@ -22,7 +22,7 @@ import { sharedWorkerClient, type GenuiClient, type Unavailable } from "../clien
 import { recall, recallState, remember } from "../client/memory.ts";
 import { fenceKey, hashSource } from "../fences.ts";
 import type { BlockAction } from "../runtime.ts";
-import { hasHiddenText, mentionsUrl } from "../text.ts";
+import { copiedPreview, hasHiddenText, mentionsUrl } from "../text.ts";
 import {
   DispatchContext,
   GenuiActionsContext,
@@ -264,7 +264,7 @@ function useBlockActions(message: GenuiMessage, block: string, ordinal: number, 
           setLeaving(action.value);
         } else if (action.kind === "copy" && clicked && action.value.length <= COPY_CHARS) {
           void navigator.clipboard?.writeText(action.value).then(() => {
-            toast.success("Copied", { description: action.value.slice(0, 80) });
+            toast.success("Copied", { description: copiedPreview(action.value) });
           });
         }
       }

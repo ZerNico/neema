@@ -20,3 +20,16 @@ export function stripHiddenText(text: string): string {
 export function mentionsUrl(text: string): boolean {
   return /\b(?:https?:\/\/|www\.)\S|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S/i.test(text);
 }
+
+const PREVIEW_CHARS = 200;
+
+/**
+ * What a block put on the clipboard, as the toast says it. A button's label
+ * need not match what it copies, so the text itself is shown, and a long one
+ * says how much more follows rather than hiding its end.
+ */
+export function copiedPreview(text: string): string {
+  if (text.length <= PREVIEW_CHARS) return text;
+  const more = text.length - PREVIEW_CHARS;
+  return `${text.slice(0, PREVIEW_CHARS)}… and ${more.toLocaleString()} more characters`;
+}

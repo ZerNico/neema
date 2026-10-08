@@ -43,6 +43,7 @@ import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
 import { handlerOf, useHandler } from "./handler.ts";
 import { UiLink } from "./link.tsx";
 import { UiImage, UiImages } from "./media.tsx";
+import { copiedPreview } from "../text.ts";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { SuggestContext } from "./context.ts";
 
@@ -720,6 +721,7 @@ function CopyNode({ node }: { node: ValidNode }) {
       disabled={!text}
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
+          toast.success("Copied", { description: copiedPreview(text) });
           setCopied(true);
           clearTimeout(timer.current);
           timer.current = setTimeout(() => setCopied(false), 1500);
