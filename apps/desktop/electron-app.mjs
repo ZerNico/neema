@@ -10,7 +10,9 @@ const NAME = "neema";
  */
 const BUNDLE_ID = "app.neema.desktop.dev";
 /** Bumped when the copy is made differently, so an older copy is redone. */
-const RECIPE = 2;
+const RECIPE = 3;
+/** electron-builder's `protocols`: the browser hands desktop sign-in over with it. */
+const SIGN_IN_SCHEME = "chat-desktop";
 
 /**
  * The shell runs unpackaged, and macOS takes the Dock, Cmd-Tab and menu bar
@@ -18,8 +20,9 @@ const RECIPE = 2;
  * routes a notification's click by bundle id, and every stock Electron.app
  * shares one, so a click could launch another project's Electron instead of
  * reaching this shell. So on macOS we launch a renamed copy with its own id,
- * made once per Electron version. Changing the plist voids the signature,
- * hence the ad-hoc re-sign.
+ * made once per Electron version. Declaring the sign-in scheme lets the
+ * browser's sign-in link reach a running dev shell the same way. Changing the
+ * plist voids the signature, hence the ad-hoc re-sign.
  */
 export const electronBinary = () => {
   if (process.platform !== "darwin") return electron;
@@ -44,6 +47,13 @@ export const electronBinary = () => {
   for (const key of ["CFBundleName", "CFBundleDisplayName"])
     execFileSync("plutil", ["-replace", key, "-string", NAME, plist]);
   execFileSync("plutil", ["-replace", "CFBundleIdentifier", "-string", BUNDLE_ID, plist]);
+  execFileSync("plutil", [
+    "-replace",
+    "CFBundleURLTypes",
+    "-json",
+    JSON.stringify([{ CFBundleURLName: "neema sign-in", CFBundleURLSchemes: [SIGN_IN_SCHEME] }]),
+    plist,
+  ]);
   execFileSync("codesign", ["--force", "--deep", "--sign", "-", bundle], { stdio: "ignore" });
   writeFileSync(marker, version);
   return binary;
