@@ -2,7 +2,10 @@
 // checked against the catalog, so each component only maps them onto ours;
 // anything it does not recognise renders nothing rather than guessing.
 
-import { use, useState, type ReactNode } from "react";
+import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { MotionSwap } from "~/ui/motion.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -413,6 +416,45 @@ function ButtonNode({ node }: { node: ValidNode }) {
   );
 }
 
+/** Copies its own text, no handler involved: the click is the reader's. */
+function CopyNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const text = str(p.text) ?? "";
+  const variant = str(p.variant);
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <Button
+      size="sm"
+      variant={
+        variant === "default" || variant === "secondary" || variant === "ghost"
+          ? variant
+          : "outline"
+      }
+      disabled={!text}
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
+        <HugeiconsIcon
+          icon={copied ? Tick02Icon : Copy01Icon}
+          strokeWidth={2}
+          className={copied ? "text-success" : undefined}
+          data-icon="inline-start"
+          aria-hidden
+        />
+      </MotionSwap>
+      {copied ? "Copied" : <Nodes nodes={node.children} />}
+    </Button>
+  );
+}
+
 function TabsNode({ node }: { node: ValidNode }) {
   const p = node.props;
   const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "tabs" });
@@ -620,6 +662,8 @@ function Node({ node }: { node: ValidNode }) {
       return <UiImage node={node} />;
     case "images":
       return <UiImages node={node} />;
+    case "copy":
+      return <CopyNode node={node} />;
     case "suggestions":
       return <div className="flex flex-wrap gap-2">{children}</div>;
     case "suggestion":

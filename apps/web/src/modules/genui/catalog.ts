@@ -252,6 +252,15 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "inline",
   },
+  copy: {
+    group: "input",
+    doc: "Button that copies its text to the clipboard, e.g. a shopping list.",
+    props: {
+      text: required(text(4096)),
+      variant: oneOf(["default", "secondary", "outline", "ghost"]),
+    },
+    children: "inline",
+  },
   segmented: {
     group: "input",
     doc: "Choice between a few options; onchange(value).",

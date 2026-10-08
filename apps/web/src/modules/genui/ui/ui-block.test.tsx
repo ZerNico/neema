@@ -83,6 +83,25 @@ describe("ui blocks in answers", () => {
     expect(container.querySelectorAll('input[type="range"]')).toHaveLength(1);
   });
 
+  it("copies a copy button's text, not its label", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    draw(
+      ["```ui", '<copy text="2 kg lamb, 1.5 kg potatoes">Copy shopping list</copy>', "```"].join(
+        "\n",
+      ),
+      "m-copy",
+    );
+    // Found outside act: act holds React's updates back, so a button that has
+    // not rendered yet could never appear inside it.
+    const copy = await screen.findByRole("button", { name: "Copy shopping list" });
+    await act(async () => {
+      fireEvent.click(copy);
+    });
+    expect(writeText).toHaveBeenCalledWith("2 kg lamb, 1.5 kg potatoes");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
   it("shows the images the server found, and says why when there are none", async () => {
     draw(
       [
