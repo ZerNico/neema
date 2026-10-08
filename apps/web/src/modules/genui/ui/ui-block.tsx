@@ -11,9 +11,11 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import * as m from "motion/react-m";
 import { toast } from "sonner";
 import type { CustomRendererProps } from "streamdown";
-import { Skeleton } from "~/ui/primitives/skeleton";
+import { motionEase } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { LeaveDialog } from "~/ui/leave-dialog.tsx";
 import type { RenderReply } from "../client/engine.ts";
 import { sharedWorkerClient, type GenuiClient, type Unavailable } from "../client/host.ts";
@@ -31,6 +33,7 @@ import {
   type GenuiMessage,
   type TrustedEvent,
 } from "./context.ts";
+import { BlockSkeleton } from "./frame.tsx";
 import { Nodes } from "./tree.tsx";
 
 /** While a block is still being written, it re-renders at most this often. */
@@ -140,22 +143,33 @@ function useBlock({
 function Block(props: BlockProps & { suggest: ((text: string) => void) | null }) {
   const { reply, dispatch } = useBlock(props);
   const { block, code, streaming, suggest } = props;
+  const reduced = useAppReducedMotion();
+  // Fade in only what replaces a skeleton: a block the virtual list remounts
+  // from memory is already on screen in the reader's mind.
+  const [startedEmpty] = useState(reply === null);
   if (reply === null || (!reply.ok && reply.reason === "incomplete")) {
-    return <Skeleton className="h-24 w-full" />;
+    return <BlockSkeleton />;
   }
   if (!reply.ok) {
     // Still being written, a failure is most likely a half-sent expression.
-    if (streaming) return <Skeleton className="h-24 w-full" />;
+    if (streaming) return <BlockSkeleton />;
     return <Source code={code} />;
   }
   return (
-    <div className="flex flex-col gap-3" data-genui-block={block}>
+    <m.div
+      className="flex flex-col gap-3"
+      data-genui-block={block}
+      // Not from nothing: the first frame of the grow already shows the block.
+      initial={startedEmpty && !reduced ? { opacity: 0.3 } : false}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15, ease: motionEase }}
+    >
       <DispatchContext value={dispatch}>
         <SuggestContext value={suggest}>
           <Nodes nodes={reply.nodes} />
         </SuggestContext>
       </DispatchContext>
-    </div>
+    </m.div>
   );
 }
 
@@ -256,7 +270,7 @@ export default function UiBlock({ code, isIncomplete, meta }: CustomRendererProp
   // An unkeyed fence (nested in a list, past the block limit, or outside an
   // answer) renders as code: without a key there is nowhere to keep its state.
   if (key === null || message === null) return <Source code={code} />;
-  if (!hydrated && !injected) return <Skeleton className="h-24 w-full" />;
+  if (!hydrated && !injected) return <BlockSkeleton />;
   return (
     <KeyedBlock
       client={injected ?? sharedWorkerClient()}

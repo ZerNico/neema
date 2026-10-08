@@ -1,4 +1,5 @@
-import { lazy, memo, useMemo, type ComponentProps } from "react";
+import { memo, useMemo, type ComponentProps } from "react";
+import UiBlockFrame from "~/modules/genui/ui/frame.tsx";
 import { Streamdown, defaultRehypePlugins, type ExtraProps, type PluginConfig } from "streamdown";
 import { FileReferenceLink } from "./file-reference.tsx";
 import { isFileReferenceHref } from "../file-references.ts";
@@ -25,10 +26,10 @@ const referenceComponents: MarkdownComponents = { span: MarkdownReferenceSpan };
 
 // ```ui fences are interactive blocks in answers only: reasoning, file and
 // skill previews keep the shared plugins and show the source as code.
-// Streamdown wraps renderers in Suspense, so the block loads on first use.
+// The frame is small and eager; the block behind it loads on first use.
 const answerPlugins: PluginConfig = {
   ...markdownPlugins,
-  renderers: [{ language: "ui", component: lazy(() => import("~/modules/genui/ui/ui-block.tsx")) }],
+  renderers: [{ language: "ui", component: UiBlockFrame }],
 };
 
 /**
