@@ -39,3 +39,10 @@ export function isUnauthenticatedError(error: unknown): boolean {
   if (error instanceof Response) return error.status === 401;
   return error instanceof Error && error.message === UNAUTHENTICATED_BODY;
 }
+
+/**
+ * Whose data this device's caches hold. An admin acting as someone is a
+ * separate owner from either of them alone.
+ */
+export const cacheOwnerOf = (identity: SessionIdentity): string =>
+  `${identity.userId}:${identity.impersonatedBy ?? ""}`;

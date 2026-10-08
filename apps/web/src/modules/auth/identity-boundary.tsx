@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Activity, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { authClient } from "./client.ts";
 import { getSessionIdentity } from "./server/functions.ts";
 import {
+  cacheOwnerOf,
   isUnauthenticatedError,
   projectSessionIdentity,
   sameIdentity,
@@ -49,6 +51,8 @@ export function IdentityBoundary({
 }) {
   const queryClient = useQueryClient();
   const [initialIdentity] = useState(identity);
+  const cacheOwner = cacheOwnerOf(initialIdentity);
+  useEffect(() => setDeviceCacheOwner(cacheOwner), [cacheOwner]);
   const [leaving, setLeaving] = useState(false);
   const [frozen, setFrozen] = useState(false);
   const state = useRef({
@@ -67,6 +71,8 @@ export function IdentityBoundary({
       flushSync(() => setLeaving(true));
       void queryClient.cancelQueries();
       queryClient.clear();
+      // What this device kept for the identity leaving goes with it.
+      void clearDeviceCaches();
       if (broadcast) {
         try {
           localStorage.setItem(IDENTITY_CHANGE_KEY, crypto.randomUUID());

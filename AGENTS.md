@@ -292,6 +292,8 @@ skipped one on purpose.
   tools run by the page), site approvals and the navigation gate.
 - `docs/internals/generative-ui.md`: ```ui blocks in answers. The language, the mutation
   contract that makes a rebuilt block equal the live one, and the QuickJS JSON boundary.
+- `docs/internals/device-cache.md`: IndexedDB caches on the reader's device. One store keyed by
+  owner and namespace, synchronous reads once warm, owner scoping and clearing on identity change.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 

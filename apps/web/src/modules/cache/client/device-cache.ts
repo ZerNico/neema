@@ -1,0 +1,268 @@
+// Caches kept on this device in IndexedDB, for things worth showing at once
+// on the next visit and cheap to lose. One database and one store hold every
+// cache, keyed [owner, namespace, key], so a new cache is a new namespace with
+// no schema change. Reads are synchronous from memory once a namespace is warm;
+// writes are batched behind them. Any storage failure leaves a memory-only
+// cache, never an error: everything here can be rebuilt.
+//
+// Entries belong to the signed-in identity. Opening for one deletes every
+// other identity's entries first, so a session that ended outside the app
+// leaves nothing readable for whoever signs in next.
+
+const DB_NAME = "neema-cache";
+const STORE = "entries";
+
+type Key = [owner: string, namespace: string, key: string];
+
+interface Stored<V> {
+  readonly value: V;
+  readonly at: number;
+  readonly bytes: number;
+}
+
+export interface DeviceCacheOptions {
+  /** Unique per cache; it is part of every key. */
+  readonly namespace: string;
+  /** The namespace's budget, roughly in UTF-16 units of its JSON. The oldest go first. */
+  readonly maxBytes: number;
+  /** A value over this is not kept at all. Defaults to `maxBytes / 8`. */
+  readonly maxEntryBytes?: number;
+}
+
+export interface DeviceCache<V> {
+  /** Loads the namespace into memory; resolves at once if it is already, or storage is unusable. */
+  warm(): Promise<void>;
+  /** The value, if warm and present. */
+  get(key: string): V | undefined;
+  set(key: string, value: V): void;
+  delete(key: string): void;
+}
+
+// ---- the connection and the owner
+
+let owner: string | null = null;
+let ownerSet: (() => void) | null = null;
+let ownerKnown = new Promise<void>((resolve) => {
+  ownerSet = resolve;
+});
+let database: Promise<IDBDatabase | null> | null = null;
+const caches = new Set<NamespaceCache<unknown>>();
+
+const request = <T>(req: IDBRequest<T>) =>
+  new Promise<T>((resolve, reject) => {
+    req.addEventListener("success", () => resolve(req.result));
+    req.addEventListener("error", () => reject(req.error));
+  });
+
+const done = (tx: IDBTransaction) =>
+  new Promise<void>((resolve, reject) => {
+    tx.addEventListener("complete", () => resolve());
+    tx.addEventListener("error", () => reject(tx.error));
+    tx.addEventListener("abort", () => reject(tx.error));
+  });
+
+function open(): Promise<IDBDatabase | null> {
+  database ??= (async () => {
+    if (typeof indexedDB === "undefined") return null;
+    const req = indexedDB.open(DB_NAME, 1);
+    req.addEventListener("upgradeneeded", () => req.result.createObjectStore(STORE));
+    const db = await request(req);
+    // Another tab upgrading later must not be blocked by this connection.
+    db.addEventListener("versionchange", () => db.close());
+    return db;
+  })().catch(() => null);
+  return database;
+}
+
+/** Deletes every entry not under `keep`: lower keys, then higher ones. */
+async function purgeOthers(db: IDBDatabase, keep: string) {
+  const tx = db.transaction(STORE, "readwrite");
+  const store = tx.objectStore(STORE);
+  // [keep] sorts before every [keep, …]; [keep, []] after them, arrays above strings.
+  store.delete(IDBKeyRange.upperBound([keep]));
+  store.delete(IDBKeyRange.lowerBound([keep, []], true));
+  await done(tx);
+}
+
+/**
+ * The identity whose caches are open. Called once the session is known; a
+ * different identity drops what memory holds and purges the old one's entries.
+ */
+export function setDeviceCacheOwner(next: string): void {
+  if (owner === next) return;
+  const changed = owner !== null;
+  owner = next;
+  if (changed) for (const cache of caches) cache.reset();
+  ownerSet?.();
+  ownerSet = null;
+  void open().then((db) => (db ? purgeOthers(db, next).catch(() => {}) : undefined));
+}
+
+/** Forgets every cache on this device, for the identity leaving it. */
+export async function clearDeviceCaches(): Promise<void> {
+  for (const cache of caches) cache.reset();
+  owner = null;
+  ownerKnown = new Promise<void>((resolve) => {
+    ownerSet = resolve;
+  });
+  const db = await open();
+  if (!db) return;
+  try {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).clear();
+    await done(tx);
+  } catch {
+    /* Already unusable: nothing readable remains. */
+  }
+}
+
+// ---- one namespace
+
+const WRITE_DELAY_MS = 300;
+const sizeOf = (value: unknown) => JSON.stringify(value)?.length ?? 0;
+
+class NamespaceCache<V> implements DeviceCache<V> {
+  private memory = new Map<string, Stored<V>>();
+  private bytes = 0;
+  private loading: Promise<void> | null = null;
+  /** Keys to write (with their entry) or delete (undefined) on the next flush. */
+  private dirty = new Map<string, Stored<V> | undefined>();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly maxEntryBytes: number;
+
+  constructor(private readonly options: DeviceCacheOptions) {
+    this.maxEntryBytes = options.maxEntryBytes ?? options.maxBytes / 8;
+  }
+
+  warm(): Promise<void> {
+    this.loading ??= this.load();
+    return this.loading;
+  }
+
+  private async load() {
+    await ownerKnown;
+    const forOwner = owner;
+    const db = await open();
+    if (!db || forOwner === null) return;
+    try {
+      const tx = db.transaction(STORE, "readonly");
+      const range = IDBKeyRange.bound(
+        [forOwner, this.options.namespace],
+        [forOwner, this.options.namespace, []],
+        false,
+        true,
+      );
+      const [keys, values] = await Promise.all([
+        request(tx.objectStore(STORE).getAllKeys(range)),
+        request(tx.objectStore(STORE).getAll(range)),
+      ]);
+      if (owner !== forOwner) return;
+      keys.forEach((raw, i) => {
+        const key = (raw as Key)[2];
+        // A value set while loading is newer than the stored one.
+        if (this.memory.has(key) || this.dirty.has(key)) return;
+        const entry = values[i] as Stored<V>;
+        this.memory.set(key, entry);
+        this.bytes += entry.bytes;
+      });
+      this.evict();
+    } catch {
+      /* Memory only from here. */
+    }
+  }
+
+  get(key: string): V | undefined {
+    return this.memory.get(key)?.value;
+  }
+
+  set(key: string, value: V): void {
+    const bytes = sizeOf(value);
+    this.drop(key);
+    if (bytes > this.maxEntryBytes) {
+      this.mark(key, undefined);
+      return;
+    }
+    const entry = { value, at: Date.now(), bytes };
+    this.memory.set(key, entry);
+    this.bytes += bytes;
+    this.mark(key, entry);
+    this.evict();
+  }
+
+  delete(key: string): void {
+    this.drop(key);
+    this.mark(key, undefined);
+  }
+
+  /** Forgets memory and pending writes, as for another identity. */
+  reset(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.memory.clear();
+    this.dirty.clear();
+    this.bytes = 0;
+    this.loading = null;
+  }
+
+  private drop(key: string) {
+    const old = this.memory.get(key);
+    if (!old) return;
+    this.bytes -= old.bytes;
+    this.memory.delete(key);
+  }
+
+  private evict() {
+    if (this.bytes <= this.options.maxBytes) return;
+    const oldest = [...this.memory.entries()].toSorted((a, b) => a[1].at - b[1].at);
+    for (const [key] of oldest) {
+      if (this.bytes <= this.options.maxBytes) break;
+      this.drop(key);
+      this.mark(key, undefined);
+    }
+  }
+
+  private mark(key: string, entry: Stored<V> | undefined) {
+    this.dirty.set(key, entry);
+    this.timer ??= setTimeout(() => void this.flush(), WRITE_DELAY_MS);
+  }
+
+  /** Writes what changed in one transaction. Exposed for pagehide and tests. */
+  async flush(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const forOwner = owner;
+    if (this.dirty.size === 0 || forOwner === null) return;
+    const batch = [...this.dirty];
+    this.dirty.clear();
+    const db = await open();
+    if (!db || owner !== forOwner) return;
+    try {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      for (const [key, entry] of batch) {
+        const id: Key = [forOwner, this.options.namespace, key];
+        if (entry) store.put(entry, id);
+        else store.delete(id);
+      }
+      await done(tx);
+    } catch {
+      /* A lost write costs a placeholder on the next visit, nothing more. */
+    }
+  }
+}
+
+/** A cache in its own namespace. Create it once, at module scope. */
+export function deviceCache<V>(options: DeviceCacheOptions): DeviceCache<V> & {
+  flush(): Promise<void>;
+} {
+  const cache = new NamespaceCache<V>(options);
+  caches.add(cache as NamespaceCache<unknown>);
+  return cache;
+}
+
+// Writes still waiting when the page goes away would be lost with it.
+if (typeof addEventListener === "function") {
+  addEventListener("pagehide", () => {
+    for (const cache of caches) void cache.flush();
+  });
+}

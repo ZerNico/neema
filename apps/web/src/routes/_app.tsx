@@ -10,7 +10,8 @@ import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-ro
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
 import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
-import type { SessionIdentity } from "~/modules/auth/identity.ts";
+import { cacheOwnerOf, type SessionIdentity } from "~/modules/auth/identity.ts";
+import { setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import {
   approvalStatusQuery,
   sessionIdentityQuery,
@@ -51,6 +52,8 @@ export const Route = createFileRoute("/_app")({
     // account, so it is turned away before any of them runs.
     const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
     if (approval !== "approved") throw redirect({ to: "/pending" });
+    // Known before anything renders, so a cache can be read for the first frame.
+    setDeviceCacheOwner(cacheOwnerOf(identity));
     return { user, identity };
   },
   loader: async ({ context }) => {
