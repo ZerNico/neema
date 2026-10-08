@@ -145,8 +145,8 @@ describe("ui blocks in answers", () => {
       [
         "```ui",
         "<script>let picked = $state([]);</script>",
-        '<quiz title="Dative" answers={picked} onchange={(a) => picked = a}>',
-        '  <question options={["dem", "der", "den"]} answer="dem" explain="helfen takes the dative.">Ich helfe ___ Mann.</question>',
+        '<quiz title="Dative" more="Another dative quiz" answers={picked} onchange={(a) => picked = a}>',
+        '  <question options={["dem", "der", "den"]} answer="dem" explain="helfen takes the dative." feedback={["Masculine dative.", "Der is feminine here.", "Den is plural."]} hint="Which case does helfen take?">Ich helfe ___ Mann.</question>',
         '  <question options={["mir", "mich"]} answer="mir">Das gehört ___.</question>',
         "</quiz>",
         '<text>Kept {picked.map((a) => a ?? "-").join(",")}</text>',
@@ -155,11 +155,15 @@ describe("ui blocks in answers", () => {
       "m-quiz",
     );
     expect(await screen.findByText(/Question 1 of 2/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hint" }));
+    expect(await screen.findByText(/Which case does helfen take/)).toBeInTheDocument();
     const der = screen.getByRole("button", { name: /der/ });
     await act(async () => {
       fireEvent.click(der);
     });
     expect(await screen.findByText(/Not quite: it’s dem\./)).toBeInTheDocument();
+    // What was wrong with the option picked, not only the right answer.
+    expect(screen.getByText(/Der is feminine here/)).toBeInTheDocument();
     expect(screen.getByText(/helfen takes the dative/)).toBeInTheDocument();
     // The block kept the answer in its own state.
     expect(await screen.findByText("Kept der,-")).toBeInTheDocument();
@@ -175,6 +179,7 @@ describe("ui blocks in answers", () => {
       fireEvent.click(screen.getByRole("button", { name: "See score" }));
     });
     expect(await screen.findByText("1 of 2 correct")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Another dative quiz" })).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
     });

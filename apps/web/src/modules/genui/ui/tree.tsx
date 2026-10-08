@@ -408,8 +408,12 @@ function textOf(children: readonly Child[]): string {
 }
 
 function SuggestionNode({ node }: { node: ValidNode }) {
+  return <SuggestionChip label={textOf(node.children)} />;
+}
+
+/** A chip whose label is the message it sends, under the host's sending rules. */
+function SuggestionChip({ label }: { label: string }) {
   const suggest = use(SuggestContext);
-  const label = textOf(node.children);
   return (
     <Button
       size="sm"
@@ -563,6 +567,9 @@ interface QuizQuestion {
   readonly options: readonly string[];
   readonly answer: string;
   readonly explain: string | undefined;
+  /** Why each option is right or wrong, by option position. */
+  readonly feedback: readonly (string | undefined)[];
+  readonly hint: string | undefined;
 }
 
 function questionsOf(node: ValidNode): QuizQuestion[] {
@@ -574,7 +581,19 @@ function questionsOf(node: ValidNode): QuizQuestion[] {
     const answer = str(child.props.answer) ?? "";
     // A question whose answer is not among its options cannot be scored.
     if (options.length < 2 || !options.includes(answer)) return [];
-    return [{ prompt: child.children, options, answer, explain: str(child.props.explain) }];
+    const feedback = Array.isArray(child.props.feedback)
+      ? options.map((_, i) => str((child.props.feedback as unknown[])[i]))
+      : [];
+    return [
+      {
+        prompt: child.children,
+        options,
+        answer,
+        explain: str(child.props.explain),
+        feedback,
+        hint: str(child.props.hint),
+      },
+    ];
   });
 }
 
@@ -597,7 +616,9 @@ function QuizNode({ node }: { node: ValidNode }) {
   const firstOpen = questions.findIndex((_, i) => !answers[i]);
   const [index, setIndex] = useState(firstOpen === -1 ? 0 : firstOpen);
   const [scored, setScored] = useState(firstOpen === -1 && answers.length > 0);
+  const [hinted, setHinted] = useState<number | null>(null);
   const title = str(p.title);
+  const more = str(p.more);
   if (questions.length === 0) return null;
   const at = Math.min(index, questions.length - 1);
   const question = questions[at]!;
@@ -623,6 +644,7 @@ function QuizNode({ node }: { node: ValidNode }) {
           {score} of {questions.length} correct
         </p>
         <Progress value={(score / questions.length) * 100} aria-label="Score" />
+        {more ? <SuggestionChip label={more} /> : null}
         <Button
           size="sm"
           variant="outline"
@@ -709,17 +731,29 @@ function QuizNode({ node }: { node: ValidNode }) {
           );
         })}
       </ul>
-      <div role="status" className="text-sm">
-        {chosen === null ? null : (
-          <p>
-            <b className={chosen === question.answer ? "text-success" : "text-destructive"}>
-              {chosen === question.answer ? "Correct." : `Not quite: it’s ${question.answer}.`}
-            </b>{" "}
-            {question.explain}
-          </p>
+      <div role="status" className="flex flex-col gap-1 text-sm">
+        {chosen === null ? (
+          hinted === at && question.hint ? (
+            <p className="text-muted-foreground">Hint: {question.hint}</p>
+          ) : null
+        ) : (
+          <>
+            <p>
+              <b className={chosen === question.answer ? "text-success" : "text-destructive"}>
+                {chosen === question.answer ? "Correct." : `Not quite: it’s ${question.answer}.`}
+              </b>{" "}
+              {question.feedback[question.options.indexOf(chosen)] ?? null}
+            </p>
+            {question.explain ? <p className="text-muted-foreground">{question.explain}</p> : null}
+          </>
         )}
       </div>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {question.hint && chosen === null && hinted !== at ? (
+          <Button size="sm" variant="ghost" onClick={() => setHinted(at)}>
+            Hint
+          </Button>
+        ) : null}
         <Button
           size="sm"
           disabled={chosen === null}

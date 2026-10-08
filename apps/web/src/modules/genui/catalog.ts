@@ -359,9 +359,11 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   quiz: {
     group: "input",
-    doc: "Quiz, one question at a time, scored with explanations. Use it for any quiz. answers (chosen option or null per question) can live in $state; onchange(answers).",
+    doc: "Quiz, one question at a time, scored. Use it for any quiz. more: a follow-up request offered at the end. answers can live in $state; onchange(answers).",
     props: {
       title: text(120),
+      // Offered at the score, e.g. "Another quiz on the dative with harder questions".
+      more: text(300),
       answers: prop(
         Schema.Array(Schema.NullOr(Schema.String.check(Schema.isMaxLength(200)))).check(
           Schema.isMaxLength(30),
@@ -374,7 +376,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   question: {
     group: "input",
-    doc: "Quiz question: text as children, answer must be one of options, explain shown after answering.",
+    doc: "Quiz question: text as children; answer is one of options; feedback explains each option, in order; hint before answering, explain after.",
     props: {
       options: required(
         prop(
@@ -387,6 +389,11 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       ),
       answer: required(text(200)),
       explain: text(500),
+      feedback: prop(
+        Schema.Array(Schema.String.check(Schema.isMaxLength(300))).check(Schema.isMaxLength(6)),
+        "string[]",
+      ),
+      hint: text(300),
     },
     children: "inline",
   },
