@@ -691,6 +691,17 @@ export const renameConversation = createServerFn({ method: "POST" })
     ),
   );
 
+export const markConversationRead = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ConversationIdInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.markRead({ userId: context.session.user.id, conversationId: data.conversationId }),
+      ),
+    ),
+  );
+
 export const keepConversation = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(ConversationIdInput))

@@ -1,11 +1,12 @@
-import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, scheduleRuns, schedules } from "~/db/schema/index.ts";
+import { conversations, messages, scheduleRuns, schedules } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import { answered, type SettledRun } from "../settled-run.ts";
 
 export type ScheduleRow = typeof schedules.$inferSelect;
 type RunRow = typeof scheduleRuns.$inferSelect;
@@ -22,6 +23,7 @@ export const toSummary = (row: ScheduleRow): ScheduleSummary => ({
 });
 
 const CLAIM_BATCH = 25;
+const SETTLE_BATCH = 50;
 
 export class ScheduleRepo extends Context.Service<
   ScheduleRepo,
@@ -46,6 +48,7 @@ export class ScheduleRepo extends Context.Service<
         chatMode: "new" | "same";
         chatId: string | null;
         integrationGrants?: IntegrationGrant[];
+        notify?: ScheduleRow["notify"];
         nextFireAt: Date | null;
       },
       tx?: DbTx,
@@ -77,6 +80,7 @@ export class ScheduleRepo extends Context.Service<
           | "collectionIds"
           | "skillIds"
           | "integrationGrants"
+          | "notify"
           | "chatMode"
           | "chatId"
           | "paused"
@@ -112,6 +116,12 @@ export class ScheduleRepo extends Context.Service<
       limit: number,
       nextFor: (row: ScheduleRow) => Date | null,
     ): Effect.Effect<Array<ScheduleRow & { runId: string }>>;
+    /**
+     * Claims the runs that have ended and marks each settled, once: a run that
+     * never started, or whose answer is no longer streaming or is no longer the
+     * fire's attempt. Marks their chats unread in the same transaction.
+     */
+    settleRuns(): Effect.Effect<SettledRun[]>;
   }
 >()("chat/schedules/ScheduleRepo") {
   static readonly layer = Layer.effect(
@@ -302,6 +312,82 @@ export class ScheduleRepo extends Context.Service<
                   }
                 }
                 return claimed;
+              }),
+            )
+            .pipe(Effect.orDie);
+        }),
+        settleRuns: Effect.fn("ScheduleRepo.settleRuns")(function* () {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const rows = yield* tx
+                  .select({
+                    run: scheduleRuns,
+                    scheduleName: schedules.name,
+                    userId: schedules.userId,
+                    notify: schedules.notify,
+                    messageStatus: messages.status,
+                    messageContent: messages.content,
+                    messageGenerationId: messages.generationId,
+                  })
+                  .from(scheduleRuns)
+                  .innerJoin(schedules, eq(schedules.id, scheduleRuns.scheduleId))
+                  .leftJoin(messages, eq(messages.id, scheduleRuns.messageId))
+                  .where(
+                    and(
+                      isNull(scheduleRuns.settledAt),
+                      or(
+                        inArray(scheduleRuns.status, ["error", "skipped"]),
+                        and(
+                          eq(scheduleRuns.status, "started"),
+                          or(
+                            isNull(messages.id),
+                            sql`${messages.status} <> 'streaming'`,
+                            sql`${messages.generationId} is distinct from ${scheduleRuns.generationId}`,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .orderBy(scheduleRuns.firedAt)
+                  .limit(SETTLE_BATCH)
+                  // Two settlers (the turn's own and the tick) never claim one run twice.
+                  .for("update", { of: scheduleRuns, skipLocked: true });
+                if (rows.length === 0) return [];
+                yield* tx
+                  .update(scheduleRuns)
+                  .set({ settledAt: sql`now()` })
+                  .where(
+                    inArray(
+                      scheduleRuns.id,
+                      rows.map((row) => row.run.id),
+                    ),
+                  );
+                const settled = rows.map((row): SettledRun => ({
+                  runId: row.run.id,
+                  scheduleId: row.run.scheduleId,
+                  scheduleName: row.scheduleName,
+                  userId: row.userId,
+                  notify: row.notify,
+                  status: row.run.status,
+                  error: row.run.error,
+                  conversationId: row.run.conversationId,
+                  answer: row.messageStatus
+                    ? {
+                        status: row.messageStatus,
+                        content: row.messageContent ?? "",
+                        current: row.messageGenerationId === row.run.generationId,
+                      }
+                    : null,
+                  notifyMessage: row.run.notifyMessage,
+                }));
+                const unread = settled.filter(answered).map((run) => run.conversationId!);
+                if (unread.length > 0)
+                  yield* tx
+                    .update(conversations)
+                    .set({ unread: true })
+                    .where(inArray(conversations.id, unread));
+                return settled;
               }),
             )
             .pipe(Effect.orDie);

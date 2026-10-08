@@ -42,6 +42,7 @@ import {
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
+import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
 import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
 
@@ -163,6 +164,20 @@ export function toActivity(row: {
         row.status === "running" ? "running" : result?.status === "complete" ? "complete" : "error",
       ...(row.researchRunId ? { runId: row.researchRunId } : {}),
       ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
+    };
+  }
+  if (row.toolName === "notify_user") {
+    const result = Option.getOrNull(Schema.decodeUnknownOption(NotifyToolResult)(row.result));
+    const message = result?.outcome === "queued" ? result.message : undefined;
+    return {
+      family: "notify",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "running" ? "running" : message ? "complete" : "error",
+      ...(message ? { message } : {}),
     };
   }
   if (row.toolName === "update_plan") {

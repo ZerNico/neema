@@ -23,10 +23,22 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ScheduleFire } from "~/modules/schedules/server/fire.ts";
 import { ScheduleRepo, type ScheduleRow } from "~/modules/schedules/server/repo.ts";
 import { ScheduleService } from "~/modules/schedules/server/service.ts";
+import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
+import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+
+const settlement = ScheduleSettlement.layer.pipe(
+  Layer.provideMerge(
+    Layer.succeed(NotificationService, {
+      deliver: () => Effect.void,
+      preferences: () => Effect.succeed({ push: true, email: false, emailAvailable: false }),
+      setPreferences: () => Effect.void,
+    }),
+  ),
+);
 
 let database: TestDatabase;
 let databaseUrl: string;
@@ -469,6 +481,7 @@ describe("schedule capability revocation", () => {
       ScheduleService.layer.pipe(
         Layer.provideMerge(FeaturePolicy.layer),
         Layer.provideMerge(fakeFire),
+        Layer.provideMerge(settlement),
         Layer.provideMerge(fakeBus),
         Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
         Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
@@ -614,6 +627,7 @@ describe("manual schedule fires", () => {
         ScheduleService.layer.pipe(
           Layer.provideMerge(FeaturePolicy.layer),
           Layer.provideMerge(fakeFire),
+          Layer.provideMerge(settlement),
           Layer.provideMerge(fakeBus),
           Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
           Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
@@ -717,6 +731,7 @@ describe("manual schedule fires", () => {
         ScheduleService.layer.pipe(
           Layer.provideMerge(FeaturePolicy.layer),
           Layer.provideMerge(fakeFire),
+          Layer.provideMerge(settlement),
           Layer.provideMerge(fakeBus),
           Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
           Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),

@@ -22,6 +22,7 @@ import {
   CHANGE_SERVER,
   CHROME_GET_STATE,
   CHROME_SET_THEME,
+  CHROME_SHOW_WINDOW,
   CONNECT,
   CONNECT_CURRENT,
   FIXED_SERVER_ARGUMENT,
@@ -89,6 +90,9 @@ if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
 }
 // userData was resolved from the old name at startup, so renaming leaves the profile in place.
 app.setName("neema");
+// Windows files notifications under this id and sends their clicks to the app
+// installed with it; it must match electron-builder's appId.
+if (process.platform === "win32") app.setAppUserModelId("app.neema.desktop");
 // Browser tabs run on the app-wide default, so it must stay what Electron
 // generates (`browser/user-agent.ts`); only our name is taken out. The token
 // the server keys the desktop session on goes on the app's own session alone,
@@ -584,6 +588,11 @@ void app.whenReady().then(async () => {
   ipcMain.handle(CHROME_SET_THEME, (event, theme: unknown) => {
     if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
     windowChrome.get(mainWindow)?.setTheme(theme);
+  });
+  // Only the server's page asks, when someone clicks one of its notifications.
+  ipcMain.handle(CHROME_SHOW_WINDOW, (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    restoreWindow();
   });
   ipcMain.handle(NETWORK_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

@@ -217,5 +217,8 @@ export const fetchPinned = (target: PublicHttpTarget, init: RequestInit = {}): P
       },
     );
     req.on("error", reject);
-    req.end();
+    // Bytes or text only: a stream body would need its own error handling.
+    const body = init.body;
+    if (typeof body === "string" || body instanceof Uint8Array) req.end(body);
+    else req.end();
   });

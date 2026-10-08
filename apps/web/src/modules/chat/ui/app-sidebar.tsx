@@ -1,17 +1,7 @@
-import {
-  BubbleChatIcon,
-  Book02Icon,
-  Calendar03Icon,
-  Folder01Icon,
-  FolderLibraryIcon,
-  Robot01Icon,
-  MoreHorizontalIcon,
-  PlusSignIcon,
-} from "@hugeicons/core-free-icons";
+import { MoreHorizontalIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseInfiniteQuery } from "@tanstack/react-query";
-import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import { Link, useParams, useRouterState } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { Suspense, useMemo, useState } from "react";
@@ -29,7 +19,6 @@ import { buttonVariants } from "~/ui/primitives/button";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -39,8 +28,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
+  useSidebar,
 } from "~/ui/primitives/sidebar";
 import { ProjectsSidebarGroup } from "~/modules/projects/ui/projects-sidebar.tsx";
+import { SidebarNavRail } from "~/modules/navigation/ui/sidebar-rail.tsx";
 import { ClosesOnLink } from "~/ui/sidebar-links.tsx";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
@@ -53,86 +44,50 @@ export function AppSidebar({
   user: { id: string; name: string; email: string; role?: string | null | undefined };
   impersonating?: boolean;
 }) {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const trimmed = pathname.replace(/\/$/, "");
-  const { data: capabilities } = useQuery(capabilitiesQuery);
-  const destinations = [
-    { to: "/projects", label: "Projects", icon: Folder01Icon, shown: capabilities?.projectsUse },
-    { to: "/agents", label: "Agents", icon: Robot01Icon, shown: capabilities?.agentsUse },
-    {
-      to: "/knowledge",
-      label: "Knowledge",
-      icon: FolderLibraryIcon,
-      shown: capabilities?.knowledgeUse,
-    },
-    { to: "/schedules", label: "Schedules", icon: Calendar03Icon, shown: capabilities?.schedules },
-    { to: "/skills", label: "Skills", icon: Book02Icon, shown: capabilities?.skillsUse },
-    { to: "/chats", label: "Chats", icon: BubbleChatIcon, shown: true },
-  ].filter((destination) => destination.shown);
-
+  const { state, isMobile } = useSidebar();
   return (
-    <Sidebar>
+    <Sidebar collapsible="rail">
       <ClosesOnLink>
-        <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton render={<Link to="/" />}>
-                <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-6 items-center justify-center rounded-md">
-                  <NeemaGlyph className="size-4" />
-                </span>
-                <span className="font-semibold">neema</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
-            <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            New chat
-          </Link>
-          {/* Tiles keep every destination one labelled click away in two rows,
-            leaving the height to the chat list. */}
-          {/* oxlint-disable-next-line shadcn/no-restyle -- a tile grid, not the menu's vertical list */}
-          <SidebarMenu className={cn("grid gap-1", tileColumns(destinations.length))}>
-            {destinations.map((destination) => (
-              <SidebarMenuItem key={destination.to}>
-                <SidebarMenuButton
-                  size="tile"
-                  isActive={trimmed.startsWith(destination.to)}
-                  render={<Link to={destination.to} />}
-                >
-                  <HugeiconsIcon icon={destination.icon} strokeWidth={2} />
-                  {destination.label}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarHeader>
-        {/* Match the chat scroller's soft edge; padding keeps the first and last
-          items outside the fade when the list is scrolled to either end. */}
-        {/* oxlint-disable-next-line shadcn/no-restyle -- the padding keeps items clear of the mask */}
-        <SidebarContent className="pb-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
-          {/* The route loader prefetches the first page, so this only shows on
-            a cold cache (e.g. right after sign-out emptied it). */}
-          <Suspense fallback={<ConversationListSkeleton />}>
-            <ConversationList />
-          </Suspense>
-        </SidebarContent>
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <AccountMenu user={user} impersonating={impersonating} />
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        <div className="flex min-h-0 flex-1">
+          <SidebarNavRail account={<AccountMenu user={user} impersonating={impersonating} />} />
+          {/* On a wide screen a fixed width, so collapsing slides the panel under
+            the rail instead of reflowing every title; clipped out of sight, it
+            leaves the tab order too. The phone sheet sets its own width. */}
+          <div
+            inert={state === "collapsed" && !isMobile}
+            className="flex min-w-0 flex-1 flex-col md:w-[calc(var(--sidebar-width)-var(--sidebar-width-icon))] md:flex-none"
+          >
+            <SidebarHeader>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton render={<Link to="/" />}>
+                    <span className="bg-sidebar-primary text-sidebar-primary-foreground flex size-6 items-center justify-center rounded-md">
+                      <NeemaGlyph className="size-4" />
+                    </span>
+                    <span className="font-semibold">neema</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+              <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
+                <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
+                New chat
+              </Link>
+            </SidebarHeader>
+            {/* Match the chat scroller's soft edge; padding keeps the first and last
+              items outside the fade when the list is scrolled to either end. */}
+            {/* oxlint-disable-next-line shadcn/no-restyle -- the padding keeps items clear of the mask */}
+            <SidebarContent className="pb-3 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
+              {/* The route loader prefetches the first page, so this only shows on
+                a cold cache (e.g. right after sign-out emptied it). */}
+              <Suspense fallback={<ConversationListSkeleton />}>
+                <ConversationList />
+              </Suspense>
+            </SidebarContent>
+          </div>
+        </div>
       </ClosesOnLink>
     </Sidebar>
   );
-}
-
-// Four tiles read better as two pairs than as three and a straggler.
-function tileColumns(count: number) {
-  if (count >= 5) return "grid-cols-3";
-  if (count === 4 || count === 2) return "grid-cols-2";
-  return count === 3 ? "grid-cols-3" : "grid-cols-1";
 }
 
 function ConversationListSkeleton() {
@@ -215,8 +170,10 @@ function ConversationList() {
                     >
                       <SidebarMenuButton
                         isActive={conversation.id === activeId}
-                        // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between status icon and title
-                        className="gap-0 [&>span:last-child]:!text-clip"
+                        // The "…" takes the status icon's place wherever it shows on
+                        // hover, and the title ends where it did; on touch both stay.
+                        // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between title and status icon
+                        className="gap-0 [&_[data-status-slot]]:ml-auto [&_[data-status-slot][data-filled]]:-mr-1 pointer-fine:group-hover/menu-item:[&_[data-status-slot]]:hidden pointer-fine:group-has-focus-visible/menu-item:[&_[data-status-slot]]:hidden pointer-fine:group-has-[[aria-expanded=true]]/menu-item:[&_[data-status-slot]]:hidden"
                         render={
                           <Link
                             to="/chat/$conversationId"
@@ -229,6 +186,7 @@ function ConversationList() {
                           browsing={browsing.has(conversation.id)}
                           branched={!!conversation.branchedFrom}
                           scheduled={conversation.scheduled}
+                          unread={conversation.unread}
                           conversationId={conversation.id}
                           title={conversation.title}
                           registry={revealRegistry}

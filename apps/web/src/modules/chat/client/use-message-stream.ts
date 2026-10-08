@@ -68,6 +68,12 @@ export interface PlanToolActivity extends ToolActivityBase {
   steps?: ReadonlyArray<PlanStep>;
 }
 
+/** A scheduled run's answer told its owner; the text is what they were sent. */
+export interface NotifyToolActivity extends ToolActivityBase {
+  family: "notify";
+  message?: string;
+}
+
 export interface AttachmentToolActivity extends ToolActivityBase {
   family: "attachment";
   /** Which file and part; the text itself only ever reached the model. */
@@ -234,6 +240,7 @@ export type ToolActivity =
   | MemoryToolActivity
   | AskToolActivity
   | PlanToolActivity
+  | NotifyToolActivity
   | ToolLoadActivity
   | AttachmentToolActivity
   | ResearchToolActivity
@@ -389,6 +396,7 @@ export function applyToolChunk(
     e.family !== "memory" &&
     e.family !== "ask" &&
     e.family !== "plan" &&
+    e.family !== "notify" &&
     e.family !== "tool-load" &&
     e.family !== "attachment" &&
     e.family !== "research" &&
@@ -800,6 +808,33 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.phase === "start" ? "running" : e.ok && loaded ? "complete" : "error",
       ...(loaded ? { loaded } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  if (family === "notify") {
+    if (
+      e.name !== "notify_user" ||
+      (e.phase !== "start" && e.phase !== "result") ||
+      (e.phase === "result" && typeof e.ok !== "boolean") ||
+      (existing && e.phase === "start")
+    )
+      return tools;
+    const message =
+      e.phase === "result" && typeof (e as { message?: unknown }).message === "string"
+        ? (e as { message: string }).message
+        : undefined;
+    const next: NotifyToolActivity = {
+      family: "notify",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : e.ok && message ? "complete" : "error",
+      ...(message ? { message } : {}),
     };
     return index === -1
       ? [...tools, next]

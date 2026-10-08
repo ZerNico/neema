@@ -1012,6 +1012,8 @@ export class ChatRepo extends Context.Service<
     ): Effect.Effect<void>;
     /** Clears the temporary flag. False when it was already a kept chat. */
     keepConversation(userId: string, conversationId: string): Effect.Effect<boolean>;
+    /** Clears a scheduled run's unread mark. False when there was none. */
+    markRead(userId: string, conversationId: string): Effect.Effect<boolean>;
     /**
      * Archives or unarchives one chat. False when nothing changed: already in
      * that state, not this person's, or temporary (which is never archived).
@@ -2005,7 +2007,12 @@ export class ChatRepo extends Context.Service<
                 if (input.scheduleRunId)
                   yield* tx
                     .update(scheduleRuns)
-                    .set({ status: "started", conversationId: conversation.id })
+                    .set({
+                      status: "started",
+                      conversationId: conversation.id,
+                      messageId: assistantRows[0]!.id,
+                      generationId: assistantRows[0]!.generationId,
+                    })
                     .where(
                       and(
                         eq(scheduleRuns.id, input.scheduleRunId),
@@ -2473,6 +2480,21 @@ export class ChatRepo extends Context.Service<
           },
         ),
 
+        markRead: Effect.fn("ChatRepo.markRead")(function* (userId, conversationId) {
+          const rows = yield* db
+            .update(conversations)
+            .set({ unread: false })
+            .where(
+              and(
+                eq(conversations.id, conversationId),
+                eq(conversations.userId, userId),
+                eq(conversations.unread, true),
+              ),
+            )
+            .returning({ id: conversations.id })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
         keepConversation: Effect.fn("ChatRepo.keepConversation")(
           function* (userId, conversationId) {
             const rows = yield* db

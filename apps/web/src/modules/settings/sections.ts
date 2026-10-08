@@ -4,6 +4,7 @@ import {
   Brain02Icon,
   ComputerIcon,
   LaptopPhoneSyncIcon,
+  Notification03Icon,
   PlugSocketIcon,
   UserCircleIcon,
 } from "@hugeicons/core-free-icons";
@@ -22,6 +23,12 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     label: "Memory",
     icon: Brain02Icon,
     matchPrefix: "/settings/memory",
+  },
+  {
+    to: "/settings/notifications",
+    label: "Notifications",
+    icon: Notification03Icon,
+    matchPrefix: "/settings/notifications",
   },
   {
     to: "/settings/integrations",

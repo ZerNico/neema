@@ -24,11 +24,37 @@ function setup(branched = false, generating = false) {
   const view = render(tree(generating));
   const title = screen.getByText("Example chat");
   const link = screen.getByRole("link");
-  const slot = link.firstElementChild as HTMLElement;
+  const slot = link.querySelector<HTMLElement>("[data-status-slot]")!;
   return { ...view, title, link, slot, update: (busy: boolean) => view.rerender(tree(busy)) };
 }
 
 describe("conversation status in sidebar and chats list", () => {
+  it("marks a run chat with an unread answer above its calendar, and the busy state above both", () => {
+    const registry = createTitleRevealRegistry();
+    const row = (generating: boolean, unread: boolean) => (
+      <AppMotionProvider>
+        <a href="/chat/example">
+          <ConversationStatusTitle
+            conversationId="example"
+            title="Example chat"
+            registry={registry}
+            generating={generating}
+            branched={false}
+            scheduled
+            unread={unread}
+          />
+        </a>
+      </AppMotionProvider>
+    );
+    const view = render(row(false, true));
+    expect(screen.getByRole("img", { name: "New answer" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Scheduled chat")).not.toBeInTheDocument();
+    view.rerender(row(true, true));
+    expect(screen.getByRole("status", { name: "Generating" })).toBeInTheDocument();
+    view.rerender(row(false, false));
+    expect(screen.getByLabelText("Scheduled chat")).toBeInTheDocument();
+  });
+
   it("animates idle → generating → idle without replacing the title or leaving a gap", async () => {
     const { title, link, slot, update } = setup();
     expect(slot.style.width).toBe("0px");
@@ -48,9 +74,9 @@ describe("conversation status in sidebar and chats list", () => {
     update(true);
     // jsdom applies no stylesheet, so the icon slot stays inline and the
     // accessible name loses the space a browser gets from blockifying it.
-    expect(screen.getByRole("link")).toHaveAccessibleName(/^Generating\s?Example chat$/);
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Example chat\s?Generating$/);
     update(false);
-    expect(screen.getByRole("link")).toHaveAccessibleName(/^Branched conversation\s?Example chat$/);
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Example chat\s?Branched conversation$/);
     await waitFor(() => expect(slot.querySelector("[inert]")).toBeNull());
     expect(slot.style.width).toBe("24px");
   });

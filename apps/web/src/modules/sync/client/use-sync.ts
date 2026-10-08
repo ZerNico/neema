@@ -1,13 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
+import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
 
 /**
  * One SSE connection per tab. Applies this user's domain events (from any
  * browser/instance) to the query cache so sidebar and open chats stay in sync.
  */
-export function useSync(reconcileIdentity?: () => Promise<boolean>) {
+export function useSync(
+  reconcileIdentity?: () => Promise<boolean>,
+  /** Where a clicked notification goes; a full load without a router. */
+  openPath?: (path: string) => void,
+) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -91,6 +96,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["sidebar"] });
         void queryClient.invalidateQueries({ queryKey: ["documents"] });
         void queryClient.invalidateQueries({ queryKey: ["projects"] });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -245,9 +251,18 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         case "memory.policy.changed":
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
           break;
+        case "sidebar.changed":
+          void queryClient.invalidateQueries({ queryKey: ["sidebar"] });
+          break;
         case "desktop.session.created":
           void queryClient.invalidateQueries({ queryKey: ["desktop-sessions"] });
           announceTicketRedeemed(event.ticketId);
+          break;
+        case "notification":
+          showNotification(
+            event.notification,
+            openPath ?? ((path) => window.location.assign(path)),
+          );
           break;
       }
     });
@@ -258,5 +273,5 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
       clearKnowledgeTimer();
       source.close();
     };
-  }, [queryClient, reconcileIdentity]);
+  }, [queryClient, reconcileIdentity, openPath]);
 }

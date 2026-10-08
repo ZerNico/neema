@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { redeemDesktopTicket } from "~/modules/auth/client.ts";
 import { toast } from "sonner";
-import { challengeOf } from "~/modules/auth/desktop-ticket.ts";
+import { challengeOf, UNBOUND_TICKET } from "~/modules/auth/desktop-ticket.ts";
 import { identityNavigation } from "~/modules/auth/identity-context.ts";
 import { DesktopSignIn } from "./desktop-sign-in.tsx";
 
@@ -115,8 +115,29 @@ describe("DesktopSignIn", () => {
     expect(screen.queryByRole("button", { name: /Change server/ })).not.toBeInTheDocument();
   });
 
-  it("fills in a deep-linked ticket and redeems it only when the person continues", async () => {
+  it("signs in from a deep link at once when the code is bound to this shell", async () => {
     redeem.mockResolvedValue({ ok: true });
+    const { listeners } = renderPage();
+    await waitFor(() => expect(listeners.size).toBe(1));
+
+    act(() => {
+      for (const listener of listeners) listener(TICKET);
+    });
+
+    expect(screen.getByLabelText("Code")).toHaveValue("K7MX4-QPD9R-TA2HC-VB3N5");
+    await waitFor(() =>
+      expect(redeem).toHaveBeenCalledWith({
+        ticket: TICKET,
+        verifier: expect.any(String),
+        boundOnly: true,
+      }),
+    );
+    await waitFor(() => expect(identityNavigation.replace).toHaveBeenCalledWith("/"));
+  });
+
+  it("waits for Continue when a deep-linked code was not asked for by this shell", async () => {
+    // The server refuses it unused: anyone can open the link with their own code.
+    redeem.mockRejectedValueOnce(new Error(UNBOUND_TICKET)).mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     const { listeners } = renderPage();
     await waitFor(() => expect(listeners.size).toBe(1));
@@ -125,14 +146,14 @@ describe("DesktopSignIn", () => {
       for (const listener of listeners) listener(TICKET);
     });
 
-    // Anyone can open the deep link, so arrival alone must not sign in.
-    expect(screen.getByLabelText("Code")).toHaveValue(TICKET);
-    expect(redeem).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus());
+    expect(identityNavigation.replace).not.toHaveBeenCalled();
+    // Not an error, only unconfirmed.
+    expect(screen.queryByText(UNBOUND_TICKET)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() =>
-      expect(redeem).toHaveBeenCalledWith({ ticket: TICKET, verifier: expect.any(String) }),
+      expect(redeem).toHaveBeenLastCalledWith({ ticket: TICKET, verifier: expect.any(String) }),
     );
     await waitFor(() => expect(identityNavigation.replace).toHaveBeenCalledWith("/"));
   });

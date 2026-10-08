@@ -7,6 +7,9 @@ export const CronExpression = Schema.String.check(Schema.isMinLength(1), Schema.
 /** IANA timezone name; validated with Intl at write time. */
 export const Timezone = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100));
 
+export const ScheduleNotify = Schema.Literals(["off", "always", "conditional"]);
+export type ScheduleNotify = typeof ScheduleNotify.Type;
+
 export const ScheduleSettings = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   /** The natural-language cadence the user wrote or the model proposed. */
@@ -37,6 +40,12 @@ export const ScheduleSettings = Schema.Struct({
   integrationGrants: Schema.optionalKey(
     Schema.Array(IntegrationGrant).check(Schema.isMaxLength(10)),
   ),
+  /**
+   * When a run tells its owner: after every run, only when the answer decides
+   * it is worth it, or never. Absent keeps what is saved, or `always` for a new
+   * schedule.
+   */
+  notify: Schema.optionalKey(ScheduleNotify),
 });
 export type ScheduleSettings = typeof ScheduleSettings.Type;
 

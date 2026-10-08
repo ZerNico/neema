@@ -13,7 +13,7 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import { scheduleAuthoringRequest } from "../authoring.ts";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
-import { ScheduleSettings } from "../schema.ts";
+import { ScheduleSettings, type ScheduleNotify } from "../schema.ts";
 import {
   deleteSchedule,
   pauseSchedule,
@@ -65,6 +65,7 @@ const scheduleToSettings = (schedule: {
   chatMode: "new" | "same";
   chatId: string | null;
   integrationGrants: ReadonlyArray<IntegrationGrant>;
+  notify: ScheduleNotify;
 }): ScheduleSettings => ({
   name: schedule.name,
   scheduleText: schedule.scheduleText,
@@ -81,6 +82,7 @@ const scheduleToSettings = (schedule: {
   chatMode: schedule.chatMode,
   chatId: schedule.chatId,
   integrationGrants: schedule.integrationGrants.map((grant) => ({ ...grant })),
+  notify: schedule.notify,
 });
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {

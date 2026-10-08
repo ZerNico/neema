@@ -10,6 +10,7 @@ import { ScheduleNotAvailable, ScheduleRejected, type ScheduleRunSummary } from 
 import { isValidTimezone, previewFires, validateCron } from "./cron.ts";
 import { ScheduleFire, type FireOutcome } from "./fire.ts";
 import { ScheduleRepo, toSummary, type ScheduleRow } from "./repo.ts";
+import { ScheduleSettlement } from "./settle.ts";
 import { checkScheduleResources, firstFireAt, validateScheduleSettings } from "./validate.ts";
 
 const TICK_INTERVAL = Duration.seconds(30);
@@ -61,6 +62,7 @@ export class ScheduleService extends Context.Service<
       const providers = yield* ProviderRepo;
       const agents = yield* AgentRepo;
       const bus = yield* SyncBus;
+      const settlement = yield* ScheduleSettlement;
       const changed = (userId: string, scheduleId: string) =>
         bus
           .publish(userId, { type: "schedule.changed", scheduleId })
@@ -101,12 +103,14 @@ export class ScheduleService extends Context.Service<
               ),
             ),
           );
-          if (!outcome.conversationId)
+          if (!outcome.conversationId) {
             yield* repo.finishRun(
               runId,
               outcome.error?.startsWith("skipped:") ? "skipped" : "error",
               outcome.error ?? "the scheduled message could not be sent",
             );
+            yield* settlement.settle;
+          }
           yield* runChanged(row.userId, row.id, runId);
         }).pipe(
           Effect.scoped,
@@ -143,6 +147,9 @@ export class ScheduleService extends Context.Service<
               .pipe(Effect.orDie);
             if (row[0]) yield* runChanged(row[0].userId, run.scheduleId, run.id);
           }
+          // Answers the reaper ended, and turns a restart cut off, have no
+          // turn left to settle them.
+          yield* settlement.settle;
           const claimed = yield* repo.claimDue(ScheduleRepo.batch, (row) =>
             firstFireAt({ cron: row.cron, timezone: row.timezone, endAt: row.endAt }),
           );

@@ -66,6 +66,9 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
   chat_id: "chatId",
   conversationId: "chatId",
   conversation_id: "chatId",
+  notification: "notify",
+  notifications: "notify",
+  notify_mode: "notify",
 };
 const OpenParams = Schema.Struct({
   scheduleId: OpenScheduleDraftInput.fields.scheduleId,

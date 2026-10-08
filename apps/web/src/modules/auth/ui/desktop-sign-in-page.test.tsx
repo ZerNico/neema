@@ -30,12 +30,17 @@ const renderPage = (challenge?: string) => {
   return { clear };
 };
 
+// jsdom cannot navigate to a custom scheme; the page's attempt is what counts.
+const assign = vi.fn();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal("location", { ...window.location, assign });
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("DesktopSignInPage", () => {
@@ -57,6 +62,8 @@ describe("DesktopSignInPage", () => {
       "href",
       `chat-desktop://sign-in?ticket=${TICKET}`,
     );
+    // The app sent the person here and is waiting, so it opens at once.
+    expect(assign).toHaveBeenCalledWith(`chat-desktop://sign-in?ticket=${TICKET}`);
     expect(screen.getByRole("timer")).toHaveTextContent(/Expires in (3:00|2:5\d)/);
     expect(screen.getByText("You can close this tab afterwards.")).toBeInTheDocument();
     expect(
@@ -76,6 +83,9 @@ describe("DesktopSignInPage", () => {
     await user.click(screen.getByRole("button", { name: "Continue as Nico" }));
 
     await waitFor(() => expect(mint).toHaveBeenCalledWith({}));
+    // No app is waiting for it, so the link is only offered.
+    await screen.findByRole("link", { name: "Open neema Desktop" });
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("copies the formatted code", async () => {

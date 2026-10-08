@@ -152,7 +152,11 @@ function Sidebar({
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
-  collapsible?: "offcanvas" | "icon" | "none";
+  /**
+   * "rail" narrows the container to the icon width and leaves its contents
+   * alone, for a sidebar whose first column is already icon-only.
+   */
+  collapsible?: "offcanvas" | "icon" | "rail" | "none";
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
@@ -183,6 +187,8 @@ function Sidebar({
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+              // The sheet is portalled out of the provider that sets the rest.
+              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
             } as React.CSSProperties
           }
           side={side}
@@ -212,6 +218,7 @@ function Sidebar({
         className={cn(
           "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
           "group-data-[collapsible=offcanvas]:w-0",
+          "group-data-[collapsible=rail]:w-(--sidebar-width-icon)",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
             ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
@@ -227,6 +234,10 @@ function Sidebar({
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          "group-data-[collapsible=rail]:w-(--sidebar-width-icon)",
+          // Clipped while opening and closing too, so the panel slides out from
+          // under the rail instead of appearing whole over the page.
+          collapsible === "rail" && "overflow-hidden",
           className,
         )}
         {...props}
@@ -456,7 +467,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-xl px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-xl px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height] group-has-[[data-sidebar=menu-action]:not([data-reveal])]/menu-item:pr-8 [[data-slot=sidebar-menu-item]:has([data-reveal]):is(:hover,:has(:focus-visible),:has([aria-expanded=true]))_&]:pr-8 pointer-coarse:group-has-data-reveal/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -468,7 +479,7 @@ const sidebarMenuButtonVariants = cva(
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
         lg: "h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!",
-        tile: "h-auto flex-col justify-center gap-1.5 px-0 py-2.5 text-center text-2xs text-muted-foreground bg-sidebar-accent/40 [&_svg]:size-4.5 [&_svg]:text-sidebar-foreground data-active:shadow-[inset_0_0_0_1px_var(--sidebar-ring)]",
+        icon: "size-8 justify-center p-0",
       },
     },
     defaultVariants: {
@@ -546,9 +557,11 @@ function SidebarMenuAction({
     props: mergeProps<"button">(
       {
         className: cn(
-          "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-xl p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-2 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
+          "absolute top-1.5 right-1.5 flex aspect-square w-5 items-center justify-center rounded-xl p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-2 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
+          // Shown on hover or focus where there is a pointer to hover with,
+          // always on touch. The menu button frees the room it took meanwhile.
           showOnHover &&
-            "group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 focus-visible:opacity-100 md:opacity-0",
+            "group-hover/menu-item:opacity-100 group-has-focus-visible/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 focus-visible:opacity-100 pointer-fine:opacity-0",
           className,
         ),
       },
@@ -558,6 +571,7 @@ function SidebarMenuAction({
     state: {
       slot: "sidebar-menu-action",
       sidebar: "menu-action",
+      reveal: showOnHover,
     },
   });
 }

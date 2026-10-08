@@ -17,13 +17,15 @@ import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { skillReadable } from "~/modules/skills/server/access.ts";
-import { ScheduleRejected, ScheduleSettings } from "../schema.ts";
+import { ScheduleRejected, ScheduleSettings, type ScheduleNotify } from "../schema.ts";
 import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
 
 export type ValidatedSchedule = Omit<
   ScheduleSettings,
-  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId" | "integrationGrants"
+  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId" | "integrationGrants" | "notify"
 > & {
+  /** Absent keeps what is saved, or the column default on a new schedule. */
+  notify?: ScheduleNotify;
   /** Absent keeps what is saved; see ScheduleSettings. */
   integrationGrants?: IntegrationGrant[];
   endAt: Date | null;

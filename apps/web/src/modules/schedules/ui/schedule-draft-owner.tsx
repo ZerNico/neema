@@ -34,6 +34,7 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
     skillIds: "Skills",
     integrationGrants: "Integrations",
     chatMode: "Chat",
+    notify: "Notifications",
     chatId: "Chat",
   },
   Fields: ScheduleSettingsFields,

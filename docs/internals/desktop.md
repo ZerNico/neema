@@ -64,10 +64,14 @@ the login route renders a browser-only screen whenever the shell exposes the
 handler pushes to the system browser, and a paste field for the code that page
 mints. The browser page mints a ticket only for a signed-in, approved, not
 impersonated account, and shows it twice: as a `chat-desktop://sign-in` link
-and as a `XXXXX-XXXXX-XXXXX-XXXXX` code. The link is never fired automatically,
-because macOS has no scheme registered until the app is packaged and a silent
-failure would leave nothing to paste. Windows and Linux register the scheme at
-runtime; the deep link is otherwise dormant.
+and as a `XXXXX-XXXXX-XXXXX-XXXXX` code. When the shell sent the person there
+(a challenge came with it), the page fires the link as soon as the ticket
+exists, since the app is waiting; the button and code stay for a browser that
+refused. The packaged app declares the scheme through electron-builder, the dev
+shell through its renamed copy of Electron.app (`electron-app.mjs`), which also
+carries its own bundle id so macOS hands it the link and notification clicks
+rather than another project's stock Electron. Windows and Linux register the
+scheme at runtime.
 
 A ticket lives three minutes, is stored hashed in Better Auth's `verification`
 table, and is consumed once; every failure is the same "not valid" answer.
@@ -76,11 +80,13 @@ S256 challenge with the link, so a ticket minted with a challenge is refused
 without the matching verifier. Settings › Devices mints paste-only tickets
 without a challenge, which the redemption accepts with no verifier at all.
 
-A deep-linked ticket only fills the code field; the person presses Continue.
-Anyone can open `chat-desktop://sign-in?ticket=…`, and a paste-only ticket has
-no challenge for the verifier to check, so a shell that redeemed on arrival
-could be signed into whichever account minted the ticket. The click is the
-consent the verifier cannot supply for that path.
+A deep-linked ticket is redeemed on arrival with `boundOnly`, which succeeds
+only for a ticket bound to a challenge: only this shell holds the verifier, so
+no other page can produce one it accepts. Anyone can open
+`chat-desktop://sign-in?ticket=…` with a paste-only ticket, which has no
+challenge to check and could be another account's; `boundOnly` refuses it
+before consuming it, and it waits in the code field for Continue. The click is
+the consent the verifier cannot supply for that path.
 
 Redemption creates a separate session for the desktop, ninety days long,
 and the shell renews it to a fresh ninety days on every authenticated mount

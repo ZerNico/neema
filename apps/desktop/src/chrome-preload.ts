@@ -1,6 +1,12 @@
 import type { IpcRenderer } from "electron";
 import type { DesktopChrome, DesktopChromeState } from "@chat/desktop-rpc";
-import { CHROME_GET_STATE, CHROME_SET_THEME, CHROME_STATE, desktopPlatform } from "./chrome.ts";
+import {
+  CHROME_GET_STATE,
+  CHROME_SET_THEME,
+  CHROME_SHOW_WINDOW,
+  CHROME_STATE,
+  desktopPlatform,
+} from "./chrome.ts";
 
 export const makeChromeBridge = (
   ipc: Pick<IpcRenderer, "invoke" | "on" | "removeListener">,
@@ -17,6 +23,7 @@ export const makeChromeBridge = (
     };
   },
   setTheme: (theme) => ipc.invoke(CHROME_SET_THEME, theme),
+  showWindow: () => ipc.invoke(CHROME_SHOW_WINDOW),
 });
 
 /** Local pages can observe presentation, but cannot change the server's theme. */
@@ -24,6 +31,10 @@ export const makeLocalChromeBridge = (
   ipc: Pick<IpcRenderer, "invoke" | "on" | "removeListener">,
   platform: string,
 ) => {
-  const { setTheme: _setTheme, ...chrome } = makeChromeBridge(ipc, platform);
+  const {
+    setTheme: _setTheme,
+    showWindow: _showWindow,
+    ...chrome
+  } = makeChromeBridge(ipc, platform);
   return chrome;
 };

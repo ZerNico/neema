@@ -75,8 +75,11 @@ export const createDesktopTicket = (input: { challenge?: string } = {}) =>
   unwrap(authClient.$fetch<DesktopTicket>("/desktop/ticket", { method: "POST", body: input }));
 
 /** Trades a ticket for a new desktop session; the cookie arrives on the response. */
-export const redeemDesktopTicket = (input: { ticket: string; verifier?: string }) =>
-  unwrap(authClient.$fetch<{ ok: true }>("/desktop/session", { method: "POST", body: input }));
+export const redeemDesktopTicket = (input: {
+  ticket: string;
+  verifier?: string;
+  boundOnly?: boolean;
+}) => unwrap(authClient.$fetch<{ ok: true }>("/desktop/session", { method: "POST", body: input }));
 
 /** Extends the current desktop session to a fresh 90 days; the server refuses browsers. */
 export const refreshDesktopSession = () =>

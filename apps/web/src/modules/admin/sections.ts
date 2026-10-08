@@ -3,6 +3,7 @@ import {
   CloudServerIcon,
   CodeIcon,
   Key01Icon,
+  Mail01Icon,
   FolderLibraryIcon,
   UserGroupIcon,
   UserMultipleIcon,
@@ -36,6 +37,12 @@ export const ADMIN_SECTIONS: SectionNavItem[] = [
     label: "Integrations",
     icon: PlugSocketIcon,
     matchPrefix: "/admin/integrations",
+  },
+  {
+    to: "/admin/email",
+    label: "Email",
+    icon: Mail01Icon,
+    matchPrefix: "/admin/email",
   },
   {
     to: "/admin/documents",

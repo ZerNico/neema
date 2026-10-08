@@ -4,6 +4,7 @@ import type { DesktopPlatform, DesktopTheme } from "@chat/desktop-rpc";
 export const CHROME_STATE = "chat-desktop:chrome-state";
 export const CHROME_GET_STATE = "chat-desktop:chrome-get-state";
 export const CHROME_SET_THEME = "chat-desktop:chrome-set-theme";
+export const CHROME_SHOW_WINDOW = "chat-desktop:chrome-show-window";
 export const RECOVERY_RETRY = "chat-desktop:recovery-retry";
 export const CHANGE_SERVER = "chat-desktop:change-server";
 export const CONNECT = "chat-desktop:connect";

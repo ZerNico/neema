@@ -63,6 +63,8 @@ description: How to create or edit a scheduled task from chat: the draft workflo
 
 A schedule asks a prompt on a cadence. chatMode "new" (the default) starts a fresh chat each fire. chatMode "same" keeps answering in chatId, or adopts the chat the first fire creates when chatId is null. To run the task here, use chatMode "same" and the draftConversationId returned by the draft tools as chatId. If the app is down at fire time, one catch-up fire runs on recovery and the cadence resumes from now; a backlog is never replayed.
 
+notify decides when the owner is told. "always" (the default) notifies after every run. "conditional" notifies only when the run's answer calls notify_user, so the prompt must say when that is worth it ("tell me only if the price drops below 50"). Use it for watch tasks where most runs find nothing. "off" never notifies. A failed run notifies unless notify is "off".
+
 ## Workflow
 
 1. When the user wants a recurring or one-time task, reminder, or automation, call draft_schedule. Omit scheduleId for a new schedule, or pass an owned schedule's ID to edit it. Optional changes populate the draft as it is created.
