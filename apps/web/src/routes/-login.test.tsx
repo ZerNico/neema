@@ -10,17 +10,26 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authClient } from "~/modules/auth/client.ts";
 import { getSessionIdentity, getSessionUser } from "~/modules/auth/server/functions.ts";
-import { getApprovalStatus } from "~/modules/auth/server/signup-functions.ts";
+import {
+  getApprovalStatus,
+  getNeedsSetup,
+  setSignupPolicy,
+} from "~/modules/auth/server/signup-functions.ts";
 import { signInProvidersQuery } from "~/modules/auth/queries.ts";
 import { Route as AppRoute } from "./_app.tsx";
 import { Route as LoginRoute } from "./login.tsx";
 import { Route as RegisterRoute } from "./register.tsx";
+import { Route as SetupRoute } from "./setup.tsx";
 
 vi.mock("~/modules/auth/server/functions.ts", () => ({
   getSessionUser: vi.fn(),
   getSessionIdentity: vi.fn(),
 }));
-vi.mock("~/modules/auth/server/signup-functions.ts", () => ({ getApprovalStatus: vi.fn() }));
+vi.mock("~/modules/auth/server/signup-functions.ts", () => ({
+  getApprovalStatus: vi.fn(),
+  getNeedsSetup: vi.fn(),
+  setSignupPolicy: vi.fn(),
+}));
 vi.mock("~/modules/auth/server/oauth-functions.ts", () => ({ getSignInProviders: vi.fn() }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
 // Better Auth's client is a proxy spyOn cannot patch; only the calls this page makes.
@@ -35,11 +44,11 @@ const user = { id: "u1", name: "Ada", email: "ada@example.com" };
  * The real sign-in pages and the real app guard, with a stand-in shell: the
  * bug lives between one's cached "signed out" and the other's read of it.
  */
-async function renderAt(path: "/login" | "/register") {
+async function renderAt(path: "/login" | "/register" | "/setup") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(signInProvidersQuery.queryKey, []);
   const root = createRootRouteWithContext<{ queryClient: QueryClient }>()();
-  const page = (route: typeof LoginRoute | typeof RegisterRoute, at: string) =>
+  const page = (route: typeof LoginRoute | typeof RegisterRoute | typeof SetupRoute, at: string) =>
     createRoute({
       getParentRoute: () => root,
       path: at,
@@ -68,6 +77,7 @@ async function renderAt(path: "/login" | "/register") {
     routeTree: root.addChildren([
       page(LoginRoute, "/login"),
       page(RegisterRoute, "/register"),
+      page(SetupRoute, "/setup"),
       app.addChildren([home]),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -90,6 +100,7 @@ beforeEach(() => {
     .mockResolvedValue(user as never);
   vi.mocked(getSessionIdentity).mockResolvedValue({ userId: "u1", impersonatedBy: null });
   vi.mocked(getApprovalStatus).mockResolvedValue("approved");
+  vi.mocked(getNeedsSetup).mockResolvedValue(false);
 });
 
 const fill = (label: string, value: string) =>
@@ -117,5 +128,55 @@ describe("after a successful sign-in", () => {
 
     expect(await screen.findByText("Signed-in home")).toBeVisible();
     expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+describe("an instance nobody has set up", () => {
+  it.each(["/login", "/register"] as const)("sends %s to setup", async (path) => {
+    vi.mocked(getNeedsSetup).mockResolvedValue(true);
+    const router = await renderAt(path);
+
+    expect(await screen.findByText("Set up neema")).toBeVisible();
+    expect(router.state.location.pathname).toBe("/setup");
+  });
+
+  it("creates the admin with the chosen policy and enters the app", async () => {
+    vi.mocked(getNeedsSetup).mockResolvedValue(true);
+    vi.mocked(authClient.signUp.email).mockResolvedValue({
+      data: { user: { role: "admin" } },
+      error: null,
+    } as never);
+    const router = await renderAt("/setup");
+    fill("Name", "Ada");
+    fill("Email", "ada@example.com");
+    fill("Password", "correct horse");
+    fireEvent.click(screen.getByRole("button", { name: "Create admin account" }));
+
+    expect(await screen.findByText("Signed-in home")).toBeVisible();
+    expect(router.state.location.pathname).toBe("/");
+    expect(setSignupPolicy).toHaveBeenCalledWith({ data: { policy: "approval" } });
+  });
+
+  it("leaves the policy alone for someone who lost the race to set it up", async () => {
+    vi.mocked(getNeedsSetup).mockResolvedValue(true);
+    vi.mocked(authClient.signUp.email).mockResolvedValue({
+      data: { user: { role: "user" } },
+      error: null,
+    } as never);
+    await renderAt("/setup");
+    fill("Name", "Ada");
+    fill("Email", "ada@example.com");
+    fill("Password", "correct horse");
+    fireEvent.click(screen.getByRole("button", { name: "Create admin account" }));
+
+    expect(await screen.findByText("Signed-in home")).toBeVisible();
+    expect(setSignupPolicy).not.toHaveBeenCalled();
+  });
+
+  it("is gone once the instance has an owner", async () => {
+    const router = await renderAt("/setup");
+
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
+    expect(router.state.location.pathname).toBe("/login");
   });
 });

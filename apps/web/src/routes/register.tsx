@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
-import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
+import { leaveIfSignedIn, setUpFirst } from "~/modules/auth/signed-in-guard.ts";
 import { SignInProviders } from "~/modules/auth/ui/sign-in-providers.tsx";
 import { signInProvidersQuery } from "~/modules/auth/queries.ts";
 import { useAppForm } from "~/ui/form/app-form.ts";
@@ -25,7 +25,10 @@ const RegisterSchema = Schema.Struct({
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
     redirectSearch(safeRedirect(search["redirect"])),
-  beforeLoad: ({ context, search }) => leaveIfSignedIn(context.queryClient, search.redirect),
+  beforeLoad: async ({ context, search }) => {
+    await setUpFirst(context.queryClient, search.redirect);
+    await leaveIfSignedIn(context.queryClient, search.redirect);
+  },
   loader: ({ context }) => context.queryClient.ensureQueryData(signInProvidersQuery),
   component: RegisterPage,
 });

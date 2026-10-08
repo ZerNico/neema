@@ -13,7 +13,7 @@ pnpm dev:setup   # starts Postgres and SearXNG in Docker and prepares this check
 pnpm dev         # the web app and the desktop app, rebuilt on every change
 ```
 
-Open the printed URL and register. The first account becomes the admin. Add a model
+Open the printed URL and create the admin account. Add a model
 provider under **Admin → Providers**, and SearXNG at `http://localhost:8081` as a search
 provider under **Admin → Tools**.
 

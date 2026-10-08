@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
-import { approvalStatusQuery, sessionUserQuery } from "./client.ts";
+import { approvalStatusQuery, needsSetupQuery, sessionUserQuery } from "./client.ts";
+import { redirectSearch } from "./redirect.ts";
 
 /**
  * The sign-in pages' `beforeLoad`. Someone who already holds a session has
@@ -14,4 +15,10 @@ export async function leaveIfSignedIn(queryClient: QueryClient, redirectTo: stri
   const approval = await queryClient.ensureQueryData(approvalStatusQuery);
   if (approval !== "approved") throw redirect({ to: "/pending" });
   throw redirect({ href: redirectTo ?? "/" });
+}
+
+/** Sign-in and registration have nothing to offer an instance nobody owns yet. */
+export async function setUpFirst(queryClient: QueryClient, redirectTo: string | undefined) {
+  if (await queryClient.fetchQuery(needsSetupQuery))
+    throw redirect({ to: "/setup", search: redirectSearch(redirectTo) });
 }

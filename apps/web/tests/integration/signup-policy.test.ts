@@ -182,6 +182,15 @@ describe("who gets an account", () => {
     expect(row?.role).toBe("admin");
   });
 
+  it("needs setup until the first account claims the instance, and never again", async () => {
+    expect(await signups((repo) => repo.needsSetup())).toBe(true);
+    await signUp("founder");
+    expect(await signups((repo) => repo.needsSetup())).toBe(false);
+
+    await db.delete(user);
+    expect(await signups((repo) => repo.needsSetup())).toBe(false);
+  });
+
   it("creates a later account but leaves it waiting", async () => {
     await signUp("founder");
     expect((await signUp("newcomer")).status).toBe(200);

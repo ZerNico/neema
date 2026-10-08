@@ -86,12 +86,12 @@ neema then listens on `127.0.0.1:3000` for your reverse proxy.
 
 ### First steps
 
-Open the site and register. **The first account becomes the admin.** From the user
-menu, open **Admin** to:
+Open the site. It asks you to create the admin account and choose who may sign up.
+From the user menu, open **Admin** to:
 
 1. add a model provider under **Providers** and pick its models,
 2. add a search provider under **Tools** (`http://searxng:8080` with the compose example),
-3. choose who may sign up under **Sign-in**.
+3. add sign-in providers under **Sign-in**.
 
 ### Configuration
 

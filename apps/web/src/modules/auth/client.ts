@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { getSessionUser, getSessionIdentity } from "./server/functions.ts";
-import { getApprovalStatus } from "./server/signup-functions.ts";
+import { getApprovalStatus, getNeedsSetup } from "./server/signup-functions.ts";
 
 export const authClient = createAuthClient({
   plugins: [adminClient()],
@@ -40,6 +40,13 @@ export const approvalStatusQuery = queryOptions({
   queryKey: ["approval-status"],
   queryFn: () => getApprovalStatus(),
   staleTime: 30_000,
+});
+
+/** Once set up, an instance never goes back, so a false answer is kept for good. */
+export const needsSetupQuery = queryOptions({
+  queryKey: ["needs-setup"],
+  queryFn: () => getNeedsSetup(),
+  staleTime: (query) => (query.state.data === false ? Infinity : 0),
 });
 
 /**

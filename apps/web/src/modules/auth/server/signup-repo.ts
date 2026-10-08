@@ -1,7 +1,13 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { AUTH_SETTINGS_ID, authSettings, user, userApprovals } from "~/db/schema/index.ts";
+import {
+  AUTH_SETTINGS_ID,
+  authSettings,
+  signupBootstrap,
+  user,
+  userApprovals,
+} from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import type { ApprovalStatus, SignupPolicy } from "../signup.ts";
 
@@ -22,6 +28,11 @@ export class SignupRepo extends Context.Service<
      */
     policy(): Effect.Effect<SignupPolicy>;
     setPolicy(policy: SignupPolicy): Effect.Effect<void>;
+    /**
+     * True until the first account claims the instance. Read from the claim, not
+     * a user count: a claim whose user insert failed must not reopen setup.
+     */
+    needsSetup(): Effect.Effect<boolean>;
     /** Reconciles a missing row before returning the user's status. */
     statusOf(userId: string): Effect.Effect<ApprovalStatus | null>;
     record(input: { userId: string; status: ApprovalStatus }): Effect.Effect<void>;
@@ -59,6 +70,15 @@ export class SignupRepo extends Context.Service<
               set: { signupPolicy: policy, updatedAt: new Date() },
             })
             .pipe(Effect.orDie);
+        }),
+
+        needsSetup: Effect.fn("SignupRepo.needsSetup")(function* () {
+          const rows = yield* db
+            .select({ id: signupBootstrap.id })
+            .from(signupBootstrap)
+            .where(eq(signupBootstrap.id, AUTH_SETTINGS_ID))
+            .pipe(Effect.orDie);
+          return rows.length === 0;
         }),
 
         statusOf: Effect.fn("SignupRepo.statusOf")(function* (userId) {

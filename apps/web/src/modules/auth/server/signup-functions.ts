@@ -22,6 +22,11 @@ export const getApprovalStatus = createServerFn({ method: "GET" }).handler(async
   return status ?? "pending";
 });
 
+/** Public: a signed-out visitor has to know whether to set up or sign in. */
+export const getNeedsSetup = createServerFn({ method: "GET" }).handler(() =>
+  runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.needsSetup())),
+);
+
 export const getSignupPolicy = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.policy())));

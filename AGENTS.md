@@ -158,7 +158,7 @@ skipped one on purpose.
   The shell has no HMR: `dev:desktop` rebuilds and relaunches Electron on every
   change, and logs its build stamp (short sha and time) on start, so "is it running
   my change" has an answer in the terminal. The stamp is deliberately not in the UI.
-  Sign in at `/login`; the first registered user is admin.
+  A fresh database opens at `/setup`, which creates the admin.
 - Smallest proof first: the one test file you touched, with the right `--project`.
   Then `pnpm typecheck && pnpm lint && pnpm test` before calling work done. Lint
   has pre-existing warnings; zero errors is the bar. Report the counts you saw,
@@ -415,7 +415,8 @@ Differs from most Effect 3 material online.
   install's machine id onto its generation config — attempt metadata for the
   foreign-chat banner, never auth. See `docs/internals/desktop.md`.
 - The first signup claims a durable bootstrap owner before Better Auth inserts
-  the user. Only that owner becomes admin and bypasses closed signup; a failed
+  the user. `/setup` is the page for it and exists only while no claim does;
+  sign-in and registration send there until then. Only that owner becomes admin and bypasses closed signup; a failed
   insert leaves the claim reserved, requiring quiesced operator repair rather
   than automatic re-election. To recover, stop account creation and wait for
   in-flight signups to finish, verify the claimed ID has no user row, then
