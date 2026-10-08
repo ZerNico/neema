@@ -2029,6 +2029,32 @@ describe("conversation documents", () => {
     }
   });
 
+  it("never ends the request after a new document on its assistant-role data", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      expect(prompts).toHaveLength(2);
+      // The document's data is an assistant message; ending on it is a prefill,
+      // which models without prefill support reject with a 400.
+      const roles = prompts[1]!.prompt.content.map((message) => message.role);
+      expect(roles.at(-1)).not.toBe("assistant");
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("Application-provided documents");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("puts the text back when a streamed edit's decoded call is refused", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];

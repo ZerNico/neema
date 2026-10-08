@@ -1830,8 +1830,13 @@ export class StreamEngine extends Context.Service<
                 : null,
               planReminder(),
             ].filter(Boolean);
+            const updates = contextUpdates();
+            // Context data rides as assistant messages (documents), and a request
+            // that ends on one is a prefill, which some models refuse outright.
+            if (sections.length === 0 && updates.at(-1)?.role === "assistant")
+              sections.push("The application data above is current. Continue the answer.");
             const messages = [
-              ...contextUpdates(),
+              ...updates,
               ...(sections.length > 0 ? [systemReminderMessage(sections.join("\n\n"))] : []),
             ];
             return messages.length > 0 ? Prompt.make(messages) : null;
