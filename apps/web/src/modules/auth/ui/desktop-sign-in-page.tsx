@@ -12,13 +12,13 @@ import { cn } from "~/ui/utils";
 import { AuthScreen } from "./auth-screen.tsx";
 import { desktopSignInPath } from "./desktop-sign-in-path.ts";
 
-const DESKTOP_SIGN_IN_SCHEME_URL = "chat-desktop://sign-in";
+const deepLink = (ticket: string) => `chat-desktop://sign-in?ticket=${encodeURIComponent(ticket)}`;
 
 /**
  * The browser half of desktop sign-in. The person is already signed in here
- * with their real cookies; one click mints a code for the desktop. The deep
- * link is offered, never fired: macOS has no scheme registered until the app
- * is packaged, and a silent failure would leave the reader with nothing.
+ * with their real cookies; one click mints a code for the desktop. When the
+ * app sent them here (a challenge came with it), it is waiting, so the link
+ * opens it at once; the button and the code stay for a browser that refused.
  */
 export function DesktopSignInPage({
   user,
@@ -32,6 +32,9 @@ export function DesktopSignInPage({
   const [signingOut, setSigningOut] = useState(false);
   const mint = useMutation({
     mutationFn: () => createDesktopTicket(challenge ? { challenge } : {}),
+    onSuccess: (minted) => {
+      if (challenge) window.location.assign(deepLink(minted.ticket));
+    },
   });
   const ticket = mint.data;
 
@@ -45,7 +48,7 @@ export function DesktopSignInPage({
           {ticket ? (
             <>
               <a
-                href={`${DESKTOP_SIGN_IN_SCHEME_URL}?ticket=${ticket.ticket}`}
+                href={deepLink(ticket.ticket)}
                 className={cn(buttonVariants({ variant: "default" }), "w-full")}
               >
                 Open neema Desktop

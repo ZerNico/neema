@@ -6,8 +6,10 @@ import { redeemDesktopTicket } from "~/modules/auth/client.ts";
 import {
   challengeOf,
   createVerifier,
+  formatTicket,
   isTicketShaped,
   normaliseTicket,
+  UNBOUND_TICKET,
 } from "~/modules/auth/desktop-ticket.ts";
 import { identityNavigation } from "~/modules/auth/identity-context.ts";
 import { desktopSignInPath } from "~/modules/auth/ui/desktop-sign-in-path.ts";
@@ -39,11 +41,12 @@ function loadVerifier(): string {
  * in the system browser, which mints a code the shell redeems. The code
  * arrives either through the deep link (`auth.onTicket`) or by paste.
  *
- * A deep-linked code only fills the field; the person presses Continue. Any
- * page can open `chat-desktop://sign-in?ticket=…`, and a code minted from
- * Settings › Devices carries no challenge, so the verifier cannot tell a code
- * this shell asked for from one an attacker's account minted. Redeeming it
- * unasked would sign this computer into that account.
+ * A deep-linked code signs in at once only if it is bound to this shell's
+ * challenge. Any page can open `chat-desktop://sign-in?ticket=…`, and a code
+ * minted from Settings › Devices carries no challenge, so it could be one an
+ * attacker's account minted; redeeming that unasked would sign this computer
+ * into their account. The server leaves such a code unused, and it waits in
+ * the field for Continue.
  */
 export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
   const queryClient = useQueryClient();
@@ -64,7 +67,8 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
   }, [verifier]);
 
   const redeem = useMutation({
-    mutationFn: (ticket: string) => redeemDesktopTicket({ ticket, verifier }),
+    mutationFn: ({ ticket, boundOnly }: { ticket: string; boundOnly?: boolean }) =>
+      redeemDesktopTicket({ ticket, verifier, ...(boundOnly ? { boundOnly } : {}) }),
     onSuccess: () => {
       sessionStorage.removeItem(VERIFIER_KEY);
       // What IdentityBoundary does on an identity change: nothing cached
@@ -83,7 +87,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
         return;
       }
       setShapeError(null);
-      mutate(ticket);
+      mutate({ ticket });
     },
     [mutate],
   );
@@ -91,18 +95,24 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
   useEffect(
     () =>
       auth.onTicket((ticket) => {
-        setCode(ticket);
+        setCode(formatTicket(normaliseTicket(ticket)));
         setShapeError(null);
-        continueButton.current?.focus();
+        mutate({ ticket: normaliseTicket(ticket), boundOnly: true });
       }),
-    [auth],
+    [auth, mutate],
   );
 
   const changeServer = useMutation({
     mutationFn: () => auth.changeServer(),
     onError: (cause) => toast.error(cause.message),
   });
-  const error = shapeError ?? (redeem.isError ? redeem.error.message : null);
+  // A code this shell did not ask for is not wrong, only unconfirmed: it
+  // waits for Continue, focused once the button is enabled again.
+  const unconfirmed = redeem.isError && redeem.error.message === UNBOUND_TICKET;
+  useEffect(() => {
+    if (unconfirmed) continueButton.current?.focus();
+  }, [unconfirmed]);
+  const error = shapeError ?? (redeem.isError && !unconfirmed ? redeem.error.message : null);
   const browserHref =
     challenge === null ? null : `${window.location.origin}${desktopSignInPath(challenge)}`;
 
@@ -114,7 +124,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-muted-foreground text-sm">
-            Sign in in your browser, then paste the code it shows you here.
+            Sign in in your browser. If neema doesn’t continue by itself, paste the code it shows.
           </p>
           {browserHref ? (
             <a

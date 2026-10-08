@@ -102,8 +102,12 @@ class Client {
   ticket(challenge?: string) {
     return this.request("/desktop/ticket", challenge ? { challenge } : {});
   }
-  redeem(ticket: string, verifier?: string) {
-    return this.request("/desktop/session", verifier ? { ticket, verifier } : { ticket });
+  redeem(ticket: string, verifier?: string, boundOnly?: boolean) {
+    return this.request("/desktop/session", {
+      ticket,
+      ...(verifier ? { verifier } : {}),
+      ...(boundOnly ? { boundOnly } : {}),
+    });
   }
   refresh() {
     return this.request("/desktop/session/refresh", {});
@@ -303,6 +307,20 @@ describe("redeeming a ticket", () => {
       ),
     );
     expect(otherEvents).toEqual([]);
+  });
+
+  it("leaves a code no shell asked for unused when a deep link may only redeem bound ones", async () => {
+    const pasteOnly = (await browser.ticket()).body;
+    const refused = await desktop.redeem(pasteOnly.ticket, createVerifier(), true);
+    expect(refused.status).toBe(409);
+    // Still there for the person to confirm by hand.
+    expect((await desktop.redeem(pasteOnly.ticket)).status).toBe(200);
+
+    const verifier = createVerifier();
+    const bound = (await browser.ticket(await challengeOf(verifier))).body;
+    expect(
+      (await new Client(DESKTOP_UA, browser.ip).redeem(bound.ticket, verifier, true)).status,
+    ).toBe(200);
   });
 
   it("lets a paste-only ticket ignore any verifier", async () => {

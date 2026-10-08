@@ -18,6 +18,7 @@ import {
   hashTicket,
   isTicketShaped,
   normaliseTicket,
+  UNBOUND_TICKET,
 } from "../desktop-ticket.ts";
 
 const IDENTIFIER_PREFIX = "desktop-ticket:";
@@ -31,7 +32,16 @@ const TicketBody = Schema.toStandardSchemaV1(
   Schema.Struct({ challenge: Schema.optionalKey(Schema.String) }),
 );
 const RedeemBody = Schema.toStandardSchemaV1(
-  Schema.Struct({ ticket: Schema.String, verifier: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({
+    ticket: Schema.String,
+    verifier: Schema.optionalKey(Schema.String),
+    /**
+     * Redeem only a code bound to a challenge, and leave any other untouched.
+     * A deep link sets it: any page can open one, but only the shell that
+     * opened the browser holds the verifier of a bound code.
+     */
+    boundOnly: Schema.optionalKey(Schema.Boolean),
+  }),
 );
 const RevokeBody = Schema.toStandardSchemaV1(Schema.Struct({ id: Schema.String }));
 const StoredTicket = Schema.Struct({
@@ -101,9 +111,16 @@ export const desktopSessions = ({
           const ticket = normaliseTicket(ctx.body.ticket);
           // Shape check first so malformed input never reaches the store.
           if (!isTicketShaped(ticket)) throw invalid();
-          const consumed = await ctx.context.internalAdapter.consumeVerificationValue(
-            IDENTIFIER_PREFIX + (await hashTicket(ticket)),
-          );
+          const identifier = IDENTIFIER_PREFIX + (await hashTicket(ticket));
+          // Read before consuming: an unbound code refused here must still
+          // work when the person confirms it by hand.
+          if (ctx.body.boundOnly) {
+            const found = await ctx.context.internalAdapter.findVerificationValue(identifier);
+            const peeked = found ? decodeStored(found.value) : Option.none();
+            if (Option.isSome(peeked) && peeked.value.challenge === null)
+              throw new APIError("CONFLICT", { message: UNBOUND_TICKET });
+          }
+          const consumed = await ctx.context.internalAdapter.consumeVerificationValue(identifier);
           if (!consumed) throw invalid();
           const stored = decodeStored(consumed.value);
           if (Option.isNone(stored)) throw invalid();

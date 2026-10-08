@@ -5,6 +5,11 @@
  */
 
 export const DESKTOP_TICKET_MINUTES = 3;
+/**
+ * The refusal of a `boundOnly` redemption for a code no shell asked for. The
+ * shell then shows the code and waits for a click, rather than an error.
+ */
+export const UNBOUND_TICKET = "Check that this is your code, then continue.";
 export const DESKTOP_SESSION_SECONDS = 90 * 24 * 60 * 60;
 /** Prefix the desktop shell appends to its user agent; the server keys on it. */
 export const DESKTOP_UA_MARKER = "ChatDesktop/";
