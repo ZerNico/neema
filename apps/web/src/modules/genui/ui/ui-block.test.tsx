@@ -234,8 +234,9 @@ describe("what blocks may do", () => {
 
   it("puts a handler's message in the composer and saves the new state", async () => {
     const actions = drawWith({});
+    const stepButton = await screen.findByRole("button", { name: "Step" });
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Step" }));
+      fireEvent.click(stepButton);
     });
     expect(await screen.findByText("Count 1")).toBeInTheDocument();
     expect(actions.offer).toHaveBeenCalledWith("Explain step 1");
@@ -283,8 +284,9 @@ describe("what blocks may do", () => {
 
   it("drops a message with invisible characters", async () => {
     const actions = drawWith({});
+    const sneakyButton = await screen.findByRole("button", { name: "Sneaky" });
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Sneaky" }));
+      fireEvent.click(sneakyButton);
     });
     expect(actions.offer).not.toHaveBeenCalled();
     expect(actions.send).not.toHaveBeenCalled();
