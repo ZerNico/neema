@@ -46,7 +46,7 @@ A rebuilt block must equal the live one, because runtimes are evicted, workers r
 A block's code is model-written and can be prompt-injected through web content, so what its actions do is decided by the host (`ui-block.tsx`), never by the block:
 
 - A user message carries the reader's authority: tools, integrations, memory, and URL authority for the reader. So a block never sends on its own. `send(text)` from a handler only fills the composer (`ComposerHandle.offerDraft`), and the reader sends.
-- The one direct send is a `<suggestion>` chip: its label is the message, shown in full before the click. A label with a link or over 500 characters goes to the composer instead. It sends plain text with no composer files and no research offer, like a structured answer.
+- The one direct send is a `<suggestion>` chip: its label is the message, shown in full before the click, so the chip wraps and whitespace is collapsed as displayed. A label with a link or over 120 characters goes to the composer instead: the end of a long one is easy to skim past. It sends plain text with no composer files and no research offer, like a structured answer.
 - Only clicks on a button act. A slider or input change can never send, open or copy. Suggestions and sends work only on the conversation's last answer, once it finished.
 - Text with invisible characters (format characters such as zero-width or bidi marks and Unicode tags, except the joiner emoji need) is refused, and the catalog strips them from everything a block shows, so what the reader sees is what would be sent.
 - `open(url)` goes through the leave dialog. `copy(text)` takes at most 4 KB and the toast shows what was copied.

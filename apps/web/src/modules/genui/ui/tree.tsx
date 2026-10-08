@@ -433,7 +433,14 @@ function SuggestionNode({ node }: { node: ValidNode }) {
   const suggest = use(SuggestContext);
   const label = textOf(node.children);
   return (
-    <Button size="sm" variant="outline" disabled={!suggest} onClick={() => suggest?.(label)}>
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={!suggest}
+      onClick={() => suggest?.(label)}
+      // oxlint-disable-next-line shadcn/no-restyle -- a chip's label is what one click sends, so it wraps rather than running out of view
+      className="h-auto min-h-8 py-1.5 text-left whitespace-normal"
+    >
       {label}
     </Button>
   );

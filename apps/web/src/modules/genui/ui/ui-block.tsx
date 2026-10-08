@@ -51,6 +51,11 @@ const noop = () => () => {};
 
 /** Text a block may send or copy; anything longer is cut off as a mistake. */
 const SEND_CHARS = 500;
+/**
+ * The longest suggestion sent with one click. A longer one goes to the
+ * composer, where the reader sees all of it before it is sent.
+ */
+const SUGGEST_CHARS = 120;
 const COPY_CHARS = 4096;
 /** Saves wait for the reader to settle, so a dragged slider writes once. */
 const SAVE_DELAY_MS = 1000;
@@ -272,10 +277,11 @@ function useBlockActions(message: GenuiMessage, block: string, ordinal: number, 
   const suggest = useMemo(() => {
     if (!canSend || !actions) return null;
     return (text: string) => {
-      const label = text.trim();
+      // As the chip shows it: runs of whitespace collapse to one space.
+      const label = text.replace(/\s+/g, " ").trim();
       if (!label || hasHiddenText(label)) return;
-      // The label is the message: shown in full, without a link, it may go as is.
-      if (label.length > SEND_CHARS || mentionsUrl(label))
+      // The label is the message: short, shown in full and without a link, it may go as is.
+      if (label.length > SUGGEST_CHARS || mentionsUrl(label))
         actions.offer(label.slice(0, SEND_CHARS));
       else actions.send(label);
     };
