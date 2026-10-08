@@ -158,6 +158,24 @@ describe("ui blocks in answers", () => {
     expect(screen.getByRole("radio", { name: "Bell-shaped" })).toBeChecked();
   });
 
+  it("asks before leaving by a middle click too, and sends no referrer", async () => {
+    draw(
+      ["```ui", '<link href="https://guide.example/start">Guide</link>', "```"].join("\n"),
+      "m-link",
+    );
+    const link = await screen.findByRole("link", { name: "Guide" });
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    const middle = new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true });
+    await act(async () => {
+      fireEvent(link, middle);
+    });
+    expect(middle.defaultPrevented).toBe(true);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("guide.example");
+    expect(opened).not.toHaveBeenCalled();
+    opened.mockRestore();
+  });
+
   it("renders formulas with KaTeX and never as links", async () => {
     const { container } = draw(
       [

@@ -8,8 +8,16 @@ export function UiLink({ href, children }: { href: string; children: ReactNode }
     <>
       <a
         href={href}
+        // No referrer: the chat's address is not the destination's business.
+        rel="noopener noreferrer"
         className="text-primary underline underline-offset-4"
         onClick={(event) => {
+          event.preventDefault();
+          setOpen(true);
+        }}
+        // A middle click opens a tab without a click event; it asks first too.
+        onAuxClick={(event) => {
+          if (event.button !== 1) return;
           event.preventDefault();
           setOpen(true);
         }}
