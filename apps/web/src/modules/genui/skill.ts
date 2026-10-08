@@ -100,12 +100,21 @@ export const SKILL_EXAMPLES = {
   </steps>
   <timer seconds={1800} label="Resting"/>
 </card>`,
+  map: `<script>
+  let stop = $state("museum");
+</script>
+<map label="A day in Potsdam" selected={stop} onselect={(id) => stop = id}>
+  <pin id="station" place="Potsdam Hauptbahnhof" label="Station">Trains from Berlin every 10 minutes.</pin>
+  <pin id="museum" place="Museum Barberini, Potsdam" label="Barberini" color="chart-2">Impressionists, closed Tuesdays.</pin>
+  <pin id="palace" place="Sanssouci Palace" label="Sanssouci" color="chart-3">Book the palace tour ahead.</pin>
+  <route mode="walk" stops={["Potsdam Hauptbahnhof", "Museum Barberini, Potsdam", "Sanssouci Palace"]} label="Walk"/>
+</map>`,
 } as const;
 
 const fence = (body: string) => "```ui\n" + body + "\n```";
 
 export const INTERACTIVE_UI_SKILL_DESCRIPTION =
-  "How to put interactive UI in an answer with a ```ui block: calculators, comparisons, charts, drawings and image galleries.";
+  "How to put interactive UI in an answer with a ```ui block: calculators, comparisons, charts, drawings, maps and image galleries.";
 
 export const INTERACTIVE_UI_SKILL_ROOT = `---
 name: interactive-ui
@@ -131,6 +140,7 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - \`toLocaleString\` covers common cases, but \`<num>\` and \`<date>\` format in the reader's own locale and are better.
 - Images: \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
+- Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal, specific enough to find ("Museum Barberini, Potsdam", not "the museum"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Leave them out unless the answer ends at a real fork the reader has to choose, such as which option to explore next. Most blocks need none, and the reader can always just type.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
 
@@ -155,4 +165,8 @@ ${fence(SKILL_EXAMPLES.drawing)}
 A plan with a checklist, a copy button and a timer:
 
 ${fence(SKILL_EXAMPLES.plan)}
+
+A map whose pins the reader taps:
+
+${fence(SKILL_EXAMPLES.map)}
 `;

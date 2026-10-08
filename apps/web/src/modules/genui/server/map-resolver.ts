@@ -13,6 +13,8 @@ import type { RoutedMode } from "./map-lookups.ts";
 export const MAP_DRAIN = Duration.seconds(8);
 
 export interface MapResolverDeps {
+  /** Maps are off: every place and route is recorded as such, and no service is asked. */
+  readonly off?: boolean;
   /** Places and routes an earlier attempt of this answer already settled. */
   readonly settled: { readonly places: ReadonlySet<string>; readonly routes: ReadonlySet<string> };
   /** Coordinates of places an earlier attempt resolved, which this attempt's routes may use. */
@@ -34,6 +36,7 @@ export interface MapResolver {
 }
 
 const UNAVAILABLE = { status: "unavailable" } as const;
+const MAPS_OFF = { status: "maps_off" } as const;
 
 export const makeMapResolver = (
   deps: MapResolverDeps,
@@ -71,6 +74,11 @@ export const makeMapResolver = (
           yield* Deferred.succeed(deferred, known);
           return deferred;
         }
+        if (deps.off) {
+          yield* recordPlace(query, MAPS_OFF);
+          yield* Deferred.succeed(deferred, MAPS_OFF);
+          return deferred;
+        }
         if (deps.settled.places.has(query) || places.size > MAP_LOOKUP_LIMITS.placesPerAnswer) {
           yield* Deferred.succeed(deferred, UNAVAILABLE);
           return deferred;
@@ -88,6 +96,7 @@ export const makeMapResolver = (
     const resolveRoute = (request: RouteRequest, key: string) =>
       Effect.gen(function* () {
         if (request.mode === "straight") return;
+        if (deps.off) return yield* recordRoute(key, MAPS_OFF);
         const stops = yield* Effect.forEach(request.stops, (stop) =>
           typeof stop === "string"
             ? placeFor(stop).pipe(Effect.flatMap(Deferred.await))

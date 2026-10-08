@@ -46,6 +46,17 @@ const handler = () =>
   );
 
 const TONES = ["default", "muted", "primary", "success", "warning", "destructive"] as const;
+/** Map colours follow the chart palette, plus the meaning-bearing tones. */
+const MAP_COLORS = [
+  "primary",
+  "chart-1",
+  "chart-2",
+  "chart-3",
+  "chart-4",
+  "success",
+  "warning",
+  "destructive",
+] as const;
 const SVG_PAINT = [
   "none",
   "currentColor",
@@ -82,7 +93,7 @@ type Children =
   | "svg"
   | { readonly only: readonly string[] };
 
-export type TagGroup = "layout" | "text" | "input" | "data" | "media" | "chat" | "svg";
+export type TagGroup = "layout" | "text" | "input" | "data" | "media" | "map" | "chat" | "svg";
 
 interface TagSpec {
   readonly group: TagGroup;
@@ -508,6 +519,74 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     children: "none",
   },
 
+  map: {
+    group: "map",
+    doc: "Map that fits its pins, routes and areas; onselect(pinId) when a pin is tapped.",
+    props: {
+      label: required(text(200)),
+      height: int(160, 800),
+      zoom: between(1, 18),
+      center: prop(
+        Schema.Struct({
+          lat: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+          lng: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
+        }),
+        "{lat, lng}",
+      ),
+      selected: text(80),
+      onselect: handler(),
+    },
+    children: { only: ["pin", "route", "area"] },
+  },
+  pin: {
+    group: "map",
+    doc: 'Marker. place="Ferry Building, San Francisco" is looked up; or give lat and lng. Its content shows when tapped.',
+    props: {
+      id: text(80),
+      place: text(200),
+      lat: between(-90, 90),
+      lng: between(-180, 180),
+      label: text(120),
+      color: oneOf(MAP_COLORS),
+    },
+    children: "inline",
+  },
+  route: {
+    group: "map",
+    doc: "Route through stops (place names or {lat, lng}). mode drive, walk or bike follows roads; straight draws a direct line.",
+    props: {
+      stops: required(
+        prop(
+          Schema.Array(
+            Schema.Union([
+              Schema.String.check(Schema.isMaxLength(200)),
+              Schema.Struct({
+                lat: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+                lng: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
+              }),
+            ]),
+          ).check(Schema.isMinLength(2), Schema.isMaxLength(10)),
+          "(string | {lat, lng})[] (2 to 10 stops, written out)",
+        ),
+      ),
+      mode: oneOf(["drive", "walk", "bike", "straight"]),
+      label: text(120),
+      color: oneOf(MAP_COLORS),
+    },
+    children: "none",
+  },
+  area: {
+    group: "map",
+    doc: "Circle around a point, radius in metres.",
+    props: {
+      lat: required(between(-90, 90)),
+      lng: required(between(-180, 180)),
+      radius: required(between(10, 200_000)),
+      label: text(120),
+      color: oneOf(MAP_COLORS),
+    },
+    children: "none",
+  },
   svg: {
     group: "svg",
     doc: "Drawing; shapes inside use theme colours.",
@@ -739,6 +818,7 @@ const GROUP_ORDER: readonly TagGroup[] = [
   "input",
   "data",
   "media",
+  "map",
   "chat",
   "svg",
 ];
@@ -749,6 +829,7 @@ const GROUP_TITLES: Record<TagGroup, string> = {
   input: "Inputs",
   data: "Data",
   media: "Images",
+  map: "Maps (pins and routes go inside <map>)",
   chat: "Follow-ups",
   svg: "Drawing (inside <svg> only)",
 };

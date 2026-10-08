@@ -3,7 +3,7 @@
 // anything it does not recognise renders nothing rather than guessing.
 
 import katex from "katex";
-import { use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Copy01Icon,
   PauseIcon,
@@ -43,7 +43,11 @@ import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
 import { handlerOf, useHandler } from "./handler.ts";
 import { UiLink } from "./link.tsx";
 import { UiImage, UiImages } from "./media.tsx";
+import { Skeleton } from "~/ui/primitives/skeleton";
 import { SuggestContext } from "./context.ts";
+
+// MapLibre is large; it loads only for a block that draws a map.
+const UiMap = lazy(() => import("./map.tsx"));
 
 type Child = ValidNode | string;
 
@@ -944,6 +948,16 @@ function Node({ node }: { node: ValidNode }) {
       return <StepsNode node={node} />;
     case "wizard":
       return <WizardNode node={node} />;
+    case "map":
+      return (
+        <Suspense
+          fallback={
+            <Skeleton className="w-full" style={{ height: num(node.props.height) ?? 320 }} />
+          }
+        >
+          <UiMap node={node} />
+        </Suspense>
+      );
     case "timer":
       return <TimerNode node={node} />;
     case "copy":

@@ -51,9 +51,12 @@ export type UiImageResult = typeof UiImageResult.Type;
 /** Image results by normalised query (`normalizeQuery`). */
 export type UiImages = Readonly<Record<string, UiImageResult>>;
 
-/** Where a ```ui map's place name was found. `unavailable`: no match, or the lookup failed. */
+/**
+ * Where a ```ui map's place name was found. `unavailable`: no match, or the
+ * lookup failed. `maps_off`: maps were off for the attempt, so nothing was asked.
+ */
 export interface UiPlace {
-  readonly status: "resolved" | "unavailable";
+  readonly status: "resolved" | "unavailable" | "maps_off";
   readonly lat?: number;
   readonly lng?: number;
   /** The geocoder's name for it, shown when the block gave none. */
@@ -64,7 +67,7 @@ export type UiPlaces = Readonly<Record<string, UiPlace>>;
 
 /** A road, cycle or walking route between a map's stops, simplified for drawing. */
 export interface UiRoute {
-  readonly status: "resolved" | "unavailable";
+  readonly status: "resolved" | "unavailable" | "maps_off";
   /** [lng, lat] pairs, as GeoJSON orders them. */
   readonly path?: ReadonlyArray<readonly [number, number]>;
   /** Metres. */

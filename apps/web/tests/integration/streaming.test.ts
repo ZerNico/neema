@@ -5565,6 +5565,47 @@ describe("ui block maps", () => {
       terminalFixtures = undefined;
     }
   });
+  it("marks every place and route as maps off when an admin switched maps off, asking nothing", async () => {
+    terminalFixtures = [answer];
+    const before = mapLookupCalls.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const tools = yield* ToolsRepo;
+          const engine = yield* StreamEngine;
+          yield* tools.updateTool("interactive_ui", { config: { maps: false } });
+          try {
+            const seed = yield* setupConversation;
+            yield* engine.startGeneration({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: seed.assistant.id,
+              generationId: seed.assistant.generationId ?? undefined,
+              modelId: textModelId,
+              searchEnabled: false,
+            });
+            yield* engine
+              .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+              .pipe(Stream.runCollect);
+            const output = (yield* repo.getMessage(seed.assistant.id))!.assistantOutput!;
+            const key = routeKey({ mode: "drive", stops: ["Berlin Hauptbahnhof", "Potsdam"] });
+            expect(output.places).toEqual({
+              "Berlin Hauptbahnhof": { status: "maps_off" },
+              Atlantis: { status: "maps_off" },
+              Potsdam: { status: "maps_off" },
+            });
+            expect(output.routes).toEqual({ [key]: { status: "maps_off" } });
+            expect(mapLookupCalls.length).toBe(before);
+          } finally {
+            yield* tools.updateTool("interactive_ui", { config: {} });
+          }
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+    }
+  });
 });
 
 describe("interactive answers setting", () => {

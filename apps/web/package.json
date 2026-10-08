@@ -82,6 +82,7 @@
     "katex": "^0.16.47",
     "lib0": "0.2.117",
     "linkedom": "^0.18.13",
+    "maplibre-gl": "6.13.0",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "mdast-util-gfm-footnote": "2.1.0",

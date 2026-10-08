@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
 import { BlockEngine } from "../client/engine.ts";
 import type { GenuiClient } from "../client/host.ts";
+import { routeKey } from "../extract.ts";
 import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
 import {
   GenuiActionsContext,
@@ -254,6 +255,52 @@ describe("ui blocks in answers", () => {
     expect(screen.getByText("Images need web search")).toBeInTheDocument();
     // Never resolved, and the answer is finished.
     expect(screen.getByText("Image unavailable")).toBeInTheDocument();
+  });
+
+  it("lists a map's places, selects one into state, and says what it couldn’t find", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let at = $state(null);</script>",
+        '<map label="Trip" selected={at} onselect={(id) => at = id}>',
+        '  <pin id="hbf" place="Berlin Hauptbahnhof" label="Station">Trains every hour</pin>',
+        '  <pin place="Atlantis"/>',
+        '  <route mode="drive" stops={["Berlin Hauptbahnhof", "Potsdam"]}/>',
+        "</map>",
+        "<text>At {at}</text>",
+        "```",
+      ].join("\n"),
+      "m-map",
+      false,
+      {
+        places: {
+          "Berlin Hauptbahnhof": { status: "resolved", lat: 52.525, lng: 13.369 },
+          Atlantis: { status: "unavailable" },
+        },
+        routes: {
+          [routeKey({ mode: "drive", stops: ["Berlin Hauptbahnhof", "Potsdam"] })]: {
+            status: "resolved",
+            path: [
+              [13.369, 52.525],
+              [13.06, 52.39],
+            ],
+            distance: 34000,
+            duration: 2400,
+          },
+        },
+      },
+    );
+    const station = await screen.findByRole("button", { name: "Station" });
+    expect(screen.getByRole("button", { name: "Atlantis" })).toBeDisabled();
+    expect(screen.getByText("Couldn’t find Atlantis")).toBeInTheDocument();
+    expect(screen.getByText(/34 km · 40 min/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fix the map" })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(station);
+    });
+    expect(await screen.findByText("At hbf")).toBeInTheDocument();
+    expect(station).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Trains every hour")).toBeInTheDocument();
   });
 
   it("draws the block with app components and runs its handlers", async () => {

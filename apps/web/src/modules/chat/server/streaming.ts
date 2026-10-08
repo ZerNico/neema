@@ -1043,9 +1043,12 @@ export class StreamEngine extends Context.Service<
           // Places and routes on the answer's maps. Not web search: they go to
           // the map services an admin configured, and only place names leave.
           const earlier = (resuming && currentMessage?.assistantOutput) || null;
+          // With maps off nothing is asked, but each place is marked so, so the
+          // reader is told why rather than that it could not be found.
           const mapResolver: MapResolver | null =
-            interactiveUi.maps && fence && Option.isSome(mapLookups)
+            fence && Option.isSome(mapLookups)
               ? yield* makeMapResolver({
+                  off: !interactiveUi.maps,
                   settled: {
                     places: new Set(Object.keys(earlier?.places ?? {})),
                     routes: new Set(Object.keys(earlier?.routes ?? {})),
