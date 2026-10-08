@@ -308,6 +308,39 @@ describe("ui blocks in answers", () => {
     expect(await screen.findByText("Image unavailable")).toBeInTheDocument();
   });
 
+  it("starts a retried answer's block from its own state, while a remount keeps it", async () => {
+    const counter = [
+      "```ui",
+      "<script>let n = $state(0);</script>",
+      "<button onclick={() => n++}>Add</button><text>Count {n}</text>",
+      "```",
+    ].join("\n");
+    const engine = new BlockEngine(quickjs);
+    const attempt = (generationId: string) => (
+      <GenuiClientContext value={inProcess(engine)}>
+        <GenuiMessageContext
+          value={{ messageId: "m-retry", createdAt: 0, streaming: false, generationId }}
+        >
+          <AssistantMarkdown content={keyUiFences(counter, 0)} streaming={false} />
+        </GenuiMessageContext>
+      </GenuiClientContext>
+    );
+    const first = render(attempt("g1"));
+    const add = await screen.findByRole("button", { name: "Add" });
+    await act(async () => {
+      fireEvent.click(add);
+    });
+    expect(await screen.findByText("Count 1")).toBeInTheDocument();
+    first.unmount();
+    // The virtual list brings the same attempt back: what the reader set stays.
+    const again = render(attempt("g1"));
+    expect(await screen.findByText("Count 1")).toBeInTheDocument();
+    again.unmount();
+    // A retry wrote the same block again: it starts from its initializer.
+    render(attempt("g2"));
+    expect(await screen.findByText("Count 0")).toBeInTheDocument();
+  });
+
   it("draws the block with app components and runs its handlers", async () => {
     draw(GEARS);
     expect(await screen.findByText("Gear 2")).toBeInTheDocument();

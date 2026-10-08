@@ -308,7 +308,10 @@ function KeyedBlock({
     <>
       <Block
         client={client}
-        block={`${message.messageId}:${ordinal}`}
+        // One attempt's block: a retry or edit starts its own, from its own
+        // initial state, rather than inheriting what the reader set on the last.
+        // A resume reopens from the saved row, which only a finished answer has.
+        block={`${message.messageId}:${message.generationId ?? "copy"}:${ordinal}`}
         ordinal={ordinal}
         code={code}
         streaming={incomplete || message.streaming}
