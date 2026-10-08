@@ -34,7 +34,7 @@ type Lookup = { found: Found } | { pending: true } | { missing: string };
 function useLookup(): (query: string, index: number) => Lookup {
   const message = use(GenuiMessageContext);
   return (query, index) => {
-    const result: UiImageResult | undefined = message?.images?.[normalizeQuery(query)];
+    const result: UiImageResult | undefined = message?.lookups?.images[normalizeQuery(query)];
     const found = result?.items[index];
     if (found) return { found };
     if (!result) return message?.streaming ? { pending: true } : { missing: "Image unavailable" };

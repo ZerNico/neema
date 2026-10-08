@@ -34,7 +34,7 @@ import {
   officeFilesToolQuery,
   interactiveUiToolQuery,
 } from "../client/queries.ts";
-import { readInteractiveUi } from "~/modules/genui/settings.ts";
+import { readInteractiveUi, type MapServices } from "~/modules/genui/settings.ts";
 
 const WebSearchForm = Schema.Struct({
   maxResults: integerBetween(1, 20),
@@ -377,7 +377,7 @@ function InteractiveUiSection() {
   const { data: tool } = useSuspenseQuery(interactiveUiToolQuery);
   const queryClient = useQueryClient();
   const update = useMutation({
-    mutationFn: (patch: { enabled?: boolean; images?: boolean }) =>
+    mutationFn: (patch: { enabled?: boolean; images?: boolean; maps?: boolean }) =>
       updateInteractiveUiTool({ data: patch }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
     onError: (error) => toastError("Could not update interactive answers.", error),
@@ -424,8 +424,92 @@ function InteractiveUiSection() {
             aria-label="Images in interactive answers"
           />
         </ListRow>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Maps</span>
+            <span className="text-muted-foreground text-xs">
+              Draws maps with places and routes, looked up through the services below.
+            </span>
+          </div>
+          <Switch
+            checked={settings.maps}
+            onCheckedChange={(checked) => update.mutate({ maps: checked })}
+            disabled={update.isPending || !settings.enabled}
+            aria-label="Maps in interactive answers"
+          />
+        </ListRow>
+        {settings.maps ? <MapServicesRow services={settings.mapServices} /> : null}
       </ListCard>
     </Section>
+  );
+}
+
+const MapServicesForm = Schema.Struct({
+  mapStyleLight: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  mapStyleDark: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  mapGeocoder: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  mapRouting: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+});
+
+/** Where maps get their tiles, places and routes. The public OpenStreetMap services by default. */
+function MapServicesRow({ services }: { services: MapServices }) {
+  const queryClient = useQueryClient();
+  const { justSaved, markSaved } = useSaveStatus();
+  const defaults = {
+    mapStyleLight: services.styleLight,
+    mapStyleDark: services.styleDark,
+    mapGeocoder: services.geocoder,
+    mapRouting: services.routing,
+  };
+  const form = useAppForm({
+    defaultValues: defaults,
+    validators: { onSubmit: Schema.toStandardSchemaV1(MapServicesForm) },
+    onSubmit: async ({ value }) => {
+      try {
+        await updateInteractiveUiTool({ data: value });
+      } catch {
+        toast.error("Could not save the map services.");
+        return;
+      }
+      markSaved();
+      form.reset(value);
+      await queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey });
+    },
+  });
+  return (
+    <ListRow className="flex-col items-stretch gap-3">
+      <form
+        noValidate
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void form.handleSubmit();
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <form.AppField name="mapStyleLight">
+            {(field) => <field.TextField label="Light map style" type="url" />}
+          </form.AppField>
+          <form.AppField name="mapStyleDark">
+            {(field) => <field.TextField label="Dark map style" type="url" />}
+          </form.AppField>
+          <form.AppField name="mapGeocoder">
+            {(field) => <field.TextField label="Place search" type="url" />}
+          </form.AppField>
+          <form.AppField name="mapRouting">
+            {(field) => <field.TextField label="Routing" type="url" />}
+          </form.AppField>
+        </div>
+        <FormActions>
+          <form.AppForm>
+            <form.SubmitButton size="sm">
+              <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+            </form.SubmitButton>
+          </form.AppForm>
+          <SaveStatus justSaved={justSaved} />
+        </FormActions>
+      </form>
+    </ListRow>
   );
 }
 

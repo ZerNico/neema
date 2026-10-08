@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { extractImageQueries, IMAGE_QUERY_LIMITS } from "./extract.ts";
+import {
+  IMAGE_QUERY_LIMITS,
+  MAP_LOOKUP_LIMITS,
+  blockMapLookups,
+  extractImageQueries,
+  routeKey,
+} from "./extract.ts";
 
 describe("extractImageQueries", () => {
   it("collects literal queries from closed blocks in order, once each", () => {
@@ -26,5 +32,49 @@ describe("extractImageQueries", () => {
     expect(extractImageQueries(`\`\`\`ui\n${tags}\n\`\`\``)).toHaveLength(
       IMAGE_QUERY_LIMITS.queriesPerAnswer,
     );
+  });
+});
+
+describe("blockMapLookups", () => {
+  it("finds literal places and routes, and leaves computed ones to the block", () => {
+    const code = [
+      "<map>",
+      '  <pin id="ferry" place="Ferry  Building, San Francisco" label="Ferry"/>',
+      '  <pin place={"Coit Tower"}/>',
+      '  <pin lat={37.8} lng={-122.4} label="Given"/>',
+      "  {#each spots as s}<pin place={s.name}/>{/each}",
+      '  <route mode="walk" stops={["Ferry Building, San Francisco", { lat: 37.8024, lng: -122.4058 }]}/>',
+      '  <route mode="fly" stops={["A", "B"]}/>',
+      "  <route stops={names}/>",
+      '  <route stops={["Only one"]}/>',
+      "</map>",
+    ].join("\n");
+    const { places, routes } = blockMapLookups(code);
+    expect(places).toEqual([
+      "Ferry Building, San Francisco",
+      "Coit Tower",
+      "Ferry Building, San Francisco",
+    ]);
+    expect(routes).toEqual([
+      {
+        mode: "walk",
+        stops: ["Ferry Building, San Francisco", { lat: 37.8024, lng: -122.4058 }],
+      },
+    ]);
+  });
+
+  it("drives by default and names a route the same however it was spaced", () => {
+    const [route] = blockMapLookups('<route stops={["Berlin ", "Potsdam"]}/>').routes;
+    expect(route?.mode).toBe("drive");
+    expect(routeKey(route!)).toBe(routeKey({ mode: "drive", stops: ["Berlin", "Potsdam"] }));
+    expect(routeKey({ mode: "drive", stops: [{ lat: 52.5200001, lng: 13.4 }, "Potsdam"] })).toBe(
+      'drive:[[52.52,13.4],"Potsdam"]',
+    );
+  });
+
+  it("keeps at most ten stops of a route", () => {
+    const stops = JSON.stringify(Array.from({ length: 14 }, (_, i) => `Stop ${i}`));
+    const [route] = blockMapLookups(`<route mode="bike" stops={${stops}}/>`).routes;
+    expect(route?.stops).toHaveLength(MAP_LOOKUP_LIMITS.stopsPerRoute);
   });
 });

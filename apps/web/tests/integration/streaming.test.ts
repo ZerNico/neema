@@ -94,6 +94,8 @@ import { Db } from "~/server/db.ts";
 import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
+import { routeKey } from "~/modules/genui/extract.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
@@ -115,6 +117,7 @@ const FakeKnowledge = Layer.mergeAll(
 /** Image search for ```ui blocks; unset means web search is unavailable. */
 let imageSearch: ((query: string) => ReadonlyArray<string>) | undefined;
 const imageFetches: string[] = [];
+const mapLookupCalls: string[] = [];
 const ImageSearchingWebSearch = Layer.effect(
   WebSearchExecutor,
   Effect.gen(function* () {
@@ -380,6 +383,28 @@ beforeAll(async () => {
     FakeGateway,
     FakeKnowledge,
     ImageSearchingWebSearch,
+    Layer.succeed(MapLookups, {
+      geocode: (_services, query) =>
+        Effect.sync(() => {
+          mapLookupCalls.push(`place:${query}`);
+          return query.includes("Atlantis")
+            ? ({ status: "unavailable" } as const)
+            : ({ status: "resolved", lat: 52.5, lng: 13.4, name: query } as const);
+        }),
+      route: (_services, mode, stops) =>
+        Effect.sync(() => {
+          mapLookupCalls.push(`route:${mode}:${stops.length}`);
+          return {
+            status: "resolved",
+            path: [
+              [13.4, 52.5],
+              [13.05, 52.39],
+            ],
+            distance: 34000,
+            duration: 2400,
+          } as const;
+        }),
+    }),
     Layer.succeed(ImageFetcher, {
       fetch: (imageUrl) =>
         Effect.suspend(() => {
@@ -5424,8 +5449,10 @@ describe("ui block images", () => {
           const bytes = yield* files.read({ userId, attachmentId: found.items[0]!.attachmentId });
           expect(Buffer.from(bytes.bytes).equals(generatedPng)).toBe(true);
           // Live subscribers heard about it before the answer finished.
-          const announced = events.filter((event) => event.kind === "images");
-          expect(announced.length).toBeGreaterThan(0);
+          const announced = events.flatMap((event) =>
+            event.kind === "lookups" ? [event.lookups] : [],
+          );
+          expect(announced.at(-1)?.images["gear hub"]?.status).toBe("resolved");
           // Never listed as the answer's files, nor as the chat's.
           expect(yield* attachmentRepo.listForMessages([assistant.id])).toEqual([]);
           expect(yield* attachmentRepo.listWithBlobsForMessages([assistant.id])).toEqual([]);
@@ -5475,6 +5502,67 @@ describe("ui block images", () => {
     } finally {
       terminalFixtures = undefined;
       imageSearch = undefined;
+    }
+  });
+});
+
+describe("ui block maps", () => {
+  const answer = [
+    AiResponse.makePart("text-delta", { id: "t", delta: "Your day trip:\n```ui\n<map>\n" }),
+    AiResponse.makePart("text-delta", {
+      id: "t",
+      delta: [
+        '<pin place="Berlin Hauptbahnhof"/>',
+        '<pin place="Atlantis"/>',
+        '<route mode="drive" stops={["Berlin Hauptbahnhof", "Potsdam"]}/>',
+      ].join("\n"),
+    }),
+    AiResponse.makePart("text-delta", { id: "t", delta: "\n</map>\n```\nEnjoy." }),
+    AiResponse.makePart("finish", {
+      reason: "stop",
+      usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+    }),
+  ];
+
+  it("stores the places and routes a map named, and tells subscribers", async () => {
+    terminalFixtures = [answer];
+    const before = mapLookupCalls.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const engine = yield* StreamEngine;
+          const seed = yield* setupConversation;
+          yield* engine.startGeneration({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            generationId: seed.assistant.generationId ?? undefined,
+            modelId: textModelId,
+            searchEnabled: false,
+          });
+          const events = yield* engine
+            .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect);
+          const output = (yield* repo.getMessage(seed.assistant.id))!.assistantOutput!;
+          // Not web search: maps resolve with search off.
+          expect(output.places?.["Berlin Hauptbahnhof"]).toMatchObject({ status: "resolved" });
+          expect(output.places?.["Atlantis"]).toEqual({ status: "unavailable" });
+          const key = routeKey({ mode: "drive", stops: ["Berlin Hauptbahnhof", "Potsdam"] });
+          expect(output.routes?.[key]).toMatchObject({ status: "resolved", distance: 34000 });
+          // Each place once, though the route names the station again.
+          expect(mapLookupCalls.slice(before).toSorted()).toEqual([
+            "place:Atlantis",
+            "place:Berlin Hauptbahnhof",
+            "place:Potsdam",
+            "route:drive:2",
+          ]);
+          const last = [...events].flatMap((e) => (e.kind === "lookups" ? [e.lookups] : [])).at(-1);
+          expect(last?.routes[key]?.status).toBe("resolved");
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
     }
   });
 });

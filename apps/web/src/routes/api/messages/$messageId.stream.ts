@@ -57,9 +57,9 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
                   sentAt: Date.now(),
                   ...(event.runId ? { runId: event.runId } : {}),
                 })
-              : event.kind === "images"
-                ? sseFrame("images", {
-                    images: event.images,
+              : event.kind === "lookups"
+                ? sseFrame("lookups", {
+                    lookups: event.lookups,
                     ...(event.runId ? { runId: event.runId } : {}),
                   })
                 : sseFrame("done", {

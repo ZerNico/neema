@@ -11,8 +11,8 @@ import {
   GenuiClientContext,
   GenuiMessageContext,
   type GenuiActions,
-  type GenuiMessage,
 } from "./context.ts";
+import { mergeLookups, NO_LOOKUPS, type UiLookups } from "~/modules/chat/assistant-output.ts";
 
 // A block's first render loads the lazy renderer and runs QuickJS; under a
 // full parallel run that outlasts the one-second default wait.
@@ -55,12 +55,14 @@ function draw(
   markdown: string,
   messageId = "m1",
   streaming = false,
-  images: GenuiMessage["images"] = {},
+  lookups: Partial<UiLookups> = {},
 ) {
   const engine = new BlockEngine(quickjs);
   return render(
     <GenuiClientContext value={inProcess(engine)}>
-      <GenuiMessageContext value={{ messageId, createdAt: 0, streaming, images }}>
+      <GenuiMessageContext
+        value={{ messageId, createdAt: 0, streaming, lookups: mergeLookups(NO_LOOKUPS, lookups) }}
+      >
         <AssistantMarkdown content={keyUiFences(markdown, 0)} streaming={streaming} />
       </GenuiMessageContext>
     </GenuiClientContext>,
@@ -225,18 +227,20 @@ describe("ui blocks in answers", () => {
       "m-img",
       false,
       {
-        "gear hub": {
-          status: "resolved",
-          items: [
-            {
-              attachmentId: "a1",
-              pageUrl: "https://www.bikes.example/hub",
-              title: "Hub",
-              size: 2048,
-            },
-          ],
+        images: {
+          "gear hub": {
+            status: "resolved",
+            items: [
+              {
+                attachmentId: "a1",
+                pageUrl: "https://www.bikes.example/hub",
+                title: "Hub",
+                size: 2048,
+              },
+            ],
+          },
+          cassette: { status: "search_off", items: [] },
         },
-        cassette: { status: "search_off", items: [] },
       },
     );
     const hub = await screen.findByRole("img", { name: "A hub" });

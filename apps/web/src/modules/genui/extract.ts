@@ -40,31 +40,32 @@ function literalStrings(code: string): string[] | null {
   return out;
 }
 
-function collect(nodes: readonly UiNode[], into: string[]): void {
+/** Visits every element, inside each and if branches too. */
+function walk(
+  nodes: readonly UiNode[],
+  visit: (node: Extract<UiNode, { type: "element" }>) => void,
+) {
   for (const node of nodes) {
-    switch (node.type) {
-      case "element": {
-        if (node.tag === "image" || node.tag === "images") {
-          const attr = node.attrs.find((a) => a.name === "query");
-          if (attr?.value.kind === "literal") into.push(attr.value.value);
-          else if (attr?.value.kind === "expr")
-            into.push(...(literalStrings(attr.value.code) ?? []));
-        }
-        collect(node.children, into);
-        break;
-      }
-      case "each":
-        collect(node.body, into);
-        collect(node.fallback, into);
-        break;
-      case "if":
-        for (const branch of node.branches) collect(branch.body, into);
-        if (node.fallback) collect(node.fallback, into);
-        break;
-      default:
-        break;
+    if (node.type === "element") {
+      visit(node);
+      walk(node.children, visit);
+    } else if (node.type === "each") {
+      walk(node.body, visit);
+      walk(node.fallback, visit);
+    } else if (node.type === "if") {
+      for (const branch of node.branches) walk(branch.body, visit);
+      if (node.fallback) walk(node.fallback, visit);
     }
   }
+}
+
+function collect(nodes: readonly UiNode[], into: string[]): void {
+  walk(nodes, (node) => {
+    if (node.tag !== "image" && node.tag !== "images") return;
+    const attr = node.attrs.find((a) => a.name === "query");
+    if (attr?.value.kind === "literal") into.push(attr.value.value);
+    else if (attr?.value.kind === "expr") into.push(...(literalStrings(attr.value.code) ?? []));
+  });
 }
 
 /** Normalised so the server's key and the client's lookup agree. */
@@ -99,4 +100,110 @@ export function extractImageQueries(content: string): string[] {
     }
   }
   return out;
+}
+
+export const MAP_LOOKUP_LIMITS = {
+  placesPerAnswer: 20,
+  routesPerAnswer: 5,
+  stopsPerRoute: 10,
+} as const;
+
+export type RouteMode = "drive" | "walk" | "bike" | "straight";
+export const ROUTE_MODES: readonly RouteMode[] = ["drive", "walk", "bike", "straight"];
+
+/** A route stop: a place name to look up, or coordinates the block gave. */
+export type RouteStop = string | { readonly lat: number; readonly lng: number };
+
+export interface RouteRequest {
+  readonly mode: RouteMode;
+  readonly stops: readonly RouteStop[];
+}
+
+const coordinate = (value: number) => Math.round(value * 1e5) / 1e5;
+
+/** How server and page name one route, so the page finds what the server stored. */
+export function routeKey(route: RouteRequest): string {
+  const stops = route.stops.map((stop) =>
+    typeof stop === "string" ? normalizeQuery(stop) : [coordinate(stop.lat), coordinate(stop.lng)],
+  );
+  return `${route.mode}:${JSON.stringify(stops)}`;
+}
+
+function attrText(node: Extract<UiNode, { type: "element" }>, name: string): string | null {
+  const attr = node.attrs.find((a) => a.name === name);
+  if (attr?.value.kind === "literal") return attr.value.value;
+  if (attr?.value.kind === "expr") {
+    const values = literalStrings(attr.value.code);
+    return values?.length === 1 ? values[0]! : null;
+  }
+  return null;
+}
+
+function literalStops(code: string): RouteStop[] | null {
+  let node: AnyNode;
+  try {
+    node = parseExpressionAt(code, 0, { ecmaVersion: "latest" });
+  } catch {
+    return null;
+  }
+  if (code.slice(node.end).trim() !== "" || node.type !== "ArrayExpression") return null;
+  const stops: RouteStop[] = [];
+  for (const element of node.elements) {
+    const text = element?.type === "SpreadElement" ? null : stringValue(element);
+    if (text !== null) {
+      stops.push(text);
+      continue;
+    }
+    if (element?.type !== "ObjectExpression") return null;
+    const numbers: Record<string, number> = {};
+    for (const prop of element.properties) {
+      if (prop.type !== "Property" || prop.key.type !== "Identifier") return null;
+      const value = prop.value;
+      const n =
+        value.type === "Literal" && typeof value.value === "number"
+          ? value.value
+          : value.type === "UnaryExpression" &&
+              value.operator === "-" &&
+              value.argument.type === "Literal" &&
+              typeof value.argument.value === "number"
+            ? -value.argument.value
+            : null;
+      if (n === null) return null;
+      numbers[prop.key.name] = n;
+    }
+    const { lat, lng } = numbers;
+    if (lat === undefined || lng === undefined || Math.abs(lat) > 90 || Math.abs(lng) > 180)
+      return null;
+    stops.push({ lat, lng });
+  }
+  return stops;
+}
+
+/**
+ * The place names and routes one block's maps need looked up, literal only:
+ * pins with a place, and routes whose stops are written out. A computed one
+ * draws only if it gives coordinates itself.
+ */
+export function blockMapLookups(code: string): { places: string[]; routes: RouteRequest[] } {
+  const places: string[] = [];
+  const routes: RouteRequest[] = [];
+  walk(parseUi(code).nodes, (node) => {
+    if (node.tag === "pin") {
+      const place = attrText(node, "place");
+      if (place !== null) places.push(normalizeQuery(place));
+    } else if (node.tag === "route") {
+      const mode = attrText(node, "mode") ?? "drive";
+      const attr = node.attrs.find((a) => a.name === "stops");
+      const stops = attr?.value.kind === "expr" ? literalStops(attr.value.code) : null;
+      if (!ROUTE_MODES.includes(mode as RouteMode) || !stops) return;
+      const usable = stops.slice(0, MAP_LOOKUP_LIMITS.stopsPerRoute);
+      if (usable.length < 2) return;
+      for (const stop of usable) if (typeof stop === "string") places.push(normalizeQuery(stop));
+      routes.push({ mode: mode as RouteMode, stops: usable });
+    }
+  });
+  return {
+    places: places.filter((p) => p !== "" && p.length <= IMAGE_QUERY_LIMITS.queryChars),
+    routes,
+  };
 }

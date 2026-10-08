@@ -188,6 +188,33 @@ describe("ToolsPage", () => {
     );
   });
 
+  it("switches maps and saves their services", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateInteractiveUiTool).mockResolvedValue(undefined as never);
+    renderPage();
+
+    const routing = screen.getByLabelText("Routing");
+    expect(routing).toHaveValue("https://routing.openstreetmap.de");
+    await user.clear(routing);
+    await user.type(routing, "https://osrm.example.org");
+    await user.click(within(routing.closest("form")!).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({
+        data: {
+          mapStyleLight: "https://tiles.openfreemap.org/styles/positron",
+          mapStyleDark: "https://tiles.openfreemap.org/styles/dark",
+          mapGeocoder: "https://photon.komoot.io",
+          mapRouting: "https://osrm.example.org",
+        },
+      }),
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Maps in interactive answers" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { maps: false } }),
+    );
+  });
+
   it("shows images as off while interactive answers are off", () => {
     renderPage({ interactiveUi: { ...tool("interactive_ui", { images: true }), enabled: false } });
     const images = screen.getByRole("switch", { name: "Images in interactive answers" });
@@ -299,9 +326,11 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(updateUrlReaderTool).toHaveBeenCalledWith({ data: { perPageCharCap: 15000 } }),
     );
-    // The URL reader's own button confirms; the web search one is untouched.
-    expect(await screen.findByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(saveButtons()).toHaveLength(1);
+    // The URL reader's own button confirms; the web search and map ones are untouched.
+    expect(
+      await within(cap.closest("form")!).findByRole("button", { name: "Saved" }),
+    ).toBeInTheDocument();
+    expect(saveButtons()).toHaveLength(2);
   });
 
   it("tests a provider from its dialog, keeping the label while testing", async () => {

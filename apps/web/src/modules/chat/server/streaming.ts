@@ -65,11 +65,13 @@ import {
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
-import type { UiImages } from "../assistant-output.ts";
+import { lookupsOf, type UiLookups } from "../assistant-output.ts";
 import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
 import { INTERACTIVE_UI_TOOL, readInteractiveUi } from "~/modules/genui/settings.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
+import { makeMapResolver, type MapResolver } from "~/modules/genui/server/map-resolver.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
 import {
@@ -259,20 +261,20 @@ export interface StatusEvent {
 }
 
 /**
- * Image results for the answer's ```ui blocks, every query so far. Like
- * status, never a chunk: the row holds them and a late subscriber gets a
- * snapshot, so a repeated event only restates what the client has.
+ * What the answer's ```ui blocks looked up so far: images, places, routes.
+ * Like status, never a chunk: the row holds them and a late subscriber gets
+ * a snapshot, so a repeated event only restates what the client has.
  */
-export interface ImagesEvent {
+export interface LookupsEvent {
   readonly messageId: string;
   readonly runId?: string;
-  readonly images: UiImages;
+  readonly lookups: UiLookups;
 }
 
 export type StreamEvent =
   | ({ readonly kind: "chunk" } & ChunkEvent)
   | ({ readonly kind: "status" } & StatusEvent)
-  | ({ readonly kind: "images" } & ImagesEvent)
+  | ({ readonly kind: "lookups" } & LookupsEvent)
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
@@ -458,6 +460,8 @@ export class StreamEngine extends Context.Service<
       // Postgres by seq, and `done` re-syncs the final row.
       const pubsub = yield* PubSub.sliding<StreamEvent>(4096);
       const imageAttachments = yield* Effect.serviceOption(AttachmentService);
+      // Optional so test engines need not reach map services.
+      const mapLookups = yield* Effect.serviceOption(MapLookups);
       // Tests replace the network; everything else fetches search images itself.
       const imageFetcher = Option.getOrElse(yield* Effect.serviceOption(ImageFetcher), () =>
         ImageFetcher.of({ fetch: fetchImage }),
@@ -769,6 +773,23 @@ export class StreamEngine extends Context.Service<
           buffer.push({ seq, kind, delta });
         };
 
+        /** Stores lookups under the fence, then tells subscribers everything found so far. */
+        const recordLookups = (
+          owner: GenerationIdentity,
+          update: Parameters<typeof repo.recordUiLookups>[1],
+        ) =>
+          repo.recordUiLookups(owner, update).pipe(
+            Effect.flatMap((lookups) =>
+              PubSub.publish(pubsub, {
+                kind: "lookups",
+                messageId: input.messageId,
+                runId: owner.generationId,
+                lookups,
+              }),
+            ),
+            Effect.asVoid,
+          );
+
         const publishStatus = (reading: StatusEvent["reading"]) =>
           Effect.suspend(() => {
             const event: StatusEvent = {
@@ -1015,20 +1036,32 @@ export class StreamEngine extends Context.Service<
                       mediaType: image.mediaType,
                       bytes: image.bytes,
                     }),
-                  record: (query, result) =>
-                    repo.recordUiImages(fence, query, result).pipe(
-                      Effect.flatMap((images) =>
-                        PubSub.publish(pubsub, {
-                          kind: "images",
-                          messageId: input.messageId,
-                          runId: fence.generationId,
-                          images,
-                        }),
-                      ),
-                    ),
+                  record: (query, result) => recordLookups(fence, { images: { [query]: result } }),
                 })
               : null;
           if (imageResolver) yield* imageResolver.observe(assembled);
+          // Places and routes on the answer's maps. Not web search: they go to
+          // the map services an admin configured, and only place names leave.
+          const earlier = (resuming && currentMessage?.assistantOutput) || null;
+          const mapResolver: MapResolver | null =
+            interactiveUi.maps && fence && Option.isSome(mapLookups)
+              ? yield* makeMapResolver({
+                  settled: {
+                    places: new Set(Object.keys(earlier?.places ?? {})),
+                    routes: new Set(Object.keys(earlier?.routes ?? {})),
+                  },
+                  known: new Map(
+                    Object.entries(earlier?.places ?? {}).filter(
+                      ([, place]) => place.status === "resolved",
+                    ),
+                  ),
+                  geocode: (query) => mapLookups.value.geocode(interactiveUi.mapServices, query),
+                  route: (mode, stops) =>
+                    mapLookups.value.route(interactiveUi.mapServices, mode, stops),
+                  record: (update) => recordLookups(fence, update),
+                })
+              : null;
+          if (mapResolver) yield* mapResolver.observe(assembled);
 
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
@@ -2538,8 +2571,10 @@ export class StreamEngine extends Context.Service<
                         case "text-delta": {
                           pushChunk("text", part.delta);
                           // Only a fence line can close a block.
-                          if (imageResolver && /[`~]/.test(part.delta))
-                            yield* imageResolver.observe(assembled);
+                          if (/[`~]/.test(part.delta)) {
+                            if (imageResolver) yield* imageResolver.observe(assembled);
+                            if (mapResolver) yield* mapResolver.observe(assembled);
+                          }
                           if (buffer.length >= 16) yield* flush;
                           return;
                         }
@@ -4134,7 +4169,10 @@ export class StreamEngine extends Context.Service<
             transcript = buildTranscript();
           }
           // Before the scope closes and finalize runs: recording needs the row still streaming.
-          if (imageResolver) yield* imageResolver.drain;
+          yield* Effect.all(
+            [imageResolver?.drain ?? Effect.void, mapResolver?.drain ?? Effect.void],
+            { concurrency: "unbounded", discard: true },
+          );
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
           // A resumed answer starts from its earlier text, so it is never empty.
@@ -4381,10 +4419,16 @@ export class StreamEngine extends Context.Service<
                 ? Stream.make({ kind: "status", ...status })
                 : Stream.empty;
             // Read after subscribing, so an image recorded since the loader ran is in one or the other.
-            const images = afterReplay.assistantOutput?.images;
-            const imageSnapshot: Stream.Stream<StreamEvent> = images
-              ? Stream.make({ kind: "images", messageId, ...(runId ? { runId } : {}), images })
-              : Stream.empty;
+            const output = afterReplay.assistantOutput;
+            const imageSnapshot: Stream.Stream<StreamEvent> =
+              output?.images || output?.places || output?.routes
+                ? Stream.make({
+                    kind: "lookups",
+                    messageId,
+                    ...(runId ? { runId } : {}),
+                    lookups: lookupsOf(output),
+                  })
+                : Stream.empty;
             return replay.pipe(
               Stream.concat(reading),
               Stream.concat(imageSnapshot),

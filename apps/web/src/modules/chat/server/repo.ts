@@ -2,7 +2,13 @@ import type { UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
-import type { UiImageResult, UiImages } from "../assistant-output.ts";
+import {
+  lookupsOf,
+  type UiImages,
+  type UiLookups,
+  type UiPlaces,
+  type UiRoutes,
+} from "../assistant-output.ts";
 import {
   and,
   asc,
@@ -1157,14 +1163,17 @@ export class ChatRepo extends Context.Service<
       state: JsonValue;
     }): Effect.Effect<"saved" | "refused">;
     /**
-     * Records what one ```ui image query came to, merged into the answer's
-     * output under the generation fence. Returns every result so far.
+     * Merges what an answer's ```ui blocks looked up (images, places, routes)
+     * into its output under the generation fence. Returns every result so far.
      */
-    recordUiImages(
+    recordUiLookups(
       fence: GenerationIdentity,
-      query: string,
-      result: UiImageResult,
-    ): Effect.Effect<UiImages>;
+      update: {
+        readonly images?: UiImages;
+        readonly places?: UiPlaces;
+        readonly routes?: UiRoutes;
+      },
+    ): Effect.Effect<UiLookups>;
     createCompactionEvent(input: {
       id: string;
       messageId: string;
@@ -3436,19 +3445,26 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
-        recordUiImages: Effect.fn("ChatRepo.recordUiImages")(function* (fence, query, result) {
+        recordUiLookups: Effect.fn("ChatRepo.recordUiLookups")(function* (fence, update) {
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
                 const message = yield* lockGeneration(tx, fence);
                 const output = message.assistantOutput;
-                const images = { ...output?.images, [query]: result };
+                const next = {
+                  ...output,
+                  v: 1 as const,
+                  files: output?.files ?? [],
+                  images: { ...output?.images, ...update.images },
+                  places: { ...output?.places, ...update.places },
+                  routes: { ...output?.routes, ...update.routes },
+                };
                 yield* tx
                   .update(messages)
-                  .set({ assistantOutput: { ...output, v: 1, files: output?.files ?? [], images } })
+                  .set({ assistantOutput: next })
                   .where(eq(messages.id, fence.messageId))
                   .pipe(Effect.orDie);
-                return images;
+                return lookupsOf(next);
               }),
             )
             .pipe(Effect.catchTag("SqlError", Effect.die));

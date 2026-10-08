@@ -50,8 +50,58 @@ export const UiImageResult = Schema.Struct({
 export type UiImageResult = typeof UiImageResult.Type;
 /** Image results by normalised query (`normalizeQuery`). */
 export type UiImages = Readonly<Record<string, UiImageResult>>;
+
+/** Where a ```ui map's place name was found. `unavailable`: no match, or the lookup failed. */
+export interface UiPlace {
+  readonly status: "resolved" | "unavailable";
+  readonly lat?: number;
+  readonly lng?: number;
+  /** The geocoder's name for it, shown when the block gave none. */
+  readonly name?: string;
+}
+/** Place results by normalised place name. */
+export type UiPlaces = Readonly<Record<string, UiPlace>>;
+
+/** A road, cycle or walking route between a map's stops, simplified for drawing. */
+export interface UiRoute {
+  readonly status: "resolved" | "unavailable";
+  /** [lng, lat] pairs, as GeoJSON orders them. */
+  readonly path?: ReadonlyArray<readonly [number, number]>;
+  /** Metres. */
+  readonly distance?: number;
+  /** Seconds. */
+  readonly duration?: number;
+}
+/** Route results by `routeKey`. */
+export type UiRoutes = Readonly<Record<string, UiRoute>>;
+
+/** Everything the server looked up for an answer's blocks, as one snapshot. */
+export interface UiLookups {
+  readonly images: UiImages;
+  readonly places: UiPlaces;
+  readonly routes: UiRoutes;
+}
+
 export interface AssistantOutput {
   v: 1;
   files: ReadonlyArray<AssistantFile>;
   images?: UiImages;
+  places?: UiPlaces;
+  routes?: UiRoutes;
 }
+
+export const NO_LOOKUPS: UiLookups = { images: {}, places: {}, routes: {} };
+
+/** Later results win per key; neither side is changed. */
+export const mergeLookups = (a: UiLookups, b: Partial<UiLookups>): UiLookups => ({
+  images: { ...a.images, ...b.images },
+  places: { ...a.places, ...b.places },
+  routes: { ...a.routes, ...b.routes },
+});
+
+/** The lookups an output holds, with an empty record for each kind it has none of. */
+export const lookupsOf = (output: AssistantOutput | null | undefined): UiLookups => ({
+  images: output?.images ?? {},
+  places: output?.places ?? {},
+  routes: output?.routes ?? {},
+});

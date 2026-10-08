@@ -17,7 +17,7 @@ import {
 } from "~/modules/schedules/tool-schema.ts";
 
 import { applyFileChunk, learnServerClock } from "../client/use-message-stream.ts";
-import type { AssistantFile } from "../assistant-output.ts";
+import { lookupsOf, mergeLookups, NO_LOOKUPS, type AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
 
@@ -388,9 +388,7 @@ export function ChatView({
       reasoningSeen: reasoningChunks.length > 0,
       tools,
       compactions,
-      ...(streamingMessage.assistantOutput?.images
-        ? { images: streamingMessage.assistantOutput.images }
-        : {}),
+      lookups: lookupsOf(streamingMessage.assistantOutput),
       lastSeq,
     };
   }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
@@ -1466,7 +1464,7 @@ export function ChatView({
           : {}),
         reasoning,
         files: message.assistantOutput?.files ?? [],
-        ...(message.assistantOutput?.images ? { uiImages: message.assistantOutput.images } : {}),
+        uiLookups: lookupsOf(message.assistantOutput),
         ...(uiStatesByMessage.has(message.id)
           ? { uiStates: uiStatesByMessage.get(message.id)! }
           : {}),
@@ -1646,7 +1644,7 @@ export function ChatView({
           ],
           liveStream: { text: stream.live, status: stream.status },
           reading: stream.reading,
-          uiImages: { ...projected.uiImages, ...stream.images },
+          uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, stream.lookups),
         };
       }),
     [
@@ -1672,7 +1670,7 @@ export function ChatView({
       editResearchEnabled,
       stream.compactions,
       stream.files,
-      stream.images,
+      stream.lookups,
       stream.live,
       stream.reading,
       stream.status,

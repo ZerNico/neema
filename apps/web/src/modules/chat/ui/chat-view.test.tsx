@@ -384,6 +384,7 @@ vi.mock("../client/use-message-stream.ts", async (importOriginal) => ({
       tools: liveDraft.tools,
       compactions: [],
       steers: [],
+      lookups: { images: {}, places: {}, routes: {} },
       live: idleLiveText,
       status: liveDraft.status,
     };

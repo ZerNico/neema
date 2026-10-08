@@ -231,6 +231,12 @@ export const updateOfficeFilesTool = createServerFn({ method: "POST" })
     ),
   );
 
+/** Map services are reached from the server and named in the reader's map: https only. */
+const MapServiceUrl = Schema.String.check(
+  Schema.isMaxLength(500),
+  Schema.isPattern(/^https:\/\/[^\s/]+(\/\S*)?$/),
+);
+
 export const getInteractiveUiTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
@@ -242,19 +248,25 @@ export const updateInteractiveUiTool = createServerFn({ method: "POST" })
       Schema.Struct({
         enabled: Schema.optionalKey(Schema.Boolean),
         images: Schema.optionalKey(Schema.Boolean),
+        maps: Schema.optionalKey(Schema.Boolean),
+        mapStyleLight: Schema.optionalKey(MapServiceUrl),
+        mapStyleDark: Schema.optionalKey(MapServiceUrl),
+        mapGeocoder: Schema.optionalKey(MapServiceUrl),
+        mapRouting: Schema.optionalKey(MapServiceUrl),
       }),
     ),
   )
-  .handler(({ data }) =>
-    runtime.runPromise(
+  .handler(({ data }) => {
+    const { enabled, ...config } = data;
+    return runtime.runPromise(
       ToolsRepo.use((repo) =>
         repo.updateTool(INTERACTIVE_UI_TOOL, {
-          ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
-          ...(data.images !== undefined ? { config: { images: data.images } } : {}),
+          ...(enabled !== undefined ? { enabled } : {}),
+          ...(Object.keys(config).length > 0 ? { config } : {}),
         }),
       ),
-    ),
-  );
+    );
+  });
 
 export const getDocumentParserTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
