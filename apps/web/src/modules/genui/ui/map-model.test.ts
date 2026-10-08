@@ -109,6 +109,26 @@ describe("routeSummary", () => {
 });
 
 describe("circleRing", () => {
+  it("stays on the globe at a pole and across the date line", () => {
+    for (const [lat, lng] of [
+      [90, 0],
+      [-89.99, 45],
+      [10, 179.99],
+    ] as const) {
+      for (const [x, y] of circleRing(lat, lng, 200_000)) {
+        expect(Math.abs(y)).toBeLessThanOrEqual(90);
+        expect(Math.abs(x)).toBeLessThanOrEqual(180);
+      }
+    }
+  });
+
+  it("puts each point at the radius from the centre", () => {
+    const [east] = circleRing(0, 0, 111_195, 4).slice(1);
+    // A quarter turn from north: due east, one degree along the equator.
+    expect(east![0]).toBeCloseTo(1, 3);
+    expect(east![1]).toBeCloseTo(0, 6);
+  });
+
   it("closes the ring around the centre", () => {
     const ring = circleRing(52.5, 13.4, 1000, 8);
     expect(ring).toHaveLength(9);

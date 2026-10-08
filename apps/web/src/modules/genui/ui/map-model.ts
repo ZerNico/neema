@@ -168,19 +168,33 @@ export function routeSummary(route: MapRoute, locale?: string): string | null {
   return `${distance} · ${time}`;
 }
 
-/** A circle as a polygon ring, for an area. */
+/**
+ * A circle as a polygon ring, for an area. Each point is the great-circle
+ * destination from the centre, so a ring near a pole keeps valid latitudes
+ * and longitudes (a flat approximation divides by cos(lat), which is 0 there).
+ */
 export function circleRing(
   lat: number,
   lng: number,
   radius: number,
   steps = 64,
 ): Array<[number, number]> {
-  const earth = 6_371_000;
-  const dLat = (radius / earth) * (180 / Math.PI);
-  const dLng = dLat / Math.cos((lat * Math.PI) / 180);
+  const rad = Math.PI / 180;
+  const distance = radius / 6_371_000;
+  const phi = lat * rad;
   const ring = Array.from({ length: steps }, (_, i) => {
-    const angle = (i / steps) * 2 * Math.PI;
-    return [lng + dLng * Math.cos(angle), lat + dLat * Math.sin(angle)] as [number, number];
+    const bearing = (i / steps) * 2 * Math.PI;
+    const phi2 = Math.asin(
+      Math.sin(phi) * Math.cos(distance) + Math.cos(phi) * Math.sin(distance) * Math.cos(bearing),
+    );
+    const lambda2 =
+      lng * rad +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(distance) * Math.cos(phi),
+        Math.cos(distance) - Math.sin(phi) * Math.sin(phi2),
+      );
+    const wrapped = ((((lambda2 / rad + 180) % 360) + 360) % 360) - 180;
+    return [wrapped, phi2 / rad] as [number, number];
   });
   ring.push(ring[0]!);
   return ring;
