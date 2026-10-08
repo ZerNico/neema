@@ -84,6 +84,22 @@ export const SKILL_EXAMPLES = {
   <slider label="Health" min={0} max={100} value={percent} onchange={(v) => percent = v}/>
   <images query={["lithium ion battery cell cutaway", "battery health screen iphone"]} layout="grid" aspect="4:3"/>
 </box>`,
+  plan: `<script>
+  let guests = $state(6);
+  let done = $state([]);
+  const lamb = $derived((guests * 0.4).toFixed(1));
+</script>
+<card title="Sunday roast">
+  <stepper label="Guests" value={guests} min={2} max={12} onchange={(v) => guests = v}/>
+  <stat label="Bone-in leg of lamb" value={lamb + " kg"}/>
+  <copy text={"Lamb " + lamb + " kg, potatoes " + guests * 250 + " g, carrots " + guests}>Copy shopping list</copy>
+  <steps checkable done={done} onchange={(d) => done = d}>
+    <step title="Prep ahead" time="Saturday">Make the crumble and the marinade.</step>
+    <step title="Start roasting" time="1:30 PM">Into the oven, check with a thermometer.</step>
+    <step title="Rest and carve" time="4:45 PM">Rest 30 minutes, then carve.</step>
+  </steps>
+  <timer seconds={1800} label="Resting"/>
+</card>`,
 } as const;
 
 const fence = (body: string) => "```ui\n" + body + "\n```";
@@ -135,4 +151,8 @@ ${fence(SKILL_EXAMPLES.comparison)}
 A drawing with images:
 
 ${fence(SKILL_EXAMPLES.drawing)}
+
+A plan with a checklist, a copy button and a timer:
+
+${fence(SKILL_EXAMPLES.plan)}
 `;
