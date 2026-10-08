@@ -12,6 +12,7 @@ import { Button } from "~/ui/primitives/button";
 import { Checkbox } from "~/ui/primitives/checkbox";
 import { Input } from "~/ui/primitives/input";
 import { Label } from "~/ui/primitives/label";
+import { Progress, ProgressLabel } from "~/ui/primitives/progress";
 import {
   Select,
   SelectContent,
@@ -416,6 +417,118 @@ function ButtonNode({ node }: { node: ValidNode }) {
   );
 }
 
+const stepsOf = (node: ValidNode) =>
+  node.children.flatMap((c) => (typeof c === "string" || c.tag !== "step" ? [] : [c]));
+
+function StepHeading({ step, done }: { step: ValidNode; done?: boolean }) {
+  const time = str(step.props.time);
+  return (
+    <div className="flex min-w-0 flex-col">
+      {time ? <span className="text-muted-foreground text-xs tabular-nums">{time}</span> : null}
+      <span className={cn("text-sm font-medium", done && "text-muted-foreground line-through")}>
+        {str(step.props.title)}
+      </span>
+    </div>
+  );
+}
+
+/** A timeline, or with `checkable` a checklist whose ticks the block can keep. */
+function StepsNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const steps = stepsOf(node);
+  const checkable = p.checkable === true;
+  const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "steps" });
+  // Compared as text: the tree hands over a new array on every render, and
+  // the local ticks must survive until the block's own value changes.
+  const given = JSON.stringify(
+    Array.isArray(p.done) ? p.done.filter((i): i is number => typeof i === "number") : [],
+  );
+  const [doneText, setDoneText] = useLocal(given);
+  const done: number[] = JSON.parse(doneText);
+  const toggle = (index: number, checked: boolean) => {
+    const next = checked
+      ? [...done.filter((i) => i !== index), index].toSorted((a, b) => a - b)
+      : done.filter((i) => i !== index);
+    setDoneText(JSON.stringify(next));
+    fire?.([next]);
+  };
+  return (
+    <div className="flex flex-col gap-3">
+      {checkable ? (
+        <Progress value={(done.length / Math.max(1, steps.length)) * 100}>
+          <ProgressLabel>
+            {done.length} of {steps.length} done
+          </ProgressLabel>
+        </Progress>
+      ) : null}
+      <ol className="flex flex-col">
+        {steps.map((step, i) => {
+          const finished = done.includes(i);
+          return (
+            // oxlint-disable-next-line react/no-array-index-key -- steps have no identity beyond their order
+            <li key={i} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                {checkable ? (
+                  <Checkbox
+                    checked={finished}
+                    onCheckedChange={(checked) => toggle(i, checked === true)}
+                    aria-label={str(step.props.title) ?? `Step ${i + 1}`}
+                  />
+                ) : (
+                  <span className="bg-primary mt-1.5 size-2 shrink-0 rounded-full" />
+                )}
+                {i < steps.length - 1 ? <span className="bg-border my-1 w-px flex-1" /> : null}
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-1 pb-4">
+                <StepHeading step={step} done={checkable && finished} />
+                <div className="text-sm">
+                  <Nodes nodes={step.children} />
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** One step at a time; the block may follow the position through onchange. */
+function WizardNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const steps = stepsOf(node);
+  const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "wizard" });
+  const [current, setCurrent] = useLocal(num(p.current) ?? 0);
+  const index = Math.min(Math.max(0, current), Math.max(0, steps.length - 1));
+  const step = steps[index];
+  const go = (next: number) => {
+    setCurrent(next);
+    fire?.([next]);
+  };
+  if (!step) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      <Progress value={((index + 1) / steps.length) * 100}>
+        <ProgressLabel>
+          Step {index + 1} of {steps.length}
+        </ProgressLabel>
+      </Progress>
+      <StepHeading step={step} />
+      <div className="text-sm">
+        <Nodes nodes={step.children} />
+      </div>
+      <div className="flex justify-between gap-2">
+        <Button size="sm" variant="outline" disabled={index === 0} onClick={() => go(index - 1)}>
+          Back
+        </Button>
+        <Button size="sm" disabled={index === steps.length - 1} onClick={() => go(index + 1)}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Copies its own text, no handler involved: the click is the reader's. */
 function CopyNode({ node }: { node: ValidNode }) {
   const p = node.props;
@@ -662,6 +775,10 @@ function Node({ node }: { node: ValidNode }) {
       return <UiImage node={node} />;
     case "images":
       return <UiImages node={node} />;
+    case "steps":
+      return <StepsNode node={node} />;
+    case "wizard":
+      return <WizardNode node={node} />;
     case "copy":
       return <CopyNode node={node} />;
     case "suggestions":

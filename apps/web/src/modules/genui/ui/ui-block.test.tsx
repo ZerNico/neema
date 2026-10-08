@@ -102,6 +102,59 @@ describe("ui blocks in answers", () => {
     expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
   });
 
+  it("ticks a checklist into the block's state, and keeps local ticks without one", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let done = $state([]);</script>",
+        "<text>Saved {done.length}</text>",
+        "<steps checkable done={done} onchange={(d) => done = d}>",
+        '  <step title="Prep ahead" time="Saturday">Make the crumble.</step>',
+        '  <step title="Roast" time="1:30 PM">Into the oven.</step>',
+        "</steps>",
+        '<steps checkable><step title="Loose one">No state here.</step></steps>',
+        "```",
+      ].join("\n"),
+      "m-steps",
+    );
+    const roast = await screen.findByRole("checkbox", { name: "Roast" });
+    await act(async () => {
+      fireEvent.click(roast);
+    });
+    expect(await screen.findByText("Saved 1")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 done/)).toBeInTheDocument();
+    expect(screen.getByText("1:30 PM")).toBeInTheDocument();
+    const loose = screen.getByRole("checkbox", { name: "Loose one" });
+    await act(async () => {
+      fireEvent.click(loose);
+    });
+    expect(screen.getByRole("checkbox", { name: "Loose one" })).toBeChecked();
+  });
+
+  it("walks a wizard one step at a time", async () => {
+    draw(
+      [
+        "```ui",
+        "<wizard>",
+        '  <step title="Unbox">Lay out the parts.</step>',
+        '  <step title="Fit the front wheel">Slide it into the fork.</step>',
+        "</wizard>",
+        "```",
+      ].join("\n"),
+      "m-wizard",
+    );
+    expect(await screen.findByText("Unbox")).toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+    const next = screen.getByRole("button", { name: "Next" });
+    await act(async () => {
+      fireEvent.click(next);
+    });
+    expect(screen.getByText("Fit the front wheel")).toBeInTheDocument();
+    expect(screen.getByText(/Step 2 of 2/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
   it("shows the images the server found, and says why when there are none", async () => {
     draw(
       [

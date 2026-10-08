@@ -156,6 +156,33 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     props: { value: text(200), onchange: handler() },
     children: { only: ["tab"] },
   },
+  steps: {
+    group: "layout",
+    doc: "Timeline of steps, e.g. a cooking schedule. checkable adds a checkbox per step; onchange(doneIndexes).",
+    props: {
+      checkable: flag(),
+      done: prop(
+        Schema.Array(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 99 }))).check(
+          Schema.isMaxLength(100),
+        ),
+        "number[] (indexes of finished steps)",
+      ),
+      onchange: handler(),
+    },
+    children: { only: ["step"] },
+  },
+  wizard: {
+    group: "layout",
+    doc: "One step at a time with Back and Next, e.g. assembly instructions; onchange(index).",
+    props: { current: int(0, 99), onchange: handler() },
+    children: { only: ["step"] },
+  },
+  step: {
+    group: "layout",
+    doc: "One step in steps or wizard: a title, an optional time, any content.",
+    props: { title: required(text(120)), time: text(40) },
+    children: "block",
+  },
   tab: {
     group: "layout",
     doc: "One tab.",
