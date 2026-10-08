@@ -64,7 +64,10 @@ import {
 } from "~/modules/office/server/families.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
-import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
+import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
+import type { UiImages } from "../assistant-output.ts";
+import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
+import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
 import {
@@ -251,9 +254,21 @@ export interface StatusEvent {
   readonly reading: { readonly read: number; readonly total: number } | null;
 }
 
+/**
+ * Image results for the answer's ```ui blocks, every query so far. Like
+ * status, never a chunk: the row holds them and a late subscriber gets a
+ * snapshot, so a repeated event only restates what the client has.
+ */
+export interface ImagesEvent {
+  readonly messageId: string;
+  readonly runId?: string;
+  readonly images: UiImages;
+}
+
 export type StreamEvent =
   | ({ readonly kind: "chunk" } & ChunkEvent)
   | ({ readonly kind: "status" } & StatusEvent)
+  | ({ readonly kind: "images" } & ImagesEvent)
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
@@ -439,6 +454,10 @@ export class StreamEngine extends Context.Service<
       // Postgres by seq, and `done` re-syncs the final row.
       const pubsub = yield* PubSub.sliding<StreamEvent>(4096);
       const imageAttachments = yield* Effect.serviceOption(AttachmentService);
+      // Tests replace the network; everything else fetches search images itself.
+      const imageFetcher = Option.getOrElse(yield* Effect.serviceOption(ImageFetcher), () =>
+        ImageFetcher.of({ fetch: fetchImage }),
+      );
       // Optional so test engines need not build blob storage for it.
       const projectFiles = yield* Effect.serviceOption(ProjectFileService);
       // Optional for the same reason; without it a tool's file parameter
@@ -965,6 +984,40 @@ export class StreamEngine extends Context.Service<
                 owner: input.userId,
               })
             : null;
+
+          // Images named by the answer's ```ui blocks, looked up while it streams.
+          // Only with the search this attempt was offered; otherwise each query
+          // is recorded as needing it, so the reader is told why.
+          const imageResolver: ImageResolver | null =
+            fence && Option.isSome(imageAttachments)
+              ? yield* makeImageResolver({
+                  searchOn: permissions.webSearch && input.searchEnabled,
+                  settled: new Set(
+                    Object.keys((resuming && currentMessage?.assistantOutput?.images) || {}),
+                  ),
+                  search: (query, maxResults) => webSearch.images(query, maxResults),
+                  fetch: (url) => imageFetcher.fetch(url),
+                  store: (image, fileName) =>
+                    acceptSearchImage(imageAttachments.value, {
+                      fence,
+                      fileName,
+                      mediaType: image.mediaType,
+                      bytes: image.bytes,
+                    }),
+                  record: (query, result) =>
+                    repo.recordUiImages(fence, query, result).pipe(
+                      Effect.flatMap((images) =>
+                        PubSub.publish(pubsub, {
+                          kind: "images",
+                          messageId: input.messageId,
+                          runId: fence.generationId,
+                          images,
+                        }),
+                      ),
+                    ),
+                })
+              : null;
+          if (imageResolver) yield* imageResolver.observe(assembled);
 
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
@@ -2454,6 +2507,9 @@ export class StreamEngine extends Context.Service<
                         }
                         case "text-delta": {
                           pushChunk("text", part.delta);
+                          // Only a fence line can close a block.
+                          if (imageResolver && /[`~]/.test(part.delta))
+                            yield* imageResolver.observe(assembled);
                           if (buffer.length >= 16) yield* flush;
                           return;
                         }
@@ -4010,6 +4066,8 @@ export class StreamEngine extends Context.Service<
             }
             transcript = buildTranscript();
           }
+          // Before the scope closes and finalize runs: recording needs the row still streaming.
+          if (imageResolver) yield* imageResolver.drain;
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
           // A resumed answer starts from its earlier text, so it is never empty.
@@ -4255,7 +4313,16 @@ export class StreamEngine extends Context.Service<
               status && status.runId === runId
                 ? Stream.make({ kind: "status", ...status })
                 : Stream.empty;
-            return replay.pipe(Stream.concat(reading), Stream.concat(live));
+            // Read after subscribing, so an image recorded since the loader ran is in one or the other.
+            const images = afterReplay.assistantOutput?.images;
+            const imageSnapshot: Stream.Stream<StreamEvent> = images
+              ? Stream.make({ kind: "images", messageId, ...(runId ? { runId } : {}), images })
+              : Stream.empty;
+            return replay.pipe(
+              Stream.concat(reading),
+              Stream.concat(imageSnapshot),
+              Stream.concat(live),
+            );
           }),
         );
 

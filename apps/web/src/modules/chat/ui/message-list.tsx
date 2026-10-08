@@ -3,7 +3,7 @@ import { findTags, tagWords } from "../tags.ts";
 import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
-import type { AssistantFile } from "../assistant-output.ts";
+import type { AssistantFile, UiImages } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -116,6 +116,7 @@ import { keyUiFences, scanUiFences } from "~/modules/genui/fences.ts";
 import { GenuiMessageContext, type SavedUiState } from "~/modules/genui/ui/context.ts";
 
 const NO_UI_STATES: ReadonlyMap<number, SavedUiState> = new Map();
+const NO_UI_IMAGES: UiImages = {};
 
 // The sources change with every streamed token, but the components must not:
 // a new component function is a new element type to React, which remounts the
@@ -236,6 +237,8 @@ export interface DisplayMessage {
   generationId?: string | null;
   /** Saved ```ui block state by ordinal. */
   uiStates?: ReadonlyMap<number, SavedUiState>;
+  /** Image results for the answer's ```ui blocks, by query. */
+  uiImages?: UiImages;
   /**
    * Files this send copied into the chat's workspace, by basename. The path
    * joins against the machine's current workspace root at click time: the
@@ -710,8 +713,9 @@ const AssistantBody = memo(function AssistantBody({
       streaming,
       generationId: message.generationId ?? null,
       saved: message.uiStates ?? NO_UI_STATES,
+      images: message.uiImages ?? NO_UI_IMAGES,
     }),
-    [message.id, iso, streaming, message.generationId, message.uiStates],
+    [message.id, iso, streaming, message.generationId, message.uiStates, message.uiImages],
   );
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   // Working files a publish in this answer delivered, whichever tool made them.

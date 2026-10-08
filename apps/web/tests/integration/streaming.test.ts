@@ -91,6 +91,8 @@ import {
   NoIntegrations,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
+import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
@@ -108,6 +110,29 @@ const FakeKnowledge = Layer.mergeAll(
   } as never),
   Layer.succeed(KnowledgeService, {} as never),
 );
+
+/** Image search for ```ui blocks; unset means web search is unavailable. */
+let imageSearch: ((query: string) => ReadonlyArray<string>) | undefined;
+const imageFetches: string[] = [];
+const ImageSearchingWebSearch = Layer.effect(
+  WebSearchExecutor,
+  Effect.gen(function* () {
+    const base = yield* WebSearchExecutor;
+    return WebSearchExecutor.of({
+      ...base,
+      images: (query) =>
+        imageSearch
+          ? Effect.succeed(
+              imageSearch(query).map((url) => ({
+                imageUrl: url,
+                pageUrl: `${url}/page`,
+                title: `Found ${url}`,
+              })),
+            )
+          : Effect.fail(new ToolUnavailable({ tool: "web_search", reason: "disabled" })),
+    });
+  }),
+).pipe(Layer.provide(FakeWebSearch));
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
@@ -351,7 +376,20 @@ beforeAll(async () => {
   const EngineCore = Layer.mergeAll(
     FakeGateway,
     FakeKnowledge,
-    FakeWebSearch,
+    ImageSearchingWebSearch,
+    Layer.succeed(ImageFetcher, {
+      fetch: (imageUrl) =>
+        Effect.suspend(() => {
+          imageFetches.push(imageUrl);
+          return imageUrl.includes("broken")
+            ? Effect.fail(new ImageFetchFailed({ url: imageUrl, message: "HTTP 404" }))
+            : Effect.succeed({
+                bytes: Uint8Array.from(generatedPng),
+                mediaType: "image/png",
+                size: { width: 1, height: 1 },
+              });
+        }),
+    }),
     FakeUrlReader,
     ImageBlobStore,
     FakeDocumentParser,
@@ -5322,6 +5360,119 @@ describe("generated image streaming", () => {
         });
       }),
     );
+  });
+});
+
+describe("ui block images", () => {
+  const answer = (...queries: string[]) => [
+    AiResponse.makePart("text-delta", { id: "t", delta: "Here:\n```ui\n" }),
+    AiResponse.makePart("text-delta", {
+      id: "t",
+      delta: queries.map((q) => `<image query="${q}"/>`).join("\n"),
+    }),
+    AiResponse.makePart("text-delta", { id: "t", delta: "\n```\nDone." }),
+    AiResponse.makePart("finish", {
+      reason: "stop",
+      usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+    }),
+  ];
+  const generate = (searchEnabled: boolean) =>
+    Effect.gen(function* () {
+      const engine = yield* StreamEngine;
+      const seed = yield* setupConversation;
+      yield* engine.startGeneration({
+        userId: seed.userId,
+        conversationId: seed.conversation.id,
+        messageId: seed.assistant.id,
+        generationId: seed.assistant.generationId ?? undefined,
+        modelId: textModelId,
+        searchEnabled,
+      });
+      const events = yield* engine
+        .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+        .pipe(Stream.runCollect);
+      return { ...seed, events: [...events] };
+    });
+
+  it("stores found images with the answer, out of its files, and branches them", async () => {
+    terminalFixtures = [answer("gear hub", "nothing here")];
+    imageSearch = (query) =>
+      query === "gear hub"
+        ? ["https://img.test/broken", "https://img.test/a", "https://img.test/b"]
+        : [];
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const attachmentRepo = yield* AttachmentRepo;
+          const files = yield* AttachmentService;
+          const { userId, conversation, assistant, events } = yield* generate(true);
+          const message = yield* repo.getMessage(assistant.id);
+          expect(message!.status).toBe("complete");
+          const images = message!.assistantOutput!.images!;
+          expect(images["nothing here"]).toEqual({ status: "unavailable", items: [] });
+          const found = images["gear hub"]!;
+          expect(found.status).toBe("resolved");
+          expect(found.items.map((item) => item.pageUrl)).toEqual([
+            "https://img.test/a/page",
+            "https://img.test/b/page",
+          ]);
+          expect(message!.assistantOutput!.files).toEqual([]);
+          const bytes = yield* files.read({ userId, attachmentId: found.items[0]!.attachmentId });
+          expect(Buffer.from(bytes.bytes).equals(generatedPng)).toBe(true);
+          // Live subscribers heard about it before the answer finished.
+          const announced = events.filter((event) => event.kind === "images");
+          expect(announced.length).toBeGreaterThan(0);
+          // Never listed as the answer's files, nor as the chat's.
+          expect(yield* attachmentRepo.listForMessages([assistant.id])).toEqual([]);
+          expect(yield* attachmentRepo.listWithBlobsForMessages([assistant.id])).toEqual([]);
+          expect(yield* attachmentRepo.listForConversation(userId, conversation.id)).toEqual([]);
+
+          const branch = yield* repo.cloneConversationPrefix({
+            userId,
+            sourceConversationId: conversation.id,
+            throughMessageId: assistant.id,
+          });
+          const copied = (yield* repo.listMessages(branch.id)).find((m) => m.role === "assistant")!;
+          const copiedFound = copied.assistantOutput!.images!["gear hub"]!;
+          expect(copiedFound.items).toHaveLength(2);
+          expect(copiedFound.items[0]!.attachmentId).not.toBe(found.items[0]!.attachmentId);
+          const copiedBytes = yield* files.read({
+            userId,
+            attachmentId: copiedFound.items[0]!.attachmentId,
+          });
+          expect(Buffer.from(copiedBytes.bytes).equals(generatedPng)).toBe(true);
+          expect(yield* attachmentRepo.listForMessages([copied.id])).toEqual([]);
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+      imageSearch = undefined;
+    }
+  });
+
+  it("records that images need web search when the attempt had none, without searching", async () => {
+    terminalFixtures = [answer("anything")];
+    imageSearch = () => {
+      throw new Error("searched without web search");
+    };
+    const fetchesBefore = imageFetches.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const { assistant } = yield* generate(false);
+          const message = yield* repo.getMessage(assistant.id);
+          expect(message!.assistantOutput!.images).toEqual({
+            anything: { status: "search_off", items: [] },
+          });
+          expect(imageFetches.length).toBe(fetchesBefore);
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+      imageSearch = undefined;
+    }
   });
 });
 

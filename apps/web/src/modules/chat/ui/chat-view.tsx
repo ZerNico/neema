@@ -386,6 +386,9 @@ export function ChatView({
       reasoningSeen: reasoningChunks.length > 0,
       tools,
       compactions,
+      ...(streamingMessage.assistantOutput?.images
+        ? { images: streamingMessage.assistantOutput.images }
+        : {}),
       lastSeq,
     };
   }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
@@ -1461,6 +1464,7 @@ export function ChatView({
           : {}),
         reasoning,
         files: message.assistantOutput?.files ?? [],
+        ...(message.assistantOutput?.images ? { uiImages: message.assistantOutput.images } : {}),
         ...(uiStatesByMessage.has(message.id)
           ? { uiStates: uiStatesByMessage.get(message.id)! }
           : {}),
@@ -1640,6 +1644,7 @@ export function ChatView({
           ],
           liveStream: { text: stream.live, status: stream.status },
           reading: stream.reading,
+          uiImages: { ...projected.uiImages, ...stream.images },
         };
       }),
     [
@@ -1665,6 +1670,7 @@ export function ChatView({
       editResearchEnabled,
       stream.compactions,
       stream.files,
+      stream.images,
       stream.live,
       stream.reading,
       stream.status,

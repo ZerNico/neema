@@ -114,6 +114,10 @@ export const messageAttachments = pgTable(
       .notNull()
       .references(() => attachments.id, { onDelete: "cascade" }),
     position: integer().notNull(),
+    // A `search_image` is an image a ```ui block asked for, fetched while the
+    // answer streamed. It belongs to the answer like its files do, but it is
+    // never one of them: listings, tool files and the model leave it out.
+    kind: text().$type<"file" | "search_image">().notNull().default("file"),
   },
   (t) => [
     primaryKey({ columns: [t.messageId, t.attachmentId] }),

@@ -641,7 +641,7 @@ export class ProjectFileService extends Context.Service<
                 eq(attachments.userId, writer.userId),
                 // The model may only move files from its own chat.
                 input.conversationId
-                  ? sql`exists (select 1 from ${messageAttachments} join ${messages} on ${messages.id} = ${messageAttachments.messageId} join ${conversations} on ${conversations.id} = ${messages.conversationId} where ${messageAttachments.attachmentId} = ${attachments.id} and ${conversations.id} = ${input.conversationId})`
+                  ? sql`exists (select 1 from ${messageAttachments} join ${messages} on ${messages.id} = ${messageAttachments.messageId} join ${conversations} on ${conversations.id} = ${messages.conversationId} where ${messageAttachments.attachmentId} = ${attachments.id} and ${messageAttachments.kind} = 'file' and ${conversations.id} = ${input.conversationId})`
                   : undefined,
               ),
             )

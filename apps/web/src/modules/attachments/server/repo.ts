@@ -624,6 +624,7 @@ export class AttachmentRepo extends Context.Service<
             attachmentId: attachments.id,
             messageId: messageAttachments.messageId,
             position: messageAttachments.position,
+            kind: messageAttachments.kind,
             blobId: attachments.blobId,
             fileName: attachments.fileName,
           })
@@ -656,6 +657,7 @@ export class AttachmentRepo extends Context.Service<
           fileName: row.fileName,
           messageId: targetOf.get(row.messageId)!,
           position: row.position,
+          kind: row.kind,
         }));
 
         yield* tx
@@ -671,6 +673,7 @@ export class AttachmentRepo extends Context.Service<
               messageId: row.messageId,
               attachmentId: row.id,
               position: row.position,
+              kind: row.kind,
             })),
           )
           .pipe(Effect.orDie);
@@ -723,7 +726,12 @@ export class AttachmentRepo extends Context.Service<
           .from(messageAttachments)
           .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
           .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
-          .where(inArray(messageAttachments.messageId, [...messageIds]))
+          .where(
+            and(
+              inArray(messageAttachments.messageId, [...messageIds]),
+              eq(messageAttachments.kind, "file"),
+            ),
+          )
           .orderBy(asc(messageAttachments.messageId), asc(messageAttachments.position))
           .pipe(Effect.orDie);
         return rows.map((row) => ({
@@ -754,6 +762,7 @@ export class AttachmentRepo extends Context.Service<
               eq(conversations.id, conversationId),
               eq(conversations.userId, userId),
               eq(attachments.userId, userId),
+              eq(messageAttachments.kind, "file"),
             ),
           )
           .orderBy(asc(messageAttachments.messageId), asc(messageAttachments.position))
@@ -777,7 +786,12 @@ export class AttachmentRepo extends Context.Service<
             .from(messageAttachments)
             .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
             .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
-            .where(inArray(messageAttachments.messageId, [...messageIds]))
+            .where(
+              and(
+                inArray(messageAttachments.messageId, [...messageIds]),
+                eq(messageAttachments.kind, "file"),
+              ),
+            )
             .orderBy(asc(messageAttachments.messageId), asc(messageAttachments.position))
             .pipe(Effect.orDie);
         },

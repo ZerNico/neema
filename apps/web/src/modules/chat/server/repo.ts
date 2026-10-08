@@ -1,7 +1,8 @@
 import type { UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
-import { GenerationFence, lockGeneration } from "./generation-fence.ts";
+import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
+import type { UiImageResult, UiImages } from "../assistant-output.ts";
 import {
   and,
   asc,
@@ -777,6 +778,21 @@ const rejectReservedWorkTurn = (tx: DbTx, conversationId: string) =>
     if (live.length > 0) return yield* new ConversationBusy({ conversationId });
   });
 
+/** A branch's copy of an answer's image results, pointing at the cloned attachments. */
+const remapUiImages = (images: UiImages, attachmentIds: ReadonlyMap<string, string>): UiImages =>
+  Object.fromEntries(
+    Object.entries(images).map(([query, result]) => [
+      query,
+      {
+        ...result,
+        items: result.items.flatMap((item) => {
+          const id = attachmentIds.get(item.attachmentId);
+          return id ? [{ ...item, attachmentId: id }] : [];
+        }),
+      },
+    ]),
+  );
+
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
@@ -1138,6 +1154,15 @@ export class ChatRepo extends Context.Service<
       sourceHash: string;
       state: JsonValue;
     }): Effect.Effect<"saved" | "refused">;
+    /**
+     * Records what one ```ui image query came to, merged into the answer's
+     * output under the generation fence. Returns every result so far.
+     */
+    recordUiImages(
+      fence: GenerationIdentity,
+      query: string,
+      result: UiImageResult,
+    ): Effect.Effect<UiImages>;
     createCompactionEvent(input: {
       id: string;
       messageId: string;
@@ -2855,6 +2880,9 @@ export class ChatRepo extends Context.Service<
                           if (!id) throw new Error("Missing cloned assistant file");
                           return { ...file, attachment: { ...file.attachment, id } };
                         }),
+                        ...(message.assistantOutput.images
+                          ? { images: remapUiImages(message.assistantOutput.images, attachmentIds) }
+                          : {}),
                       },
                     })
                     .where(eq(messages.id, clonedIds.get(message.id)!))
@@ -3384,6 +3412,24 @@ export class ChatRepo extends Context.Service<
             .where(inArray(messageUiStates.messageId, [...messageIds]))
             .orderBy(asc(messageUiStates.messageId), asc(messageUiStates.ordinal))
             .pipe(Effect.orDie);
+        }),
+
+        recordUiImages: Effect.fn("ChatRepo.recordUiImages")(function* (fence, query, result) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const message = yield* lockGeneration(tx, fence);
+                const output = message.assistantOutput;
+                const images = { ...output?.images, [query]: result };
+                yield* tx
+                  .update(messages)
+                  .set({ assistantOutput: { ...output, v: 1, files: output?.files ?? [], images } })
+                  .where(eq(messages.id, fence.messageId))
+                  .pipe(Effect.orDie);
+                return images;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
         }),
 
         saveUiState: Effect.fn("ChatRepo.saveUiState")(function* (input) {

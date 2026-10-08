@@ -54,4 +54,11 @@ A block's code is model-written and can be prompt-injected through web content, 
 
 ## Images
 
-Image tags carry a search query, not a URL. `extract.ts` finds literal queries in closed fences so the server can resolve them while the answer streams. A computed query renders as unavailable.
+- Image tags carry a search query, never a URL. A block cannot point the page at an address of its choosing, and `img-src` stays `'self'`.
+- The server resolves queries while the answer streams (`genui/server/image-resolver.ts`). It reads each fence once, when it closes, so a query is never searched mid-word. Only literal queries count (`extract.ts`): the server runs before any browser has evaluated the block. A computed query renders as unavailable.
+- Resolution follows the search this attempt was offered: the sender's permission and the composer toggle. Without it each query is recorded as `search_off` and the tile says images need web search. Nothing is looked up.
+- Fetching reuses the reader's SSRF boundary (resolve, pin, re-check each redirect). The body is capped, the type sniffed (never SVG), and the dimensions read from the header alone (`image-header.ts`). The server never decodes an image. Bytes are stored as fetched and only the reader's browser decodes them, so a hostile image never reaches native code in the server process.
+- Each image is a `search_image` attachment claimed by the answer (see [files](files.md)), registered under the generation fence. Positions come from the maximum across all of the message's attachments, because answer files are written by another fiber. The outcome per query goes into `assistantOutput.images`, keyed by normalised query. That column also holds answer files, so every writer merges into it.
+- Results are not chunks and take no `seq`. After each commit the engine publishes an `images` event with every result so far. A subscriber gets a snapshot read after it subscribes, so an image recorded between the loader and the subscription is never lost. The client merges by query, so a repeat changes nothing.
+- On normal completion the answer waits up to five seconds for lookups in flight, inside the generation's scope, because recording needs the row still streaming. Stop, an error or a lost lease close the scope and interrupt them. Whatever is left is recorded as unavailable, and the reaper resolves nothing.
+- A resume skips queries an earlier attempt settled, and the per-answer caps count both. A branch copies the images with fresh ids. Retry and edit release them with the old attempt's files.

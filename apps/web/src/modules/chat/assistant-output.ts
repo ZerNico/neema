@@ -28,7 +28,28 @@ export const AssistantFile = Schema.Struct({
   origin: Schema.optional(Schema.Struct({ toolCallId: Schema.String })),
 });
 export type AssistantFile = typeof AssistantFile.Type;
+/** One image found for a ```ui block's query, stored as a `search_image` attachment. */
+export const UiImage = Schema.Struct({
+  attachmentId: Schema.String,
+  pageUrl: Schema.String,
+  title: Schema.String,
+  width: Schema.optional(Schema.Number),
+  height: Schema.optional(Schema.Number),
+});
+export type UiImage = typeof UiImage.Type;
+/**
+ * What one query came to. `search_off` means the attempt had no web search to
+ * ask, so the reader is told why rather than shown a broken tile.
+ */
+export const UiImageResult = Schema.Struct({
+  status: Schema.Literals(["resolved", "unavailable", "search_off"]),
+  items: Schema.Array(UiImage),
+});
+export type UiImageResult = typeof UiImageResult.Type;
+/** Image results by normalised query (`normalizeQuery`). */
+export type UiImages = Readonly<Record<string, UiImageResult>>;
 export interface AssistantOutput {
   v: 1;
   files: ReadonlyArray<AssistantFile>;
+  images?: UiImages;
 }

@@ -11,6 +11,7 @@ import {
   GenuiClientContext,
   GenuiMessageContext,
   type GenuiActions,
+  type GenuiMessage,
 } from "./context.ts";
 
 // A block's first render loads the lazy renderer and runs QuickJS; under a
@@ -50,11 +51,16 @@ const GEARS = [
   "```",
 ].join("\n");
 
-function draw(markdown: string, messageId = "m1", streaming = false) {
+function draw(
+  markdown: string,
+  messageId = "m1",
+  streaming = false,
+  images: GenuiMessage["images"] = {},
+) {
   const engine = new BlockEngine(quickjs);
   return render(
     <GenuiClientContext value={inProcess(engine)}>
-      <GenuiMessageContext value={{ messageId, createdAt: 0, streaming }}>
+      <GenuiMessageContext value={{ messageId, createdAt: 0, streaming, images }}>
         <AssistantMarkdown content={keyUiFences(markdown, 0)} streaming={streaming} />
       </GenuiMessageContext>
     </GenuiClientContext>,
@@ -62,6 +68,32 @@ function draw(markdown: string, messageId = "m1", streaming = false) {
 }
 
 describe("ui blocks in answers", () => {
+  it("shows the images the server found, and says why when there are none", async () => {
+    draw(
+      [
+        "```ui",
+        '<image query="gear  hub" caption="A hub"/>',
+        '<images query={["cassette", "chain"]}/>',
+        "```",
+      ].join("\n"),
+      "m-img",
+      false,
+      {
+        "gear hub": {
+          status: "resolved",
+          items: [{ attachmentId: "a1", pageUrl: "https://www.bikes.example/hub", title: "Hub" }],
+        },
+        cassette: { status: "search_off", items: [] },
+      },
+    );
+    const hub = await screen.findByRole("img", { name: "A hub" });
+    expect(hub).toHaveAttribute("src", "/api/files/a1");
+    expect(screen.getByRole("link", { name: "bikes.example" })).toBeInTheDocument();
+    expect(screen.getByText("Images need web search")).toBeInTheDocument();
+    // Never resolved, and the answer is finished.
+    expect(screen.getByText("Image unavailable")).toBeInTheDocument();
+  });
+
   it("draws the block with app components and runs its handlers", async () => {
     draw(GEARS);
     expect(await screen.findByText("Gear 2")).toBeInTheDocument();

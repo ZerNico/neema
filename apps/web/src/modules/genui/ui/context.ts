@@ -1,3 +1,4 @@
+import type { UiImages } from "~/modules/chat/assistant-output.ts";
 import { createContext } from "react";
 import type { GenuiClient } from "../client/host.ts";
 
@@ -17,6 +18,8 @@ export interface GenuiMessage {
   readonly generationId?: string | null;
   /** Saved state by block ordinal, from the conversation's stored rows. */
   readonly saved?: ReadonlyMap<number, SavedUiState>;
+  /** What each image query came to, by normalised query. */
+  readonly images?: UiImages;
 }
 
 export interface UiStateSave {

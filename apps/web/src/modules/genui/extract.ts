@@ -72,6 +72,15 @@ export function normalizeQuery(query: string): string {
   return query.replace(/\s+/g, " ").trim();
 }
 
+/** One block's literal image queries, normalised, without the empty or overlong. */
+export function blockImageQueries(code: string): string[] {
+  const raw: string[] = [];
+  collect(parseUi(code).nodes, raw);
+  return raw
+    .map(normalizeQuery)
+    .filter((query) => query !== "" && query.length <= IMAGE_QUERY_LIMITS.queryChars);
+}
+
 /**
  * Distinct image queries in closed `ui` fences, in order of appearance,
  * capped per answer. Open fences are skipped: their queries may still be
@@ -82,10 +91,8 @@ export function extractImageQueries(content: string): string[] {
   const out: string[] = [];
   for (const fence of scanUiFences(content)) {
     if (!fence.closed) continue;
-    const raw: string[] = [];
-    collect(parseUi(fence.code).nodes, raw);
-    for (const query of raw.map(normalizeQuery)) {
-      if (query === "" || query.length > IMAGE_QUERY_LIMITS.queryChars || seen.has(query)) continue;
+    for (const query of blockImageQueries(fence.code)) {
+      if (seen.has(query)) continue;
       if (out.length >= IMAGE_QUERY_LIMITS.queriesPerAnswer) return out;
       seen.add(query);
       out.push(query);

@@ -1,0 +1,1 @@
+ALTER TABLE "message_attachments" ADD COLUMN "kind" text DEFAULT 'file' NOT NULL;

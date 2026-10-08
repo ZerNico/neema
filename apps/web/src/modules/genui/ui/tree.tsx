@@ -4,7 +4,6 @@
 
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
-import { LeaveDialog } from "~/ui/leave-dialog.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Checkbox } from "~/ui/primitives/checkbox";
@@ -28,6 +27,8 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
+import { UiLink } from "./link.tsx";
+import { UiImage, UiImages } from "./media.tsx";
 import { DispatchContext, SuggestContext, type HandlerRef, type TrustedEvent } from "./context.ts";
 
 type Child = ValidNode | string;
@@ -178,33 +179,6 @@ function Field({ label, children }: { label: string | undefined; children: React
       <Label>{label}</Label>
       {children}
     </div>
-  );
-}
-
-function UiLink({ href, children }: { href: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <a
-        href={href}
-        className="text-primary underline underline-offset-4"
-        onClick={(event) => {
-          event.preventDefault();
-          setOpen(true);
-        }}
-      >
-        {children}
-      </a>
-      <LeaveDialog
-        isOpen={open}
-        url={href}
-        onClose={() => setOpen(false)}
-        onConfirm={() => {
-          window.open(href, "_blank", "noopener,noreferrer");
-          setOpen(false);
-        }}
-      />
-    </>
   );
 }
 
@@ -675,6 +649,10 @@ function Node({ node }: { node: ValidNode }) {
       return <UiChart node={node} />;
     case "svg":
       return <UiSvg node={node} />;
+    case "image":
+      return <UiImage node={node} />;
+    case "images":
+      return <UiImages node={node} />;
     case "suggestions":
       return <div className="flex flex-wrap gap-2">{children}</div>;
     case "suggestion":

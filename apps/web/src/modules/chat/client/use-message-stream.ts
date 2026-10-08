@@ -32,7 +32,7 @@ import {
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
 import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
-import { AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
+import { AssistantFile, ASSISTANT_FILE_LIMITS, type UiImages } from "../assistant-output.ts";
 import { SteerChunkEnvelope } from "../schema.ts";
 import type { AssistantSteer } from "../ui/assistant-body.ts";
 import {
@@ -278,6 +278,8 @@ export interface StreamState {
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
   /** Scanned pages being read before the answer starts; live only, never replayed. */
   reading: { read: number; total: number } | null;
+  /** Image results for the answer's ```ui blocks, by query. */
+  images: UiImages;
 }
 
 type Action =
@@ -287,6 +289,7 @@ type Action =
       tools: ToolActivity[];
       compactions: CompactionActivity[];
       steers?: AssistantSteer[];
+      images?: UiImages;
     }
   | {
       kind: "chunk";
@@ -296,6 +299,7 @@ type Action =
       at?: number;
     }
   | { kind: "reading"; reading: StreamState["reading"] }
+  | { kind: "images"; images: UiImages }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
 const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
@@ -1197,11 +1201,15 @@ function reducer(state: StreamState, action: Action): StreamState {
         steers: action.steers ?? [],
         status: "streaming",
         reading: null,
+        images: action.images ?? {},
       };
     case "chunk":
       return applyChunk(state, action.chunkKind, action.delta, action.at);
     case "reading":
       return { ...state, reading: action.reading };
+    case "images":
+      // Each event restates every result so far, so a repeat changes nothing.
+      return { ...state, images: { ...state.images, ...action.images } };
     case "done":
       return {
         ...state,
@@ -1220,6 +1228,7 @@ export interface InitialStream {
   tools: ToolActivity[];
   compactions: CompactionActivity[];
   steers?: AssistantSteer[];
+  images?: UiImages;
   lastSeq: number;
 }
 
@@ -1256,6 +1265,7 @@ export function useMessageStream(
     steers: initial?.steers ?? [],
     status: messageId ? "streaming" : "idle",
     reading: null,
+    images: initial?.images ?? {},
   });
   const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
@@ -1272,6 +1282,7 @@ export function useMessageStream(
       tools: initial?.tools ?? [],
       compactions: initial?.compactions ?? [],
       steers: initial?.steers ?? [],
+      images: initial?.images ?? {},
     });
   }
   const activeRef = useRef<string | null>(null);
@@ -1344,6 +1355,12 @@ export function useMessageStream(
       };
       if (!acceptsRun(data.runId)) return;
       dispatch({ kind: "reading", reading: data.reading });
+    });
+
+    source.addEventListener("images", (raw) => {
+      const data = JSON.parse((raw as MessageEvent).data) as { images: UiImages; runId?: string };
+      if (!acceptsRun(data.runId)) return;
+      dispatch({ kind: "images", images: data.images });
     });
 
     source.addEventListener("done", (raw) => {
