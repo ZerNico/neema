@@ -8,7 +8,7 @@ import {
   Copy01Icon,
   PauseIcon,
   PlayIcon,
-  RotateLeft01Icon,
+  RefreshIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
@@ -677,7 +677,7 @@ function TimerNode({ node }: { node: ValidNode }) {
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={reset} disabled={elapsed === 0}>
-            <HugeiconsIcon icon={RotateLeft01Icon} strokeWidth={2} data-icon="inline-start" />
+            <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
             Reset
           </Button>
         </div>
