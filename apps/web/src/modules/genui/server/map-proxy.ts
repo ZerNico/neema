@@ -13,6 +13,25 @@ const TIMEOUT_MS = 10_000;
 const CACHE_BYTES = 64 * 1024 * 1024;
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * What a map is made of. Anything else, HTML or script above all, would run on
+ * this server's origin if passed through, so it is refused whatever the host.
+ */
+const MAP_TYPES = new Set([
+  "application/json",
+  "application/x-protobuf",
+  "application/vnd.mapbox-vector-tile",
+  "application/octet-stream",
+  "image/png",
+  "image/webp",
+  "image/jpeg",
+]);
+/** The upstream type when it is one a map needs, without parameters; otherwise null. */
+export function mapType(contentType: string): string | null {
+  const type = contentType.split(";")[0]!.trim().toLowerCase();
+  return MAP_TYPES.has(type) ? type : null;
+}
+
 interface Cached {
   readonly body: Uint8Array;
   readonly type: string;
@@ -82,6 +101,11 @@ async function fetchCapped(url: URL): Promise<{ body: Uint8Array; type: string }
     redirect: "error",
   });
   if (!response.ok || !response.body) return null;
+  const type = mapType(response.headers.get("content-type") ?? "application/octet-stream");
+  if (!type) {
+    await response.body.cancel();
+    return null;
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -101,7 +125,7 @@ async function fetchCapped(url: URL): Promise<{ body: Uint8Array; type: string }
     body.set(chunk, at);
     at += chunk.byteLength;
   }
-  return { body, type: response.headers.get("content-type") ?? "application/octet-stream" };
+  return { body, type };
 }
 
 /**
@@ -131,7 +155,7 @@ export async function proxyMap(
     entry = { ...fetched, at: now };
     remember(key, entry);
   }
-  const json = /json/i.test(entry.type);
+  const json = entry.type === "application/json";
   const body = json
     ? rewriteMapJson(new TextDecoder().decode(entry.body), hostsOf(services), origin)
     : new Blob([entry.body.slice()]);
@@ -139,6 +163,8 @@ export async function proxyMap(
     headers: {
       "content-type": entry.type,
       "x-content-type-options": "nosniff",
+      // Never a document: even a mislabelled body opened directly has no script and no origin.
+      "content-security-policy": "default-src 'none'; sandbox",
       // Styles name versioned tile sets, so they may change; tiles under one version do not.
       "cache-control": json ? "private, max-age=3600" : "private, max-age=86400",
     },

@@ -80,6 +80,38 @@ describe("proxyMap", () => {
     expect(tile.headers.get("cache-control")).toBe("private, max-age=86400");
   });
 
+  it("refuses anything a map is not made of, so a page on an allowed host never runs here", async () => {
+    stubFetch(
+      () =>
+        new Response("<script>fetch('/api/me')</script>", {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    );
+    const page = await proxyMap(
+      "t/tiles.openfreemap.org/uploads/x.html",
+      at("t/tiles.openfreemap.org/uploads/x.html"),
+      services,
+    );
+    expect(page.status).toBe(502);
+    expect(await page.text()).not.toContain("<script>");
+  });
+
+  it("sends map assets with a sandbox policy and their bare type", async () => {
+    stubFetch(
+      () =>
+        new Response(new Uint8Array([9]), {
+          headers: { "content-type": "image/png; foo=bar" },
+        }),
+    );
+    const sprite = await proxyMap(
+      "t/tiles.openfreemap.org/sprites/ofm.png",
+      at("t/tiles.openfreemap.org/sprites/ofm.png"),
+      services,
+    );
+    expect(sprite.headers.get("content-type")).toBe("image/png");
+    expect(sprite.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+  });
+
   it("answers 404 for a refused path and 502 when the service fails", async () => {
     stubFetch(() => new Response("down", { status: 503 }));
     expect(
