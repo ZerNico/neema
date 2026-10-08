@@ -739,7 +739,9 @@ class Validator {
       return null;
     }
     const tag = raw.tag;
-    const spec = inSvg && tag === "text" ? SVG_TEXT : CATALOG[tag];
+    // Own keys only: a tag named after a prototype member is just unknown.
+    const spec =
+      inSvg && tag === "text" ? SVG_TEXT : Object.hasOwn(CATALOG, tag) ? CATALOG[tag] : undefined;
     if (!spec) {
       this.report("omitted_node", "unknown_tag", tag);
       return null;

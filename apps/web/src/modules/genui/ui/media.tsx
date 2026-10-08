@@ -3,7 +3,11 @@
 // only ever shows our own copy, never a URL the block chose.
 
 import { use, useState } from "react";
-import type { UiImage as Found, UiImageResult } from "~/modules/chat/assistant-output.ts";
+import {
+  lookupOf,
+  type UiImage as Found,
+  type UiImageResult,
+} from "~/modules/chat/assistant-output.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { Skeleton } from "~/ui/primitives/skeleton";
@@ -34,7 +38,9 @@ type Lookup = { found: Found } | { pending: true } | { missing: string };
 function useLookup(): (query: string, index: number) => Lookup {
   const message = use(GenuiMessageContext);
   return (query, index) => {
-    const result: UiImageResult | undefined = message?.lookups?.images[normalizeQuery(query)];
+    const result: UiImageResult | undefined = message?.lookups
+      ? lookupOf(message.lookups.images, normalizeQuery(query))
+      : undefined;
     const found = result?.items[index];
     if (found) return { found };
     if (!result) return message?.streaming ? { pending: true } : { missing: "Image unavailable" };

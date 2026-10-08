@@ -47,6 +47,17 @@ describe("validateTree", () => {
     ]);
   });
 
+  it("treats tags named after prototype members as unknown", () => {
+    const { nodes, diagnostics } = validateTree([
+      el("constructor"),
+      el("__proto__"),
+      el("toString"),
+      el("text", {}, ["hi"]),
+    ]);
+    expect(only(nodes).tag).toBe("text");
+    expect(diagnostics.map((d) => d.code)).toEqual(["unknown_tag", "unknown_tag", "unknown_tag"]);
+  });
+
   it("omits a node missing a required prop and nodes in the wrong place", () => {
     const { nodes, diagnostics } = validateTree([
       el("slider", { min: 1, max: 2 }),

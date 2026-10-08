@@ -303,6 +303,11 @@ describe("ui blocks in answers", () => {
     expect(screen.getByText("Trains every hour")).toBeInTheDocument();
   });
 
+  it("says an image named after a prototype member is unavailable instead of crashing", async () => {
+    draw(["```ui", '<image query="constructor" caption="Odd"/>', "```"].join("\n"), "m-proto");
+    expect(await screen.findByText("Image unavailable")).toBeInTheDocument();
+  });
+
   it("draws the block with app components and runs its handlers", async () => {
     draw(GEARS);
     expect(await screen.findByText("Gear 2")).toBeInTheDocument();

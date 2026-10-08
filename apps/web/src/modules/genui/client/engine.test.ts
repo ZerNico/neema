@@ -36,6 +36,14 @@ describe("BlockEngine", () => {
     expect(reply.ok && reply.render.ok && reply.render.state).toBe('{"n":1,"__seed":0}');
   });
 
+  it("drops a tag named after a prototype member instead of failing the block", () => {
+    const engine = new BlockEngine(quickjs);
+    const reply = ok(
+      engine.render({ block: "m:0", code: "<constructor/><text>hi</text>", saved: null, now: 0 }),
+    );
+    expect(JSON.stringify(reply.nodes)).toContain("hi");
+  });
+
   it("keeps state while the source grows and waits for an unfinished script", () => {
     const engine = new BlockEngine(quickjs);
     expect(

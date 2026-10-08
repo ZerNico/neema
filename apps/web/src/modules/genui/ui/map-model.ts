@@ -1,7 +1,7 @@
 // What a validated <map> draws, from its children and what the server looked
 // up. Pure, so it is tested without a WebGL map: the drawing only renders it.
 
-import type { UiLookups } from "~/modules/chat/assistant-output.ts";
+import { lookupOf, type UiLookups } from "~/modules/chat/assistant-output.ts";
 import type { ValidNode } from "../catalog.ts";
 import { normalizeQuery, routeKey, type RouteMode, type RouteStop } from "../extract.ts";
 
@@ -62,7 +62,7 @@ function stopsOf(value: unknown): RouteStop[] {
 export function resolveMap(node: ValidNode, lookups: UiLookups, streaming: boolean): MapModel {
   const absent: Resolution = streaming ? "pending" : "missing";
   const where = (place: string) => {
-    const found = lookups.places[normalizeQuery(place)];
+    const found = lookupOf(lookups.places, normalizeQuery(place));
     if (!found) return { status: absent };
     if (found.status === "maps_off") return { status: "off" as const };
     return found.status === "resolved" && found.lat !== undefined && found.lng !== undefined
@@ -125,7 +125,7 @@ export function resolveMap(node: ValidNode, lookups: UiLookups, streaming: boole
         });
         return;
       }
-      const found = lookups.routes[key];
+      const found = lookupOf(lookups.routes, key);
       routes.push({
         key,
         mode,

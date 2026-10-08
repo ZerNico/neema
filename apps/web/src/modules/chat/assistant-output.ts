@@ -93,6 +93,13 @@ export interface AssistantOutput {
   routes?: UiRoutes;
 }
 
+/**
+ * One result by a model-written key. Own keys only: a place or query named
+ * `constructor` would otherwise read a prototype member as a result.
+ */
+export const lookupOf = <T>(results: Readonly<Record<string, T>>, key: string): T | undefined =>
+  Object.hasOwn(results, key) ? results[key] : undefined;
+
 export const NO_LOOKUPS: UiLookups = { images: {}, places: {}, routes: {} };
 
 /** Later results win per key; neither side is changed. */

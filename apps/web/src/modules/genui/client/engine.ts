@@ -118,7 +118,18 @@ export class BlockEngine {
     const out = entry.runtime.render();
     if (!out.ok)
       return { ok: false, reason: "failed", error: out.error, diagnostics: entry.diagnostics };
-    const tree = validateTree(out.nodes);
+    let tree: ReturnType<typeof validateTree>;
+    try {
+      tree = validateTree(out.nodes);
+    } catch (error) {
+      // A host bug on one block's tree costs that block, not the Worker every block shares.
+      return {
+        ok: false,
+        reason: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        diagnostics: entry.diagnostics,
+      };
+    }
     return {
       ok: true,
       rev: out.rev,
