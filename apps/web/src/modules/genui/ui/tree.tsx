@@ -239,7 +239,9 @@ function SliderNode({ node }: { node: ValidNode }) {
           min={min}
           max={max}
           step={num(p.step) ?? 1}
-          value={value}
+          // An array: shadcn's Slider counts thumbs from it, and a bare number
+          // renders a second thumb that swallows every press on the track.
+          value={[value]}
           disabled={!fire}
           aria-label={str(p.label) ?? "Value"}
           onValueChange={(next) => {

@@ -68,6 +68,21 @@ function draw(
 }
 
 describe("ui blocks in answers", () => {
+  it("gives a slider one thumb, so a press on its track moves it", async () => {
+    const { container } = draw(
+      [
+        "```ui",
+        "<script>let n = $state(3);</script>",
+        '<slider label="Amount" min={0} max={10} value={n} onchange={(v) => n = v}/>',
+        "```",
+      ].join("\n"),
+      "m-slider",
+    );
+    await screen.findByText("Amount");
+    // A second thumb without a value took every track press for itself.
+    expect(container.querySelectorAll('input[type="range"]')).toHaveLength(1);
+  });
+
   it("shows the images the server found, and says why when there are none", async () => {
     draw(
       [
