@@ -462,7 +462,8 @@ class Parser {
         this.report("recovered_parse", "else_after_else", span.start);
         return;
       }
-      if (rest.startsWith("if ")) frame.node.branches.push({ test: rest.slice(3).trim(), body: [] });
+      if (rest.startsWith("if "))
+        frame.node.branches.push({ test: rest.slice(3).trim(), body: [] });
       else frame.node.fallback = [];
       return;
     }
@@ -477,7 +478,8 @@ class Parser {
     for (let i = this.stack.length - 1; i > 0; i--) {
       const frame = this.stack[i]!;
       if (frame.kind === kind) {
-        if (i !== this.stack.length - 1) this.report("recovered_parse", "unclosed_element", span.start);
+        if (i !== this.stack.length - 1)
+          this.report("recovered_parse", "unclosed_element", span.start);
         this.stack.length = i;
         return;
       }
@@ -500,7 +502,8 @@ class Parser {
   /** Adds a node to the innermost open container; false once over the cap. */
   private append(node: UiNode): boolean {
     if (this.nodeCount >= LIMITS.nodes) {
-      if (this.nodeCount === LIMITS.nodes) this.report("omitted_node", "too_many_nodes", node.span.start);
+      if (this.nodeCount === LIMITS.nodes)
+        this.report("omitted_node", "too_many_nodes", node.span.start);
       this.nodeCount++;
       this.truncated = true;
       return false;
@@ -534,7 +537,11 @@ class Parser {
     const before = this.source.slice(0, offset);
     const line = before.split("\n").length;
     const column = offset - before.lastIndexOf("\n");
-    this.diagnostics.push(detail === undefined ? { action, code, line, column } : { action, code, line, column, detail });
+    this.diagnostics.push(
+      detail === undefined
+        ? { action, code, line, column }
+        : { action, code, line, column, detail },
+    );
   }
 }
 

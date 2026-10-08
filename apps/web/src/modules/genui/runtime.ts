@@ -3,7 +3,12 @@
 // strings cross into and out of the VM; no host object or function is ever
 // injected, which is the boundary docs/internals/generative-ui.md relies on.
 
-import { shouldInterruptAfterDeadline, type QuickJSContext, type QuickJSRuntime, type QuickJSWASMModule } from "quickjs-emscripten-core";
+import {
+  shouldInterruptAfterDeadline,
+  type QuickJSContext,
+  type QuickJSRuntime,
+  type QuickJSWASMModule,
+} from "quickjs-emscripten-core";
 import type { CompiledBlock } from "./compile.ts";
 import { PRELUDE } from "./prelude.ts";
 
@@ -69,7 +74,12 @@ export class BlockRuntime {
    * an earlier session; `now` freezes the block's clock (the message's
    * creation time, so reload and branch see the same tree).
    */
-  static boot(module: QuickJSWASMModule, block: CompiledBlock, saved: string | null, now: number): BootOutcome {
+  static boot(
+    module: QuickJSWASMModule,
+    block: CompiledBlock,
+    saved: string | null,
+    now: number,
+  ): BootOutcome {
     const runtime = module.newRuntime();
     runtime.setMemoryLimit(RUNTIME_LIMITS.memoryBytes);
     runtime.setMaxStackSize(RUNTIME_LIMITS.stackBytes);
@@ -92,14 +102,18 @@ export class BlockRuntime {
     return { ok: true, runtime: instance };
   }
 
-  private evaluate(code: string, ms: number): { ok: true; value: unknown } | { ok: false; error: string } {
+  private evaluate(
+    code: string,
+    ms: number,
+  ): { ok: true; value: unknown } | { ok: false; error: string } {
     if (this.disposed) return { ok: false, error: "disposed" };
     this.runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + ms));
     const result = this.context.evalCode(code, "block.js", { type: "global" });
     if (result.error) {
       const dumped: unknown = this.context.dump(result.error);
       result.error.dispose();
-      const message = isRecord(dumped) && typeof dumped.message === "string" ? dumped.message : String(dumped);
+      const message =
+        isRecord(dumped) && typeof dumped.message === "string" ? dumped.message : String(dumped);
       return { ok: false, error: message };
     }
     const value: unknown = this.context.dump(result.value);
@@ -112,9 +126,11 @@ export class BlockRuntime {
     if (!result.ok) return result;
     if (typeof result.value !== "string") return { ok: false, error: "render_returned_non_string" };
     // Check the size before parsing: the host must not parse an unbounded string.
-    if (result.value.length > RUNTIME_LIMITS.treeChars) return { ok: false, error: "tree_too_large" };
+    if (result.value.length > RUNTIME_LIMITS.treeChars)
+      return { ok: false, error: "tree_too_large" };
     const parsed = parseJson(result.value);
-    if (!isRecord(parsed) || typeof parsed.rev !== "number") return { ok: false, error: "render_malformed" };
+    if (!isRecord(parsed) || typeof parsed.rev !== "number")
+      return { ok: false, error: "render_malformed" };
     if (typeof parsed.error === "string") return { ok: false, error: parsed.error };
     if (!Array.isArray(parsed.nodes)) return { ok: false, error: "render_malformed" };
     return { ok: true, rev: parsed.rev, nodes: parsed.nodes };
@@ -122,9 +138,11 @@ export class BlockRuntime {
 
   /** Runs handler `id` from render `rev`; a handler from an older render is refused. */
   call(rev: number, id: number, args: readonly unknown[]): CallOutcome {
-    if (!Number.isSafeInteger(rev) || !Number.isSafeInteger(id)) return { ok: false, stale: false, error: "bad_handler" };
+    if (!Number.isSafeInteger(rev) || !Number.isSafeInteger(id))
+      return { ok: false, stale: false, error: "bad_handler" };
     const argsJson = JSON.stringify(args);
-    if (argsJson.length > RUNTIME_LIMITS.stateChars) return { ok: false, stale: false, error: "args_too_large" };
+    if (argsJson.length > RUNTIME_LIMITS.stateChars)
+      return { ok: false, stale: false, error: "args_too_large" };
     const result = this.evaluate(
       `__host.call(${rev}, ${id}, ${JSON.stringify(argsJson)})`,
       RUNTIME_LIMITS.handlerMs,
@@ -133,7 +151,9 @@ export class BlockRuntime {
     const parsed = typeof result.value === "string" ? parseJson(result.value) : null;
     if (!isRecord(parsed)) return { ok: false, stale: false, error: "call_malformed" };
     if (parsed.stale === true) return { ok: false, stale: true };
-    const actions = Array.isArray(parsed.actions) ? parsed.actions.filter(isAction).slice(0, 1) : [];
+    const actions = Array.isArray(parsed.actions)
+      ? parsed.actions.filter(isAction).slice(0, 1)
+      : [];
     return { ok: true, actions, error: typeof parsed.error === "string" ? parsed.error : null };
   }
 

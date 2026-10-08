@@ -1,10 +1,12 @@
 // Citation markers (`[^N]`) are rendering syntax, not content. Shared between
 // the UI (display/copy) and the stream engine (history hygiene), so it lives at
-// module root, not ui/.
+// module root, not ui/. Markers inside ```ui blocks are code and stay.
+
+import { outsideUiFences } from "~/modules/genui/fences.ts";
 
 /** Removes every citation marker. For clipboard text and model history. */
 export function stripCitationMarkers(content: string): string {
-  return content.replace(/\[\^\d+\]/g, "");
+  return outsideUiFences(content, (text) => text.replace(/\[\^\d+\]/g, ""));
 }
 
 /**
@@ -18,7 +20,9 @@ export function stripCitationMarkers(content: string): string {
  */
 export function stripUndefinedCitationMarkers(content: string): string {
   const defined = new Set([...content.matchAll(/^\[\^(\d+)\]:/gm)].map((m) => m[1]));
-  return content
-    .replace(/\[\^\d*$/, "")
-    .replace(/\[\^(\d+)\]/g, (match, n: string) => (defined.has(n) ? match : ""));
+  return outsideUiFences(content, (text) =>
+    text
+      .replace(/\[\^\d*$/, "")
+      .replace(/\[\^(\d+)\]/g, (match, n: string) => (defined.has(n) ? match : "")),
+  );
 }

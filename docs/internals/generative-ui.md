@@ -26,6 +26,15 @@ A rebuilt block must equal the live one, because runtimes are evicted, workers r
 - Limits per block: 16 MB of memory, a 256 KB stack (larger, and deep recursion traps the whole WebAssembly module instead of throwing), deadlines of 200 ms for the script and handlers and 50 ms per render.
 - `catalog.ts` validates every tree before React sees it: unknown tags and props are dropped, required props missing omit the node. Drawings are a closed SVG subset: geometry and theme colours only, no `href`, `style`, event attribute, `url()` or `foreignObject`.
 
+## In the page
+
+- One dedicated Worker per page holds every live block's runtime (`client/worker.ts`, `client/engine.ts`). Parsing, compiling, evaluation and catalog validation all run there, so the main thread only draws trees that already passed the catalog. At most 16 runtimes live at once, least recently used first out, and an evicted block's handlers answer as stale.
+- The page's watchdog (`client/host.ts`) times a request only from the moment the Worker reports it started, so queueing never counts. A request still executing after a second terminates the Worker, and every block renders again in a fresh one from its source and last state. Handler references from before a restart are stale. A block that took the Worker down twice stays on its source.
+- QuickJS compiles WebAssembly inside the Worker, and the document CSP stays as it is. A Worker loaded from a same-origin URL follows the CSP of its own response, never its creator's (only `blob:` and `data:` Workers inherit), and `/assets` responses carry none. A CSP added to `/assets` later, by a proxy for example, would need `'wasm-unsafe-eval'` in that header, not the document's. Checked in Chromium against the built Worker, with and without the directive on the page.
+- Only `AssistantMarkdown` registers the renderer. Reasoning, file and skill previews show a block as code.
+- `projectAssistantBody` treats a `ui` fence as one unit: an activity anchored inside it is shown after it, so a block never splits across two markdown renders. That is display only, and stored offsets stay as they are. `renderPart` writes each block's ordinal into its fence opener before citations are prepared, and the citation helpers skip `ui` fences, so a key never moves when the first source arrives and a `[^5]` in a script stays code.
+- Streamdown remounts renderers when an answer finishes and the transcript virtualizes rows away. A block's last tree and state live outside React (`client/memory.ts`), keyed by message and ordinal. A source that extends the remembered one (still streaming) keeps its state, and one that replaces it (a retry) starts fresh.
+
 ## Images
 
 Image tags carry a search query, not a URL. `extract.ts` finds literal queries in closed fences so the server can resolve them while the answer streams. A computed query renders as unavailable.

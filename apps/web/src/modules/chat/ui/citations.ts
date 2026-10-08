@@ -4,6 +4,7 @@ import { gfmFootnote } from "micromark-extension-gfm-footnote";
 import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { mergeSources, sourceTarget } from "~/modules/tools/sources.ts";
 import type { InheritedSources } from "./inherited-sources.ts";
+import { outsideUiFences } from "~/modules/genui/fences.ts";
 
 /**
  * Matches the href streamdown gives a GFM footnote reference. A run of
@@ -39,19 +40,22 @@ export function prepareCitedMarkdown(content: string, sources: ReadonlyArray<Too
 
   const targets = new Map(sources.map((s) => [s.index, sourceTarget(s)]));
   const groups = new Map<string, number>();
-  const body = content
-    // A marker still being streamed, e.g. "…as of 2026[^1" at the very end.
-    .replace(/\[\^\d*$/, "")
-    .replace(MARKER_RUN, (run) => {
-      // Indexes with no matching source are dropped, since the model invented them.
-      const indexes = [
-        ...new Set([...run.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1]))),
-      ].filter((index) => targets.has(index));
-      if (indexes.length === 0) return "";
-      const label = indexes.join("-");
-      if (indexes.length > 1) groups.set(label, indexes[0]!);
-      return `[^${label}]`;
-    });
+  // Markers inside ```ui blocks are code, not citations.
+  const body = outsideUiFences(content, (text) =>
+    text
+      // A marker still being streamed, e.g. "…as of 2026[^1" at the very end.
+      .replace(/\[\^\d*$/, "")
+      .replace(MARKER_RUN, (run) => {
+        // Indexes with no matching source are dropped, since the model invented them.
+        const indexes = [
+          ...new Set([...run.matchAll(/\[\^(\d+)\]/g)].map((match) => Number(match[1]))),
+        ].filter((index) => targets.has(index));
+        if (indexes.length === 0) return "";
+        const label = indexes.join("-");
+        if (indexes.length > 1) groups.set(label, indexes[0]!);
+        return `[^${label}]`;
+      }),
+  );
 
   const definitions = [
     ...sources.map((s) => `[^${s.index}]: ${sourceTarget(s)}`),

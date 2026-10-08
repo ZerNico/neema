@@ -24,7 +24,8 @@ function tags(nodes: readonly UiNode[]): string[] {
   return nodes.flatMap((n) => {
     if (n.type === "element") return [n.tag, ...tags(n.children)];
     if (n.type === "each") return ["#each", ...tags(n.body), ...tags(n.fallback)];
-    if (n.type === "if") return ["#if", ...n.branches.flatMap((b) => tags(b.body)), ...tags(n.fallback ?? [])];
+    if (n.type === "if")
+      return ["#if", ...n.branches.flatMap((b) => tags(b.body)), ...tags(n.fallback ?? [])];
     return [];
   });
 }
@@ -96,7 +97,9 @@ describe("parseUi", () => {
   });
 
   it("enforces the source, depth and node limits", () => {
-    expect(parseUi("x".repeat(LIMITS.sourceChars + 1)).diagnostics.map((d) => d.code)).toEqual(["source_too_large"]);
+    expect(parseUi("x".repeat(LIMITS.sourceChars + 1)).diagnostics.map((d) => d.code)).toEqual([
+      "source_too_large",
+    ]);
     const deep = "<box>".repeat(LIMITS.depth + 5);
     expect(parseUi(deep).diagnostics.some((d) => d.code === "too_deep")).toBe(true);
     const many = "<b/>".repeat(LIMITS.nodes + 10);

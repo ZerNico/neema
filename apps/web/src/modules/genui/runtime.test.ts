@@ -37,7 +37,8 @@ function text(nodes: readonly (TreeNode | string)[]): string {
 
 function handlerOf(node: TreeNode, prop: string): { $h: number; rev: number } {
   const ref = node.props[prop];
-  if (typeof ref !== "object" || ref === null || !("$h" in ref) || !("rev" in ref)) throw new Error("no handler");
+  if (typeof ref !== "object" || ref === null || !("$h" in ref) || !("rev" in ref))
+    throw new Error("no handler");
   return { $h: Number(ref.$h), rev: Number(ref.rev) };
 }
 
@@ -59,7 +60,9 @@ describe("BlockRuntime", () => {
     expect(text(first.nodes)).toContain("Gear 4: 2.33");
     expect(text(first.nodes)).toContain("18T");
     const card = first.nodes.find((n): n is TreeNode => typeof n !== "string")!;
-    const button = card.children.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!;
+    const button = card.children.find(
+      (n): n is TreeNode => typeof n !== "string" && n.tag === "button",
+    )!;
     const ref = handlerOf(button, "onclick");
     expect(rt.call(ref.rev, ref.$h, [])).toEqual({ ok: true, actions: [], error: null });
     const second = render(rt);
@@ -72,7 +75,9 @@ describe("BlockRuntime", () => {
     const rt = boot(GEARS);
     const first = render(rt);
     const card = first.nodes.find((n): n is TreeNode => typeof n !== "string")!;
-    const button = card.children.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!;
+    const button = card.children.find(
+      (n): n is TreeNode => typeof n !== "string" && n.tag === "button",
+    )!;
     const ref = handlerOf(button, "onclick");
     render(rt);
     expect(rt.call(ref.rev, ref.$h, [])).toEqual({ ok: false, stale: true });
@@ -82,24 +87,37 @@ describe("BlockRuntime", () => {
   it("restores saved state and rebuilds an identical tree", () => {
     const live = boot(GEARS);
     const card = render(live).nodes.find((n): n is TreeNode => typeof n !== "string")!;
-    const ref = handlerOf(card.children.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!, "onclick");
+    const ref = handlerOf(
+      card.children.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!,
+      "onclick",
+    );
     live.call(ref.rev, ref.$h, []);
     const liveTree = render(live).nodes;
     const saved = live.state();
     const rebuilt = boot(GEARS, saved);
     // Handler references carry the render revision, which counts renders.
-    const withoutRev = (nodes: unknown) => JSON.stringify(nodes, (k, v: unknown) => (k === "rev" ? undefined : v));
+    const withoutRev = (nodes: unknown) =>
+      JSON.stringify(nodes, (k, v: unknown) => (k === "rev" ? undefined : v));
     expect(withoutRev(render(rebuilt).nodes)).toBe(withoutRev(liveTree));
     live.dispose();
     rebuilt.dispose();
   });
 
   it("stops runaway scripts, renders and handlers at their limits", () => {
-    expect(BlockRuntime.boot(quickjs, compiled("<script>while (true) {}</script><text>x</text>"), null, NOW)).toMatchObject({
+    expect(
+      BlockRuntime.boot(
+        quickjs,
+        compiled("<script>while (true) {}</script><text>x</text>"),
+        null,
+        NOW,
+      ),
+    ).toMatchObject({
       ok: false,
       error: "interrupted",
     });
-    const recursion = boot("<script>function f(n) { return f(n + 1) + 1; }</script><text>{f(0)}</text>");
+    const recursion = boot(
+      "<script>function f(n) { return f(n + 1) + 1; }</script><text>{f(0)}</text>",
+    );
     // The overflow is caught per expression: the node blanks, the block lives.
     expect(text(render(recursion).nodes)).toBe("");
     recursion.dispose();
@@ -151,7 +169,9 @@ describe("BlockRuntime", () => {
     const replay = boot(
       "<script>let roll = $state(0);</script><text>{new Date().getTime()}|{Date.now()}|{now}</text><text>{random()}</text><button onclick={() => roll = Math.floor(random() * 6) + 1}>roll</button><text>{roll}</text>",
     );
-    const replayButton = render(replay).nodes.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!;
+    const replayButton = render(replay).nodes.find(
+      (n): n is TreeNode => typeof n !== "string" && n.tag === "button",
+    )!;
     const replayRef = handlerOf(replayButton, "onclick");
     replay.call(replayRef.rev, replayRef.$h, []);
     expect(text(render(replay).nodes)).toBe(rolled);
@@ -168,12 +188,18 @@ describe("BlockRuntime", () => {
     expect(text(nodes)).toBe("go");
     const button = nodes.find((n): n is TreeNode => typeof n !== "string" && n.tag === "button")!;
     const ref = handlerOf(button, "onclick");
-    expect(rt.call(ref.rev, ref.$h, [])).toEqual({ ok: true, actions: [{ kind: "send", value: "first" }], error: null });
+    expect(rt.call(ref.rev, ref.$h, [])).toEqual({
+      ok: true,
+      actions: [{ kind: "send", value: "first" }],
+      error: null,
+    });
     rt.dispose();
   });
 
   it("passes handler arguments as JSON", () => {
-    const rt = boot("<script>let v = $state(1);</script><slider min={0} max={10} value={v} onchange={(x) => v = x}/><text>{v}</text>");
+    const rt = boot(
+      "<script>let v = $state(1);</script><slider min={0} max={10} value={v} onchange={(x) => v = x}/><text>{v}</text>",
+    );
     const slider = render(rt).nodes.find((n): n is TreeNode => typeof n !== "string")!;
     const ref = handlerOf(slider, "onchange");
     rt.call(ref.rev, ref.$h, [7]);
@@ -182,7 +208,9 @@ describe("BlockRuntime", () => {
   });
 
   it("never lets a function or host value cross the boundary", () => {
-    const rt = boot("<script>const f = () => 1;</script><text>{f}</text><card title={{ toString: f }}/><text>{[f, Symbol('x')]}</text>");
+    const rt = boot(
+      "<script>const f = () => 1;</script><text>{f}</text><card title={{ toString: f }}/><text>{[f, Symbol('x')]}</text>",
+    );
     const out = rt.render();
     expect(out).toMatchObject({ ok: true });
     expect(JSON.stringify(out)).not.toContain("=>");
@@ -200,7 +228,9 @@ describe("BlockRuntime", () => {
   });
 
   it("refuses a script that breaks the mutation contract instead of running it", () => {
-    const result = compileUi("<script>let hidden = 0;\nfunction bump() { hidden++; }</script><text>x</text>");
+    const result = compileUi(
+      "<script>let hidden = 0;\nfunction bump() { hidden++; }</script><text>x</text>",
+    );
     expect(result.ok).toBe(false);
     expect(result.ok ? [] : result.diagnostics.map((d) => d.code)).toEqual(["assigns_non_state"]);
   });
@@ -211,4 +241,3 @@ function compiled(source: string) {
   if (!result.ok) throw new Error("compile failed");
   return result.block;
 }
-

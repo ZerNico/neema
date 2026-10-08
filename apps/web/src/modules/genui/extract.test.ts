@@ -6,7 +6,7 @@ describe("extractImageQueries", () => {
     const content = [
       "```ui",
       '<image query="7 speed  cassette"/>',
-      "{#if open}<images query={[\"hub gear\", `derailleur`]}/>{/if}",
+      '{#if open}<images query={["hub gear", `derailleur`]}/>{/if}',
       "```",
       "text",
       "```ui",
@@ -23,6 +23,8 @@ describe("extractImageQueries", () => {
 
   it("caps queries per answer", () => {
     const tags = Array.from({ length: 12 }, (_, i) => `<image query="q${i}"/>`).join("");
-    expect(extractImageQueries(`\`\`\`ui\n${tags}\n\`\`\``)).toHaveLength(IMAGE_QUERY_LIMITS.queriesPerAnswer);
+    expect(extractImageQueries(`\`\`\`ui\n${tags}\n\`\`\``)).toHaveLength(
+      IMAGE_QUERY_LIMITS.queriesPerAnswer,
+    );
   });
 });

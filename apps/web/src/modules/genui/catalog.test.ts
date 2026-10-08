@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { catalogReference, TREE_LIMITS, validateTree, type ValidNode } from "./catalog.ts";
 
-const el = (tag: string, props: Record<string, unknown> = {}, children: unknown[] = []) => ({ tag, props, children });
+const el = (tag: string, props: Record<string, unknown> = {}, children: unknown[] = []) => ({
+  tag,
+  props,
+  children,
+});
 
 function only(nodes: readonly (ValidNode | string)[]): ValidNode {
   const [node] = nodes;
@@ -12,13 +16,21 @@ function only(nodes: readonly (ValidNode | string)[]): ValidNode {
 describe("validateTree", () => {
   it("keeps known tags and props of the declared types", () => {
     const { nodes, diagnostics } = validateTree([
-      el("card", { title: "Gears" }, [el("slider", { min: 1, max: 7, value: 4, onchange: { $h: 0, rev: 1 } })]),
+      el("card", { title: "Gears" }, [
+        el("slider", { min: 1, max: 7, value: 4, onchange: { $h: 0, rev: 1 } }),
+      ]),
     ]);
     expect(diagnostics).toEqual([]);
     expect(only(nodes)).toEqual({
       tag: "card",
       props: { title: "Gears" },
-      children: [{ tag: "slider", props: { min: 1, max: 7, value: 4, onchange: { $h: 0, rev: 1 } }, children: [] }],
+      children: [
+        {
+          tag: "slider",
+          props: { min: 1, max: 7, value: 4, onchange: { $h: 0, rev: 1 } },
+          children: [],
+        },
+      ],
     });
   });
 
@@ -42,10 +54,18 @@ describe("validateTree", () => {
       el("b", {}, [el("card")]),
     ]);
     expect(nodes).toEqual([
-      { tag: "tabs", props: {}, children: [{ tag: "tab", props: { label: "A" }, children: ["ok"] }] },
+      {
+        tag: "tabs",
+        props: {},
+        children: [{ tag: "tab", props: { label: "A" }, children: ["ok"] }],
+      },
       { tag: "b", props: {}, children: [] },
     ]);
-    expect(diagnostics.map((d) => d.code)).toEqual(["missing_prop", "not_allowed_here", "not_allowed_here"]);
+    expect(diagnostics.map((d) => d.code)).toEqual([
+      "missing_prop",
+      "not_allowed_here",
+      "not_allowed_here",
+    ]);
   });
 
   it("only accepts http(s) links", () => {
@@ -64,7 +84,8 @@ describe("validateTree", () => {
 });
 
 describe("validateTree on drawings", () => {
-  const drawing = (children: unknown[]) => el("svg", { viewBox: "0 0 100 100", label: "Gears" }, children);
+  const drawing = (children: unknown[]) =>
+    el("svg", { viewBox: "0 0 100 100", label: "Gears" }, children);
 
   it("keeps geometry and theme colours, and reads <text> as SVG text", () => {
     const svg = only(
@@ -82,7 +103,11 @@ describe("validateTree on drawings", () => {
         tag: "g",
         props: { transform: "translate(10, 5) rotate(45)" },
         children: [
-          { tag: "circle", props: { cx: 50, cy: 50, r: 10, fill: "chart-1", strokeWidth: 2 }, children: [] },
+          {
+            tag: "circle",
+            props: { cx: 50, cy: 50, r: 10, fill: "chart-1", strokeWidth: 2 },
+            children: [],
+          },
           { tag: "text", props: { x: 50, y: 90, textAnchor: "middle" }, children: ["1"] },
         ],
       },
@@ -96,9 +121,15 @@ describe("validateTree on drawings", () => {
     ["use with href", el("use", { href: "#x" })],
     ["image with href", el("image", { href: "https://evil.example/x.png" })],
     ["animate", el("animate", { attributeName: "href", to: "javascript:alert(1)" })],
-    ["a with href", el("a", { href: "javascript:alert(1)" }, [el("rect", { width: 1, height: 1 })])],
+    [
+      "a with href",
+      el("a", { href: "javascript:alert(1)" }, [el("rect", { width: 1, height: 1 })]),
+    ],
     ["event attribute", el("rect", { width: 1, height: 1, onload: "alert(1)" })],
-    ["style attribute", el("rect", { width: 1, height: 1, style: "fill:url(https://evil.example)" })],
+    [
+      "style attribute",
+      el("rect", { width: 1, height: 1, style: "fill:url(https://evil.example)" }),
+    ],
     ["url() paint", el("rect", { width: 1, height: 1, fill: "url(#grad)" })],
     ["raw hex colour", el("rect", { width: 1, height: 1, fill: "#ff0000" })],
     ["filter", el("filter", { id: "f" })],
@@ -112,12 +143,16 @@ describe("validateTree on drawings", () => {
     it(`fails closed on ${name}`, () => {
       const svg = only(validateTree([drawing([payload])]).nodes);
       const serialized = JSON.stringify(svg);
-      expect(serialized).not.toMatch(/javascript:|onload|onerror|url\(|#ff0000|script|foreignObject|href|style|matrix/);
+      expect(serialized).not.toMatch(
+        /javascript:|onload|onerror|url\(|#ff0000|script|foreignObject|href|style|matrix/,
+      );
     });
   }
 
   it("keeps drawings out of text and text out of drawings", () => {
-    expect(validateTree([el("text", {}, [drawing([])])]).nodes).toEqual([{ tag: "text", props: {}, children: [] }]);
+    expect(validateTree([el("text", {}, [drawing([])])]).nodes).toEqual([
+      { tag: "text", props: {}, children: [] },
+    ]);
     expect(only(validateTree([drawing(["loose text", el("button")])]).nodes).children).toEqual([]);
   });
 
@@ -133,7 +168,9 @@ describe("catalogReference", () => {
     const reference = catalogReference();
     expect(reference).toContain("### Layout");
     expect(reference).toContain("### Drawing (inside <svg> only)");
-    expect(reference).toContain("<slider min: number, max: number, step?: number, value: number, onchange?: handler, label?: string>");
+    expect(reference).toContain(
+      "<slider min: number, max: number, step?: number, value: number, onchange?: handler, label?: string>",
+    );
     expect(reference).toBe(catalogReference());
   });
 });

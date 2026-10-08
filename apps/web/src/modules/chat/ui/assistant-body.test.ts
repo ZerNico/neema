@@ -129,6 +129,22 @@ describe("projectAssistantBody", () => {
     expect(parts[2]).toMatchObject({ content: outro });
   });
 
+  it("keeps a ui block whole and shows an activity anchored inside it after it", () => {
+    const intro = "Intro\n\n";
+    const block = "```ui\n<text>a</text>\n<text>b</text>\n```\n";
+    const outro = "After";
+    const inside = intro.length + block.indexOf("<text>b");
+    const { parts } = projectAssistantBody({
+      content: intro + block + outro,
+      streaming: false,
+      tools: [web("web", inside)],
+      compactions: [],
+    });
+    expect(parts.map((p) => p.kind)).toEqual(["text", "web", "text"]);
+    expect(parts[0]).toMatchObject({ content: intro + block, start: 0 });
+    expect(parts[2]).toMatchObject({ content: outro, start: (intro + block).length });
+  });
+
   it("sorts equal-offset compactions before their turn and tool siblings by call index", () => {
     const { parts } = projectAssistantBody({
       content: "",
@@ -185,7 +201,7 @@ describe("projectAssistantBody", () => {
       compactions: [],
     });
     expect(before.parts).toEqual([
-      { kind: "text", key: "text-0", content: "abc", streaming: true },
+      { kind: "text", key: "text-0", content: "abc", streaming: true, start: 0 },
     ]);
     const at = projectAssistantBody({
       content: "abcde",

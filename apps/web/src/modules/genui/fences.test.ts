@@ -49,14 +49,18 @@ describe("scanUiFences", () => {
   });
 
   it("needs a closing fence at least as long as the opener", () => {
-    expect(scanUiFences("````ui\n<b>x</b>\n```\nstill inside\n````")[0]!.code).toBe("<b>x</b>\n```\nstill inside");
+    expect(scanUiFences("````ui\n<b>x</b>\n```\nstill inside\n````")[0]!.code).toBe(
+      "<b>x</b>\n```\nstill inside",
+    );
   });
 });
 
 describe("keyUiFences", () => {
   it("writes message-wide keys into the openers and nothing else", () => {
     const part = "a\n```ui\n<b>x</b>\n```\nb\n```ui extra\n<b>y</b>\n```";
-    expect(keyUiFences(part, 3)).toBe("a\n```ui key=3\n<b>x</b>\n```\nb\n```ui key=4\n<b>y</b>\n```");
+    expect(keyUiFences(part, 3)).toBe(
+      "a\n```ui key=3\n<b>x</b>\n```\nb\n```ui key=4\n<b>y</b>\n```",
+    );
   });
 
   it("round-trips through fenceKey", () => {

@@ -62,12 +62,25 @@ const SVG_PAINT = [
 const SPACE = () => int(0, 12);
 const option = Schema.Union([
   Schema.String.check(Schema.isMaxLength(200)),
-  Schema.Struct({ label: Schema.String.check(Schema.isMaxLength(200)), value: Schema.String.check(Schema.isMaxLength(200)) }),
+  Schema.Struct({
+    label: Schema.String.check(Schema.isMaxLength(200)),
+    value: Schema.String.check(Schema.isMaxLength(200)),
+  }),
 ]);
-const cell = Schema.Union([Schema.String.check(Schema.isMaxLength(2000)), Schema.Finite, Schema.Null]);
+const cell = Schema.Union([
+  Schema.String.check(Schema.isMaxLength(2000)),
+  Schema.Finite,
+  Schema.Null,
+]);
 
 /** Where a tag may appear and what it may contain. */
-type Children = "none" | "plain" | "inline" | "block" | "svg" | { readonly only: readonly string[] };
+type Children =
+  | "none"
+  | "plain"
+  | "inline"
+  | "block"
+  | "svg"
+  | { readonly only: readonly string[] };
 
 export type TagGroup = "layout" | "text" | "input" | "data" | "media" | "chat" | "svg";
 
@@ -118,8 +131,18 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "block",
   },
-  col: { group: "layout", doc: "Column inside a row; takes the free width.", props: { gap: SPACE() }, children: "block" },
-  grid: { group: "layout", doc: "Grid of cells.", props: { columns: int(1, 6), gap: SPACE() }, children: "block" },
+  col: {
+    group: "layout",
+    doc: "Column inside a row; takes the free width.",
+    props: { gap: SPACE() },
+    children: "block",
+  },
+  grid: {
+    group: "layout",
+    doc: "Grid of cells.",
+    props: { columns: int(1, 6), gap: SPACE() },
+    children: "block",
+  },
   cell: { group: "layout", doc: "Grid cell.", props: { span: int(1, 6) }, children: "block" },
   card: { group: "layout", doc: "Bordered card.", props: { title: text(200) }, children: "block" },
   divider: { group: "layout", doc: "Horizontal rule.", props: {}, children: "none" },
@@ -129,7 +152,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     props: { value: text(200), onchange: handler() },
     children: { only: ["tab"] },
   },
-  tab: { group: "layout", doc: "One tab.", props: { label: required(text(80)), value: text(200) }, children: "block" },
+  tab: {
+    group: "layout",
+    doc: "One tab.",
+    props: { label: required(text(80)), value: text(200) },
+    children: "block",
+  },
   disclosure: {
     group: "layout",
     doc: "Collapsible section.",
@@ -137,7 +165,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     children: "block",
   },
 
-  title: { group: "text", doc: "Heading.", props: { size: oneOf(["sm", "md", "lg"]) }, children: "inline" },
+  title: {
+    group: "text",
+    doc: "Heading.",
+    props: { size: oneOf(["sm", "md", "lg"]) },
+    children: "inline",
+  },
   text: {
     group: "text",
     doc: "Paragraph.",
@@ -159,7 +192,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Metric with label.",
     props: {
       label: required(text(120)),
-      value: required(prop(Schema.Union([Schema.String.check(Schema.isMaxLength(120)), Schema.Finite]), "string | number")),
+      value: required(
+        prop(
+          Schema.Union([Schema.String.check(Schema.isMaxLength(120)), Schema.Finite]),
+          "string | number",
+        ),
+      ),
       delta: text(60),
       tone: oneOf(TONES),
     },
@@ -178,7 +216,10 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Number formatted in the reader's locale.",
     props: {
       value: required(num()),
-      format: matching(/^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/, '"decimal:2" | "percent" | "compact" | "currency:EUR"'),
+      format: matching(
+        /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/,
+        '"decimal:2" | "percent" | "compact" | "currency:EUR"',
+      ),
     },
     children: "none",
   },
@@ -186,7 +227,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     group: "text",
     doc: "Date formatted in the reader's locale.",
     props: {
-      value: required(prop(Schema.Union([Schema.Finite, Schema.String.check(Schema.isMaxLength(40))]), "timestamp | ISO string")),
+      value: required(
+        prop(
+          Schema.Union([Schema.Finite, Schema.String.check(Schema.isMaxLength(40))]),
+          "timestamp | ISO string",
+        ),
+      ),
       format: oneOf(["date", "time", "datetime", "relative"]),
     },
     children: "none",
@@ -206,7 +252,9 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     group: "input",
     doc: "Choice between a few options; onchange(value).",
     props: {
-      options: required(prop(Schema.Array(option).check(Schema.isMaxLength(12)), "(string | {label, value})[]")),
+      options: required(
+        prop(Schema.Array(option).check(Schema.isMaxLength(12)), "(string | {label, value})[]"),
+      ),
       value: text(200),
       onchange: handler(),
     },
@@ -234,14 +282,23 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   number: {
     group: "input",
     doc: "Number input; onchange(value).",
-    props: { value: num(), min: num(), max: num(), step: num(), onchange: handler(), label: text(120) },
+    props: {
+      value: num(),
+      min: num(),
+      max: num(),
+      step: num(),
+      onchange: handler(),
+      label: text(120),
+    },
     children: "none",
   },
   select: {
     group: "input",
     doc: "Dropdown; onchange(value).",
     props: {
-      options: required(prop(Schema.Array(option).check(Schema.isMaxLength(100)), "(string | {label, value})[]")),
+      options: required(
+        prop(Schema.Array(option).check(Schema.isMaxLength(100)), "(string | {label, value})[]"),
+      ),
       value: text(200),
       onchange: handler(),
       label: text(120),
@@ -263,11 +320,23 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   stepper: {
     group: "input",
     doc: "− value + control; onchange(value).",
-    props: { value: required(num()), min: num(), max: num(), step: num(), onchange: handler(), label: text(120) },
+    props: {
+      value: required(num()),
+      min: num(),
+      max: num(),
+      step: num(),
+      onchange: handler(),
+      label: text(120),
+    },
     children: "none",
   },
 
-  suggestions: { group: "chat", doc: "Follow-up suggestions.", props: {}, children: { only: ["suggestion"] } },
+  suggestions: {
+    group: "chat",
+    doc: "Follow-up suggestions.",
+    props: {},
+    children: { only: ["suggestion"] },
+  },
   suggestion: {
     group: "chat",
     doc: "A follow-up the reader can send with one click; its text is the message.",
@@ -279,8 +348,20 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     group: "data",
     doc: "Table.",
     props: {
-      columns: required(prop(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(20)), "string[]")),
-      rows: required(prop(Schema.Array(Schema.Array(cell).check(Schema.isMaxLength(20))).check(Schema.isMaxLength(500)), "(string | number | null)[][]")),
+      columns: required(
+        prop(
+          Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(20)),
+          "string[]",
+        ),
+      ),
+      rows: required(
+        prop(
+          Schema.Array(Schema.Array(cell).check(Schema.isMaxLength(20))).check(
+            Schema.isMaxLength(500),
+          ),
+          "(string | number | null)[][]",
+        ),
+      ),
     },
     children: "none",
   },
@@ -295,13 +376,22 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Bar, line or area chart.",
     props: {
       type: required(oneOf(["bar", "line", "area"])),
-      x: required(prop(Schema.Array(Schema.Union([Schema.String.check(Schema.isMaxLength(80)), Schema.Finite])).check(Schema.isMaxLength(500)), "(string | number)[]")),
+      x: required(
+        prop(
+          Schema.Array(
+            Schema.Union([Schema.String.check(Schema.isMaxLength(80)), Schema.Finite]),
+          ).check(Schema.isMaxLength(500)),
+          "(string | number)[]",
+        ),
+      ),
       series: required(
         prop(
           Schema.Array(
             Schema.Struct({
               name: Schema.String.check(Schema.isMaxLength(80)),
-              values: Schema.Array(Schema.Union([Schema.Finite, Schema.Null])).check(Schema.isMaxLength(500)),
+              values: Schema.Array(Schema.Union([Schema.Finite, Schema.Null])).check(
+                Schema.isMaxLength(500),
+              ),
             }),
           ).check(Schema.isMaxLength(8)),
           "{name, values: number[]}[]",
@@ -317,14 +407,23 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   image: {
     group: "media",
     doc: "Image found by web search for the query.",
-    props: { query: required(text(200)), aspect: matching(/^\d{1,2}:\d{1,2}$/, '"4:3"'), caption: text(300) },
+    props: {
+      query: required(text(200)),
+      aspect: matching(/^\d{1,2}:\d{1,2}$/, '"4:3"'),
+      caption: text(300),
+    },
     children: "none",
   },
   images: {
     group: "media",
     doc: "Several images found by web search.",
     props: {
-      query: required(prop(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(4)), "string[]")),
+      query: required(
+        prop(
+          Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(4)),
+          "string[]",
+        ),
+      ),
       layout: oneOf(["carousel", "grid"]),
       aspect: matching(/^\d{1,2}:\d{1,2}$/, '"1:1"'),
     },
@@ -335,7 +434,9 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     group: "svg",
     doc: "Drawing; shapes inside use theme colours.",
     props: {
-      viewBox: required(matching(/^\s*-?\d+(?:\.\d+)?(?:[\s,]+-?\d+(?:\.\d+)?){3}\s*$/, '"0 0 320 120"')),
+      viewBox: required(
+        matching(/^\s*-?\d+(?:\.\d+)?(?:[\s,]+-?\d+(?:\.\d+)?){3}\s*$/, '"0 0 320 120"'),
+      ),
       label: required(text(200)),
       height: between(1, 2000),
     },
@@ -345,7 +446,15 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   rect: {
     group: "svg",
     doc: "Rectangle.",
-    props: { ...SVG_SHAPE, x: num(), y: num(), width: required(num()), height: required(num()), rx: num(), ry: num() },
+    props: {
+      ...SVG_SHAPE,
+      x: num(),
+      y: num(),
+      width: required(num()),
+      height: required(num()),
+      rx: num(),
+      ry: num(),
+    },
     children: "none",
   },
   circle: {
@@ -366,12 +475,27 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     props: { ...SVG_SHAPE, x1: num(), y1: num(), x2: num(), y2: num() },
     children: "none",
   },
-  polyline: { group: "svg", doc: "Open polyline.", props: { ...SVG_SHAPE, points: required(POINTS) }, children: "none" },
-  polygon: { group: "svg", doc: "Closed polygon.", props: { ...SVG_SHAPE, points: required(POINTS) }, children: "none" },
+  polyline: {
+    group: "svg",
+    doc: "Open polyline.",
+    props: { ...SVG_SHAPE, points: required(POINTS) },
+    children: "none",
+  },
+  polygon: {
+    group: "svg",
+    doc: "Closed polygon.",
+    props: { ...SVG_SHAPE, points: required(POINTS) },
+    children: "none",
+  },
   path: {
     group: "svg",
     doc: "Path.",
-    props: { ...SVG_SHAPE, d: required(matching(/^[MmLlHhVvCcSsQqTtAaZz\d\s,.eE+-]*$/, "path data", TREE_LIMITS.pathChars)) },
+    props: {
+      ...SVG_SHAPE,
+      d: required(
+        matching(/^[MmLlHhVvCcSsQqTtAaZz\d\s,.eE+-]*$/, "path data", TREE_LIMITS.pathChars),
+      ),
+    },
     children: "none",
   },
 };
@@ -416,7 +540,12 @@ class Validator {
     if (this.diagnostics.length < 50) this.diagnostics.push({ action, code, detail });
   }
 
-  list(raw: readonly unknown[], parent: Children, inSvg: boolean, depth: number): (ValidNode | string)[] {
+  list(
+    raw: readonly unknown[],
+    parent: Children,
+    inSvg: boolean,
+    depth: number,
+  ): (ValidNode | string)[] {
     const out: (ValidNode | string)[] = [];
     for (const child of raw) {
       if (typeof child === "string") {
@@ -428,7 +557,8 @@ class Validator {
         // layout whitespace or a mistake.
         if (parent === "inline" || parent === "block" || parent === "plain") {
           out.push(child);
-        } else if (child.trim() !== "") this.report("omitted_node", "text_not_allowed", child.slice(0, 40));
+        } else if (child.trim() !== "")
+          this.report("omitted_node", "text_not_allowed", child.slice(0, 40));
         continue;
       }
       const node = this.node(child, parent, inSvg, depth);
@@ -507,13 +637,24 @@ class Validator {
  * dropped with a diagnostic, so React only ever sees known tags with props
  * of the declared types.
  */
-export function validateTree(raw: readonly unknown[]): { nodes: (ValidNode | string)[]; diagnostics: TreeDiagnostic[] } {
+export function validateTree(raw: readonly unknown[]): {
+  nodes: (ValidNode | string)[];
+  diagnostics: TreeDiagnostic[];
+} {
   const validator = new Validator();
   const nodes = validator.list(raw, "block", false, 0);
   return { nodes, diagnostics: validator.diagnostics };
 }
 
-const GROUP_ORDER: readonly TagGroup[] = ["layout", "text", "input", "data", "media", "chat", "svg"];
+const GROUP_ORDER: readonly TagGroup[] = [
+  "layout",
+  "text",
+  "input",
+  "data",
+  "media",
+  "chat",
+  "svg",
+];
 
 const GROUP_TITLES: Record<TagGroup, string> = {
   layout: "Layout",
@@ -526,7 +667,9 @@ const GROUP_TITLES: Record<TagGroup, string> = {
 };
 
 function signature(tag: string, spec: TagSpec): string {
-  const props = Object.entries(spec.props).map(([name, p]) => `${name}${p.required ? "" : "?"}: ${p.type}`);
+  const props = Object.entries(spec.props).map(
+    ([name, p]) => `${name}${p.required ? "" : "?"}: ${p.type}`,
+  );
   return `<${tag}${props.length > 0 ? ` ${props.join(", ")}` : ""}>`;
 }
 

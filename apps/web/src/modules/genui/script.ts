@@ -4,7 +4,14 @@
 // contract is what makes rebuilding a block from source plus saved state
 // reproduce it exactly (docs/internals/generative-ui.md).
 
-import { parse, parseExpressionAt, type AnyNode, type Options, type Pattern, type Program } from "acorn";
+import {
+  parse,
+  parseExpressionAt,
+  type AnyNode,
+  type Options,
+  type Pattern,
+  type Program,
+} from "acorn";
 
 const OPTIONS: Options = { ecmaVersion: "latest", sourceType: "script", locations: true };
 
@@ -37,7 +44,9 @@ interface Scope {
 }
 
 function isNode(value: unknown): value is AnyNode {
-  return typeof value === "object" && value !== null && "type" in value && typeof value.type === "string";
+  return (
+    typeof value === "object" && value !== null && "type" in value && typeof value.type === "string"
+  );
 }
 
 function children(node: AnyNode): AnyNode[] {
@@ -49,7 +58,10 @@ function children(node: AnyNode): AnyNode[] {
   return out;
 }
 
-function patternNames(pattern: Pattern | AnyNode | null | undefined, into: string[] = []): string[] {
+function patternNames(
+  pattern: Pattern | AnyNode | null | undefined,
+  into: string[] = [],
+): string[] {
   if (!pattern) return into;
   switch (pattern.type) {
     case "Identifier":
@@ -155,7 +167,8 @@ class Checker {
 
   private walkPatternDefaults(pattern: AnyNode, scope: Scope): void {
     if (pattern.type === "AssignmentPattern") this.walk(pattern.right, scope);
-    for (const child of children(pattern)) if (child.type !== "Identifier") this.walkPatternDefaults(child, scope);
+    for (const child of children(pattern))
+      if (child.type !== "Identifier") this.walkPatternDefaults(child, scope);
   }
 
   private functionScope(fn: AnyNode & { params: Pattern[]; body: AnyNode }, scope: Scope): Scope {
@@ -174,7 +187,8 @@ class Checker {
         if (FORBIDDEN.has(node.name) || node.name.startsWith("__")) {
           this.report(node, "forbidden_name", node.name);
         }
-        if (node.name === "$state" || node.name === "$derived") this.report(node, "rune_misplaced", node.name);
+        if (node.name === "$state" || node.name === "$derived")
+          this.report(node, "rune_misplaced", node.name);
         return;
       case "AssignmentExpression":
         this.checkTarget(node.left, scope);
@@ -209,7 +223,8 @@ class Checker {
       case "ArrowFunctionExpression": {
         const inner = this.functionScope(node, scope);
         for (const p of node.params) this.walkPatternDefaults(p, inner);
-        if (node.body.type === "BlockStatement") for (const s of node.body.body) this.walk(s, inner);
+        if (node.body.type === "BlockStatement")
+          for (const s of node.body.body) this.walk(s, inner);
         else this.walk(node.body, inner);
         return;
       }
@@ -231,9 +246,11 @@ class Checker {
         }
         const inner = { names, parent: scope, topLevel: false };
         // `for (x of xs)` assigns x on every iteration.
-        const assignsHead = node.type !== "ForStatement" && head && head.type !== "VariableDeclaration";
+        const assignsHead =
+          node.type !== "ForStatement" && head && head.type !== "VariableDeclaration";
         if (assignsHead) this.checkTarget(head, inner);
-        for (const child of children(node)) if (!assignsHead || child !== head) this.walk(child, inner);
+        for (const child of children(node))
+          if (!assignsHead || child !== head) this.walk(child, inner);
         return;
       }
       case "CatchClause": {
@@ -257,15 +274,26 @@ class Checker {
   }
 }
 
-function topLevelScope(stateNames: readonly string[], derivedNames: readonly string[], others: readonly string[]): Scope {
-  return { names: new Set([...stateNames, ...derivedNames, ...others]), parent: null, topLevel: true };
+function topLevelScope(
+  stateNames: readonly string[],
+  derivedNames: readonly string[],
+  others: readonly string[],
+): Scope {
+  return {
+    names: new Set([...stateNames, ...derivedNames, ...others]),
+    parent: null,
+    topLevel: true,
+  };
 }
 
 function issueFromSyntax(error: unknown, offsetLine = 0): ScriptIssue {
   const loc = typeof error === "object" && error && "loc" in error ? error.loc : null;
-  const line = typeof loc === "object" && loc && "line" in loc && typeof loc.line === "number" ? loc.line : 1;
+  const line =
+    typeof loc === "object" && loc && "line" in loc && typeof loc.line === "number" ? loc.line : 1;
   const column =
-    typeof loc === "object" && loc && "column" in loc && typeof loc.column === "number" ? loc.column + 1 : 1;
+    typeof loc === "object" && loc && "column" in loc && typeof loc.column === "number"
+      ? loc.column + 1
+      : 1;
   const message = error instanceof Error ? error.message : String(error);
   return { code: "syntax_error", line: line + offsetLine, column, detail: message };
 }
@@ -279,7 +307,13 @@ export function analyzeScript(code: string | null): ScriptAnalysis {
   try {
     program = parse(code, OPTIONS);
   } catch (error) {
-    return { stateNames: [], derivedNames: [], frozenNames: [], rewritten: "", issues: [issueFromSyntax(error)] };
+    return {
+      stateNames: [],
+      derivedNames: [],
+      frozenNames: [],
+      rewritten: "",
+      issues: [issueFromSyntax(error)],
+    };
   }
 
   const stateNames: string[] = [];
@@ -304,7 +338,8 @@ export function analyzeScript(code: string | null): ScriptAnalysis {
     for (const d of statement.declarations) {
       const rune = runeCall(d.init);
       if (d.id.type !== "Identifier" || rune === null || d.init?.type !== "CallExpression") {
-        if (rune !== null) pre.push({ code: "rune_pattern", line: d.loc?.start.line ?? 1, column: 1 });
+        if (rune !== null)
+          pre.push({ code: "rune_pattern", line: d.loc?.start.line ?? 1, column: 1 });
         parts.push(`${statement.kind} ${code.slice(d.start, d.end)};`);
         frozenNames.push(...patternNames(d.id));
         continue;
@@ -313,7 +348,13 @@ export function analyzeScript(code: string | null): ScriptAnalysis {
       const arg = d.init.arguments[0];
       const init = arg ? code.slice(arg.start, arg.end) : "undefined";
       if (rune === "$state") {
-        if (statement.kind !== "let") pre.push({ code: "state_needs_let", line: d.loc?.start.line ?? 1, column: 1, detail: name });
+        if (statement.kind !== "let")
+          pre.push({
+            code: "state_needs_let",
+            line: d.loc?.start.line ?? 1,
+            column: 1,
+            detail: name,
+          });
         stateNames.push(name);
         parts.push(`__decl(${JSON.stringify(name)}, function () { return (${init}); });`);
       } else {
@@ -327,7 +368,8 @@ export function analyzeScript(code: string | null): ScriptAnalysis {
   rewritten += code.slice(at);
 
   for (const name of [...stateNames, ...derivedNames, ...frozenNames]) {
-    if (name.startsWith("__")) pre.push({ code: "forbidden_name", line: 1, column: 1, detail: name });
+    if (name.startsWith("__"))
+      pre.push({ code: "forbidden_name", line: 1, column: 1, detail: name });
   }
   const checker = new Checker(new Set(stateNames));
   checker.issues.push(...pre);
@@ -362,7 +404,14 @@ export function analyzeExpression(
     return [issueFromSyntax(error)];
   }
   if (code.slice(expression.end).trim() !== "") {
-    return [{ code: "syntax_error", line: 1, column: expression.end + 1, detail: "Unexpected trailing code" }];
+    return [
+      {
+        code: "syntax_error",
+        line: 1,
+        column: expression.end + 1,
+        detail: "Unexpected trailing code",
+      },
+    ];
   }
   const checker = new Checker(new Set(script.stateNames));
   const top = topLevelScope(script.stateNames, script.derivedNames, script.frozenNames);

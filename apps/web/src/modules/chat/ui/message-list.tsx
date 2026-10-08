@@ -112,6 +112,8 @@ import {
 } from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { keyUiFences, scanUiFences } from "~/modules/genui/fences.ts";
+import { GenuiMessageContext } from "~/modules/genui/ui/context.ts";
 
 // The sources change with every streamed token, but the components must not:
 // a new component function is a new element type to React, which remounts the
@@ -690,6 +692,15 @@ const AssistantBody = memo(function AssistantBody({
   reasoningActive: boolean;
 }) {
   const streaming = message.status === "streaming";
+  const uiFenceStarts = useMemo(
+    () => scanUiFences(message.content).map((f) => f.start),
+    [message.content],
+  );
+  const iso = message.time?.iso;
+  const genui = useMemo(
+    () => ({ messageId: message.id, createdAt: iso ? Date.parse(iso) || 0 : 0, streaming }),
+    [message.id, iso, streaming],
+  );
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   // Working files a publish in this answer delivered, whichever tool made them.
   const publishedFiles: ReadonlySet<string> = useMemo(
@@ -712,13 +723,18 @@ const AssistantBody = memo(function AssistantBody({
       return <AssistantFileAttachment key={part.key} file={part.file} fresh={streaming} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
+      // Keyed on the raw text, before any citation rewrite changes lengths.
+      const content = keyUiFences(
+        part.content,
+        uiFenceStarts.filter((start) => start < part.start).length,
+      );
       return (
         <div key={part.key} className="mb-3 last:mb-0">
           <FileReferenceMachine value={message.desktopMachineId ?? null}>
             {sources.length > 0 ? (
-              <CitedAnswer content={part.content} sources={sources} streaming={part.streaming} />
+              <CitedAnswer content={content} sources={sources} streaming={part.streaming} />
             ) : (
-              <AssistantMarkdown content={part.content} streaming={part.streaming} />
+              <AssistantMarkdown content={content} streaming={part.streaming} />
             )}
           </FileReferenceMachine>
         </div>
@@ -847,23 +863,27 @@ const AssistantBody = memo(function AssistantBody({
       />
     );
   };
-  return parts.map((part, index) => {
-    const live = streaming && index === parts.length - 1;
-    if (part.kind !== "work") return renderPart(part);
-    // A lone step without calls (reasoning, a compaction) keeps its own row:
-    // a work line would only repeat it. Any call, even one, gets the line.
-    if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
-      return renderPart(part.steps[0]!);
-    return (
-      <WorkGroupBlock
-        key={part.key}
-        part={part}
-        live={live}
-        approvals={message.desktopApprovals}
-        renderStep={(step) => renderPart(step)}
-      />
-    );
-  });
+  return (
+    <GenuiMessageContext value={genui}>
+      {parts.map((part, index) => {
+        const live = streaming && index === parts.length - 1;
+        if (part.kind !== "work") return renderPart(part);
+        // A lone step without calls (reasoning, a compaction) keeps its own row:
+        // a work line would only repeat it. Any call, even one, gets the line.
+        if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
+          return renderPart(part.steps[0]!);
+        return (
+          <WorkGroupBlock
+            key={part.key}
+            part={part}
+            live={live}
+            approvals={message.desktopApprovals}
+            renderStep={(step) => renderPart(step)}
+          />
+        );
+      })}
+    </GenuiMessageContext>
+  );
 });
 
 // Mount the panel binding beside, not around, the body: receiving the first

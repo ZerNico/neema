@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { analyzeExpression, analyzeScript } from "./script.ts";
 
-const codes = (code: string) => analyzeScript(code).issues.map((i) => `${i.code}:${i.detail ?? ""}`);
+const codes = (code: string) =>
+  analyzeScript(code).issues.map((i) => `${i.code}:${i.detail ?? ""}`);
 
 describe("analyzeScript", () => {
   it("finds runes in order and rewrites them in place", () => {
@@ -13,8 +14,12 @@ function bump() { count += 1; }`);
     expect(analysis.stateNames).toEqual(["count"]);
     expect(analysis.derivedNames).toEqual(["double"]);
     expect(analysis.frozenNames).toEqual(["base", "label", "bump"]);
-    expect(analysis.rewritten).toContain('__decl("count", function () { return (base * 2); }); let label = "x";');
-    expect(analysis.rewritten).toContain('__derive("double", function () { return (count * 2); });');
+    expect(analysis.rewritten).toContain(
+      '__decl("count", function () { return (base * 2); }); let label = "x";',
+    );
+    expect(analysis.rewritten).toContain(
+      '__derive("double", function () { return (count * 2); });',
+    );
     expect(analysis.rewritten).toContain("const base = 3;");
   });
 
@@ -28,8 +33,12 @@ const run = () => { let wins = 0; for (const d of [1, 2]) { wins++; } items = [.
   });
 
   it("rejects writes to non-state top-level bindings and globals", () => {
-    expect(codes("let counter = 0;\nfunction inc() { counter++; }")).toEqual(["assigns_non_state:counter"]);
-    expect(codes("const box = { n: 0 };\nfunction inc() { box.n = 1; }")).toEqual(["assigns_non_state:box"]);
+    expect(codes("let counter = 0;\nfunction inc() { counter++; }")).toEqual([
+      "assigns_non_state:counter",
+    ]);
+    expect(codes("const box = { n: 0 };\nfunction inc() { box.n = 1; }")).toEqual([
+      "assigns_non_state:box",
+    ]);
     expect(codes("function leak() { stray = 1; }")).toEqual(["assigns_global:stray"]);
     expect(codes("function wipe() { delete Math.PI; }")).toEqual(["assigns_global:Math"]);
     expect(codes("let [a, b] = [1, 2];\nfunction swap() { [a, b] = [b, a]; }")).toEqual([
@@ -66,7 +75,11 @@ describe("analyzeExpression", () => {
   });
 
   it("rejects writes to constants and trailing code", () => {
-    expect(analyzeExpression("() => sprockets[0] = 1", script, []).map((i) => i.code)).toEqual(["assigns_non_state"]);
-    expect(analyzeExpression("1 + 1; alert(1)", script, []).map((i) => i.code)).toEqual(["syntax_error"]);
+    expect(analyzeExpression("() => sprockets[0] = 1", script, []).map((i) => i.code)).toEqual([
+      "assigns_non_state",
+    ]);
+    expect(analyzeExpression("1 + 1; alert(1)", script, []).map((i) => i.code)).toEqual([
+      "syntax_error",
+    ]);
   });
 });

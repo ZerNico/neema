@@ -107,6 +107,21 @@ export function keyUiFences(part: string, firstOrdinal: number): string {
   return out + part.slice(at);
 }
 
+/**
+ * Applies `transform` to the text between `ui` fences and leaves each block
+ * byte-for-byte. Citation rewriting uses it: a `[^5]` in a block's script is
+ * code, and collapsing it would also shift the block's source hash.
+ */
+export function outsideUiFences(text: string, transform: (segment: string) => string): string {
+  let out = "";
+  let at = 0;
+  for (const fence of scanUiFences(text)) {
+    out += transform(text.slice(at, fence.start)) + text.slice(fence.start, fence.end);
+    at = fence.end;
+  }
+  return out + transform(text.slice(at));
+}
+
 /** Reads the key `keyUiFences` wrote into a fence's info string. */
 export function fenceKey(meta: string | undefined): number | null {
   const match = meta ? /(?:^|\s)key=(\d+)(?:\s|$)/.exec(meta) : null;

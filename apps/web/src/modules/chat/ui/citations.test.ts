@@ -135,3 +135,13 @@ describe("collectSources", () => {
     ).toEqual([source(1, "https://a.dev")]);
   });
 });
+
+describe("prepareCitedMarkdown next to ui blocks", () => {
+  it("rewrites markers in prose but not inside a ui block", () => {
+    const block = "```ui key=0\n<text>see [^1][^9]</text>\n```";
+    const out = prepareCitedMarkdown(`A[^1][^9].\n\n${block}\n`, [
+      { kind: "web", index: 1, url: "https://a.dev", title: "A", snippet: "", read: false },
+    ]);
+    expect(out.startsWith(`A[^1].\n\n${block}\n`)).toBe(true);
+  });
+});

@@ -76,7 +76,9 @@ class Emitter {
       case "expr":
         return this.expr(node.code, locals, "null", "expression");
       case "element": {
-        const props = node.attrs.map((a) => `${JSON.stringify(a.name)}: ${this.attr(a, locals)}`).join(", ");
+        const props = node.attrs
+          .map((a) => `${JSON.stringify(a.name)}: ${this.attr(a, locals)}`)
+          .join(", ");
         return `__el(${JSON.stringify(node.tag)}, {${props}}, ${this.nodes(node.children, locals)})`;
       }
       case "each": {
@@ -113,11 +115,16 @@ export function compileProgram(program: UiProgram): CompileResult {
   }
   const script = analyzeScript(program.script?.code ?? null);
   if (script.issues.length > 0) {
-    return { ok: false, diagnostics: [...program.diagnostics, ...scriptDiagnostics(script)], incomplete: false };
+    return {
+      ok: false,
+      diagnostics: [...program.diagnostics, ...scriptDiagnostics(script)],
+      incomplete: false,
+    };
   }
   const emitter = new Emitter(script);
   const tree = emitter.nodes(program.nodes, []);
-  const freeze = script.frozenNames.length > 0 ? `__freeze([${script.frozenNames.join(", ")}]);` : "";
+  const freeze =
+    script.frozenNames.length > 0 ? `__freeze([${script.frozenNames.join(", ")}]);` : "";
   // The script's own declarations sit inside both `with` blocks, so they
   // shadow state and derived names only where the script declares them.
   const source = `(function (__rt) {

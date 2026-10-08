@@ -47,7 +47,8 @@ function collect(nodes: readonly UiNode[], into: string[]): void {
         if (node.tag === "image" || node.tag === "images") {
           const attr = node.attrs.find((a) => a.name === "query");
           if (attr?.value.kind === "literal") into.push(attr.value.value);
-          else if (attr?.value.kind === "expr") into.push(...(literalStrings(attr.value.code) ?? []));
+          else if (attr?.value.kind === "expr")
+            into.push(...(literalStrings(attr.value.code) ?? []));
         }
         collect(node.children, into);
         break;
