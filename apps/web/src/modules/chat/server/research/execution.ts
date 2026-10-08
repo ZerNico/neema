@@ -49,6 +49,7 @@ import {
   COMPACTION_CONFIG,
   computeBudget,
   estimatePromptTokens,
+  skillRootChars,
   type CompactionDeps,
 } from "../compaction.ts";
 import {
@@ -297,8 +298,10 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     ? yield* prepareSkillTools({
         userId: deps.userId,
         manifest: skillManifest,
-        maxRootChars: Math.floor(
-          computeBudget({ contextLength: model?.contextLength, webToolsEnabled: true }).input * 0.2,
+        // A run has no earlier answer of its own to calibrate from.
+        maxRootChars: skillRootChars(
+          computeBudget({ contextLength: model?.contextLength, webToolsEnabled: true }).input,
+          null,
         ),
       }).pipe(Effect.provideService(SkillReader, skillReader))
     : null;

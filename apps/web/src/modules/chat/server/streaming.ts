@@ -187,6 +187,7 @@ import {
   calibrationFactor,
   compileActivePrompt,
   computeBudget,
+  skillRootChars,
   estimatePromptTokens,
   estimateToolSchemaTokens,
   ContextTooLarge,
@@ -1096,11 +1097,12 @@ export class StreamEngine extends Context.Service<
             ? yield* prepareSkillTools({
                 userId: input.userId,
                 manifest: skillManifest,
-                maxRootChars: Math.floor(
+                maxRootChars: skillRootChars(
                   computeBudget({
                     contextLength: model?.contextLength,
                     webToolsEnabled: !!webTools,
-                  }).input * 0.2,
+                  }).input,
+                  priorUsage,
                 ),
               }).pipe(Effect.provideService(SkillReader, skillReader))
             : null;
