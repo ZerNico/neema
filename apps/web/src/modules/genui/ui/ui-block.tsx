@@ -180,20 +180,67 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
 }
 
 /**
+ * State a reader set that is not saved yet, by block. Outside React because
+ * Streamdown remounts a block when its answer finishes, exactly when a change
+ * made while it streamed first becomes savable.
+ */
+const unsaved = new Map<string, string>();
+
+/**
+ * Saves what the reader set, once they settle. A change made while the answer
+ * still streams waits for it to finish, since only a finished answer stores
+ * state, and a save still waiting when the block unmounts (scrolled away, chat
+ * switched) is sent then rather than dropped.
+ */
+function useBlockSave(message: GenuiMessage, block: string, ordinal: number, code: string) {
+  const actions = use(GenuiActionsContext);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useRef(() => {});
+  const { messageId, streaming } = message;
+  // A branch's copy has no attempt (null) yet still saves; undefined means unknown.
+  const generationId = message.generationId;
+  const canSave = actions !== null && !streaming && generationId !== undefined;
+
+  useEffect(() => {
+    flush.current = () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      const state = unsaved.get(block);
+      if (state === undefined || !canSave) return;
+      unsaved.delete(block);
+      actions.save({ messageId, generationId, ordinal, sourceHash: hashSource(code), state });
+    };
+  });
+
+  const schedule = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => flush.current(), SAVE_DELAY_MS);
+  }, []);
+
+  // Mounted, or the answer finished, with a change still unsaved.
+  useEffect(() => {
+    if (canSave && unsaved.has(block)) schedule();
+  }, [canSave, block, schedule]);
+
+  useEffect(() => () => flush.current(), []);
+
+  return useCallback(
+    (state: string) => {
+      unsaved.set(block, state);
+      if (canSave) schedule();
+    },
+    [block, canSave, schedule],
+  );
+}
+
+/**
  * What a block's actions may do, decided here and not in the block: which
  * event fired, on which element, and what the text says. A prompt-injected
  * block can draw a misleading button; it cannot send on the reader's behalf.
  */
-function useBlockActions(message: GenuiMessage, ordinal: number, code: string) {
+function useBlockActions(message: GenuiMessage, block: string, ordinal: number, code: string) {
   const actions = use(GenuiActionsContext);
   const [leaving, setLeaving] = useState<string | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    },
-    [],
-  );
   const canSend =
     actions !== null &&
     !actions.disabled &&
@@ -220,23 +267,7 @@ function useBlockActions(message: GenuiMessage, ordinal: number, code: string) {
     [actions, canSend],
   );
 
-  const generationId = message.generationId;
-  const onState = useCallback(
-    (state: string) => {
-      if (!actions || message.streaming || !generationId) return;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        actions.save({
-          messageId: message.messageId,
-          generationId,
-          ordinal,
-          sourceHash: hashSource(code),
-          state,
-        });
-      }, SAVE_DELAY_MS);
-    },
-    [actions, message.streaming, message.messageId, generationId, ordinal, code],
-  );
+  const onState = useBlockSave(message, block, ordinal, code);
 
   const suggest = useMemo(() => {
     if (!canSend || !actions) return null;
@@ -301,17 +332,18 @@ function KeyedBlock({
   code: string;
   incomplete: boolean;
 }) {
-  const { onActions, onState, suggest, dialog } = useBlockActions(message, ordinal, code);
+  // One attempt's block: a retry or edit starts its own, from its own
+  // initial state, rather than inheriting what the reader set on the last.
+  // A resume reopens from the saved row, which only a finished answer has.
+  const block = `${message.messageId}:${message.generationId ?? "copy"}:${ordinal}`;
+  const { onActions, onState, suggest, dialog } = useBlockActions(message, block, ordinal, code);
   const stored = message.saved?.get(ordinal);
   const persisted = stored && stored.sourceHash === hashSource(code) ? stored.state : null;
   return (
     <>
       <Block
         client={client}
-        // One attempt's block: a retry or edit starts its own, from its own
-        // initial state, rather than inheriting what the reader set on the last.
-        // A resume reopens from the saved row, which only a finished answer has.
-        block={`${message.messageId}:${message.generationId ?? "copy"}:${ordinal}`}
+        block={block}
         ordinal={ordinal}
         code={code}
         streaming={incomplete || message.streaming}

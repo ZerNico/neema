@@ -1153,11 +1153,12 @@ export class ChatRepo extends Context.Service<
      * Saves one block's state for the conversation's owner. Refused unless the
      * answer is finished, still on `generationId`, and its block `ordinal`
      * hashes to `sourceHash`: a late save from a replaced attempt changes nothing.
+     * A branch's copy has no attempt (null) until it is retried.
      */
     saveUiState(input: {
       userId: string;
       messageId: string;
-      generationId: string;
+      generationId: string | null;
       ordinal: number;
       sourceHash: string;
       state: JsonValue;

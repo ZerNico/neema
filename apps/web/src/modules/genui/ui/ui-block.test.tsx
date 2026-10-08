@@ -475,6 +475,84 @@ describe("what blocks may do", () => {
     });
   });
 
+  describe("saving", () => {
+    const COUNTER = [
+      "Counter:",
+      "",
+      "```ui",
+      "<script>let n = $state(0);</script>",
+      "<button onclick={() => n++}>Add</button><text>Count {n}</text>",
+      "```",
+    ].join("\n");
+    const hash = hashSource(scanUiFences(COUNTER)[0]!.code);
+
+    function mount(messageId: string, generationId: string | null, streaming: boolean) {
+      const save = vi.fn();
+      const actions: GenuiActions = {
+        tailId: messageId,
+        disabled: false,
+        send: vi.fn(),
+        offer: vi.fn(),
+        save,
+      };
+      const engine = new BlockEngine(quickjs);
+      const view = (live: boolean) => (
+        <GenuiClientContext value={inProcess(engine)}>
+          <GenuiActionsContext value={actions}>
+            <GenuiMessageContext value={{ messageId, createdAt: 0, streaming: live, generationId }}>
+              <AssistantMarkdown content={keyUiFences(COUNTER, 0)} streaming={live} />
+            </GenuiMessageContext>
+          </GenuiActionsContext>
+        </GenuiClientContext>
+      );
+      const rendered = render(view(streaming));
+      return { save, rendered, rerender: (live: boolean) => rendered.rerender(view(live)) };
+    }
+
+    async function add() {
+      const button = await screen.findByRole("button", { name: "Add" });
+      await act(async () => {
+        fireEvent.click(button);
+      });
+      await screen.findByText("Count 1");
+    }
+
+    it("sends a save still waiting when the block unmounts", async () => {
+      const { save, rendered } = mount("m-unmount", "g1", false);
+      await add();
+      expect(save).not.toHaveBeenCalled();
+      rendered.unmount();
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ messageId: "m-unmount", state: '{"n":1,"__seed":0}' }),
+      );
+    });
+
+    it("saves a change made while the answer streamed once it finishes", async () => {
+      const { save, rerender } = mount("m-streamed", "g1", true);
+      await add();
+      // Only a finished answer stores state.
+      expect(save).not.toHaveBeenCalled();
+      rerender(false);
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      expect(save).toHaveBeenCalledWith({
+        messageId: "m-streamed",
+        generationId: "g1",
+        ordinal: 0,
+        sourceHash: hash,
+        state: '{"n":1,"__seed":0}',
+      });
+    });
+
+    it("saves in a branch's copy, which has no attempt of its own", async () => {
+      const { save } = mount("m-copy", null, false);
+      await add();
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ messageId: "m-copy", generationId: null }),
+      );
+    });
+  });
+
   it("lets a drawing's parts change state, by pointer or keyboard, but never send", async () => {
     const actions = drawWith(
       {},

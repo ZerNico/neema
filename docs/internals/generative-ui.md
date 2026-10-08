@@ -53,8 +53,8 @@ A block's code is model-written and can be prompt-injected through web content, 
 
 ## Saved state
 
-- `message_ui_states` keeps one row per block (answer, ordinal) with the block's `$state` JSON and the hash of the block's code when saved. The reader's runtime reports state after each handler, and the save follows a second later.
-- A save names the attempt (`generationId`). Under the conversation lock that retry and edit take, it is accepted only from the conversation's owner, for a finished answer still on that attempt, whose stored block at that ordinal hashes to the saved source. A late save from an attempt a retry replaced is refused, never stored. Retry and edit delete the rows in the reset that starts the new attempt.
+- `message_ui_states` keeps one row per block (answer, ordinal) with the block's `$state` JSON and the hash of the block's code when saved. The reader's runtime reports state after each handler, and the save follows a second later. Unsaved state is kept outside React, so a change made while the answer streams is saved when it finishes (Streamdown remounts the block just then), and a save still waiting when the block unmounts is sent rather than dropped.
+- A save names the attempt (`generationId`). Under the conversation lock that retry and edit take, it is accepted only from the conversation's owner, for a finished answer still on that attempt, whose stored block at that ordinal hashes to the saved source. A late save from an attempt a retry replaced is refused, never stored. A branch's copy has no attempt (null) and saves under that until it is retried. Retry and edit delete the rows in the reset that starts the new attempt.
 - Stop, the reaper and resume keep the answer's text, so they keep its rows. A branch copies them. The loader returns them with every page of history, and the page applies a row only while its hash still matches the block.
 - The model never sees widget state, so earlier answers stay byte-stable for prompt caching.
 

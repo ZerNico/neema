@@ -1112,9 +1112,22 @@ describe("saved ui block state", () => {
         const stored = yield* repo.listUiStates([assistant.id]);
         const branched = yield* branch(userId, conversation.id, assistant.id);
         const copy = branched.messages.find((m) => m.role === "assistant")!;
-        return { outcomes, stored, copied: yield* repo.listUiStates([copy.id]) };
+        const copied = yield* repo.listUiStates([copy.id]);
+        // The copy has no attempt of its own, and the reader keeps using its blocks.
+        const copySave = { ...base, messageId: copy.id, generationId: null, state: { n: 5 } };
+        const inCopy = {
+          generationId: copy.generationId,
+          saved: yield* repo.saveUiState(copySave),
+          wrongAttempt: yield* repo.saveUiState({ ...copySave, generationId: uuidv7() }),
+          rows: yield* repo.listUiStates([copy.id]),
+        };
+        return { outcomes, stored, copied, inCopy };
       }),
     );
+    expect(result.inCopy.generationId).toBeNull();
+    expect(result.inCopy.saved).toBe("saved");
+    expect(result.inCopy.wrongAttempt).toBe("refused");
+    expect(result.inCopy.rows.map((row) => row.state)).toEqual([{ n: 5 }]);
     expect(result.outcomes).toEqual({
       stranger: "refused",
       replacedAttempt: "refused",

@@ -24,7 +24,8 @@ export interface GenuiMessage {
 
 export interface UiStateSave {
   readonly messageId: string;
-  readonly generationId: string;
+  /** Null for a branch's copy, which has no attempt of its own. */
+  readonly generationId: string | null;
   readonly ordinal: number;
   readonly sourceHash: string;
   readonly state: string;
