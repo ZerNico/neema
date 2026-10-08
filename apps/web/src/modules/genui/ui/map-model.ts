@@ -170,8 +170,10 @@ export function routeSummary(route: MapRoute, locale?: string): string | null {
 
 /**
  * A circle as a polygon ring, for an area. Each point is the great-circle
- * destination from the centre, so a ring near a pole keeps valid latitudes
- * and longitudes (a flat approximation divides by cos(lat), which is 0 there).
+ * destination from the centre, so latitudes stay valid near a pole (a flat
+ * approximation divides by cos(lat), which is 0 there). Longitudes stay
+ * continuous around the centre, past ±180 if need be: wrapped, a ring across
+ * the date line would jump 360° and draw as a band round the world.
  */
 export function circleRing(
   lat: number,
@@ -193,8 +195,7 @@ export function circleRing(
         Math.sin(bearing) * Math.sin(distance) * Math.cos(phi),
         Math.cos(distance) - Math.sin(phi) * Math.sin(phi2),
       );
-    const wrapped = ((((lambda2 / rad + 180) % 360) + 360) % 360) - 180;
-    return [wrapped, phi2 / rad] as [number, number];
+    return [lambda2 / rad, phi2 / rad] as [number, number];
   });
   ring.push(ring[0]!);
   return ring;

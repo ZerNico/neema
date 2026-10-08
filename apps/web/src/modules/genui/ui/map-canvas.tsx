@@ -93,11 +93,16 @@ export interface MapCanvasProps {
   readonly onSelect: (id: string) => void;
   /** The style never loaded: the figure falls back to its list. */
   readonly onBroken: () => void;
-  /** The first tiles of the map for this theme are on screen. */
-  readonly onPainted: (dark: boolean) => void;
-  /** The map has faded fully in over the skeleton, which may now go. */
-  readonly onRevealed: (dark: boolean) => void;
-  /** This theme's map has painted, so it fades in. */
+  /**
+   * A new map was made (on mount, a theme change or a fixed zoom), numbered
+   * so painting and revealing refer to that map, not to an earlier one.
+   */
+  readonly onCreated: (map: number) => void;
+  /** That map's first tiles are on screen. */
+  readonly onPainted: (map: number) => void;
+  /** That map has faded fully in over the skeleton, which may now go. */
+  readonly onRevealed: (map: number) => void;
+  /** The current map has painted, so it fades in. */
   readonly shown: boolean;
   /** A view the block fixed; otherwise the map fits what it draws. */
   readonly view: { readonly center?: [number, number]; readonly zoom?: number };
@@ -110,6 +115,7 @@ export default function MapCanvas({
   selected,
   onSelect,
   onBroken,
+  onCreated,
   onPainted,
   onRevealed,
   shown,
@@ -119,14 +125,15 @@ export default function MapCanvas({
   const mapRef = useRef<maplibre.Map | null>(null);
   const markers = useRef<maplibre.Marker[]>([]);
   const fitted = useRef(0);
-  // The theme whose map has loaded, so a theme change is not ready until its own map is.
-  const [loaded, setLoaded] = useState<boolean | null>(null);
-  const ready = loaded === dark;
+  // The map whose layers exist. Compared with the current map in each effect,
+  // so a map made since, in any theme, is not drawn on before its own load.
+  const [loaded, setLoaded] = useState<maplibre.Map | null>(null);
+  const made = useRef(0);
   const fixedZoom = view.zoom !== undefined;
   // Read when a map is made, not followed: later changes do not move a map the reader panned.
-  const latest = useRef({ model, onSelect, onBroken, onPainted, onRevealed, view });
+  const latest = useRef({ model, onSelect, onBroken, onCreated, onPainted, onRevealed, view });
   useEffect(() => {
-    latest.current = { model, onSelect, onBroken, onPainted, onRevealed, view };
+    latest.current = { model, onSelect, onBroken, onCreated, onPainted, onRevealed, view };
   });
 
   // One map per theme: a style swap would drop the layers drawn on it.
@@ -135,8 +142,13 @@ export default function MapCanvas({
     if (!element) return;
     const opening = latest.current;
     // Open on what is already known, so the first frame is not the whole world.
-    const known = fixedZoom ? null : boundsOf(opening.model);
+    const bounds = boundsOf(opening.model);
+    const known = fixedZoom ? null : bounds;
     fitted.current = known ? drawnCount(opening.model) : 0;
+    // A fixed zoom without a centre opens on what the map draws, not on open sea at 0°, 20°.
+    const center = opening.view.center ?? bounds?.getCenter().toArray() ?? [0, 20];
+    const id = ++made.current;
+    latest.current.onCreated(id);
     let map: maplibre.Map;
     try {
       map = new maplibre.Map({
@@ -146,18 +158,19 @@ export default function MapCanvas({
         cooperativeGestures: true,
         ...(known
           ? { bounds: known, fitBoundsOptions: FIT }
-          : { center: opening.view.center ?? [0, 20], zoom: opening.view.zoom ?? 1 }),
+          : { center, zoom: opening.view.zoom ?? 1 }),
       });
     } catch {
       latest.current.onBroken();
       return;
     }
     mapRef.current = map;
+    let everLoaded = false;
     map.addControl(new maplibre.NavigationControl({ showCompass: false }), "top-right");
     map.once("idle", () => {
-      latest.current.onPainted(dark);
+      latest.current.onPainted(id);
       // No fade to wait for.
-      if (prefersReducedMotion()) latest.current.onRevealed(dark);
+      if (prefersReducedMotion()) latest.current.onRevealed(id);
     });
     map.on("load", () => {
       map.addSource("areas", {
@@ -196,11 +209,13 @@ export default function MapCanvas({
         filter: ["get", "dashed"],
         paint: { "line-color": ["get", "color"], "line-width": 2.5, "line-dasharray": [2, 2] },
       });
-      setLoaded(dark);
+      everLoaded = true;
+      setLoaded(map);
     });
     map.on("error", () => {
-      // Only a style that never loads leaves nothing to draw; a missing tile is not that.
-      if (!map.isStyleLoaded()) latest.current.onBroken();
+      // Only a style that never loads leaves nothing to draw. isStyleLoaded is
+      // also false while tiles load, so a failed tile would read the same.
+      if (!everLoaded) latest.current.onBroken();
     });
     return () => {
       for (const marker of markers.current) marker.remove();
@@ -213,7 +228,7 @@ export default function MapCanvas({
   // Draw what is known so far, and fit the view whenever more of it arrives.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready) return;
+    if (!map || loaded !== map) return;
     const data = featureCollections(model);
     (map.getSource("routes") as maplibre.GeoJSONSource | undefined)?.setData(data.routes);
     (map.getSource("areas") as maplibre.GeoJSONSource | undefined)?.setData(data.areas);
@@ -244,17 +259,17 @@ export default function MapCanvas({
       fitted.current = count;
       map.fitBounds(bounds, { ...FIT, animate: !first && !prefersReducedMotion() });
     }
-  }, [model, ready, selected, fixedZoom]);
+  }, [model, loaded, selected, fixedZoom]);
 
   // A pin chosen from the list may be off screen; bring it into view.
   useEffect(() => {
     // Through the ref: only a new selection moves the view, not new lookups.
     const map = mapRef.current;
     const pin = latest.current.model.pins.find((candidate) => candidate.id === selected);
-    if (!map || !ready || pin?.lat === undefined || pin.lng === undefined) return;
+    if (!map || loaded !== map || pin?.lat === undefined || pin.lng === undefined) return;
     const at: [number, number] = [pin.lng, pin.lat];
     if (!map.getBounds().contains(at)) map.easeTo({ center: at, animate: !prefersReducedMotion() });
-  }, [selected, ready]);
+  }, [selected, loaded]);
 
   return (
     <div
@@ -267,7 +282,7 @@ export default function MapCanvas({
         shown ? "opacity-100" : "opacity-0",
       )}
       onTransitionEnd={(event) => {
-        if (shown && event.target === event.currentTarget) onRevealed(dark);
+        if (shown && event.target === event.currentTarget) onRevealed(made.current);
       }}
     />
   );

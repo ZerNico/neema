@@ -109,17 +109,16 @@ describe("routeSummary", () => {
 });
 
 describe("circleRing", () => {
-  it("stays on the globe at a pole and across the date line", () => {
-    for (const [lat, lng] of [
-      [90, 0],
-      [-89.99, 45],
-      [10, 179.99],
-    ] as const) {
-      for (const [x, y] of circleRing(lat, lng, 200_000)) {
-        expect(Math.abs(y)).toBeLessThanOrEqual(90);
-        expect(Math.abs(x)).toBeLessThanOrEqual(180);
-      }
+  it("keeps valid latitudes at a pole and a continuous ring across the date line", () => {
+    for (const [x, y] of circleRing(90, 0, 200_000)) {
+      expect(Math.abs(y)).toBeLessThanOrEqual(90);
+      expect(Number.isFinite(x)).toBe(true);
     }
+    // Fiji: wrapped into ±180, neighbouring points would sit 360° apart.
+    const fiji = circleRing(-17, 179.9, 50_000);
+    const jumps = fiji.slice(1).map(([x], i) => Math.abs(x - fiji[i]![0]));
+    expect(Math.max(...jumps)).toBeLessThan(1);
+    expect(Math.max(...fiji.map(([x]) => x))).toBeGreaterThan(180);
   });
 
   it("puts each point at the radius from the centre", () => {

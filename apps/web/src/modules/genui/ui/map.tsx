@@ -72,10 +72,12 @@ export function UiMap({
   const [broken, setBroken] = useState(false);
   // The theme whose map has drawn its first tiles. One skeleton covers the
   // chunk loading and the tiles arriving, so it never restarts or blinks.
-  const [painted, setPainted] = useState<boolean | null>(null);
-  const shown = painted === dark;
+  // By map number, so a map made since (theme change, fixed zoom) starts hidden again.
+  const [created, setCreated] = useState(0);
+  const [painted, setPainted] = useState(0);
+  const shown = created > 0 && painted === created;
   // It stays under the map until the fade ends, so the map never fades in over nothing.
-  const [revealed, setRevealed] = useState<boolean | null>(null);
+  const [revealed, setRevealed] = useState(0);
   const off =
     model.pins.some((pin) => pin.status === "off") ||
     model.routes.some((route) => route.status === "off");
@@ -101,7 +103,7 @@ export function UiMap({
     <figure className="flex flex-col gap-2">
       {failed ? null : (
         <div className="relative w-full overflow-hidden rounded-2xl" style={{ height }}>
-          {revealed === dark ? null : <Skeleton className="absolute inset-0" />}
+          {created > 0 && revealed === created ? null : <Skeleton className="absolute inset-0" />}
           <Suspense fallback={null}>
             <MapCanvas
               model={model}
@@ -110,6 +112,7 @@ export function UiMap({
               selected={selected}
               onSelect={select}
               onBroken={() => setBroken(true)}
+              onCreated={setCreated}
               onPainted={setPainted}
               onRevealed={setRevealed}
               shown={shown}
