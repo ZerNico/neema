@@ -1,0 +1,33 @@
+/*
+ * MapLibre's controls in the app's colours. Its stylesheet paints them white
+ * with dark glyphs drawn as background images, which glare on a dark map, so
+ * surfaces take theme tokens and the glyphs invert in dark mode.
+ */
+[data-genui-map] .maplibregl-ctrl-group,
+[data-genui-map] .maplibregl-ctrl-attrib.maplibregl-compact {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+
+[data-genui-map] .maplibregl-ctrl-group {
+  border-radius: calc(var(--radius) * 0.8);
+  overflow: hidden;
+}
+
+[data-genui-map] .maplibregl-ctrl-group button + button {
+  border-top-color: var(--border);
+}
+
+[data-genui-map] .maplibregl-ctrl-group button:not(:disabled):hover {
+  background: var(--muted);
+}
+
+[data-genui-map] .maplibregl-ctrl-attrib a {
+  color: var(--muted-foreground);
+}
+
+.dark [data-genui-map] .maplibregl-ctrl-icon,
+.dark [data-genui-map] .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
