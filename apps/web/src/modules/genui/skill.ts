@@ -67,10 +67,6 @@ export const SKILL_EXAMPLES = {
   {:else}
     <text tone="muted">Pick two plans to compare.</text>
   {/if}
-  <suggestions>
-    <suggestion>Which plan fits a family of four?</suggestion>
-    <suggestion>Are there student discounts?</suggestion>
-  </suggestions>
 </box>`,
   drawing: `<script>
   let percent = $state(65);
@@ -93,7 +89,7 @@ export const SKILL_EXAMPLES = {
 const fence = (body: string) => "```ui\n" + body + "\n```";
 
 export const INTERACTIVE_UI_SKILL_DESCRIPTION =
-  "How to put interactive UI in an answer with a ```ui block: calculators, comparisons, charts, drawings, image galleries and follow-up chips.";
+  "How to put interactive UI in an answer with a ```ui block: calculators, comparisons, charts, drawings and image galleries.";
 
 export const INTERACTIVE_UI_SKILL_ROOT = `---
 name: interactive-ui
@@ -119,7 +115,7 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 - There is no network, no timers, no DOM and no \`window\`. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - \`toLocaleString\` covers common cases, but \`<num>\` and \`<date>\` format in the reader's own locale and are better.
 - Images: \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
-- \`<suggestion>\` text is sent as the reader's next message when clicked. Keep each short and self-contained.
+- \`<suggestion>\` text is sent as the reader's next message when clicked. Leave them out unless the answer ends at a real fork the reader has to choose, such as which option to explore next. Most blocks need none, and the reader can always just type.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
 
 ## Catalog
@@ -132,7 +128,7 @@ A calculator with derived values:
 
 ${fence(SKILL_EXAMPLES.calculator)}
 
-A comparison with tabs, a chart, a helper that mutates state and follow-ups:
+A comparison with tabs, a chart and a helper that mutates state:
 
 ${fence(SKILL_EXAMPLES.comparison)}
 
