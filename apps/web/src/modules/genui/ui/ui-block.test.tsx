@@ -558,6 +558,53 @@ describe("a block shown before its runtime is ready", () => {
     expect(await screen.findByText("Count 1")).toBeInTheDocument();
   });
 
+  it("waits for one input change to land before sending the next", async () => {
+    const engine = new BlockEngine(quickjs);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // One call at a time, in order, as the Worker runs them; the first is
+    // still running when the reader types on.
+    let queue: Promise<unknown> = gate;
+    const client: GenuiClient = {
+      ...inProcess(engine),
+      call: (request) => {
+        const reply = queue.then(() => engine.call(request));
+        queue = reply;
+        return reply;
+      },
+    };
+    const TYPING = [
+      "```ui",
+      '<script>let t = $state("");</script>',
+      '<input label="Name" value={t} onchange={(v) => t = v}/><text>Typed {t}</text>',
+      "```",
+    ].join("\n");
+    render(
+      <GenuiClientContext value={client}>
+        <GenuiMessageContext
+          value={{ messageId: "m-typing", createdAt: 0, streaming: false, generationId: "g1" }}
+        >
+          <AssistantMarkdown content={keyUiFences(TYPING, 0)} streaming={false} />
+        </GenuiMessageContext>
+      </GenuiClientContext>,
+    );
+    const box = await screen.findByRole("textbox", { name: "Name" });
+    // Two keystrokes a moment apart, the first still in the Worker.
+    await act(async () => {
+      fireEvent.change(box, { target: { value: "a" } });
+    });
+    await act(async () => {
+      fireEvent.change(box, { target: { value: "ab" } });
+    });
+    await act(async () => {
+      release();
+    });
+    // The second change went with the first one's revision and was lost before.
+    expect(await screen.findByText("Typed ab")).toBeInTheDocument();
+  });
+
   it("drops a click when the live block turns out different from the cached one", async () => {
     const engine = new BlockEngine(quickjs);
     const { client, release } = heldClient(engine);

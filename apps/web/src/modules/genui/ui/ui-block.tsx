@@ -74,9 +74,13 @@ interface BlockProps {
   onState: (state: string) => void;
 }
 
-/** A tree without its revisions: two renders that look and act the same compare equal. */
-const shapeOf = (nodes: unknown) =>
-  JSON.stringify(nodes, (key, value) => (key === "rev" ? 0 : value));
+/**
+ * A tree and its state without revisions. Two renders that compare equal show
+ * the same thing from the same state, so the same handler index does the same
+ * thing: two branches that merely look alike differ in state.
+ */
+const shapeOf = (tree: DrawnTree) =>
+  `${tree.state ?? ""}|${JSON.stringify(tree.nodes, (key, value) => (key === "rev" ? 0 : value))}`;
 
 interface Queued {
   readonly handler: number;
@@ -110,7 +114,14 @@ function useBlock({
   const lastRender = useRef(0);
   // A click on a tree that is not live yet, replayed once it is.
   const queued = useRef<Queued | null>(null);
-  const run = useRef<(tree: DrawnTree, handler: number, q: Queued, at: number) => void>(() => {});
+  const run = useRef<(tree: DrawnTree, handler: number, q: Queued, at: number) => Promise<void>>(
+    async () => {},
+  );
+  // The source being shown now, which a late reply to an older call must not undo.
+  const current = useRef(code);
+  useEffect(() => {
+    current.current = code;
+  });
   const startFrom = useCallback(
     () => recallState(block, code) ?? persisted,
     [block, code, persisted],
@@ -139,8 +150,8 @@ function useBlock({
       const click = queued.current;
       queued.current = null;
       // Only into the same tree: anything else would run a handler the reader never saw.
-      if (click && next.ok && shapeOf(next.nodes) === click.shape) {
-        run.current(next, click.handler, click, at);
+      if (click && next.ok && shapeOf(next) === click.shape) {
+        void run.current(next, click.handler, click, at);
       }
     },
     [block, streaming],
@@ -167,31 +178,36 @@ function useBlock({
   useEffect(() => () => client.release(block), [client, block]);
 
   useEffect(() => {
-    run.current = (tree, handler, click, at) => {
-      void client
-        .call({ block, source: tree.source, rev: tree.rev, handler, args: click.args })
-        .then(async (result) => {
-          if (result.ok) {
-            show(result.render, at, code);
-            if (result.render.ok && result.render.state !== null) onState(result.render.state);
-            onActions(result.actions, click.trusted);
-          } else if ("stale" in result && result.stale) {
-            show(await client.render({ block, code, saved: startFrom(), now }), at, code);
-          }
-        });
+    run.current = async (tree, handler, click, at) => {
+      const result = await client.call({
+        block,
+        source: tree.source,
+        rev: tree.rev,
+        handler,
+        args: click.args,
+      });
+      if (result.ok) {
+        show(result.render, at, code);
+        if (result.render.ok && result.render.state !== null) onState(result.render.state);
+        onActions(result.actions, click.trusted);
+      } else if ("stale" in result && result.stale && current.current === code) {
+        // Redrawn only while this source is still the one shown; a newer one renders itself.
+        show(await client.render({ block, code, saved: startFrom(), now }), at, code);
+      }
     };
   });
 
   const dispatch: Dispatch = useCallback(
     async (ref, args, trusted) => {
       if (!reply?.ok) return;
-      const click = { handler: ref.$h, args, trusted, shape: shapeOf(reply.nodes) };
+      const click = { handler: ref.$h, args, trusted, shape: shapeOf(reply) };
       if (!live) {
         queued.current = click;
         return;
       }
       if (stamp !== client.epoch() || ref.rev !== reply.rev) return;
-      run.current(reply, ref.$h, click, client.epoch());
+      // Awaited, so a control waits for this reply before sending its next value.
+      await run.current(reply, ref.$h, click, client.epoch());
     },
     [client, live, reply, stamp],
   );

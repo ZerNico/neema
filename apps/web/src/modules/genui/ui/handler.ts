@@ -1,7 +1,7 @@
 // Turning a tree's handler references into calls. Shared by every component
 // that fires one, the controls in tree.tsx and the drawing in data.tsx alike.
 
-import { use, useEffect, useRef } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { DispatchContext, type HandlerRef, type TrustedEvent } from "./context.ts";
 
 export function handlerOf(value: unknown): HandlerRef | undefined {
@@ -20,10 +20,14 @@ export function useHandler(ref: HandlerRef | undefined, trusted: TrustedEvent) {
   const dispatch = use(DispatchContext);
   const inFlight = useRef(false);
   const queued = useRef<readonly unknown[] | null>(null);
+  // The reply's tree may already be on screen when the call settles, so the
+  // effect below would not run again; a render of our own lets it send.
+  const [, settled] = useState(0);
   const send = (target: HandlerRef, args: readonly unknown[]) => {
     inFlight.current = true;
     void dispatch(target, args, trusted).finally(() => {
       inFlight.current = false;
+      if (queued.current) settled((n) => n + 1);
     });
   };
   // A queued value goes out once the new tree, with its fresh handler, lands.
