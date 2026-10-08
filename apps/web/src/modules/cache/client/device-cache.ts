@@ -125,6 +125,12 @@ class NamespaceCache<V> implements DeviceCache<V> {
   private memory = new Map<string, Stored<V>>();
   private bytes = 0;
   private loading: Promise<void> | null = null;
+  /**
+   * Keys set or deleted while a load is reading. The read is older than them,
+   * so it must not bring a deleted entry back or replace a newer one; the
+   * pending writes cannot say so once a flush has taken them.
+   */
+  private touched: Set<string> | null = null;
   /** Keys to write (with their entry) or delete (undefined) on the next flush. */
   private dirty = new Map<string, Stored<V> | undefined>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -140,6 +146,15 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   private async load() {
+    this.touched = new Set();
+    try {
+      await this.read();
+    } finally {
+      this.touched = null;
+    }
+  }
+
+  private async read() {
     await ownerKnown;
     const forOwner = owner;
     const db = await open();
@@ -159,8 +174,8 @@ class NamespaceCache<V> implements DeviceCache<V> {
       if (owner !== forOwner) return;
       keys.forEach((raw, i) => {
         const key = (raw as Key)[2];
-        // A value set while loading is newer than the stored one.
-        if (this.memory.has(key) || this.dirty.has(key)) return;
+        // A value set or deleted while loading is newer than the stored one.
+        if (this.touched?.has(key) || this.memory.has(key) || this.dirty.has(key)) return;
         const entry = values[i] as Stored<V>;
         this.memory.set(key, entry);
         this.bytes += entry.bytes;
@@ -222,6 +237,7 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   private mark(key: string, entry: Stored<V> | undefined) {
+    this.touched?.add(key);
     this.dirty.set(key, entry);
     this.timer ??= setTimeout(() => void this.flush(), WRITE_DELAY_MS);
   }

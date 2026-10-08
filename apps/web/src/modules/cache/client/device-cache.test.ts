@@ -47,6 +47,25 @@ describe("deviceCache", () => {
     ]);
   });
 
+  it("does not bring back an entry deleted while the namespace was loading", async () => {
+    setDeviceCacheOwner("alice");
+    const name = fresh();
+    const first = reopen<string>(name);
+    await first.warm();
+    first.set("k", "old");
+    await first.flush();
+
+    const next = reopen<string>(name);
+    const warming = next.warm();
+    // Let the read's transaction open first: it sees the entry, and its answer
+    // arrives after the delete has been written.
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+    next.delete("k");
+    await next.flush();
+    await warming;
+    expect(next.get("k")).toBeUndefined();
+  });
+
   it("keeps namespaces apart", async () => {
     setDeviceCacheOwner("alice");
     const [one, two] = [fresh(), fresh()];
