@@ -56,6 +56,13 @@ export const makeImageResolver = (
     // Every query this answer has named, settled earlier or started here; the cap counts them all.
     const named = new Set(deps.settled);
     const recorded = new Set<string>();
+    // Images stored so far, by query. Outside the query's fiber: when the drain
+    // deadline interrupts it, what it already stored is still its result.
+    const progress = new Map<string, UiImage[]>();
+    const settle = (query: string) => {
+      const items = progress.get(query) ?? [];
+      return record(query, { status: items.length ? "resolved" : "unavailable", items });
+    };
     let blocksRead = 0;
     let storedCount = 0;
 
@@ -78,6 +85,7 @@ export const makeImageResolver = (
         if (!deps.searchOn) return yield* record(query, { status: "search_off", items: [] });
         const hits = yield* deps.search(query, IMAGE_RESOLVE_LIMITS.candidatesPerQuery);
         const items: UiImage[] = [];
+        progress.set(query, items);
         let next = 0;
         let full = false;
         // Fetch only as many as are still missing, so a good first page costs four fetches.
@@ -109,9 +117,9 @@ export const makeImageResolver = (
             });
           }
         }
-        yield* record(query, { status: items.length ? "resolved" : "unavailable", items });
+        yield* settle(query);
       }).pipe(
-        Effect.catch(() => record(query, { status: "unavailable", items: [] })),
+        Effect.catch(() => settle(query)),
         permits.withPermits(1),
       );
 
@@ -133,7 +141,7 @@ export const makeImageResolver = (
       yield* FiberSet.awaitEmpty(running).pipe(Effect.timeoutOption(IMAGE_RESOLVE_LIMITS.drain));
       yield* FiberSet.clear(running);
       for (const query of named) {
-        if (!deps.settled.has(query)) yield* record(query, { status: "unavailable", items: [] });
+        if (!deps.settled.has(query)) yield* settle(query);
       }
     });
 

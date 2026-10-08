@@ -110,6 +110,30 @@ describe("image resolver", () => {
     }),
   );
 
+  it.effect("keeps the images it stored when the drain limit cuts a later batch short", () =>
+    Effect.gen(function* () {
+      const never = yield* Deferred.make<typeof image>();
+      const h = harness({
+        // The first batch stores image 1 only; the second hangs on image 5.
+        fetch: (url) =>
+          url.includes("/1.")
+            ? Effect.succeed(image)
+            : url.includes("/5.")
+              ? Deferred.await(never)
+              : Effect.fail("gone"),
+      });
+      const resolver = yield* makeImageResolver(h.deps);
+      yield* resolver.observe(block("partly"));
+      const draining = yield* Effect.forkChild(resolver.drain);
+      yield* TestClock.adjust("6 seconds");
+      yield* Fiber.join(draining);
+      expect(h.recorded.get("partly")).toMatchObject({
+        status: "resolved",
+        items: [{ attachmentId: "att-1", pageUrl: "https://page.example/1" }],
+      });
+    }),
+  );
+
   it.effect("stops waiting after the drain limit and records the rest as unavailable", () =>
     Effect.gen(function* () {
       const never = yield* Deferred.make<ReadonlyArray<ImageHit>>();
