@@ -13,10 +13,6 @@ import {
 } from "react";
 import { toast } from "sonner";
 import type { CustomRendererProps } from "streamdown";
-import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
-import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
-import { focusRingClassName } from "~/ui/focus-ring.ts";
-import { cn } from "~/ui/utils";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { LeaveDialog } from "~/ui/leave-dialog.tsx";
 import type { RenderReply } from "../client/engine.ts";
@@ -45,21 +41,6 @@ function Source({ code }: { code: string }) {
     <pre className="bg-muted overflow-x-auto rounded-2xl p-3 font-mono text-xs">
       <code>{code}</code>
     </pre>
-  );
-}
-
-function ShowSource({ code }: { code: string }) {
-  return (
-    <Disclosure>
-      <DisclosureTrigger className={cn(disclosureTriggerClassName, focusRingClassName)}>
-        Show source
-      </DisclosureTrigger>
-      <DisclosureContent>
-        <div className="pt-2">
-          <Source code={code} />
-        </div>
-      </DisclosureContent>
-    </Disclosure>
   );
 }
 
@@ -168,15 +149,12 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
     return <Source code={code} />;
   }
   return (
-    <div className="flex flex-col gap-2" data-genui-block={block}>
+    <div className="flex flex-col gap-3" data-genui-block={block}>
       <DispatchContext value={dispatch}>
         <SuggestContext value={suggest}>
-          <div className="flex flex-col gap-3">
-            <Nodes nodes={reply.nodes} />
-          </div>
+          <Nodes nodes={reply.nodes} />
         </SuggestContext>
       </DispatchContext>
-      {streaming ? null : <ShowSource code={code} />}
     </div>
   );
 }
