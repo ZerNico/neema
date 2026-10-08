@@ -90,6 +90,9 @@ if (devReload && process.env.CHAT_DESKTOP_PROFILE) {
 }
 // userData was resolved from the old name at startup, so renaming leaves the profile in place.
 app.setName("neema");
+// Windows files notifications under this id and sends their clicks to the app
+// installed with it; it must match electron-builder's appId.
+if (process.platform === "win32") app.setAppUserModelId("app.neema.desktop");
 // Browser tabs run on the app-wide default, so it must stay what Electron
 // generates (`browser/user-agent.ts`); only our name is taken out. The token
 // the server keys the desktop session on goes on the app's own session alone,
