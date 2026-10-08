@@ -40,7 +40,10 @@ function isRenderReply(
   return "nodes" in reply || "reason" in reply;
 }
 
-export function createWorkerClient(spawn: () => Worker): GenuiClient {
+export function createWorkerClient(spawn: () => Worker): GenuiClient & {
+  /** Starts the Worker, and with it QuickJS, before any block asks. */
+  warm(): void;
+} {
   let worker: Worker | null = null;
   let generation = 0;
   let nextId = 1;
@@ -118,6 +121,9 @@ export function createWorkerClient(spawn: () => Worker): GenuiClient {
       if (!worker) return;
       void send({ id: nextId++, op: "release", block }, null);
     },
+    warm() {
+      if (!fatal) ensure();
+    },
     epoch: () => generation,
     subscribe(listener) {
       listeners.add(listener);
@@ -126,12 +132,19 @@ export function createWorkerClient(spawn: () => Worker): GenuiClient {
   };
 }
 
-let shared: GenuiClient | null = null;
+let shared: ReturnType<typeof createWorkerClient> | null = null;
+
+const sharedWorker = () =>
+  (shared ??= createWorkerClient(
+    () => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
+  ));
 
 /** The page's Worker client, created on the first ui block. Browser only. */
 export function sharedWorkerClient(): GenuiClient {
-  shared ??= createWorkerClient(
-    () => new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
-  );
-  return shared;
+  return sharedWorker();
+}
+
+/** Creates the page's Worker now, so QuickJS is loading before the first block mounts. */
+export function warmSharedWorker(): void {
+  sharedWorker().warm();
 }

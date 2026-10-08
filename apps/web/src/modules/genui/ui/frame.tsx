@@ -6,9 +6,13 @@
 import { lazy, Suspense } from "react";
 import type { CustomRendererProps } from "streamdown";
 import { Skeleton } from "~/ui/primitives/skeleton";
+import { loadedUiBlock, loadUiBlock } from "./load-block.ts";
 import { SmoothHeight } from "./smooth-height.tsx";
 
-const UiBlock = lazy(() => import("./ui-block.tsx"));
+// Only until the code is in: React.lazy suspends on first render even for a
+// loaded module, and React holds a revealed fallback back for a moment, so a
+// block whose tree was ready would still blink as a placeholder.
+const UiBlock = lazy(loadUiBlock);
 
 /** The one placeholder a block shows until its tree is ready. */
 export function BlockSkeleton() {
@@ -16,11 +20,17 @@ export function BlockSkeleton() {
 }
 
 export default function UiBlockFrame(props: CustomRendererProps) {
+  const Loaded = loadedUiBlock();
   return (
     <SmoothHeight>
-      <Suspense fallback={<BlockSkeleton />}>
-        <UiBlock {...props} />
-      </Suspense>
+      {Loaded ? (
+        // oxlint-disable-next-line react/static-components -- one module-level component, read once loaded; never made here
+        <Loaded {...props} />
+      ) : (
+        <Suspense fallback={<BlockSkeleton />}>
+          <UiBlock {...props} />
+        </Suspense>
+      )}
     </SmoothHeight>
   );
 }

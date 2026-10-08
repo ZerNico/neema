@@ -20,6 +20,7 @@ import { LeaveDialog } from "~/ui/leave-dialog.tsx";
 import type { RenderReply } from "../client/engine.ts";
 import { sharedWorkerClient, type GenuiClient, type Unavailable } from "../client/host.ts";
 import { recall, recallState, remember } from "../client/memory.ts";
+import { cachedTree, keepTree, warmTrees, type DrawnTree } from "../client/tree-cache.ts";
 import { fenceKey, hashSource } from "../fences.ts";
 import type { BlockAction } from "../runtime.ts";
 import { copiedPreview, hasHiddenText, mentionsUrl } from "../text.ts";
@@ -73,6 +74,18 @@ interface BlockProps {
   onState: (state: string) => void;
 }
 
+/** A tree without its revisions: two renders that look and act the same compare equal. */
+const shapeOf = (nodes: unknown) =>
+  JSON.stringify(nodes, (key, value) => (key === "rev" ? 0 : value));
+
+interface Queued {
+  readonly handler: number;
+  readonly args: readonly unknown[];
+  readonly trusted: TrustedEvent;
+  /** The tree the reader clicked in. */
+  readonly shape: string;
+}
+
 function useBlock({
   client,
   block,
@@ -83,31 +96,59 @@ function useBlock({
   onActions,
   onState,
 }: BlockProps) {
+  // What the reader saw last, from this session's memory or the device's
+  // cache, so a remount or reload shows the block at once. It is not live:
+  // its handlers belong to a runtime that is gone until the Worker redraws it.
   const [reply, setReply] = useState<RenderReply | Unavailable | null>(
-    () => recall(block, code)?.reply ?? null,
+    () => recall(block, code)?.reply ?? (streaming ? undefined : cachedTree(block, code)) ?? null,
   );
+  const [live, setLive] = useState(false);
   // Replies are stamped with the Worker generation that produced them: a
   // restart makes every handler reference in the shown tree stale.
   const [stamp, setStamp] = useState(client.epoch());
   const epoch = useSyncExternalStore(client.subscribe, client.epoch, () => 0);
   const lastRender = useRef(0);
+  // A click on a tree that is not live yet, replayed once it is.
+  const queued = useRef<Queued | null>(null);
+  const run = useRef<(tree: DrawnTree, handler: number, q: Queued, at: number) => void>(() => {});
   const startFrom = useCallback(
     () => recallState(block, code) ?? persisted,
     [block, code, persisted],
   );
 
+  // The device cache may still have been loading when this mounted.
+  useEffect(() => {
+    if (streaming) return;
+    let cancelled = false;
+    void warmTrees().then(() => {
+      const tree = cachedTree(block, code);
+      if (!cancelled && tree) setReply((shown) => shown ?? tree);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [block, code, streaming]);
+
   const show = useCallback(
     (next: RenderReply | Unavailable, at: number, source: string) => {
       if (next.ok || next.reason !== "unavailable") remember(block, source, next);
+      if (next.ok && !streaming) keepTree(block, source, next);
       setReply(next);
       setStamp(at);
+      setLive(true);
+      const click = queued.current;
+      queued.current = null;
+      // Only into the same tree: anything else would run a handler the reader never saw.
+      if (click && next.ok && shapeOf(next.nodes) === click.shape) {
+        run.current(next, click.handler, click, at);
+      }
     },
-    [block],
+    [block, streaming],
   );
 
   useEffect(() => {
     let cancelled = false;
-    const run = () => {
+    const render = () => {
       lastRender.current = Date.now();
       const at = client.epoch();
       void client.render({ block, code, saved: startFrom(), now }).then((next) => {
@@ -115,7 +156,7 @@ function useBlock({
       });
     };
     const wait = streaming ? Math.max(0, lastRender.current + STREAMING_RENDER_MS - Date.now()) : 0;
-    const timer = setTimeout(run, wait);
+    const timer = setTimeout(render, wait);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -125,27 +166,34 @@ function useBlock({
 
   useEffect(() => () => client.release(block), [client, block]);
 
+  useEffect(() => {
+    run.current = (tree, handler, click, at) => {
+      void client
+        .call({ block, source: tree.source, rev: tree.rev, handler, args: click.args })
+        .then(async (result) => {
+          if (result.ok) {
+            show(result.render, at, code);
+            if (result.render.ok && result.render.state !== null) onState(result.render.state);
+            onActions(result.actions, click.trusted);
+          } else if ("stale" in result && result.stale) {
+            show(await client.render({ block, code, saved: startFrom(), now }), at, code);
+          }
+        });
+    };
+  });
+
   const dispatch: Dispatch = useCallback(
     async (ref, args, trusted) => {
-      if (stamp !== client.epoch() || !reply?.ok) return;
-      const at = client.epoch();
-      const result = await client.call({
-        block,
-        source: reply.source,
-        rev: ref.rev,
-        handler: ref.$h,
-        args,
-      });
-      if (result.ok) {
-        show(result.render, at, code);
-        if (result.render.ok && result.render.state !== null) onState(result.render.state);
-        onActions(result.actions, trusted);
-      } else if ("stale" in result && result.stale) {
-        const next = await client.render({ block, code, saved: startFrom(), now });
-        show(next, at, code);
+      if (!reply?.ok) return;
+      const click = { handler: ref.$h, args, trusted, shape: shapeOf(reply.nodes) };
+      if (!live) {
+        queued.current = click;
+        return;
       }
+      if (stamp !== client.epoch() || ref.rev !== reply.rev) return;
+      run.current(reply, ref.$h, click, client.epoch());
     },
-    [client, block, code, now, stamp, reply, show, startFrom, onActions, onState],
+    [client, live, reply, stamp],
   );
 
   return { reply, dispatch };

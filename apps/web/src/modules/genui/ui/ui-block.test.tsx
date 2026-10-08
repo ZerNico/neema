@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantMarkdown } from "~/modules/chat/ui/assistant-markdown.tsx";
 import { BlockEngine } from "../client/engine.ts";
+import { keepTree } from "../client/tree-cache.ts";
 import type { GenuiClient } from "../client/host.ts";
 import { routeKey } from "../extract.ts";
 import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
@@ -444,6 +445,86 @@ describe("ui blocks in answers", () => {
     expect(circles[0]).toHaveAttribute("fill", "var(--chart-1)");
     expect(circles[1]).toHaveAttribute("fill", "none");
     expect(drawing.querySelector("text")).toHaveTextContent("gears");
+  });
+});
+
+describe("a block shown before its runtime is ready", () => {
+  const COUNTER = [
+    "```ui",
+    "<script>let n = $state(0);</script>",
+    "<button onclick={() => n++}>Add</button><text>Count {n}</text>",
+    "```",
+  ].join("\n");
+  const code = scanUiFences(COUNTER)[0]!.code;
+
+  /** The Worker, held back until the test lets its first render through. */
+  function heldClient(engine: BlockEngine) {
+    let release = () => {};
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client: GenuiClient = {
+      ...inProcess(engine),
+      render: async (request) => {
+        await ready;
+        return engine.render(request);
+      },
+    };
+    return { client, release };
+  }
+
+  function mount(client: GenuiClient, messageId: string) {
+    return render(
+      <GenuiClientContext value={client}>
+        <GenuiMessageContext
+          value={{ messageId, createdAt: 0, streaming: false, generationId: "g1" }}
+        >
+          <AssistantMarkdown content={keyUiFences(COUNTER, 0)} streaming={false} />
+        </GenuiMessageContext>
+      </GenuiClientContext>,
+    );
+  }
+
+  /** What the device cache would hold from an earlier visit. */
+  function cacheTree(messageId: string, source: string) {
+    const drawn = new BlockEngine(quickjs).render({
+      block: "x",
+      code: source,
+      saved: null,
+      now: 0,
+    });
+    if (!drawn.ok) throw new Error("no tree");
+    keepTree(`${messageId}:g1:0`, code, drawn);
+  }
+
+  it("shows the cached tree at once, and replays a click once the block is live", async () => {
+    const engine = new BlockEngine(quickjs);
+    const { client, release } = heldClient(engine);
+    cacheTree("m-cached", code);
+    mount(client, "m-cached");
+    // The Worker is held, so what shows came from the cache: no wait for QuickJS.
+    expect(await screen.findByText("Count 0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("Count 0")).toBeInTheDocument();
+    await act(async () => {
+      release();
+    });
+    expect(await screen.findByText("Count 1")).toBeInTheDocument();
+  });
+
+  it("drops a click when the live block turns out different from the cached one", async () => {
+    const engine = new BlockEngine(quickjs);
+    const { client, release } = heldClient(engine);
+    // An older drawing of the block, say from state saved elsewhere since.
+    cacheTree("m-stale", code.replace("$state(0)", "$state(5)"));
+    mount(client, "m-stale");
+    expect(await screen.findByText("Count 5")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await act(async () => {
+      release();
+    });
+    expect(await screen.findByText("Count 0")).toBeInTheDocument();
+    expect(screen.queryByText("Count 1")).toBeNull();
   });
 });
 

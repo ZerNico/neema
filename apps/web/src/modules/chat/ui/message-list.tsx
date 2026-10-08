@@ -114,6 +114,7 @@ import {
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { keyUiFences, scanUiFences } from "~/modules/genui/fences.ts";
+import { prewarmGenui } from "~/modules/genui/client/prewarm.ts";
 import { GenuiMessageContext, type SavedUiState } from "~/modules/genui/ui/context.ts";
 
 const NO_UI_STATES: ReadonlyMap<number, SavedUiState> = new Map();
@@ -705,6 +706,11 @@ const AssistantBody = memo(function AssistantBody({
     () => scanUiFences(message.content).map((f) => f.start),
     [message.content],
   );
+  const hasUiBlocks = uiFenceStarts.length > 0;
+  // A block waits on cached trees, its renderer and QuickJS: start them now, together.
+  useEffect(() => {
+    if (hasUiBlocks) void prewarmGenui();
+  }, [hasUiBlocks]);
   const iso = message.time?.iso;
   const genui = useMemo(
     () => ({
