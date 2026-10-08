@@ -134,6 +134,27 @@ describe("image resolver", () => {
     }),
   );
 
+  it.effect("records again a result whose write the drain limit interrupted", () =>
+    Effect.gen(function* () {
+      const stuck = yield* Deferred.make<void>();
+      const recorded = new Map<string, UiImageResult>();
+      let attempts = 0;
+      const h = harness({
+        // The first write waits on a busy database past the deadline; the next goes through.
+        record: (query, result) =>
+          ++attempts === 1
+            ? Deferred.await(stuck)
+            : Effect.sync(() => void recorded.set(query, result)),
+      });
+      const resolver = yield* makeImageResolver(h.deps);
+      yield* resolver.observe(block("busy"));
+      const draining = yield* Effect.forkChild(resolver.drain);
+      yield* TestClock.adjust("6 seconds");
+      yield* Fiber.join(draining);
+      expect(recorded.get("busy")).toMatchObject({ status: "resolved" });
+    }),
+  );
+
   it.effect("stops waiting after the drain limit and records the rest as unavailable", () =>
     Effect.gen(function* () {
       const never = yield* Deferred.make<ReadonlyArray<ImageHit>>();

@@ -49,18 +49,23 @@ export const makeMapResolver = (
     const recordedRoutes = new Set<string>();
     let blocksRead = 0;
 
+    // Counted as recorded once the write succeeded, so the drain retries one it interrupted.
     const recordPlace = (query: string, place: UiPlace) =>
-      Effect.suspend(() => {
-        if (recordedPlaces.has(query)) return Effect.void;
-        recordedPlaces.add(query);
-        return deps.record({ places: { [query]: place } });
-      });
+      Effect.suspend(() =>
+        recordedPlaces.has(query)
+          ? Effect.void
+          : deps
+              .record({ places: { [query]: place } })
+              .pipe(Effect.tap(() => Effect.sync(() => recordedPlaces.add(query)))),
+      );
     const recordRoute = (key: string, route: UiRoute) =>
-      Effect.suspend(() => {
-        if (recordedRoutes.has(key)) return Effect.void;
-        recordedRoutes.add(key);
-        return deps.record({ routes: { [key]: route } });
-      });
+      Effect.suspend(() =>
+        recordedRoutes.has(key)
+          ? Effect.void
+          : deps
+              .record({ routes: { [key]: route } })
+              .pipe(Effect.tap(() => Effect.sync(() => recordedRoutes.add(key)))),
+      );
 
     /** The place's result, started on first ask; settled ones are answered at once. */
     const placeFor = (query: string) =>

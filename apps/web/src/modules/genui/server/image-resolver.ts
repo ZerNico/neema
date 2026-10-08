@@ -66,12 +66,16 @@ export const makeImageResolver = (
     let blocksRead = 0;
     let storedCount = 0;
 
+    // Counted as recorded once the write succeeded: a write the drain deadline
+    // interrupts is tried again by the drain, not skipped as done.
     const record = (query: string, result: UiImageResult) =>
-      Effect.suspend(() => {
-        if (recorded.has(query)) return Effect.void;
-        recorded.add(query);
-        return deps.record(query, result);
-      });
+      Effect.suspend(() =>
+        recorded.has(query)
+          ? Effect.void
+          : deps
+              .record(query, result)
+              .pipe(Effect.tap(() => Effect.sync(() => recorded.add(query)))),
+      );
 
     const fetchHit = (hit: ImageHit) =>
       // The thumbnail is smaller and usually enough for a tile; the original is the fallback.
