@@ -151,12 +151,16 @@ describe("ui blocks in answers", () => {
       ].join("\n"),
       "m-choice",
     );
-    const bell = await screen.findByRole("radio", { name: "Bell-shaped" });
+    // The radio the reader sees and a screen reader reaches carries the option's name,
+    // not only the hidden native input beside it.
+    const visibleRadio = async (name: string) =>
+      (await screen.findAllByRole("radio")).find((el) => el.getAttribute("aria-label") === name)!;
+    const bell = await visibleRadio("Bell-shaped");
     await act(async () => {
       fireEvent.click(bell);
     });
     expect(await screen.findByText("Correct!")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Bell-shaped" })).toBeChecked();
+    expect(await visibleRadio("Bell-shaped")).toBeChecked();
   });
 
   it("asks before leaving by a middle click too, and sends no referrer", async () => {

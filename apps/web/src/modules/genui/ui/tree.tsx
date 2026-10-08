@@ -381,7 +381,8 @@ function ChoiceNode({ node }: { node: ValidNode }) {
       >
         {options.map((o) => (
           <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
-            <RadioGroupItem value={o.value} />
+            {/* A radio is a span, which a wrapping label does not name. */}
+            <RadioGroupItem value={o.value} aria-label={o.label} />
             {o.label}
           </label>
         ))}
