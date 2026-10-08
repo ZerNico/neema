@@ -326,6 +326,28 @@ describe("ui blocks in answers", () => {
     expect(screen.getByText("Trains every hour")).toBeInTheDocument();
   });
 
+  it("opens an image found before sizes were kept in the preview too", async () => {
+    draw(
+      ["```ui", '<image query="old hub" caption="Old hub"/>', "```"].join("\n"),
+      "m-old-img",
+      false,
+      {
+        images: {
+          "old hub": {
+            status: "resolved",
+            items: [
+              { attachmentId: "a-old", pageUrl: "https://www.bikes.example/old", title: "Hub" },
+            ],
+          },
+        },
+      },
+    );
+    const preview = await screen.findByRole("button", { name: "Preview Old hub" });
+    fireEvent.click(preview);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("img")).toHaveAttribute("src", "/api/files/a-old");
+  });
+
   it("says an image named after a prototype member is unavailable instead of crashing", async () => {
     draw(["```ui", '<image query="constructor" caption="Odd"/>', "```"].join("\n"), "m-proto");
     expect(await screen.findByText("Image unavailable")).toBeInTheDocument();

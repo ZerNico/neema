@@ -37,7 +37,8 @@ function OfficeFilePreview({ office }: { office: OfficePreview }) {
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
   readonly fileName: string;
-  readonly size: number;
+  /** Bytes, shown under the name; unknown for images a ui block found before sizes were kept. */
+  readonly size?: number | undefined;
   readonly kind: AttachmentKind;
   /** Authenticated bytes route, or an object URL for a not-yet-stored image. */
   readonly url: string;
@@ -101,7 +102,9 @@ export function AttachmentPreviewDialog({
                 ))}
             </div>
           </div>
-          <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
+          {target.size === undefined ? null : (
+            <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
+          )}
         </DialogHeader>
         <FilePreviewBody target={target} linkable={!actions} />
       </DialogContent>

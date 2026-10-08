@@ -97,26 +97,19 @@ function FoundTile({
   );
   return (
     <figure className="flex min-w-0 flex-col gap-1">
-      {/* Images stored before their size was kept open nowhere: the preview would show a wrong size. */}
-      {found.size === undefined ? (
-        image
-      ) : (
-        <>
-          <button
-            type="button"
-            aria-label={`Preview ${name}`}
-            className={cn("cursor-zoom-in rounded-xl", focusRingClassName)}
-            onClick={() => setOpen(true)}
-          >
-            {image}
-          </button>
-          <AttachmentPreviewDialog
-            target={{ fileName: name, size: found.size, kind: "image", url }}
-            open={open}
-            onOpenChange={setOpen}
-          />
-        </>
-      )}
+      <button
+        type="button"
+        aria-label={`Preview ${name}`}
+        className={cn("cursor-zoom-in rounded-xl", focusRingClassName)}
+        onClick={() => setOpen(true)}
+      >
+        {image}
+      </button>
+      <AttachmentPreviewDialog
+        target={{ fileName: name, size: found.size, kind: "image", url }}
+        open={open}
+        onOpenChange={setOpen}
+      />
       <figcaption className="text-muted-foreground flex min-w-0 flex-col text-xs">
         {caption ? <span>{caption}</span> : null}
         {host && /^https?:\/\//i.test(found.pageUrl) ? (
