@@ -2,7 +2,7 @@
 // apart from tree.tsx because the chart library is heavy; both still load
 // only with the lazy ui-block chunk.
 
-import { areaY, barY, defineChart, lineY } from "@tanstack/charts";
+import { areaY, barY, defineChart, lineY, ruleX, ruleY } from "@tanstack/charts";
 import { group } from "@tanstack/charts/group";
 import { Chart } from "@tanstack/charts/react";
 import { scaleBand } from "@tanstack/charts/scales/band";
@@ -109,6 +109,34 @@ function seriesOf(value: unknown): Series[] {
   });
 }
 
+interface Rule {
+  readonly x?: string;
+  readonly y?: number;
+  readonly label?: string;
+}
+
+function rulesOf(value: unknown): Rule[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r: unknown) => {
+    if (typeof r !== "object" || r === null) return [];
+    const x =
+      "x" in r && (typeof r.x === "string" || typeof r.x === "number") ? String(r.x) : undefined;
+    const y = "y" in r && typeof r.y === "number" ? r.y : undefined;
+    const label = "label" in r && typeof r.label === "string" ? r.label : undefined;
+    if (x === undefined && y === undefined) return [];
+    return [
+      {
+        ...(x !== undefined ? { x } : {}),
+        ...(y !== undefined ? { y } : {}),
+        ...(label ? { label } : {}),
+      },
+    ];
+  });
+}
+
+/** Reference lines read as annotation, not data: muted and dashed. */
+const RULE_STYLE = { stroke: "var(--muted-foreground)", strokeDasharray: "4 4", strokeWidth: 1.5 };
+
 export function UiChart({ node }: { node: ValidNode }) {
   const p = node.props;
   const type = p.type === "line" || p.type === "area" ? p.type : "bar";
@@ -117,6 +145,7 @@ export function UiChart({ node }: { node: ValidNode }) {
   const stacked = p.stacked === true;
   const xs = useMemo(() => (Array.isArray(p.x) ? p.x.map(String) : []), [p.x]);
   const series = useMemo(() => seriesOf(p.series), [p.series]);
+  const rules = useMemo(() => rulesOf(p.rules), [p.rules]);
   const definition = useMemo(() => {
     const rows = series.flatMap((s) =>
       xs.map((x, i) => ({ x, series: s.name, value: s.values[i] ?? null })),
@@ -142,8 +171,14 @@ export function UiChart({ node }: { node: ValidNode }) {
               inset: 1,
               ...(many ? { layout: stacked ? stack() : group() } : {}),
             });
+    const levels = rules.filter((r) => r.y !== undefined);
+    const categories = rules.filter((r) => r.x !== undefined && xs.includes(r.x));
     return defineChart({
-      marks: [marks],
+      marks: [
+        marks,
+        ...(levels.length ? [ruleY(levels, { y: "y", ...RULE_STYLE })] : []),
+        ...(categories.length ? [ruleX(categories, { x: "x", ...RULE_STYLE })] : []),
+      ],
       scales: {
         x: { scale: () => scaleBand<string>().padding(0.25), axis: { line: false } },
         y: {
@@ -156,17 +191,30 @@ export function UiChart({ node }: { node: ValidNode }) {
       color: { domain: series.map((s) => s.name), range: PALETTE.slice(0, series.length) },
       tooltip,
     });
-  }, [series, xs, type, stacked, unit]);
+  }, [series, xs, type, stacked, unit, rules]);
   return (
     <figure className="flex flex-col gap-2">
-      {series.length > 1 ? (
+      {series.length > 1 || rules.some((r) => r.label) ? (
         <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
-          {series.map((s, i) => (
-            <span key={s.name} className="flex items-center gap-1.5">
-              <span className="size-2 rounded-full" style={{ backgroundColor: PALETTE[i] }} />
-              {s.name}
-            </span>
-          ))}
+          {series.length > 1
+            ? series.map((s, i) => (
+                <span key={s.name} className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full" style={{ backgroundColor: PALETTE[i] }} />
+                  {s.name}
+                </span>
+              ))
+            : null}
+          {rules.flatMap((r, i) =>
+            r.label
+              ? [
+                  // oxlint-disable-next-line react/no-array-index-key -- labels may repeat; position is the identity
+                  <span key={`rule-${i}`} className="flex items-center gap-1.5">
+                    <span className="border-muted-foreground w-3 border-t border-dashed" />
+                    {r.label}
+                  </span>,
+                ]
+              : [],
+          )}
         </div>
       ) : null}
       <div className="text-muted-foreground text-xs">

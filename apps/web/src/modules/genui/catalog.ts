@@ -460,6 +460,18 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       label: required(text(200)),
       stacked: flag(),
       unit: text(20),
+      rules: prop(
+        Schema.Array(
+          Schema.Struct({
+            x: Schema.optionalKey(
+              Schema.Union([Schema.String.check(Schema.isMaxLength(80)), Schema.Finite]),
+            ),
+            y: Schema.optionalKey(Schema.Finite),
+            label: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(80))),
+          }),
+        ).check(Schema.isMaxLength(4)),
+        "{x?, y?, label?}[] (dashed reference lines: y for a level such as a mean, x for a category)",
+      ),
     },
     children: "none",
   },
