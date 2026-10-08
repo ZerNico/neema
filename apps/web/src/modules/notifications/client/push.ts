@@ -1,7 +1,6 @@
 import { readDesktopChrome } from "@chat/desktop-rpc";
 import { useEffect } from "react";
-import { describeSession } from "~/modules/settings/ui/describe-session.ts";
-import { getPushKey, subscribePush, unsubscribePush } from "../server/functions.ts";
+import { getPushKey, subscribePush } from "../server/functions.ts";
 
 /**
  * Whether this browser can be reached while closed. Needs a secure origin and
@@ -14,53 +13,39 @@ export const pushSupported = () =>
   "PushManager" in window &&
   readDesktopChrome() === null;
 
-const registration = () =>
-  pushSupported() ? navigator.serviceWorker.getRegistration() : Promise.resolve(undefined);
-
 /** This browser's push subscription, if it has one. */
 export const currentPushSubscription = async () =>
-  (await (await registration())?.pushManager.getSubscription()) ?? null;
+  pushSupported()
+    ? ((await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription()) ??
+      null)
+    : null;
 
-/** Subscribes this browser and tells the server; asks for permission first. */
-export async function enablePush() {
-  if ((await Notification.requestPermission()) !== "granted") return false;
-  const worker = await navigator.serviceWorker.register("/sw.js");
-  await navigator.serviceWorker.ready;
-  const key = await getPushKey();
-  const subscription = await worker.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) =>
-      c.charCodeAt(0),
-    ),
-  });
-  const { endpoint, keys } = subscription.toJSON();
-  await subscribePush({
-    data: {
-      endpoint: endpoint!,
-      p256dh: keys!.p256dh!,
-      auth: keys!.auth!,
-      label: describeSession(navigator.userAgent),
-    },
-  });
-  return true;
-}
+const keyBytes = (key: string) =>
+  Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
 /**
- * Stops pushes to this browser. Signing out calls it too, so a shared
- * computer stops receiving the last person's notifications.
+ * Subscribes this browser, once notifications are allowed, and ties it to
+ * this sign-in. Idempotent, so every visit repeats it: a new sign-in in the
+ * same browser takes the subscription over, and signing out ends it.
  */
-export async function disablePush() {
-  const subscription = await currentPushSubscription();
-  if (!subscription) return;
-  await unsubscribePush({ data: { endpoint: subscription.endpoint } }).catch((error: unknown) =>
-    console.error("Could not forget this browser's push subscription", error),
-  );
-  await subscription.unsubscribe();
+export async function ensurePush() {
+  if (!pushSupported() || Notification.permission !== "granted") return;
+  const worker = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  const subscription =
+    (await worker.pushManager.getSubscription()) ??
+    (await worker.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: keyBytes(await getPushKey()),
+    }));
+  const { endpoint, keys } = subscription.toJSON();
+  await subscribePush({ data: { endpoint: endpoint!, p256dh: keys!.p256dh!, auth: keys!.auth! } });
 }
 
-/** Routes a click on a pushed notification inside the open page. */
-export function usePushNavigation(openPath: (path: string) => void) {
+/** Keeps this browser subscribed while signed in, and routes clicks in place. */
+export function usePush(openPath: (path: string) => void) {
   useEffect(() => {
+    ensurePush().catch((error: unknown) => console.error("Could not set up push", error));
     if (!pushSupported()) return;
     const receive = (event: MessageEvent) => {
       const data = event.data as { type?: unknown; path?: unknown } | null;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ensurePush } from "./push.ts";
 import { notificationsSupported } from "./show.ts";
 
 export type PermissionState = NotificationPermission | "unsupported";
@@ -26,7 +27,9 @@ export function useNotificationPermission() {
   }, []);
   const request = async () => {
     if (!notificationsSupported()) return;
-    setPermission(await Notification.requestPermission());
+    const answer = await Notification.requestPermission();
+    setPermission(answer);
+    if (answer === "granted") await ensurePush();
   };
   return { permission, request };
 }

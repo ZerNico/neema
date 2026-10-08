@@ -1,4 +1,4 @@
-import { and, asc, eq, notInArray, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Redacted, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import { pushKeys, pushSubscriptions } from "~/db/schema/index.ts";
@@ -24,13 +24,6 @@ export class PushRejected extends Schema.TaggedError<PushRejected>()("PushReject
   reason: Schema.String,
 }) {}
 
-export interface PushDevice {
-  id: string;
-  label: string;
-  createdAt: string;
-  lastDeliveredAt: string | null;
-}
-
 /**
  * Notifications for browsers that are closed. A subscription's endpoint is a
  * URL the browser chose, so it is checked like any address the server fetches,
@@ -41,13 +34,11 @@ export class PushService extends Context.Service<
   {
     /** The key browsers subscribe with, made the first time anyone asks. */
     readonly publicKey: Effect.Effect<string>;
+    /** Ties this browser to the sign-in, which ending stops it. */
     subscribe(
-      userId: string,
-      subscription: { endpoint: string; p256dh: string; auth: string; label: string },
+      owner: { userId: string; sessionId: string },
+      subscription: { endpoint: string; p256dh: string; auth: string },
     ): Effect.Effect<void, PushRejected>;
-    unsubscribe(userId: string, endpoint: string): Effect.Effect<void>;
-    list(userId: string): Effect.Effect<PushDevice[]>;
-    remove(userId: string, id: string): Effect.Effect<void>;
     send(userId: string, notification: AppNotification): Effect.Effect<void>;
   }
 >()("chat/notifications/PushService") {
@@ -126,13 +117,7 @@ export class PushService extends Context.Service<
               .delete(pushSubscriptions)
               .where(eq(pushSubscriptions.id, subscription.id))
               .pipe(Effect.orDie);
-          else if (response.ok)
-            yield* db
-              .update(pushSubscriptions)
-              .set({ lastDeliveredAt: sql`now()` })
-              .where(eq(pushSubscriptions.id, subscription.id))
-              .pipe(Effect.orDie);
-          else
+          else if (!response.ok)
             yield* Effect.logWarning("push service refused a notification", {
               status: response.status,
               origin: target.url.origin,
@@ -145,7 +130,10 @@ export class PushService extends Context.Service<
 
       return PushService.of({
         publicKey: Effect.map(keys, (pair) => base64url(pair.publicKey)),
-        subscribe: Effect.fn("PushService.subscribe")(function* (userId, subscription) {
+        subscribe: Effect.fn("PushService.subscribe")(function* (
+          { userId, sessionId },
+          subscription,
+        ) {
           const endpoint = yield* resolvePublicHttpUrl(subscription.endpoint).pipe(
             Effect.mapError(() => new PushRejected({ reason: "this push address is not allowed" })),
           );
@@ -163,19 +151,14 @@ export class PushService extends Context.Service<
               Effect.gen(function* () {
                 yield* tx
                   .insert(pushSubscriptions)
-                  .values({
-                    id: uuidv7(),
-                    userId,
-                    ...subscription,
-                    label: subscription.label.slice(0, 120),
-                  })
+                  .values({ id: uuidv7(), userId, sessionId, ...subscription })
                   .onConflictDoUpdate({
                     target: pushSubscriptions.endpoint,
                     set: {
                       userId,
+                      sessionId,
                       p256dh: subscription.p256dh,
                       auth: subscription.auth,
-                      label: subscription.label.slice(0, 120),
                     },
                   });
                 const kept = yield* tx
@@ -195,34 +178,6 @@ export class PushService extends Context.Service<
                 );
               }),
             )
-            .pipe(Effect.orDie);
-        }),
-        unsubscribe: Effect.fn("PushService.unsubscribe")(function* (userId, endpoint) {
-          yield* db
-            .delete(pushSubscriptions)
-            .where(
-              and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)),
-            )
-            .pipe(Effect.orDie);
-        }),
-        list: Effect.fn("PushService.list")(function* (userId) {
-          const rows = yield* db
-            .select()
-            .from(pushSubscriptions)
-            .where(eq(pushSubscriptions.userId, userId))
-            .orderBy(asc(pushSubscriptions.createdAt))
-            .pipe(Effect.orDie);
-          return rows.map((row) => ({
-            id: row.id,
-            label: row.label,
-            createdAt: row.createdAt.toISOString(),
-            lastDeliveredAt: row.lastDeliveredAt?.toISOString() ?? null,
-          }));
-        }),
-        remove: Effect.fn("PushService.remove")(function* (userId, id) {
-          yield* db
-            .delete(pushSubscriptions)
-            .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.id, id)))
             .pipe(Effect.orDie);
         }),
         send: Effect.fn("PushService.send")(function* (userId, notification) {

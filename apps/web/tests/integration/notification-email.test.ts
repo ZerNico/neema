@@ -1,16 +1,20 @@
 import { createServer, type Server } from "node:net";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { ConfigProvider, Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { smtpSettings, user } from "~/db/schema/index.ts";
+import type { SyncEvent } from "~/modules/sync/events.ts";
 import { MailService } from "~/modules/notifications/server/mail.ts";
+import { NotificationService } from "~/modules/notifications/server/service.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
-let runtime: ManagedRuntime.ManagedRuntime<MailService | Db, unknown>;
+let runtime: ManagedRuntime.ManagedRuntime<NotificationService | MailService | Db, unknown>;
+const published: SyncEvent[] = [];
 let smtp: Server;
 let smtpPort = 0;
 /** Each message the fake server accepted: envelope recipient and raw data. */
@@ -69,8 +73,18 @@ beforeAll(async () => {
       ),
     ),
   );
+  const bus = Layer.succeed(SyncBus, {
+    publish: (_userId: string, event: SyncEvent) => Effect.sync(() => void published.push(event)),
+    publishGlobal: () => Effect.void,
+    signals: Stream.make({ type: "ready" } as const).pipe(Stream.concat(Stream.never)),
+    subscribe: () => Stream.empty,
+  });
   runtime = ManagedRuntime.make(
-    MailService.layer.pipe(Layer.provideMerge(cipher), Layer.provideMerge(infra)),
+    NotificationService.layer.pipe(
+      Layer.provideMerge(bus),
+      Layer.provideMerge(cipher),
+      Layer.provideMerge(infra),
+    ),
   );
   await runtime.runPromise(
     Effect.flatMap(Db, (db) =>
@@ -116,7 +130,7 @@ it("keeps the password encrypted and unchanged unless a new one is given", async
   expect(await mail((m) => m.settings)).toMatchObject({ passwordSet: false });
 });
 
-it("mails a notification only to someone who turned email on", async () => {
+it("sends on the channels the person chose: push by default, email once turned on", async () => {
   await mail((m) =>
     m.save({
       host: "127.0.0.1",
@@ -132,12 +146,20 @@ it("mails a notification only to someone who turned email on", async () => {
     body: "Rain after 3pm.",
     path: "/chat/c",
   };
-  expect(await mail((m) => m.preferences("owner"))).toEqual({ email: false, available: true });
-  await mail((m) => m.send("owner", notification));
+  const notifications = <A>(use: (n: NotificationService["Service"]) => Effect.Effect<A>) =>
+    runtime.runPromise(Effect.flatMap(NotificationService, use));
+  expect(await notifications((n) => n.preferences("owner"))).toEqual({
+    push: true,
+    email: false,
+    emailAvailable: true,
+  });
+  await notifications((n) => n.deliver("owner", notification));
+  expect(published).toEqual([{ type: "notification", notification }]);
   expect(received).toEqual([]);
 
-  await mail((m) => m.setEmail("owner", true));
-  await mail((m) => m.send("owner", notification));
+  await notifications((n) => n.setPreferences("owner", { push: false, email: true }));
+  await notifications((n) => n.deliver("owner", notification));
+  expect(published).toHaveLength(1);
   expect(received).toHaveLength(1);
   expect(received[0]!.to).toBe("owner@t.io");
   expect(received[0]!.data).toContain("Subject: Morning digest");

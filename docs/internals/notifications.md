@@ -29,9 +29,15 @@ answer therefore sends nothing, and the tool row records only the text that was 
 
 ## Channels
 
-`NotificationService.deliver` fans one `AppNotification` (title, body, path) out to every
-channel the person has, each best effort and logged. A notification that cannot be
-delivered never fails the run.
+`NotificationService.deliver` fans one `AppNotification` (title, body, path) out to the
+channels the person chose, each best effort and logged. A notification that cannot be
+delivered never fails the run. Channels are per account and per kind of notification
+(schedules are the only kind so far): push, on by default, and email, off until chosen and
+offered only once an admin sets up a mail server. A schedule only says when.
+
+Push means every device the person is signed in on, so it is one choice rather than one per
+browser: open tabs, the desktop app and Web Push all follow it. What a single browser adds
+is its permission, which the settings page asks for only while push is on and it is missing.
 
 - Open tabs and the desktop app get it as the `notification` sync event, the one event that
   carries content rather than ids: it is immutable and capped well under the NOTIFY limit.
@@ -48,14 +54,13 @@ delivered never fails the run.
   send, which goes through `fetchPinned`. A 404 or 410 deletes the subscription.
 - The VAPID key pair is made on first need, one row, private half under `KeyCipher`.
   Replacing it orphans every subscription, so nothing rotates it.
-- An endpoint belongs to one browser profile. Subscribing it under another account moves
-  it there, and signing out unsubscribes this browser first, so a shared computer stops
-  receiving the last person's notifications.
+- A browser subscribes by itself on each visit once it has permission, and the
+  subscription belongs to that sign-in's session row: signing out, or revoking the device
+  under Devices, deletes it with the session, so there is no list of push devices to manage.
+  An endpoint is one browser profile, so another sign-in in it takes the subscription over.
 - Email goes through the SMTP server an admin set under Admin → Email, one row with the
-  password under `KeyCipher`, to people who turned it on in their notification settings
-  (off until they do). The host is the admin's choice and may be an internal relay, so,
+  password under `KeyCipher`. The host is the admin's choice and may be an internal relay, so,
   like the SearXNG base URL, it is exempt from the public-address rule.
-- Channels are the person's, chosen once in settings; a schedule only says when.
 - Every channel tags the notification with the run id, so several tabs show it once. A tab
   in a browser with a push subscription shows nothing itself and leaves it to the service
   worker, which always shows what it receives: Chrome penalises a push that shows nothing.

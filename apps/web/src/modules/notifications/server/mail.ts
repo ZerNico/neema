@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Redacted, Schema } from "effect";
 import { createTransport } from "nodemailer";
-import { notificationSettings, smtpSettings, user } from "~/db/schema/index.ts";
+import { smtpSettings, user } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
@@ -48,9 +48,8 @@ export class MailService extends Context.Service<
     clear: Effect.Effect<void>;
     /** Sends one message now and reports the server's refusal. */
     test(to: string): Effect.Effect<void, MailFailed>;
-    /** Whether this person gets notification email, and whether anyone can. */
-    preferences(userId: string): Effect.Effect<{ email: boolean; available: boolean }>;
-    setEmail(userId: string, email: boolean): Effect.Effect<void>;
+    /** Whether an admin set up a server, so anyone can get email. */
+    readonly available: Effect.Effect<boolean>;
     send(userId: string, notification: AppNotification): Effect.Effect<void>;
   }
 >()("chat/notifications/MailService") {
@@ -134,32 +133,14 @@ export class MailService extends Context.Service<
           .pipe(Effect.orDie, Effect.asVoid),
         test: (to) =>
           deliver(to, "neema test email", "Email from neema works. Schedules can notify you here."),
-        preferences: Effect.fn("MailService.preferences")(function* (userId) {
-          const [prefs] = yield* db
-            .select({ email: notificationSettings.email })
-            .from(notificationSettings)
-            .where(eq(notificationSettings.userId, userId))
-            .pipe(Effect.orDie);
-          return { email: prefs?.email ?? false, available: (yield* row) !== null };
-        }),
-        setEmail: Effect.fn("MailService.setEmail")(function* (userId, email) {
-          yield* db
-            .insert(notificationSettings)
-            .values({ userId, email })
-            .onConflictDoUpdate({
-              target: notificationSettings.userId,
-              set: { email, updatedAt: sql`now()` },
-            })
-            .pipe(Effect.orDie);
-        }),
+        available: Effect.map(row, (config) => config !== null),
         send: Effect.fn("MailService.send")(function* (userId, notification) {
           const [recipient] = yield* db
-            .select({ address: user.email, wanted: notificationSettings.email })
+            .select({ address: user.email })
             .from(user)
-            .leftJoin(notificationSettings, eq(notificationSettings.userId, user.id))
             .where(eq(user.id, userId))
             .pipe(Effect.orDie);
-          if (!recipient?.wanted) return;
+          if (!recipient) return;
           const site = publicUrl();
           const text = site
             ? `${notification.body}\n\nOpen it: ${site}${notification.path}`

@@ -4,16 +4,14 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { runtime } from "~/server/runtime.ts";
 import { MailService, SmtpSettingsInput } from "./mail.ts";
 import { PushService } from "./push.ts";
+import { NotificationService } from "./service.ts";
 
 const Text = (max: number) => Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(max));
 const PushSubscriptionInput = Schema.Struct({
   endpoint: Text(2048),
   p256dh: Text(200),
   auth: Text(100),
-  label: Text(200),
 });
-const EndpointInput = Schema.Struct({ endpoint: Text(2048) });
-const DeviceInput = Schema.Struct({ id: Text(128) });
 
 export const getPushKey = createServerFn({ method: "GET" })
   .middleware([requireSession])
@@ -24,7 +22,12 @@ export const subscribePush = createServerFn({ method: "POST" })
   .validator(Schema.toStandardSchemaV1(PushSubscriptionInput))
   .handler(({ data, context }) =>
     runtime.runPromise(
-      Effect.flatMap(PushService, (push) => push.subscribe(context.session.user.id, data)).pipe(
+      Effect.flatMap(PushService, (push) =>
+        push.subscribe(
+          { userId: context.session.user.id, sessionId: context.session.session.id },
+          data,
+        ),
+      ).pipe(
         Effect.catchTag("PushRejected", (error) =>
           Effect.die(new Response(error.reason, { status: 400 })),
         ),
@@ -32,46 +35,31 @@ export const subscribePush = createServerFn({ method: "POST" })
     ),
   );
 
-export const unsubscribePush = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(EndpointInput))
-  .handler(({ data, context }) =>
-    runtime.runPromise(
-      Effect.flatMap(PushService, (push) =>
-        push.unsubscribe(context.session.user.id, data.endpoint),
-      ),
-    ),
-  );
-
-export const listPushDevices = createServerFn({ method: "GET" })
-  .middleware([requireSession])
-  .handler(({ context }) =>
-    runtime.runPromise(Effect.flatMap(PushService, (push) => push.list(context.session.user.id))),
-  );
-
-export const removePushDevice = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(DeviceInput))
-  .handler(({ data, context }) =>
-    runtime.runPromise(
-      Effect.flatMap(PushService, (push) => push.remove(context.session.user.id, data.id)),
-    ),
-  );
-
 export const getNotificationPreferences = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>
     runtime.runPromise(
-      Effect.flatMap(MailService, (mail) => mail.preferences(context.session.user.id)),
+      Effect.flatMap(NotificationService, (service) =>
+        service.preferences(context.session.user.id),
+      ),
     ),
   );
 
-export const setEmailNotifications = createServerFn({ method: "POST" })
+export const updateNotificationPreferences = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(Schema.Struct({ email: Schema.Boolean })))
+  .validator(
+    Schema.toStandardSchemaV1(
+      Schema.Struct({
+        push: Schema.optionalKey(Schema.Boolean),
+        email: Schema.optionalKey(Schema.Boolean),
+      }),
+    ),
+  )
   .handler(({ data, context }) =>
     runtime.runPromise(
-      Effect.flatMap(MailService, (mail) => mail.setEmail(context.session.user.id, data.email)),
+      Effect.flatMap(NotificationService, (service) =>
+        service.setPreferences(context.session.user.id, data),
+      ),
     ),
   );
 

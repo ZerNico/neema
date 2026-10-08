@@ -1,7 +1,8 @@
 import { PgClient } from "@effect/sql-pg";
+import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { pushKeys, user } from "~/db/schema/index.ts";
+import { pushKeys, pushSubscriptions, session, user } from "~/db/schema/index.ts";
 import { PushService } from "~/modules/notifications/server/push.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
@@ -37,10 +38,17 @@ beforeAll(async () => {
   );
   await runtime.runPromise(
     Effect.flatMap(Db, (db) =>
-      db.insert(user).values([
-        { id: "a", name: "A", email: "a@t.io" },
-        { id: "b", name: "B", email: "b@t.io" },
-      ]),
+      Effect.gen(function* () {
+        yield* db.insert(user).values([
+          { id: "a", name: "A", email: "a@t.io" },
+          { id: "b", name: "B", email: "b@t.io" },
+        ]);
+        const expiresAt = new Date(Date.now() + 86_400_000);
+        yield* db.insert(session).values([
+          { id: "sa", userId: "a", token: "ta", expiresAt },
+          { id: "sb", userId: "b", token: "tb", expiresAt },
+        ]);
+      }),
     ),
   );
 }, 120_000);
@@ -58,27 +66,34 @@ it("makes one server key and keeps its private half encrypted", async () => {
   expect(rows[0]!.privateKeyCiphertext.split(".")).toHaveLength(3);
 });
 
+const a = { userId: "a", sessionId: "sa" };
+const b = { userId: "b", sessionId: "sb" };
+const owners = () =>
+  runtime.runPromise(
+    Effect.flatMap(Db, (db) =>
+      db
+        .select({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.endpoint, endpoint)),
+    ),
+  );
+
 it("refuses endpoints the server must not post to, and malformed keys", async () => {
   for (const bad of ["http://8.8.8.8/push", "https://127.0.0.1/push", "https://localhost/push"])
-    await expect(
-      push((p) => p.subscribe("a", { endpoint: bad, ...keys, label: "x" })),
-    ).rejects.toThrow();
+    await expect(push((p) => p.subscribe(a, { endpoint: bad, ...keys }))).rejects.toThrow();
   await expect(
-    push((p) => p.subscribe("a", { endpoint, p256dh: keys.auth, auth: keys.auth, label: "x" })),
+    push((p) => p.subscribe(a, { endpoint, p256dh: keys.auth, auth: keys.auth })),
   ).rejects.toMatchObject({ _tag: "PushRejected", reason: "the subscription keys are malformed" });
 });
 
-it("moves a browser to whoever subscribed it last, and removes it on request", async () => {
-  await push((p) => p.subscribe("a", { endpoint, ...keys, label: "Chrome on macOS" }));
-  expect(await push((p) => p.list("a"))).toEqual([
-    expect.objectContaining({ label: "Chrome on macOS", lastDeliveredAt: null }),
-  ]);
-  await push((p) => p.subscribe("b", { endpoint, ...keys, label: "Chrome on macOS" }));
-  expect(await push((p) => p.list("a"))).toEqual([]);
-  const [device] = await push((p) => p.list("b"));
-  // Another person's id removes nothing.
-  await push((p) => p.remove("a", device!.id));
-  expect(await push((p) => p.list("b"))).toHaveLength(1);
-  await push((p) => p.unsubscribe("b", endpoint));
-  expect(await push((p) => p.list("b"))).toEqual([]);
+it("moves a browser to whoever signed in last, and stops it when that sign-in ends", async () => {
+  await push((p) => p.subscribe(a, { endpoint, ...keys }));
+  expect(await owners()).toEqual([{ userId: "a" }]);
+  await push((p) => p.subscribe(b, { endpoint, ...keys }));
+  expect(await owners()).toEqual([{ userId: "b" }]);
+  // Signing out, or revoking the device, deletes the session.
+  await runtime.runPromise(
+    Effect.flatMap(Db, (db) => db.delete(session).where(eq(session.id, "sb"))),
+  );
+  expect(await owners()).toEqual([]);
 });

@@ -1,192 +1,129 @@
 import { readDesktopChrome } from "@chat/desktop-rpc";
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import {
-  currentPushSubscription,
-  disablePush,
-  enablePush,
-  pushSupported,
-} from "~/modules/notifications/client/push.ts";
-import {
-  notificationPreferencesQuery,
-  pushDevicesQuery,
-} from "~/modules/notifications/client/queries.ts";
+import { Link } from "@tanstack/react-router";
+import { notificationPreferencesQuery } from "~/modules/notifications/client/queries.ts";
 import { useNotificationPermission } from "~/modules/notifications/client/use-permission.ts";
-import {
-  removePushDevice,
-  setEmailNotifications,
-} from "~/modules/notifications/server/functions.ts";
-import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
+import type { NotificationPreferences } from "~/modules/notifications/schema.ts";
+import { updateNotificationPreferences } from "~/modules/notifications/server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Switch } from "~/ui/primitives/switch";
-import { PendingButton } from "~/ui/pending-button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 
-/** Where schedule runs reach you. Each schedule decides whether they notify. */
+const channelsLabel = (preferences: NotificationPreferences) =>
+  [preferences.push && "Push", preferences.email && preferences.emailAvailable && "Email"]
+    .filter(Boolean)
+    .join(", ") || "Off";
+
+/** What reaches you, and where. Each schedule still decides when it notifies. */
 export function NotificationsPage() {
-  const inDesktopApp = readDesktopChrome() !== null;
+  const queryClient = useQueryClient();
+  const { data: preferences } = useQuery(notificationPreferencesQuery);
+  const update = useMutation({
+    mutationFn: (changes: { push?: boolean; email?: boolean }) =>
+      updateNotificationPreferences({ data: changes }),
+    onMutate: (changes) => {
+      const previous = preferences;
+      if (previous)
+        queryClient.setQueryData(notificationPreferencesQuery.queryKey, {
+          ...previous,
+          ...changes,
+        });
+      return { previous };
+    },
+    onError: (error, _changes, context) => {
+      if (context?.previous)
+        queryClient.setQueryData(notificationPreferencesQuery.queryKey, context.previous);
+      toastError("Could not change notifications.", error);
+    },
+  });
+
   return (
-    <Page
-      title="Notifications"
-      description="Schedules notify you when a run finishes. Each schedule chooses when."
-      rootPath="/settings"
-      rootLabel="Settings"
-    >
-      <Section title={inDesktopApp ? "This app" : "This browser"}>
+    <Page title="Notifications" rootPath="/settings" rootLabel="Settings">
+      {preferences?.push ? <ThisBrowser /> : null}
+      <Section title="Notify me about">
         <ListCard>
-          <OpenRow inDesktopApp={inDesktopApp} />
-          {inDesktopApp ? null : <ClosedRow />}
+          <ListRow>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm font-medium">Schedules</span>
+              <span className="text-muted-foreground text-xs">
+                When a run finishes, or its answer finds something worth telling you.{" "}
+                <Link to="/schedules" className="underline underline-offset-2">
+                  Manage schedules
+                </Link>
+              </span>
+            </div>
+            {preferences ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" aria-label="Schedule notifications" />
+                  }
+                >
+                  {channelsLabel(preferences)}
+                  <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuCheckboxItem
+                    checked={preferences.push}
+                    onCheckedChange={(push) => update.mutate({ push })}
+                  >
+                    Push
+                  </DropdownMenuCheckboxItem>
+                  {/* Offered once an admin sets up a mail server. */}
+                  {preferences.emailAvailable ? (
+                    <DropdownMenuCheckboxItem
+                      checked={preferences.email}
+                      onCheckedChange={(email) => update.mutate({ email })}
+                    >
+                      Email
+                    </DropdownMenuCheckboxItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </ListRow>
         </ListCard>
       </Section>
-      <Section title="Email">
-        <ListCard>
-          <EmailRow />
-        </ListCard>
-      </Section>
-      <PushDevices />
     </Page>
   );
 }
 
-function OpenRow({ inDesktopApp }: { inDesktopApp: boolean }) {
+/**
+ * Push needs this browser's permission, which only it can give. Said only
+ * when something is missing; the desktop app never needs it.
+ */
+function ThisBrowser() {
   const { permission, request } = useNotificationPermission();
+  if (readDesktopChrome() !== null || permission === "granted") return null;
   return (
-    <ListRow>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-medium">
-          {inDesktopApp ? "Desktop notifications" : "While neema is open"}
-        </span>
-        <span className="text-muted-foreground text-xs">
-          {permission === "granted"
-            ? inDesktopApp
-              ? "On while the app is running, even with its window closed."
-              : "On. Turn them off in your browser’s site settings."
-            : permission === "denied"
-              ? "Blocked. Allow them in your browser’s site settings."
+    <ListCard>
+      <ListRow>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-medium">
+            {permission === "denied"
+              ? "Notifications are blocked in this browser"
               : permission === "unsupported"
-                ? "This browser can’t show notifications."
-                : "Off"}
-        </span>
-      </div>
-      {permission === "default" ? (
-        <Button size="sm" variant="outline" onClick={() => void request()}>
-          Turn on
-        </Button>
-      ) : null}
-    </ListRow>
-  );
-}
-
-const unsupportedReason = () =>
-  !window.isSecureContext
-    ? "Needs neema on an https address."
-    : /iPhone|iPad/.test(navigator.userAgent)
-      ? "Add neema to your Home Screen first, then turn this on there."
-      : "This browser can’t receive them while closed.";
-
-function ClosedRow() {
-  const queryClient = useQueryClient();
-  const supported = pushSupported();
-  const [subscribed, setSubscribed] = useState<boolean | null>(null);
-  useEffect(() => {
-    void currentPushSubscription().then((subscription) => setSubscribed(subscription !== null));
-  }, []);
-  const toggle = useMutation({
-    mutationFn: async (on: boolean) => (on ? enablePush() : disablePush().then(() => false)),
-    onSuccess: (on) => setSubscribed(on),
-    onError: (error) => toastError("Could not change notifications for this browser.", error),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: pushDevicesQuery.queryKey }),
-  });
-  return (
-    <ListRow>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-medium">Also when it’s closed</span>
-        <span className="text-muted-foreground text-xs">
-          {supported ? "Reaches this browser while no neema tab is open." : unsupportedReason()}
-        </span>
-      </div>
-      <Switch
-        checked={subscribed === true}
-        onCheckedChange={(on) => toggle.mutate(on)}
-        disabled={!supported || subscribed === null || toggle.isPending}
-        aria-label="Notify this browser when neema is closed"
-      />
-    </ListRow>
-  );
-}
-
-function EmailRow() {
-  const queryClient = useQueryClient();
-  const preferences = useQuery(notificationPreferencesQuery);
-  const toggle = useMutation({
-    mutationFn: (email: boolean) => setEmailNotifications({ data: { email } }),
-    onMutate: (email) => {
-      const previous = preferences.data;
-      if (previous)
-        queryClient.setQueryData(notificationPreferencesQuery.queryKey, { ...previous, email });
-      return { previous };
-    },
-    onError: (error, _email, context) => {
-      if (context?.previous)
-        queryClient.setQueryData(notificationPreferencesQuery.queryKey, context.previous);
-      toastError("Could not change email notifications.", error);
-    },
-  });
-  const available = preferences.data?.available ?? false;
-  return (
-    <ListRow>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-medium">Email me too</span>
-        <span className="text-muted-foreground text-xs">
-          {preferences.data && !available
-            ? "An administrator hasn’t set up email."
-            : "Sent to your account’s address."}
-        </span>
-      </div>
-      <Switch
-        checked={available && (preferences.data?.email ?? false)}
-        onCheckedChange={(email) => toggle.mutate(email)}
-        disabled={!available}
-        aria-label="Email me notifications"
-      />
-    </ListRow>
-  );
-}
-
-function PushDevices() {
-  const queryClient = useQueryClient();
-  const devices = useQuery(pushDevicesQuery);
-  const remove = useMutation({
-    mutationFn: (id: string) => removePushDevice({ data: { id } }),
-    onError: (error) => toastError("Could not remove that browser.", error),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: pushDevicesQuery.queryKey }),
-  });
-  if (!devices.data?.length) return null;
-  return (
-    <Section title="Browsers notified while closed">
-      <ListCard>
-        {devices.data.map((device) => (
-          <ListRow key={device.id}>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium">{device.label}</span>
-              <span className="text-muted-foreground text-xs">
-                {device.lastDeliveredAt
-                  ? `Last notified ${relativeAgeLabel(device.lastDeliveredAt)}`
-                  : `Added ${relativeAgeLabel(device.createdAt)}`}
-              </span>
-            </div>
-            <PendingButton
-              variant="ghost"
-              size="sm"
-              pending={remove.isPending && remove.variables === device.id}
-              onClick={() => remove.mutate(device.id)}
-            >
-              Remove
-            </PendingButton>
-          </ListRow>
-        ))}
-      </ListCard>
-    </Section>
+                ? "This browser can’t show notifications"
+                : "Notifications are off in this browser"}
+          </span>
+          {permission === "denied" ? (
+            <span className="text-muted-foreground text-xs">Allow them in its site settings.</span>
+          ) : null}
+        </div>
+        {permission === "default" ? (
+          <Button size="sm" onClick={() => void request()}>
+            Turn on
+          </Button>
+        ) : null}
+      </ListRow>
+    </ListCard>
   );
 }

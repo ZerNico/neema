@@ -13,3 +13,11 @@ export const AppNotification = Schema.Struct({
   path: Schema.String.check(Schema.isStartsWith("/")),
 });
 export type AppNotification = typeof AppNotification.Type;
+
+/** Where schedule runs reach someone; push covers every signed-in device. */
+export interface NotificationPreferences {
+  push: boolean;
+  email: boolean;
+  /** False until an admin sets up a mail server. */
+  emailAvailable: boolean;
+}

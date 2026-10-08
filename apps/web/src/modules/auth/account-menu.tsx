@@ -29,11 +29,8 @@ import { useRailTooltip } from "~/modules/navigation/ui/use-rail-tooltip.ts";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { toastError } from "~/ui/error-toast.ts";
-import { disablePush } from "~/modules/notifications/client/push.ts";
 
 async function signOutSession() {
-  // Before the session ends: forgetting the subscription needs it.
-  await disablePush().catch((error: unknown) => console.error("Could not stop push", error));
   const { error } = await authClient.signOut();
   if (error) throw new Error(error.message);
 }

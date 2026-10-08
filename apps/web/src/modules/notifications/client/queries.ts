@@ -1,14 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
-import {
-  getNotificationPreferences,
-  getSmtpSettings,
-  listPushDevices,
-} from "../server/functions.ts";
-
-export const pushDevicesQuery = queryOptions({
-  queryKey: ["notifications", "push-devices"],
-  queryFn: () => listPushDevices(),
-});
+import { getNotificationPreferences, getSmtpSettings } from "../server/functions.ts";
 
 export const notificationPreferencesQuery = queryOptions({
   queryKey: ["notifications", "preferences"],

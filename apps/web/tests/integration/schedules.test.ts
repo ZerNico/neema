@@ -31,7 +31,13 @@ import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 const settlement = ScheduleSettlement.layer.pipe(
-  Layer.provideMerge(Layer.succeed(NotificationService, { deliver: () => Effect.void })),
+  Layer.provideMerge(
+    Layer.succeed(NotificationService, {
+      deliver: () => Effect.void,
+      preferences: () => Effect.succeed({ push: true, email: false, emailAvailable: false }),
+      setPreferences: () => Effect.void,
+    }),
+  ),
 );
 
 let database: TestDatabase;

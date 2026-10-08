@@ -32,7 +32,7 @@ beforeAll(async () => {
   });
   const notifications = Layer.succeed(NotificationService, {
     deliver: (_userId, notification) => Effect.sync(() => void delivered.push(notification)),
-  });
+  } as NotificationService["Service"]);
   runtime = ManagedRuntime.make(
     ScheduleSettlement.layer.pipe(
       Layer.provideMerge(notifications),

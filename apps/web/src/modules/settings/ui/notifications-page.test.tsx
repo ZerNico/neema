@@ -1,25 +1,32 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getNotificationPreferences,
-  listPushDevices,
+  updateNotificationPreferences,
 } from "~/modules/notifications/server/functions.ts";
 import { NotificationsPage } from "./notifications-page.tsx";
 
 vi.mock("~/modules/notifications/server/functions.ts", () => ({
   getNotificationPreferences: vi.fn(),
-  setEmailNotifications: vi.fn(),
+  updateNotificationPreferences: vi.fn(),
   getPushKey: vi.fn(),
-  listPushDevices: vi.fn(),
-  removePushDevice: vi.fn(),
   subscribePush: vi.fn(),
-  unsubscribePush: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
   useRouterState: () => "/settings/notifications",
 }));
+
+beforeEach(() => {
+  vi.mocked(getNotificationPreferences).mockResolvedValue({
+    push: true,
+    email: false,
+    emailAvailable: false,
+  });
+  vi.mocked(updateNotificationPreferences).mockResolvedValue(undefined);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -33,50 +40,37 @@ const renderPage = () =>
     </QueryClientProvider>,
   );
 
-beforeEach(() => {
-  vi.mocked(getNotificationPreferences).mockResolvedValue({ email: false, available: false });
-});
-
 describe("NotificationsPage", () => {
-  it("offers turning on notifications here, and explains why closed ones are unavailable", async () => {
-    vi.stubGlobal("Notification", { permission: "default", requestPermission: vi.fn() });
-    vi.mocked(listPushDevices).mockResolvedValue([
-      {
-        id: "d",
-        label: "Firefox on Linux",
-        createdAt: new Date().toISOString(),
-        lastDeliveredAt: null,
-      },
-    ]);
+  it("chooses where schedule runs reach you, offering email only once it is set up", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("Notification", { permission: "granted" });
     renderPage();
-    expect(screen.getByRole("button", { name: "Turn on" })).toBeInTheDocument();
-    // jsdom is not a secure context.
-    expect(screen.getByText("Needs neema on an https address.")).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", { name: "Notify this browser when neema is closed" }),
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(await screen.findByText("Firefox on Linux")).toBeInTheDocument();
-    expect(await screen.findByText("An administrator hasn’t set up email.")).toBeInTheDocument();
+    const channels = await screen.findByRole("button", { name: "Schedule notifications" });
+    expect(channels).toHaveTextContent("Push");
+    await user.click(channels);
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Push" }));
+    // No mail server yet, so there is no email to choose.
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Email" })).not.toBeInTheDocument();
+    expect(updateNotificationPreferences).toHaveBeenCalledWith({ data: { push: false } });
+    await waitFor(() => expect(channels).toHaveTextContent("Off"));
+    // Nothing to say about this browser while it may already show them.
+    expect(screen.queryByText(/in this browser/)).not.toBeInTheDocument();
   });
 
-  it("in the desktop app, speaks of the app and offers no push", () => {
-    vi.stubGlobal("Notification", { permission: "granted" });
-    vi.mocked(listPushDevices).mockResolvedValue([]);
+  it("asks this browser for permission only while push is on and it is missing", async () => {
+    vi.stubGlobal("Notification", { permission: "default", requestPermission: vi.fn() });
+    renderPage();
+    expect(await screen.findByText("Notifications are off in this browser")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Turn on" })).toBeInTheDocument();
+  });
+
+  it("never asks inside the desktop app", async () => {
+    vi.stubGlobal("Notification", { permission: "default" });
     Reflect.set(globalThis, "__chatDesktop", {
-      chrome: {
-        platform: "darwin",
-        getState: vi.fn(),
-        onState: vi.fn(),
-        setTheme: vi.fn(),
-      },
+      chrome: { platform: "darwin", getState: vi.fn(), onState: vi.fn(), setTheme: vi.fn() },
     });
     renderPage();
-    expect(screen.getByRole("heading", { name: "This app" })).toBeInTheDocument();
-    expect(
-      screen.getByText("On while the app is running, even with its window closed."),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("switch", { name: "Notify this browser when neema is closed" }),
-    ).not.toBeInTheDocument();
+    await screen.findByRole("button", { name: "Schedule notifications" });
+    expect(screen.queryByRole("button", { name: "Turn on" })).not.toBeInTheDocument();
   });
 });
