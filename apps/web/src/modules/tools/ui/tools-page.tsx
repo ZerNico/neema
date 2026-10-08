@@ -3,6 +3,7 @@ import { useInvalidateTools } from "../client/use-invalidate-tools.ts";
 import { integerBetween } from "./integer-between.ts";
 import {
   Brain02Icon,
+  DashboardSquare01Icon,
   GlobalSearchIcon,
   Link01Icon,
   Presentation01Icon,
@@ -17,6 +18,7 @@ import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
+  updateInteractiveUiTool,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -30,7 +32,9 @@ import {
   webSearchToolQuery,
   urlReaderToolQuery,
   officeFilesToolQuery,
+  interactiveUiToolQuery,
 } from "../client/queries.ts";
+import { readInteractiveUi } from "~/modules/genui/settings.ts";
 
 const WebSearchForm = Schema.Struct({
   maxResults: integerBetween(1, 20),
@@ -43,11 +47,15 @@ const UrlReaderForm = Schema.Struct({
 
 export function ToolsPage() {
   return (
-    <Page title="Tools" description="Web tools, memory and Office files available in chats.">
+    <Page
+      title="Tools"
+      description="Web tools, memory, Office files and interactive answers available in chats."
+    >
       <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
       <OfficeFilesSection />
+      <InteractiveUiSection />
     </Page>
   );
 }
@@ -356,6 +364,66 @@ function OfficeFilesSection() {
           />
         </ListRow>
         <PresentationFontsRow />
+      </ListCard>
+    </Section>
+  );
+}
+
+/**
+ * Whether answers may contain interactive blocks, and whether their image
+ * tags are looked up. Blocks already in earlier answers keep rendering.
+ */
+function InteractiveUiSection() {
+  const { data: tool } = useSuspenseQuery(interactiveUiToolQuery);
+  const queryClient = useQueryClient();
+  const update = useMutation({
+    mutationFn: (patch: { enabled?: boolean; images?: boolean }) =>
+      updateInteractiveUiTool({ data: patch }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
+    onError: (error) => toastError("Could not update interactive answers.", error),
+  });
+
+  if (!tool) {
+    return (
+      <Section title="Interactive answers">
+        <EmptyState icon={DashboardSquare01Icon} title="This tool isn’t set up yet" />
+      </Section>
+    );
+  }
+
+  const settings = readInteractiveUi(tool);
+  return (
+    <Section title="Interactive answers">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Interactive answers</span>
+            <span className="text-muted-foreground text-xs">
+              Lets the model answer with calculators, charts, drawings and other controls the reader
+              can use.
+            </span>
+          </div>
+          <Switch
+            checked={settings.enabled}
+            onCheckedChange={(checked) => update.mutate({ enabled: checked })}
+            disabled={update.isPending}
+            aria-label="Interactive answers enabled"
+          />
+        </ListRow>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Images</span>
+            <span className="text-muted-foreground text-xs">
+              Finds pictures for interactive answers with web search.
+            </span>
+          </div>
+          <Switch
+            checked={settings.images}
+            onCheckedChange={(checked) => update.mutate({ images: checked })}
+            disabled={update.isPending || !settings.enabled}
+            aria-label="Images in interactive answers"
+          />
+        </ListRow>
       </ListCard>
     </Section>
   );

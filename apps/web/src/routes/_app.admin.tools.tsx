@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ToolsPage } from "~/modules/tools/ui/tools-page.tsx";
 import {
   memoryToolQuery,
+  interactiveUiToolQuery,
   officeFilesToolQuery,
   urlReaderToolQuery,
   webSearchToolQuery,
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/_app/admin/tools")({
       context.queryClient.ensureQueryData(urlReaderToolQuery),
       context.queryClient.ensureQueryData(presentationFontsQuery),
       context.queryClient.ensureQueryData(officeFilesToolQuery),
+      context.queryClient.ensureQueryData(interactiveUiToolQuery),
     ]),
   component: ToolsPage,
 });

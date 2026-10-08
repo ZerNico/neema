@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import {
   getDocumentParserTool,
   getMemoryTool,
+  getInteractiveUiTool,
   getOfficeFilesTool,
   getScanReading,
   getUrlReaderTool,
@@ -27,6 +28,11 @@ export const urlReaderToolQuery = queryOptions({
 export const officeFilesToolQuery = queryOptions({
   queryKey: ["admin", "tools", "office-files"],
   queryFn: () => getOfficeFilesTool(),
+});
+
+export const interactiveUiToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "interactive-ui"],
+  queryFn: () => getInteractiveUiTool(),
 });
 
 export const searchProvidersQuery = queryOptions({

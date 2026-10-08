@@ -2,6 +2,11 @@
 
 An answer can contain ```` ```ui ```` blocks: Svelte-like markup the model writes, drawn with our own components. The block is part of the message text, so the live stream, a reload and a branch all carry it with no transport of their own. Logic in a block runs only inside QuickJS, and the page sees validated JSON.
 
+## Admin settings
+
+- Interactive answers have one switch and an images switch, kept in the `interactive_ui` row of the tools registry (`genui/settings.ts`). A missing row means on. Each attempt reads it once, like the Office files switch.
+- Off means new answers are not offered the skill and nothing is looked up for them. Blocks already in earlier answers keep rendering: they are stored text, and hiding them would change history. A model that writes a block without the skill still gets it drawn, since nothing in the transcript is filtered.
+
 ## The language
 
 - Markup: lowercase tags from the catalog (`src/modules/genui/catalog.ts`), `{expr}` interpolation, `{#each}` and `{#if}` blocks, and an optional leading `<script>` using Svelte 5 runes: `let x = $state(init)` declares persisted state, `const y = $derived(expr)` is recomputed on every render. It is our grammar, not Svelte: the Svelte compiler emits DOM code, which is exactly what must not run.

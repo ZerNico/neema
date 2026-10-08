@@ -67,6 +67,8 @@ import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
 import type { UiImages } from "../assistant-output.ts";
 import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
+import { INTERACTIVE_UI_TOOL, readInteractiveUi } from "~/modules/genui/settings.ts";
+import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
@@ -987,11 +989,18 @@ export class StreamEngine extends Context.Service<
               })
             : null;
 
+          // Admins can switch interactive answers, or only their images, off in
+          // Tools. Read once per attempt, so a change applies to the next answer.
+          const interactiveUi = readInteractiveUi(
+            Option.isSome(toolRegistry)
+              ? yield* toolRegistry.value.getTool(INTERACTIVE_UI_TOOL)
+              : null,
+          );
           // Images named by the answer's ```ui blocks, looked up while it streams.
           // Only with the search this attempt was offered; otherwise each query
           // is recorded as needing it, so the reader is told why.
           const imageResolver: ImageResolver | null =
-            fence && Option.isSome(imageAttachments)
+            interactiveUi.images && fence && Option.isSome(imageAttachments)
               ? yield* makeImageResolver({
                   searchOn: permissions.webSearch && input.searchEnabled,
                   settled: new Set(
@@ -1039,10 +1048,12 @@ export class StreamEngine extends Context.Service<
           const skillManifest = permissions.skillsUse
             ? [
                 ...(config.skills ?? []),
-                ...(yield* skillReader.catalogue(
-                  input.userId,
-                  (config.skills ?? []).map((entry) => entry.skillId),
-                )),
+                ...(yield* skillReader.catalogue(input.userId, [
+                  ...(config.skills ?? []).map((entry) => entry.skillId),
+                  // Switched off, the skill is not offered; blocks already
+                  // in earlier answers still render.
+                  ...(interactiveUi.enabled ? [] : [INTERACTIVE_UI_SKILL_ID]),
+                ])),
               ]
             : [];
           const skillTools = skillManifest.length

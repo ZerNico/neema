@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { INTERACTIVE_UI_TOOL } from "~/modules/genui/settings.ts";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -227,6 +228,31 @@ export const updateOfficeFilesTool = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     runtime.runPromise(
       ToolsRepo.use((repo) => repo.updateTool("office_files", { enabled: data.enabled })),
+    ),
+  );
+
+export const getInteractiveUiTool = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
+
+export const updateInteractiveUiTool = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(
+    standard(
+      Schema.Struct({
+        enabled: Schema.optionalKey(Schema.Boolean),
+        images: Schema.optionalKey(Schema.Boolean),
+      }),
+    ),
+  )
+  .handler(({ data }) =>
+    runtime.runPromise(
+      ToolsRepo.use((repo) =>
+        repo.updateTool(INTERACTIVE_UI_TOOL, {
+          ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
+          ...(data.images !== undefined ? { config: { images: data.images } } : {}),
+        }),
+      ),
     ),
   );
 

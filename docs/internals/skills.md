@@ -13,7 +13,8 @@ A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a
 - `interactive-ui` lives in `src/modules/genui/skill.ts` beside the language it teaches. Its
   catalog section is generated from `catalog.ts` and its examples are rendered by a test, so
   the text cannot drift from what the runtime accepts. Research leaves it out of its
-  catalogue: a run's workers write briefs nobody renders.
+  catalogue: a run's workers write briefs nobody renders. Chat leaves it out too when an
+  admin switches interactive answers off (see [generative UI](generative-ui.md)).
 - `SkillRepo.catalogue` prepends them as ambient entries with `revisionId: "builtin"`;
   `SkillReader.readPinned` returns the bundled root for a builtin id and never touches the
   database or blob store. Nothing pins them in `message_skills`: builtin content is versioned

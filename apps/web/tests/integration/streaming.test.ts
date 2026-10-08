@@ -93,6 +93,7 @@ import {
 import { Db } from "~/server/db.ts";
 import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
@@ -150,6 +151,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | AttachmentService
   | ExternalCompletion
   | ScheduleRepo
+  | ToolsRepo
   | KeptWorkingFiles,
   unknown
 >;
@@ -368,6 +370,7 @@ beforeAll(async () => {
     KnowledgeRepo.layer,
     ProviderRepo.layer,
     ScheduleRepo.layer,
+    ToolsRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(FeaturePolicy.layer),
@@ -5473,6 +5476,46 @@ describe("ui block images", () => {
       terminalFixtures = undefined;
       imageSearch = undefined;
     }
+  });
+});
+
+describe("interactive answers setting", () => {
+  const offered = (prompt: Prompt.Prompt) =>
+    JSON.stringify(prompt).includes("builtin:interactive-ui");
+  const answer = () =>
+    Effect.gen(function* () {
+      const engine = yield* StreamEngine;
+      const seed = yield* setupConversation;
+      const before = streamPrompts.length;
+      yield* engine.startGeneration({
+        userId: seed.userId,
+        conversationId: seed.conversation.id,
+        messageId: seed.assistant.id,
+        generationId: seed.assistant.generationId ?? undefined,
+        modelId: textModelId,
+        searchEnabled: false,
+      });
+      yield* engine
+        .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+        .pipe(Stream.runCollect);
+      return streamPrompts.slice(before);
+    });
+
+  it("offers the skill by default and not once an admin switches it off", async () => {
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const tools = yield* ToolsRepo;
+        expect((yield* answer()).some(offered)).toBe(true);
+        yield* tools.updateTool("interactive_ui", { enabled: false });
+        try {
+          const prompts = yield* answer();
+          expect(prompts.length).toBeGreaterThan(0);
+          expect(prompts.some(offered)).toBe(false);
+        } finally {
+          yield* tools.updateTool("interactive_ui", { enabled: true });
+        }
+      }),
+    );
   });
 });
 
