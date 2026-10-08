@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { AppNotification } from "../schema.ts";
+import { PushService } from "./push.ts";
 
 /**
  * Tells a person something on every channel they have. Each channel is best
@@ -15,6 +16,7 @@ export class NotificationService extends Context.Service<
     NotificationService,
     Effect.gen(function* () {
       const bus = yield* SyncBus;
+      const push = yield* PushService;
       return NotificationService.of({
         deliver: Effect.fn("NotificationService.deliver")(function* (userId, notification) {
           // Open tabs and the desktop app show it themselves.
@@ -25,8 +27,10 @@ export class NotificationService extends Context.Service<
                 Effect.logWarning("notification could not reach open sessions", cause),
               ),
             );
+          // Browsers that are closed, and phones.
+          yield* push.send(userId, notification);
         }),
       });
     }),
-  );
+  ).pipe(Layer.provideMerge(PushService.layer));
 }

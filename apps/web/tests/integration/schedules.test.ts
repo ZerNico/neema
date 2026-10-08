@@ -30,7 +30,9 @@ import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
-const settlement = ScheduleSettlement.layer.pipe(Layer.provideMerge(NotificationService.layer));
+const settlement = ScheduleSettlement.layer.pipe(
+  Layer.provideMerge(Layer.succeed(NotificationService, { deliver: () => Effect.void })),
+);
 
 let database: TestDatabase;
 let databaseUrl: string;

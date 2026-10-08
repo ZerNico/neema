@@ -21,6 +21,7 @@ import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { sidebarPinsQuery } from "~/modules/navigation/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
+import { usePushNavigation } from "~/modules/notifications/client/push.ts";
 import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { AppMotionProvider } from "~/ui/motion.tsx";
@@ -86,6 +87,7 @@ function AuthenticatedLayout({
   const router = useRouter();
   const openPath = useCallback((path: string) => router.history.push(path), [router]);
   useSync(boundary?.reconcile, openPath);
+  usePushNavigation(openPath);
   useDesktopSessionRefresh();
 
   return (

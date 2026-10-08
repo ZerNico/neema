@@ -40,4 +40,17 @@ delivered never fails the run.
   and the hidden window keeps its page and its sync connection. A click asks the shell to
   bring the window forward through the optional `chrome.showWindow`, outside the Work
   protocol version, so an older shell still runs Work and only stays in the background.
-- Every channel tags the notification with the run id, so several tabs show it once.
+- Browsers that are closed, and phones with neema on the Home Screen, get Web Push.
+  Encryption (RFC 8291) and the server's signed claim (VAPID, RFC 8292) are written on
+  `node:crypto` and tested against the RFC's own example, rather than taken from a
+  library that would send through its own HTTP client: a subscription's endpoint is a URL
+  the browser chose, so it passes `resolvePublicHttpUrl` when saved and again on every
+  send, which goes through `fetchPinned`. A 404 or 410 deletes the subscription.
+- The VAPID key pair is made on first need, one row, private half under `KeyCipher`.
+  Replacing it orphans every subscription, so nothing rotates it.
+- An endpoint belongs to one browser profile. Subscribing it under another account moves
+  it there, and signing out unsubscribes this browser first, so a shared computer stops
+  receiving the last person's notifications.
+- Every channel tags the notification with the run id, so several tabs show it once. A tab
+  in a browser with a push subscription shows nothing itself and leaves it to the service
+  worker, which always shows what it receives: Chrome penalises a push that shows nothing.
