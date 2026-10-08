@@ -51,6 +51,11 @@ delivered never fails the run.
 - An endpoint belongs to one browser profile. Subscribing it under another account moves
   it there, and signing out unsubscribes this browser first, so a shared computer stops
   receiving the last person's notifications.
+- Email goes through the SMTP server an admin set under Admin → Email, one row with the
+  password under `KeyCipher`, to people who turned it on in their notification settings
+  (off until they do). The host is the admin's choice and may be an internal relay, so,
+  like the SearXNG base URL, it is exempt from the public-address rule.
+- Channels are the person's, chosen once in settings; a schedule only says when.
 - Every channel tags the notification with the run id, so several tabs show it once. A tab
   in a browser with a push subscription shows nothing itself and leaves it to the service
   worker, which always shows what it receives: Chrome penalises a push that shows nothing.

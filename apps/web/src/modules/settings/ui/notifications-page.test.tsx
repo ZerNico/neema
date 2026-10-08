@@ -1,10 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { listPushDevices } from "~/modules/notifications/server/functions.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getNotificationPreferences,
+  listPushDevices,
+} from "~/modules/notifications/server/functions.ts";
 import { NotificationsPage } from "./notifications-page.tsx";
 
 vi.mock("~/modules/notifications/server/functions.ts", () => ({
+  getNotificationPreferences: vi.fn(),
+  setEmailNotifications: vi.fn(),
   getPushKey: vi.fn(),
   listPushDevices: vi.fn(),
   removePushDevice: vi.fn(),
@@ -28,6 +33,10 @@ const renderPage = () =>
     </QueryClientProvider>,
   );
 
+beforeEach(() => {
+  vi.mocked(getNotificationPreferences).mockResolvedValue({ email: false, available: false });
+});
+
 describe("NotificationsPage", () => {
   it("offers turning on notifications here, and explains why closed ones are unavailable", async () => {
     vi.stubGlobal("Notification", { permission: "default", requestPermission: vi.fn() });
@@ -47,6 +56,7 @@ describe("NotificationsPage", () => {
       screen.getByRole("switch", { name: "Notify this browser when neema is closed" }),
     ).toHaveAttribute("aria-disabled", "true");
     expect(await screen.findByText("Firefox on Linux")).toBeInTheDocument();
+    expect(await screen.findByText("An administrator hasn’t set up email.")).toBeInTheDocument();
   });
 
   it("in the desktop app, speaks of the app and offers no push", () => {
@@ -65,6 +75,8 @@ describe("NotificationsPage", () => {
     expect(
       screen.getByText("On while the app is running, even with its window closed."),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: "Notify this browser when neema is closed" }),
+    ).not.toBeInTheDocument();
   });
 });

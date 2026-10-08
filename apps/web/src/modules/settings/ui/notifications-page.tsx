@@ -7,9 +7,15 @@ import {
   enablePush,
   pushSupported,
 } from "~/modules/notifications/client/push.ts";
-import { pushDevicesQuery } from "~/modules/notifications/client/queries.ts";
+import {
+  notificationPreferencesQuery,
+  pushDevicesQuery,
+} from "~/modules/notifications/client/queries.ts";
 import { useNotificationPermission } from "~/modules/notifications/client/use-permission.ts";
-import { removePushDevice } from "~/modules/notifications/server/functions.ts";
+import {
+  removePushDevice,
+  setEmailNotifications,
+} from "~/modules/notifications/server/functions.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -31,6 +37,11 @@ export function NotificationsPage() {
         <ListCard>
           <OpenRow inDesktopApp={inDesktopApp} />
           {inDesktopApp ? null : <ClosedRow />}
+        </ListCard>
+      </Section>
+      <Section title="Email">
+        <ListCard>
+          <EmailRow />
         </ListCard>
       </Section>
       <PushDevices />
@@ -100,6 +111,44 @@ function ClosedRow() {
         onCheckedChange={(on) => toggle.mutate(on)}
         disabled={!supported || subscribed === null || toggle.isPending}
         aria-label="Notify this browser when neema is closed"
+      />
+    </ListRow>
+  );
+}
+
+function EmailRow() {
+  const queryClient = useQueryClient();
+  const preferences = useQuery(notificationPreferencesQuery);
+  const toggle = useMutation({
+    mutationFn: (email: boolean) => setEmailNotifications({ data: { email } }),
+    onMutate: (email) => {
+      const previous = preferences.data;
+      if (previous)
+        queryClient.setQueryData(notificationPreferencesQuery.queryKey, { ...previous, email });
+      return { previous };
+    },
+    onError: (error, _email, context) => {
+      if (context?.previous)
+        queryClient.setQueryData(notificationPreferencesQuery.queryKey, context.previous);
+      toastError("Could not change email notifications.", error);
+    },
+  });
+  const available = preferences.data?.available ?? false;
+  return (
+    <ListRow>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-medium">Email me too</span>
+        <span className="text-muted-foreground text-xs">
+          {preferences.data && !available
+            ? "An administrator hasn’t set up email."
+            : "Sent to your account’s address."}
+        </span>
+      </div>
+      <Switch
+        checked={available && (preferences.data?.email ?? false)}
+        onCheckedChange={(email) => toggle.mutate(email)}
+        disabled={!available}
+        aria-label="Email me notifications"
       />
     </ListRow>
   );

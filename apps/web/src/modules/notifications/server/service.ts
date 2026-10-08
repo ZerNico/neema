@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { AppNotification } from "../schema.ts";
+import { MailService } from "./mail.ts";
 import { PushService } from "./push.ts";
 
 /**
@@ -17,6 +18,7 @@ export class NotificationService extends Context.Service<
     Effect.gen(function* () {
       const bus = yield* SyncBus;
       const push = yield* PushService;
+      const mail = yield* MailService;
       return NotificationService.of({
         deliver: Effect.fn("NotificationService.deliver")(function* (userId, notification) {
           // Open tabs and the desktop app show it themselves.
@@ -27,10 +29,13 @@ export class NotificationService extends Context.Service<
                 Effect.logWarning("notification could not reach open sessions", cause),
               ),
             );
-          // Browsers that are closed, and phones.
-          yield* push.send(userId, notification);
+          // Browsers that are closed, and phones, and mail for those who asked.
+          yield* Effect.all([push.send(userId, notification), mail.send(userId, notification)], {
+            concurrency: "unbounded",
+            discard: true,
+          });
         }),
       });
     }),
-  ).pipe(Layer.provideMerge(PushService.layer));
+  ).pipe(Layer.provideMerge(Layer.mergeAll(PushService.layer, MailService.layer)));
 }

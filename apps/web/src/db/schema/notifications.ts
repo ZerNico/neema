@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
 /**
@@ -35,3 +35,28 @@ export const pushSubscriptions = pgTable(
   },
   (t) => [index("push_subscriptions_user_idx").on(t.userId)],
 );
+
+/**
+ * The instance's outgoing mail, set by an admin. One row; none means no email
+ * channel. The password is a credential like any provider key.
+ */
+export const smtpSettings = pgTable("smtp_settings", {
+  id: text().primaryKey(),
+  host: text().notNull(),
+  port: integer().notNull(),
+  /** `tls` from the first byte (465), `starttls` upgrades (587), `none` for a local relay. */
+  security: text({ enum: ["tls", "starttls", "none"] }).notNull(),
+  username: text(),
+  passwordCiphertext: text("password_ciphertext"),
+  fromAddress: text("from_address").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** No row means the defaults: email off, since nobody asked for mail. */
+export const notificationSettings = pgTable("notification_settings", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  email: boolean().notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
