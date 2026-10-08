@@ -194,7 +194,12 @@ describe("what blocks may do", () => {
     "```",
   ].join("\n");
 
-  function drawWith(actions: Partial<GenuiActions>, tailId = "m1") {
+  function drawWith(
+    actions: Partial<GenuiActions>,
+    tailId = "m1",
+    markdown = BLOCK,
+    messageId = "m1",
+  ) {
     const all: GenuiActions = {
       tailId,
       disabled: false,
@@ -208,9 +213,9 @@ describe("what blocks may do", () => {
       <GenuiClientContext value={inProcess(engine)}>
         <GenuiActionsContext value={all}>
           <GenuiMessageContext
-            value={{ messageId: "m1", createdAt: 0, streaming: false, generationId: "g1" }}
+            value={{ messageId, createdAt: 0, streaming: false, generationId: "g1" }}
           >
-            <AssistantMarkdown content={keyUiFences(BLOCK, 0)} streaming={false} />
+            <AssistantMarkdown content={keyUiFences(markdown, 0)} streaming={false} />
           </GenuiMessageContext>
         </GenuiActionsContext>
       </GenuiClientContext>,
@@ -245,6 +250,35 @@ describe("what blocks may do", () => {
       sourceHash: hashSource(scanUiFences(BLOCK)[0]!.code),
       state: '{"n":1,"__seed":0}',
     });
+  });
+
+  it("lets a drawing's parts change state, by pointer or keyboard, but never send", async () => {
+    const actions = drawWith(
+      {},
+      "m-shape",
+      [
+        "```ui",
+        "<script>let n = $state(0);</script>",
+        "<text>Taps {n}</text>",
+        '<svg viewBox="0 0 10 10" label="Pad">',
+        "  <rect width={10} height={10} label=\"Tap pad\" onclick={() => { n++; send('From a shape'); }}/>",
+        "</svg>",
+        "```",
+      ].join("\n"),
+      "m-shape",
+    );
+    const pad = await screen.findByRole("button", { name: "Tap pad" });
+    await act(async () => {
+      fireEvent.click(pad);
+    });
+    expect(await screen.findByText("Taps 1")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("button", { name: "Tap pad" }), { key: "Enter" });
+    });
+    expect(await screen.findByText("Taps 2")).toBeInTheDocument();
+    // Its text was never shown to the reader as a label, so a shape cannot send it.
+    expect(actions.offer).not.toHaveBeenCalled();
+    expect(actions.send).not.toHaveBeenCalled();
   });
 
   it("drops a message with invisible characters", async () => {

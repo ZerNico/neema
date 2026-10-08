@@ -9,7 +9,7 @@ import { scaleBand } from "@tanstack/charts/scales/band";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { stack } from "@tanstack/charts/stack";
 import { tooltip } from "@tanstack/charts/tooltip";
-import { createElement, useMemo } from "react";
+import { createElement, useMemo, type KeyboardEvent } from "react";
 import { Progress, ProgressLabel } from "~/ui/primitives/progress";
 import {
   Table,
@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "~/ui/primitives/table";
 import type { ValidNode } from "../catalog.ts";
+import { handlerOf, useHandler } from "./handler.ts";
 
 /** Series colours, in fixed order and never cycled; the catalog caps series at four. */
 const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)"];
@@ -177,11 +178,28 @@ export function UiChart({ node }: { node: ValidNode }) {
 
 /** One SVG element from validated props; colours map to theme variables. */
 function SvgNode({ node }: { node: ValidNode }) {
+  const { onclick, label, ...rest } = node.props;
+  const fire = useHandler(handlerOf(onclick), { event: "click", tag: "shape" });
   if (!SVG_TAGS.has(node.tag)) return null;
   const props: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(node.props)) {
+  for (const [name, value] of Object.entries(rest)) {
     props[name] =
       (name === "fill" || name === "stroke") && typeof value === "string" ? PAINT[value] : value;
+  }
+  if (fire) {
+    // A real control: focusable, named, and pressed by keyboard as by pointer.
+    Object.assign(props, {
+      role: "button",
+      tabIndex: 0,
+      "aria-label": typeof label === "string" ? label : "Select",
+      className: "cursor-pointer outline-none focus-visible:[outline:2px_solid_var(--ring)]",
+      onClick: () => fire([]),
+      onKeyDown: (event: KeyboardEvent<SVGElement>) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        fire([]);
+      },
+    });
   }
   const children = node.children.map((child, i) =>
     // oxlint-disable-next-line react/no-array-index-key -- drawing order is the identity

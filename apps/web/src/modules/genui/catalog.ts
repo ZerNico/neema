@@ -104,6 +104,10 @@ const SVG_SHAPE = {
     /^\s*(?:(?:translate|rotate|scale)\(\s*-?\d+(?:\.\d+)?(?:\s*[ ,]\s*-?\d+(?:\.\d+)?){0,2}\s*\)\s*)+$/,
     "translate()/rotate()/scale()",
   ),
+  // A tappable part of a drawing. It changes state only: sending, opening and
+  // copying stay with real buttons, whose text the reader can see.
+  onclick: handler(),
+  label: text(120),
 };
 const POINTS = matching(/^[\d\s,.eE+-]*$/, "points", TREE_LIMITS.pathChars);
 
@@ -395,7 +399,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
             }),
           ).check(Schema.isMaxLength(4)),
           // The theme has four chart colours; a fifth series drops the whole chart.
-          "{name, values: number[]}[] (at most 4; fold the rest into one \"Other\" series)",
+          '{name, values: number[]}[] (at most 4; fold the rest into one "Other" series)',
         ),
       ),
       label: required(text(200)),

@@ -2,7 +2,7 @@
 // checked against the catalog, so each component only maps them onto ours;
 // anything it does not recognise renders nothing rather than guessing.
 
-import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import { use, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -27,9 +27,10 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
+import { handlerOf, useHandler } from "./handler.ts";
 import { UiLink } from "./link.tsx";
 import { UiImage, UiImages } from "./media.tsx";
-import { DispatchContext, SuggestContext, type HandlerRef, type TrustedEvent } from "./context.ts";
+import { SuggestContext } from "./context.ts";
 
 type Child = ValidNode | string;
 
@@ -117,13 +118,6 @@ const num = (value: unknown): number | undefined => (typeof value === "number" ?
 const step = (value: unknown, table: readonly string[], fallback: number) =>
   table[num(value) ?? fallback] ?? "";
 
-function handlerOf(value: unknown): HandlerRef | undefined {
-  if (typeof value !== "object" || value === null || !("$h" in value) || !("rev" in value))
-    return undefined;
-  const { $h, rev } = value;
-  return typeof $h === "number" && typeof rev === "number" ? { $h, rev } : undefined;
-}
-
 function optionsOf(value: unknown): { label: string; value: string }[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((o: unknown) => {
@@ -134,35 +128,6 @@ function optionsOf(value: unknown): { label: string; value: string }[] {
     }
     return [];
   });
-}
-
-/**
- * Calls a handler with the latest arguments, one call at a time. A slider
- * fires on every pixel; between replies only the newest value matters, and
- * it is sent through the handler of the tree that reply produced.
- */
-function useHandler(ref: HandlerRef | undefined, trusted: TrustedEvent) {
-  const dispatch = use(DispatchContext);
-  const inFlight = useRef(false);
-  const queued = useRef<readonly unknown[] | null>(null);
-  const send = (target: HandlerRef, args: readonly unknown[]) => {
-    inFlight.current = true;
-    void dispatch(target, args, trusted).finally(() => {
-      inFlight.current = false;
-    });
-  };
-  // A queued value goes out once the new tree, with its fresh handler, lands.
-  useEffect(() => {
-    if (!ref || inFlight.current || !queued.current) return;
-    const args = queued.current;
-    queued.current = null;
-    send(ref, args);
-  });
-  if (!ref) return undefined;
-  return (args: readonly unknown[]) => {
-    if (inFlight.current) queued.current = args;
-    else send(ref, args);
-  };
 }
 
 /** A control's own value while the reader moves it, until the tree's value changes. */

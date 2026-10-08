@@ -105,7 +105,7 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 - A block is markup: \`<tag prop="text" prop={expression} flag/>\`, plain text, and \`{expression}\` interpolation. Tags are only those in the catalog below; anything else is dropped.
 - Logic: \`{#each list as item, i}…{:else}…{/each}\` and \`{#if cond}…{:else if other}…{:else}…{/if}\`.
 - An optional \`<script>\` comes first. \`let x = $state(initial)\` declares state the reader changes. \`const y = $derived(expression)\` is recomputed on every render. Plain \`const\` and \`function\` declarations are allowed.
-- Events: \`onclick={() => …}\` on buttons, \`onchange={(value) => …}\` on inputs. The argument is the new value.
+- Events: \`onclick={() => …}\` on buttons and on drawing shapes, \`onchange={(value) => …}\` on inputs. The argument is the new value. A tappable shape needs a \`label\` saying what it selects; it can change state but never send, open or copy.
 - Text is plain: no Markdown, no citations, no HTML. Use \`<b>\`, \`<i>\`, \`<code>\`, \`<link>\` inline.
 
 ## Rules the runtime enforces
