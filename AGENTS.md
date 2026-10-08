@@ -283,6 +283,8 @@ skipped one on purpose.
   by main, one profile per server, pages outside the routes laid over panel slots, the
   lifecycle that freezes and discards them, and the model's browser tools (desktop-family
   tools run by the page), site approvals and the navigation gate.
+- `docs/internals/generative-ui.md`: ```ui blocks in answers. The language, the mutation
+  contract that makes a rebuilt block equal the live one, and the QuickJS JSON boundary.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 
