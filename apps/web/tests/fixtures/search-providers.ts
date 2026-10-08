@@ -12,9 +12,13 @@ export const testSearchProvider: SearchProviderSnapshot = {
 };
 
 /** A chain whose search is the test's; everything else is inert. */
-export const fakeSearchProviders = (fake: Pick<SearchProviders["Service"], "search">) =>
+export const fakeSearchProviders = (
+  fake: Pick<SearchProviders["Service"], "search"> &
+    Partial<Pick<SearchProviders["Service"], "searchImages">>,
+) =>
   SearchProviders.of({
     search: fake.search,
+    searchImages: fake.searchImages ?? (() => Effect.succeed([])),
     test: () => Effect.succeed({ resultCount: 0 }),
     status: () => Effect.succeed([]),
   });

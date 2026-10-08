@@ -12,6 +12,8 @@ import {
 import { searchFailure } from "./http.ts";
 import { makeSearxngAdapter } from "./searxng.ts";
 import type {
+  ImageHit,
+  ImageSearchRequest,
   SearchAdapter,
   SearchFailureReason,
   SearchHit,
@@ -122,6 +124,11 @@ export class SearchProviders extends Context.Service<
       providers: ReadonlyArray<SearchProviderSnapshot>,
       request: SearchRequest,
     ): Effect.Effect<ReadonlyArray<SearchHit>, SearchFailed>;
+    /** Image search across the providers that have it, with health kept apart from web search. */
+    searchImages(
+      providers: ReadonlyArray<SearchProviderSnapshot>,
+      request: ImageSearchRequest,
+    ): Effect.Effect<ReadonlyArray<ImageHit>, SearchFailed>;
     /** One attempt against one provider, outside the chain and its health. */
     test(
       provider: SearchProviderSnapshot,
@@ -143,12 +150,20 @@ export class SearchProviders extends Context.Service<
         langsearch: makeLangSearchAdapter(http),
       };
       const health = new Map<string, Health>();
-      const current = (provider: SearchProviderSnapshot) => {
-        const entry = health.get(provider.id);
+      // Image search keeps its own health: an image outage must not cool a
+      // provider down for web search, nor the other way round.
+      type Capability = "web" | "images";
+      const healthKey = (provider: SearchProviderSnapshot, capability: Capability) =>
+        capability === "web" ? provider.id : `${provider.id}:images`;
+      const current = (provider: SearchProviderSnapshot, capability: Capability = "web") => {
+        const entry = health.get(healthKey(provider, capability));
         return entry?.version === provider.version ? entry : undefined;
       };
-      const entryFor = (provider: SearchProviderSnapshot): Health => {
-        const existing = current(provider);
+      const entryFor = (
+        provider: SearchProviderSnapshot,
+        capability: Capability = "web",
+      ): Health => {
+        const existing = current(provider, capability);
         if (existing) return existing;
         const fresh: Health = {
           version: provider.version,
@@ -157,7 +172,7 @@ export class SearchProviders extends Context.Service<
           lastSuccessAt: null,
           lastError: null,
         };
-        health.set(provider.id, fresh);
+        health.set(healthKey(provider, capability), fresh);
         return fresh;
       };
 
@@ -221,6 +236,58 @@ export class SearchProviders extends Context.Service<
         });
       });
 
+      const searchImages = Effect.fn("SearchProviders.searchImages")(function* (
+        providers: ReadonlyArray<SearchProviderSnapshot>,
+        request: ImageSearchRequest,
+      ) {
+        const capable = providers.filter((p) => adapters[p.settings.kind].searchImages);
+        const started = yield* Clock.currentTimeMillis;
+        const ordered = orderProviders(
+          capable,
+          { query: request.query, maxResults: request.maxResults },
+          () => true,
+          (provider) => current(provider, "images")?.until ?? 0,
+          started,
+        );
+        const failures: string[] = [];
+        for (const provider of ordered) {
+          const remaining = started + QUERY_DEADLINE_MS - (yield* Clock.currentTimeMillis);
+          if (remaining <= 0) {
+            failures.push("image search took too long");
+            break;
+          }
+          const adapter = adapters[provider.settings.kind];
+          const timeoutMs = Math.min(ATTEMPT_TIMEOUT_MS, remaining);
+          const outcome = yield* Effect.result(
+            adapter.searchImages!(provider, request).pipe(
+              Effect.timeoutOrElse({
+                duration: Duration.millis(timeoutMs),
+                orElse: () =>
+                  Effect.fail(
+                    searchFailure("unavailable", `no answer within ${timeoutMs / 1000}s`),
+                  ),
+              }),
+            ),
+          );
+          const finished = yield* Clock.currentTimeMillis;
+          const entry = entryFor(provider, "images");
+          if (Result.isSuccess(outcome)) {
+            entry.consecutiveFailures = 0;
+            entry.until = 0;
+            entry.lastSuccessAt = finished;
+            return outcome.success;
+          }
+          const error = outcome.failure;
+          if (error.reason !== "rejected") entry.consecutiveFailures++;
+          entry.until = finished + cooldownMs(error, entry.consecutiveFailures);
+          entry.lastError = { reason: error.reason, message: error.message, at: finished };
+          failures.push(`${provider.label}: ${error.message}`);
+        }
+        return yield* new SearchFailed({
+          message: failures.length ? failures.join("; ") : "no provider can search images",
+        });
+      });
+
       const test = Effect.fn("SearchProviders.test")(function* (provider: SearchProviderSnapshot) {
         const hits = yield* attempt(
           provider,
@@ -232,16 +299,18 @@ export class SearchProviders extends Context.Service<
 
       const status = Effect.fn("SearchProviders.status")(function* () {
         const now = yield* Clock.currentTimeMillis;
-        return [...health].map(([providerId, entry]): SearchProviderStatus => ({
-          providerId,
-          version: entry.version,
-          lastSuccessAt: entry.lastSuccessAt,
-          lastError: entry.lastError,
-          coolingDownUntil: entry.until > now ? entry.until : null,
-        }));
+        return [...health]
+          .filter(([key]) => !key.endsWith(":images"))
+          .map(([providerId, entry]): SearchProviderStatus => ({
+            providerId,
+            version: entry.version,
+            lastSuccessAt: entry.lastSuccessAt,
+            lastError: entry.lastError,
+            coolingDownUntil: entry.until > now ? entry.until : null,
+          }));
       });
 
-      return SearchProviders.of({ search, test, status });
+      return SearchProviders.of({ search, searchImages, test, status });
     }),
   );
 

@@ -10,8 +10,8 @@ import {
   type WebToolResult as Result,
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchProviders } from "./search-providers/chain.ts";
-import type { SearchHit } from "./search-providers/types.ts";
+import { SearchProviders, type SearchFailed } from "./search-providers/chain.ts";
+import type { ImageHit, SearchHit } from "./search-providers/types.ts";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
 import { canonicalUserUrl } from "./user-urls.ts";
@@ -96,6 +96,14 @@ export class WebSearchExecutor extends Context.Service<
     ): Effect.Effect<WebSearchHandler, ToolUnavailable, Scope.Scope>;
     /** Read once at research start; an active run keeps its captured allowance. */
     researchSearchLimit(): Effect.Effect<number>;
+    /**
+     * Image search across the configured providers that have it. Fails with
+     * ToolUnavailable when web search is off or unconfigured.
+     */
+    images(
+      query: string,
+      maxResults: number,
+    ): Effect.Effect<ReadonlyArray<ImageHit>, ToolUnavailable | SearchFailed>;
     /** Cheap check used by ChatService validation + composer availability. */
     availability(): Effect.Effect<{ configured: boolean; enabled: boolean }>;
   }
@@ -217,6 +225,20 @@ export class WebSearchExecutor extends Context.Service<
         return handler as WebSearchHandler;
       });
 
+      const images = Effect.fn("WebSearchExecutor.images")(function* (
+        query: string,
+        maxResults: number,
+      ) {
+        const tool = yield* repo.getWebSearch();
+        if (!tool || tool.providers.length === 0) {
+          return yield* new ToolUnavailable({ tool: "web_search", reason: "not configured" });
+        }
+        if (!tool.enabled) {
+          return yield* new ToolUnavailable({ tool: "web_search", reason: "disabled" });
+        }
+        return yield* searchProviders.searchImages(tool.providers, { query, maxResults });
+      });
+
       const availability = Effect.fn("WebSearchExecutor.availability")(function* () {
         const tool = yield* repo.getWebSearch();
         return {
@@ -230,7 +252,12 @@ export class WebSearchExecutor extends Context.Service<
         return tool?.config.researchMaxSearchQueries ?? RESEARCH_SEARCH_BUDGET.default;
       });
 
-      return WebSearchExecutor.of({ handler: makeHandler, availability, researchSearchLimit });
+      return WebSearchExecutor.of({
+        handler: makeHandler,
+        images,
+        availability,
+        researchSearchLimit,
+      });
     }),
   );
 }

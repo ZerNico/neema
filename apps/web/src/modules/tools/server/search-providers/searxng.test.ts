@@ -454,3 +454,68 @@ describe("SearxngBackend", () => {
     ),
   );
 });
+
+describe("SearxngBackend images", () => {
+  it.effect("asks the image engines and keeps only fetchable http(s) images", () => {
+    let asked: URL | undefined;
+    return Effect.gen(function* () {
+      const backend = yield* SearchBackend;
+      const hits = yield* backend.searchImages!(connection, { query: "gear hub", maxResults: 2 });
+      expect(asked?.searchParams.get("engines")).toBe("bing images");
+      expect(hits).toEqual([
+        {
+          imageUrl: "https://img.example/a.jpg",
+          thumbnailUrl: "https://thumbs.example/a.jpg",
+          pageUrl: "https://page.example/a",
+          title: "A",
+          width: 1920,
+          height: 1080,
+        },
+        {
+          imageUrl: "https://img.example/b.png",
+          pageUrl: "https://page.example/b",
+          title: "https://page.example/b",
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        backendWith(
+          (url) => {
+            asked = url;
+            return searxngJson([
+              {
+                url: "https://page.example/a",
+                title: "A",
+                img_src: "https://img.example/a.jpg",
+                thumbnail_src: "//thumbs.example/a.jpg",
+                resolution: "1920 x 1080",
+              },
+              // The same image from a second engine.
+              { url: "https://page.example/a2", img_src: "https://img.example/a.jpg" },
+              { url: "https://page.example/data", img_src: "data:image/png;base64,AAAA" },
+              {
+                url: "https://page.example/b",
+                img_src: "https://img.example/b.png",
+                resolution: "big",
+              },
+              { url: "https://page.example/c", img_src: "https://img.example/c.png" },
+              { url: "https://page.example/d", img_src: "https://img.example/d.png" },
+            ]);
+          },
+          () =>
+            Response.json({
+              engines: [
+                { name: "brave", enabled: true, categories: ["general"], time_range_support: true },
+                {
+                  name: "bing images",
+                  enabled: true,
+                  categories: ["images"],
+                  time_range_support: false,
+                },
+              ],
+            }),
+        ),
+      ),
+    );
+  });
+});

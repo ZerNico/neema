@@ -192,4 +192,41 @@ describe("search provider chain", () => {
       expect(yield* providers.status()).toEqual([]);
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect(
+    "searches images only where a provider can, with health kept apart from web search",
+    () => {
+      const calls: string[] = [];
+      const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push(new URL(new Request(input, init).url).host);
+        return Response.json({ detail: "down" }, { status: 503 });
+      }) as typeof globalThis.fetch;
+      const layer = SearchProviders.layerWithoutHttp.pipe(
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch)),
+      );
+      const searxng: SearchProviderSnapshot = {
+        id: "s",
+        label: "SearXNG",
+        version: 0,
+        settings: { kind: "searxng", baseUrl: "http://searx.test" },
+        secret: null,
+      };
+      return Effect.gen(function* () {
+        const providers = yield* SearchProviders;
+        const error = yield* providers
+          .searchImages([provider("a"), searxng], { query: "q", maxResults: 4 })
+          .pipe(Effect.flip);
+        expect(error.message).toContain("SearXNG");
+        // Tavily has no image search, so only SearXNG was asked (config, then search).
+        expect(calls.every((host) => host === "searx.test")).toBe(true);
+        // The image failure cools nothing a web search would see.
+        expect(yield* providers.status()).toEqual([]);
+        const none = yield* providers
+          .searchImages([provider("a")], { query: "q", maxResults: 4 })
+          .pipe(Effect.flip);
+        expect(none.message).toBe("no provider can search images");
+      }).pipe(Effect.provide(layer));
+    },
+  );
 });

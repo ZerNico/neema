@@ -4,6 +4,8 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { invalidResponse, searchFailure, statusFailure } from "./http.ts";
 import {
   SearchProviderError,
+  type ImageHit,
+  type ImageSearchRequest,
   type SearchAdapter,
   type SearchHit,
   type SearchRequest,
@@ -29,6 +31,26 @@ const SearxngResponse = Schema.Struct({
 });
 
 const decodeSearxng = Schema.decodeUnknownEffect(SearxngResponse);
+const SearxngImages = Schema.Struct({
+  results: Schema.Array(
+    Schema.Struct({
+      url: Schema.String,
+      title: Schema.optionalKey(Schema.String),
+      img_src: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      thumbnail_src: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      // "1920 x 1080" or "1920x1080", when the engine reports one.
+      resolution: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    }),
+  ),
+});
+const decodeImages = Schema.decodeUnknownEffect(SearxngImages);
+
+/** SearXNG thumbnails are sometimes protocol-relative; only http(s) survives. */
+const absolute = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+  const full = url.startsWith("//") ? `https:${url}` : url;
+  return /^https?:\/\//i.test(full) ? full : undefined;
+};
 const SearxngConfig = Schema.Struct({
   engines: Schema.Array(
     Schema.Struct({
@@ -222,12 +244,65 @@ export const makeSearxngAdapter = Effect.gen(function* () {
       ),
     );
 
+  const queryImages = (
+    connection: SearxngConnection,
+    request: ImageSearchRequest,
+  ): Effect.Effect<ReadonlyArray<ImageHit>, SearchProviderError> =>
+    Effect.gen(function* () {
+      const base = new URL(connection.baseUrl).href.replace(/\/+$/, "");
+      const config = yield* configuration(connection, base);
+      const names = config?.engines
+        .filter((engine) => engine.enabled && engine.categories.includes("images"))
+        .map((engine) => engine.name);
+      let req = HttpClientRequest.get(`${base}/search`).pipe(
+        HttpClientRequest.setUrlParams({
+          q: request.query,
+          format: "json",
+          ...(names?.length ? { engines: names.join(",") } : { categories: "images" }),
+        }),
+      );
+      if (connection.secret) req = HttpClientRequest.bearerToken(req, connection.secret);
+      const res = yield* httpClient.execute(req).pipe(Effect.timeout(Duration.seconds(10)));
+      if (res.status !== 200) return yield* statusFailure(res.status, "");
+      const decoded = yield* decodeImages(yield* res.json).pipe(Effect.mapError(invalidResponse));
+      const seen = new Set<string>();
+      const hits: ImageHit[] = [];
+      for (const r of decoded.results) {
+        const imageUrl = absolute(r.img_src);
+        if (!imageUrl || seen.has(imageUrl)) continue;
+        seen.add(imageUrl);
+        const size = /^(\d+)\s*[x×]\s*(\d+)$/.exec(r.resolution ?? "");
+        const thumbnailUrl = absolute(r.thumbnail_src);
+        hits.push({
+          imageUrl,
+          pageUrl: r.url,
+          title: r.title ?? r.url,
+          ...(thumbnailUrl ? { thumbnailUrl } : {}),
+          ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
+        });
+        if (hits.length >= request.maxResults) break;
+      }
+      return hits;
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.fail(
+          error instanceof SearchProviderError
+            ? error
+            : searchFailure("unavailable", String(error)),
+        ),
+      ),
+    );
+
   return {
     // Engines without date support are left out of a dated request.
     supports: { timeRange: true, language: true, maxResults: 20 },
     search: (provider, request) =>
       provider.settings.kind === "searxng"
         ? query({ baseUrl: provider.settings.baseUrl, secret: provider.secret }, request)
+        : Effect.die(`searxng adapter given a ${provider.settings.kind} provider`),
+    searchImages: (provider, request) =>
+      provider.settings.kind === "searxng"
+        ? queryImages({ baseUrl: provider.settings.baseUrl, secret: provider.secret }, request)
         : Effect.die(`searxng adapter given a ${provider.settings.kind} provider`),
   } satisfies SearchAdapter;
 });
