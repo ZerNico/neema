@@ -54,6 +54,7 @@ import {
   editMessage,
   resumeMessage,
   retryMessage,
+  saveUiState,
   sendMessage,
   stopGeneration,
   updateWorkSettings,
@@ -115,6 +116,11 @@ import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
+import {
+  GenuiActionsContext,
+  type SavedUiState,
+  type UiStateSave,
+} from "~/modules/genui/ui/context.ts";
 import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
@@ -979,6 +985,20 @@ export function ChatView({
     [data.messages],
   );
   const tailMessageId = turnMessages.at(-1)?.id;
+  // What ```ui blocks may do here: suggestions go out as ordinary sends,
+  // anything else waits in the composer, and state saves are best effort.
+  const mutateSend = sendMutation.mutate;
+  const genuiActions = useMemo(
+    () => ({
+      tailId: tailMessageId,
+      disabled: generationDisabled,
+      send: (text: string) =>
+        mutateSend({ content: text, attachmentIds: [], researchEnabled: false, skillIds: [] }),
+      offer: (text: string) => composer.current?.offerDraft(text),
+      save: (input: UiStateSave) => void saveUiState({ data: input }).catch(() => {}),
+    }),
+    [tailMessageId, generationDisabled, mutateSend],
+  );
 
   // A rewind takes the documents, drafts and unpublished files those answers
   // created with it, so the dialog names them: a checklist someone has been
@@ -1122,6 +1142,16 @@ export function ChatView({
 
   // Grouped once per query result, since the display map below runs on every
   // stream chunk and must not rescan the flat list per message.
+  const uiStatesByMessage = useMemo(() => {
+    const grouped = new Map<string, Map<number, SavedUiState>>();
+    for (const row of data.uiStates) {
+      const states = grouped.get(row.messageId) ?? new Map<number, SavedUiState>();
+      states.set(row.ordinal, { sourceHash: row.sourceHash, state: JSON.stringify(row.state) });
+      grouped.set(row.messageId, states);
+    }
+    return grouped;
+  }, [data.uiStates]);
+
   const toolCallsByMessage = useMemo(() => {
     const grouped = new Map<string, ToolActivity[]>();
     for (const row of data.toolCalls) {
@@ -1431,6 +1461,9 @@ export function ChatView({
           : {}),
         reasoning,
         files: message.assistantOutput?.files ?? [],
+        ...(uiStatesByMessage.has(message.id)
+          ? { uiStates: uiStatesByMessage.get(message.id)! }
+          : {}),
         desktopMachineId: machinesByMessage.get(message.id) ?? null,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
@@ -1531,6 +1564,7 @@ export function ChatView({
     stamps,
     steersByAnswer,
     toolCallsByMessage,
+    uiStatesByMessage,
     visibleMessages,
     data.priorSources,
   ]);
@@ -1788,13 +1822,15 @@ export function ChatView({
                   }
                 >
                   <FileReferenceContext value={fileReferences}>
-                    <VirtualMessageList
-                      messages={withPlacedCards}
-                      anchorId={anchorId}
-                      onReleaseAnchor={releaseAnchor}
-                      onReachStart={loadOlder}
-                      loadingOlder={loadingOlder}
-                    />
+                    <GenuiActionsContext value={genuiActions}>
+                      <VirtualMessageList
+                        messages={withPlacedCards}
+                        anchorId={anchorId}
+                        onReleaseAnchor={releaseAnchor}
+                        onReachStart={loadOlder}
+                        loadingOlder={loadingOlder}
+                      />
+                    </GenuiActionsContext>
                   </FileReferenceContext>
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>

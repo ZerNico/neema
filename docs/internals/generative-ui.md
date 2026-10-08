@@ -35,6 +35,23 @@ A rebuilt block must equal the live one, because runtimes are evicted, workers r
 - `projectAssistantBody` treats a `ui` fence as one unit: an activity anchored inside it is shown after it, so a block never splits across two markdown renders. That is display only, and stored offsets stay as they are. `renderPart` writes each block's ordinal into its fence opener before citations are prepared, and the citation helpers skip `ui` fences, so a key never moves when the first source arrives and a `[^5]` in a script stays code.
 - Streamdown remounts renderers when an answer finishes and the transcript virtualizes rows away. A block's last tree and state live outside React (`client/memory.ts`), keyed by message and ordinal. A source that extends the remembered one (still streaming) keeps its state, and one that replaces it (a retry) starts fresh.
 
+## Actions
+
+A block's code is model-written and can be prompt-injected through web content, so what its actions do is decided by the host (`ui-block.tsx`), never by the block:
+
+- A user message carries the reader's authority: tools, integrations, memory, and URL authority for the reader. So a block never sends on its own. `send(text)` from a handler only fills the composer (`ComposerHandle.offerDraft`), and the reader sends.
+- The one direct send is a `<suggestion>` chip: its label is the message, shown in full before the click. A label with a link or over 500 characters goes to the composer instead. It sends plain text with no composer files and no research offer, like a structured answer.
+- Only clicks on a button act. A slider or input change can never send, open or copy. Suggestions and sends work only on the conversation's last answer, once it finished.
+- Text with invisible characters (format characters such as zero-width or bidi marks and Unicode tags, except the joiner emoji need) is refused, and the catalog strips them from everything a block shows, so what the reader sees is what would be sent.
+- `open(url)` goes through the leave dialog. `copy(text)` takes at most 4 KB and the toast shows what was copied.
+
+## Saved state
+
+- `message_ui_states` keeps one row per block (answer, ordinal) with the block's `$state` JSON and the hash of the block's code when saved. The reader's runtime reports state after each handler, and the save follows a second later.
+- A save names the attempt (`generationId`). Under the conversation lock that retry and edit take, it is accepted only from the conversation's owner, for a finished answer still on that attempt, whose stored block at that ordinal hashes to the saved source. A late save from an attempt a retry replaced is refused, never stored. Retry and edit delete the rows in the reset that starts the new attempt.
+- Stop, the reaper and resume keep the answer's text, so they keep its rows. A branch copies them. The loader returns them with every page of history, and the page applies a row only while its hash still matches the block.
+- The model never sees widget state, so earlier answers stay byte-stable for prompt caching.
+
 ## Images
 
 Image tags carry a search query, not a URL. `extract.ts` finds literal queries in closed fences so the server can resolve them while the answer streams. A computed query renders as unavailable.

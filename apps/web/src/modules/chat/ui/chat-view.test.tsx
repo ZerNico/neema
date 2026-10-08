@@ -483,6 +483,7 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
   // The whole conversation is loaded; paging has its own tests.
   window: { anchorId: "m-user" as string | null, olderCursor: null as string | null },
   priorSources: [] as ToolSource[],
+  uiStates: [],
   latestMachineAttempt: null,
   queue: [],
   queueState: null,
@@ -1725,6 +1726,7 @@ const olderPage = {
   attachments: [],
   generations: [],
   priorSources: [],
+  uiStates: [],
   olderCursor: null,
 };
 const partial = { window: { anchorId: "m-user", olderCursor: "m-user" } };

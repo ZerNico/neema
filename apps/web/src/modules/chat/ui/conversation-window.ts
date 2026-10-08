@@ -6,6 +6,7 @@ interface Rows {
   attachments: ReadonlyArray<unknown>;
   generations: ReadonlyArray<unknown>;
   priorSources: ReadonlyArray<unknown>;
+  uiStates: ReadonlyArray<unknown>;
 }
 
 /**
@@ -30,6 +31,7 @@ export function withHistory<Head extends Rows & { window: { olderCursor: string 
     attachments: joined("attachments"),
     generations: joined("generations"),
     priorSources: joined("priorSources"),
+    uiStates: joined("uiStates"),
     hasOlder: pages.at(-1)!.olderCursor !== null,
   };
 }

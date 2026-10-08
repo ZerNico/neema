@@ -46,6 +46,7 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { hashSource } from "~/modules/genui/fences.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
@@ -1067,5 +1068,102 @@ describe("temporary chats", () => {
     );
     expect(result.remaining).toEqual([]);
     expect(result.events).toEqual([{ type: "conversation.deleted", conversationId: result.id }]);
+  });
+});
+
+describe("saved ui block state", () => {
+  const BLOCK = "<script>let n = $state(0);</script><text>{n}</text>";
+  const ANSWER = `Here:\n\n\`\`\`ui\n${BLOCK}\n\`\`\`\n`;
+
+  const seedAnswer = Effect.fn("test.seedUiAnswer")(function* () {
+    const userId = yield* makeUser();
+    const { conversation, messages: rows } = yield* seedThread(userId, [
+      { user: "Show me a counter", assistant: ANSWER },
+    ]);
+    const assistant = rows.find((m) => m.role === "assistant")!;
+    return { userId, conversation, assistant, rows };
+  });
+
+  it("accepts only the owner's save of the current attempt's stored block, and a branch keeps it", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const { userId, conversation, assistant } = yield* seedAnswer();
+        const stranger = yield* makeUser();
+        const base = {
+          userId,
+          messageId: assistant.id,
+          generationId: assistant.generationId!,
+          ordinal: 0,
+          sourceHash: hashSource(BLOCK),
+          state: { n: 3 },
+        };
+        const outcomes = {
+          stranger: yield* repo.saveUiState({ ...base, userId: stranger }),
+          replacedAttempt: yield* repo.saveUiState({ ...base, generationId: uuidv7() }),
+          otherSource: yield* repo.saveUiState({
+            ...base,
+            sourceHash: hashSource("<text>x</text>"),
+          }),
+          missingBlock: yield* repo.saveUiState({ ...base, ordinal: 1 }),
+          saved: yield* repo.saveUiState(base),
+          overwritten: yield* repo.saveUiState({ ...base, state: { n: 4 } }),
+        };
+        const stored = yield* repo.listUiStates([assistant.id]);
+        const branched = yield* branch(userId, conversation.id, assistant.id);
+        const copy = branched.messages.find((m) => m.role === "assistant")!;
+        return { outcomes, stored, copied: yield* repo.listUiStates([copy.id]) };
+      }),
+    );
+    expect(result.outcomes).toEqual({
+      stranger: "refused",
+      replacedAttempt: "refused",
+      otherSource: "refused",
+      missingBlock: "refused",
+      saved: "saved",
+      overwritten: "saved",
+    });
+    expect(result.stored.map((row) => row.state)).toEqual([{ n: 4 }]);
+    expect(result.copied.map((row) => [row.ordinal, row.sourceHash, row.state])).toEqual([
+      [0, hashSource(BLOCK), { n: 4 }],
+    ]);
+  });
+
+  it("drops saved state when a retry starts a new attempt, and refuses the old attempt's late save", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const { userId, conversation, assistant } = yield* seedAnswer();
+        const save = {
+          userId,
+          messageId: assistant.id,
+          generationId: assistant.generationId!,
+          ordinal: 0,
+          sourceHash: hashSource(BLOCK),
+          state: { n: 3 },
+        };
+        yield* repo.saveUiState(save);
+        yield* repo.resetMessageForRetry({
+          expectedMessages: yield* repo.listMessages(conversation.id),
+          userId,
+          messageId: assistant.id,
+          modelId,
+          deleteMessageIds: [],
+          invalidateCheckpointThroughMessageIds: [],
+        });
+        const afterReset = yield* repo.listUiStates([assistant.id]);
+        yield* repo.finalizeMessage({
+          messageId: assistant.id,
+          status: "complete",
+          content: ANSWER,
+        });
+        const late = yield* repo.saveUiState(save);
+        return { afterReset, late, final: yield* repo.listUiStates([assistant.id]) };
+      }),
+    );
+    expect(result.afterReset).toEqual([]);
+    // Same source, but the old attempt's id: the retry's answer owns its blocks.
+    expect(result.late).toBe("refused");
+    expect(result.final).toEqual([]);
   });
 });

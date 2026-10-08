@@ -113,7 +113,9 @@ import {
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { keyUiFences, scanUiFences } from "~/modules/genui/fences.ts";
-import { GenuiMessageContext } from "~/modules/genui/ui/context.ts";
+import { GenuiMessageContext, type SavedUiState } from "~/modules/genui/ui/context.ts";
+
+const NO_UI_STATES: ReadonlyMap<number, SavedUiState> = new Map();
 
 // The sources change with every streamed token, but the components must not:
 // a new component function is a new element type to React, which remounts the
@@ -230,6 +232,10 @@ export interface DisplayMessage {
   inheritedSources?: InheritedSources;
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
+  /** The attempt that wrote this answer, which names the attempt in a block's save. */
+  generationId?: string | null;
+  /** Saved ```ui block state by ordinal. */
+  uiStates?: ReadonlyMap<number, SavedUiState>;
   /**
    * Files this send copied into the chat's workspace, by basename. The path
    * joins against the machine's current workspace root at click time: the
@@ -698,8 +704,14 @@ const AssistantBody = memo(function AssistantBody({
   );
   const iso = message.time?.iso;
   const genui = useMemo(
-    () => ({ messageId: message.id, createdAt: iso ? Date.parse(iso) || 0 : 0, streaming }),
-    [message.id, iso, streaming],
+    () => ({
+      messageId: message.id,
+      createdAt: iso ? Date.parse(iso) || 0 : 0,
+      streaming,
+      generationId: message.generationId ?? null,
+      saved: message.uiStates ?? NO_UI_STATES,
+    }),
+    [message.id, iso, streaming, message.generationId, message.uiStates],
   );
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   // Working files a publish in this answer delivered, whichever tool made them.

@@ -56,6 +56,7 @@ import {
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
+  messageUiStates,
   toolCallDebugArguments,
   schedules,
   scheduleRuns,
@@ -78,6 +79,7 @@ import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { escapeLike } from "~/server/sql.ts";
+import { hashSource, MAX_UI_BLOCKS, scanUiFences } from "~/modules/genui/fences.ts";
 import {
   HIGHLIGHT_END,
   HIGHLIGHT_START,
@@ -391,6 +393,7 @@ export type StoredChunk = ChunkRow & { createdAt: Date };
 /**
  * Durable tool-call projection safe for clients (summaries only, no page bodies).
  */
+export type UiStateRow = typeof messageUiStates.$inferSelect;
 export type ToolCallRow = typeof messageToolCalls.$inferSelect;
 export type CompactionCheckpointRow = typeof conversationCompactionCheckpoints.$inferSelect;
 export type CompactionEventRow = typeof messageCompactionEvents.$inferSelect;
@@ -1120,6 +1123,21 @@ export class ChatRepo extends Context.Service<
     /** Drops failed calls' full arguments older than a week, by the database clock. */
     sweepFailedCallArguments(): Effect.Effect<number>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
+    /** Saved ```ui block state for these answers; the client drops rows whose hash no longer matches. */
+    listUiStates(messageIds: ReadonlyArray<string>): Effect.Effect<UiStateRow[]>;
+    /**
+     * Saves one block's state for the conversation's owner. Refused unless the
+     * answer is finished, still on `generationId`, and its block `ordinal`
+     * hashes to `sourceHash`: a late save from a replaced attempt changes nothing.
+     */
+    saveUiState(input: {
+      userId: string;
+      messageId: string;
+      generationId: string;
+      ordinal: number;
+      sourceHash: string;
+      state: JsonValue;
+    }): Effect.Effect<"saved" | "refused">;
     createCompactionEvent(input: {
       id: string;
       messageId: string;
@@ -2744,6 +2762,21 @@ export class ChatRepo extends Context.Service<
                     .pipe(Effect.orDie);
                 }
 
+                // A branch shows the same answers as the reader left them.
+                const uiStates = yield* tx
+                  .select()
+                  .from(messageUiStates)
+                  .where(inArray(messageUiStates.messageId, [...clonedIds.keys()]))
+                  .pipe(Effect.orDie);
+                if (uiStates.length > 0) {
+                  yield* tx
+                    .insert(messageUiStates)
+                    .values(
+                      uiStates.map((row) => ({ ...row, messageId: clonedIds.get(row.messageId)! })),
+                    )
+                    .pipe(Effect.orDie);
+                }
+
                 // Agent/knowledge configuration is copied verbatim, never
                 // re-resolved: the branch shows the same answers the same way,
                 // and its next turn resolves the associated agent live.
@@ -3343,6 +3376,91 @@ export class ChatRepo extends Context.Service<
           },
         ),
 
+        listUiStates: Effect.fn("ChatRepo.listUiStates")(function* (messageIds) {
+          if (messageIds.length === 0) return [];
+          return yield* db
+            .select()
+            .from(messageUiStates)
+            .where(inArray(messageUiStates.messageId, [...messageIds]))
+            .orderBy(asc(messageUiStates.messageId), asc(messageUiStates.ordinal))
+            .pipe(Effect.orDie);
+        }),
+
+        saveUiState: Effect.fn("ChatRepo.saveUiState")(function* (input) {
+          if (
+            !Number.isSafeInteger(input.ordinal) ||
+            input.ordinal < 0 ||
+            input.ordinal >= MAX_UI_BLOCKS
+          ) {
+            return "refused" as const;
+          }
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const [target] = yield* tx
+                  .select({ conversationId: messages.conversationId })
+                  .from(messages)
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie);
+                if (!target) return "refused" as const;
+                // The conversation lock is the one retry and edit take, so a
+                // reset cannot slip between this check and the write.
+                const owned = yield* tx
+                  .select({ id: conversations.id })
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.id, target.conversationId),
+                      eq(conversations.userId, input.userId),
+                    ),
+                  )
+                  .for("update")
+                  .pipe(Effect.orDie);
+                if (owned.length === 0) return "refused" as const;
+                const [message] = yield* tx
+                  .select({
+                    role: messages.role,
+                    status: messages.status,
+                    generationId: messages.generationId,
+                    content: messages.content,
+                  })
+                  .from(messages)
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie);
+                const fence = message ? scanUiFences(message.content)[input.ordinal] : undefined;
+                if (
+                  !message ||
+                  message.role !== "assistant" ||
+                  message.status === "streaming" ||
+                  message.generationId !== input.generationId ||
+                  !fence?.closed ||
+                  hashSource(fence.code) !== input.sourceHash
+                ) {
+                  return "refused" as const;
+                }
+                yield* tx
+                  .insert(messageUiStates)
+                  .values({
+                    messageId: input.messageId,
+                    ordinal: input.ordinal,
+                    sourceHash: input.sourceHash,
+                    state: input.state,
+                  })
+                  .onConflictDoUpdate({
+                    target: [messageUiStates.messageId, messageUiStates.ordinal],
+                    set: {
+                      sourceHash: input.sourceHash,
+                      state: input.state,
+                      updatedAt: new Date(),
+                    },
+                  })
+                  .pipe(Effect.orDie);
+                return "saved" as const;
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
         listToolCalls: Effect.fn("ChatRepo.listToolCalls")(function* (messageIds) {
           if (messageIds.length === 0) return [];
           return yield* db
@@ -3597,6 +3715,11 @@ export class ChatRepo extends Context.Service<
                 const orphanedKeys: string[] = [
                   ...(yield* attachments.releaseForMessages(tx, [input.messageId])),
                 ];
+                // A new attempt writes a new answer; its blocks start from their own state.
+                yield* tx
+                  .delete(messageUiStates)
+                  .where(eq(messageUiStates.messageId, input.messageId))
+                  .pipe(Effect.orDie);
 
                 if (input.edit) {
                   yield* tx

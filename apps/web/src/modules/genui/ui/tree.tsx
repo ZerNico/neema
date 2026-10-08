@@ -28,7 +28,7 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
-import { DispatchContext, type HandlerRef, type TrustedEvent } from "./context.ts";
+import { DispatchContext, SuggestContext, type HandlerRef, type TrustedEvent } from "./context.ts";
 
 type Child = ValidNode | string;
 
@@ -437,6 +437,21 @@ function SelectNode({ node }: { node: ValidNode }) {
   );
 }
 
+/** The text a node shows; a suggestion sends exactly what it displays. */
+function textOf(children: readonly Child[]): string {
+  return children.map((c) => (typeof c === "string" ? c : textOf(c.children))).join("");
+}
+
+function SuggestionNode({ node }: { node: ValidNode }) {
+  const suggest = use(SuggestContext);
+  const label = textOf(node.children);
+  return (
+    <Button size="sm" variant="outline" disabled={!suggest} onClick={() => suggest?.(label)}>
+      {label}
+    </Button>
+  );
+}
+
 function ButtonNode({ node }: { node: ValidNode }) {
   const p = node.props;
   const fire = useHandler(handlerOf(p.onclick), { event: "click", tag: "button" });
@@ -663,11 +678,7 @@ function Node({ node }: { node: ValidNode }) {
     case "suggestions":
       return <div className="flex flex-wrap gap-2">{children}</div>;
     case "suggestion":
-      return (
-        <Button size="sm" variant="outline" disabled>
-          {children}
-        </Button>
-      );
+      return <SuggestionNode node={node} />;
     default:
       return null;
   }

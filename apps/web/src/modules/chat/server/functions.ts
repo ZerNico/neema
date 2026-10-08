@@ -6,6 +6,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   AnswerQuestionInput,
+  SaveUiStateInput,
   BranchConversationInput,
   ConversationArchiveInput,
   ConversationDetailInput,
@@ -32,6 +33,7 @@ import {
 } from "../schema.ts";
 import { loadConversationDetail, loadConversationHistory } from "./conversation-detail.ts";
 import { ChatRepo } from "./repo.ts";
+import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService, type DesktopFolderRef } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -748,3 +750,33 @@ export const listChatModels = createServerFn({ method: "GET" })
       ProviderRepo.use((repo) => repo.listChatModelsFor(context.session.user.id)),
     ),
   );
+
+/**
+ * Saves a ```ui block's state. A refused save is not an error to the reader:
+ * the answer moved on (retry, edit) or the block is not the one stored.
+ */
+export const saveUiState = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SaveUiStateInput))
+  .handler(({ data, context }) => {
+    let state: JsonValue;
+    try {
+      state = JSON.parse(data.state);
+    } catch {
+      return { saved: false };
+    }
+    if (typeof state !== "object" || state === null || Array.isArray(state))
+      return { saved: false };
+    return runtime.runPromise(
+      ChatRepo.use((repo) =>
+        repo.saveUiState({
+          userId: context.session.user.id,
+          messageId: data.messageId,
+          generationId: data.generationId,
+          ordinal: data.ordinal,
+          sourceHash: data.sourceHash,
+          state,
+        }),
+      ).pipe(Effect.map((outcome) => ({ saved: outcome === "saved" }))),
+    );
+  });

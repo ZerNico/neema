@@ -75,6 +75,7 @@ it.each(["stream first", "detail first"])(
       pendingChunks: [],
       window: { anchorId: "m1", olderCursor: null },
       priorSources: [],
+      uiStates: [],
       latestMachineAttempt: null,
       compactionEvents: [],
       attachments: [],

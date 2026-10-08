@@ -5,6 +5,7 @@
 
 import { Option, Schema } from "effect";
 import type { DiagnosticAction } from "./parse.ts";
+import { stripHiddenText } from "./text.ts";
 
 export const TREE_LIMITS = {
   nodes: 2000,
@@ -526,6 +527,15 @@ export interface TreeDiagnostic {
   readonly detail: string;
 }
 
+/** Every string a prop carries, as the reader will see it. */
+function visible(value: unknown): unknown {
+  if (typeof value === "string") return stripHiddenText(value);
+  if (Array.isArray(value)) return value.map(visible);
+  if (isRecord(value))
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visible(v)]));
+  return value;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -555,7 +565,7 @@ class Validator {
         // Text is only meaningful where inline content is; elsewhere it is
         // layout whitespace or a mistake.
         if (parent === "inline" || parent === "block" || parent === "plain") {
-          out.push(child);
+          out.push(stripHiddenText(child));
         } else if (child.trim() !== "")
           this.report("omitted_node", "text_not_allowed", child.slice(0, 40));
         continue;
@@ -603,7 +613,7 @@ class Validator {
         this.report("dropped_prop", "invalid_prop", `${tag}.${name}`);
         continue;
       }
-      props[name] = decoded.value;
+      props[name] = visible(decoded.value);
     }
     for (const [name, propSpec] of Object.entries(spec.props)) {
       if (propSpec.required && !(name in props)) {

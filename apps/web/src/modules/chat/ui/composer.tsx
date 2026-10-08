@@ -32,6 +32,11 @@ export interface ComposerHandle {
   seedDraft: (text: string) => void;
   /** Consumes a navigation prefill once, without replacing typing or moving focus. */
   prefillDraft: (text: string) => void;
+  /**
+   * Adds text a ```ui block offered, for the reader to send: fills an empty
+   * draft, or appends to what was typed rather than replacing it.
+   */
+  offerDraft: (text: string) => void;
   /** Puts the caret in the textarea, since opening a chat should be ready to type. */
   focus: () => void;
 }
@@ -214,6 +219,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         const prefill = extractReferences(text);
         setDraft(prefill.text);
         setReferences(prefill.references);
+      },
+      offerDraft: (text) => {
+        touched.current = true;
+        const typed = textareaRef.current?.value ?? "";
+        setDraft(typed.trim() ? `${typed.trimEnd()}\n${text}` : text);
+        textareaRef.current?.focus();
       },
       focus: () => textareaRef.current?.focus(),
     }),
