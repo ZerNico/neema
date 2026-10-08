@@ -113,6 +113,14 @@ export const SKILL_EXAMPLES = {
 
 const fence = (body: string) => "```ui\n" + body + "\n```";
 
+/**
+ * Always in the system prompt while the skill is offered. Deciding from a
+ * catalogue line alone, models answered "a quick quiz" in Markdown; with the
+ * kinds of block named up front, a block is an ordinary way to answer and the
+ * skill is where its syntax lives.
+ */
+export const INTERACTIVE_UI_APP_POLICY = `Answers can contain interactive \`\`\`ui blocks the chat draws with its own components: quizzes, calculators with sliders, charts, diagrams to step through, maps with pins and routes, checklists, timers and image galleries. Use one when seeing, trying or clicking makes the answer clearer than prose: practising or testing what someone learns, numbers they will vary, a process, places, a comparison to explore. Load the skill ${INTERACTIVE_UI_SKILL_ID} with load_skill before writing one; it has the syntax. Keep explanations in Markdown around the block. Most answers still need none.`;
+
 export const INTERACTIVE_UI_SKILL_DESCRIPTION =
   "Interactive ```ui blocks in answers: quizzes, calculators, charts, diagrams, trip maps, checklists, timers, image galleries. Load it when something to see or click beats prose.";
 
