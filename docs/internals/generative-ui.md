@@ -5,6 +5,7 @@ An answer can contain ```` ```ui ```` blocks: Svelte-like markup the model write
 ## The language
 
 - Markup: lowercase tags from the catalog (`src/modules/genui/catalog.ts`), `{expr}` interpolation, `{#each}` and `{#if}` blocks, and an optional leading `<script>` using Svelte 5 runes: `let x = $state(init)` declares persisted state, `const y = $derived(expr)` is recomputed on every render. It is our grammar, not Svelte: the Svelte compiler emits DOM code, which is exactly what must not run.
+- No model is trained on it. A model learns it by loading the `builtin:interactive-ui` skill, whose catalog section is generated and whose examples a test renders (see [skills](skills.md)). Models write what they know from web pages, so the runtime also accepts habits such as JSX-cased events and `toLocaleString`.
 - `parse.ts` is tolerant because it runs on every streaming render: an unfinished trailing tag or expression is dropped, open elements close at the end, mistakes become diagnostics. A half-written `<script>` stops parsing until it closes, so a block never runs a script whose end has not arrived.
 - Block identity is the fence's ordinal among the message's `ui` fences (`fences.ts`), computed on the raw message text. Content only grows during a generation and is copied verbatim by branch and resume, so the ordinal is stable on every path. Citation rewriting changes text lengths, which is why the key is never derived from an offset in rewritten text.
 

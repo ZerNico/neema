@@ -675,12 +675,18 @@ const GROUP_TITLES: Record<TagGroup, string> = {
   svg: "Drawing (inside <svg> only)",
 };
 
-function signature(tag: string, spec: TagSpec): string {
-  const props = Object.entries(spec.props).map(
-    ([name, p]) => `${name}${p.required ? "" : "?"}: ${p.type}`,
-  );
+function signature(tag: string, spec: TagSpec, shared: ReadonlySet<string> = new Set()): string {
+  const props = Object.entries(spec.props)
+    .filter(([name]) => !shared.has(name))
+    .map(([name, p]) => `${name}${p.required ? "" : "?"}: ${p.type}`);
   return `<${tag}${props.length > 0 ? ` ${props.join(", ")}` : ""}>`;
 }
+
+// Every shape takes the same paint props; listing them once keeps the skill short.
+const SHAPE_PROPS = new Set(Object.keys(SVG_SHAPE));
+const SHAPE_NOTE = `Every shape below also takes ${Object.entries(SVG_SHAPE)
+  .map(([name, p]) => `${name}?: ${p.type}`)
+  .join(", ")}.`;
 
 /** The catalog as reference text for the skill. Stable: generated, never edited. */
 export function catalogReference(): string {
@@ -688,8 +694,14 @@ export function catalogReference(): string {
   for (const group of GROUP_ORDER) {
     const lines = Object.entries(CATALOG)
       .filter(([, spec]) => spec.group === group)
-      .map(([tag, spec]) => `- ${signature(tag, spec)} ${spec.doc}`);
-    if (group === "svg") lines.push(`- ${signature("text", SVG_TEXT)} ${SVG_TEXT.doc}`);
+      .map(
+        ([tag, spec]) =>
+          `- ${signature(tag, spec, tag === "svg" ? undefined : group === "svg" ? SHAPE_PROPS : undefined)} ${spec.doc}`,
+      );
+    if (group === "svg") {
+      lines.splice(1, 0, SHAPE_NOTE);
+      lines.push(`- ${signature("text", SVG_TEXT)} ${SVG_TEXT.doc}`);
+    }
     sections.push(`### ${GROUP_TITLES[group]}\n${lines.join("\n")}`);
   }
   return sections.join("\n\n");

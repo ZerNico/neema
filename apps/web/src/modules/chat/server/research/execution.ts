@@ -1,4 +1,5 @@
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
+import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import {
   AgentDraftToolName,
   agentDraftFailureReason,
@@ -286,10 +287,11 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   // Same offer as ordinary chat: selections are pinned, the library is visible.
   const skillManifest = [
     ...(deps.config.skills ?? []),
-    ...(yield* skillReader.catalogue(
-      deps.userId,
-      (deps.config.skills ?? []).map((entry) => entry.skillId),
-    )),
+    ...(yield* skillReader.catalogue(deps.userId, [
+      ...(deps.config.skills ?? []).map((entry) => entry.skillId),
+      // A run's workers write briefs nobody renders, so blocks would only cost tokens.
+      INTERACTIVE_UI_SKILL_ID,
+    ])),
   ];
   const skillTools = skillManifest.length
     ? yield* prepareSkillTools({

@@ -8,10 +8,11 @@ import {
 } from "./index.ts";
 
 describe("bundled skills", () => {
-  it("exposes the two authoring skills with builtin-prefixed ids", () => {
+  it("exposes the builtin skills with builtin-prefixed ids", () => {
     expect(BUILTIN_SKILLS.map((skill) => skill.id)).toEqual([
       "builtin:agent-authoring",
       "builtin:schedule-authoring",
+      "builtin:interactive-ui",
     ]);
     for (const skill of BUILTIN_SKILLS) {
       expect(skill.name.length).toBeGreaterThan(0);

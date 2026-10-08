@@ -4,10 +4,16 @@ A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a
 
 ## Built-in skills
 
-- The two authoring skills (`builtin:agent-authoring`, `builtin:schedule-authoring`) are
-  hardcoded constants in `src/modules/skills/bundled/`, single-file, with no DB rows, blobs,
-  or revisions. They exist so the model loads authoring depth on demand instead of carrying
-  an always-on policy in the prompt prefix; the fixed prefix keeps a one-line pointer.
+- The builtins (`builtin:agent-authoring`, `builtin:schedule-authoring`,
+  `builtin:interactive-ui`) are hardcoded constants listed in `src/modules/skills/bundled/`,
+  single-file, with no DB rows, blobs, or revisions. They exist so the model loads depth on
+  demand instead of carrying an always-on policy in the prompt prefix. The authoring skills
+  keep a one-line pointer in the fixed prefix. `interactive-ui` has none: its catalogue
+  description is the pointer, so it adds nothing a skill-less chat would carry.
+- `interactive-ui` lives in `src/modules/genui/skill.ts` beside the language it teaches. Its
+  catalog section is generated from `catalog.ts` and its examples are rendered by a test, so
+  the text cannot drift from what the runtime accepts. Research leaves it out of its
+  catalogue: a run's workers write briefs nobody renders.
 - `SkillRepo.catalogue` prepends them as ambient entries with `revisionId: "builtin"`;
   `SkillReader.readPinned` returns the bundled root for a builtin id and never touches the
   database or blob store. Nothing pins them in `message_skills`: builtin content is versioned
