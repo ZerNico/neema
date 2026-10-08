@@ -332,6 +332,19 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "none",
   },
+  choice: {
+    group: "input",
+    doc: "Options shown as radio buttons, e.g. a quiz question; onchange(value).",
+    props: {
+      options: required(
+        prop(Schema.Array(option).check(Schema.isMaxLength(20)), "(string | {label, value})[]"),
+      ),
+      value: text(200),
+      onchange: handler(),
+      label: text(200),
+    },
+    children: "none",
+  },
   select: {
     group: "input",
     doc: "Dropdown; onchange(value).",

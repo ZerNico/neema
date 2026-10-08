@@ -13,6 +13,7 @@ import { Checkbox } from "~/ui/primitives/checkbox";
 import { Input } from "~/ui/primitives/input";
 import { Label } from "~/ui/primitives/label";
 import { Progress, ProgressLabel } from "~/ui/primitives/progress";
+import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
 import {
   Select,
   SelectContent,
@@ -347,6 +348,35 @@ function SegmentedNode({ node }: { node: ValidNode }) {
         </SegmentedControlItem>
       ))}
     </SegmentedControl>
+  );
+}
+
+function ChoiceNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "choice" });
+  const options = optionsOf(p.options);
+  const [value, setValue] = useLocal(str(p.value) ?? null);
+  const label = str(p.label);
+  return (
+    <Field label={label}>
+      <RadioGroup
+        value={value}
+        disabled={!fire}
+        aria-label={label ?? "Options"}
+        onValueChange={(next) => {
+          if (typeof next !== "string") return;
+          setValue(next);
+          fire?.([next]);
+        }}
+      >
+        {options.map((o) => (
+          <label key={o.value} className="flex cursor-pointer items-center gap-2 text-sm">
+            <RadioGroupItem value={o.value} />
+            {o.label}
+          </label>
+        ))}
+      </RadioGroup>
+    </Field>
   );
 }
 
@@ -775,6 +805,8 @@ function Node({ node }: { node: ValidNode }) {
       return <UiImage node={node} />;
     case "images":
       return <UiImages node={node} />;
+    case "choice":
+      return <ChoiceNode node={node} />;
     case "steps":
       return <StepsNode node={node} />;
     case "wizard":

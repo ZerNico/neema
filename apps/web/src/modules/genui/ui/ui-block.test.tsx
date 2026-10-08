@@ -131,6 +131,25 @@ describe("ui blocks in answers", () => {
     expect(screen.getByRole("checkbox", { name: "Loose one" })).toBeChecked();
   });
 
+  it("answers a quiz through radio options", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let pick = $state(null);</script>",
+        '<choice label="What do averages look like?" options={["Skewed", "Bell-shaped"]} value={pick} onchange={(v) => pick = v}/>',
+        '{#if pick === "Bell-shaped"}<callout tone="success">Correct!</callout>{/if}',
+        "```",
+      ].join("\n"),
+      "m-choice",
+    );
+    const bell = await screen.findByRole("radio", { name: "Bell-shaped" });
+    await act(async () => {
+      fireEvent.click(bell);
+    });
+    expect(await screen.findByText("Correct!")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Bell-shaped" })).toBeChecked();
+  });
+
   it("walks a wizard one step at a time", async () => {
     draw(
       [
