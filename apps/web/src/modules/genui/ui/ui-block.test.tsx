@@ -85,4 +85,29 @@ describe("ui blocks in answers", () => {
       expect(document.querySelector("pre code")).toHaveTextContent("<text>hello</text>"),
     );
   });
+
+  it("draws tables, progress, charts and drawings", async () => {
+    draw(
+      [
+        "```ui",
+        '<table columns={["Gear", "Teeth"]} rows={[[1, 28], [2, 24]]}/>',
+        '<progress value={40} label="Climb"/>',
+        '<chart type="bar" label="Teeth per gear" x={[1, 2]} series={[{ name: "Teeth", values: [28, 24] }]}/>',
+        '<svg viewBox="0 0 100 40" label="Sprockets">',
+        '  {#each [28, 24] as t, i}<circle cx={20 + i * 40} cy="20" r={t / 2} fill={i === 0 ? "chart-1" : "none"} stroke="currentColor"/>{/each}',
+        '  <text x="50" y="38" textAnchor="middle">gears</text>',
+        "</svg>",
+        "```",
+      ].join("\n"),
+    );
+    expect(await screen.findByRole("columnheader", { name: "Teeth" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "28" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Climb" })).toBeInTheDocument();
+    const drawing = screen.getByRole("img", { name: "Sprockets" });
+    const circles = drawing.querySelectorAll("circle");
+    expect(circles).toHaveLength(2);
+    expect(circles[0]).toHaveAttribute("fill", "var(--chart-1)");
+    expect(circles[1]).toHaveAttribute("fill", "none");
+    expect(drawing.querySelector("text")).toHaveTextContent("gears");
+  });
 });

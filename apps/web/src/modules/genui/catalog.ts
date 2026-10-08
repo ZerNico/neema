@@ -57,7 +57,6 @@ const SVG_PAINT = [
   "chart-2",
   "chart-3",
   "chart-4",
-  "chart-5",
 ] as const;
 const SPACE = () => int(0, 12);
 const option = Schema.Union([
@@ -393,7 +392,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
                 Schema.isMaxLength(500),
               ),
             }),
-          ).check(Schema.isMaxLength(8)),
+          ).check(Schema.isMaxLength(4)),
           "{name, values: number[]}[]",
         ),
       ),

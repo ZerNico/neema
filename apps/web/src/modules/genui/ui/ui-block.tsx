@@ -89,6 +89,7 @@ function useBlock(
       cancelled = true;
       clearTimeout(timer);
     };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- epoch re-renders the block in a restarted Worker
   }, [client, block, code, streaming, now, epoch, show]);
 
   useEffect(() => () => client.release(block), [client, block]);

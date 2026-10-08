@@ -8,6 +8,7 @@ import { newQuickJSWASMModuleFromVariant, newVariant } from "quickjs-emscripten-
 import { BlockEngine } from "./engine.ts";
 import type { WorkerMessage, WorkerRequest } from "./protocol.ts";
 
+// oxlint-disable-next-line unicorn/require-post-message-target-origin -- a Worker's postMessage takes no origin
 const post = (message: WorkerMessage) => self.postMessage(message);
 
 // The wasm URL is passed explicitly rather than left to the loader's own

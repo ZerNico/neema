@@ -27,6 +27,7 @@ import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
+import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
 import { DispatchContext, type HandlerRef, type TrustedEvent } from "./context.ts";
 
 type Child = ValidNode | string;
@@ -651,6 +652,14 @@ function Node({ node }: { node: ValidNode }) {
       return <ToggleNode node={node} />;
     case "stepper":
       return <StepperNode node={node} />;
+    case "table":
+      return <UiTable node={node} />;
+    case "progress":
+      return <UiProgress node={node} />;
+    case "chart":
+      return <UiChart node={node} />;
+    case "svg":
+      return <UiSvg node={node} />;
     case "suggestions":
       return <div className="flex flex-wrap gap-2">{children}</div>;
     case "suggestion":
@@ -666,6 +675,7 @@ function Node({ node }: { node: ValidNode }) {
 
 export function Nodes({ nodes }: { nodes: readonly Child[] }) {
   return nodes.map((child, i) =>
+    // oxlint-disable-next-line react/no-array-index-key -- tree order is the identity; siblings may be identical
     typeof child === "string" ? child : <Node key={`${child.tag}-${i}`} node={child} />,
   );
 }

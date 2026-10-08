@@ -101,6 +101,7 @@ export function createWorkerClient(spawn: () => Worker): GenuiClient {
       if (block && (crashes.get(block) ?? 0) >= FREEZE_AFTER)
         return resolve(unavailable("stopped_responding"));
       pending.set(request.id, { block, resolve });
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a Worker's postMessage takes no origin
       ensure().postMessage(request);
     });
 
