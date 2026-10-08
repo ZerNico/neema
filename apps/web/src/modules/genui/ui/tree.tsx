@@ -5,6 +5,9 @@
 import katex from "katex";
 import { use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  Cancel01Icon,
   Copy01Icon,
   PauseIcon,
   PlayIcon,
@@ -555,6 +558,180 @@ function WizardNode({ node }: { node: ValidNode }) {
   );
 }
 
+interface QuizQuestion {
+  readonly prompt: readonly Child[];
+  readonly options: readonly string[];
+  readonly answer: string;
+  readonly explain: string | undefined;
+}
+
+function questionsOf(node: ValidNode): QuizQuestion[] {
+  return node.children.flatMap((child) => {
+    if (typeof child === "string" || child.tag !== "question") return [];
+    const options = Array.isArray(child.props.options)
+      ? child.props.options.filter((o): o is string => typeof o === "string")
+      : [];
+    const answer = str(child.props.answer) ?? "";
+    // A question whose answer is not among its options cannot be scored.
+    if (options.length < 2 || !options.includes(answer)) return [];
+    return [{ prompt: child.children, options, answer, explain: str(child.props.explain) }];
+  });
+}
+
+const LETTERS = "ABCDEF";
+
+/**
+ * A quiz the page runs: one question at a time, scored as the reader goes.
+ * The block may keep the answers in its state through answers and onchange.
+ */
+function QuizNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const questions = questionsOf(node);
+  const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "quiz" });
+  // Compared as text: the tree hands over a new array on every render.
+  const given = JSON.stringify(
+    Array.isArray(p.answers) ? p.answers.map((a) => (typeof a === "string" ? a : null)) : [],
+  );
+  const [answersText, setAnswersText] = useLocal(given);
+  const answers: (string | null)[] = JSON.parse(answersText);
+  const firstOpen = questions.findIndex((_, i) => !answers[i]);
+  const [index, setIndex] = useState(firstOpen === -1 ? 0 : firstOpen);
+  const [scored, setScored] = useState(firstOpen === -1 && answers.length > 0);
+  const title = str(p.title);
+  if (questions.length === 0) return null;
+  const at = Math.min(index, questions.length - 1);
+  const question = questions[at]!;
+  const chosen = answers[at] ?? null;
+  const record = (next: (string | null)[]) => {
+    setAnswersText(JSON.stringify(next));
+    fire?.([next]);
+  };
+  const pick = (option: string) => {
+    if (chosen) return;
+    const next = questions.map((_, i) => answers[i] ?? null);
+    next[at] = option;
+    record(next);
+  };
+  const score = questions.filter((q, i) => answers[i] === q.answer).length;
+  const last = at === questions.length - 1;
+
+  if (scored)
+    return (
+      <div className="border-border flex flex-col items-start gap-3 rounded-2xl border p-4">
+        {title ? <span className="text-muted-foreground text-xs">{title}</span> : null}
+        <p className="text-lg font-semibold" role="status">
+          {score} of {questions.length} correct
+        </p>
+        <Progress value={(score / questions.length) * 100} aria-label="Score" />
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            record(questions.map(() => null));
+            setIndex(0);
+            setScored(false);
+          }}
+        >
+          <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" aria-hidden />
+          Try again
+        </Button>
+      </div>
+    );
+
+  return (
+    <div className="border-border flex flex-col gap-3 rounded-2xl border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-muted-foreground text-xs">
+          {title ? `${title} · ` : ""}Question {at + 1} of {questions.length}
+        </span>
+        <div className="flex gap-1">
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Previous question"
+            disabled={at === 0}
+            onClick={() => setIndex(at - 1)}
+          >
+            <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} aria-hidden />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Next question"
+            disabled={last}
+            onClick={() => setIndex(at + 1)}
+          >
+            <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} aria-hidden />
+          </Button>
+        </div>
+      </div>
+      <p className="font-medium">
+        <Nodes nodes={question.prompt} />
+      </p>
+      <ul className="flex flex-col gap-2" aria-label="Options">
+        {question.options.map((option, i) => {
+          const right = chosen !== null && option === question.answer;
+          const wrong = chosen === option && option !== question.answer;
+          return (
+            <li key={option}>
+              <button
+                type="button"
+                aria-pressed={chosen === option}
+                aria-disabled={chosen !== null}
+                onClick={() => pick(option)}
+                className={cn(
+                  "border-border flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm transition-colors",
+                  focusRingClassName,
+                  chosen === null && "hover:bg-muted cursor-pointer",
+                  right && "border-success bg-success/10",
+                  wrong && "border-destructive bg-destructive/10",
+                )}
+              >
+                <span
+                  className={cn(
+                    "border-border text-muted-foreground grid size-6 shrink-0 place-items-center rounded-full border text-xs",
+                    right && "border-success text-success",
+                    wrong && "border-destructive text-destructive",
+                  )}
+                  aria-hidden
+                >
+                  {right ? (
+                    <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="size-3.5" />
+                  ) : wrong ? (
+                    <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3.5" />
+                  ) : (
+                    LETTERS[i]
+                  )}
+                </span>
+                {option}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div role="status" className="text-sm">
+        {chosen === null ? null : (
+          <p>
+            <b className={chosen === question.answer ? "text-success" : "text-destructive"}>
+              {chosen === question.answer ? "Correct." : `Not quite: it’s ${question.answer}.`}
+            </b>{" "}
+            {question.explain}
+          </p>
+        )}
+      </div>
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          disabled={chosen === null}
+          onClick={() => (last ? setScored(true) : setIndex(at + 1))}
+        >
+          {last ? "See score" : "Next"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * A formula through KaTeX, as answers render theirs. trust stays off, so TeX
  * cannot add links or raw HTML, and the expansion limits stop a macro bomb.
@@ -931,6 +1108,8 @@ function Node({ node }: { node: ValidNode }) {
       return <StepsNode node={node} />;
     case "wizard":
       return <WizardNode node={node} />;
+    case "quiz":
+      return <QuizNode node={node} />;
     case "map":
       return <UiMap node={node} renderContent={(nodes) => <Nodes nodes={nodes} />} />;
     case "timer":

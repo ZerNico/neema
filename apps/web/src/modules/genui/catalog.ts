@@ -357,9 +357,42 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "none",
   },
+  quiz: {
+    group: "input",
+    doc: "Quiz, one question at a time, scored with explanations. Use it for any quiz. answers (chosen option or null per question) can live in $state; onchange(answers).",
+    props: {
+      title: text(120),
+      answers: prop(
+        Schema.Array(Schema.NullOr(Schema.String.check(Schema.isMaxLength(200)))).check(
+          Schema.isMaxLength(30),
+        ),
+        "(string | null)[]",
+      ),
+      onchange: handler(),
+    },
+    children: { only: ["question"] },
+  },
+  question: {
+    group: "input",
+    doc: "Quiz question: text as children, answer must be one of options, explain shown after answering.",
+    props: {
+      options: required(
+        prop(
+          Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
+            Schema.isMinLength(2),
+            Schema.isMaxLength(6),
+          ),
+          "string[]",
+        ),
+      ),
+      answer: required(text(200)),
+      explain: text(500),
+    },
+    children: "inline",
+  },
   choice: {
     group: "input",
-    doc: "Options shown as radio buttons, e.g. a quiz question; onchange(value).",
+    doc: "Radio buttons; onchange(value).",
     props: {
       options: required(
         prop(Schema.Array(option).check(Schema.isMaxLength(20)), "(string | {label, value})[]"),
