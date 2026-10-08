@@ -394,7 +394,8 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
               ),
             }),
           ).check(Schema.isMaxLength(4)),
-          "{name, values: number[]}[]",
+          // The theme has four chart colours; a fifth series drops the whole chart.
+          "{name, values: number[]}[] (at most 4; fold the rest into one \"Other\" series)",
         ),
       ),
       label: required(text(200)),
