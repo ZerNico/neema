@@ -19,6 +19,14 @@ settled by the migration.
 The same claim sets `conversations.unread`, the dot in the sidebar and on the Chats page.
 The chat page clears it once the chat is on screen, not merely open in a background tab.
 
+## The answer decides
+
+A `conditional` schedule offers its fire's own attempt `notify_user` (the `notify` family),
+found by the run row naming that message and generation, so a retry, edit, resume or branch
+is never offered it. The call does not send anything: it keeps the text on the run row, one
+call per answer, and settlement sends it once the answer has ended. A stopped or replaced
+answer therefore sends nothing, and the tool row records only the text that was kept.
+
 ## Channels
 
 `NotificationService.deliver` fans one `AppNotification` (title, body, path) out to every

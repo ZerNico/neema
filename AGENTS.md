@@ -136,7 +136,7 @@ skipped one on purpose.
 - **Display path**: the live SSE stream, the conversation-detail loader on reload,
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
-- **Tool families**: web, knowledge, skill, memory, ask, plan, research, agent-draft,
+- **Tool families**: web, knowledge, skill, memory, ask, plan, notify, research, agent-draft,
   schedule-draft, document, project-file, desktop, custom, integration, presentation,
   spreadsheet, word, tool-file, tool-load, attachment.
   Each has its own envelope with a required `family`; there is no inference from shape.

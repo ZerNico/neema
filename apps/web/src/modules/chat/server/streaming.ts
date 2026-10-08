@@ -156,6 +156,8 @@ import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
+import { prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
+import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
 import { isBrowserTool, shownBrowserArgs } from "~/modules/browser/tool-schema.ts";
 import { debugArguments, storedArguments } from "./stored-arguments.ts";
 
@@ -1040,6 +1042,15 @@ export class StreamEngine extends Context.Service<
           const planTools = config.planEnabled
             ? preparePlanTool(resumedPlan?.value ?? null)
             : undefined;
+          // Only a schedule fire's own attempt, and only when its schedule
+          // leaves telling the owner to the answer.
+          const notifyTools =
+            fence && Option.isSome(database)
+              ? yield* prepareNotifyTool(database.value, {
+                  messageId: input.messageId,
+                  generationId: fence.generationId,
+                })
+              : null;
           // Admins switch Office file editing off in Tools; read per attempt so
           // it applies to the next answer. A missing row keeps the default, on.
           const officeFiles = Option.isSome(toolRegistry)
@@ -1440,6 +1451,7 @@ export class StreamEngine extends Context.Service<
             ...(skillTools ? [skillTools.group] : []),
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
+            ...(notifyTools ? [notifyTools.group] : []),
             ...officeTools.map((tool) => tool.group),
             ...(customTools ? [customTools.group] : []),
             ...(publishFileTool ? [publishFileTool.group] : []),
@@ -2501,28 +2513,31 @@ export class StreamEngine extends Context.Service<
                                               ? "ask"
                                               : part.name === "update_plan"
                                                 ? "plan"
-                                                : (part.name === "publish_file" &&
-                                                      publishFileTool) ||
-                                                    (part.name === "create_file" && createFileTool)
-                                                  ? "tool-file"
-                                                  : officeFamilyOf(part.name)
-                                                    ? officeFamilyOf(part.name)!.family
-                                                    : Schema.is(SkillToolName)(part.name)
-                                                      ? "skill"
-                                                      : Schema.is(KnowledgeToolName)(part.name)
-                                                        ? "knowledge"
-                                                        : part.name === "deep_research"
-                                                          ? "research"
-                                                          : part.name === "web_search" ||
-                                                              part.name === "read_url"
-                                                            ? "web"
-                                                            : customToolNames.has(part.name)
-                                                              ? "custom"
-                                                              : integrationTools?.names.has(
-                                                                    part.name,
-                                                                  )
-                                                                ? "integration"
-                                                                : null;
+                                                : part.name === "notify_user" && notifyTools
+                                                  ? "notify"
+                                                  : (part.name === "publish_file" &&
+                                                        publishFileTool) ||
+                                                      (part.name === "create_file" &&
+                                                        createFileTool)
+                                                    ? "tool-file"
+                                                    : officeFamilyOf(part.name)
+                                                      ? officeFamilyOf(part.name)!.family
+                                                      : Schema.is(SkillToolName)(part.name)
+                                                        ? "skill"
+                                                        : Schema.is(KnowledgeToolName)(part.name)
+                                                          ? "knowledge"
+                                                          : part.name === "deep_research"
+                                                            ? "research"
+                                                            : part.name === "web_search" ||
+                                                                part.name === "read_url"
+                                                              ? "web"
+                                                              : customToolNames.has(part.name)
+                                                                ? "custom"
+                                                                : integrationTools?.names.has(
+                                                                      part.name,
+                                                                    )
+                                                                  ? "integration"
+                                                                  : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -2631,7 +2646,12 @@ export class StreamEngine extends Context.Service<
                             });
                             return;
                           }
-                          if (family === "memory" || family === "ask" || family === "plan") {
+                          if (
+                            family === "memory" ||
+                            family === "ask" ||
+                            family === "plan" ||
+                            family === "notify"
+                          ) {
                             yield* pushToolChunk(
                               family === "plan"
                                 ? {
@@ -3372,6 +3392,35 @@ export class StreamEngine extends Context.Service<
                               name: "update_plan",
                               ok,
                               ...(ok ? { steps: result.steps } : { error: result.message }),
+                            });
+                            return;
+                          }
+                          if (part.name === "notify_user" && notifyTools) {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(NotifyToolResult)(
+                              part.result,
+                            );
+                            const result: NotifyToolResult =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : { v: 1, outcome: "rejected", message: "Nothing was sent." };
+                            const ok = result.outcome === "queued";
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(result),
+                              status: ok ? "complete" : "error",
+                              ...(ok
+                                ? {}
+                                : { error: { code: "NotifyRejected", message: result.message } }),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "notify",
+                              phase: "result",
+                              callId: rowId,
+                              name: "notify_user",
+                              ok,
+                              ...(ok ? { message: result.message } : { error: result.message }),
                             });
                             return;
                           }

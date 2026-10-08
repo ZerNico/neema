@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { conversations, messages, scheduleRuns, schedules, user } from "~/db/schema/index.ts";
 import type { AppNotification } from "~/modules/notifications/schema.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
+import { prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
 import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -99,7 +100,21 @@ async function startedRun(notify: "off" | "always" | "conditional" = "always") {
           .where(eq(conversations.id, conversationId)),
       )
     )[0]!.unread;
-  return { scheduleId, conversationId, runId, answer, unread };
+  const tool = () =>
+    db((d) => prepareNotifyTool(d, { messageId, generationId })).then((prepared) =>
+      prepared
+        ? (message: unknown) =>
+            runtime.runPromise(
+              (
+                prepared.group.handlers as Record<
+                  string,
+                  (params: { message?: unknown }) => Effect.Effect<unknown>
+                >
+              ).notify_user!({ message }),
+            )
+        : null,
+    );
+  return { scheduleId, conversationId, runId, answer, unread, tool };
 }
 
 it("tells the owner once, however many settlers see the answer end", async () => {
@@ -168,4 +183,29 @@ it("points a run that never started at its schedule", async () => {
       path: `/schedules/${scheduleId}`,
     },
   ]);
+});
+
+it("offers notify_user only to a conditional fire, and sends what its answer said once", async () => {
+  expect(await (await startedRun("always")).tool()).toBeNull();
+  const fire = await startedRun("conditional");
+  const notify = (await fire.tool())!;
+  expect(await notify("")).toMatchObject({ outcome: "rejected" });
+  expect(await notify("  Bitcoin fell below 50k.  ")).toEqual({
+    v: 1,
+    outcome: "queued",
+    message: "Bitcoin fell below 50k.",
+  });
+  expect(await notify("Again")).toMatchObject({ outcome: "rejected" });
+  await fire.answer({ status: "complete", content: "Long analysis…" });
+  await settle();
+  expect(delivered.filter((each) => each.id === fire.runId)).toEqual([
+    {
+      id: fire.runId,
+      title: "Morning digest",
+      body: "Bitcoin fell below 50k.",
+      path: `/chat/${fire.conversationId}`,
+    },
+  ]);
+  // A settled run is past notifying.
+  expect(await fire.tool()).toBeNull();
 });

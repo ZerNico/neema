@@ -22,6 +22,7 @@ import { editWordFileTool, inspectWordFileTool } from "~/modules/word/server/too
 import { askUserTool } from "./ask-user.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
 import { updatePlanTool } from "./plan-tool.ts";
+import { notifyUserTool } from "~/modules/schedules/server/notify-tool.ts";
 
 const guard = () => Effect.void;
 const base = { userId: "u", conversationId: "c", messageId: "m", writeGuard: guard };
@@ -71,6 +72,7 @@ describe("tool parameters the model is offered", () => {
       saveMemoryTool,
       askUserTool,
       updatePlanTool,
+      notifyUserTool,
       ...toolsOf(prepareBrowserTools({ rowIdFor: () => Effect.succeed(undefined) }).toolkit),
     ];
     // Schema.Number advertises "NaN" and "Infinity" as strings; models then send them.
