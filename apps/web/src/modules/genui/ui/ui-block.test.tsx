@@ -150,6 +150,25 @@ describe("ui blocks in answers", () => {
     expect(screen.getByRole("radio", { name: "Bell-shaped" })).toBeChecked();
   });
 
+  it("renders formulas with KaTeX and never as links", async () => {
+    const { container } = draw(
+      [
+        "```ui",
+        String.raw`<text>Spread <math tex="\frac{\sigma}{\sqrt{n}}"/> shrinks</text>`,
+        String.raw`<math display tex="\bar{x} = \frac{1}{n}\sum x_i"/>`,
+        String.raw`<math tex="\href{javascript:alert(1)}{click}"/>`,
+        "```",
+      ].join("\n"),
+      "m-math",
+    );
+    await screen.findByText(/Spread/);
+    expect(container.querySelectorAll(".katex").length).toBe(3);
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+    // Parsed as TeX, not shown as its source.
+    expect(container.querySelector(".katex-mathml mfrac")).not.toBeNull();
+    expect(container.querySelector("[data-genui-block] a")).toBeNull();
+  });
+
   it("walks a wizard one step at a time", async () => {
     draw(
       [

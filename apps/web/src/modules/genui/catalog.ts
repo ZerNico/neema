@@ -91,7 +91,7 @@ interface TagSpec {
   readonly children: Children;
 }
 
-const INLINE_TAGS = new Set(["b", "i", "code", "link", "num", "date", "badge"]);
+const INLINE_TAGS = new Set(["b", "i", "code", "link", "num", "date", "badge", "math"]);
 
 const SVG_SHAPE = {
   fill: oneOf(SVG_PAINT),
@@ -242,6 +242,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   list: { group: "text", doc: "List.", props: { ordered: flag() }, children: { only: ["item"] } },
   item: { group: "text", doc: "List item.", props: {}, children: "block" },
+  math: {
+    group: "text",
+    doc: 'TeX formula; write it as a quoted string, e.g. tex="\\frac{\\sigma}{\\sqrt{n}}". display centres it on its own line.',
+    props: { tex: required(text(2000)), display: flag() },
+    children: "none",
+  },
   num: {
     group: "text",
     doc: "Number formatted in the reader's locale.",

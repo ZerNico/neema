@@ -2,7 +2,8 @@
 // checked against the catalog, so each component only maps them onto ours;
 // anything it does not recognise renders nothing rather than guessing.
 
-import { use, useEffect, useRef, useState, type ReactNode } from "react";
+import katex from "katex";
+import { use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MotionSwap } from "~/ui/motion.tsx";
@@ -559,6 +560,35 @@ function WizardNode({ node }: { node: ValidNode }) {
   );
 }
 
+/**
+ * A formula through KaTeX, as answers render theirs. trust stays off, so TeX
+ * cannot add links or raw HTML, and the expansion limits stop a macro bomb.
+ */
+function MathNode({ node }: { node: ValidNode }) {
+  const tex = str(node.props.tex) ?? "";
+  const display = node.props.display === true;
+  const html = useMemo(
+    () =>
+      katex.renderToString(tex, {
+        displayMode: display,
+        throwOnError: false,
+        trust: false,
+        strict: "ignore",
+        maxSize: 20,
+        maxExpand: 500,
+      }),
+    [tex, display],
+  );
+  const Tag = display ? "div" : "span";
+  // oxlint-disable-next-line react/no-danger -- KaTeX output with trust off, the same markup answers render
+  return (
+    <Tag
+      className={display ? "overflow-x-auto" : undefined}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 /** Copies its own text, no handler involved: the click is the reader's. */
 function CopyNode({ node }: { node: ValidNode }) {
   const p = node.props;
@@ -805,6 +835,8 @@ function Node({ node }: { node: ValidNode }) {
       return <UiImage node={node} />;
     case "images":
       return <UiImages node={node} />;
+    case "math":
+      return <MathNode node={node} />;
     case "choice":
       return <ChoiceNode node={node} />;
     case "steps":
