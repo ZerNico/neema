@@ -259,7 +259,7 @@ export function useSync(
           announceTicketRedeemed(event.ticketId);
           break;
         case "notification":
-          void showNotification(
+          showNotification(
             event.notification,
             openPath ?? ((path) => window.location.assign(path)),
           );

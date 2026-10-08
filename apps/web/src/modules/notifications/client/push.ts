@@ -13,13 +13,6 @@ export const pushSupported = () =>
   "PushManager" in window &&
   readDesktopChrome() === null;
 
-/** This browser's push subscription, if it has one. */
-export const currentPushSubscription = async () =>
-  pushSupported()
-    ? ((await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription()) ??
-      null)
-    : null;
-
 const keyBytes = (key: string) =>
   Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
