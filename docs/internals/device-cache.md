@@ -19,5 +19,6 @@ user (see [generative UI](generative-ui.md)).
 - Entries belong to an identity (user, plus the admin when impersonating). The `_app` route sets
   the owner in `beforeLoad`, before anything renders, so the first frame can read the cache.
   Setting an owner deletes every other owner's entries, and `IdentityBoundary` clears the whole
-  store on any identity change. A session that ended outside the app therefore leaves nothing
+  store on any identity change, waiting up to half a second for it before replacing the document,
+  which would otherwise abort a clear still in flight. A session that ended outside the app therefore leaves nothing
   readable for whoever signs in next on the same browser.

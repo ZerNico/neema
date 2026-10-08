@@ -210,7 +210,8 @@ describe("authenticated identity boundary", () => {
       window,
       new StorageEvent("storage", { key: IDENTITY_CHANGE_KEY, newValue: "second" }),
     );
-    expect(identityNavigation.replace).toHaveBeenCalledExactlyOnceWith("/");
+    // Leaving waits for the device cache to be cleared first.
+    await waitFor(() => expect(identityNavigation.replace).toHaveBeenCalledExactlyOnceWith("/"));
     expect(setItem).not.toHaveBeenCalled();
     expect(client.getQueryCache().getAll()).toEqual([]);
   });

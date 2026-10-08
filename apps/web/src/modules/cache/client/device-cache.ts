@@ -110,6 +110,8 @@ export async function clearDeviceCaches(): Promise<void> {
   try {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).clear();
+    // Sent now rather than at the next turn, as the page may be leaving.
+    tx.commit();
     await done(tx);
   } catch {
     /* Already unusable: nothing readable remains. */
