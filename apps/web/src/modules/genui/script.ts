@@ -41,6 +41,11 @@ interface Scope {
   readonly parent: Scope | null;
   /** The script's top level, where only state may be assigned. */
   readonly topLevel: boolean;
+  /**
+   * Names an `{#each}` binds. They hold the render's frozen copy of each item,
+   * so a write to one would change nothing and fail silently.
+   */
+  readonly each?: boolean;
 }
 
 function isNode(value: unknown): value is AnyNode {
@@ -161,6 +166,10 @@ class Checker {
   private checkName(node: AnyNode, name: string, scope: Scope): void {
     // Locals (including ones shadowing a state name) are free to change.
     const owner = this.resolve(name, scope);
+    if (owner?.each) {
+      this.report(node, "assigns_each_item", name);
+      return;
+    }
     if (owner && (!owner.topLevel || this.stateNames.has(name))) return;
     this.report(node, owner ? "assigns_non_state" : "assigns_global", name);
   }
@@ -415,7 +424,7 @@ export function analyzeExpression(
   }
   const checker = new Checker(new Set(script.stateNames));
   const top = topLevelScope(script.stateNames, script.derivedNames, script.frozenNames);
-  const scope: Scope = { names: new Set(locals), parent: top, topLevel: false };
+  const scope: Scope = { names: new Set(locals), parent: top, topLevel: false, each: true };
   checker.walk(expression, scope);
   return checker.issues;
 }

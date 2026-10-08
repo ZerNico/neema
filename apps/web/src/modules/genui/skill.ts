@@ -135,7 +135,7 @@ An answer may contain \`\`\`ui fenced blocks. Each is drawn in the chat with the
 
 ## Rules the runtime enforces
 
-- Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source.
+- Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source. Inside \`{#each items as item, i}\`, write through the state (\`items[i].done = true\`), never to \`item\`. Keep everything the reader changes in \`$state\`: a \`Set\`, \`Map\` or closure variable is lost when the block reloads.
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - \`toLocaleString\` covers common cases, but \`<num>\` and \`<date>\` format in the reader's own locale and are better.

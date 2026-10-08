@@ -74,6 +74,19 @@ describe("analyzeExpression", () => {
     expect(analyzeExpression("part.name + i", script, ["part", "i"])).toEqual([]);
   });
 
+  it("rejects writes to each-bindings, which hold the render's frozen copy", () => {
+    const list = analyzeScript("let items = $state([{ done: false }]);");
+    expect(
+      analyzeExpression("() => item.done = !item.done", list, ["item", "i"]).map((x) => x.code),
+    ).toEqual(["assigns_each_item"]);
+    expect(analyzeExpression("() => i++", list, ["item", "i"]).map((x) => x.code)).toEqual([
+      "assigns_each_item",
+    ]);
+    // Through the state itself, it is a real write; a handler's own parameter is its own.
+    expect(analyzeExpression("() => items[i].done = true", list, ["item", "i"])).toEqual([]);
+    expect(analyzeExpression("(item) => { item = 1; }", list, ["item"])).toEqual([]);
+  });
+
   it("rejects writes to constants and trailing code", () => {
     expect(analyzeExpression("() => sprockets[0] = 1", script, []).map((i) => i.code)).toEqual([
       "assigns_non_state",
