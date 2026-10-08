@@ -153,7 +153,9 @@ export default function UiMap({ node }: { node: ValidNode }) {
   const label = typeof p.label === "string" ? p.label : "Map";
   const height = typeof p.height === "number" ? p.height : 320;
 
-  // One map per theme: a style swap would drop the layers drawn on it.
+  // One map per theme: a style swap would drop the layers drawn on it. A map
+  // that falls back to its list (maps off, a style that never loads) is torn
+  // down with its container rather than holding a WebGL context to the end.
   useEffect(() => {
     const element = container.current;
     if (!element) return;
@@ -220,7 +222,8 @@ export default function UiMap({ node }: { node: ValidNode }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [dark]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- failed unmounts the container, and the map must go with it
+  }, [dark, failed]);
 
   // Draw what is known so far, and fit the view whenever more of it arrives.
   useEffect(() => {
