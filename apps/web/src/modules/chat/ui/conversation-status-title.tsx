@@ -28,10 +28,15 @@ export function ConversationStatusTitle({
   const [slot, setSlot] = useState({ target: width, settled: width });
   if (slot.target !== width) setSlot({ ...slot, target: width });
   const moving = !reduced && slot.settled !== width;
+  // The icon trails the title; the slot's own width is the gap, so the title
+  // never jumps. The sidebar pushes it to the row's end, under the hover menu.
   return (
     <>
+      <ConversationTitle {...title} resizing={moving} />
       <m.span
-        className="flex shrink-0 items-center overflow-hidden"
+        data-status-slot
+        data-filled={width > 0 || undefined}
+        className="flex shrink-0 items-center justify-end overflow-hidden"
         initial={false}
         animate={{ width }}
         transition={{ duration: reduced ? 0 : 0.2, ease: motionEase }}
@@ -82,7 +87,6 @@ export function ConversationStatusTitle({
           ) : null}
         </MotionSwap>
       </m.span>
-      <ConversationTitle {...title} resizing={moving} />
     </>
   );
 }

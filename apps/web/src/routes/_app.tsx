@@ -5,6 +5,7 @@ import {
   WorkConnectionNotice,
 } from "~/modules/desktop/client/work-host.tsx";
 import { useQuery } from "@tanstack/react-query";
+import type { CSSProperties } from "react";
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
 import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
@@ -17,6 +18,8 @@ import {
 } from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
+import { sidebarPinsQuery } from "~/modules/navigation/client/queries.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -50,7 +53,13 @@ export const Route = createFileRoute("/_app")({
     return { user, identity };
   },
   loader: async ({ context }) => {
-    await context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery("", true));
+    await Promise.all([
+      context.queryClient.ensureInfiniteQueryData(conversationsInfiniteQuery("", true)),
+      // The rail shows a pin only for a page the person may open, so both
+      // arrive before it renders, or the pins would animate in after it.
+      context.queryClient.ensureQueryData(sidebarPinsQuery),
+      context.queryClient.ensureQueryData(capabilitiesQuery),
+    ]);
     return { user: context.user, identity: context.identity };
   },
   component: AppLayout,
@@ -82,7 +91,7 @@ function AuthenticatedLayout({
       <AppMotionProvider>
         <ConfirmProvider>
           <FeatureTourProvider enabled={!identity.impersonatedBy}>
-            <SidebarProvider>
+            <SidebarProvider style={{ "--sidebar-width": "19rem" } as CSSProperties}>
               <CommandPaletteProvider>
                 <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
                 <SidebarInset className="h-svh overflow-hidden">
@@ -99,7 +108,8 @@ function AuthenticatedLayout({
                       <div className="relative flex min-h-0 flex-1">
                         <div className="flex min-w-0 flex-1 flex-col">
                           <AppHeader>
-                            <SidebarTrigger />
+                            {/* On a wide screen the toggle heads the rail. */}
+                            <SidebarTrigger className="md:hidden" />
                             <HistoryButtons />
                             <SearchButton />
                             <HeaderSlot />

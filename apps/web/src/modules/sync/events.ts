@@ -71,6 +71,7 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("memory.policy.changed"),
   }),
+  Schema.Struct({ type: Schema.Literal("sidebar.changed") }),
   Schema.Struct({
     type: Schema.Literal("models.defaults.changed"),
   }),

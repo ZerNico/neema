@@ -91,6 +91,7 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         void queryClient.invalidateQueries({ queryKey: ["conversation"] });
         void queryClient.invalidateQueries({ queryKey: ["memory"] });
+        void queryClient.invalidateQueries({ queryKey: ["sidebar"] });
         void queryClient.invalidateQueries({ queryKey: ["documents"] });
         void queryClient.invalidateQueries({ queryKey: ["projects"] });
         void queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -244,6 +245,9 @@ export function useSync(reconcileIdentity?: () => Promise<boolean>) {
         case "memory.changed":
         case "memory.policy.changed":
           void queryClient.invalidateQueries({ queryKey: ["memory"] });
+          break;
+        case "sidebar.changed":
+          void queryClient.invalidateQueries({ queryKey: ["sidebar"] });
           break;
         case "desktop.session.created":
           void queryClient.invalidateQueries({ queryKey: ["desktop-sessions"] });

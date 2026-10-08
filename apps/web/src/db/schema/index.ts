@@ -11,6 +11,7 @@ export * from "./help.ts";
 export * from "./integrations.ts";
 export * from "./knowledge.ts";
 export * from "./memory.ts";
+export * from "./navigation.ts";
 export * from "./oauth.ts";
 export * from "./presentation-fonts.ts";
 export * from "./project-files.ts";

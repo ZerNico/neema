@@ -582,9 +582,10 @@ describe("impersonation controls", () => {
 
   it("keeps the ordinary account menu and client-side sign out", async () => {
     const { client } = mount(<Account impersonating={false} />);
+    await openAccount();
+    // The rail shows the avatar alone; the menu names the account.
     expect(screen.queryByText("Impersonating")).not.toBeInTheDocument();
     expect(screen.getByText("target@example.test")).toBeVisible();
-    await openAccount();
     expect(screen.queryByRole("menuitem", { name: "Stop impersonating" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Change server" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));

@@ -18,11 +18,14 @@ import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { SidebarMenuButton } from "~/ui/primitives/sidebar";
+import { useRailTooltip } from "~/modules/navigation/ui/use-rail-tooltip.ts";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { toastError } from "~/ui/error-toast.ts";
@@ -45,6 +48,7 @@ export function AccountMenu({
   const accountLabel = `${user.name}, ${user.email}${impersonating ? ", Impersonating" : ""}`;
   const boundary = useIdentityBoundary();
   const desktopAuth = useDesktopAuth();
+  const tooltip = useRailTooltip();
   const changeServer = useMutation({
     mutationFn: () => desktopAuth!.changeServer(),
     onError: (cause) => toast.error(cause.message),
@@ -79,7 +83,7 @@ export function AccountMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<SidebarMenuButton size="lg" tooltip={accountLabel} />}
+        render={<SidebarMenuButton size="icon" tooltip={tooltip(accountLabel)} />}
         aria-label={accountLabel}
       >
         {/* oxlint-disable-next-line shadcn/no-restyle -- marks an impersonated session, so it is a state signal rather than decoration */}
@@ -92,16 +96,19 @@ export function AccountMenu({
             )}
           </AvatarFallback>
         </Avatar>
-        <div className="grid flex-1 text-left text-sm leading-tight">
-          <span className="truncate font-medium">{user.name}</span>
-          {impersonating ? (
-            <span className="text-warning truncate text-xs font-medium">Impersonating</span>
-          ) : (
-            <span className="text-muted-foreground truncate text-xs">{user.email}</span>
-          )}
-        </div>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-56">
+      <DropdownMenuContent side="right" align="end" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <span className="text-foreground block truncate font-medium">{user.name}</span>
+            {impersonating ? (
+              <span className="text-warning block truncate font-medium">Impersonating</span>
+            ) : (
+              <span className="block truncate">{user.email}</span>
+            )}
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link to="/settings" />}>
           <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
           Settings

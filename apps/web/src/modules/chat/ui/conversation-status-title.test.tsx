@@ -24,7 +24,7 @@ function setup(branched = false, generating = false) {
   const view = render(tree(generating));
   const title = screen.getByText("Example chat");
   const link = screen.getByRole("link");
-  const slot = link.firstElementChild as HTMLElement;
+  const slot = link.querySelector<HTMLElement>("[data-status-slot]")!;
   return { ...view, title, link, slot, update: (busy: boolean) => view.rerender(tree(busy)) };
 }
 
@@ -48,9 +48,9 @@ describe("conversation status in sidebar and chats list", () => {
     update(true);
     // jsdom applies no stylesheet, so the icon slot stays inline and the
     // accessible name loses the space a browser gets from blockifying it.
-    expect(screen.getByRole("link")).toHaveAccessibleName(/^Generating\s?Example chat$/);
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Example chat\s?Generating$/);
     update(false);
-    expect(screen.getByRole("link")).toHaveAccessibleName(/^Branched conversation\s?Example chat$/);
+    expect(screen.getByRole("link")).toHaveAccessibleName(/^Example chat\s?Branched conversation$/);
     await waitFor(() => expect(slot.querySelector("[inert]")).toBeNull());
     expect(slot.style.width).toBe("24px");
   });

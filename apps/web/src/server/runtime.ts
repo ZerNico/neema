@@ -29,6 +29,7 @@ import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
+import { SidebarPinsService } from "~/modules/navigation/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -114,6 +115,7 @@ const CoreLayer = Layer.mergeAll(
   IntegrationService.layer,
   IntegrationApprovals.layer,
   ProjectService.layer,
+  SidebarPinsService.layer,
 ).pipe(Layer.provideMerge(SyncBus.layer), Layer.provideMerge(ReposLayer));
 // Knowledge indexing sits above the gateway and the parser: it embeds through
 // one and extracts through the other.
