@@ -122,9 +122,15 @@ function useBlock({
 
   const dispatch: Dispatch = useCallback(
     async (ref, args, trusted) => {
-      if (stamp !== client.epoch()) return;
+      if (stamp !== client.epoch() || !reply?.ok) return;
       const at = client.epoch();
-      const result = await client.call({ block, rev: ref.rev, handler: ref.$h, args });
+      const result = await client.call({
+        block,
+        source: reply.source,
+        rev: ref.rev,
+        handler: ref.$h,
+        args,
+      });
       if (result.ok) {
         show(result.render, at, code);
         if (result.render.ok && result.render.state !== null) onState(result.render.state);
@@ -134,7 +140,7 @@ function useBlock({
         show(next, at, code);
       }
     },
-    [client, block, code, now, stamp, show, startFrom, onActions, onState],
+    [client, block, code, now, stamp, reply, show, startFrom, onActions, onState],
   );
 
   return { reply, dispatch };

@@ -27,7 +27,7 @@ A rebuilt block must equal the live one, because runtimes are evicted, workers r
 
 - `compile.ts` emits one sloppy-mode function: `with (__derived) with (__state)` is what lets a handler write `gear = v`. `with` is illegal in modules, so it is evaluated as a global script.
 - `runtime.ts` passes only strings: the prelude (`prelude.ts`) answers `render`, `call` and `state` with JSON. No host object or function is injected, and the host checks a string's length before parsing it.
-- Every handler reference carries the render revision. A call from an older render is refused instead of running whatever now holds that index.
+- Every handler reference carries the render revision, and every call the source hash of the runtime that drew it. A call from an older render, or from a runtime a recompile replaced (revisions restart with each one), is refused instead of running whatever now holds that index.
 - Actions (`send`, `open`, `copy`) only queue during a handler, one per call. Which events may trigger which action, and what the host does with them, is the host's decision.
 - Limits per block: 16 MB of memory, a 256 KB stack (larger, and deep recursion traps the whole WebAssembly module instead of throwing), deadlines of 200 ms for the script and handlers and 50 ms per render.
 - `catalog.ts` validates every tree before React sees it: unknown tags and props are dropped, required props missing omit the node. Drawings are a closed SVG subset: geometry and theme colours only, no `href`, `style`, event attribute, `url()` or `foreignObject`.

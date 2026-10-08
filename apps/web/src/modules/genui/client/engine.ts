@@ -23,6 +23,8 @@ export interface RenderRequest {
 
 export interface CallRequest {
   readonly block: string;
+  /** The `source` of the render the handler came from. */
+  readonly source: string;
   readonly rev: number;
   readonly handler: number;
   readonly args: readonly unknown[];
@@ -31,6 +33,11 @@ export interface CallRequest {
 export type RenderReply =
   | {
       readonly ok: true;
+      /**
+       * Hash of the source this runtime was built from. Revisions restart with
+       * each runtime, so a handler is only the one drawn if this matches too.
+       */
+      readonly source: string;
       readonly rev: number;
       readonly nodes: (ValidNode | string)[];
       readonly state: string | null;
@@ -98,7 +105,7 @@ export class BlockEngine {
 
   call(request: CallRequest): CallReply {
     const entry = this.touch(request.block);
-    if (!entry) return { ok: false, stale: true };
+    if (!entry || entry.hash !== request.source) return { ok: false, stale: true };
     const result = entry.runtime.call(request.rev, request.handler, request.args);
     if (!result.ok) return result;
     return {
@@ -132,6 +139,7 @@ export class BlockEngine {
     }
     return {
       ok: true,
+      source: entry.hash,
       rev: out.rev,
       nodes: tree.nodes,
       state: entry.runtime.state(),

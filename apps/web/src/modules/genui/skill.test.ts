@@ -38,6 +38,7 @@ describe("the interactive-ui skill", () => {
       for (const ref of handlers(reply.nodes)) {
         const called = engine.call({
           block: `skill:${name}`,
+          source: reply.source,
           handler: ref.$h,
           rev: reply.rev,
           args: [2],
