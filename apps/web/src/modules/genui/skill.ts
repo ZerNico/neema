@@ -114,7 +114,7 @@ export const SKILL_EXAMPLES = {
 const fence = (body: string) => "```ui\n" + body + "\n```";
 
 export const INTERACTIVE_UI_SKILL_DESCRIPTION =
-  "How to put interactive UI in an answer with a ```ui block: calculators, comparisons, charts, drawings, maps and image galleries.";
+  "Interactive ```ui blocks in answers: quizzes, calculators, charts, diagrams, trip maps, checklists, timers, image galleries. Load it when something to see or click beats prose.";
 
 export const INTERACTIVE_UI_SKILL_ROOT = `---
 name: interactive-ui
