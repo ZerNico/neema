@@ -68,6 +68,7 @@ const schedule = {
   chatMode: "new" as const,
   chatId: null,
   integrationGrants: [],
+  notify: "always" as const,
   paused: false,
 };
 

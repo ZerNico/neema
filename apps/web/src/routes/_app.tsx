@@ -5,8 +5,8 @@ import {
   WorkConnectionNotice,
 } from "~/modules/desktop/client/work-host.tsx";
 import { useQuery } from "@tanstack/react-query";
-import type { CSSProperties } from "react";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { useCallback, type CSSProperties } from "react";
+import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
 import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
@@ -83,7 +83,9 @@ function AuthenticatedLayout({
 }) {
   const boundary = useIdentityBoundary();
   const browser = useDesktopBrowser();
-  useSync(boundary?.reconcile);
+  const router = useRouter();
+  const openPath = useCallback((path: string) => router.history.push(path), [router]);
+  useSync(boundary?.reconcile, openPath);
   useDesktopSessionRefresh();
 
   return (

@@ -10,6 +10,11 @@ export interface DesktopChrome {
   getState(): Promise<DesktopChromeState>;
   onState(listener: (state: DesktopChromeState) => void): () => void;
   setTheme(theme: DesktopTheme): Promise<void>;
+  /**
+   * Brings the window forward, hidden or minimized, for a notification the
+   * person clicked. Absent on shells built before it.
+   */
+  showWindow?(): Promise<void>;
 }
 
 export function readDesktopChrome(): DesktopChrome | null {

@@ -50,6 +50,7 @@ const scheduleToSettings = (row: ScheduleRow): ScheduleDraftSettings => ({
   skillIds: [...row.skillIds],
   chatMode: row.chatMode,
   chatId: row.chatId,
+  notify: row.notify,
 });
 
 export class ScheduleDraftService extends Context.Service<

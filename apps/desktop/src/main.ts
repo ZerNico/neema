@@ -22,6 +22,7 @@ import {
   CHANGE_SERVER,
   CHROME_GET_STATE,
   CHROME_SET_THEME,
+  CHROME_SHOW_WINDOW,
   CONNECT,
   CONNECT_CURRENT,
   FIXED_SERVER_ARGUMENT,
@@ -584,6 +585,11 @@ void app.whenReady().then(async () => {
   ipcMain.handle(CHROME_SET_THEME, (event, theme: unknown) => {
     if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
     windowChrome.get(mainWindow)?.setTheme(theme);
+  });
+  // Only the server's page asks, when someone clicks one of its notifications.
+  ipcMain.handle(CHROME_SHOW_WINDOW, (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    restoreWindow();
   });
   ipcMain.handle(NETWORK_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

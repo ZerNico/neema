@@ -119,6 +119,7 @@ export function ChatsPage() {
                           generating={conversation.generating}
                           branched={!!conversation.branchedFrom}
                           scheduled={conversation.scheduled}
+                          unread={conversation.unread}
                           conversationId={conversation.id}
                           title={conversation.title}
                           registry={revealRegistry}

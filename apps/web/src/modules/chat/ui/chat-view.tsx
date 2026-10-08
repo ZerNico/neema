@@ -100,6 +100,7 @@ import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
+import { useMarkRead } from "./use-mark-read.ts";
 import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
@@ -252,6 +253,7 @@ export function ChatView({
     if (head.serverTime) learnServerClock(head.serverTime, dataUpdatedAt);
   }, [head.serverTime, dataUpdatedAt]);
   useBrowserChat(conversationId, data.conversation.temporary);
+  useMarkRead(conversationId, data.conversation.unread);
   const { hasNextPage, isFetching: loadingOlder, fetchNextPage } = history;
   const loadOlder = useCallback(() => {
     if (!data.hasOlder || loadingOlder) return;

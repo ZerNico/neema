@@ -80,11 +80,17 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   an in-flight fire finishes in its chat. Pause and resume touch only `paused`
   and `nextFireAt`; an in-flight fire is unaffected. "Run now" calls the same fire path
   without claiming, so the cadence is untouched and a run row is still written.
-- `createTurn` locks the pending attempt and binds its conversation in the same transaction
-  that writes the user and assistant messages. A stale or settled attempt cannot create a
-  turn. Typed failures, defects and interruption settle an unbound attempt; a bound attempt
-  remains `started`, and the message-generation lease handles an orphaned streaming answer.
-  Outcome beyond "started" is derived by joining the run's conversation messages.
+- `createTurn` locks the pending attempt and binds its conversation, its assistant message
+  and that message's generation in the same transaction that writes the user and assistant
+  messages. A stale or settled attempt cannot create a turn. Typed failures, defects and
+  interruption settle an unbound attempt; a bound attempt remains `started`, and the
+  message-generation lease handles an orphaned streaming answer.
+- A run is over when it never started, or when its message stops streaming or stops being
+  the fire's attempt (a person retried or edited it). `settleRuns` claims such runs once,
+  setting `settled_at` under `FOR UPDATE SKIP LOCKED`, and marks the chat `unread` in the
+  same transaction when the fire's own answer ended. The turn's `onSettled` calls it at
+  once, and the tick calls it too, because the reaper and a restart never reach a callback.
+  Only then does the owner hear of it; see [notifications](notifications.md).
 
 ## Drafts and sync
 

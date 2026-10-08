@@ -29,6 +29,32 @@ function setup(branched = false, generating = false) {
 }
 
 describe("conversation status in sidebar and chats list", () => {
+  it("marks a run chat with an unread answer above its calendar, and the busy state above both", () => {
+    const registry = createTitleRevealRegistry();
+    const row = (generating: boolean, unread: boolean) => (
+      <AppMotionProvider>
+        <a href="/chat/example">
+          <ConversationStatusTitle
+            conversationId="example"
+            title="Example chat"
+            registry={registry}
+            generating={generating}
+            branched={false}
+            scheduled
+            unread={unread}
+          />
+        </a>
+      </AppMotionProvider>
+    );
+    const view = render(row(false, true));
+    expect(screen.getByRole("img", { name: "New answer" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Scheduled chat")).not.toBeInTheDocument();
+    view.rerender(row(true, true));
+    expect(screen.getByRole("status", { name: "Generating" })).toBeInTheDocument();
+    view.rerender(row(false, false));
+    expect(screen.getByLabelText("Scheduled chat")).toBeInTheDocument();
+  });
+
   it("animates idle → generating → idle without replacing the title or leaving a gap", async () => {
     const { title, link, slot, update } = setup();
     expect(slot.style.width).toBe("0px");

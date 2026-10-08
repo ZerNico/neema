@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AppNotification } from "~/modules/notifications/schema.ts";
 
 /**
  * Domain events fanned out to a user's connected browser sessions.
@@ -88,6 +89,10 @@ export const SyncEvent = Schema.Union([
     type: Schema.Literal("desktop.session.created"),
     ticketId: Schema.String,
   }),
+  // The one event carrying content: a notification is shown, not refetched,
+  // and it never changes after it is sent. Its fields are capped well under
+  // the NOTIFY limit.
+  Schema.Struct({ type: Schema.Literal("notification"), notification: AppNotification }),
 ]);
 
 export type SyncEvent = typeof SyncEvent.Type;

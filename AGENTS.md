@@ -224,7 +224,9 @@ skipped one on purpose.
 - `docs/internals/skills.md`: skill packages and their binary assets, revisions, ambient
   versus pinned, hardcoded builtins, import safety.
 - `docs/internals/schedules.md`: cron cadences, claim semantics, catch-up-once,
-  run conversations, model fallback, delete-mid-run.
+  run conversations, model fallback, delete-mid-run, settling a run once.
+- `docs/internals/notifications.md`: when a schedule notifies, settlement as the one sender,
+  the unread mark, channels and their dedupe.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
 - `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,

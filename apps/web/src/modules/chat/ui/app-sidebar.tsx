@@ -186,6 +186,7 @@ function ConversationList() {
                           browsing={browsing.has(conversation.id)}
                           branched={!!conversation.branchedFrom}
                           scheduled={conversation.scheduled}
+                          unread={conversation.unread}
                           conversationId={conversation.id}
                           title={conversation.title}
                           registry={revealRegistry}

@@ -397,6 +397,8 @@ export class ChatService extends Context.Service<
       conversationId: string;
       title: string;
     }): Effect.Effect<void, ConversationNotFound>;
+    /** Its owner has seen a scheduled run's answer. Idempotent. */
+    markRead(input: { userId: string; conversationId: string }): Effect.Effect<void>;
     /** Turns a temporary chat into an ordinary one. Idempotent. */
     keepConversation(input: {
       userId: string;
@@ -436,6 +438,8 @@ export class ChatService extends Context.Service<
       integrationGrants?: ReadonlyArray<IntegrationGrant>;
       timeZone: string;
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
+      /** Runs once the fire's answer has ended, however it ended. */
+      onSettled?: Effect.Effect<void>;
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
       | ModelNotFound
@@ -1236,6 +1240,7 @@ function makeChatService() {
       desktopExecutorId?: string | undefined;
       desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
       deviceSessionId?: string | undefined;
+      onSettled?: Effect.Effect<void> | undefined;
     }) {
       const { turn } = input;
       if (turn.activatedNow && turn.conversationCreated) {
@@ -1268,7 +1273,13 @@ function makeChatService() {
           // Queued messages start only after an answer ends cleanly, so a stop
           // or a failure leaves the rest of the queue for the person to decide on.
           onSettled: ({ status }) =>
-            status === "complete" ? drainQueue(input.userId, turn.conversation.id) : Effect.void,
+            (input.onSettled ?? Effect.void).pipe(
+              Effect.andThen(
+                status === "complete"
+                  ? drainQueue(input.userId, turn.conversation.id)
+                  : Effect.void,
+              ),
+            ),
         });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -1309,6 +1320,7 @@ function makeChatService() {
        * chat, which keeps its own agent (one cannot change after creation).
        */
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
+      onSettled?: Effect.Effect<void>;
     }) {
       if (input.prompt.trim() === "")
         return yield* new InvalidMessage({ reason: "message is empty" });
@@ -1385,6 +1397,7 @@ function makeChatService() {
         turn,
         attachmentFileNames,
         timeZone: input.timeZone,
+        onSettled: input.onSettled,
       });
     });
 
@@ -2103,6 +2116,17 @@ function makeChatService() {
       });
     });
 
+    const markRead = Effect.fn("ChatService.markRead")(function* (input: {
+      userId: string;
+      conversationId: string;
+    }) {
+      if (yield* repo.markRead(input.userId, input.conversationId))
+        yield* sync.publish(input.userId, {
+          type: "conversation.updated",
+          conversationId: input.conversationId,
+        });
+    });
+
     const keepConversation = Effect.fn("ChatService.keepConversation")(function* (input: {
       userId: string;
       conversationId: string;
@@ -2198,6 +2222,7 @@ function makeChatService() {
       updateWorkSettings,
       renameConversation,
       keepConversation,
+      markRead,
       setArchived,
       archiveAll,
       listArchived,

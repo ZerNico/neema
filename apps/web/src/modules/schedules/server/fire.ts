@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Predicate, Schedule } from "effect";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
+import { ScheduleSettlement } from "./settle.ts";
 
 export interface FireOutcome {
   conversationId: string | null;
@@ -30,6 +31,7 @@ export class ScheduleFire extends Context.Service<
       const chat = yield* ChatService;
       const integrations = yield* IntegrationService;
       const repo = yield* ScheduleRepo;
+      const settlement = yield* ScheduleSettlement;
       const turn = (row: ScheduleRow, runId: string, target: { conversationId: string } | null) =>
         chat.runScheduledTurn({
           userId: row.userId,
@@ -45,6 +47,7 @@ export class ScheduleFire extends Context.Service<
           integrationGrants: row.integrationGrants,
           timeZone: row.timezone,
           target: target ? { kind: "existing", ...target } : { kind: "new" },
+          onSettled: settlement.settle,
         });
       // A fresh chat; in "same chat" mode it becomes the chat later fires use.
       const fresh = (row: ScheduleRow, runId: string) =>

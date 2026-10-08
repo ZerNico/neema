@@ -18,6 +18,7 @@ import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
 import { ScheduleAllowanceFields } from "./schedule-allowance-fields.tsx";
 import { ScheduleChatField } from "./schedule-chat-field.tsx";
+import { ScheduleNotifyField } from "./schedule-notify-field.tsx";
 import { ScheduleTimingFields } from "./schedule-timing-fields.tsx";
 import { withForm } from "~/ui/form/app-form.ts";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
@@ -57,6 +58,7 @@ export const ScheduleSettingsFields = withForm({
         </div>
         <ScheduleTimingFields form={form} />
         <ScheduleChatField form={form} />
+        <ScheduleNotifyField form={form} />
         <div>
           <form.AppField name="prompt">
             {(field) => (

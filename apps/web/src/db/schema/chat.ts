@@ -77,6 +77,9 @@ export const conversations = pgTable(
     // search. A message the owner sends clears it; a schedule's does not. See
     // docs/internals/archived-chats.md.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // A scheduled run answered here and its owner has not opened the chat
+    // since. Set when the run settles, cleared by opening it.
+    unread: boolean().notNull().default(false),
   },
   (t) => [
     check(
