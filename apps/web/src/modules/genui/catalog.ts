@@ -39,6 +39,11 @@ const oneOf = <const L extends readonly [string, ...string[]]>(values: L) =>
   prop(Schema.Literals(values), values.map((v) => `"${v}"`).join(" | "));
 const matching = (pattern: RegExp, type: string, max = 200) =>
   prop(Schema.String.check(Schema.isMaxLength(max), Schema.isPattern(pattern)), type);
+/** How <num> and charts format numbers; ui/format.ts reads it. */
+const NUMBER_FORMAT = matching(
+  /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/,
+  '"decimal:2" | "percent" | "compact" | "currency:EUR"',
+);
 const handler = () =>
   prop(
     Schema.Struct({ $h: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), rev: Schema.Int }),
@@ -264,10 +269,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Number formatted in the reader's locale.",
     props: {
       value: required(num()),
-      format: matching(
-        /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/,
-        '"decimal:2" | "percent" | "compact" | "currency:EUR"',
-      ),
+      format: NUMBER_FORMAT,
     },
     children: "none",
   },
@@ -477,6 +479,8 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       label: required(text(200)),
       stacked: flag(),
       unit: text(20),
+      // The y axis and values, as for <num>: "currency:EUR" labels a money axis "600K €".
+      format: NUMBER_FORMAT,
       rules: prop(
         Schema.Array(
           Schema.Struct({

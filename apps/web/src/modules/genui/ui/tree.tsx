@@ -45,6 +45,7 @@ import { UiLink } from "./link.tsx";
 import { UiMap } from "./map.tsx";
 import { UiImage, UiImages } from "./media.tsx";
 import { copiedPreview } from "../text.ts";
+import { formatNumber } from "./format.ts";
 import { SuggestContext } from "./context.ts";
 
 type Child = ValidNode | string;
@@ -160,31 +161,6 @@ function Field({ label, children }: { label: string | undefined; children: React
       {children}
     </div>
   );
-}
-
-function formatNumber(value: number, format: string | undefined): string {
-  const locale = typeof navigator === "undefined" ? undefined : navigator.language;
-  const [kind = "decimal", arg] = (format ?? "decimal").split(":");
-  try {
-    if (kind === "percent") {
-      const digits = arg ? Number(arg) : 0;
-      return new Intl.NumberFormat(locale, {
-        style: "percent",
-        maximumFractionDigits: digits,
-      }).format(value);
-    }
-    if (kind === "compact")
-      return new Intl.NumberFormat(locale, { notation: "compact" }).format(value);
-    if (kind === "currency" && arg)
-      return new Intl.NumberFormat(locale, { style: "currency", currency: arg }).format(value);
-    const digits = arg ? Number(arg) : undefined;
-    return new Intl.NumberFormat(
-      locale,
-      digits === undefined ? {} : { minimumFractionDigits: digits, maximumFractionDigits: digits },
-    ).format(value);
-  } catch {
-    return String(value);
-  }
 }
 
 function formatDate(value: unknown, format: string | undefined): string {

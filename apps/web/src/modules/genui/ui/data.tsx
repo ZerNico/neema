@@ -2,6 +2,7 @@
 // apart from tree.tsx because the chart library is heavy; both still load
 // only with the lazy ui-block chunk.
 
+import { formatNumber } from "./format.ts";
 import { areaY, barY, defineChart, lineY, ruleX, ruleY } from "@tanstack/charts";
 import { group } from "@tanstack/charts/group";
 import { Chart } from "@tanstack/charts/react";
@@ -141,6 +142,7 @@ export function UiChart({ node }: { node: ValidNode }) {
   const p = node.props;
   const type = p.type === "line" || p.type === "area" ? p.type : "bar";
   const unit = typeof p.unit === "string" ? p.unit : "";
+  const format = typeof p.format === "string" ? p.format : undefined;
   const label = typeof p.label === "string" ? p.label : "Chart";
   const stacked = p.stacked === true;
   const xs = useMemo(() => (Array.isArray(p.x) ? p.x.map(String) : []), [p.x]);
@@ -180,18 +182,28 @@ export function UiChart({ node }: { node: ValidNode }) {
         ...(categories.length ? [ruleX(categories, { x: "x", ...RULE_STYLE })] : []),
       ],
       scales: {
-        x: { scale: () => scaleBand<string>().padding(0.25), axis: { line: false } },
+        x: {
+          scale: () => scaleBand<string>().padding(0.25),
+          // Thirty-five years side by side are unreadable; keep the ends and space the rest.
+          axis: { line: false, tickLabels: { thin: { minGap: 8, priority: "ends" } } },
+        },
         y: {
           scale: scaleLinear,
           nice: true,
           grid: true,
-          axis: { line: false, ticks: { format: (v) => `${String(v)}${unit}` } },
+          axis: {
+            line: false,
+            ticks: {
+              format: (v) =>
+                `${typeof v === "number" ? formatNumber(v, format, { axis: true }) : String(v)}${unit}`,
+            },
+          },
         },
       },
       color: { domain: series.map((s) => s.name), range: PALETTE.slice(0, series.length) },
       tooltip,
     });
-  }, [series, xs, type, stacked, unit, rules]);
+  }, [series, xs, type, stacked, unit, format, rules]);
   return (
     <figure className="flex flex-col gap-2">
       {series.length > 1 || rules.some((r) => r.label) ? (
