@@ -28,8 +28,21 @@ const MAX_DEPTH = 8;
  * twice multiply past any size check, so expansion stops counting here.
  */
 const MAX_NODES = 5_000;
+/**
+ * Characters one schema may expand to, keys and values together. A few
+ * nodes holding a long string multiply just as well, and the size check
+ * after expanding would come too late.
+ */
+const MAX_CHARS = MCP_LIMITS.schemaBytes * 4;
 
 class TooComplex extends Error {}
+
+type Budget = { nodes: number; chars: number };
+
+const spend = (budget: Budget, chars: number) => {
+  budget.chars += chars;
+  if (++budget.nodes > MAX_NODES || budget.chars > MAX_CHARS) throw new TooComplex();
+};
 
 const resolvePointer = (root: Json, ref: string): unknown => {
   if (!ref.startsWith("#/")) return undefined;
@@ -48,9 +61,9 @@ const inline = (
   root: Json,
   depth: number,
   trail: ReadonlySet<string>,
-  budget: { nodes: number },
+  budget: Budget,
 ): unknown => {
-  if (++budget.nodes > MAX_NODES) throw new TooComplex();
+  spend(budget, typeof node === "string" ? node.length : 0);
   if (!isObject(node)) return node;
   const ref = typeof node.$ref === "string" ? node.$ref : null;
   if (ref) {
@@ -68,6 +81,7 @@ const inline = (
   const out: Json = {};
   for (const [key, value] of Object.entries(node)) {
     if (DROPPED.has(key)) continue;
+    spend(budget, key.length + (LITERAL.has(key) ? (JSON.stringify(value)?.length ?? 0) : 0));
     out[key] = LITERAL.has(key)
       ? value
       : NAMED.has(key) && isObject(value)
@@ -91,7 +105,7 @@ export const normalizeSchema = (
   if (!isObject(schema)) return { error: "Its input schema is not an object." };
   let inlined: unknown;
   try {
-    inlined = inline(schema, schema, 0, new Set(), { nodes: 0 });
+    inlined = inline(schema, schema, 0, new Set(), { nodes: 0, chars: 0 });
   } catch (error) {
     if (error instanceof TooComplex) return { error: "Its input schema is too complex to offer." };
     throw error;
@@ -109,6 +123,15 @@ export const normalizeSchema = (
     return { error: "Its input schema is too large to offer." };
   // A round trip through JSON is what makes it JSON, whatever the SDK handed over.
   return { schema: JSON.parse(text) as JsonSchemaObject };
+};
+
+/** One tool's schema can never fail the whole listing: whatever goes wrong refuses that tool. */
+const normalizedOrRefused = (schema: unknown) => {
+  try {
+    return normalizeSchema(schema);
+  } catch {
+    return { error: "Its input schema could not be read." };
+  }
 };
 
 const annotationsOf = (value: unknown): McpAnnotations => {
@@ -185,11 +208,11 @@ export const listingEntries = (
     const name = tool.name as string;
     const annotations = annotationsOf(tool.annotations);
     const fingerprint = fingerprintOf(tool);
-    const normalized = normalizeSchema(tool.inputSchema);
+    const normalized = normalizedOrRefused(tool.inputSchema);
     // Checked now, so a tool whose arguments could never be checked is never offered.
     const check = "schema" in normalized ? argumentCheck(fingerprint, normalized.schema) : null;
     const input = check && "error" in check ? check : normalized;
-    const output = isObject(tool.outputSchema) ? normalizeSchema(tool.outputSchema) : null;
+    const output = isObject(tool.outputSchema) ? normalizedOrRefused(tool.outputSchema) : null;
     const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
     const title =
       (typeof tool.title === "string" && tool.title.trim()) ||

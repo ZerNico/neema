@@ -185,4 +185,19 @@ describe("a schema built to explode", () => {
     expect(normalized).toEqual({ error: "Its input schema is too complex to offer." });
     expect(performance.now() - started).toBeLessThan(500);
   });
+
+  it("weighs long strings too, not only how many nodes they sit in", () => {
+    // A megabyte copied by a few references each: few nodes, gigabytes of text.
+    const defs: Record<string, unknown> = { d6: { type: "string", description: "x".repeat(1e6) } };
+    for (let i = 5; i >= 0; i--)
+      defs[`d${i}`] = {
+        type: "object",
+        properties: { a: { $ref: `#/$defs/d${i + 1}` }, b: { $ref: `#/$defs/d${i + 1}` } },
+      };
+    const started = performance.now();
+    expect(
+      normalizeSchema({ type: "object", properties: { r: { $ref: "#/$defs/d0" } }, $defs: defs }),
+    ).toEqual({ error: "Its input schema is too complex to offer." });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
