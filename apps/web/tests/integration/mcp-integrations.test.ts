@@ -468,6 +468,55 @@ describe("an MCP server set up by an admin", () => {
     expect(await run(after.credential)).toEqual({ kind: "api_key", values: { token: "second" } });
   });
 
+  it("pins the admin's client to one issuer, beside the registrations, until it changes", async () => {
+    const id = await setUp("Docs pinned", { url: `${base}/mcp`, auth: "oauth" });
+    const save = (clientId: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id,
+            name: "Docs pinned",
+            enabled: true,
+            config: { url: `${base}/mcp`, auth: "oauth" },
+            oauthClientId: clientId,
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    await save("admin-client");
+    const registered = {
+      clientId: "dyn",
+      clientSecret: "dyn-secret",
+      method: "dynamic" as const,
+      redirectUri: "https://chat.example.com/cb",
+    };
+    const outcome = await run(
+      Effect.gen(function* () {
+        const repo = yield* IntegrationRepo;
+        yield* repo.saveOAuthClient(id, "https://as.example.com", registered);
+        // Two first sign-ins at once: one issuer wins, and both see which.
+        const pins = yield* Effect.all(
+          [
+            repo.pinClientIssuer(id, "admin-client", "https://as.example.com"),
+            repo.pinClientIssuer(id, "admin-client", "https://evil.example.com"),
+          ],
+          { concurrency: "unbounded" },
+        );
+        return { pins, kept: yield* repo.oauthClient(id, "https://as.example.com") };
+      }),
+    );
+    expect(new Set(outcome.pins).size).toBe(1);
+    expect(outcome.kept).toEqual(registered);
+    // Another client is pinned afresh on its first use.
+    await save("other-client");
+    const repinned = await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.pinClientIssuer(id, "other-client", "https://idp.example.com"),
+      ),
+    );
+    expect(repinned).toBe("https://idp.example.com");
+  });
+
   it("does not let an approval read before a move land after it", async () => {
     const admin = await newUser();
     const id = await setUp("Docs approve race", { url: `${base}/mcp`, auth: "none" });

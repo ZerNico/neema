@@ -106,16 +106,17 @@ export interface SaveConfig {
   readonly sharedCredential?: Record<string, string> | null | undefined;
   /**
    * Another server address: the tool catalog (approved, listed, any check
-   * still running) and the issuer the admin's client was pinned to were the
-   * old server's, so both are forgotten.
+   * still running) was the old server's, so it is forgotten.
    */
   readonly serverMoved?: boolean;
+  /** Another client, or another server: the admin's client is pinned again on first use. */
+  readonly unpinClient?: boolean;
 }
 
 export interface StoredOAuthClient {
   clientId: string;
   clientSecret: string | null;
-  method: "metadata_document" | "dynamic" | "preregistered";
+  method: "metadata_document" | "dynamic";
   redirectUri: string;
 }
 
@@ -249,8 +250,15 @@ export class IntegrationRepo extends Context.Service<
       listedAt: Date,
     ): Effect.Effect<boolean>;
     oauthClient(integrationId: string, issuer: string): Effect.Effect<StoredOAuthClient | null>;
-    /** The issuer the admin's client was first used with, if it was. */
-    preregisteredIssuer(integrationId: string, clientId: string): Effect.Effect<string | null>;
+    /**
+     * Pins the admin's client to an issuer unless it already is, atomically,
+     * and returns the issuer it is pinned to. Null when the client changed.
+     */
+    pinClientIssuer(
+      integrationId: string,
+      clientId: string,
+      issuer: string,
+    ): Effect.Effect<string | null>;
     saveOAuthClient(
       integrationId: string,
       issuer: string,
@@ -342,6 +350,7 @@ export class IntegrationRepo extends Context.Service<
                     oauthClientId: input.oauthClientId,
                     ...(secret === undefined ? {} : { oauthClientSecretCiphertext: secret }),
                     ...(shared === undefined ? {} : { sharedCredentialCiphertext: shared }),
+                    ...(input.unpinClient ? { oauthClientIssuer: null } : {}),
                     allowApiKeys: input.allowApiKeys,
                     updatedAt: now,
                   })
@@ -358,14 +367,6 @@ export class IntegrationRepo extends Context.Service<
                     ),
                   );
                 if (input.serverMoved) {
-                  yield* tx
-                    .delete(integrationOAuthClients)
-                    .where(
-                      and(
-                        eq(integrationOAuthClients.integrationId, input.id),
-                        eq(integrationOAuthClients.method, "preregistered"),
-                      ),
-                    );
                   const fresh = {
                     approved: [],
                     latest: null,
@@ -879,18 +880,20 @@ export class IntegrationRepo extends Context.Service<
           };
         }),
 
-        preregisteredIssuer: Effect.fn("IntegrationRepo.preregisteredIssuer")(
-          function* (integrationId, clientId) {
+        pinClientIssuer: Effect.fn("IntegrationRepo.pinClientIssuer")(
+          function* (integrationId, clientId, issuer) {
             const rows = yield* db
-              .select({ issuer: integrationOAuthClients.issuer })
-              .from(integrationOAuthClients)
+              .update(integrationConfigs)
+              .set({
+                oauthClientIssuer: sql`coalesce(${integrationConfigs.oauthClientIssuer}, ${issuer})`,
+              })
               .where(
                 and(
-                  eq(integrationOAuthClients.integrationId, integrationId),
-                  eq(integrationOAuthClients.method, "preregistered"),
-                  eq(integrationOAuthClients.clientId, clientId),
+                  eq(integrationConfigs.id, integrationId),
+                  eq(integrationConfigs.oauthClientId, clientId),
                 ),
               )
+              .returning({ issuer: integrationConfigs.oauthClientIssuer })
               .pipe(Effect.orDie);
             return rows[0]?.issuer ?? null;
           },

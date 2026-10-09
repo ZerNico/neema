@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "d5b12c42-3beb-4035-819f-209290132e32",
+  "id": "75472f50-3179-457c-8750-b126691314e2",
   "prevIds": [
     "d11b2009-61a8-485b-8f68-b72d3acbcd89"
   ],
@@ -4791,6 +4791,19 @@
       "generated": null,
       "identity": null,
       "name": "oauth_client_secret_ciphertext",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_configs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "oauth_client_issuer",
       "entityType": "columns",
       "schema": "public",
       "table": "integration_configs"

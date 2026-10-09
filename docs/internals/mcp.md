@@ -80,8 +80,10 @@ functions:
   before with this issuer, else a Client ID Metadata Document, else dynamic registration
   (`application_type: web`). Registrations are stored per issuer
   (`integration_oauth_clients`) and never shown to another. The admin's client is pinned to
-  the issuer it was first used with, so a server that later names another authorization
-  server never receives its secret; moving the server address clears the pin. A metadata document is offered
+  the issuer it was first used with, on the integration row and in one statement, so two
+  first sign-ins cannot pin two issuers and no registration is overwritten. A server that
+  later names another authorization server never receives its secret; another client ID or
+  server address clears the pin. A metadata document is offered
   only from an operator-declared public HTTPS `PUBLIC_URL`, because a server that cannot fetch
   it fails the whole sign-in.
 - **Request.** PKCE, the `resource` indicator on authorize, token and refresh, and scopes

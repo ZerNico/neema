@@ -23,6 +23,7 @@ CREATE TABLE "integration_tool_catalogs" (
 	"check_token" text
 );
 --> statement-breakpoint
+ALTER TABLE "integration_configs" ADD COLUMN "oauth_client_issuer" text;--> statement-breakpoint
 ALTER TABLE "integration_configs" ADD COLUMN "shared_credential_ciphertext" text;--> statement-breakpoint
 ALTER TABLE "integration_connections" ADD COLUMN "required_scopes" jsonb;--> statement-breakpoint
 CREATE INDEX "integration_tool_catalogs_due_idx" ON "integration_tool_catalogs" ("next_check_at");--> statement-breakpoint

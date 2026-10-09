@@ -100,7 +100,7 @@ beforeEach(() => {
 
 const begin = (options: {
   stored?: StoredOAuthClient | null;
-  preregistered?: { clientId: string; clientSecret: string | null; issuer: string | null } | null;
+  preregistered?: { clientId: string; clientSecret: string | null; pinned: string | null } | null;
   clientMetadataUrl?: string | null;
   required?: string[];
   scopes?: string;
@@ -119,7 +119,13 @@ const begin = (options: {
       clientMetadataUrl: options.clientMetadataUrl ?? null,
       state: "state-1",
       scopes: { granted: [], required: options.required ?? [] },
-      preregistered: options.preregistered ?? null,
+      preregistered: options.preregistered
+        ? {
+            clientId: options.preregistered.clientId,
+            clientSecret: options.preregistered.clientSecret,
+            pin: (issuer) => Effect.succeed(options.preregistered!.pinned ?? issuer),
+          }
+        : null,
       storedClient: () => Effect.succeed(options.stored ?? null),
       saveClient: (issuer, client) => Effect.sync(() => void saved.push([issuer, client])),
     }),
@@ -177,13 +183,11 @@ describe("signing in to an MCP server", () => {
 
   it("uses the admin's client, or one registered before, without registering again", async () => {
     const admin = await started({
-      preregistered: { clientId: "admin-client", clientSecret: "x", issuer: null },
+      preregistered: { clientId: "admin-client", clientSecret: "x", pinned: null },
     });
     expect(admin.url.searchParams.get("client_id")).toBe("admin-client");
-    // Pinned to the issuer it was first used with.
-    expect(admin.saved).toEqual([
-      [base, expect.objectContaining({ clientId: "admin-client", method: "preregistered" })],
-    ]);
+    // Its pin lives with the integration; no registration is touched.
+    expect(admin.saved).toEqual([]);
     const again = await started({
       stored: {
         clientId: "dyn-client",
@@ -201,13 +205,13 @@ describe("signing in to an MCP server", () => {
       preregistered: {
         clientId: "admin-client",
         clientSecret: "x",
-        issuer: "https://idp.example.com",
+        pinned: "https://idp.example.com",
       },
     });
     expect(Exit.isFailure(moved.exit)).toBe(true);
     expect(JSON.stringify(moved.exit)).toMatch(/now signs in through/);
     const same = await started({
-      preregistered: { clientId: "admin-client", clientSecret: "x", issuer: base },
+      preregistered: { clientId: "admin-client", clientSecret: "x", pinned: base },
     });
     expect(same.saved).toEqual([]);
   });

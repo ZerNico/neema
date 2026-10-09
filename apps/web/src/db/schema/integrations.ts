@@ -37,6 +37,9 @@ export const integrationConfigs = pgTable(
     oauthClientId: text("oauth_client_id"),
     // AES-256-GCM via KeyCipher, like provider API keys
     oauthClientSecretCiphertext: text("oauth_client_secret_ciphertext"),
+    // The authorization server a discovered sign-in first used the admin's client
+    // with; its secret goes to no other. Cleared when the client or the server changes.
+    oauthClientIssuer: text("oauth_client_issuer"),
     allowApiKeys: boolean("allow_api_keys").notNull().default(true),
     // A key the admin holds for everyone, as the manifest's shared credential
     // fields (KeyCipher JSON). Only a type whose calls cannot act as anyone has one.
@@ -232,8 +235,7 @@ export const integrationOAuthClients = pgTable(
     clientId: text("client_id").notNull(),
     // KeyCipher; null for a public client (a metadata document, or none issued).
     clientSecretCiphertext: text("client_secret_ciphertext"),
-    // `preregistered` only pins the admin's own client to the issuer it was first used with.
-    method: text({ enum: ["metadata_document", "dynamic", "preregistered"] }).notNull(),
+    method: text({ enum: ["metadata_document", "dynamic"] }).notNull(),
     redirectUri: text("redirect_uri").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

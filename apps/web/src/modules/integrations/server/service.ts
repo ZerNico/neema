@@ -382,8 +382,9 @@ export class IntegrationService extends Context.Service<
         row: IntegrationConfigRow,
         server: DiscoveredServer,
       ) {
+        // The admin's secret goes only to the issuer their client is pinned to.
         if (row.oauthClientId && server.clientId === row.oauthClientId)
-          return yield* repo.clientSecret(row);
+          return row.oauthClientIssuer === server.issuer ? yield* repo.clientSecret(row) : null;
         const registered = yield* repo.oauthClient(row.id, server.issuer);
         return registered && registered.clientId === server.clientId
           ? registered.clientSecret
@@ -911,6 +912,8 @@ export class IntegrationService extends Context.Service<
             sharedCredential,
             serverMoved:
               manifest.toolSource === "catalog" && stored.config.url !== normalized.config.url,
+            unpinClient:
+              clientId !== stored.oauthClientId || stored.config.url !== normalized.config.url,
           });
           if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
           yield* bus
@@ -1151,7 +1154,8 @@ export class IntegrationService extends Context.Service<
                   ? {
                       clientId: row.oauthClientId,
                       clientSecret: yield* repo.clientSecret(row),
-                      issuer: yield* repo.preregisteredIssuer(integrationId, row.oauthClientId),
+                      pin: (issuer: string) =>
+                        repo.pinClientIssuer(integrationId, row.oauthClientId!, issuer),
                     }
                   : null,
                 storedClient: (issuer) => repo.oauthClient(integrationId, issuer),
