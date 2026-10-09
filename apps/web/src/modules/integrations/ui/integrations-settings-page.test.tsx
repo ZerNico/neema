@@ -6,7 +6,11 @@ import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import { outlineManifest } from "../outline/manifest.ts";
 import type { UserIntegration } from "../schema.ts";
-import { connectIntegrationApiKey, updateIntegrationConnection } from "../server/functions.ts";
+import {
+  connectIntegrationApiKey,
+  connectIntegrationOpen,
+  updateIntegrationConnection,
+} from "../server/functions.ts";
 import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -18,6 +22,7 @@ vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
   updateIntegrationConnection: vi.fn(),
   connectIntegrationApiKey: vi.fn(),
+  connectIntegrationOpen: vi.fn(async () => ({ ok: true })),
   listIntegrationScopeOptions: vi.fn(async () => ({
     ok: true,
     options: [
@@ -93,6 +98,19 @@ describe("integration account row", () => {
       expect(connectIntegrationApiKey).toHaveBeenCalledWith({
         data: { integrationId: "outline", values: { key: "ol_api_x" } },
       }),
+    );
+  });
+
+  it("lets a person turn an open server on again after the admin changed it", async () => {
+    mount({
+      ...outline({ authKind: "none", accountLabel: "No sign-in needed", status: "needs_reauth" }),
+      methods: { oauth: false, apiKey: false, open: "none" },
+    });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Signed out")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Turn on again" }));
+    await waitFor(() =>
+      expect(connectIntegrationOpen).toHaveBeenCalledWith({ data: { integrationId: "outline" } }),
     );
   });
 

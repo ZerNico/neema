@@ -271,7 +271,8 @@ const toolsFor = (userId: string, conversationId: string, unattended = false) =>
           service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
         // One durable row per provider call, as the stream observer mints it.
         rowIdFor: (providerCallId) => Effect.succeed(`row-${providerCallId}-${conversationId}`),
-        reportAuthFailure: () => Effect.void,
+        reportAuthFailure: (session) =>
+          service.reportAuthFailure({ userId, connectionId: session.connectionId }),
         reportMissingScopes: (session, scopes) =>
           service.reportMissingScopes({ userId, connectionId: session.connectionId }, scopes),
         allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
@@ -682,5 +683,26 @@ describe("an MCP server set up by an admin", () => {
     expect(refused).toMatchObject({ reason: "API keys are turned off for this integration." });
     const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(after.find((row) => row.id === id)?.connection?.authKind).toBe("shared");
+
+    // A key the server stops taking is the admin's to fix: nobody is signed out for it.
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs shared",
+          enabled: true,
+          config: { url: `${base}/keyed`, auth: "shared", header: "X-Api-Key" },
+          oauthClientId: "",
+          allowApiKeys: true,
+          sharedCredential: { token: "revoked-key" },
+        }),
+      ),
+    );
+    const failed = await run(
+      handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "f" }),
+    );
+    expect(JSON.stringify(failed)).toMatch(/refused the shared key/);
+    const still = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
+    expect(still.find((row) => row.id === id)?.connection?.status).toBe("active");
   });
 });

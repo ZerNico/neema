@@ -59,7 +59,13 @@ export function ConnectActions({
 }
 
 /** For a server that needs no account of one's own: open, or the admin's shared key. */
-function TurnOnButton({ integration }: { integration: UserIntegration }) {
+export function TurnOnButton({
+  integration,
+  children = "Turn on",
+}: {
+  integration: UserIntegration;
+  children?: ReactNode;
+}) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const turnOn = useMutation({
@@ -77,7 +83,7 @@ function TurnOnButton({ integration }: { integration: UserIntegration }) {
   return (
     <div className="flex flex-col items-end gap-1">
       <PendingButton size="sm" pending={turnOn.isPending} onClick={() => turnOn.mutate()}>
-        Turn on
+        {children}
       </PendingButton>
       {error ? <FieldError>{error}</FieldError> : null}
     </div>

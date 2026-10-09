@@ -21,7 +21,7 @@ import { findIntegrationType } from "../catalog.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
-import { ApiKeyDialog, ConnectActions, SignInButton } from "./connect-actions.tsx";
+import { ApiKeyDialog, ConnectActions, SignInButton, TurnOnButton } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { IntegrationScopeSection } from "./integration-scope.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
@@ -31,7 +31,12 @@ function StatusBadge({ integration }: { integration: UserIntegration }) {
   if (!connection) return null;
   if (!integration.available) return <Badge variant="outline">Turned off</Badge>;
   // Says what happened; the button beside it says what to do.
-  if (connection.status === "needs_reauth") return <Badge variant="destructive">Signed out</Badge>;
+  if (connection.status === "needs_reauth")
+    return (
+      <Badge variant="destructive">
+        {connection.authKind === "shared" || connection.authKind === "none" ? "Paused" : "Signed out"}
+      </Badge>
+    );
   return <Badge variant="secondary">Connected</Badge>;
 }
 
@@ -247,8 +252,10 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
         <span className="text-muted-foreground truncate text-xs">
           {!integration.available
             ? "An admin turned this integration off."
-            : needsReauth
-              ? `Sign in to ${integration.name} again to keep using it.`
+            : needsReauth && integration.methods.open
+              ? `${integration.name} changed. Turn it on again to keep using it.`
+              : needsReauth
+                ? `Sign in to ${integration.name} again to keep using it.`
               : connection?.authKind === "shared"
                 ? "Everyone here uses one key, so chats only read."
                 : connection?.authKind === "none"
@@ -270,6 +277,8 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
       ) : null}
       {reconnectWithOAuth ? (
         <SignInButton integration={integration}>Reconnect</SignInButton>
+      ) : needsReauth && canConnect && integration.methods.open ? (
+        <TurnOnButton integration={integration}>Turn on again</TurnOnButton>
       ) : needsReauth && canConnect && integration.methods.apiKey ? (
         <Button size="sm" onClick={() => setKeyOpen(true)}>
           Reconnect
