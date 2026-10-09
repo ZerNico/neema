@@ -33,7 +33,7 @@ export function DateChipView({ node, updateAttributes, editor, selected }: React
               contentEditable={false}
               aria-label={`Date: ${label}`}
               className={cn(
-                "bg-muted text-foreground inline-flex items-center gap-1 rounded-md px-1.5 align-baseline text-[0.9em] leading-snug",
+                "bg-muted text-foreground inline-flex items-center gap-1 rounded-md px-1.5 align-baseline text-[0.9em] leading-snug font-medium",
                 selected && "ring-ring/50 ring-2",
               )}
             />
