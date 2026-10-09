@@ -104,7 +104,7 @@ export function DocumentPanelActions({
             </TooltipTrigger>
             <TooltipContent>More</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-52">
             {document?.canEdit ? (
               <>
                 <DropdownMenuItem onClick={() => setRenaming(true)}>
