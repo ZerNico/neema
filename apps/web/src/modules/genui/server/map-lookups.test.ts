@@ -38,13 +38,10 @@ describe("MapLookups", () => {
     const place = await run(
       MapLookups.use((maps) => maps.geocode(MAP_SERVICE_DEFAULTS, "Ferry Building, SF")),
     );
-    expect(urls[0]!.href).toBe("https://photon.komoot.io/api?q=Ferry+Building%2C+SF&limit=1");
-    expect(place).toEqual({
-      status: "resolved",
-      lat: 37.79555,
-      lng: -122.39347,
-      name: "Ferry Building, San Francisco, United States",
-    });
+    expect(urls[0]!.href).toBe("https://photon.komoot.io/api?q=Ferry+Building%2C+SF&limit=5");
+    expect(place).toEqual([
+      { lat: 37.79555, lng: -122.39347, name: "Ferry Building, San Francisco, United States" },
+    ]);
   });
 
   it("routes on the profile for the mode and reports distance and time", async () => {
@@ -89,13 +86,11 @@ describe("MapLookups", () => {
 
   it("answers unavailable for no match, an error status or a malformed body", async () => {
     stubFetch(() => Response.json({ features: [] }));
-    expect(await run(MapLookups.use((m) => m.geocode(MAP_SERVICE_DEFAULTS, "Atlantis")))).toEqual({
-      status: "unavailable",
-    });
+    expect(await run(MapLookups.use((m) => m.geocode(MAP_SERVICE_DEFAULTS, "Atlantis")))).toEqual(
+      [],
+    );
     stubFetch(() => new Response("busy", { status: 429 }));
-    expect(await run(MapLookups.use((m) => m.geocode(MAP_SERVICE_DEFAULTS, "x")))).toEqual({
-      status: "unavailable",
-    });
+    expect(await run(MapLookups.use((m) => m.geocode(MAP_SERVICE_DEFAULTS, "x")))).toEqual([]);
     stubFetch(() => Response.json({ code: "NoRoute" }));
     expect(
       await run(

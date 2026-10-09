@@ -387,9 +387,7 @@ beforeAll(async () => {
       geocode: (_services, query) =>
         Effect.sync(() => {
           mapLookupCalls.push(`place:${query}`);
-          return query.includes("Atlantis")
-            ? ({ status: "unavailable" } as const)
-            : ({ status: "resolved", lat: 52.5, lng: 13.4, name: query } as const);
+          return query.includes("Atlantis") ? [] : [{ lat: 52.5, lng: 13.4, name: query }];
         }),
       route: (_services, mode, stops) =>
         Effect.sync(() => {

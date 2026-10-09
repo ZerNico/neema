@@ -113,8 +113,8 @@ export const SKILL_EXAMPLES = {
 <map label="A day in Potsdam" selected={stop} onselect={(id) => stop = id}>
   <pin id="station" place="Potsdam Hauptbahnhof" label="Station">Trains from Berlin every 10 minutes.</pin>
   <pin id="museum" place="Museum Barberini, Potsdam" label="Barberini" color="chart-2">Impressionists, closed Tuesdays.</pin>
-  <pin id="palace" place="Sanssouci Palace" label="Sanssouci" color="chart-3">Book the palace tour ahead.</pin>
-  <route mode="walk" stops={["Potsdam Hauptbahnhof", "Museum Barberini, Potsdam", "Sanssouci Palace"]} label="Walk"/>
+  <pin id="palace" place="Sanssouci Palace, Potsdam" label="Sanssouci" color="chart-3">Book the palace tour ahead.</pin>
+  <route mode="walk" stops={["Potsdam Hauptbahnhof", "Museum Barberini, Potsdam", "Sanssouci Palace, Potsdam"]} label="Walk"/>
 </map>`,
 } as const;
 
@@ -166,7 +166,7 @@ An answer may contain \`\`\`ui fenced blocks, drawn with the app's own component
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale.
 - Images: show physical things (places, products, dishes, animals, the stages of a process) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
-- Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal, specific enough to find ("Museum Barberini, Potsdam", not "the museum"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
+- Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal: its name on a map plus its town ("Museum Barberini, Potsdam", not "the museum" or "Potsdam old town"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Use them only at a real fork the reader has to choose; most blocks need none.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
 

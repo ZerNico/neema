@@ -4,7 +4,7 @@
 // to one host are spaced out and carry a User-Agent.
 
 import { Context, Duration, Effect, Layer, Schema, Semaphore } from "effect";
-import type { UiPlace, UiRoute } from "~/modules/chat/assistant-output.ts";
+import type { UiRoute } from "~/modules/chat/assistant-output.ts";
 import type { MapServices } from "../settings.ts";
 
 const USER_AGENT = "neema/1.0 (self-hosted chat; maps in answers)";
@@ -45,6 +45,16 @@ const OsrmResponse = Schema.Struct({
 });
 const decodeOsrm = Schema.decodeUnknownEffect(OsrmResponse);
 
+/** One match for a place name; the geocoder's ranking is global, so a map chooses among them. */
+export interface PlaceCandidate {
+  readonly lat: number;
+  readonly lng: number;
+  readonly name?: string;
+}
+
+/** Matches asked for per name: enough to hold the right one when a namesake ranks first. */
+export const PLACE_CANDIDATES = 5;
+
 export type RoutedMode = "drive" | "walk" | "bike";
 const PROFILE: Record<RoutedMode, string> = {
   drive: "routed-car",
@@ -74,8 +84,8 @@ const UNAVAILABLE = { status: "unavailable" } as const;
 export class MapLookups extends Context.Service<
   MapLookups,
   {
-    /** Never fails: a miss or an outage is an `unavailable` place. */
-    geocode(services: MapServices, query: string): Effect.Effect<UiPlace>;
+    /** Ranked matches. Never fails: a miss or an outage is no match. */
+    geocode(services: MapServices, query: string): Effect.Effect<ReadonlyArray<PlaceCandidate>>;
     route(
       services: MapServices,
       mode: RoutedMode,
@@ -127,19 +137,18 @@ export class MapLookups extends Context.Service<
           Effect.gen(function* () {
             const url = new URL(`${services.geocoder}/api`);
             url.searchParams.set("q", query);
-            url.searchParams.set("limit", "1");
+            url.searchParams.set("limit", String(PLACE_CANDIDATES));
             const found = yield* decodePhoton(yield* getJson(url));
-            const feature = found.features[0];
-            if (!feature) return UNAVAILABLE;
-            const [lng, lat] = feature.geometry.coordinates;
-            const { name, city, country } = feature.properties;
-            return {
-              status: "resolved",
-              lat: round(lat),
-              lng: round(lng),
-              ...(name ? { name: [name, city, country].filter(Boolean).join(", ") } : {}),
-            } satisfies UiPlace;
-          }).pipe(Effect.catch(() => Effect.succeed(UNAVAILABLE))),
+            return found.features.map(({ geometry, properties }): PlaceCandidate => {
+              const [lng, lat] = geometry.coordinates;
+              const { name, city, country } = properties;
+              return {
+                lat: round(lat),
+                lng: round(lng),
+                ...(name ? { name: [name, city, country].filter(Boolean).join(", ") } : {}),
+              };
+            });
+          }).pipe(Effect.catch(() => Effect.succeed([]))),
         route: (services, mode, stops) =>
           Effect.gen(function* () {
             const coordinates = stops.map((s) => `${s.lng},${s.lat}`).join(";");
