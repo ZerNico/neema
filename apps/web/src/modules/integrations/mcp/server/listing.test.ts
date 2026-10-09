@@ -92,3 +92,25 @@ describe("listing entries", () => {
     expect(changed!.fingerprint).not.toBe(first!.fingerprint);
   });
 });
+
+describe("a schema built to explode", () => {
+  it("is refused quickly instead of expanded", () => {
+    // Each definition names the next ten times: 10^8 nodes within the depth limit.
+    const defs: Record<string, unknown> = { d8: { type: "string" } };
+    for (let i = 7; i >= 0; i--)
+      defs[`d${i}`] = {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 10 }, (_, k) => [`p${k}`, { $ref: `#/$defs/d${i + 1}` }]),
+        ),
+      };
+    const started = performance.now();
+    const normalized = normalizeSchema({
+      type: "object",
+      properties: { root: { $ref: "#/$defs/d0" } },
+      $defs: defs,
+    });
+    expect(normalized).toEqual({ error: "Its input schema is too complex to offer." });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});

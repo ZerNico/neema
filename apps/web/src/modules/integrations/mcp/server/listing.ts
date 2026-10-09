@@ -18,6 +18,13 @@ const DROPPED = new Set(["$schema", "$id", "$defs", "definitions", "$comment"]);
 
 /** Inlining stops here; deeper (or recursive) references become an open schema. */
 const MAX_DEPTH = 8;
+/**
+ * Nodes one schema may expand to. A few references that each name the next
+ * twice multiply past any size check, so expansion stops counting here.
+ */
+const MAX_NODES = 5_000;
+
+class TooComplex extends Error {}
 
 const resolvePointer = (root: Json, ref: string): unknown => {
   if (!ref.startsWith("#/")) return undefined;
@@ -30,8 +37,15 @@ const resolvePointer = (root: Json, ref: string): unknown => {
   return node;
 };
 
-const inline = (node: unknown, root: Json, depth: number, trail: ReadonlySet<string>): unknown => {
-  if (Array.isArray(node)) return node.map((item) => inline(item, root, depth, trail));
+const inline = (
+  node: unknown,
+  root: Json,
+  depth: number,
+  trail: ReadonlySet<string>,
+  budget: { nodes: number },
+): unknown => {
+  if (++budget.nodes > MAX_NODES) throw new TooComplex();
+  if (Array.isArray(node)) return node.map((item) => inline(item, root, depth, trail, budget));
   if (!isObject(node)) return node;
   const ref = typeof node.$ref === "string" ? node.$ref : null;
   if (ref) {
@@ -40,15 +54,15 @@ const inline = (node: unknown, root: Json, depth: number, trail: ReadonlySet<str
     // still validates the call, and the model is not handed a dangling pointer.
     if (!isObject(target) || trail.has(ref) || depth >= MAX_DEPTH) {
       const { $ref: _ref, ...rest } = node;
-      return inline(rest, root, depth, trail);
+      return inline(rest, root, depth, trail, budget);
     }
     const { $ref: _ref, ...siblings } = node;
-    return inline({ ...target, ...siblings }, root, depth + 1, new Set([...trail, ref]));
+    return inline({ ...target, ...siblings }, root, depth + 1, new Set([...trail, ref]), budget);
   }
   const out: Json = {};
   for (const [key, value] of Object.entries(node)) {
     if (DROPPED.has(key)) continue;
-    out[key] = inline(value, root, depth, trail);
+    out[key] = inline(value, root, depth, trail, budget);
   }
   return out;
 };
@@ -63,7 +77,13 @@ export const normalizeSchema = (
 ): { schema: JsonSchemaObject } | { error: string } => {
   if (schema === undefined) return { schema: { type: "object", properties: {} } };
   if (!isObject(schema)) return { error: "Its input schema is not an object." };
-  const inlined = inline(schema, schema, 0, new Set());
+  let inlined: unknown;
+  try {
+    inlined = inline(schema, schema, 0, new Set(), { nodes: 0 });
+  } catch (error) {
+    if (error instanceof TooComplex) return { error: "Its input schema is too complex to offer." };
+    throw error;
+  }
   if (!isObject(inlined)) return { error: "Its input schema is not an object." };
   if (inlined.type !== undefined && inlined.type !== "object")
     return { error: "It does not take named arguments." };
