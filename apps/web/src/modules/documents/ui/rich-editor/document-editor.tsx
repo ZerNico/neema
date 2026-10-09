@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { AskPopover } from "./ask-popover.tsx";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
+import { EditorContextMenu } from "./context-menu.tsx";
 import { setEditorHooks, type EditorHooks } from "./editor-hooks.ts";
 import { DocumentTableMenu } from "./table-menu.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
@@ -55,7 +56,9 @@ function RichEditor({
         : null}
       {/* Room above the first line for another person's cursor label. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-7 pb-4">
-        <EditorContent editor={editor} className="h-full" />
+        <EditorContextMenu editor={editor}>
+          <EditorContent editor={editor} className="h-full" />
+        </EditorContextMenu>
       </div>
       {readOnly ? null : (
         <>
