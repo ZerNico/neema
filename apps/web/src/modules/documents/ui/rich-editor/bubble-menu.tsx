@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Toolbar } from "@base-ui/react/toolbar";
 import type { Editor } from "@tiptap/core";
+import { NodeSelection } from "@tiptap/pm/state";
 import { useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { useState } from "react";
@@ -36,8 +37,12 @@ export function DocumentBubbleMenu({ editor }: { editor: Editor }) {
     <>
       <BubbleMenu
         editor={editor}
+        // A selected block (a chip, a planned section, a divider) has no text to format.
         shouldShow={({ editor: current, state: view }) =>
-          current.isEditable && !view.selection.empty && !current.isActive("codeBlock")
+          current.isEditable &&
+          !view.selection.empty &&
+          !(view.selection instanceof NodeSelection) &&
+          !current.isActive("codeBlock")
         }
         options={{ placement: "top", offset: 8 }}
         className="bg-popover text-popover-foreground ring-foreground/5 dark:ring-foreground/10 rounded-full p-1 shadow-lg ring-1"
