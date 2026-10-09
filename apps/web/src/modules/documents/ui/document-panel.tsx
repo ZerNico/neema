@@ -1,7 +1,7 @@
 import {
   Copy01Icon,
   Download04Icon,
-  MoreHorizontalIcon,
+  MoreVerticalIcon,
   PencilEdit02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -100,7 +100,7 @@ export function DocumentPanelActions({
                 />
               }
             >
-              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+              <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
             </TooltipTrigger>
             <TooltipContent>More</TooltipContent>
           </Tooltip>
