@@ -269,6 +269,112 @@ describe("ui blocks in answers", () => {
   });
 
   it("walks a wizard one step at a time", async () => {
+  it("runs a routine's phases in turn from one Start and tells the block at the end", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let rounds = $state(0);</script>",
+        "<routine ondone={() => rounds++}>",
+        '  <phase label="Breathe in" seconds={1} size={1}><text>Through your nose</text></phase>',
+        '  <phase label="Breathe out" seconds={1} size={0.2}/>',
+        "</routine>",
+        "<text>Finished {rounds}</text>",
+        "```",
+      ].join("\n"),
+      "m-routine",
+    );
+    expect(await screen.findByText("Breathe in")).toBeInTheDocument();
+    expect(screen.getByText("Next: Breathe out, 1 s")).toBeInTheDocument();
+    // Guidance written as <text>, the way models write it, is kept.
+    expect(screen.getByText("Through your nose")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+    // No second Start: the next phase begins on its own.
+    expect(await screen.findByText("Breathe out", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText("Done", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText("Finished 1")).toBeInTheDocument();
+    // It stays done rather than reading as unstarted, and runs again in full.
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Again" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
+    expect(await screen.findByText("Finished 2", {}, { timeout: 4000 })).toBeInTheDocument();
+  }, 15_000);
+
+  it("counts two identical timers in one block apart", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let rang = $state(0);</script>",
+        '<timer seconds={1} label="Rest" ondone={() => rang++}/>',
+        '<timer seconds={1} label="Rest" ondone={() => rang++}/>',
+        "<text>Rang {rang}</text>",
+        "```",
+      ].join("\n"),
+      "m-twins",
+    );
+    const [first, second] = await screen.findAllByRole("button", { name: "Start" });
+    await act(async () => {
+      fireEvent.click(first!);
+    });
+    // Apart, so each end calls a handler from the latest render.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    await act(async () => {
+      fireEvent.click(second!);
+    });
+    // One shared clock would announce once, for whichever ended first.
+    expect(await screen.findByText("Rang 2", {}, { timeout: 4000 })).toBeInTheDocument();
+  });
+
+  it("keeps identical timers in two tabs apart", async () => {
+    draw(
+      [
+        "```ui",
+        "<tabs>",
+        '  <tab label="Set A"><timer seconds={30} label="Rest"/></tab>',
+        '  <tab label="Set B"><timer seconds={30} label="Rest"/></tab>',
+        "</tabs>",
+        "```",
+      ].join("\n"),
+      "m-tab-timers",
+    );
+    const start = await screen.findByRole("button", { name: "Start" });
+    await act(async () => {
+      fireEvent.click(start);
+    });
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("tab", { name: "Set B" }));
+    });
+    // Set B's timer is its own: not started by Set A's.
+    expect(await screen.findByRole("button", { name: "Start" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+  });
+
+  it("keeps a running routine counting when its message scrolls away and back", async () => {
+    const markdown = [
+      "```ui",
+      "<routine>",
+      '  <phase label="Plank" seconds={2}/>',
+      "</routine>",
+      "```",
+    ].join("\n");
+    const first = draw(markdown, "m-remount");
+    const start = await screen.findByRole("button", { name: "Start" });
+    await act(async () => {
+      fireEvent.click(start);
+    });
+    // The virtual list unmounts a row out of view.
+    first.unmount();
+    draw(markdown, "m-remount");
+    expect(await screen.findByRole("button", { name: "Pause" })).toBeInTheDocument();
+    expect(await screen.findByText("Done", {}, { timeout: 4000 })).toBeInTheDocument();
+  });
+
     draw(
       [
         "```ui",

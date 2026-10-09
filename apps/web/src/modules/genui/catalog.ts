@@ -312,9 +312,26 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   timer: {
     group: "input",
-    doc: "Countdown with start, pause and reset; without seconds it counts up. ondone() fires at zero.",
+    doc: "Countdown with its own controls; without seconds it counts up. ondone() at zero.",
     props: { seconds: int(1, 86_400), label: text(80), ondone: handler() },
     children: "none",
+  },
+  routine: {
+    group: "input",
+    doc: "Timed phases in turn from one Start (breathing, intervals), rounds times; ondone() at the end.",
+    props: { rounds: int(1, 100), ondone: handler() },
+    children: { only: ["phase"] },
+  },
+  phase: {
+    group: "input",
+    doc: "Routine phase; children guide it. size 0–1 eases a circle to it over the phase, a breath.",
+    props: {
+      label: required(text(80)),
+      seconds: required(int(1, 3600)),
+      tone: named("tone", TONES),
+      size: between(0, 1),
+    },
+    children: "block",
   },
   copy: {
     group: "input",
@@ -371,7 +388,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   quiz: {
     group: "input",
-    doc: "Quiz, one question at a time, scored. Use it for any quiz. more: a follow-up request offered at the end. answers can live in $state; onchange(answers).",
+    doc: "Scored quiz, one question at a time; use it for any quiz. more: a follow-up request offered at the end. onchange(answers).",
     props: {
       title: text(120),
       // Offered at the score, e.g. "Another quiz on the dative with harder questions".

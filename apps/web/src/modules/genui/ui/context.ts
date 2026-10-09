@@ -77,3 +77,6 @@ export type Dispatch = (
 ) => Promise<void>;
 
 export const DispatchContext = createContext<Dispatch>(async () => {});
+
+/** The block a node draws in, for state that must outlive a remount (a running timer). */
+export const BlockKeyContext = createContext("");

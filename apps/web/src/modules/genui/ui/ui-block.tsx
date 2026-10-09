@@ -27,6 +27,7 @@ import { fenceKey, hashSource } from "../fences.ts";
 import type { BlockAction } from "../runtime.ts";
 import { copiedPreview, hasHiddenText, mentionsUrl } from "../text.ts";
 import {
+  BlockKeyContext,
   DispatchContext,
   GenuiActionsContext,
   GenuiClientContext,
@@ -300,7 +301,9 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
     >
       <DispatchContext value={dispatch}>
         <SuggestContext value={suggest}>
-          <Nodes nodes={reply.nodes} />
+          <BlockKeyContext value={block}>
+            <Nodes nodes={reply.nodes} />
+          </BlockKeyContext>
         </SuggestContext>
       </DispatchContext>
     </m.div>

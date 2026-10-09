@@ -3,7 +3,7 @@
 // anything it does not recognise renders nothing rather than guessing.
 
 import katex from "katex";
-import { use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -40,6 +40,7 @@ import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.t
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
@@ -49,7 +50,7 @@ import { UiMap } from "./map.tsx";
 import { UiImage, UiImages } from "./media.tsx";
 import { copiedPreview } from "../text.ts";
 import { formatNumber } from "./format.ts";
-import { SuggestContext } from "./context.ts";
+import { BlockKeyContext, SuggestContext } from "./context.ts";
 
 type Child = ValidNode | string;
 
@@ -150,6 +151,9 @@ function optionsOf(value: unknown): { label: string; value: string }[] {
 }
 
 /** A control's own value while the reader moves it, until the tree's value changes. */
+/** A node's place in its block's tree, for state that outlives a remount. */
+const PathContext = createContext("");
+
 function useLocal<T>(value: T): [T, (next: T) => void] {
   const [local, setLocal] = useState<{ value: T; base: T } | null>(null);
   const shown = local !== null && Object.is(local.base, value) ? local.value : value;
@@ -515,7 +519,7 @@ function StepsNode({ node }: { node: ValidNode }) {
               <div className="flex min-w-0 flex-1 flex-col gap-1 pb-4">
                 <StepHeading step={step} done={checkable && finished} />
                 <div className="text-sm">
-                  <Nodes nodes={step.children} />
+                  <Nodes nodes={step.children} scope={i} />
                 </div>
               </div>
             </li>
@@ -548,7 +552,7 @@ function WizardNode({ node }: { node: ValidNode }) {
       </Progress>
       <StepHeading step={step} />
       <div className="text-sm">
-        <Nodes nodes={step.children} />
+        <Nodes nodes={step.children} scope={index} />
       </div>
       <div className="flex justify-between gap-2">
         <Button size="sm" variant="outline" disabled={index === 0} onClick={() => go(index - 1)}>
@@ -688,7 +692,7 @@ function QuizNode({ node }: { node: ValidNode }) {
         </div>
       </div>
       <p className="font-medium">
-        <Nodes nodes={question.prompt} />
+        <Nodes nodes={question.prompt} scope={at} />
       </p>
       <ul className="flex flex-col gap-2" aria-label="Options">
         {question.options.map((option, i) => {
@@ -803,6 +807,72 @@ const clock = (totalSeconds: number) => {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 };
 
+interface Clock {
+  /** Milliseconds counted before the current run. */
+  readonly banked: number;
+  readonly startedAt: number | null;
+  /** The end was announced, so a remount does not fire ondone again. */
+  readonly announced: boolean;
+}
+const STOPPED: Clock = { banked: 0, startedAt: null, announced: false };
+
+/**
+ * Running clocks by block and what they count, outside React: the message
+ * list unmounts a row scrolled out of view, and a countdown must still be
+ * counting, or have ended, when it comes back.
+ */
+const clocks = new Map<string, Clock>();
+
+/** A start, pause and reset clock that survives remounts and announces its end once. */
+function useClock(spec: string, tickMs: number, total: number | undefined, onEnd: () => void) {
+  // Position, not just what it counts: two equal timers in one block are two clocks.
+  const key = `${use(BlockKeyContext)}|${use(PathContext)}|${spec}`;
+  const [local, setLocal] = useState(() => ({ key, clock: clocks.get(key) ?? STOPPED }));
+  // A changed spec is another clock: read its own, not the one shown before.
+  const counted = local.key === key ? local.clock : (clocks.get(key) ?? STOPPED);
+  const [now, setNow] = useState(() => Date.now());
+  const elapsed =
+    (counted.banked + (counted.startedAt === null ? 0 : now - counted.startedAt)) / 1000;
+  const finished = total !== undefined && elapsed >= total;
+  const running = counted.startedAt !== null && !finished;
+  const set = (next: Clock) => {
+    clocks.set(key, next);
+    setLocal({ key, clock: next });
+  };
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), tickMs);
+    return () => clearInterval(id);
+  }, [running, tickMs]);
+
+  const ended = useRef(onEnd);
+  useEffect(() => {
+    ended.current = onEnd;
+  });
+  // Finished stays finished on its own, elapsed only grows; what must outlive a
+  // remount is that the end was announced.
+  useEffect(() => {
+    const stored = clocks.get(key) ?? counted;
+    if (!finished || stored.announced) return;
+    clocks.set(key, { ...stored, announced: true });
+    ended.current();
+  }, [finished, key, counted]);
+
+  return {
+    elapsed,
+    finished,
+    running,
+    start: () => {
+      const at = Date.now();
+      setNow(at);
+      set({ ...counted, startedAt: at });
+    },
+    pause: () => set({ ...counted, banked: elapsed * 1000, startedAt: null }),
+    reset: () => set(STOPPED),
+  };
+}
+
 /**
  * Counts in the page, never in the block: QuickJS has no timers, and a tick
  * per second through the Worker would cost a handler call for nothing.
@@ -812,44 +882,15 @@ function TimerNode({ node }: { node: ValidNode }) {
   const total = num(p.seconds);
   const label = str(p.label);
   const done = useHandler(handlerOf(p.ondone), { event: "change", tag: "timer" });
-  // Time already counted, plus the moment the current run started.
-  const [banked, setBanked] = useState(0);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const elapsed = (banked + (startedAt === null ? 0 : now - startedAt)) / 1000;
-  const finished = total !== undefined && elapsed >= total;
-  const running = startedAt !== null && !finished;
-
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(id);
-  }, [running]);
-
-  const announced = useRef(false);
-  useEffect(() => {
-    if (!finished || announced.current) return;
-    announced.current = true;
-    setStartedAt(null);
-    setBanked((total ?? 0) * 1000);
-    toast.success(label ? `${label} is done` : "Timer done");
-    done?.([]);
-  }, [finished, total, label, done]);
-
-  const start = () => {
-    const at = Date.now();
-    setNow(at);
-    setStartedAt(at);
-  };
-  const pause = () => {
-    setBanked(elapsed * 1000);
-    setStartedAt(null);
-  };
-  const reset = () => {
-    announced.current = false;
-    setBanked(0);
-    setStartedAt(null);
-  };
+  const { elapsed, finished, running, start, pause, reset } = useClock(
+    `timer:${total ?? ""}:${label ?? ""}`,
+    250,
+    total,
+    () => {
+      toast.success(label ? `${label} is done` : "Timer done");
+      done?.([]);
+    },
+  );
   const shown = total === undefined ? elapsed : total - elapsed;
 
   return (
@@ -882,6 +923,177 @@ function TimerNode({ node }: { node: ValidNode }) {
       {total !== undefined ? (
         <Progress value={Math.min(100, (elapsed / total) * 100)} aria-label={label ?? "Timer"} />
       ) : null}
+    </div>
+  );
+}
+
+interface RoutinePhase {
+  readonly label: string;
+  readonly seconds: number;
+  readonly tone: string;
+  /** Circle size at the phase's end, carried from the phase before when unset. */
+  readonly size: number | undefined;
+  readonly children: readonly Child[];
+}
+
+function phasesOf(node: ValidNode): RoutinePhase[] {
+  const phases = node.children.flatMap((child) => {
+    if (typeof child === "string" || child.tag !== "phase") return [];
+    const seconds = num(child.props.seconds);
+    const label = str(child.props.label);
+    if (!seconds || !label) return [];
+    return [
+      {
+        label,
+        seconds,
+        tone: str(child.props.tone) ?? "primary",
+        size: num(child.props.size),
+        children: child.children,
+      },
+    ];
+  });
+  // A phase without a size holds the one before it; the first wraps to the last.
+  let carried = phases.findLast((phase) => phase.size !== undefined)?.size;
+  return phases.map((phase) => {
+    carried = phase.size ?? carried;
+    return { ...phase, size: carried };
+  });
+}
+
+/** Where a routine is after `elapsed` seconds, or null once every round is done. */
+function routineAt(phases: readonly RoutinePhase[], rounds: number, elapsed: number) {
+  const cycle = phases.reduce((sum, phase) => sum + phase.seconds, 0);
+  if (cycle === 0 || elapsed >= cycle * rounds) return null;
+  const round = Math.floor(elapsed / cycle);
+  let into = elapsed - round * cycle;
+  let index = 0;
+  while (into >= phases[index]!.seconds) into -= phases[index++]!.seconds;
+  return {
+    round,
+    index,
+    left: phases[index]!.seconds - into,
+    progress: into / phases[index]!.seconds,
+  };
+}
+
+const CIRCLE: Record<string, string> = {
+  default: "border-primary bg-primary/15",
+  primary: "border-primary bg-primary/15",
+  muted: "border-muted-foreground/40 bg-muted",
+  success: "border-success bg-success/15",
+  warning: "border-warning bg-warning/15",
+  destructive: "border-destructive bg-destructive/15",
+};
+// The smallest circle still holds its label.
+const MIN_CIRCLE = 0.3;
+
+/**
+ * Phases that follow one another from a single Start, counted in the page like
+ * `<timer>`. Moving a circle through script state would need a clock QuickJS
+ * does not have, so the page draws the breath too.
+ */
+function RoutineNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const phases = phasesOf(node);
+  const rounds = num(p.rounds) ?? 1;
+  const done = useHandler(handlerOf(p.ondone), { event: "change", tag: "routine" });
+  const reducedMotion = useAppReducedMotion();
+  const total = phases.reduce((sum, phase) => sum + phase.seconds, 0) * rounds;
+  const { elapsed, finished, running, start, pause, reset } = useClock(
+    `routine:${rounds}:${phases.map((phase) => `${phase.label}/${phase.seconds}`).join(",")}`,
+    100,
+    phases.length > 0 ? total : undefined,
+    () => done?.([]),
+  );
+  const at = routineAt(phases, rounds, elapsed);
+
+  if (phases.length === 0) return null;
+
+  const index = at?.index ?? phases.length - 1;
+  const phase = phases[index]!;
+  const next = at ? phases[(index + 1) % phases.length]! : undefined;
+  const lastPhase = at && at.round === rounds - 1 && index === phases.length - 1;
+  const sized = phases.some((item) => item.size !== undefined);
+  const from = phases[(index - 1 + phases.length) % phases.length]!.size ?? 0;
+  const to = phase.size ?? from;
+  // Eased like a breath: slow at both ends. Without motion, each phase's size at once.
+  const eased = at && !reducedMotion ? (1 - Math.cos(Math.PI * at.progress)) / 2 : 1;
+  const size = MIN_CIRCLE + (1 - MIN_CIRCLE) * (from + (to - from) * eased);
+  const heading = finished ? "Done" : phase.label;
+  const count = at ? Math.ceil(at.left) : null;
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      {sized ? (
+        <div className="relative flex size-44 items-center justify-center">
+          <div
+            aria-hidden
+            className={cn("absolute inset-0 rounded-full border-2", CIRCLE[phase.tone])}
+            style={{
+              transform: `scale(${size})`,
+              // Ticks are 100 ms apart; a matching linear slide joins them up.
+              transition: reducedMotion || !running ? undefined : "transform 100ms linear",
+            }}
+          />
+          <div className="relative flex flex-col items-center">
+            <span className="text-lg font-semibold" aria-live="polite">
+              {heading}
+            </span>
+            {count !== null && elapsed > 0 ? (
+              <span className="text-muted-foreground text-sm tabular-nums">{count}</span>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center">
+          <span className={cn("text-2xl font-semibold", TONE[phase.tone])} aria-live="polite">
+            {heading}
+          </span>
+          {count !== null && elapsed > 0 ? (
+            <span className="text-3xl font-semibold tabular-nums">{clock(count)}</span>
+          ) : null}
+        </div>
+      )}
+      {!finished && phase.children.length > 0 ? (
+        <div className="text-muted-foreground text-center text-sm">
+          <Nodes nodes={phase.children} scope={index} />
+        </div>
+      ) : null}
+      <div className="text-muted-foreground flex gap-3 text-xs">
+        {rounds > 1 && at ? (
+          <span>
+            Round {at.round + 1} of {rounds}
+          </span>
+        ) : null}
+        {next && !lastPhase ? (
+          <span>
+            Next: {next.label}, {next.seconds} s
+          </span>
+        ) : null}
+      </div>
+      <div className="flex gap-2">
+        {running ? (
+          <Button size="sm" variant="outline" onClick={pause}>
+            <HugeiconsIcon icon={PauseIcon} strokeWidth={2} data-icon="inline-start" />
+            Pause
+          </Button>
+        ) : (
+          <Button size="sm" onClick={finished ? reset : start}>
+            <HugeiconsIcon
+              icon={finished ? RefreshIcon : PlayIcon}
+              strokeWidth={2}
+              data-icon="inline-start"
+            />
+            {finished ? "Again" : elapsed > 0 ? "Resume" : "Start"}
+          </Button>
+        )}
+        {!finished ? (
+          <Button size="sm" variant="ghost" onClick={reset} disabled={elapsed === 0}>
+            <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
+            Reset
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -954,7 +1166,7 @@ function TabsNode({ node }: { node: ValidNode }) {
       {tabs.map((tab, i) => (
         <TabsContent key={valueOf(tab, i)} value={valueOf(tab, i)}>
           <div className="flex flex-col gap-3">
-            <Nodes nodes={tab.children} />
+            <Nodes nodes={tab.children} scope={i} />
           </div>
         </TabsContent>
       ))}
@@ -1148,6 +1360,8 @@ function Node({ node }: { node: ValidNode }) {
       return <UiMap node={node} renderContent={(nodes) => <Nodes nodes={nodes} />} />;
     case "timer":
       return <TimerNode node={node} />;
+    case "routine":
+      return <RoutineNode node={node} />;
     case "copy":
       return <CopyNode node={node} />;
     case "suggestions":
@@ -1159,9 +1373,22 @@ function Node({ node }: { node: ValidNode }) {
   }
 }
 
-export function Nodes({ nodes }: { nodes: readonly Child[] }) {
+/**
+ * A node's children. A container drawing one of its child's contents directly
+ * (a tab's, a step's) passes that child's index as `scope`, so identical
+ * contents of two tabs keep apart.
+ */
+export function Nodes({ nodes, scope }: { nodes: readonly Child[]; scope?: number }) {
+  const parent = use(PathContext);
+  const base = scope === undefined ? parent : `${parent}:${scope}`;
   return nodes.map((child, i) =>
-    // oxlint-disable-next-line react/no-array-index-key -- tree order is the identity; siblings may be identical
-    typeof child === "string" ? child : <Node key={`${child.tag}-${i}`} node={child} />,
+    typeof child === "string" ? (
+      child
+    ) : (
+      // oxlint-disable-next-line react/no-array-index-key, react/jsx-no-constructed-context-values -- tree order is the identity, and a string value compares by value
+      <PathContext key={`${child.tag}-${i}`} value={`${base}/${i}`}>
+        <Node node={child} />
+      </PathContext>
+    ),
   );
 }
