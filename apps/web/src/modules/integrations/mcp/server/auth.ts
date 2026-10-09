@@ -119,9 +119,15 @@ export const mcpOAuth: DiscoveredOAuth = {
         return yield* reject(
           "The server’s sign-in does not support PKCE, so it is not safe to use.",
         );
-      const tokenEndpoint = new URL(metadata.token_endpoint);
-      if (tokenEndpoint.protocol !== "https:" && tokenEndpoint.origin !== url.origin)
-        return yield* reject("The server’s sign-in does not use HTTPS.");
+      // The page people sign in on and the endpoint tokens come from both need
+      // HTTPS, unless they are the server itself, which the admin chose.
+      const insecure = [metadata.authorization_endpoint, metadata.token_endpoint].some(
+        (endpoint) => {
+          const address = new URL(endpoint);
+          return address.protocol !== "https:" && address.origin !== url.origin;
+        },
+      );
+      if (insecure) return yield* reject("The server’s sign-in does not use HTTPS.");
 
       // The resource the tokens are bound to: what the server says it is, as
       // long as that is the address configured, else the address itself.

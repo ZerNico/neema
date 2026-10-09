@@ -238,6 +238,14 @@ describe("signing in to an MCP server", () => {
     expect(saved).toEqual([]);
   });
 
+  it("refuses a sign-in page or token endpoint elsewhere without HTTPS", async () => {
+    for (const key of ["authorization_endpoint", "token_endpoint"]) {
+      metadataExtras = { [key]: "http://login.example.com/oauth" };
+      const { exit } = await begin({});
+      expect(JSON.stringify(exit), key).toContain("does not use HTTPS");
+    }
+  });
+
   it("refuses a sign-in without PKCE", async () => {
     metadataExtras = { code_challenge_methods_supported: ["plain"] };
     const { exit } = await begin({});
