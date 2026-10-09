@@ -1,6 +1,6 @@
 import { Fragment, Slice, type Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
-import { BLOCK_ID, blockIdOf, ensureIds, findBlocks, isBlock } from "./block-ids.ts";
+import { BLOCK_ID, blockIdOf, ensureIds, findBlocks, isBlock, withFreshIds } from "./block-ids.ts";
 import { parseMarkdown, toMarkdown } from "./markdown.ts";
 import { PENDING_INTENT_CHARS } from "./pending.ts";
 import { blockHash } from "./tree.ts";
@@ -301,7 +301,7 @@ export const applyTreeEdit = (
         content.firstChild!.marks,
       ),
     );
-  tr.replaceWith(at.from, at.to, content);
+  tr.replaceWith(at.from, at.to, withFreshIds(doc, content));
   ensureIds(tr);
   const touched: string[] = [];
   const inserted = tr.doc.slice(at.from, at.from + content.size).content;

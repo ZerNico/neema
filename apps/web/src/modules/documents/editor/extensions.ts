@@ -132,6 +132,9 @@ const DocumentTable = Table.extend({
  */
 export const documentExtensions: AnyExtension[] = [
   StarterKit.configure({
+    // It appends an empty paragraph whenever a document opens, which under
+    // collab is a step: opening would count as editing, and a viewer could not.
+    trailingNode: false,
     underline: false,
     codeBlock: false,
     orderedList: false,

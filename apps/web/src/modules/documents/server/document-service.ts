@@ -28,6 +28,7 @@ import {
   findBlocks,
   isBlock,
   plannedIds,
+  withFreshIds,
 } from "../editor/block-ids.ts";
 import { PENDING_INTENT_CHARS } from "../editor/pending.ts";
 import {
@@ -942,7 +943,11 @@ export class DocumentService extends Context.Service<
                     : node,
                 );
               });
-              const tr = new Transform(doc).replaceWith(spot.from, spot.to, nodes);
+              const tr = new Transform(doc).replaceWith(
+                spot.from,
+                spot.to,
+                withFreshIds(doc, Fragment.from(nodes)),
+              );
               ensureIds(tr);
               const written = tr.doc.slice(
                 spot.from,

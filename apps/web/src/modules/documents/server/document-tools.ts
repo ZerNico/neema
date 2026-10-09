@@ -144,7 +144,7 @@ const decode = <S extends Schema.Codec<unknown, unknown, never, never>>(
 
 const createTool = Tool.make("create_document", {
   description:
-    "Create one document beside this chat, only for something the person asked to keep or work on over time: a draft to revise, notes, a brief or a specification, a checklist to tick off later. A plan, explanation or comparison they asked to see is an answer: write it in your reply, not here. content is Markdown. outline lists the sections still to write, each a short line on what goes there; each becomes a planned placeholder after content, which you then fill one per edit_document call. For a document of more than a couple of sections, create it with a title, a one-line intro and the outline, then fill it. Write tasks as bullet items, `- [ ] step`. In a chat that belongs to a project the person may edit, scope defaults to project; pass scope chat only for private scratch material. Do not repeat the document in your reply.",
+    "Create one document beside this chat, only for something the person asked to keep or work on over time: a draft to revise, notes, a brief or a specification, a checklist to tick off later. A plan, explanation or comparison they asked to see is an answer: write it in your reply, not here. The person watches the document fill in. For anything of more than two sections, plan first: pass the title, at most a one-line intro as content, and outline, one short line per section still to write. Each outline entry appears as a planned placeholder; then fill them one per edit_document call (target the placeholder's id from the result's blocks, Markdown as content), with a short line in chat between calls. content is Markdown. Write tasks as bullet items, `- [ ] step`. scope matters only in a chat that belongs to a project: there it defaults to project, and chat keeps a private scratch document. Do not repeat the document in your reply.",
   parameters: Schema.Struct({
     title: Schema.optionalKey(transport(CreateParams.fields.title)),
     content: Schema.optionalKey(transport(Schema.String)),
@@ -451,7 +451,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         if (!after.length) return;
         const scopeField = fields.get("scope");
         if (scopeField && !scopeField.complete) return;
-        const scope = scopeField?.value ?? (input.project?.canEdit ? "project" : "chat");
+        const scope = input.project
+          ? (scopeField?.value ?? (input.project.canEdit ? "project" : "chat"))
+          : "chat";
         if (scope === "project" && !input.project?.canEdit) {
           state.failed = true;
           return;
@@ -565,12 +567,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       };
     const { scope: requested, content = "", outline, title } = decoded.value;
     // In a project someone may edit, a document is shared work unless asked otherwise.
-    const scope = requested ?? (input.project?.canEdit ? "project" : "chat");
-    if (scope === "project" && !input.project)
-      return {
-        outcome: "invalid",
-        message: "This chat is not in a project. Create the document in this chat instead.",
-      };
+    // Outside a project there is only the chat, whatever scope the model named.
+    const scope = input.project ? (requested ?? (input.project.canEdit ? "project" : "chat")) : "chat";
     if (scope === "project" && !input.project!.canEdit)
       return {
         outcome: "invalid",

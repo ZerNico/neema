@@ -153,3 +153,33 @@ export const plannedIds = (doc: Node) => {
   });
   return ids;
 };
+
+/**
+ * `content` with an ID on every block that lacks one, set before it goes in,
+ * so a write is one step rather than one more per new block. IDs already in
+ * `doc` are not reused.
+ */
+export const withFreshIds = (doc: Node, content: Fragment): Fragment => {
+  const taken = new Set<string>();
+  doc.descendants((node) => {
+    const id = isBlock(node) ? blockIdOf(node) : null;
+    if (id) taken.add(id);
+    return true;
+  });
+  const mint = () => {
+    let id = newBlockId();
+    while (taken.has(id)) id = newBlockId();
+    taken.add(id);
+    return id;
+  };
+  const visit = (node: Node): Node => {
+    if (node.isText) return node;
+    const children: Node[] = [];
+    node.forEach((child) => children.push(visit(child)));
+    const next = isBlock(node) && !blockIdOf(node) ? { ...node.attrs, [BLOCK_ID]: mint() } : node.attrs;
+    return node.type.create(next, Fragment.from(children), node.marks);
+  };
+  const nodes: Node[] = [];
+  content.forEach((node) => nodes.push(visit(node)));
+  return Fragment.from(nodes);
+};

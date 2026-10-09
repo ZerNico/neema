@@ -468,6 +468,12 @@ export function ChatView({
     const add = (target: Set<string>, id: string | undefined, owner: string | undefined) => {
       if (id && owner === conversationId && !loaded.has(id)) target.add(id);
     };
+    // A streamed creation makes the document before its call returns, so the
+    // detail already lists it; one the answer streaming now made still opens.
+    const writing = streamingMessage?.id;
+    if (writing)
+      for (const document of data.documents ?? [])
+        if (document.messageId === writing) fresh.document.add(document.id);
     for (const activity of stream.tools) {
       if (activity.family === "agent-draft" && activity.result)
         add(fresh.agent, activity.result.draftId, activity.result.draftConversationId);
@@ -489,6 +495,7 @@ export function ChatView({
     isMobile,
     projectId,
     stream.tools,
+    streamingMessage?.id,
   ]);
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
