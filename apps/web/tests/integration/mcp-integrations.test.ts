@@ -814,6 +814,22 @@ describe("an MCP server set up by an admin", () => {
       status: "active",
       requiredScopes: ["docs:read", "docs:write"],
     });
+
+    // A server naming new scopes on every refusal stops adding past the limit.
+    const connectionId = listed.find((row) => row.id === id)!.connection!.id;
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        Effect.forEach(
+          Array.from({ length: 30 }, (_, batch) => [`s${batch}a`, `s${batch}b`]),
+          (scopes) => repo.addRequiredScopes(connectionId, scopes),
+        ),
+      ),
+    );
+    const capped = await run(
+      Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(connectionId)),
+    );
+    expect(capped?.requiredScopes?.length).toBeLessThanOrEqual(50);
+    expect(capped?.requiredScopes).toEqual(expect.arrayContaining(["docs:read", "docs:write"]));
   });
 
   it("with one key for everyone, only reads are ever offered", async () => {

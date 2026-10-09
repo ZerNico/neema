@@ -29,6 +29,9 @@ export type IntegrationConnectionRow = typeof integrationConnections.$inferSelec
 export type ToolCatalogRow = typeof integrationToolCatalogs.$inferSelect;
 export type AuthKind = IntegrationConnectionRow["authKind"];
 
+/** Scopes a connection may be waiting to be granted, in all. */
+const MAX_REQUIRED_SCOPES = 50;
+
 /**
  * Where a sign-in's tokens come from when the type found it at sign-in
  * (MCP), so a refresh needs no second discovery. Public facts, encrypted
@@ -719,11 +722,13 @@ export class IntegrationRepo extends Context.Service<
 
         addRequiredScopes: Effect.fn("IntegrationRepo.addRequiredScopes")(
           function* (connectionId, scopes) {
-            // A union in one statement, so two refused calls at once both count.
+            // A union in one statement, so two refused calls at once both count. Past
+            // MAX_REQUIRED_SCOPES in all, what was asked for before stands: a server
+            // naming new scopes on every refusal cannot grow the row or the sign-in URL.
             yield* db
               .update(integrationConnections)
               .set({
-                requiredScopes: sql`(select jsonb_agg(distinct listed.scope order by listed.scope) from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes.slice(0, 50))}::jsonb) as listed(scope))`,
+                requiredScopes: sql`coalesce((select case when count(*) <= ${MAX_REQUIRED_SCOPES} then jsonb_agg(listed.scope order by listed.scope) end from (select distinct scope from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes)}::jsonb) as joined(scope)) as listed), ${integrationConnections.requiredScopes})`,
               })
               .where(eq(integrationConnections.id, connectionId))
               .pipe(Effect.orDie);
