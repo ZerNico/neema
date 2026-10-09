@@ -244,6 +244,10 @@ export const buildMessagesRequest = (
               name: tool.name,
               ...(tool.description ? { description: tool.description } : {}),
               input_schema: tool.parameters,
+              // Arguments as they are written, not each value held back until
+              // complete: a document written through a tool lands as it streams.
+              // Broken JSON still fails the call when it closes.
+              eager_input_streaming: true,
             })),
             ...(choice ? { tool_choice: choice } : {}),
           }
