@@ -673,6 +673,26 @@ describe("ownership, limits and sync", () => {
         }),
       ),
     ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    // Nor an attribute holding an object, which no size count would see.
+    await expect(
+      service((s) =>
+        s.push(owner, {
+          documentId: created.id,
+          clientId: "hostile",
+          revision: created.revision,
+          steps: [
+            JSON.stringify({
+              stepType: "replace",
+              from: 0,
+              to: 0,
+              slice: {
+                content: [{ type: "pending", attrs: { intent: { payload: "x".repeat(50) } } }],
+              },
+            }),
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
     expect((await get(owner, created))!.content).toBe("# Plan\n\nShip it");
   });
 

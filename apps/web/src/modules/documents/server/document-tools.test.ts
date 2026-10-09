@@ -389,6 +389,41 @@ describe("document tools", () => {
     expect(update).toContain(`<added after="${blockIdOf(doc.child(78))}">`);
   });
 
+  it("names a steer's new selection though the document did not change", async () => {
+    const { service, rows } = fakeService([
+      { id: "doc-1", title: "One", content: "First" },
+      { id: "doc-2", title: "Two", content: "Alpha\n\nBeta" },
+    ]);
+    const [alpha, beta] = [0, 1].map((index) => blockIdOf(rows.get("doc-2")!.doc.child(index))!);
+    const tools = await prepare(service, "doc-1");
+    send(tools);
+    tools.focus("doc-2", [alpha!], undefined);
+    await Effect.runPromise(tools.refresh());
+    expect(send(tools).at(-1)).toContain(`selected="${alpha}"`);
+    // A steer selects the other block; nothing in the document changed.
+    tools.focus("doc-2", [beta!], undefined);
+    await Effect.runPromise(tools.refresh());
+    const update = send(tools).at(-1)!;
+    expect(update).toContain(`selected="${beta}"`);
+    expect(update).not.toContain(`selected="${alpha}"`);
+  });
+
+  it("opens at the selection itself when the blocks before it are too long to fit too", async () => {
+    const long = "y".repeat(13_000);
+    const content = [
+      ...Array.from({ length: 10 }, (_, index) => `${index} ${"x".repeat(3_000)}`),
+      `long one ${long}`,
+      `long two ${long}`,
+      "The selected line",
+    ].join("\n\n");
+    const { service, rows } = fakeService([{ id: "doc-1", title: "Long", content }]);
+    const selected = blockIdOf(rows.get("doc-1")!.doc.lastChild!)!;
+    const tools = await prepare(service, "doc-1", [selected]);
+    const view = send(tools).join("\n");
+    expect(view).toContain("The selected line");
+    expect(view).toContain(`selected="${selected}"`);
+  });
+
   it("never reports blocks that only left the window as removed", async () => {
     const line = "x".repeat(400);
     const content = Array.from({ length: 100 }, (_, index) => `${index} ${line}`).join("\n\n");

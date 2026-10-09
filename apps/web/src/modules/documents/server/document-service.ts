@@ -209,8 +209,20 @@ const attributeChars = (attrs: Record<string, unknown>) => {
   for (const value of Object.values(attrs)) if (typeof value === "string") total += value.length;
   return total;
 };
+/** A value the schema's attributes hold: anything else, an object above all, is a client's invention. */
+const plainValue = (value: unknown) =>
+  value === null || ["string", "number", "boolean"].includes(typeof value);
 /** Attributes the schema types loosely but the model's view and the editor rely on. */
 const wellTyped = (node: Node) => {
+  for (const [name, value] of Object.entries(node.attrs)) {
+    // A table cell's column widths are the one list an attribute holds.
+    const widths =
+      name === "colwidth" &&
+      Array.isArray(value) &&
+      value.every((each) => typeof each === "number");
+    if (!plainValue(value) && !widths) return false;
+  }
+  for (const mark of node.marks) if (!Object.values(mark.attrs).every(plainValue)) return false;
   const { level, start, checked } = node.attrs as Record<string, unknown>;
   switch (node.type.name) {
     case "heading":

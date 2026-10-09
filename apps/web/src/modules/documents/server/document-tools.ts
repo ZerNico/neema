@@ -302,6 +302,8 @@ interface Baseline {
    * carries it again, or the next request would lose the document.
    */
   shown?: string;
+  /** The last full view the model was sent of it, in the first view or an update. */
+  xml: string;
 }
 
 /** What streaming tells the tools a provider request carried, so only that counts as seen. */
@@ -1141,8 +1143,16 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       });
       if (hit) index = at;
     });
-    const start = index === -1 ? null : blockIdOf(tree.child(Math.max(0, index - 2)));
-    return start ? { fromBlock: start } : undefined;
+    if (index === -1) return undefined;
+    // A little before it for context, as far as the budget still reaches it.
+    for (let start = Math.max(0, index - 2); start <= index; start++) {
+      const fromBlock = blockIdOf(tree.child(start));
+      if (!fromBlock) continue;
+      const view = blockView(tree, { budget: FOCUS_CHARS, fromBlock });
+      if (start === index || view.seen.some((block) => selected.has(block.id)))
+        return { fromBlock };
+    }
+    return undefined;
   };
   /** The focused document's view as it is now, with each top-level block's own XML. */
   const render = (document: EditableDocument, tree: Node) => {
@@ -1276,6 +1286,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             revision: current.revision,
             order: rendered.order,
             comments: rendered.comments,
+            xml: rendered.xml,
           });
         firstView = `${lead}\n<documents>\n${[rendered?.xml, othersXml(current)].filter(Boolean).join("\n")}\n</documents>`;
         if (current && rendered) stage(firstView, current.id, current.revision, rendered.view.seen);
@@ -1296,6 +1307,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           order: rendered.order,
           comments: rendered.comments,
           shown: rendered.xml,
+          xml: rendered.xml,
         });
       } else if (baseline.revision !== current.revision) {
         const before = new Map(
@@ -1344,6 +1356,11 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             ? rendered.xml
             : `<document${header(current, { focused: true })}>\n${delta}${threadsSince(baseline, rendered.comments)}\n</document>`;
       } else if (windows.has(current.id)) update = rendered.xml;
+      else if (
+        rendered.xml.replace(rendered.comments, "") !== baseline.xml.replace(baseline.comments, "")
+      )
+        // The same text, seen another way: a steer's new selection, a window moved to a write.
+        update = rendered.xml;
       else if (baseline.comments !== rendered.comments)
         // A reply or a resolve moves no revision, yet the first view would still show the old thread.
         update = `<document${header(current, { focused: true })}>${threadsSince(baseline, rendered.comments)}\n</document>`;
