@@ -3738,11 +3738,13 @@ export class StreamEngine extends Context.Service<
                             const { sources, access, files } = integrationTools!.take(part.id);
                             // Files a service returned become attachments of the answer,
                             // stored under the fence like a custom tool's; a failed one is noted.
-                            const undelivered = new Map<string, string>();
-                            for (const file of files) {
+                            // By position: the result lists the files in the order returned,
+                            // and two may share a name.
+                            const undelivered = new Map<number, string>();
+                            for (const [index, file] of files.entries()) {
                               const stored = yield* deliverFile(file, rowId);
                               if ("reason" in stored) {
-                                undelivered.set(file.name, stored.reason.slice(0, 200));
+                                undelivered.set(index, stored.reason.slice(0, 200));
                                 continue;
                               }
                               turnFiles.push(
@@ -3769,9 +3771,9 @@ export class StreamEngine extends Context.Service<
                                 ...returned,
                                 result: {
                                   ...output,
-                                  files: output.files.map((entry: { name?: unknown }) =>
-                                    typeof entry.name === "string" && undelivered.has(entry.name)
-                                      ? { ...entry, notAttached: undelivered.get(entry.name) }
+                                  files: output.files.map((entry: object, index: number) =>
+                                    undelivered.has(index)
+                                      ? { ...entry, notAttached: undelivered.get(index) }
                                       : entry,
                                   ),
                                 },
