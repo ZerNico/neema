@@ -66,6 +66,36 @@ describe("a server asking mid-call", () => {
     );
   });
 
+  it("leaves out an optional list nobody picked from, rather than answering with none", async () => {
+    const user = userEvent.setup();
+    vi.mocked(answerIntegrationElicitation).mockClear();
+    mount(
+      call({
+        mode: "form",
+        message: "Name it.",
+        fields: [
+          { key: "name", label: "Name", description: null, kind: "text", required: true },
+          {
+            key: "labels",
+            label: "Labels",
+            description: null,
+            kind: "choices",
+            required: false,
+            min: 1,
+            options: [{ value: "bug", label: "Bug" }],
+          },
+        ],
+      }),
+    );
+    await user.type(screen.getByLabelText("Name"), "v3");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(answerIntegrationElicitation).toHaveBeenCalledWith({
+        data: { callId: "row-1", promptId: "q-1", action: "accept", values: { name: "v3" } },
+      }),
+    );
+  });
+
   it("shows where a link goes and lets the person say they are done only after opening it", async () => {
     const user = userEvent.setup();
     mount(

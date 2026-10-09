@@ -57,6 +57,8 @@ const outgoing = (prompt: ElicitationPrompt, values: Values): Values => {
   const next = { ...values };
   for (const field of prompt.fields) {
     const value = next[field.key];
+    // Nothing picked in an optional list leaves it out, rather than answering with none.
+    if (!field.required && Array.isArray(value) && value.length === 0) delete next[field.key];
     if (field.kind === "datetime" && typeof value === "string" && !Number.isNaN(Date.parse(value)))
       next[field.key] = new Date(value).toISOString();
   }
@@ -68,15 +70,15 @@ const missing = (prompt: ElicitationPrompt, values: Values) =>
   prompt.fields.some((field) => {
     const value = values[field.key];
     // How many to pick is part of the question; the server checks it again.
-    if (Array.isArray(value) && value.length > 0)
+    if (field.kind === "choices") {
+      const picked = Array.isArray(value) ? value.length : 0;
+      if (picked === 0) return field.required && (field.min ?? 0) > 0;
       return (
-        (field.min !== undefined && value.length < field.min) ||
-        (field.max !== undefined && value.length > field.max)
+        (field.min !== undefined && picked < field.min) ||
+        (field.max !== undefined && picked > field.max)
       );
-    return (
-      field.required &&
-      (value === undefined || value === "" || (Array.isArray(value) && value.length === 0))
-    );
+    }
+    return field.required && (value === undefined || value === "");
   });
 
 /**

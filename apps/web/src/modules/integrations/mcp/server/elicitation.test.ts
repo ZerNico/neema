@@ -137,6 +137,26 @@ describe("elicitation prompts", () => {
       resultOf(pick, { action: "accept", values: { labels } }).action;
     expect(answer(["bug", "ux"])).toBe("accept");
     expect(answer(["bug", "ux", "docs"])).toBe("decline");
+    // Optional and left empty: left out, not an answer of none that breaks its minimum.
+    expect(resultOf(pick, { action: "accept", values: { labels: [] } })).toEqual({
+      action: "accept",
+      content: {},
+    });
+  });
+
+  it("declines lists asking for more, or longer picks, than an answer can carry", () => {
+    const list = (items: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      promptOf({
+        mode: "form",
+        message: "Pick",
+        requestedSchema: {
+          type: "object",
+          properties: { picks: { type: "array", items, ...extra } },
+        },
+      } as never);
+    expect(list({ enum: ["a", "b"] })).not.toBeNull();
+    expect(list({ enum: ["a", "b"] }, { minItems: 51 })).toBeNull();
+    expect(list({ enum: ["a", "x".repeat(501)] })).toBeNull();
   });
 
   it("sends only answers that fit the form, never half of one", () => {

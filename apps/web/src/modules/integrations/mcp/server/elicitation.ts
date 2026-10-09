@@ -38,8 +38,10 @@ const optionsOf = (schema: Json): ElicitationField["options"] | null => {
 /** What a card can hold, and what an answer may carry back (`AnswerElicitationInput`). */
 const MAX_FIELDS = 30;
 const MAX_KEY = 100;
-/** The longest text an answer may carry (`AnswerElicitationInput`). */
+/** What an answer may carry (`AnswerElicitationInput`): text, picks, and each pick. */
 const MAX_TEXT = 4_000;
+const MAX_PICKS = 50;
+const MAX_PICK = 500;
 const TEXT_KINDS = new Set<ElicitationField["kind"]>(["text", "email", "url", "date", "datetime"]);
 
 const fieldOf = (key: string, schema: unknown, required: boolean): ElicitationField | null => {
@@ -129,11 +131,22 @@ export const promptOf = (params: ElicitRequest["params"]): ElicitationPrompt | n
   const fields: ElicitationField[] = [];
   for (const [key, property] of entries) {
     const field = fieldOf(key, property, required.has(key));
-    // Not drawable as asked, or a text no answer could be long enough for.
-    if (!field || (TEXT_KINDS.has(field.kind) && (field.min ?? 0) > MAX_TEXT)) return null;
+    // Not drawable as asked, or asking for what no answer could carry.
+    if (!field || !answerable(field)) return null;
     fields.push(field);
   }
   return { mode: "form", message, fields };
+};
+
+const answerable = (field: ElicitationField) => {
+  if (TEXT_KINDS.has(field.kind)) return (field.min ?? 0) <= MAX_TEXT;
+  const options = field.options ?? [];
+  if (field.kind === "choice") return options.every((option) => option.value.length <= MAX_TEXT);
+  if (field.kind === "choices")
+    return (
+      (field.min ?? 0) <= MAX_PICKS && options.every((option) => option.value.length <= MAX_PICK)
+    );
+  return true;
 };
 
 const fits = (field: ElicitationField, value: ElicitationValue) => {
@@ -179,7 +192,9 @@ export const resultOf = (prompt: ElicitationPrompt, answer: ElicitationAnswer): 
   const content: Record<string, string | number | boolean | string[]> = {};
   for (const field of prompt.fields) {
     const value = values[field.key];
-    if (value === undefined || value === "") {
+    // Nothing picked in an optional list is leaving it out, not answering with none.
+    const empty = Array.isArray(value) && value.length === 0 && !field.required;
+    if (value === undefined || value === "" || empty) {
       if (field.required) return { action: "decline" };
       continue;
     }
