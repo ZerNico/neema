@@ -863,6 +863,8 @@ function useClock(spec: string, tickMs: number, total: number | undefined, onEnd
     elapsed,
     finished,
     running,
+    /** The current run's start and what was counted before it, for an animation to begin from. */
+    counted,
     start: () => {
       const at = Date.now();
       setNow(at);
@@ -882,7 +884,7 @@ function TimerNode({ node }: { node: ValidNode }) {
   const total = num(p.seconds);
   const label = str(p.label);
   const done = useHandler(handlerOf(p.ondone), { event: "change", tag: "timer" });
-  const { elapsed, finished, running, start, pause, reset } = useClock(
+  const { elapsed, finished, running, counted, start, pause, reset } = useClock(
     `timer:${total ?? ""}:${label ?? ""}`,
     250,
     total,
@@ -892,6 +894,21 @@ function TimerNode({ node }: { node: ValidNode }) {
     },
   );
   const shown = total === undefined ? elapsed : total - elapsed;
+  const reducedMotion = useAppReducedMotion();
+  const bar = useRef<HTMLDivElement>(null);
+  const sliding = running && !reducedMotion && total !== undefined;
+  // While running, the browser moves the bar to the end in one animation:
+  // following the 250 ms ticks, it steps however each step is eased.
+  useEffect(() => {
+    const indicator = bar.current?.querySelector<HTMLElement>('[data-slot="progress-indicator"]');
+    if (!sliding || counted.startedAt === null || !indicator?.animate) return;
+    const at = counted.banked + Date.now() - counted.startedAt;
+    const animation = indicator.animate(
+      [{ width: `${Math.min(100, (at / 1000 / total) * 100)}%` }, { width: "100%" }],
+      { duration: Math.max(0, total * 1000 - at), easing: "linear", fill: "forwards" },
+    );
+    return () => animation.cancel();
+  }, [sliding, counted.startedAt, counted.banked, total]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -921,7 +938,13 @@ function TimerNode({ node }: { node: ValidNode }) {
         </div>
       </div>
       {total !== undefined ? (
-        <Progress value={Math.min(100, (elapsed / total) * 100)} aria-label={label ?? "Timer"} />
+        <Progress
+          value={Math.min(100, (elapsed / total) * 100)}
+          aria-label={label ?? "Timer"}
+          ref={bar}
+          // A transition would override the animation each time the value moves.
+          motion={reducedMotion || sliding ? "none" : "ease"}
+        />
       ) : null}
     </div>
   );
