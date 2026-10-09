@@ -103,7 +103,7 @@ describe("reviewing an MCP server's tools", () => {
       expect(approveIntegrationCatalog).toHaveBeenCalledWith({
         data: {
           integrationId: "mcp",
-          fingerprint: "v1",
+          version: "v1",
           decisions: [
             { mcpName: "search", enabled: true, access: "read" },
             { mcpName: "drop_table", enabled: false, access: "destructive" },

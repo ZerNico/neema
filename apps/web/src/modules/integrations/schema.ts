@@ -122,7 +122,7 @@ export const ToolAccessInput = Schema.Literals(["read", "write", "destructive"])
 export const ApproveCatalogInput = Schema.Struct({
   integrationId: IntegrationId,
   /** The listing the admin looked at; a newer one since is refused, not approved unseen. */
-  fingerprint: Schema.String.check(Schema.isMaxLength(200)),
+  version: Schema.String.check(Schema.isMaxLength(200)),
   decisions: Schema.Array(
     Schema.Struct({
       mcpName: Schema.String.check(Schema.isMaxLength(200)),

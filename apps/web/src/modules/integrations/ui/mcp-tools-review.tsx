@@ -119,7 +119,7 @@ export function McpToolsReview({
       approveIntegrationCatalog({
         data: {
           integrationId: row.id,
-          fingerprint: catalog.version ?? "",
+          version: catalog.version ?? "",
           decisions: [...decisions].map(([mcpName, decision]) => ({ mcpName, ...decision })),
         },
       }),

@@ -169,7 +169,7 @@ export const approveIntegrationCatalog = createServerFn({ method: "POST" })
     runtime.runPromise(
       IntegrationService.use((service) =>
         service.approveCatalog(context.session.user.id, data.integrationId, {
-          version: data.fingerprint,
+          version: data.version,
           decisions: data.decisions,
         }),
       ).pipe(
