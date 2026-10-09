@@ -57,6 +57,20 @@ const tableStart = (src: string) => {
 
 const DocumentOrderedList = OrderedList.extend({
   markdownTokenizer: bounded(OrderedList.config.markdownTokenizer!, /^[ \t]*\d+[.)][ \t]/),
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      // Upstream reads a pasted `start` with parseInt: "" or "x" gives NaN,
+      // which the server refuses as no list start, stalling every edit after it.
+      start: {
+        default: 1,
+        parseHTML: (element: HTMLElement) => {
+          const start = Number.parseInt(element.getAttribute("start") ?? "", 10);
+          return Number.isInteger(start) && start >= 0 ? start : 1;
+        },
+      },
+    };
+  },
 });
 const DocumentTaskList = TaskList.extend({
   markdownTokenizer: bounded(TaskList.config.markdownTokenizer!, /^[ \t]*[-+*][ \t]+\[[ xX]\]/),
