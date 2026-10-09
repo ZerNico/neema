@@ -13,6 +13,7 @@ import type {
 import {
   applyDecisions,
   argumentDetails,
+  argumentsInFull,
   briefValue,
   MCP_LIMITS,
   offeredEntries,
@@ -228,6 +229,7 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
   parameters: entry.inputSchema,
   summarize: summarizeArguments,
   details: argumentDetails,
+  inFull: argumentsInFull,
   revision: entry.fingerprint,
   prepare: (session, args, call) =>
     Effect.gen(function* () {

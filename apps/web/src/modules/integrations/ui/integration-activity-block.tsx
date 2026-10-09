@@ -151,7 +151,15 @@ function ApprovalCard({
             {label} in {name}?
           </span>
         </div>
-        {call.details?.length ? (
+        {call.inFull ? (
+          // The short list would have hidden something: everything, as it is sent.
+          <pre
+            aria-label="Everything this sends"
+            className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
+          >
+            {call.inFull}
+          </pre>
+        ) : call.details?.length ? (
           // Every argument as sent, since a server's tool has no summary of its own.
           <dl className="bg-muted grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl p-2 text-xs">
             {call.details.map((entry) => (

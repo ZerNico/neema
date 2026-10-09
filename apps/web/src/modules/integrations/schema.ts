@@ -296,6 +296,8 @@ export interface PendingIntegrationCall {
   targets: ReadonlyArray<string>;
   /** Every argument, when the summary cannot say what the call sends. */
   details?: ReadonlyArray<{ key: string; value: string }>;
+  /** Everything the call sends, when `details` had to shorten or leave something out. */
+  inFull?: string;
   prompt?: ElicitationPrompt;
   /** Which question this is: one call may ask several, one after another. */
   promptId?: string;

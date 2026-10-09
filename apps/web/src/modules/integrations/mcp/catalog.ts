@@ -225,6 +225,29 @@ export const argumentDetails = (args: unknown) => {
     .map(([key, value]) => ({ key: key.slice(0, 64), value: briefValue(value, 300) }));
 };
 
+/** Above this, a call's arguments cannot be put to a person to approve. */
+export const REVIEWABLE_CHARS = 100_000;
+
+/**
+ * Every argument as sent, for an approval the short list cannot cover: more
+ * arguments than it shows, or a value it shortened or flattened. Null when
+ * the list already shows everything.
+ */
+export const argumentsInFull = (args: unknown) => {
+  const entries =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? Object.entries(args as Record<string, unknown>)
+      : null;
+  const listed =
+    entries !== null &&
+    entries.length <= 20 &&
+    entries.every(([key, value]) => {
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      return key.length <= 64 && briefValue(value, 300) === (text ?? "");
+    });
+  return listed ? null : JSON.stringify(args ?? {}, null, 2);
+};
+
 /** One line from the first few short arguments, since a catalog tool has no summary of its own. */
 export const summarizeArguments = (args: unknown) => {
   const parts = argumentDetails(args)

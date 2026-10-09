@@ -711,6 +711,8 @@ describe("an MCP server set up by an admin", () => {
           access: "destructive",
           details: [{ key: "id", value: "p-1" }],
         });
+        // The short list showed everything, so nothing more is sent along.
+        expect(pending?.inFull).toBeUndefined();
         // Nothing went out while the person decides.
         expect(deleted).toEqual([]);
         yield* approvals.decide(admin, pending!.callId, "allow");
@@ -719,6 +721,33 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(outcome).toMatchObject({ ok: true, result: { content: "Deleted p-1." } });
     expect(deleted).toEqual(["p-1"]);
+  });
+
+  it("puts everything a call sends to the person when the short list would hide some", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs long", { url: `${base}/mcp`, auth: "none" });
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "delete_page", enabled: true, access: "destructive" },
+    ]);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    const conversationId = await newConversation(admin);
+    const prepared = await toolsFor(admin, conversationId);
+    const long = `p-${"x".repeat(400)}-and-also-the-archive`;
+    const pending = await run(
+      Effect.gen(function* () {
+        const approvals = yield* IntegrationApprovals;
+        const waiting = yield* Effect.forkChild(
+          handlerOf(prepared, `int_${id}__delete_page`)!({ id: long }, { toolCallId: "l" }),
+        );
+        const [asked] = yield* waitForPending(admin);
+        yield* approvals.decide(admin, asked!.callId, "deny");
+        yield* Fiber.join(waiting);
+        return asked;
+      }),
+    );
+    expect(pending?.details?.[0]?.value).not.toContain("and-also-the-archive");
+    expect(pending?.inFull).toContain(`"id": "${long}"`);
   });
 
   it("does not run a call whose tool the admin took off while it waited", async () => {

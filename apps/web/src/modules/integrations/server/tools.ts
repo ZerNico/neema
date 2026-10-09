@@ -20,6 +20,7 @@ import {
   type IntegrationManifest,
   type ToolAccess,
 } from "../manifest.ts";
+import { REVIEWABLE_CHARS } from "../mcp/catalog.ts";
 import type { ElicitationAnswer } from "../schema.ts";
 import type { IntegrationModelResult } from "../tool-schema.ts";
 import type {
@@ -333,6 +334,13 @@ export function prepareIntegrationTools(input: {
           if (before.kind === "ask") {
             const callId = yield* input.rowIdFor(context.toolCallId);
             if (!callId) return failure("This action could not be put to the user.", true);
+            // A person approves what they can see: all of it, or nothing goes.
+            const inFull = tool.inFull?.(args) ?? null;
+            if (inFull !== null && inFull.length > REVIEWABLE_CHARS)
+              return failure(
+                `This action sends more than can be shown for approval (${inFull.length} characters), so it did not run. Send less at once.`,
+                true,
+              );
             const answer: ApprovalAnswer = yield* input.approvals.request(input.owner.userId, {
               callId,
               conversationId: input.owner.conversationId,
@@ -343,6 +351,7 @@ export function prepareIntegrationTools(input: {
               summary: prepared.success.summary ?? tool.summarize(args),
               targets: reach ? [...reach.targets] : [],
               ...(tool.details ? { details: tool.details(args) } : {}),
+              ...(inFull !== null ? { inFull } : {}),
             });
             if (answer === "deny")
               return failure("The user declined this action. Do not retry it unasked.", true);
