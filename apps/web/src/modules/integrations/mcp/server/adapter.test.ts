@@ -278,6 +278,39 @@ describe("an MCP server through the adapter", () => {
     expect(mapped.result.output).toEqual({ content: text });
   });
 
+  it("cites at most twenty links from one result", () => {
+    const links = Array.from({ length: 500 }, (_, index) => ({
+      type: "resource_link" as const,
+      uri: `https://docs.example.com/${index}`,
+      name: `Page ${index}`,
+    }));
+    const mapped = mapResult(
+      {
+        content: [
+          {
+            type: "resource_link",
+            uri: `https://docs.example.com/${"x".repeat(5_000)}`,
+            name: "Long",
+          },
+          ...links,
+        ],
+      },
+      {
+        key: "t",
+        mcpName: "t",
+        title: "T",
+        description: "",
+        inputSchema: { type: "object", properties: {} },
+        annotations: {},
+        access: "read",
+        enabled: true,
+        fingerprint: "f",
+      },
+    );
+    expect(mapped.result.sources).toHaveLength(20);
+    expect(mapped.result.sources[0]?.title).toBe("Page 0");
+  });
+
   it("turns returned images into files of the answer", async () => {
     const { entries } = await list(sessionAt("/mcp"));
     const exit = await run(sessionAt("/mcp"), byName(entries, "chart"), {});

@@ -71,6 +71,16 @@ export const mapResult = (result: CallToolResult, entry: McpToolEntry) => {
   const files: AdapterFile[] = [];
   const skipped: string[] = [];
   let bytes = 0;
+  // Links count against the result too: a server could otherwise list
+  // thousands, each persisted and shown to the model as a citation.
+  const cite = (source: AdapterSource) => {
+    if (sources.length < MCP_LIMITS.sources && source.url.length <= MCP_LIMITS.urlChars)
+      sources.push({
+        ...source,
+        title: source.title.slice(0, 200),
+        snippet: source.snippet.slice(0, 500),
+      });
+  };
   const addFile = (base64: string, mediaType: string, uri?: string) => {
     const data = Buffer.from(base64, "base64");
     if (files.length >= MCP_LIMITS.files || bytes + data.byteLength > MCP_LIMITS.fileBytes) {
@@ -91,7 +101,7 @@ export const mapResult = (result: CallToolResult, entry: McpToolEntry) => {
         break;
       case "resource_link":
         if (HTTP_LINK.test(block.uri))
-          sources.push({
+          cite({
             externalId: block.uri,
             title: block.title ?? block.name,
             url: block.uri,
@@ -105,7 +115,7 @@ export const mapResult = (result: CallToolResult, entry: McpToolEntry) => {
         if ("text" in resource) {
           texts.push(resource.text);
           if (HTTP_LINK.test(resource.uri))
-            sources.push({
+            cite({
               externalId: resource.uri,
               title: resource.uri,
               url: resource.uri,

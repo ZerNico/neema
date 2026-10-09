@@ -46,6 +46,9 @@ export const MCP_LIMITS = {
   enabledTools: 64,
   listedTools: 500,
   resultChars: 40_000,
+  /** Citable links from one result; more stay out of the model's context. */
+  sources: 20,
+  urlChars: 2_000,
   files: 8,
   fileBytes: 10 * 1024 * 1024,
   elicitationRounds: 5,
