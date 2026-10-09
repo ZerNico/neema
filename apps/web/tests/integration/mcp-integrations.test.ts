@@ -989,6 +989,21 @@ describe("an MCP server set up by an admin", () => {
       Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(connectionId)),
     );
     expect(capped?.requiredScopes?.length).toBeLessThanOrEqual(50);
+
+    // A first refusal naming more than fit still records the first fifty.
+    await run(Effect.flatMap(IntegrationRepo, (repo) => repo.clearRequiredScopes(connectionId)));
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.addRequiredScopes(
+          connectionId,
+          Array.from({ length: 60 }, (_, index) => `many${String(index).padStart(2, "0")}`),
+        ),
+      ),
+    );
+    const first = await run(
+      Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(connectionId)),
+    );
+    expect(first?.requiredScopes).toHaveLength(50);
     expect(capped?.requiredScopes).toEqual(expect.arrayContaining(["docs:read", "docs:write"]));
   });
 

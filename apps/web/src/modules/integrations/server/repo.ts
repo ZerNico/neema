@@ -765,7 +765,7 @@ export class IntegrationRepo extends Context.Service<
             yield* db
               .update(integrationConnections)
               .set({
-                requiredScopes: sql`coalesce((select case when count(*) <= ${MAX_REQUIRED_SCOPES} then jsonb_agg(listed.scope order by listed.scope) end from (select distinct scope from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes)}::jsonb) as joined(scope)) as listed), ${integrationConnections.requiredScopes})`,
+                requiredScopes: sql`coalesce((select case when count(*) <= ${MAX_REQUIRED_SCOPES} then jsonb_agg(listed.scope order by listed.scope) end from (select distinct scope from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes.slice(0, MAX_REQUIRED_SCOPES))}::jsonb) as joined(scope)) as listed), ${integrationConnections.requiredScopes})`,
               })
               .where(eq(integrationConnections.id, connectionId))
               .pipe(Effect.orDie);
