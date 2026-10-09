@@ -45,7 +45,10 @@ import {
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
-import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.ts";
+import {
+  fakeDocumentServer,
+  freshDocumentDevice,
+} from "../../../../tests/fixtures/document-server.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
@@ -2170,6 +2173,7 @@ const documentReference = (
 
 describe("ChatView documents", () => {
   let server: ReturnType<typeof fakeDocumentServer>;
+  beforeEach(freshDocumentDevice);
   beforeEach(() => {
     for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
       rpc.mockReset();

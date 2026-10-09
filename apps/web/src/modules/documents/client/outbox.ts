@@ -1,0 +1,33 @@
+import { deviceCache } from "~/modules/cache/client/device-cache.ts";
+
+/**
+ * Changes this device made that the server may not have yet: the steps,
+ * the document they were made on and the revision it was at, and the collab
+ * client id that sent them, so the server's copies are recognised as ours.
+ */
+export interface OutboxEntry {
+  clientId: string;
+  revision: number;
+  doc: Record<string, unknown>;
+  steps: string[];
+  savedAt: number;
+}
+
+export interface OutboxStore {
+  warm(): Promise<void>;
+  get(documentId: string): OutboxEntry | undefined;
+  set(documentId: string, entry: OutboxEntry): void;
+  delete(documentId: string): void;
+}
+
+/**
+ * Kept on the device so a reload, a crash or a discarded tab does not lose
+ * typing the server never got. Still a cache: losing an entry costs only
+ * those unsent changes, which is all an open tab ever protected before.
+ */
+export const outbox: OutboxStore = deviceCache<OutboxEntry>({
+  namespace: "document-outbox",
+  maxBytes: 16 * 1024 * 1024,
+  // A document at its size cap, plus a long offline session's steps.
+  maxEntryBytes: 4 * 1024 * 1024,
+});

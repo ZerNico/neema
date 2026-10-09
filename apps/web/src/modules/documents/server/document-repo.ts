@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNotNull, lte, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, documents, documentUpdates, projects } from "~/db/schema/index.ts";
+import { conversations, documents, documentSteps, projects } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
@@ -49,11 +49,17 @@ const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
   updatedAt: row.updatedAt.toISOString(),
 });
 
+export interface StoredStep {
+  revision: number;
+  step: Record<string, unknown>;
+  clientId: string;
+  createdAt: Date;
+}
 export interface StoredDocumentState {
   document: EditableDocument;
-  snapshot: Uint8Array;
+  snapshot: Record<string, unknown>;
   snapshotRevision: number;
-  updates: Uint8Array[];
+  steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
 
@@ -72,7 +78,7 @@ export class DocumentRepo extends Context.Service<
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
-    /** Snapshot plus every later batch, in revision order: enough to rebuild the Y.Doc. */
+    /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
     /**
      * Locks the document row alone, for someone allowed to edit it. A
@@ -85,11 +91,13 @@ export class DocumentRepo extends Context.Service<
       userId: string,
       documentId: string,
     ): Effect.Effect<EditableDocument, DocumentNotAvailable | DocumentRejected>;
-    appendUpdate(
+    appendSteps(
       tx: DbTx,
-      values: Pick<
-        typeof documentUpdates.$inferInsert,
-        "documentId" | "revision" | "update" | "origin" | "userId" | "generationId"
+      rows: ReadonlyArray<
+        Pick<
+          typeof documentSteps.$inferInsert,
+          "documentId" | "revision" | "step" | "clientId" | "origin" | "userId" | "generationId"
+        >
       >,
     ): Effect.Effect<void>;
     /** Caller holds the lock; the revision is explicit so ordering stays in the service. */
@@ -99,11 +107,11 @@ export class DocumentRepo extends Context.Service<
       documentId: string,
       changes: DocumentWrite,
     ): Effect.Effect<EditableDocument>;
-    /** Folds every batch up to `revision` into the snapshot. Caller holds the lock. */
+    /** Folds every step up to `revision` into the snapshot. Caller holds the lock. */
     compact(
       tx: DbTx,
       documentId: string,
-      snapshot: Uint8Array,
+      snapshot: Record<string, unknown>,
       revision: number,
     ): Effect.Effect<void>;
     /** Deletes a project's document; a chat's goes with its answer instead. */
@@ -161,8 +169,8 @@ export class DocumentRepo extends Context.Service<
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,
-              snapshot: Buffer.from(values.snapshot),
-              snapshotRevision: 1,
+              snapshot: values.snapshot,
+              snapshotRevision: 0,
             })
             .pipe(Effect.orDie);
           return (yield* get(userId, id, tx))!;
@@ -187,7 +195,7 @@ export class DocumentRepo extends Context.Service<
         }),
         loadState: Effect.fn("DocumentRepo.loadState")(function* (userId, documentId) {
           // The share lock holds off a compaction between the two reads, which
-          // would hand back a snapshot newer than the batches read after it.
+          // would hand back a snapshot newer than the steps read after it.
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
@@ -203,23 +211,23 @@ export class DocumentRepo extends Context.Service<
                   .pipe(Effect.orDie);
                 if (!row) return null;
                 const { snapshot, snapshotRevision, ...document } = row;
-                const updates = yield* tx
-                  .select({ update: documentUpdates.update })
-                  .from(documentUpdates)
+                const steps = yield* tx
+                  .select({
+                    revision: documentSteps.revision,
+                    step: documentSteps.step,
+                    clientId: documentSteps.clientId,
+                    createdAt: documentSteps.createdAt,
+                  })
+                  .from(documentSteps)
                   .where(
                     and(
-                      eq(documentUpdates.documentId, documentId),
-                      gt(documentUpdates.revision, snapshotRevision),
+                      eq(documentSteps.documentId, documentId),
+                      gt(documentSteps.revision, snapshotRevision),
                     ),
                   )
-                  .orderBy(asc(documentUpdates.revision))
+                  .orderBy(asc(documentSteps.revision))
                   .pipe(Effect.orDie);
-                return {
-                  document: toDocument(document),
-                  snapshot: new Uint8Array(snapshot),
-                  snapshotRevision,
-                  updates: updates.map(({ update }) => new Uint8Array(update)),
-                };
+                return { document: toDocument(document), snapshot, snapshotRevision, steps };
               }),
             )
             .pipe(Effect.orDie);
@@ -236,11 +244,12 @@ export class DocumentRepo extends Context.Service<
             return yield* new DocumentRejected({ reason: "this document is read-only for you" });
           return toDocument(row);
         }),
-        appendUpdate: Effect.fn("DocumentRepo.appendUpdate")(function* (tx, values) {
-          yield* tx
-            .insert(documentUpdates)
-            .values({ ...values, update: Buffer.from(values.update) })
-            .pipe(Effect.orDie);
+        appendSteps: Effect.fn("DocumentRepo.appendSteps")(function* (tx, rows) {
+          if (rows.length)
+            yield* tx
+              .insert(documentSteps)
+              .values([...rows])
+              .pipe(Effect.orDie);
         }),
         write: Effect.fn("DocumentRepo.write")(function* (tx, userId, documentId, changes) {
           yield* tx
@@ -253,16 +262,13 @@ export class DocumentRepo extends Context.Service<
         compact: Effect.fn("DocumentRepo.compact")(function* (tx, documentId, snapshot, revision) {
           yield* tx
             .update(documents)
-            .set({ snapshot: Buffer.from(snapshot), snapshotRevision: revision })
+            .set({ snapshot, snapshotRevision: revision })
             .where(eq(documents.id, documentId))
             .pipe(Effect.orDie);
           yield* tx
-            .delete(documentUpdates)
+            .delete(documentSteps)
             .where(
-              and(
-                eq(documentUpdates.documentId, documentId),
-                lte(documentUpdates.revision, revision),
-              ),
+              and(eq(documentSteps.documentId, documentId), lte(documentSteps.revision, revision)),
             )
             .pipe(Effect.orDie);
         }),

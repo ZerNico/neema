@@ -1,5 +1,4 @@
 import type { AnyExtension, JSONContent, MarkdownTokenizer } from "@tiptap/core";
-import { isChangeOrigin } from "@tiptap/extension-collaboration";
 import { CodeBlock } from "@tiptap/extension-code-block";
 import { Image } from "@tiptap/extension-image";
 import { OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
@@ -10,9 +9,13 @@ import {
   TableHeader,
   TableRow,
 } from "@tiptap/extension-table";
+import { UniqueID } from "@tiptap/extension-unique-id";
 import { Markdown } from "@tiptap/markdown";
 import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { StarterKit } from "@tiptap/starter-kit";
+import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
+import { Pending } from "./pending.ts";
+import { isRemoteChange } from "./remote.ts";
 
 /** Addresses a link may point at; anything else (javascript:, data:) is refused. */
 export const SAFE_LINK = /^(?:https?:|mailto:)/i;
@@ -79,7 +82,7 @@ const withHeaderRow = (table: JSONContent): JSONContent => {
 };
 
 const isLocalEdit = (transaction: Transaction) =>
-  transaction.docChanged && !isChangeOrigin(transaction);
+  transaction.docChanged && !isRemoteChange(transaction);
 
 // Upstream leaves a cell's `|` bare, which splits the cell on the next read,
 // and pads the table with blank lines the block separator already adds.
@@ -124,15 +127,11 @@ const DocumentTable = Table.extend({
 
 /**
  * The one document schema, built identically in the browser editor and on the
- * server. The server reads and writes the shared tree with it, so a node or
- * mark missing on either side would be dropped from everyone's document.
- * Only what Markdown can hold: no underline, colours or alignment.
+ * server, which refuses any step that does not fit it. Markdown is an export
+ * and what the model writes, not the limit: a planned section has none.
  */
 export const documentExtensions: AnyExtension[] = [
   StarterKit.configure({
-    // The shared Yjs history undoes one person's own changes; ProseMirror's
-    // would undo everyone's.
-    undoRedo: false,
     underline: false,
     codeBlock: false,
     orderedList: false,
@@ -153,5 +152,13 @@ export const documentExtensions: AnyExtension[] = [
   TableRow,
   TableHeader,
   TableCell,
+  Pending,
+  // Steps received from the server already carry the IDs their sender gave.
+  UniqueID.configure({
+    attributeName: BLOCK_ID,
+    types: [...BLOCK_TYPES],
+    generateID: newBlockId,
+    filterTransaction: (transaction) => !isRemoteChange(transaction),
+  }),
   Markdown,
 ];

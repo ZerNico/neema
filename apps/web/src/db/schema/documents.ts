@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
-  bytea,
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -13,13 +13,16 @@ import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { projects } from "./projects.ts";
 
+/** A ProseMirror document or step as its own `toJSON` writes it. */
+type ProseMirrorJson = Record<string, unknown>;
+
 /**
- * One collaboratively edited markdown document. The Yjs state is canonical:
- * `snapshot` holds it as of `snapshot_revision` and `document_updates` the
- * batches after it. `content` is the same text as plain markdown, rewritten in
- * the transaction that applies each batch, so the model, cards and search read
- * it without decoding Yjs. `revision` counts applied batches; it tells the
- * model the text moved, and protects nothing.
+ * One collaboratively edited document, a ProseMirror tree ordered by the
+ * server. `snapshot` holds the tree as of `snapshot_revision` and
+ * `document_steps` every step after it; `revision` is the number of steps
+ * applied, which is the collab version every editor rebases against.
+ * `content` is the tree as Markdown, rewritten in the transaction that stores
+ * each batch, so cards, search and Copy never parse the tree.
  *
  * A document belongs to exactly one conversation or one project. A chat's
  * document records the answer that produced it (`created_by_message_id`), and
@@ -41,13 +44,13 @@ export const documents = pgTable(
     }),
     title: text().notNull(),
     content: text().notNull(),
-    revision: integer().notNull().default(1),
+    revision: integer().notNull().default(0),
     lastEditedBy: text("last_edited_by").$type<"user" | "model">().notNull(),
     lastEditorUserId: text("last_editor_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
-    snapshot: bytea().notNull(),
-    snapshotRevision: integer("snapshot_revision").notNull().default(1),
+    snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
+    snapshotRevision: integer("snapshot_revision").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -62,18 +65,23 @@ export const documents = pgTable(
   ],
 );
 
-/** Yjs update batches applied after the snapshot, one row per revision. */
-export const documentUpdates = pgTable(
-  "document_updates",
+/**
+ * Every step after the snapshot, one row each; `revision` is the version the
+ * step produced. Kept long so an editor that was offline can still rebase.
+ */
+export const documentSteps = pgTable(
+  "document_steps",
   {
     documentId: text("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     revision: integer().notNull(),
-    update: bytea().notNull(),
+    step: jsonb().$type<ProseMirrorJson>().notNull(),
+    /** The collab client that sent it: an editor's id, or `model`/`server`. */
+    clientId: text("client_id").notNull(),
     origin: text().$type<"user" | "model">().notNull(),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
-    /** The generation that wrote a model batch; null for a person. */
+    /** The generation that wrote a model step; null for a person. */
     generationId: text("generation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

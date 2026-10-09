@@ -35,7 +35,7 @@ export const DocumentActivityResult = Schema.Struct({
   documentConversationId: Schema.optionalKey(ActivityId),
   documentProjectId: Schema.optionalKey(ActivityId),
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-  revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   message: Schema.optionalKey(DocumentFailureReason),
 });
 export type DocumentActivityResult = typeof DocumentActivityResult.Type;
@@ -62,7 +62,7 @@ export function projectDocumentResult(value: unknown): DocumentActivityResult {
     ...(documentConversationId ? { documentConversationId } : {}),
     ...(documentProjectId ? { documentProjectId } : {}),
     ...(title ? { title } : {}),
-    ...(revision ? { revision } : {}),
+    ...(revision !== undefined ? { revision } : {}),
     ...(message ? { message } : {}),
   };
 }

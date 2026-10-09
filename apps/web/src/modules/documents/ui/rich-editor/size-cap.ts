@@ -1,8 +1,8 @@
 import { Extension } from "@tiptap/core";
-import { isChangeOrigin } from "@tiptap/extension-collaboration";
 import type { Node } from "@tiptap/pm/model";
 import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { toMarkdown } from "../../editor/markdown.ts";
+import { isRemoteChange } from "../../editor/remote.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 
 /**
@@ -22,7 +22,7 @@ const CHARS_PER_UNIT = 4;
 export const capCheck = (measure: (doc: Node) => number, cap: number = DOCUMENT_LIMITS.chars) => {
   let last: { size: number; length: number } | null = null;
   return (transaction: Transaction, before: Node) => {
-    if (!transaction.docChanged || isChangeOrigin(transaction)) return true;
+    if (!transaction.docChanged || isRemoteChange(transaction)) return true;
     const size = transaction.doc.content.size;
     if (size <= Math.max(MEASURED_FROM, before.content.size)) return true;
     if (last && last.length + (size - last.size) * CHARS_PER_UNIT <= cap) return true;

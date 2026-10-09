@@ -10,18 +10,25 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { fromBase64, toBase64 } from "lib0/buffer";
-import * as awarenessProtocol from "y-protocols/awareness";
-import * as Y from "yjs";
+import { Node } from "@tiptap/pm/model";
+import { Step, Transform } from "@tiptap/pm/transform";
+import { eq } from "drizzle-orm";
+import { projects } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { eq } from "drizzle-orm";
-import { projects } from "~/db/schema/index.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { projectAudience, projectRole } from "~/modules/projects/server/access.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { ensureIds } from "../editor/block-ids.ts";
+import {
+  documentSchema,
+  normalizeMarkdown,
+  parseMarkdown,
+  replaceDifference,
+  toMarkdown,
+} from "../editor/markdown.ts";
 import {
   CreateDocumentInput,
   DOCUMENT_LIMITS,
@@ -30,35 +37,51 @@ import {
   EditDocumentInput,
   PushDocumentInput,
   ReplaceDocumentInput,
-  type EditableDocument,
   type DocumentFrame,
+  type DocumentPresence,
+  type EditableDocument,
   type EditDocumentResult,
   type PushDocumentResult,
   type WriteDocumentResult,
 } from "../schema.ts";
-import { normalizeMarkdown, readMarkdown, writeMarkdown } from "../editor/markdown.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 type DocumentError = DocumentNotAvailable | DocumentRejected;
 
-/** Batches kept beside the snapshot before they are folded into it. */
-const COMPACT_AFTER = 64;
+/**
+ * Steps are folded into the snapshot only past both of these, so an editor
+ * that was offline for weeks can still rebase what it typed.
+ */
+const COMPACT_STEPS = 2_000;
+const RETAIN_STEPS = Duration.days(30);
 /** An entry nobody watches is dropped after this; the database still has it all. */
 const IDLE = Duration.minutes(1);
 /** How often an open feed confirms its reader still has access. */
 const ACCESS_RECHECK = Duration.seconds(30);
 /** Cards and lists follow a person's typing through `document.changed` at most this often. */
 const CHANGED_THROTTLE = Duration.seconds(1);
+/** The collab client id of every model write, and of the server's own repairs. */
+const MODEL_CLIENT = "model";
+const SERVER_CLIENT = "server";
 
+interface KeptStep {
+  readonly json: Record<string, unknown>;
+  readonly clientId: string;
+  readonly createdAt: number;
+}
 interface Entry {
-  readonly doc: Y.Doc;
-  readonly awareness: awarenessProtocol.Awareness;
+  /** The tree at `revision`. Moves only once a write has committed. */
+  doc: Node;
+  /** The stored snapshot and every step after it, so any editor since can catch up. */
+  snapshot: Node;
+  snapshotRevision: number;
+  steps: KeptStep[];
+  revision: number;
+  readonly presence: Map<string, DocumentPresence>;
   readonly frames: PubSub.PubSub<DocumentFrame>;
   readonly conversationId: string | null;
   readonly projectId: string | null;
-  revision: number;
-  snapshotRevision: number;
   subscribers: number;
   touched: number;
   changedPending: boolean;
@@ -66,24 +89,16 @@ interface Entry {
 interface Author {
   origin: "user" | "model";
   userId: string;
-  clientId: number | null;
+  clientId: string;
+}
+/** What one committed write did, for `settle` to bring the entry along. */
+interface Stored {
+  document: EditableDocument;
+  doc: Node;
+  steps: KeptStep[];
+  compacted: { snapshot: Node; revision: number } | null;
 }
 
-/** Everything one Y.Doc transaction changed, or null when it changed nothing. */
-const capture = (doc: Y.Doc, run: () => void): Uint8Array | null => {
-  const changes: Uint8Array[] = [];
-  const collect = (update: Uint8Array) => changes.push(update);
-  doc.on("update", collect);
-  try {
-    run();
-  } finally {
-    doc.off("update", collect);
-  }
-  return changes.length ? Y.mergeUpdates(changes) : null;
-};
-/** An update whose dependencies this doc lacks would sit in memory and never be stored. */
-const incomplete = (doc: Y.Doc) =>
-  doc.store.pendingStructs !== null || doc.store.pendingDs !== null;
 const countOccurrences = (haystack: string, needle: string) => {
   let count = 0;
   for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) count++;
@@ -103,6 +118,22 @@ const withinCap = (length: number) =>
         new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.chars} characters` }),
       )
     : Effect.void;
+/** Steps rebuilt from JSON and applied in order; any that does not fit the schema refuses all. */
+const applySteps = (doc: Node, json: ReadonlyArray<Record<string, unknown>>) =>
+  Effect.try({
+    try: () => {
+      let next = doc;
+      const steps = json.map((each) => {
+        const step = Step.fromJSON(documentSchema, each);
+        const result = step.apply(next);
+        if (!result.doc) throw new Error(result.failed ?? "step failed");
+        next = result.doc;
+        return step;
+      });
+      return { doc: next, steps };
+    },
+    catch: () => new DocumentRejected({ reason: "invalid document step" }),
+  });
 /**
  * One streamed model edit, anchored in the document's Markdown: the region
  * it rewrites is found again each time by the text it now holds, with the
@@ -190,20 +221,20 @@ export class DocumentService extends Context.Service<
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<boolean, DocumentError | E, R>;
     finishLive(live: LiveEdit): Effect.Effect<EditableDocument | null>;
-    /** A person's editor: one Yjs batch and/or cursor state. */
+    /** A person's editor: steps on a revision and/or its cursor. */
     push(
       userId: string,
       input: PushDocumentInput,
     ): Effect.Effect<PushDocumentResult, DocumentError>;
     /**
-     * The live feed for one open editor: a `sync` frame diffed against the
-     * subscriber's state vector, then every later batch and cursor change from
-     * anyone else. Null when the document is not the person's.
+     * The live feed for one open editor: the steps since `revision` (or the
+     * whole document when that is too old or absent), then every later step
+     * and cursor. Null when the document is not the person's.
      */
     subscribe(
       userId: string,
       documentId: string,
-      options: { stateVector: Uint8Array | null; clientId: number | null },
+      options: { revision: number | null; clientId: string | null },
     ): Effect.Effect<Stream.Stream<DocumentFrame> | null>;
   }
 >()("chat/documents/DocumentService") {
@@ -244,9 +275,7 @@ export class DocumentService extends Context.Service<
           const entry = entries.get(documentId);
           if (!entry) return Effect.void;
           entries.delete(documentId);
-          entry.awareness.destroy();
-          entry.doc.destroy();
-          // Ends every open feed; each editor reconnects and resyncs against storage.
+          // Ends every open feed; each editor reconnects and catches up from storage.
           return PubSub.shutdown(entry.frames);
         });
       yield* Effect.addFinalizer(() =>
@@ -270,20 +299,27 @@ export class DocumentService extends Context.Service<
           }
           const state = yield* documents.loadState(userId, documentId);
           if (!state) return yield* new DocumentNotAvailable({ documentId });
-          const doc = new Y.Doc();
-          Y.applyUpdate(doc, state.snapshot);
-          for (const update of state.updates) Y.applyUpdate(doc, update);
-          const awareness = new awarenessProtocol.Awareness(doc);
-          // The server edits but never has a cursor of its own.
-          awareness.setLocalState(null);
+          const snapshot = Node.fromJSON(documentSchema, state.snapshot);
+          // Stored steps were checked when they arrived; one that no longer
+          // applies means storage is corrupt, which is a defect.
+          const { doc } = yield* applySteps(
+            snapshot,
+            state.steps.map((row) => row.step),
+          ).pipe(Effect.orDie);
           const entry: Entry = {
             doc,
-            awareness,
+            snapshot,
+            snapshotRevision: state.snapshotRevision,
+            steps: state.steps.map((row) => ({
+              json: row.step,
+              clientId: row.clientId,
+              createdAt: row.createdAt.getTime(),
+            })),
+            revision: state.document.revision,
+            presence: new Map(),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
             conversationId: state.document.conversationId,
             projectId: state.document.projectId,
-            revision: state.document.revision,
-            snapshotRevision: state.snapshotRevision,
             subscribers: 0,
             touched: now,
             changedPending: false,
@@ -348,61 +384,120 @@ export class DocumentService extends Context.Service<
                 : Effect.fail(new DocumentRejected({ reason: "documents are unavailable" })),
             ),
           );
-      /** Stores one batch the entry has already applied. Caller holds the row lock. */
+      /**
+       * Where steps old enough to fold end, once enough have piled up: the
+       * snapshot moves there, and editors based before it reload instead.
+       */
+      const compactionPoint = (entry: Entry, steps: KeptStep[], now: number) => {
+        const all = [...entry.steps, ...steps];
+        if (all.length <= COMPACT_STEPS) return 0;
+        const cutoff = now - Duration.toMillis(RETAIN_STEPS);
+        let count = 0;
+        while (count < all.length - COMPACT_STEPS && all[count]!.createdAt < cutoff) count++;
+        return count;
+      };
+      /** Stores steps the caller already applied to `doc`. Caller holds the row lock. */
       const store = (
         tx: DbTx,
         documentId: string,
         entry: Entry,
-        update: Uint8Array,
+        doc: Node,
+        steps: Step[],
         author: Author,
-        /** The tree as Markdown after this batch, read once by the caller. */
-        content: string,
       ) =>
         Effect.gen(function* () {
-          const revision = entry.revision + 1;
+          const content = toMarkdown(doc);
+          yield* withinCap(content.length);
+          const now = yield* Clock.currentTimeMillis;
           const generation = author.origin === "model" ? yield* GenerationFence : null;
-          yield* documents.appendUpdate(tx, {
-            documentId,
-            revision,
-            update: Buffer.from(update),
-            origin: author.origin,
-            userId: author.userId,
-            generationId: generation?.generationId ?? null,
-          });
-          const compacting = revision - entry.snapshotRevision >= COMPACT_AFTER;
-          if (compacting)
-            yield* documents.compact(tx, documentId, Y.encodeStateAsUpdate(entry.doc), revision);
+          const kept = steps.map((step) => ({
+            json: step.toJSON() as Record<string, unknown>,
+            clientId: author.clientId,
+            createdAt: now,
+          }));
+          yield* documents.appendSteps(
+            tx,
+            kept.map((step, index) => ({
+              documentId,
+              revision: entry.revision + index + 1,
+              step: step.json,
+              clientId: author.clientId,
+              origin: author.origin,
+              userId: author.userId,
+              generationId: generation?.generationId ?? null,
+            })),
+          );
+          const revision = entry.revision + steps.length;
+          const folded = compactionPoint(entry, kept, now);
+          let compacted: Stored["compacted"] = null;
+          if (folded) {
+            const all = [...entry.steps, ...kept];
+            const { doc: snapshot } = yield* applySteps(
+              entry.snapshot,
+              all.slice(0, folded).map((step) => step.json),
+            ).pipe(Effect.orDie);
+            compacted = { snapshot, revision: entry.snapshotRevision + folded };
+            yield* documents.compact(
+              tx,
+              documentId,
+              snapshot.toJSON() as Record<string, unknown>,
+              compacted.revision,
+            );
+          }
           const document = yield* documents.write(tx, author.userId, documentId, {
             content,
             revision,
             lastEditedBy: author.origin,
             lastEditorUserId: author.userId,
           });
-          return { document, revision, compacting };
+          return { document, doc, steps: kept, compacted } satisfies Stored;
         });
-      /** Moves the entry to what was just committed and tells every other editor. */
-      const settle = (
-        entry: Entry,
-        stored: { revision: number; compacting: boolean },
-        update: Uint8Array,
-        author: Author,
-      ) =>
+      /** Moves the entry to what was just committed and tells every editor, the sender included. */
+      const settle = (entry: Entry, stored: Stored) =>
         Effect.suspend(() => {
-          entry.revision = stored.revision;
-          if (stored.compacting) entry.snapshotRevision = stored.revision;
+          entry.doc = stored.doc;
+          entry.steps.push(...stored.steps);
+          entry.revision += stored.steps.length;
+          if (stored.compacted) {
+            entry.steps.splice(0, stored.compacted.revision - entry.snapshotRevision);
+            entry.snapshot = stored.compacted.snapshot;
+            entry.snapshotRevision = stored.compacted.revision;
+          }
           return PubSub.publish(entry.frames, {
-            type: "update",
-            update: toBase64(update),
-            revision: stored.revision,
-            clientId: author.clientId,
+            type: "steps",
+            steps: stored.steps.map((step) => step.json),
+            clientIds: stored.steps.map((step) => step.clientId),
+            revision: entry.revision,
           });
         });
 
       /**
+       * Editors mint IDs for what people type; an undo bringing a block back,
+       * or a client that did not, can leave one missing or repeated. The
+       * server fixes that as its own step, which every editor then receives.
+       */
+      const repairIds = (userId: string, documentId: string, entry: Entry) =>
+        Effect.gen(function* () {
+          const tr = ensureIds(new Transform(entry.doc));
+          if (!tr.docChanged) return;
+          const stored = yield* transaction((tx) =>
+            Effect.gen(function* () {
+              const locked = yield* documents.lock(tx, userId, documentId);
+              if (locked.revision !== entry.revision) return null;
+              return yield* store(tx, documentId, entry, tr.doc, tr.steps, {
+                origin: "user",
+                userId,
+                clientId: SERVER_CLIENT,
+              });
+            }),
+          );
+          if (stored) yield* settle(entry, stored);
+        }).pipe(Effect.catchCause(() => Effect.logWarning("document ID repair failed")));
+
+      /**
        * One model change, applied to the live document under its fence. The
        * fence goes first, so a Stop, retry or lost lease interrupts before
-       * anything moves. Any failure after the Y.Doc changed drops the entry,
-       * since memory would otherwise be ahead of storage.
+       * anything moves. The entry moves only after the commit.
        */
       const modelWrite = <
         A extends { outcome: string; document: EditableDocument },
@@ -426,40 +521,36 @@ export class DocumentService extends Context.Service<
                 yield* requireDocuments(userId, tx);
                 const locked = yield* documents.lock(tx, userId, documentId);
                 if (locked.revision !== entry.revision) return yield* new StaleEntry();
-                const decided = yield* decide(readMarkdown(entry.doc), locked);
-                const next = decided.next;
-                const update =
-                  next === null ? null : capture(entry.doc, () => writeMarkdown(entry.doc, next));
-                if (!update) return { result: decided.result, stored: null };
-                const content = readMarkdown(entry.doc);
-                yield* withinCap(content.length);
-                const stored = yield* store(
-                  tx,
-                  documentId,
-                  entry,
-                  update,
-                  { origin: "model", userId, clientId: null },
-                  content,
+                const decided = yield* decide(toMarkdown(entry.doc), locked);
+                if (decided.next === null) return { result: decided.result, stored: null };
+                const tr = ensureIds(
+                  replaceDifference(new Transform(entry.doc), parseMarkdown(decided.next)),
                 );
-                return {
-                  result: { ...decided.result, document: stored.document },
-                  stored: { ...stored, update },
-                };
+                if (!tr.docChanged) return { result: decided.result, stored: null };
+                const stored = yield* store(tx, documentId, entry, tr.doc, tr.steps, {
+                  origin: "model",
+                  userId,
+                  clientId: MODEL_CLIENT,
+                });
+                return { result: { ...decided.result, document: stored.document }, stored };
               }),
-            ).pipe(Effect.onError(() => drop(documentId)));
+            );
             if (outcome.stored) {
-              yield* settle(entry, outcome.stored, outcome.stored.update, {
-                origin: "model",
-                userId,
-                clientId: null,
-              });
+              yield* settle(entry, outcome.stored);
               yield* documentChanged(userId, outcome.stored.document);
             }
             return outcome.result;
           }),
         );
         // A stale entry is rebuilt once; a second mismatch is a real defect.
-        return attempt.pipe(Effect.catchTag("StaleEntry", () => attempt.pipe(Effect.orDie)));
+        return attempt.pipe(
+          Effect.catchTag("StaleEntry", () =>
+            drop(documentId).pipe(
+              Effect.andThen(attempt),
+              Effect.catchTag("StaleEntry", (error) => Effect.die(error)),
+            ),
+          ),
+        );
       };
 
       const create = <E = never, R = never>(
@@ -469,12 +560,9 @@ export class DocumentService extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
-          const doc = new Y.Doc();
-          writeMarkdown(doc, parsed.content);
-          // Stored as the editor will write it back, so the model's next read matches.
-          const content = readMarkdown(doc);
-          const snapshot = Y.encodeStateAsUpdate(doc);
-          doc.destroy();
+          const doc = ensureIds(new Transform(parseMarkdown(parsed.content))).doc;
+          // Stored as the editor will write it back, so the next read matches.
+          const content = toMarkdown(doc);
           yield* withinCap(content.length);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
@@ -500,7 +588,7 @@ export class DocumentService extends Context.Service<
                 createdByMessageId:
                   "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,
                 lastEditedBy: parsed.by ?? "model",
-                snapshot: Buffer.from(snapshot),
+                snapshot: doc.toJSON() as Record<string, unknown>,
               });
             }),
           );
@@ -590,61 +678,52 @@ export class DocumentService extends Context.Service<
           Effect.gen(function* () {
             yield* requireDocuments(userId);
             const { entry, document } = yield* load(userId, parsed.documentId);
-            // Refused before the batch touches the live doc: a reader's cursor may move, their text may not.
-            if (parsed.update && !document.canEdit)
+            // Refused before the steps touch anything: a reader's cursor may move, their text may not.
+            if (parsed.steps && !document.canEdit)
               return yield* new DocumentRejected({ reason: "this document is read-only for you" });
-            if (parsed.awareness) {
-              const awareness = fromBase64(parsed.awareness);
-              yield* Effect.try({
-                try: () =>
-                  awarenessProtocol.applyAwarenessUpdate(
-                    entry.awareness,
-                    awareness,
-                    parsed.clientId,
-                  ),
-                catch: () => new DocumentRejected({ reason: "invalid cursor state" }),
-              });
+            if (parsed.presence) {
+              entry.presence.set(parsed.clientId, parsed.presence);
               yield* PubSub.publish(entry.frames, {
-                type: "awareness",
-                update: parsed.awareness,
+                type: "presence",
                 clientId: parsed.clientId,
+                presence: parsed.presence,
               });
             }
-            if (!parsed.update) return { revision: entry.revision };
-            const incoming = fromBase64(parsed.update);
+            if (!parsed.steps) return { revision: entry.revision, conflict: false };
+            // Built on an older revision: the editor rebases over what its feed brings, then resends.
+            if (parsed.revision !== entry.revision)
+              return { revision: entry.revision, conflict: true };
+            if (
+              parsed.steps.reduce((total, step) => total + step.length, 0) >
+              DOCUMENT_LIMITS.stepChars
+            )
+              return yield* new DocumentRejected({ reason: "document update is too large" });
+            const json = yield* Effect.try({
+              try: () => parsed.steps!.map((step) => JSON.parse(step) as Record<string, unknown>),
+              catch: () => new DocumentRejected({ reason: "invalid document step" }),
+            });
+            const { doc, steps } = yield* applySteps(entry.doc, json);
             const author: Author = { origin: "user", userId, clientId: parsed.clientId };
-            const outcome = yield* Effect.gen(function* () {
-              const update = yield* Effect.try({
-                try: () => capture(entry.doc, () => Y.applyUpdate(entry.doc, incoming, author)),
-                catch: () => new DocumentRejected({ reason: "invalid document update" }),
-              });
-              if (incomplete(entry.doc))
-                return yield* new DocumentRejected({ reason: "document update is out of order" });
-              // A batch the server already holds, such as a resend after a lost reply.
-              if (!update) return null;
-              const content = readMarkdown(entry.doc);
-              yield* withinCap(content.length);
-              return yield* transaction((tx) =>
-                Effect.gen(function* () {
-                  const locked = yield* documents.lock(tx, userId, parsed.documentId);
-                  if (locked.revision !== entry.revision) return yield* new StaleEntry();
-                  return {
-                    update,
-                    stored: yield* store(tx, parsed.documentId, entry, update, author, content),
-                  };
-                }),
-              );
-            }).pipe(
-              Effect.onError(() => drop(parsed.documentId)),
-              // The editor rebuilds from storage, then sends what storage lacks.
+            const stored = yield* transaction((tx) =>
+              Effect.gen(function* () {
+                const locked = yield* documents.lock(tx, userId, parsed.documentId);
+                if (locked.revision !== entry.revision) return yield* new StaleEntry();
+                return yield* store(tx, parsed.documentId, entry, doc, steps, author);
+              }),
+            ).pipe(
+              // The editor reconnects, catches up from storage and sends again.
               Effect.catchTag("StaleEntry", () =>
-                Effect.fail(new DocumentRejected({ reason: "document changed; reload it" })),
+                drop(parsed.documentId).pipe(
+                  Effect.andThen(
+                    Effect.fail(new DocumentRejected({ reason: "document changed; reload it" })),
+                  ),
+                ),
               ),
             );
-            if (!outcome) return { revision: entry.revision };
-            yield* settle(entry, outcome.stored, outcome.update, author);
+            yield* settle(entry, stored);
+            yield* repairIds(userId, parsed.documentId, entry);
             yield* documentChangedSoon(userId, parsed.documentId, entry);
-            return { revision: outcome.stored.revision };
+            return { revision: entry.revision, conflict: false };
           }),
         );
       });
@@ -652,59 +731,52 @@ export class DocumentService extends Context.Service<
       const subscribe = Effect.fn("DocumentService.subscribe")(function* (
         userId: string,
         documentId: string,
-        options: { stateVector: Uint8Array | null; clientId: number | null },
+        options: { revision: number | null; clientId: string | null },
       ) {
         if (!(yield* policy.can(userId, "documents"))) return null;
         if (!(yield* documents.get(userId, documentId))) return null;
         const gone: Stream.Stream<DocumentFrame> = Stream.make({ type: "gone" });
-        const mine = (frame: DocumentFrame) =>
-          "clientId" in frame && frame.clientId !== null && frame.clientId === options.clientId;
+        const ownPresence = (frame: DocumentFrame) =>
+          frame.type === "presence" && frame.clientId === options.clientId;
         return Stream.unwrap(
           exclusive(documentId)(
             Effect.gen(function* () {
               const { entry } = yield* load(userId, documentId);
-              // Subscribed before the diff is taken, and under the lock, so no
-              // batch falls between the two.
+              // Subscribed before the catch-up is taken, and under the lock, so
+              // no step falls between the two.
               const subscription = yield* PubSub.subscribe(entry.frames);
               entry.subscribers++;
               yield* Effect.addFinalizer(() =>
                 Effect.gen(function* () {
                   entry.subscribers--;
                   entry.touched = yield* Clock.currentTimeMillis;
-                  // A cursor this editor never sent has nothing to take away.
-                  if (
-                    options.clientId === null ||
-                    entries.get(documentId) !== entry ||
-                    !entry.awareness.meta.has(options.clientId)
-                  )
-                    return;
-                  awarenessProtocol.removeAwarenessStates(
-                    entry.awareness,
-                    [options.clientId],
-                    "disconnect",
-                  );
+                  if (options.clientId === null || !entry.presence.delete(options.clientId)) return;
                   yield* PubSub.publish(entry.frames, {
-                    type: "awareness",
-                    update: toBase64(
-                      awarenessProtocol.encodeAwarenessUpdate(entry.awareness, [options.clientId]),
-                    ),
-                    clientId: null,
+                    type: "presence",
+                    clientId: options.clientId,
+                    presence: null,
                   });
                 }),
               );
-              const present = [...entry.awareness.getStates().keys()];
-              const sync: DocumentFrame = {
-                type: "sync",
-                update: toBase64(
-                  options.stateVector
-                    ? Y.encodeStateAsUpdate(entry.doc, options.stateVector)
-                    : Y.encodeStateAsUpdate(entry.doc),
-                ),
-                awareness: present.length
-                  ? toBase64(awarenessProtocol.encodeAwarenessUpdate(entry.awareness, present))
-                  : null,
-                revision: entry.revision,
-              };
+              const from = options.revision;
+              const catchUp: DocumentFrame =
+                from !== null && from >= entry.snapshotRevision && from <= entry.revision
+                  ? {
+                      type: "steps",
+                      steps: entry.steps.slice(from - entry.snapshotRevision).map((s) => s.json),
+                      clientIds: entry.steps
+                        .slice(from - entry.snapshotRevision)
+                        .map((s) => s.clientId),
+                      revision: entry.revision,
+                    }
+                  : {
+                      type: "reset",
+                      doc: entry.doc.toJSON() as Record<string, unknown>,
+                      revision: entry.revision,
+                    };
+              const others: DocumentFrame[] = [...entry.presence]
+                .filter(([clientId]) => clientId !== options.clientId)
+                .map(([clientId, presence]) => ({ type: "presence", clientId, presence }));
               // Someone removed from the project stops receiving within one check.
               const revoked = Effect.gen(function* () {
                 while (true) {
@@ -712,10 +784,10 @@ export class DocumentService extends Context.Service<
                   if (!(yield* documents.get(userId, documentId))) return;
                 }
               });
-              return Stream.make(sync).pipe(
+              return Stream.make(catchUp, ...others).pipe(
                 Stream.concat(
                   Stream.fromSubscription(subscription).pipe(
-                    Stream.filter((frame) => !mine(frame)),
+                    Stream.filter((frame) => !ownPresence(frame)),
                     Stream.interruptWhen(revoked),
                   ),
                 ),
@@ -736,7 +808,7 @@ export class DocumentService extends Context.Service<
           Effect.gen(function* () {
             const { entry, document } = yield* load(userId, input.documentId);
             if (!document.canEdit || !input.old) return null;
-            const current = readMarkdown(entry.doc);
+            const current = toMarkdown(entry.doc);
             if (countOccurrences(current, input.old) !== 1) return null;
             const at = current.indexOf(input.old);
             const live: LiveEdit = {

@@ -1,19 +1,21 @@
+import type { Editor } from "@tiptap/core";
 import { useState, useSyncExternalStore } from "react";
-import type * as Y from "yjs";
-import { readMarkdown } from "../../editor/markdown.ts";
+import { toMarkdown } from "../../editor/markdown.ts";
 
-/** The document's Markdown, read again whenever the shared tree changes. */
-const useMarkdown = (doc: Y.Doc) => {
+/** The document's Markdown, read again whenever the editor's document changes. */
+const useMarkdown = (editor: Editor) => {
   const [store] = useState(() => {
-    let markdown = readMarkdown(doc);
+    let markdown = toMarkdown(editor.state.doc);
     return {
       subscribe: (onChange: () => void) => {
         const refresh = () => {
-          markdown = readMarkdown(doc);
+          markdown = toMarkdown(editor.state.doc);
           onChange();
         };
-        doc.on("update", refresh);
-        return () => doc.off("update", refresh);
+        editor.on("update", refresh);
+        return () => {
+          editor.off("update", refresh);
+        };
       },
       read: () => markdown,
     };
@@ -22,11 +24,11 @@ const useMarkdown = (doc: Y.Doc) => {
 };
 
 /**
- * The document as it is stored and as the assistant reads it. Read-only:
- * every change goes through the editor, so there is one way text moves.
+ * The document as it is stored. Read-only: every change goes through the
+ * editor, so there is one way text moves.
  */
-export function DocumentMarkdownView({ doc }: { doc: Y.Doc }) {
-  const markdown = useMarkdown(doc);
+export function DocumentMarkdownView({ editor }: { editor: Editor }) {
+  const markdown = useMarkdown(editor);
   return (
     <div className="h-full overflow-auto px-4 py-4">
       <pre

@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.ts";
+import {
+  fakeDocumentServer,
+  freshDocumentDevice,
+} from "../../../../tests/fixtures/document-server.ts";
 import type { EditableDocument } from "../schema.ts";
 import { getDocument, pushDocument } from "../server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "./document-owner.tsx";
@@ -79,6 +82,7 @@ const fixture = async (onGone = vi.fn()) => {
   return { client, ref, onGone };
 };
 
+beforeEach(freshDocumentDevice);
 beforeEach(() => {
   vi.clearAllMocks();
   server = fakeDocumentServer();

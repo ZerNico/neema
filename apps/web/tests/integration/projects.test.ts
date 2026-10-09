@@ -1,10 +1,8 @@
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Exit, Layer, ManagedRuntime, Option, Redacted, Stream } from "effect";
-import { fromBase64, toBase64 } from "lib0/buffer";
+import { Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import * as Y from "yjs";
 import {
   conversations,
   defaultCapabilities,
@@ -16,7 +14,6 @@ import {
 } from "~/db/schema/index.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
@@ -25,6 +22,7 @@ import { ProjectService } from "~/modules/projects/server/service.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { collabEditor } from "../fixtures/collab-editor.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
@@ -98,31 +96,7 @@ const createGroup = async (members: ReadonlyArray<{ userId: string; shareProject
   return id;
 };
 /** A person's editor, seeded from the feed like the panel's. */
-const openEditor = async (userId: string, documentId: string) => {
-  const doc = new Y.Doc();
-  const feed = await docs((s) =>
-    s.subscribe(userId, documentId, { stateVector: null, clientId: doc.clientID }),
-  );
-  if (!feed) return null;
-  const frame = Option.getOrThrow(await run(Stream.runHead(feed)));
-  if (frame.type !== "sync") throw new Error(`expected sync, got ${frame.type}`);
-  Y.applyUpdate(doc, fromBase64(frame.update));
-  const type = (change: (markdown: string) => string) => {
-    const updates: Uint8Array[] = [];
-    const collect = (update: Uint8Array) => updates.push(update);
-    doc.on("update", collect);
-    writeMarkdown(doc, change(readMarkdown(doc)));
-    doc.off("update", collect);
-    return docs((s) =>
-      s.push(userId, {
-        documentId,
-        clientId: doc.clientID,
-        update: toBase64(Y.mergeUpdates(updates)),
-      }),
-    );
-  };
-  return { doc, markdown: () => readMarkdown(doc), type };
-};
+const openEditor = (userId: string, documentId: string) => collabEditor(run, userId, documentId);
 
 describe("roles", () => {
   it("gives the owner, direct members and group members their roles and nobody else any", async () => {

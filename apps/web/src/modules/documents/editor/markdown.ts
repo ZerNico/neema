@@ -1,9 +1,8 @@
 import { getSchema, type JSONContent } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
 import { Node } from "@tiptap/pm/model";
-import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "@tiptap/y-tiptap";
-import type * as Y from "yjs";
-import { DOCUMENT_FIELD } from "../text.ts";
+import type { Transform } from "@tiptap/pm/transform";
+import { adoptIds } from "./block-ids.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 
 export const documentSchema = getSchema(documentExtensions);
@@ -38,34 +37,53 @@ const withoutEmptyParagraphs = (doc: JSONContent): JSONContent =>
       }
     : doc;
 
-const serialize = (json: JSONContent) =>
-  manager.serialize(fenceInlineCode(withoutEmptyParagraphs(json)));
+/** A planned section has no text yet; left in, it would write an empty block. */
+const withoutPending = (node: JSONContent): JSONContent =>
+  node.content
+    ? {
+        ...node,
+        content: node.content.filter((child) => child.type !== "pending").map(withoutPending),
+      }
+    : node;
 
-/** The Markdown a tree reads as: what the model sees and what is stored beside it. */
+const serialize = (json: JSONContent) =>
+  manager.serialize(fenceInlineCode(withoutEmptyParagraphs(withoutPending(json))));
+
+/** The Markdown a tree reads as: what is stored beside it for cards, search and Copy. */
 export const toMarkdown = (node: Node) => serialize(node.toJSON());
+
+/** A document tree from Markdown; empty Markdown is an empty document. */
+export const parseMarkdown = (markdown: string) =>
+  Node.fromJSON(
+    documentSchema,
+    markdown.trim() ? manager.parse(markdown) : { type: "doc", content: [] },
+  );
 
 /** Markdown in the canonical form the editor would write it back as. */
 export const normalizeMarkdown = (markdown: string) =>
   markdown.trim() ? serialize(manager.parse(markdown)) : "";
 
-/** The document's shared tree. */
-export const documentTree = (doc: Y.Doc) => doc.getXmlFragment(DOCUMENT_FIELD);
-
-/** The document as Markdown, read from its shared tree. */
-export const readMarkdown = (doc: Y.Doc) =>
-  toMarkdown(yXmlFragmentToProseMirrorRootNode(documentTree(doc), documentSchema));
-
 /**
- * Makes the shared tree read as `markdown`, changing only what differs, so
- * someone typing in another block keeps their place and their text. Runs in
- * one transaction; empty Markdown empties the tree.
+ * Makes `tr`'s document equal `next` by replacing only the range where the
+ * two differ, so text on either side keeps its place and every cursor outside
+ * the change maps through it untouched. `next` usually comes from Markdown
+ * and has no block IDs; it takes the current ones first, so unchanged blocks
+ * do not differ by their IDs alone.
  */
-export const writeMarkdown = (doc: Y.Doc, markdown: string) => {
-  const node = Node.fromJSON(
-    documentSchema,
-    markdown.trim() ? manager.parse(markdown) : { type: "doc", content: [] },
-  );
-  doc.transact(() => {
-    updateYFragment(doc, documentTree(doc), node, { mapping: new Map(), isOMark: new Map() });
-  });
+export const replaceDifference = <T extends Transform>(tr: T, built: Node): T => {
+  const next = adoptIds(tr.doc, built);
+  const start = tr.doc.content.findDiffStart(next.content);
+  if (start == null) return tr;
+  const end = tr.doc.content.findDiffEnd(next.content)!;
+  // Both ends count from their own document's end; where the shared tail
+  // overlaps the shared head, keep the shorter side inside the change.
+  let endA = end.a;
+  let endB = end.b;
+  const overlap = start - Math.min(endA, endB);
+  if (overlap > 0) {
+    endA += overlap;
+    endB += overlap;
+  }
+  tr.replace(start, endA, next.slice(start, endB));
+  return tr;
 };

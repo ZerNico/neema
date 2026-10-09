@@ -13,7 +13,7 @@ export const FOCUS_CHARS = 24_000;
 export const FOCUS_LINES = 200;
 
 const DocumentId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Scope = Schema.Literals(["chat", "project"]);
 const DocumentSummary = Schema.Struct({
   id: DocumentId,
@@ -631,7 +631,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     },
   } satisfies ToolGroup;
   const editedSinceYourLastWrite = (document: EditableDocument) =>
-    document.lastEditedBy === "user" && document.revision > (seen.get(document.id) ?? 0);
+    document.lastEditedBy === "user" && document.revision > (seen.get(document.id) ?? -1);
   const focusedData = (document: EditableDocument) => {
     const head = {
       ...summary(document),

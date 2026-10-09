@@ -1,25 +1,34 @@
+import type { Editor } from "@tiptap/core";
+import { Node } from "@tiptap/pm/model";
 import { useEffect, useState } from "react";
-import type { DocumentSync } from "~/modules/documents/client/document-sync.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
+import {
+  parseMarkdown,
+  replaceDifference,
+  toMarkdown,
+} from "~/modules/documents/editor/markdown.ts";
 
 /**
- * Stands in for the rich editor: a textarea over the document's Markdown,
- * writing each change back to the tree the way the server applies an edit.
+ * Stands in for the rich editor: a textarea over the connection's document as
+ * Markdown, writing each change back as the smallest edit, as typing would.
  */
-export function FakeSourceEditor({ sync }: { sync: Pick<DocumentSync, "doc"> }) {
-  const [value, setValue] = useState(() => readMarkdown(sync.doc));
+export function FakeSourceEditor({ sync }: { sync: { editor: Editor } }) {
+  const { editor } = sync;
+  const [value, setValue] = useState(() => toMarkdown(editor.state.doc));
   useEffect(() => {
-    const observe = () => setValue(readMarkdown(sync.doc));
-    sync.doc.on("update", observe);
-    return () => sync.doc.off("update", observe);
-  }, [sync]);
+    const observe = () => setValue(toMarkdown(editor.state.doc));
+    editor.on("update", observe);
+    return () => {
+      editor.off("update", observe);
+    };
+  }, [editor]);
   return (
     <textarea
       aria-label="Document source"
       value={value}
       onChange={(event) => {
         setValue(event.target.value);
-        writeMarkdown(sync.doc, event.target.value);
+        const next = Node.fromJSON(editor.schema, parseMarkdown(event.target.value).toJSON());
+        editor.view.dispatch(replaceDifference(editor.state.tr, next));
       }}
     />
   );

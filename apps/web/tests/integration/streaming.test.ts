@@ -15,8 +15,6 @@ import {
   Stream,
 } from "effect";
 import { uuidv7 } from "uuidv7";
-import { fromBase64, toBase64 } from "lib0/buffer";
-import * as Y from "yjs";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
 import { and, eq, sql } from "drizzle-orm";
 import {
@@ -54,7 +52,6 @@ import {
   type CustomToolRunResult,
 } from "~/modules/custom-tools/server/runtime.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -86,6 +83,7 @@ import {
 } from "~/modules/tools/server/external-completion.ts";
 import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { collabEditor } from "../fixtures/collab-editor.ts";
 import {
   FakeDocumentParser,
   FakeWebSearch,
@@ -898,7 +896,10 @@ describe("conversational agent authoring", () => {
     const block = `<script>let stops = $state(["Innsbruck", "Salzburg"]);</script><map label="Trip">{#each stops as s}<pin place={s}/>{/each}</map>`;
     authoringScript = () =>
       Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: `Trip:\n\n\`\`\`ui\n${block}\n\`\`\`\n` }),
+        AiResponse.makePart("text-delta", {
+          id: "t",
+          delta: `Trip:\n\n\`\`\`ui\n${block}\n\`\`\`\n`,
+        }),
         authoringFinish(),
       );
     try {
@@ -2094,7 +2095,7 @@ describe("conversation documents", () => {
           return authoringTool(
             input,
             "edit_document",
-            { old: "- [ ] ship", new: "- [ ] ship\n- [ ] announce", expectedRevision: 1 },
+            { old: "- [ ] ship", new: "- [ ] ship\n- [ ] announce", expectedRevision: 0 },
             hermes,
           );
         return reply();
@@ -2107,11 +2108,11 @@ describe("conversation documents", () => {
         expect(JSON.stringify(prompts[0]!.prompt)).not.toContain("DATA TO EDIT");
         expect(trailing(prompts[0]!)).toBeNull();
         expect(trailing(prompts[1]!)).toMatchObject({
-          focused: { title: "Release checklist", revision: 1, content: CHECKLIST },
+          focused: { title: "Release checklist", revision: 0, content: CHECKLIST },
           others: [],
         });
         expect(trailing(prompts[2]!)!.focused).toMatchObject({
-          revision: 2,
+          revision: 1,
           lastEditedBy: "model",
           editedSinceYourLastWrite: false,
           content: `${CHECKLIST}\n- [ ] announce`,
@@ -2123,7 +2124,7 @@ describe("conversation documents", () => {
         const [document] = await documentsOf(seed);
         expect(document).toMatchObject({
           title: "Release checklist",
-          revision: 2,
+          revision: 1,
           lastEditedBy: "model",
           content: `${CHECKLIST}\n- [ ] announce`,
         });
@@ -2139,14 +2140,14 @@ describe("conversation documents", () => {
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 1,
+            revision: 0,
           },
           {
             outcome: "updated",
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 2,
+            revision: 1,
           },
         ]);
         expect(detail.toolCalls.every((call) => call.status === "complete")).toBe(true);
@@ -2185,8 +2186,8 @@ describe("conversation documents", () => {
             conversationId: seed.conversation.id,
           });
           const feed = yield* service.subscribe(seed.userId, document!.id, {
-            stateVector: null,
-            clientId: 7,
+            revision: null,
+            clientId: "watcher",
           });
           watcher = Effect.runFork(
             Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
@@ -2223,7 +2224,7 @@ describe("conversation documents", () => {
         ),
       );
       // Written while streaming, then settled: more than the one write a plain edit makes.
-      const updates = frames.filter((frame) => frame.type === "update");
+      const updates = frames.filter((frame) => frame.type === "steps");
       expect(updates.length).toBeGreaterThanOrEqual(2);
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
@@ -2308,24 +2309,14 @@ describe("conversation documents", () => {
           const [document] = yield* service.list(seed.userId, {
             conversationId: seed.conversation.id,
           });
-          // The panel's tick: one marker character in a synced Y.Doc, pushed as a batch.
-          const doc = new Y.Doc();
-          const feed = yield* service.subscribe(seed.userId, document!.id, {
-            stateVector: null,
-            clientId: doc.clientID,
-          });
-          const frame = Option.getOrThrow(yield* Stream.runHead(feed!));
-          if (frame.type !== "sync") throw new Error("expected sync");
-          Y.applyUpdate(doc, fromBase64(frame.update));
-          const updates: Uint8Array[] = [];
-          doc.on("update", (update: Uint8Array) => updates.push(update));
+          // The panel's tick, typed in an editor opened from the live feed.
+          const editor = yield* Effect.promise(() =>
+            collabEditor(runtime.runPromise, seed.userId, document!.id),
+          );
           // Ticks the first task, which in the tree is its checked attribute.
-          writeMarkdown(doc, readMarkdown(doc).replace("[ ]", "[x]"));
-          return yield* service.push(seed.userId, {
-            documentId: document!.id,
-            clientId: doc.clientID,
-            update: toBase64(Y.mergeUpdates(updates)),
-          });
+          return yield* Effect.promise(() =>
+            editor!.type((markdown) => markdown.replace("[ ]", "[x]")),
+          );
         }),
       ),
     );
@@ -2345,7 +2336,7 @@ describe("conversation documents", () => {
         return authoringTool(input, "edit_document", {
           old: "- [ ] write notes",
           new: "- [ ] write release notes",
-          expectedRevision: 2,
+          expectedRevision: 1,
         });
       return reply();
     };
@@ -2354,18 +2345,18 @@ describe("conversation documents", () => {
       await settle(sent.assistantMessageId);
       expect(prompts).toHaveLength(4);
       expect(trailing(prompts[2]!)!.focused).toMatchObject({
-        revision: 3,
+        revision: 2,
         lastEditedBy: "user",
         editedSinceYourLastWrite: true,
         content: "# Release\n\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
       });
       // Having seen the current revision through the failed edit, the flag clears.
       expect(trailing(prompts[3]!)!.focused).toMatchObject({
-        revision: 3,
+        revision: 2,
         editedSinceYourLastWrite: false,
       });
       const [document] = await documentsOf(seed);
-      expect(document).toMatchObject({ revision: 3, lastEditedBy: "user" });
+      expect(document).toMatchObject({ revision: 2, lastEditedBy: "user" });
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
@@ -2376,7 +2367,7 @@ describe("conversation documents", () => {
         documentId: document!.id,
         documentConversationId: seed.conversation.id,
         title: "Release checklist",
-        revision: 3,
+        revision: 2,
       });
       expect(Object.keys(missed.result as object).toSorted()).toEqual([
         "documentConversationId",
@@ -2388,7 +2379,7 @@ describe("conversation documents", () => {
       ]);
       expect(missed.error?.code).toBe("DocumentNotUpdated");
       expect(missed.error?.message).toContain("does not occur");
-      expect(missed.error?.message).toContain("changed since revision 2");
+      expect(missed.error?.message).toContain("changed since revision 1");
       // The preview reached the model in the tool result of its own round, and
       // is then dropped from the continuation like the rest of the content.
       expect(JSON.stringify(detail)).not.toContain("[x] write notes");

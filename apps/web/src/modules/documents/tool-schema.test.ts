@@ -35,7 +35,7 @@ describe("document tool projections", () => {
       null,
       "PRIVATE",
       { outcome: "saved" },
-      { outcome: "updated", revision: 0 },
+      { outcome: "updated", revision: -1 },
     ])
       expect(projectDocumentResult(value)).toEqual({ outcome: "invalid" });
     expect(documentResultOk({ outcome: "conflict" })).toBe(false);

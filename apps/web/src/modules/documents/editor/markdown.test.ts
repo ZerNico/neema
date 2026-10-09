@@ -3,15 +3,15 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
 import { StarterKit } from "@tiptap/starter-kit";
 import { describe, expect, it } from "vitest";
-import * as Y from "yjs";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
+import { Transform } from "@tiptap/pm/transform";
 import { documentExtensions } from "./extensions.ts";
 import {
   documentSchema,
-  documentTree,
   normalizeMarkdown,
-  readMarkdown,
+  parseMarkdown,
+  replaceDifference,
   toMarkdown,
-  writeMarkdown,
 } from "./markdown.ts";
 
 const SAMPLE = [
@@ -51,16 +51,10 @@ const cell = (text: string) => ({
 });
 const row = (...texts: string[]) => ({ type: "tableRow", content: texts.map(cell) });
 
-const withDocument = (markdown: string) => {
-  const doc = new Y.Doc();
-  writeMarkdown(doc, markdown);
-  return doc;
-};
-
 describe("document Markdown", () => {
   it("reads back what it was written in canonical form", () => {
     expect(normalizeMarkdown(SAMPLE)).toBe(SAMPLE);
-    expect(readMarkdown(withDocument(SAMPLE))).toBe(SAMPLE);
+    expect(toMarkdown(parseMarkdown(SAMPLE))).toBe(SAMPLE);
   });
 
   it.each([
@@ -126,31 +120,32 @@ describe("document Markdown", () => {
     );
   });
 
-  it("changes only the block that differs, so others keep their place", () => {
-    const doc = withDocument(SAMPLE);
-    const replica = new Y.Doc();
-    Y.applyUpdate(replica, Y.encodeStateAsUpdate(doc));
-    const before = documentTree(doc).toArray();
-    const vector = Y.encodeStateVector(doc);
+  it("changes only the range that differs, so text and cursors around it stay put", () => {
+    const doc = parseMarkdown(SAMPLE);
+    const next = parseMarkdown(SAMPLE.replace("Intro with", "An intro with"));
+    const tr = replaceDifference(new Transform(doc), next);
 
-    const next = SAMPLE.replace("- [ ] open task", "- [x] open task");
-    writeMarkdown(doc, next);
-
-    expect(readMarkdown(doc)).toBe(next);
-    const after = documentTree(doc).toArray();
-    // Ticking a task sets an attribute in place: every top-level block is the same shared item.
-    const changed = before.filter((block, index) => after[index] !== block);
-    expect(changed).toHaveLength(0);
-    const delta = Y.encodeStateAsUpdate(doc, vector);
-    expect(delta.length).toBeLessThan(Y.encodeStateAsUpdate(doc).length / 10);
-    Y.applyUpdate(replica, delta);
-    expect(readMarkdown(replica)).toBe(next);
+    expect(toMarkdown(tr.doc)).toBe(toMarkdown(next));
+    expect(tr.steps).toHaveLength(1);
+    // A cursor in the task list further down maps straight through.
+    let task = -1;
+    doc.descendants((node, position) => {
+      if (task < 0 && node.isText && node.text === "open task") task = position;
+    });
+    const before = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, task + 2),
+    });
+    const after = before.apply(before.tr.step(tr.steps[0]!));
+    expect(after.doc.textBetween(after.selection.from - 2, after.selection.from + 7)).toBe(
+      "open task",
+    );
   });
 
-  it("empties the tree for empty Markdown", () => {
-    const doc = withDocument("# Title");
-    writeMarkdown(doc, "  \n");
-    expect(documentTree(doc).length).toBe(0);
-    expect(readMarkdown(doc)).toBe("");
+  it("writes nothing when the documents already agree, and empties for empty Markdown", () => {
+    const doc = parseMarkdown("# Title");
+    expect(replaceDifference(new Transform(doc), parseMarkdown("# Title")).steps).toHaveLength(0);
+    const emptied = replaceDifference(new Transform(doc), parseMarkdown("  \n"));
+    expect(toMarkdown(emptied.doc)).toBe("");
   });
 });

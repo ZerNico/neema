@@ -24,7 +24,7 @@ const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
 const copyMarkdown = async (controller: Controller) => {
   const sync = controller.sync;
   const text = sync
-    ? (await import("../editor/markdown.ts")).readMarkdown(sync.doc)
+    ? (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc)
     : controller.content;
   await navigator.clipboard.writeText(text);
 };
@@ -125,6 +125,7 @@ export function DocumentPanelBody({
       </AnimatePresence>
       <div className="flex min-w-0 flex-1 flex-col space-y-3">
         {controller.error ? <FieldError>{controller.error}</FieldError> : null}
+        {controller.recovered ? <RecoveredChanges controller={controller} /> : null}
         <div className="flex min-w-0 flex-1 flex-col">
           {controller.sync ? (
             // The editor pads its own text, so it is pulled to the panel's
@@ -143,7 +144,7 @@ export function DocumentPanelBody({
               >
                 <div className="absolute inset-0">
                   <DocumentEditor
-                    key={controller.sync.doc.guid}
+                    key={controller.documentId}
                     sync={controller.sync}
                     mode={mode}
                     readOnly={!controller.document?.canEdit}
@@ -156,6 +157,33 @@ export function DocumentPanelBody({
             <Spinner aria-label="Connecting to document" className="text-muted-foreground" />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Text from changes made offline that the document no longer had a place
+ * for, kept until the person copies or dismisses it rather than dropped.
+ */
+function RecoveredChanges({ controller }: { controller: Controller }) {
+  const text = controller.recovered ?? "";
+  return (
+    <div role="status" className="bg-muted space-y-2 rounded-xl p-3 text-sm">
+      <p className="font-medium">Some offline changes couldn’t be placed</p>
+      <p className="text-muted-foreground line-clamp-4 whitespace-pre-wrap">{text}</p>
+      <div className="flex gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => void navigator.clipboard.writeText(text)}
+        >
+          <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} data-icon="inline-start" />
+          Copy
+        </Button>
+        <Button size="xs" variant="ghost" onClick={controller.dismissRecovered}>
+          Dismiss
+        </Button>
       </div>
     </div>
   );

@@ -203,7 +203,7 @@ describe("loadConversationDetail", () => {
             title: "Second",
             content: "PRIVATE SECOND SOURCE",
             lastEditedBy: "model",
-            snapshot: Buffer.alloc(0),
+            snapshot: { type: "doc", content: [] },
           },
           {
             id: firstId,
@@ -211,7 +211,7 @@ describe("loadConversationDetail", () => {
             title: "First",
             content: "PRIVATE FIRST SOURCE",
             lastEditedBy: "user",
-            snapshot: Buffer.alloc(0),
+            snapshot: { type: "doc", content: [] },
           },
         ]),
       ),

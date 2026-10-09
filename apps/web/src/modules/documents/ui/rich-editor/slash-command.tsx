@@ -12,9 +12,9 @@ import {
   TextIcon,
 } from "@hugeicons/core-free-icons";
 import { Extension, type Editor, type Range } from "@tiptap/core";
-import { isChangeOrigin } from "@tiptap/extension-collaboration";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
+import { isRemoteChange } from "../../editor/remote.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
@@ -114,7 +114,7 @@ export const SlashCommand = Extension.create({
         editor: this.editor,
         char: "/",
         // A collaborator's typing must never open this person's menu.
-        shouldShow: ({ transaction }) => !isChangeOrigin(transaction),
+        shouldShow: ({ transaction }) => !isRemoteChange(transaction),
         items: ({ query }) => filterSlashItems(query),
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
