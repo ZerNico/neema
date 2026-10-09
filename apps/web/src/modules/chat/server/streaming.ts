@@ -223,6 +223,7 @@ import {
 import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 
 import { runtimeContextMessage } from "./runtime-context.ts";
+import { uiStateContextMessage } from "~/modules/genui/server/ui-state-context.ts";
 import { buildSearchReminder, MAX_PRIOR_SOURCES, systemReminderMessage } from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
@@ -589,6 +590,15 @@ export class StreamEngine extends Context.Service<
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
+        // What the reader did in earlier answers' blocks, as of this send.
+        const uiStateContext = uiStateContextMessage(
+          history,
+          yield* repo.listUiStates(
+            history
+              .filter((message) => message.role === "assistant" && message.id !== input.messageId)
+              .map((message) => message.id),
+          ),
+        );
         // A resumed answer starts from what it already produced: its rows are
         // the rounds this attempt continues, read once here.
         const resuming = input.resume === true && currentMessage !== null;
@@ -1855,6 +1865,7 @@ export class StreamEngine extends Context.Service<
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             ...keptNotice,
+            ...(uiStateContext ? [uiStateContext] : []),
             runtimeContext,
           ];
           // Fixed as the answer's first request saw it: it sits ahead of every

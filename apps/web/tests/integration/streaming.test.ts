@@ -63,6 +63,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
+import { hashSource } from "~/modules/genui/fences.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { EditNotAllowed } from "~/modules/chat/errors.ts";
 import { imageStandIn, RESUME_REMINDER } from "~/modules/chat/server/prompt.ts";
@@ -767,6 +768,68 @@ describe("conversational agent authoring", () => {
           call.messageId === again.assistantMessageId && call.toolName === "read_attachment",
       );
       expect(reread?.result).toMatchObject({ ok: true, fileName: "big.csv", matches: 1 });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("tells the next answer how the reader left an earlier answer's blocks, after history", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const block = "<script>let answers = $state([]);</script><quiz answers={answers}/>";
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", {
+          id: "t",
+          delta:
+            prompts.length === 1 ? `Here:\n\n\`\`\`ui\n${block}\n\`\`\`\n` : "You picked Porto.",
+        }),
+        authoringFinish(),
+      );
+    };
+    const send = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    try {
+      const quiz = await send("Quiz me on capitals");
+      await collectDraftTurn(quiz.assistantMessageId);
+      const saved = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const row = (yield* repo.listMessages(seed.conversation.id)).find(
+            (message) => message.id === quiz.assistantMessageId,
+          );
+          return yield* repo.saveUiState({
+            userId: seed.userId,
+            messageId: row!.id,
+            generationId: row!.generationId ?? null,
+            ordinal: 0,
+            sourceHash: hashSource(block),
+            state: { answers: ["Porto"], __seed: 3 },
+          });
+        }),
+      );
+      expect(saved).toBe("saved");
+      const next = await send("Which did I pick?");
+      await collectDraftTurn(next.assistantMessageId);
+      const prompt = JSON.stringify(prompts[1]!.prompt);
+      const line = String.raw`Block 1 of your answer to \"Quiz me on capitals\": {\"answers\":[\"Porto\"]}`;
+      expect(prompt).toContain(line);
+      // After the earlier answer and the new question, so history stays cacheable.
+      expect(prompt.indexOf(line)).toBeGreaterThan(prompt.indexOf("Which did I pick?"));
+      expect(prompt).not.toContain("__seed");
     } finally {
       authoringScript = null;
     }
