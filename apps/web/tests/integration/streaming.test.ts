@@ -414,7 +414,7 @@ beforeAll(async () => {
             : Effect.succeed({
                 bytes: Uint8Array.from(generatedPng),
                 mediaType: "image/png",
-                size: { width: 1, height: 1 },
+                size: { width: 640, height: 480 },
               });
         }),
     }),

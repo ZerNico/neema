@@ -15,7 +15,11 @@ const hit = (n: number): ImageHit => ({
   title: `Image ${n}`,
 });
 
-const image = { bytes: new Uint8Array([1]), mediaType: "image/png", size: { width: 4, height: 3 } };
+const image = {
+  bytes: new Uint8Array([1]),
+  mediaType: "image/png",
+  size: { width: 800, height: 600 },
+};
 
 const harness = (overrides: Partial<ImageResolverDeps> = {}) => {
   const searched: string[] = [];
@@ -28,13 +32,14 @@ const harness = (overrides: Partial<ImageResolverDeps> = {}) => {
     search: (query) =>
       Effect.sync(() => {
         searched.push(query);
-        return [1, 2, 3, 4, 5, 6].map(hit);
+        return [1, 2, 3, 4, 5, 6, 7].map(hit);
       }),
     fetch: (url) =>
       Effect.suspend(() => {
         fetched.push(url);
-        // Thumbnails of image 2 fail; its original works. Image 3 fails both ways.
-        if (url.includes("/2.") && url.includes("thumb")) return Effect.fail("thumb down");
+        // Image 2 is thumbnail-sized; image 3 is gone.
+        if (url.includes("/2."))
+          return Effect.succeed({ ...image, size: { width: 150, height: 150 } });
         if (url.includes("/3.")) return Effect.fail("gone");
         return Effect.succeed(image);
       }),
@@ -62,14 +67,14 @@ describe("image resolver", () => {
       expect(result.status).toBe("resolved");
       expect(result.items.map((item) => item.pageUrl)).toEqual([
         "https://page.example/1",
-        "https://page.example/2",
         "https://page.example/4",
         "https://page.example/5",
+        "https://page.example/6",
       ]);
-      expect(result.items[0]).toMatchObject({ width: 4, height: 3, title: "Image 1" });
-      expect(h.fetched).toContain("https://img.example/2.png");
-      // Four were enough by the fifth candidate; the sixth was never fetched.
-      expect(h.fetched.some((url) => url.includes("/6."))).toBe(false);
+      expect(result.items[0]).toMatchObject({ width: 800, height: 600, title: "Image 1" });
+      // Originals only, and four were enough by the sixth candidate.
+      expect(h.fetched.some((url) => url.includes("thumb"))).toBe(false);
+      expect(h.fetched.some((url) => url.includes("/7."))).toBe(false);
     }),
   );
 

@@ -4,7 +4,7 @@
 // it runs in the generation's scope, so Stop or a lost lease ends it with the
 // answer, and the answer waits a moment for what is still in flight.
 
-import { Duration, Effect, FiberSet, Semaphore, type Scope } from "effect";
+import { Duration, Effect, FiberSet, Option, Semaphore, type Scope } from "effect";
 import type { UiImage, UiImageResult } from "~/modules/chat/assistant-output.ts";
 import type { ImageHit } from "~/modules/tools/server/search-providers/types.ts";
 import { blockImageQueries, IMAGE_QUERY_LIMITS } from "../extract.ts";
@@ -15,6 +15,8 @@ export const IMAGE_RESOLVE_LIMITS = {
   imagesPerQuery: 4,
   /** Hits asked for, so a few that fail to fetch still leave enough. */
   candidatesPerQuery: 8,
+  /** Shorter side in pixels; below it an image is blurry at chat width. */
+  minSide: 240,
   concurrency: 3,
   drain: Duration.seconds(5),
 } as const;
@@ -78,11 +80,18 @@ export const makeImageResolver = (
       );
 
     const fetchHit = (hit: ImageHit) =>
-      // The thumbnail is smaller and usually enough for a tile; the original is the fallback.
-      (hit.thumbnailUrl
-        ? deps.fetch(hit.thumbnailUrl).pipe(Effect.catch(() => deps.fetch(hit.imageUrl)))
-        : deps.fetch(hit.imageUrl)
-      ).pipe(Effect.option);
+      // Never the thumbnail: about 150 px, it is blurry in a carousel at chat
+      // width, and the next candidate's original is the better stand-in.
+      deps
+        .fetch(hit.imageUrl)
+        .pipe(
+          Effect.option,
+          Effect.map(
+            Option.filter(
+              ({ size }) => Math.min(size.width, size.height) >= IMAGE_RESOLVE_LIMITS.minSide,
+            ),
+          ),
+        );
 
     const resolve = (query: string) =>
       Effect.gen(function* () {
