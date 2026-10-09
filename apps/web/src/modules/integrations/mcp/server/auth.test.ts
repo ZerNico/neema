@@ -237,6 +237,16 @@ describe("signing in to an MCP server", () => {
       expect(log.tokens.at(-1)!.authorization).toMatch(/^Basic /);
     });
 
+    it("registers for the client authentication the token request then uses", async () => {
+      metadataExtras = { token_endpoint_auth_methods_supported: ["client_secret_post"] };
+      const { server: found, verifier } = await started();
+      expect(log.registrations.at(-1)).toMatchObject({
+        token_endpoint_auth_method: "client_secret_post",
+      });
+      await finish(found, verifier, base);
+      expect(log.tokens.at(-1)).toMatchObject({ client_secret: "dyn-secret", authorization: "" });
+    });
+
     it("never spends the code when another server answered, or none said who it was", async () => {
       const { server: found, verifier } = await started();
       const mixedUp = await finish(found, verifier, "https://evil.example.com");

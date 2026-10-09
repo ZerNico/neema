@@ -241,9 +241,14 @@ const clientFor = (
       return yield* reject(
         "The server’s sign-in only accepts registered apps. Ask your admin to add a client ID for it.",
       );
-    const confidential = (metadata.token_endpoint_auth_methods_supported ?? []).some(
-      (method) => method === "client_secret_basic" || method === "client_secret_post",
-    );
+    // The method the token request will use (the SDK prefers basic, then post),
+    // so the client is registered for how it then authenticates. Silence means basic (RFC 8414).
+    const supported = metadata.token_endpoint_auth_methods_supported ?? ["client_secret_basic"];
+    const method = supported.includes("client_secret_basic")
+      ? "client_secret_basic"
+      : supported.includes("client_secret_post")
+        ? "client_secret_post"
+        : "none";
     const registered = yield* Effect.tryPromise({
       try: () =>
         registerClient(metadata.issuer, {
@@ -253,7 +258,7 @@ const clientFor = (
             redirect_uris: [input.redirectUri],
             grant_types: ["authorization_code", "refresh_token"],
             response_types: ["code"],
-            token_endpoint_auth_method: confidential ? "client_secret_basic" : "none",
+            token_endpoint_auth_method: method,
             application_type: "web",
           },
           fetchFn: fetch,
