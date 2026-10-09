@@ -3738,9 +3738,13 @@ export class StreamEngine extends Context.Service<
                             const { sources, access, files } = integrationTools!.take(part.id);
                             // Files a service returned become attachments of the answer,
                             // stored under the fence like a custom tool's; a failed one is noted.
+                            const undelivered: string[] = [];
                             for (const file of files) {
                               const stored = yield* deliverFile(file, rowId);
-                              if ("reason" in stored) continue;
+                              if ("reason" in stored) {
+                                undelivered.push(`${file.name} (${stored.reason})`);
+                                continue;
+                              }
                               turnFiles.push(
                                 yield* fileForModel(promptDeps.parser, {
                                   id: stored.attachment.id,
@@ -3751,6 +3755,21 @@ export class StreamEngine extends Context.Service<
                                   files: model?.capabilities.files ?? false,
                                 }),
                               );
+                            }
+                            // The result already names the files, so say which did not arrive.
+                            const returned = part.result as { ok?: unknown; result?: unknown };
+                            if (
+                              undelivered.length &&
+                              returned.ok === true &&
+                              typeof returned.result === "object" &&
+                              returned.result !== null
+                            ) {
+                              const note = `Not attached, so do not say they are: ${undelivered.join("; ")}`;
+                              const noted = {
+                                ...returned,
+                                result: { ...returned.result, undelivered: note.slice(0, 500) },
+                              };
+                              Object.assign(part, { result: noted, encodedResult: noted });
                             }
                             for (const source of sources)
                               sourcesByIndex.set(
