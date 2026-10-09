@@ -104,6 +104,8 @@ const legacyServer = async (request: Request) => {
 
 /** Which requests the test server saw, to tell the eras apart. */
 const seen: string[] = [];
+/** What each `initialize` said the client can do. */
+const declared: unknown[] = [];
 
 /**
  * The test server: the SDK's own handler behind plain `node:http`, with a
@@ -119,8 +121,11 @@ const serve = async (request: IncomingMessage, response: ServerResponse) => {
     response.writeHead(401, { "www-authenticate": 'Bearer error="invalid_token"' }).end();
     return;
   }
-  const message = body ? (JSON.parse(body) as { method?: string }) : {};
+  const message = body
+    ? (JSON.parse(body) as { method?: string; params?: { capabilities?: unknown } })
+    : {};
   if (message.method) seen.push(`${url.pathname} ${message.method}`);
+  if (message.method === "initialize") declared.push(message.params?.capabilities);
   const headers = new Headers();
   for (const [key, value] of Object.entries(request.headers))
     if (typeof value === "string") headers.set(key, value);
@@ -319,6 +324,19 @@ describe("an MCP server through the adapter", () => {
       const { entries } = await list(sessionAt("/mcp"));
       const exit = await run(sessionAt("/mcp"), byName(entries, "deploy"), {});
       expect(JSON.stringify(exit)).not.toContain("Deployed.");
+    });
+
+    it("tells a server it may ask only when someone is there to answer", async () => {
+      const { entries } = await list(sessionAt("/legacy"));
+      declared.length = 0;
+      await run(sessionAt("/legacy"), byName(entries, "deploy"), {});
+      await run(
+        sessionAt("/legacy"),
+        byName(entries, "deploy"),
+        {},
+        answering({ action: "decline" }).call,
+      );
+      expect(declared).toEqual([{}, { elicitation: { form: {}, url: {} } }]);
     });
   });
 

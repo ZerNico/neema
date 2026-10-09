@@ -289,29 +289,30 @@ export function prepareIntegrationTools(input: {
           if (early.kind === "refuse") return refusal(early);
           // A server may ask several things at once; the person sees one at a time.
           const asking = Semaphore.makeUnsafe(1);
-          const callContext: CallContext = {
-            // Nobody to ask in a scheduled run: the service hears "decline" at once.
-            elicit: (prompt) =>
-              offer.unattended !== null
-                ? Effect.succeed<ElicitationAnswer>({ action: "decline" })
-                : Effect.gen(function* () {
-                    const callId = yield* input.rowIdFor(context.toolCallId);
-                    if (!callId) return { action: "cancel" } satisfies ElicitationAnswer;
-                    return yield* asking.withPermits(1)(
-                      input.approvals.elicit(input.owner.userId, {
-                        callId,
-                        conversationId: input.owner.conversationId,
-                        messageId: input.owner.messageId,
-                        integrationId: offer.integrationId,
-                        tool: tool.name,
-                        access: tool.access,
-                        summary: tool.summarize(args),
-                        targets: [],
-                        prompt,
-                      }),
-                    );
-                  }),
-          };
+          // Nobody to ask in a scheduled run, so no way to ask is given at all.
+          const callContext: CallContext | undefined =
+            offer.unattended !== null
+              ? undefined
+              : {
+                  elicit: (prompt) =>
+                    Effect.gen(function* () {
+                      const callId = yield* input.rowIdFor(context.toolCallId);
+                      if (!callId) return { action: "cancel" } satisfies ElicitationAnswer;
+                      return yield* asking.withPermits(1)(
+                        input.approvals.elicit(input.owner.userId, {
+                          callId,
+                          conversationId: input.owner.conversationId,
+                          messageId: input.owner.messageId,
+                          integrationId: offer.integrationId,
+                          tool: tool.name,
+                          access: tool.access,
+                          summary: tool.summarize(args),
+                          targets: [],
+                          prompt,
+                        }),
+                      );
+                    }),
+                };
           const prepared = yield* prepare(offer.session, args, callContext).pipe(Effect.result);
           if (prepared._tag === "Failure") return yield* report(offer.session)(prepared.failure);
           const call = prepared.success;

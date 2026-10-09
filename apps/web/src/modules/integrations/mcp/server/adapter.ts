@@ -167,7 +167,8 @@ const callTool = (
         credential,
         header: session.config.header,
         holder: integrationId,
-        elicit,
+        // Nobody to ask (a scheduled run): the server is not told it may.
+        ...(call ? { elicit } : {}),
       });
       const tool: McpTool = {
         name: entry.mcpName,
