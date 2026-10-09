@@ -100,7 +100,7 @@ beforeEach(() => {
 
 const begin = (options: {
   stored?: StoredOAuthClient | null;
-  preregistered?: { clientId: string; clientSecret: string | null } | null;
+  preregistered?: { clientId: string; clientSecret: string | null; issuer: string | null } | null;
   clientMetadataUrl?: string | null;
   required?: string[];
   scopes?: string;
@@ -176,8 +176,14 @@ describe("signing in to an MCP server", () => {
   });
 
   it("uses the admin's client, or one registered before, without registering again", async () => {
-    const admin = await started({ preregistered: { clientId: "admin-client", clientSecret: "x" } });
+    const admin = await started({
+      preregistered: { clientId: "admin-client", clientSecret: "x", issuer: null },
+    });
     expect(admin.url.searchParams.get("client_id")).toBe("admin-client");
+    // Pinned to the issuer it was first used with.
+    expect(admin.saved).toEqual([
+      [base, expect.objectContaining({ clientId: "admin-client", method: "preregistered" })],
+    ]);
     const again = await started({
       stored: {
         clientId: "dyn-client",
@@ -188,6 +194,22 @@ describe("signing in to an MCP server", () => {
     });
     expect(again.url.searchParams.get("client_id")).toBe("dyn-client");
     expect(log.registrations).toEqual([]);
+  });
+
+  it("never sends the admin's client to an issuer other than the one it was first used with", async () => {
+    const moved = await begin({
+      preregistered: {
+        clientId: "admin-client",
+        clientSecret: "x",
+        issuer: "https://idp.example.com",
+      },
+    });
+    expect(Exit.isFailure(moved.exit)).toBe(true);
+    expect(JSON.stringify(moved.exit)).toMatch(/now signs in through/);
+    const same = await started({
+      preregistered: { clientId: "admin-client", clientSecret: "x", issuer: base },
+    });
+    expect(same.saved).toEqual([]);
   });
 
   it("prefers a client metadata document where the server reads them", async () => {

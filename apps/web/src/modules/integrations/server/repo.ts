@@ -105,16 +105,17 @@ export interface SaveConfig {
   /** The shared credential's fields; absent keeps what is stored, null clears it. */
   readonly sharedCredential?: Record<string, string> | null | undefined;
   /**
-   * Forgets the tool catalog: what was approved and listed was another
-   * server's. Any check still running is voided with it.
+   * Another server address: the tool catalog (approved, listed, any check
+   * still running) and the issuer the admin's client was pinned to were the
+   * old server's, so both are forgotten.
    */
-  readonly resetCatalog?: boolean;
+  readonly serverMoved?: boolean;
 }
 
 export interface StoredOAuthClient {
   clientId: string;
   clientSecret: string | null;
-  method: "metadata_document" | "dynamic";
+  method: "metadata_document" | "dynamic" | "preregistered";
   redirectUri: string;
 }
 
@@ -243,6 +244,8 @@ export class IntegrationRepo extends Context.Service<
       reviewedBy: string,
     ): Effect.Effect<void>;
     oauthClient(integrationId: string, issuer: string): Effect.Effect<StoredOAuthClient | null>;
+    /** The issuer the admin's client was first used with, if it was. */
+    preregisteredIssuer(integrationId: string, clientId: string): Effect.Effect<string | null>;
     saveOAuthClient(
       integrationId: string,
       issuer: string,
@@ -349,7 +352,15 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
-                if (input.resetCatalog) {
+                if (input.serverMoved) {
+                  yield* tx
+                    .delete(integrationOAuthClients)
+                    .where(
+                      and(
+                        eq(integrationOAuthClients.integrationId, input.id),
+                        eq(integrationOAuthClients.method, "preregistered"),
+                      ),
+                    );
                   const fresh = {
                     approved: [],
                     latest: null,
@@ -854,6 +865,23 @@ export class IntegrationRepo extends Context.Service<
             redirectUri: row.redirectUri,
           };
         }),
+
+        preregisteredIssuer: Effect.fn("IntegrationRepo.preregisteredIssuer")(
+          function* (integrationId, clientId) {
+            const rows = yield* db
+              .select({ issuer: integrationOAuthClients.issuer })
+              .from(integrationOAuthClients)
+              .where(
+                and(
+                  eq(integrationOAuthClients.integrationId, integrationId),
+                  eq(integrationOAuthClients.method, "preregistered"),
+                  eq(integrationOAuthClients.clientId, clientId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            return rows[0]?.issuer ?? null;
+          },
+        ),
 
         saveOAuthClient: Effect.fn("IntegrationRepo.saveOAuthClient")(
           function* (integrationId, issuer, client) {

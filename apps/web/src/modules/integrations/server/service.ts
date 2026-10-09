@@ -899,7 +899,7 @@ export class IntegrationService extends Context.Service<
             config: normalized.config,
             fingerprint: normalized.fingerprint,
             sharedCredential,
-            resetCatalog:
+            serverMoved:
               manifest.toolSource === "catalog" && stored.config.url !== normalized.config.url,
           });
           if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
@@ -1124,7 +1124,11 @@ export class IntegrationService extends Context.Service<
                 state,
                 scopes: { granted, required: connection?.requiredScopes ?? [] },
                 preregistered: row.oauthClientId
-                  ? { clientId: row.oauthClientId, clientSecret: yield* repo.clientSecret(row) }
+                  ? {
+                      clientId: row.oauthClientId,
+                      clientSecret: yield* repo.clientSecret(row),
+                      issuer: yield* repo.preregisteredIssuer(integrationId, row.oauthClientId),
+                    }
                   : null,
                 storedClient: (issuer) => repo.oauthClient(integrationId, issuer),
                 saveClient: (issuer, client) => repo.saveOAuthClient(integrationId, issuer, client),

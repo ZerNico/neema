@@ -228,13 +228,26 @@ const clientFor = (
   fetch: ReturnType<typeof scopedFetch>,
 ) =>
   Effect.gen(function* () {
-    if (input.preregistered)
-      return {
-        clientId: input.preregistered.clientId,
-        clientSecret: input.preregistered.clientSecret,
-      };
+    const admin = input.preregistered;
+    if (admin) {
+      // The admin registered it with one authorization server. If the MCP server
+      // later names another, its secret must not go there.
+      if (admin.issuer && admin.issuer !== metadata.issuer)
+        return yield* reject(
+          `The server now signs in through ${metadata.issuer}, not ${admin.issuer} where your admin’s client ID was set up. Ask your admin to check it.`,
+        );
+      if (!admin.issuer)
+        yield* input.saveClient(metadata.issuer, {
+          clientId: admin.clientId,
+          clientSecret: null,
+          method: "preregistered",
+          redirectUri: input.redirectUri,
+        });
+      return { clientId: admin.clientId, clientSecret: admin.clientSecret };
+    }
     const stored = yield* input.storedClient(metadata.issuer);
-    if (stored && stored.redirectUri === input.redirectUri) return stored;
+    if (stored && stored.method !== "preregistered" && stored.redirectUri === input.redirectUri)
+      return stored;
     if (input.clientMetadataUrl && metadata.client_id_metadata_document_supported === true)
       return { clientId: input.clientMetadataUrl, clientSecret: null };
     if (!metadata.registration_endpoint)

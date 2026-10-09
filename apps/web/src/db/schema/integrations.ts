@@ -232,7 +232,8 @@ export const integrationOAuthClients = pgTable(
     clientId: text("client_id").notNull(),
     // KeyCipher; null for a public client (a metadata document, or none issued).
     clientSecretCiphertext: text("client_secret_ciphertext"),
-    method: text({ enum: ["metadata_document", "dynamic"] }).notNull(),
+    // `preregistered` only pins the admin's own client to the issuer it was first used with.
+    method: text({ enum: ["metadata_document", "dynamic", "preregistered"] }).notNull(),
     redirectUri: text("redirect_uri").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

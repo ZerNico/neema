@@ -221,7 +221,8 @@ export interface DiscoveredOAuth {
     clientMetadataUrl: string | null;
     state: string;
     scopes: { granted: ReadonlyArray<string>; required: ReadonlyArray<string> };
-    preregistered: { clientId: string; clientSecret: string | null } | null;
+    /** The admin's client, and the issuer it was first used with; it is sent to no other. */
+    preregistered: { clientId: string; clientSecret: string | null; issuer: string | null } | null;
     storedClient: (issuer: string) => Effect.Effect<StoredOAuthClient | null>;
     saveClient: (issuer: string, client: StoredOAuthClient) => Effect.Effect<void>;
   }): Effect.Effect<
