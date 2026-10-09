@@ -79,6 +79,49 @@ describe("document connection", () => {
     await waitFor(() => expect(second.pending()).toBe(false));
   });
 
+  it("gives a second tab its own identity while the first still owns the unsent steps", async () => {
+    // A minimal lock manager, as tabs of one browser share it.
+    const held = new Map<string, Promise<void>>();
+    const request = (
+      name: string,
+      ...args: [unknown, ((lock: unknown) => unknown)?] | [(lock: unknown) => unknown]
+    ) => {
+      const [options, callback] =
+        args.length === 2 ? args : [{}, args[0] as (lock: unknown) => unknown];
+      const ifAvailable = (options as { ifAvailable?: boolean }).ifAvailable;
+      const run = async () => {
+        const done = Promise.resolve(callback!({ name })).then(() => held.delete(name));
+        held.set(
+          name,
+          done.then(() => undefined),
+        );
+      };
+      const busy = held.get(name);
+      if (!busy) return run();
+      if (ifAvailable) return Promise.resolve(callback!(null));
+      return busy.then(run);
+    };
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { request } });
+    try {
+      const first = await connect(offline);
+      first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");
+      await waitFor(() => expect(outbox.get("plan")).toBeDefined());
+
+      const second = await connect(online);
+      // The second tab neither takes the first one's text nor its identity.
+      expect(markdown(second)).toBe("Keep this\n\nRemove me");
+      second.editor!.commands.insertContentAt(at(second, "Remove"), "Do ");
+      await waitFor(() => expect(server.content("plan")).toBe("Keep this\n\nDo Remove me"));
+      const pushed = server.pushes
+        .filter((push) => push.steps?.length)
+        .map((push) => push.clientId);
+      expect(pushed).not.toContain(outbox.get("plan")!.clientId);
+      expect(outbox.get("plan")!.steps).toHaveLength(1);
+    } finally {
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
   it("rebases what was typed offline over what others wrote meanwhile", async () => {
     const first = await connect(offline);
     first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");
@@ -132,6 +175,14 @@ describe("document connection", () => {
     const second = await connect(online);
     await waitFor(() => expect(markdown(second)).toBe("Fresh start"));
     expect(second.recovered).toBe("Please");
+    // Closing the panel does not take it along; dismissing does.
+    reload(second);
+    const third = await connect(online);
+    expect(third.recovered).toBe("Please");
+    third.dismissRecovered();
+    reload(third);
+    const fourth = await connect(online);
+    expect(fourth.recovered).toBeNull();
   });
 
   it("reports changes stored only once the server has them", async () => {

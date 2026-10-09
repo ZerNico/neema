@@ -107,6 +107,32 @@ const inText = (doc: Node, position: number) => {
   const $position = doc.resolve(Math.min(position, doc.content.size));
   return $position.parent.inlineContent ? position : Selection.near($position, -1).head;
 };
+/**
+ * Whether this tab owns the document's saved unsent steps: the outbox is one
+ * entry per document on the device, and a second tab adopting it would take
+ * the first one's collab identity and skip its steps as its own. The lock is
+ * held until `released` settles; `onOwned` runs once it is this tab's.
+ */
+const claimOutbox = (documentId: string, released: Promise<void>, onOwned: () => void) => {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  // Without Web Locks there is no telling tabs apart; behave as the only one.
+  if (!locks) return Promise.resolve(true);
+  const name = `document-outbox:${documentId}`;
+  return new Promise<boolean>((resolve) => {
+    void locks.request(name, { ifAvailable: true }, (lock) => {
+      resolve(lock !== null);
+      return lock ? released : undefined;
+    });
+  }).then((owned) => {
+    // Another tab has it: take over once that tab closes, with a fresh identity.
+    if (!owned)
+      void locks.request(name, () => {
+        onOwned();
+        return released;
+      });
+    return owned;
+  });
+};
 const randomClient = () =>
   typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -155,12 +181,28 @@ export class DocumentSync {
   #listeners = new Set<() => void>();
   #version = 0;
   #comments: ReadonlyArray<DocumentComment> = [];
+  /** Only the tab that owns the device's outbox entry for this document reads or writes it. */
+  #ownsOutbox = false;
+  #release: () => void = () => undefined;
+  readonly #released = new Promise<void>((resolve) => {
+    this.#release = resolve;
+  });
 
   constructor(private readonly options: DocumentSyncOptions) {
-    const saved = options.outbox.get(options.documentId);
-    this.#clientId = saved?.clientId ?? randomClient();
-    if (saved) this.#restore(saved);
-    this.#connect();
+    this.#clientId = randomClient();
+    void claimOutbox(options.documentId, this.#released, () => {
+      this.#ownsOutbox = true;
+      this.#scheduleSave();
+    }).then((owned) => {
+      if (this.#destroyed) return;
+      this.#ownsOutbox = owned;
+      const saved = owned ? options.outbox.get(options.documentId) : undefined;
+      if (saved) {
+        this.#clientId = saved.clientId;
+        this.#restore(saved);
+      }
+      this.#connect();
+    });
   }
 
   /** Null until the first frame: the panel should not open on an empty document. */
@@ -179,6 +221,7 @@ export class DocumentSync {
   }
   dismissRecovered() {
     this.#recovered = null;
+    this.#save();
     this.#notify();
   }
   /** Every comment on the document, threads and replies, oldest first. */
@@ -238,6 +281,11 @@ export class DocumentSync {
     this.#source?.close();
     this.#listeners.clear();
     this.#editor?.destroy();
+    this.#release();
+  }
+
+  #dropOutbox() {
+    if (this.#ownsOutbox) this.options.outbox.delete(this.options.documentId);
   }
 
   #notify() {
@@ -297,6 +345,7 @@ export class DocumentSync {
 
   /** Reopens on what this device saved: its base document, then its unsent steps on top. */
   #restore(saved: NonNullable<ReturnType<OutboxStore["get"]>>) {
+    this.#recovered = saved.recovered ?? null;
     try {
       this.#createEditor(saved.doc, saved.revision);
       const editor = this.#editor!;
@@ -309,7 +358,7 @@ export class DocumentSync {
       this.#editor?.destroy();
       this.#editor = null;
       this.#confirmed = null;
-      this.options.outbox.delete(this.options.documentId);
+      this.#dropOutbox();
     }
   }
 
@@ -330,10 +379,10 @@ export class DocumentSync {
   }
   #save() {
     const editor = this.#editor;
-    if (this.#destroyed || !editor || !this.#confirmed) return;
+    if (this.#destroyed || !editor || !this.#confirmed || !this.#ownsOutbox) return;
     const unconfirmed = unconfirmedOf(this.#collab, editor.state);
-    if (!unconfirmed.length) {
-      this.options.outbox.delete(this.options.documentId);
+    if (!unconfirmed.length && !this.#recovered) {
+      this.#dropOutbox();
       return;
     }
     this.options.outbox.set(this.options.documentId, {
@@ -341,6 +390,7 @@ export class DocumentSync {
       revision: getVersion(editor.state),
       doc: this.#confirmed.toJSON() as Record<string, unknown>,
       steps: unconfirmed.map(({ step }) => JSON.stringify(step.toJSON())),
+      ...(this.#recovered ? { recovered: this.#recovered } : {}),
       savedAt: Date.now(),
     });
   }
@@ -384,8 +434,10 @@ export class DocumentSync {
         this.#failures = 0;
         this.#setError(null);
         // Stored now, though they count as confirmed only once they come back.
+        // Up to the end of this batch: the server's revision can be further on
+        // by a repair it appended, which is not this editor's to count.
         if (steps && !result.conflict)
-          this.#storedRevision = Math.max(this.#storedRevision, result.revision);
+          this.#storedRevision = Math.max(this.#storedRevision, revision + steps.length);
       },
       (failure: unknown) => {
         this.#failures++;
@@ -478,7 +530,7 @@ export class DocumentSync {
       case "gone":
         this.#source?.close();
         this.#source = null;
-        this.options.outbox.delete(this.options.documentId);
+        this.#dropOutbox();
         this.#setStatus("gone");
     }
   }
@@ -505,7 +557,8 @@ export class DocumentSync {
       editor.state.tr.setMeta(SERVER_RESET, true).setMeta("addToHistory", false),
     );
     this.#confirmed = doc;
-    this.options.outbox.delete(this.options.documentId);
+    // Nothing left to send; anything recovered stays until dismissed.
+    this.#save();
   }
 
   #steps(frame: Extract<DocumentFrame, { type: "steps" }>) {
@@ -575,7 +628,10 @@ export class DocumentSync {
 
   #keepRecovered(steps: Step[]) {
     const text = steps.map(insertedText).filter(Boolean).join("\n\n");
-    if (text) this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
+    if (!text) return;
+    this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
+    // Kept on the device at once: a closed panel must not take it along.
+    this.#save();
   }
 
   #showComments() {

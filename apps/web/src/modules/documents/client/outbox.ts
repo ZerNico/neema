@@ -10,6 +10,8 @@ export interface OutboxEntry {
   revision: number;
   doc: Record<string, unknown>;
   steps: string[];
+  /** Text from steps that could no longer be placed, kept until the person dismisses it. */
+  recovered?: string;
   savedAt: number;
 }
 
