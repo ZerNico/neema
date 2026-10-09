@@ -1,9 +1,15 @@
-import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { Suspense, lazy, useState } from "react";
 import { Button } from "~/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
 import { motionEase } from "~/ui/motion-presets.ts";
@@ -27,6 +33,19 @@ const copyMarkdown = async (controller: Controller) => {
     : controller.content;
   await navigator.clipboard.writeText(text);
 };
+const exportAs = async (controller: Controller, format: "pdf" | "markdown") => {
+  const title = controller.document?.title ?? "Document";
+  const { printDocument, downloadMarkdown } = await import("./export.ts");
+  const sync = controller.sync;
+  if (format === "pdf") {
+    if (sync) printDocument(sync.editor, title);
+    return;
+  }
+  const text = sync
+    ? (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc)
+    : controller.content;
+  downloadMarkdown(text, title);
+};
 
 export function DocumentPanelActions({
   controller,
@@ -42,6 +61,38 @@ export function DocumentPanelActions({
       {/* The editor's formatting fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Export document"
+                      className="text-muted-foreground"
+                    />
+                  }
+                />
+              }
+            >
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+            </TooltipTrigger>
+            <TooltipContent>Export</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={!controller.sync}
+              onClick={() => void exportAs(controller, "pdf")}
+            >
+              PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void exportAs(controller, "markdown")}>
+              Markdown
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Tooltip>
           <TooltipTrigger
             render={
