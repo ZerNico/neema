@@ -5,6 +5,7 @@ import { DateChip, PersonMention } from "../../editor/chips.ts";
 import { isRemoteChange } from "../../editor/remote.ts";
 import { DateChipView } from "./date-chip-view.tsx";
 import { editorHooks, type MentionCandidate } from "./editor-hooks.ts";
+import { mountAtCaret } from "./suggestion-mount.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 /** The shared date node, drawn as a chip with a picker; the schema is unchanged. */
@@ -53,7 +54,7 @@ export const DocumentMention = PersonMention.extend({
                 props: menuProps(props),
                 editor: props.editor,
               });
-              unmount = props.mount(renderer.element);
+              unmount = mountAtCaret(props, renderer.element);
             },
             onUpdate: (props: SuggestionProps<MentionCandidate>) =>
               renderer?.updateProps(menuProps(props)),

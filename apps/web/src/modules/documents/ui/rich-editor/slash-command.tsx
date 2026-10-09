@@ -21,6 +21,7 @@ import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { isRemoteChange } from "../../editor/remote.ts";
 import { isoDay } from "./dates.ts";
 import { editorHooks } from "./editor-hooks.ts";
+import { mountAtCaret } from "./suggestion-mount.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
@@ -181,7 +182,7 @@ export const SlashCommand = Extension.create({
           return {
             onStart: (props: SuggestionProps<SlashItem, SlashItem>) => {
               renderer = new ReactRenderer(SlashMenu, { props, editor: props.editor });
-              unmount = props.mount(renderer.element);
+              unmount = mountAtCaret(props, renderer.element);
             },
             onUpdate: (props) => renderer?.updateProps(props),
             onKeyDown: (props) => {
