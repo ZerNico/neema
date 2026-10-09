@@ -259,6 +259,23 @@ describe("an MCP server through the adapter", () => {
     ]);
   });
 
+  it("never checks a result against the server's own output schema", async () => {
+    const { entries } = await list(sessionAt("/mcp"));
+    // A pattern written to stall whoever checks it; the server's answer is passed on as is.
+    const trap: McpToolEntry = {
+      ...byName(entries, "search"),
+      outputSchema: {
+        type: "object",
+        properties: { x: { type: "string", pattern: "^(a+)+$" } },
+        required: ["x"],
+      },
+    };
+    const started = performance.now();
+    const exit = await run(sessionAt("/mcp"), trap, { q: "billing" });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
   it("keeps a result's line breaks and indentation for the model", () => {
     const text = "| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n  indented()\n```";
     const mapped = mapResult(
@@ -338,7 +355,7 @@ describe("an MCP server through the adapter", () => {
     const broken: McpToolEntry = {
       ...byName(entries, "search"),
       fingerprint: "pattern-that-does-not-compile",
-      inputSchema: { type: "object", properties: { q: { type: "string", pattern: "(" } } },
+      validation: { type: "object", properties: { q: { type: "string", pattern: "(" } } },
     };
     const exit = await run(sessionAt("/mcp"), broken, { q: "x" });
     expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(true);

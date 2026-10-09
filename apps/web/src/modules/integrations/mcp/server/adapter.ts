@@ -178,12 +178,12 @@ const callTool = (
         // Nobody to ask (a scheduled run): the server is not told it may.
         ...(call ? { elicit } : {}),
       });
+      // No output schema: the SDK would check results against it, running the
+      // server's own patterns on the server's own text, which the server can
+      // write to stall the process. Results are bounded and passed on instead.
       const tool: McpTool = {
         name: entry.mcpName,
         inputSchema: entry.inputSchema as McpTool["inputSchema"],
-        ...(entry.outputSchema
-          ? { outputSchema: entry.outputSchema as McpTool["outputSchema"] }
-          : {}),
       };
       const result = yield* Effect.tryPromise({
         try: (signal) =>
@@ -219,7 +219,7 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
   revision: entry.fingerprint,
   prepare: (session, args, call) =>
     Effect.gen(function* () {
-      const check = argumentCheck(entry.fingerprint, entry.inputSchema);
+      const check = argumentCheck(entry.fingerprint, entry.validation ?? entry.inputSchema);
       if ("error" in check) return yield* new IntegrationRejected({ reason: check.error });
       const checked = check(args ?? {});
       if (!checked.valid)

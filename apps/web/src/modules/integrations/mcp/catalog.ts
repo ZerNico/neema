@@ -26,7 +26,14 @@ export interface McpToolEntry {
   readonly mcpName: string;
   readonly title: string;
   readonly description: string;
+  /** What the model is shown: references inlined, one dialect, always an object. */
   readonly inputSchema: JsonSchemaObject;
+  /**
+   * What arguments are checked against: the server's own schema, only made
+   * safe to check. Absent in entries listed before it was kept.
+   */
+  readonly validation?: JsonSchemaObject;
+  /** Only whether there is one matters: results are never checked against it. */
   readonly outputSchema?: JsonSchemaObject;
   readonly annotations: McpAnnotations;
   /** Read from the annotations, or what the admin chose. */

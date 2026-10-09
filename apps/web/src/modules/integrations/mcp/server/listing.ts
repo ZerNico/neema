@@ -8,6 +8,7 @@ import {
   type McpToolEntry,
 } from "../catalog.ts";
 import { argumentCheck } from "./validate.ts";
+import { validationSchema } from "./validation.ts";
 
 type Json = Record<string, unknown>;
 
@@ -28,15 +29,17 @@ const LITERAL = new Set([
 ]);
 /** Keywords whose value maps names to schemas: a property may be called `definitions`. */
 const NAMED = new Set(["properties", "patternProperties", "dependentSchemas"]);
+/** Keywords that only describe: a sibling of a reference simply replaces the target's. */
+const DESCRIBING = new Set(["title", "description", "default", "examples", "deprecated"]);
 
 /**
  * Draft-07 spellings as 2020-12 says them. The `$schema` that named the
- * dialect is dropped and the validator reads 2020-12, which would ignore
- * `dependencies` and refuse tuple `items`, so each is rewritten as it means.
+ * dialect is dropped from what the model is shown, and providers read
+ * 2020-12, so `dependencies` and tuple `items` are rewritten as they mean.
  */
 const as2020 = (node: Json): Json => {
   let out = node;
-  if (Array.isArray(out.items)) {
+  if (Array.isArray(out.items) && out.prefixItems === undefined) {
     const { items, additionalItems, ...rest } = out;
     out = {
       ...rest,
@@ -87,6 +90,9 @@ const MAX_NODES = 5_000;
  */
 const MAX_CHARS = MCP_LIMITS.schemaBytes * 4;
 
+/** Deeper than this, nothing a tool takes is plausible, and recursion gets risky. */
+const MAX_NESTING = 64;
+
 class TooComplex extends Error {}
 
 type Budget = { nodes: number; chars: number };
@@ -119,19 +125,23 @@ const inline = (
   if (!isObject(node)) return node;
   const ref = typeof node.$ref === "string" ? node.$ref : null;
   if (ref) {
-    const target = resolvePointer(root, ref);
-    // A remote, missing or recursive reference accepts anything: the server
-    // still validates the call, and the model is not handed a dangling pointer.
+    const found = resolvePointer(root, ref);
+    // `true` and `false` are schemas too: anything, and nothing.
+    const target = found === true ? {} : found === false ? { not: {} } : found;
+    // A remote, missing or recursive reference accepts anything here; arguments
+    // are checked against the server's own schema, so this only loses detail.
     if (!isObject(target) || trail.has(ref) || depth >= MAX_DEPTH) {
       const { $ref: _ref, ...rest } = node;
       return inline(rest, root, depth, trail, budget);
     }
     const { $ref: _ref, ...siblings } = node;
-    // Both say something about one keyword (two `required` lists, say): both
-    // must hold, so they are kept apart rather than one overwriting the other.
-    const merged = Object.keys(siblings).some((key) => key in target)
-      ? { allOf: [target, siblings] }
-      : { ...target, ...siblings };
+    // Siblings that only describe, or repeat the target, merge into it. Ones
+    // that say something else about the same keyword stay a separate branch.
+    const clash = Object.entries(siblings).some(
+      ([key, value]) =>
+        key in target && !DESCRIBING.has(key) && canonical(value) !== canonical(target[key]),
+    );
+    const merged = clash ? { allOf: [target, siblings] } : { ...target, ...siblings };
     return inline(merged, root, depth + 1, new Set([...trail, ref]), budget);
   }
   const walk = (value: unknown) => inline(value, root, depth, trail, budget);
@@ -142,7 +152,12 @@ const inline = (
     out[key] = LITERAL.has(key)
       ? value
       : NAMED.has(key) && isObject(value)
-        ? Object.fromEntries(Object.entries(value).map(([name, schema]) => [name, walk(schema)]))
+        ? Object.fromEntries(
+            Object.entries(value).map(([name, schema]) => {
+              spend(budget, name.length);
+              return [name, walk(schema)];
+            }),
+          )
         : Array.isArray(value)
           ? value.map(walk)
           : walk(value);
@@ -151,9 +166,10 @@ const inline = (
 };
 
 /**
- * A tool's input schema made safe to hand any provider: local references
- * inlined, meta keys dropped, always an object. Null, with the reason, when
- * it cannot be offered as written.
+ * A tool's input schema as the model is shown it: local references inlined,
+ * meta keys dropped, always an object. Arguments are checked against the
+ * server's own schema instead (`validationSchema`), so a detail lost here
+ * never lets a wrong argument through. The reason, when it cannot be shown.
  */
 export const normalizeSchema = (
   schema: unknown,
@@ -204,12 +220,13 @@ const annotationsOf = (value: unknown): McpAnnotations => {
 };
 
 /** Stable JSON: object keys sorted, so a reordered schema is not a changed tool. */
-const canonical = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+const canonical = (value: unknown, depth = 0): string => {
+  if (depth > MAX_NESTING) throw new TooComplex();
+  if (Array.isArray(value)) return `[${value.map((item) => canonical(item, depth + 1)).join(",")}]`;
   if (isObject(value))
     return `{${Object.keys(value)
       .toSorted()
-      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
+      .map((key) => `${JSON.stringify(key)}:${canonical(value[key], depth + 1)}`)
       .join(",")}}`;
   return JSON.stringify(value) ?? "null";
 };
@@ -264,35 +281,65 @@ export const listingEntries = (
   return unique.map((tool): McpToolEntry => {
     const name = tool.name as string;
     const annotations = annotationsOf(tool.annotations);
-    const fingerprint = fingerprintOf(tool);
-    const normalized = normalizedOrRefused(tool.inputSchema);
-    // Checked now, so a tool whose arguments could never be checked is never offered.
-    const check = "schema" in normalized ? argumentCheck(fingerprint, normalized.schema) : null;
-    const input = check && "error" in check ? check : normalized;
-    const output = isObject(tool.outputSchema) ? normalizedOrRefused(tool.outputSchema) : null;
-    const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
-    const title =
-      (typeof tool.title === "string" && tool.title.trim()) ||
-      annotations.title ||
-      humanTitle(name);
-    const unsupported =
-      "error" in input
-        ? input.error
+    const key = keys.get(name)!;
+    // Whatever goes wrong with one tool refuses that tool, never the listing.
+    try {
+      return entryOf(tool, name, key, annotations);
+    } catch {
+      return {
+        key,
+        mcpName: name,
+        title: humanTitle(name).slice(0, 120),
+        description: "",
+        inputSchema: { type: "object", properties: {} },
+        annotations,
+        access: accessFromAnnotations(annotations),
+        enabled: false,
+        unsupported: "Its description could not be read.",
+        fingerprint: createHash("sha256")
+          .update(`unreadable:${name}`)
+          .digest("base64url")
+          .slice(0, 22),
+      };
+    }
+  });
+};
+
+const entryOf = (
+  tool: Json,
+  name: string,
+  key: string,
+  annotations: McpAnnotations,
+): McpToolEntry => {
+  const fingerprint = fingerprintOf(tool);
+  const shown = normalizedOrRefused(tool.inputSchema);
+  const checked = validationSchema(tool.inputSchema);
+  // Compiled now, so a tool whose arguments could never be checked is never offered.
+  const check = "schema" in checked ? argumentCheck(fingerprint, checked.schema) : checked;
+  const output = isObject(tool.outputSchema) ? normalizedOrRefused(tool.outputSchema) : null;
+  const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
+  const title =
+    (typeof tool.title === "string" && tool.title.trim()) || annotations.title || humanTitle(name);
+  const unsupported =
+    "error" in shown
+      ? shown.error
+      : "error" in check
+        ? check.error
         : rawDescription.length > MCP_LIMITS.descriptionChars
           ? `Its description is longer than ${MCP_LIMITS.descriptionChars} characters.`
           : undefined;
-    return {
-      key: keys.get(name)!,
-      mcpName: name,
-      title: title.slice(0, 120),
-      description: rawDescription.slice(0, MCP_LIMITS.descriptionChars),
-      inputSchema: "schema" in input ? input.schema : { type: "object", properties: {} },
-      ...(output && "schema" in output ? { outputSchema: output.schema } : {}),
-      annotations,
-      access: accessFromAnnotations(annotations),
-      enabled: false,
-      ...(unsupported ? { unsupported } : {}),
-      fingerprint,
-    };
-  });
+  return {
+    key,
+    mcpName: name,
+    title: title.slice(0, 120),
+    description: rawDescription.slice(0, MCP_LIMITS.descriptionChars),
+    inputSchema: "schema" in shown ? shown.schema : { type: "object", properties: {} },
+    ...("schema" in checked ? { validation: checked.schema } : {}),
+    ...(output && "schema" in output ? { outputSchema: output.schema } : {}),
+    annotations,
+    access: accessFromAnnotations(annotations),
+    enabled: false,
+    ...(unsupported ? { unsupported } : {}),
+    fingerprint,
+  };
 };

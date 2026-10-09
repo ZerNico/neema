@@ -135,9 +135,22 @@ Structured content wins when the tool declares an output schema; otherwise the t
 A `resource_link` or text resource with an http(s) URI becomes an integration source,
 citable like Outline's. Images, audio and blobs become [files](files.md) of the answer,
 delivered under the generation fence like a custom tool's, and shown to the model when it
-can read them. `isError` is a failed call in the server's words. Arguments are checked
-against the approved schema before anything is sent, so the model learns which field is
-wrong.
+can read them. `isError` is a failed call in the server's words. Results are never checked against the
+tool's output schema: that would run the server's patterns on the server's own text, which
+it can write to stall the process, and a check failing after the call ran would read as
+refused and invite a repeat.
+
+## Two schemas per tool
+
+A tool keeps two copies of its input schema. The model is shown one with local references
+inlined in one dialect, since providers handle `$ref` and draft-07 unevenly. Arguments are
+checked against the other, the server's own as written, before anything is sent, so the
+model learns which field is wrong. Inlining is lossy; keeping the check on the original means
+a mistake there can make the model's view vaguer but never lets a wrong argument through.
+The checked copy only drops what makes checking unsafe: `$async`, and patterns that can
+backtrack exponentially, which the server still enforces itself. Every listed tool is
+processed alone, under node, character and depth budgets, so one hostile schema refuses that
+tool and nothing else.
 
 ## Elicitation
 

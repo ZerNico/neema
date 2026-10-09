@@ -65,7 +65,7 @@ describe("input schemas", () => {
     });
   });
 
-  it("keeps every constraint, in the dialect the validator reads", () => {
+  it("shows the model every constraint, in the dialect providers read", () => {
     const normalized = normalizeSchema({
       $schema: "http://json-schema.org/draft-07/schema#",
       type: "object",
@@ -107,6 +107,30 @@ describe("input schemas", () => {
     expect(check({ owner: { name: "a" } }).valid).toBe(false);
     expect(check({ owner: { name: "a", email: "b" }, point: [1, 2] }).valid).toBe(true);
     expect(check({ point: [1, 2, 3] }).valid).toBe(false);
+  });
+
+  it("shows the model a root reference's arguments, with the sibling's words", () => {
+    // zod-to-json-schema with a name: MCP's root `type` sits beside the reference.
+    expect(
+      normalizeSchema({
+        type: "object",
+        $ref: "#/$defs/Args",
+        $defs: {
+          Args: {
+            type: "object",
+            properties: { where: { $ref: "#/$defs/Place", description: "Where to look" } },
+            required: ["where"],
+          },
+          Place: { type: "string", description: "A place" },
+        },
+      }),
+    ).toEqual({
+      schema: {
+        type: "object",
+        properties: { where: { type: "string", description: "Where to look" } },
+        required: ["where"],
+      },
+    });
   });
 
   it("refuses what cannot be named arguments", () => {
@@ -206,6 +230,38 @@ describe("an asynchronous schema", () => {
     if ("error" in check) return;
     expect(check({ q: 5 }).valid).toBe(false);
     expect(check({ q: "x" }).valid).toBe(true);
+  });
+});
+
+describe("a schema that would sink a listing", () => {
+  it("counts long argument names against the budget too", () => {
+    const name = "n".repeat(50_000);
+    expect(
+      normalizeSchema({
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 100 }, (_, index) => [`p${index}`, { $ref: "#/$defs/wide" }]),
+        ),
+        $defs: { wide: { type: "object", properties: { [name]: { type: "string" } } } },
+      }),
+    ).toEqual({ error: "Its input schema is too complex to offer." });
+  });
+
+  it("refuses only the tool nested past reason, not its neighbours", () => {
+    let deep: Record<string, unknown> = { type: "string" };
+    for (let i = 0; i < 5_000; i++) deep = { type: "object", properties: { x: deep } };
+    const entries = listingEntries(
+      "docs",
+      [
+        { name: "deep", inputSchema: deep },
+        { name: "fine", inputSchema: { type: "object" } },
+      ],
+      [],
+    );
+    expect(entries.map((entry) => [entry.mcpName, Boolean(entry.unsupported)])).toEqual([
+      ["deep", true],
+      ["fine", false],
+    ]);
   });
 });
 
