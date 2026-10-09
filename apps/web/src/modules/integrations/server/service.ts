@@ -886,6 +886,7 @@ export class IntegrationService extends Context.Service<
                 ? "Enter the shared key before turning this on."
                 : "Set up OAuth or allow personal API keys before turning this on.",
             });
+          // Approval was of one server, not of words: another address starts the review over.
           const row = yield* repo.saveConfig({
             ...input,
             name,
@@ -893,11 +894,10 @@ export class IntegrationService extends Context.Service<
             config: normalized.config,
             fingerprint: normalized.fingerprint,
             sharedCredential,
+            resetCatalog:
+              manifest.toolSource === "catalog" && stored.config.url !== normalized.config.url,
           });
           if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
-          // A new address or way in may list other tools: look again soon.
-          if (manifest.toolSource === "catalog" && stored.config.url !== normalized.config.url)
-            yield* repo.scheduleCatalogCheck(row.id);
           yield* bus
             .publishGlobal({ type: "integrations.changed" })
             .pipe(Effect.catchCause(() => Effect.void));

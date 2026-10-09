@@ -359,6 +359,44 @@ describe("an MCP server set up by an admin", () => {
     }
   });
 
+  it("forgets what was approved when the admin moves it to another server", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs moved", { url: `${base}/mcp`, auth: "none" });
+    const first = await check(id, admin);
+    await approve(admin, id, first.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+
+    // A check of the old address still running when the admin saves is dropped too.
+    const { arrived, release } = holdNextListing();
+    const stale = run(
+      Effect.flatMap(IntegrationService, (s) => Effect.flip(s.checkCatalog(id, admin))),
+    );
+    await arrived;
+    const moved = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs moved",
+          enabled: true,
+          config: { url: `${base}/elsewhere`, auth: "none" },
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    release();
+    await stale;
+    expect(moved.catalog).toMatchObject({ approved: [], latest: null, reviewedAt: null });
+    const after = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+    expect(after).toMatchObject({ approved: [], latest: null });
+
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    const conversationId = await newConversation(admin);
+    expect(await offeredNames(admin, conversationId)).toEqual([]);
+  });
+
   it("calls a read straight away and asks before a destructive call, showing every argument", async () => {
     const admin = await newUser();
     const id = await setUp("Docs calls", { url: `${base}/mcp`, auth: "none" });

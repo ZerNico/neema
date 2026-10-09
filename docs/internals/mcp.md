@@ -29,9 +29,14 @@ the server's order and a model-facing key fixed at first approval, which keeps t
 block byte-stable for [prompt caching](prompt-caching.md) and never renames a tool the
 model already knows.
 
+An approval is of one server, not of words that happen to match: moving the integration to
+another address empties both lists in the same transaction, and the review starts over.
+
 Checks run when the admin asks, and in the background through `IntegrationCatalogSweep`
-(a claim with a lease, like schedules, every ten minutes). Each check sets the next one from
-the server's `ttlMs` hint, between an hour and a day. A check runs as the admin who last
+(a claim with a lease, like schedules, every ten minutes). Each check takes a token as it
+starts and only the newest token may write, so a slow check never puts back a listing a
+newer one replaced, and a move voids any check still running. Each check sets the next one
+from the server's `ttlMs` hint, between an hour and a day. A check runs as the admin who last
 reviewed, since listing may show what only an account can see. An open or shared-key server
 needs nobody.
 

@@ -104,6 +104,11 @@ export interface SaveConfig {
   readonly allowApiKeys: boolean;
   /** The shared credential's fields; absent keeps what is stored, null clears it. */
   readonly sharedCredential?: Record<string, string> | null | undefined;
+  /**
+   * Forgets the tool catalog: what was approved and listed was another
+   * server's. Any check still running is voided with it.
+   */
+  readonly resetCatalog?: boolean;
 }
 
 export interface StoredOAuthClient {
@@ -342,6 +347,24 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
+                if (input.resetCatalog) {
+                  const fresh = {
+                    approved: [],
+                    latest: null,
+                    server: null,
+                    checkedAt: null,
+                    checkError: null,
+                    reviewedBy: null,
+                    reviewedAt: null,
+                    nextCheckAt: now,
+                    checkLeaseUntil: null,
+                    checkToken: null,
+                  };
+                  yield* tx
+                    .insert(integrationToolCatalogs)
+                    .values({ integrationId: input.id, ...fresh })
+                    .onConflictDoUpdate({ target: integrationToolCatalogs.integrationId, set: fresh });
+                }
                 return rows[0];
               }),
             )
