@@ -513,7 +513,7 @@ describe("an MCP server set up by an admin", () => {
           ],
           { concurrency: "unbounded" },
         );
-        return { pins, kept: yield* repo.oauthClient(id, "https://as.example.com") };
+        return { pins, kept: yield* repo.oauthClient(id, "https://as.example.com", "dyn") };
       }),
     );
     expect(new Set(outcome.pins).size).toBe(1);
@@ -540,6 +540,41 @@ describe("an MCP server set up by an admin", () => {
       ),
     );
     expect(repinned).toBe("https://idp.example.com");
+  });
+
+  it("keeps every client registered with an issuer, so each sign-in finds its own secret", async () => {
+    const id = await setUp("Docs registrations", { url: `${base}/mcp`, auth: "oauth" });
+    const client = (clientId: string, redirectUri = "https://chat.example.com/cb") => ({
+      clientId,
+      clientSecret: `${clientId}-secret`,
+      method: "dynamic" as const,
+      redirectUri,
+    });
+    const found = await run(
+      Effect.gen(function* () {
+        const repo = yield* IntegrationRepo;
+        // Two first sign-ins each registered; a later one came from another origin.
+        yield* repo.saveOAuthClient(id, "https://as.example.com", client("first"));
+        yield* repo.saveOAuthClient(id, "https://as.example.com", client("second"));
+        yield* repo.saveOAuthClient(
+          id,
+          "https://as.example.com",
+          client("desktop", "https://desk.example.com/cb"),
+        );
+        return {
+          first: yield* repo.oauthClient(id, "https://as.example.com", "first"),
+          second: yield* repo.oauthClient(id, "https://as.example.com", "second"),
+          reuse: yield* repo.reusableOAuthClient(
+            id,
+            "https://as.example.com",
+            "https://chat.example.com/cb",
+          ),
+        };
+      }),
+    );
+    expect(found.first?.clientSecret).toBe("first-secret");
+    expect(found.second?.clientSecret).toBe("second-secret");
+    expect(found.reuse?.clientId).toBe("second");
   });
 
   it("starts review over when a server moves away and back, as the save finds it", async () => {

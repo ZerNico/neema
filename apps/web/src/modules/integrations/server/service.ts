@@ -403,10 +403,8 @@ export class IntegrationService extends Context.Service<
         // The admin's secret goes only to the issuer their client is pinned to.
         if (row.oauthClientId && server.clientId === row.oauthClientId)
           return row.oauthClientIssuer === server.issuer ? yield* repo.clientSecret(row) : null;
-        const registered = yield* repo.oauthClient(row.id, server.issuer);
-        return registered && registered.clientId === server.clientId
-          ? registered.clientSecret
-          : null;
+        const registered = yield* repo.oauthClient(row.id, server.issuer, server.clientId);
+        return registered?.clientSecret ?? null;
       });
 
       const adminView = Effect.fn(function* (
@@ -1186,7 +1184,8 @@ export class IntegrationService extends Context.Service<
                         repo.pinClientIssuer(integrationId, row.revision, issuer),
                     }
                   : null,
-                storedClient: (issuer) => repo.oauthClient(integrationId, issuer),
+                storedClient: (issuer) =>
+                  repo.reusableOAuthClient(integrationId, issuer, redirectUri),
                 saveClient: (issuer, client) => repo.saveOAuthClient(integrationId, issuer, client),
               });
               yield* store({

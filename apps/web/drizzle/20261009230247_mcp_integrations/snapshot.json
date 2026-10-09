@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "f60483f7-7543-4d82-8bdb-ab714714fae2",
+  "id": "26eb0cda-df91-4f01-926d-9d6609023277",
   "prevIds": [
     "d11b2009-61a8-485b-8f68-b72d3acbcd89"
   ],
@@ -15766,7 +15766,8 @@
     {
       "columns": [
         "integration_id",
-        "issuer"
+        "issuer",
+        "client_id"
       ],
       "nameExplicit": false,
       "name": "integration_oauth_clients_pkey",

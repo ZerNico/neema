@@ -1,12 +1,12 @@
 CREATE TABLE "integration_oauth_clients" (
 	"integration_id" text,
 	"issuer" text,
-	"client_id" text NOT NULL,
+	"client_id" text,
 	"client_secret_ciphertext" text,
 	"method" text NOT NULL,
 	"redirect_uri" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "integration_oauth_clients_pkey" PRIMARY KEY("integration_id","issuer")
+	CONSTRAINT "integration_oauth_clients_pkey" PRIMARY KEY("integration_id","issuer","client_id")
 );
 --> statement-breakpoint
 CREATE TABLE "integration_tool_catalogs" (

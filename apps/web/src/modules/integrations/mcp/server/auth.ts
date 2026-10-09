@@ -248,7 +248,7 @@ const clientFor = (
       return { clientId: admin.clientId, clientSecret: admin.clientSecret };
     }
     const stored = yield* input.storedClient(metadata.issuer);
-    if (stored && stored.redirectUri === input.redirectUri) return stored;
+    if (stored) return stored;
     if (input.clientMetadataUrl && metadata.client_id_metadata_document_supported === true)
       return { clientId: input.clientMetadataUrl, clientSecret: null };
     if (!metadata.registration_endpoint)

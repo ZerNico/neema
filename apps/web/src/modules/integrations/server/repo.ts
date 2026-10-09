@@ -1,4 +1,4 @@
-import { and, count, eq, lte, or, isNull, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, lte, or, isNull, sql, type SQL } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -250,7 +250,18 @@ export class IntegrationRepo extends Context.Service<
       reviewedBy: string,
       reviewed: { listingId: string; reviewSeq: number },
     ): Effect.Effect<boolean>;
-    oauthClient(integrationId: string, issuer: string): Effect.Effect<StoredOAuthClient | null>;
+    /** The client this app registered with an issuer under this id, if it did. */
+    oauthClient(
+      integrationId: string,
+      issuer: string,
+      clientId: string,
+    ): Effect.Effect<StoredOAuthClient | null>;
+    /** The newest client registered with an issuer for this redirect, to sign in with again. */
+    reusableOAuthClient(
+      integrationId: string,
+      issuer: string,
+      redirectUri: string,
+    ): Effect.Effect<StoredOAuthClient | null>;
     /**
      * Pins the admin's client to an issuer unless it already is, atomically,
      * and returns the issuer it is pinned to. Null when the integration is no
@@ -277,6 +288,18 @@ export class IntegrationRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const cipher = yield* KeyCipher;
+
+      const storedClient = (row: typeof integrationOAuthClients.$inferSelect) =>
+        Effect.gen(function* () {
+          return {
+            clientId: row.clientId,
+            clientSecret: row.clientSecretCiphertext
+              ? Redacted.value(yield* cipher.decrypt(row.clientSecretCiphertext))
+              : null,
+            method: row.method,
+            redirectUri: row.redirectUri,
+          } satisfies StoredOAuthClient;
+        });
 
       const decrypt = (row: IntegrationConnectionRow) =>
         cipher
@@ -889,28 +912,41 @@ export class IntegrationRepo extends Context.Service<
           },
         ),
 
-        oauthClient: Effect.fn("IntegrationRepo.oauthClient")(function* (integrationId, issuer) {
-          const rows = yield* db
-            .select()
-            .from(integrationOAuthClients)
-            .where(
-              and(
-                eq(integrationOAuthClients.integrationId, integrationId),
-                eq(integrationOAuthClients.issuer, issuer),
-              ),
-            )
-            .pipe(Effect.orDie);
-          const row = rows[0];
-          if (!row) return null;
-          return {
-            clientId: row.clientId,
-            clientSecret: row.clientSecretCiphertext
-              ? Redacted.value(yield* cipher.decrypt(row.clientSecretCiphertext))
-              : null,
-            method: row.method,
-            redirectUri: row.redirectUri,
-          };
-        }),
+        oauthClient: Effect.fn("IntegrationRepo.oauthClient")(
+          function* (integrationId, issuer, clientId) {
+            const rows = yield* db
+              .select()
+              .from(integrationOAuthClients)
+              .where(
+                and(
+                  eq(integrationOAuthClients.integrationId, integrationId),
+                  eq(integrationOAuthClients.issuer, issuer),
+                  eq(integrationOAuthClients.clientId, clientId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            return rows[0] ? yield* storedClient(rows[0]) : null;
+          },
+        ),
+
+        reusableOAuthClient: Effect.fn("IntegrationRepo.reusableOAuthClient")(
+          function* (integrationId, issuer, redirectUri) {
+            const rows = yield* db
+              .select()
+              .from(integrationOAuthClients)
+              .where(
+                and(
+                  eq(integrationOAuthClients.integrationId, integrationId),
+                  eq(integrationOAuthClients.issuer, issuer),
+                  eq(integrationOAuthClients.redirectUri, redirectUri),
+                ),
+              )
+              .orderBy(desc(integrationOAuthClients.createdAt))
+              .limit(1)
+              .pipe(Effect.orDie);
+            return rows[0] ? yield* storedClient(rows[0]) : null;
+          },
+        ),
 
         pinClientIssuer: Effect.fn("IntegrationRepo.pinClientIssuer")(
           function* (integrationId, revision, issuer) {
@@ -939,15 +975,11 @@ export class IntegrationRepo extends Context.Service<
               clientSecretCiphertext: secret,
               method: client.method,
               redirectUri: client.redirectUri,
-              createdAt: new Date(),
             };
             yield* db
               .insert(integrationOAuthClients)
               .values({ integrationId, issuer, ...values })
-              .onConflictDoUpdate({
-                target: [integrationOAuthClients.integrationId, integrationOAuthClients.issuer],
-                set: values,
-              })
+              .onConflictDoNothing()
               .pipe(Effect.orDie);
           },
         ),

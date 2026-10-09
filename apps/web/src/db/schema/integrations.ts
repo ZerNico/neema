@@ -251,5 +251,7 @@ export const integrationOAuthClients = pgTable(
     redirectUri: text("redirect_uri").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.integrationId, t.issuer] })],
+  // One row per client, never overwritten: a sign-in under way, or a connection
+  // refreshing, keeps finding the secret of the client it used.
+  (t) => [primaryKey({ columns: [t.integrationId, t.issuer, t.clientId] })],
 );
