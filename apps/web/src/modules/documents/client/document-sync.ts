@@ -1,5 +1,5 @@
 import { Editor, Extension, type AnyExtension, type EditorOptions } from "@tiptap/core";
-import { Node } from "@tiptap/pm/model";
+import { Node, type Schema } from "@tiptap/pm/model";
 import { EditorState, Selection, type Plugin, type Transaction } from "@tiptap/pm/state";
 import { Mapping, ReplaceAroundStep, ReplaceStep, Step, Transform } from "@tiptap/pm/transform";
 import { collab, getVersion, receiveTransaction, sendableSteps } from "prosemirror-collab";
@@ -70,6 +70,25 @@ const insertedText = (step: Step) =>
   step instanceof ReplaceStep || step instanceof ReplaceAroundStep
     ? step.slice.content.textBetween(0, step.slice.content.size, "\n\n", " ").trim()
     : "";
+/**
+ * What a saved entry's steps changed in its document, as text: the stretch
+ * between the first and last difference once they are applied. Steps that
+ * no longer apply to it count for nothing.
+ */
+const changedText = (schema: Schema, entry: { doc: Record<string, unknown>; steps: string[] }) => {
+  try {
+    const base = Node.fromJSON(schema, entry.doc);
+    let doc = base;
+    for (const json of entry.steps)
+      doc = Step.fromJSON(schema, JSON.parse(json)).apply(doc).doc ?? doc;
+    const start = base.content.findDiffStart(doc.content);
+    if (start === null) return "";
+    const end = base.content.findDiffEnd(doc.content)!;
+    return doc.textBetween(start, Math.max(start, end.b), "\n\n", " ").trim();
+  } catch {
+    return "";
+  }
+};
 /**
  * The unsent steps that will not survive rebasing over `over`, found the way
  * prosemirror-collab rebases: undo them, apply the server's, redo each mapped.
@@ -296,16 +315,7 @@ export class DocumentSync {
     this.#ownsOutbox = true;
     const schema = this.#editor?.schema;
     if (left && left.clientId !== this.#clientId && schema) {
-      const texts = [
-        left.recovered ?? "",
-        ...left.steps.map((json) => {
-          try {
-            return insertedText(Step.fromJSON(schema, JSON.parse(json)));
-          } catch {
-            return "";
-          }
-        }),
-      ].filter(Boolean);
+      const texts = [left.recovered ?? "", changedText(schema, left)].filter(Boolean);
       if (texts.length) this.#keepRecovered([], texts.join("\n\n"));
     }
     this.#save();
@@ -655,7 +665,8 @@ export class DocumentSync {
   }
 
   #keepRecovered(steps: Step[], extra = "") {
-    const text = [...steps.map(insertedText), extra].filter(Boolean).join("\n\n");
+    // Steps are keystrokes as often as not: typed in a row, their text runs on.
+    const text = [steps.map(insertedText).join("").trim(), extra].filter(Boolean).join("\n\n");
     if (!text) return;
     this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
     // Kept on the device at once: a closed panel must not take it along.

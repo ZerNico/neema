@@ -110,7 +110,10 @@ describe("document connection", () => {
     Object.defineProperty(navigator, "locks", { configurable: true, value: { request } });
     try {
       const first = await connect(offline);
-      first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");
+      // Typed a key at a time, as a person does: one step per character.
+      const start = at(first, "Keep");
+      for (const [offset, character] of [..."Please "].entries())
+        first.editor!.commands.insertContentAt(start + offset, character);
       await waitFor(() => expect(outbox.get("plan")).toBeDefined());
 
       // Another tab: its own copy of the cache, over the same storage.
@@ -128,7 +131,7 @@ describe("document connection", () => {
         .filter((push) => push.steps?.length)
         .map((push) => push.clientId);
       expect(pushed).not.toContain(outbox.get("plan")!.clientId);
-      expect(outbox.get("plan")!.steps).toHaveLength(1);
+      expect(outbox.get("plan")!.steps.length).toBeGreaterThan(1);
       // The first tab closes with that text unsent: the second takes the
       // outbox over and keeps the text to copy back, rather than wiping it.
       reload(first);
