@@ -209,11 +209,6 @@ const attributeChars = (attrs: Record<string, unknown>) => {
   for (const value of Object.values(attrs)) if (typeof value === "string") total += value.length;
   return total;
 };
-/**
- * The size limits Markdown length cannot see, for every author: blocks that
- * write nothing (an empty paragraph, a planned section) and attributes (IDs,
- * intents, links, comment threads) count too, beside the Markdown itself.
- */
 /** Attributes the schema types loosely but the model's view and the editor rely on. */
 const wellTyped = (node: Node) => {
   const { level, start, checked } = node.attrs as Record<string, unknown>;
@@ -228,15 +223,21 @@ const wellTyped = (node: Node) => {
       return true;
   }
 };
+/**
+ * The size limits Markdown length cannot see, for every author: blocks that
+ * write nothing (an empty paragraph, a planned section), and attribute text
+ * (IDs, intents, links, comment threads) under a budget of its own. The
+ * Markdown cap itself is the one the editor measures, so the two agree.
+ */
 const withinTreeCap = (doc: Node, markdownChars = 0) => {
   let blocks = 0;
-  let chars = markdownChars;
+  let attributes = 0;
   let malformed = false;
   doc.descendants((node) => {
     malformed ||= !wellTyped(node);
     if (isBlock(node)) blocks++;
-    chars += attributeChars(node.attrs);
-    for (const mark of node.marks) chars += attributeChars(mark.attrs);
+    attributes += attributeChars(node.attrs);
+    for (const mark of node.marks) attributes += attributeChars(mark.attrs);
     return true;
   });
   if (malformed) return Effect.fail(new DocumentRejected({ reason: "invalid document update" }));
@@ -244,7 +245,9 @@ const withinTreeCap = (doc: Node, markdownChars = 0) => {
     return Effect.fail(
       new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.blocks} blocks` }),
     );
-  return withinCap(chars);
+  if (attributes > DOCUMENT_LIMITS.chars)
+    return Effect.fail(new DocumentRejected({ reason: "document holds too much hidden data" }));
+  return withinCap(markdownChars);
 };
 /** The owned blocks of a live edit as one sibling range, or null if a person touched them. */
 const ownedRange = (doc: Node, live: LiveEdit) => {
@@ -475,6 +478,17 @@ export class DocumentService extends Context.Service<
                 if (--lock.holders === 0) locks.delete(documentId);
               }),
           );
+      // A cursor moves several times a second; its label is looked up once a minute at most.
+      const names = new Map<string, { name: string; at: number }>();
+      const nameOf = (userId: string) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const known = names.get(userId);
+          if (known && now - known.at < 60_000) return known.name;
+          const name = yield* documents.userName(userId);
+          names.set(userId, { name, at: now });
+          return name;
+        });
       const drop = (documentId: string) =>
         Effect.suspend(() => {
           const entry = entries.get(documentId);
@@ -932,7 +946,7 @@ export class DocumentService extends Context.Service<
               // Labelled by who is signed in, never by what the client says.
               const presence = {
                 ...parsed.presence,
-                user: presenceUser({ id: userId, name: yield* documents.userName(userId) }),
+                user: presenceUser({ id: userId, name: yield* nameOf(userId) }),
               };
               entry.presence.set(parsed.clientId, presence);
               yield* PubSub.publish(entry.frames, {

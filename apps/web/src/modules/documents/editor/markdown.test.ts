@@ -128,7 +128,7 @@ describe("document Markdown", () => {
   });
 
   it("leaves a shortcode typed into code as it is in the people's Markdown", () => {
-    const markdown = '```\nconst due = \'[date value="2026-10-09"]\';\n```';
+    const markdown = "```\nconst due = '[date value=\"2026-10-09\"]';\n```";
     expect(toMarkdown(parseMarkdown(markdown))).toBe(markdown);
   });
 

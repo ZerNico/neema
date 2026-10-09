@@ -68,11 +68,6 @@ const TAGS: Record<string, string> = {
   pending: "pending",
 };
 
-/**
- * A block as XML. Text is inline Markdown; a list item holding one paragraph
- * shows as one element under the item's ID. Every block drawn in full is
- * added to `seen`.
- */
 /** A heading's level as a tag number; anything a stray client set is read as 2. */
 const headingLevel = (node: Node) => {
   const level: unknown = node.attrs.level;
@@ -81,6 +76,11 @@ const headingLevel = (node: Node) => {
     : 2;
 };
 
+/**
+ * A block as XML. Text is inline Markdown; a list item holding one paragraph
+ * shows as one element under the item's ID. Every block drawn in full is
+ * added to `seen`.
+ */
 const render = (node: Node, seen: SeenBlock[]): string => {
   const id = blockIdOf(node);
   if (id) seen.push({ id, hash: blockHash(node) });

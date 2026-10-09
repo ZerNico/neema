@@ -41,8 +41,9 @@ export const blockIdOf = (node: Node): string | null => {
 
 /**
  * Gives every block an ID it lacks, or holds one not shaped like an ID, and
- * a fresh one to every repeat after the first. Editors mint IDs for what people type; this covers what the server
- * builds from Markdown, and repeats an undo or a stray client brought back.
+ * a fresh one to every repeat after the first. Editors mint IDs for what
+ * people type; this covers what the server builds from Markdown, and repeats
+ * an undo or a stray client brought back.
  */
 export const ensureIds = <T extends Transform>(tr: T, mint: () => string = newBlockId): T => {
   const seen = new Set<string>();

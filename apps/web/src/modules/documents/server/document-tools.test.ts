@@ -258,6 +258,33 @@ describe("document tools", () => {
     expect(after[2]).not.toContain("<h1");
   });
 
+  it("refuses to replace text in a document the focus left that changed since its first view", async () => {
+    const { service } = fakeService([
+      { id: "doc-1", title: "One", content: "Intro\n\nOutro" },
+      { id: "doc-2", title: "Two", content: "Other" },
+    ]);
+    const tools = await prepare(service, "doc-1");
+    send(tools);
+    expect(
+      await call(tools, "edit_document", {
+        documentId: "doc-1",
+        target: "b1",
+        content: "New intro",
+      }),
+    ).toMatchObject({ outcome: "updated" });
+    send(tools);
+    // Reading the other document moves the focus; the first one's changes leave the requests.
+    await call(tools, "read_chat_document", { documentId: "doc-2" });
+    send(tools);
+    expect(
+      await call(tools, "edit_document", { documentId: "doc-1", target: "b1", content: "Again" }),
+    ).toMatchObject({ outcome: "conflict" });
+    // Unchanged since the first view: still known.
+    expect(
+      await call(tools, "edit_document", { documentId: "doc-1", target: "b2", content: "End" }),
+    ).toMatchObject({ outcome: "updated" });
+  });
+
   it("refuses to replace a block the model was never sent, then allows it once sent", async () => {
     const { service } = fakeService([{ id: "doc-1", title: "Plan", content: "Intro\n\nOutro" }]);
     const tools = await prepare(service, "doc-1");

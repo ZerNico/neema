@@ -776,11 +776,14 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           };
         }
       }
-      // Previewed in the wrong place: it goes, and the document is made where asked.
-      yield* service.discard(input.userId, preview.created.id, input.writeGuard).pipe(
-        Effect.catchTag("DocumentRejected", () => Effect.void),
-        Effect.catchTag("DocumentNotAvailable", () => Effect.void),
-      );
+      // Previewed in the wrong place: it goes, unless someone wrote in it, and
+      // the document is made where asked.
+      yield* service
+        .discard(input.userId, preview.created.id, input.writeGuard, preview.revision ?? undefined)
+        .pipe(
+          Effect.catchTag("DocumentRejected", () => Effect.void),
+          Effect.catchTag("DocumentNotAvailable", () => Effect.void),
+        );
       known = known.filter((document) => document.id !== preview.created!.id);
     }
     const result = yield* service
@@ -1121,7 +1124,6 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       .map(([key, value]) => ` ${key}="${escapeAttribute(String(value))}"`)
       .join("");
   };
-  /** The focused document's view as it is now, with each top-level block's own XML. */
   /** A window opening just before the first selected block, when the default one misses them all. */
   const selectionWindow = (
     tree: Node,
@@ -1142,6 +1144,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const start = index === -1 ? null : blockIdOf(tree.child(Math.max(0, index - 2)));
     return start ? { fromBlock: start } : undefined;
   };
+  /** The focused document's view as it is now, with each top-level block's own XML. */
   const render = (document: EditableDocument, tree: Node) => {
     const window = windows.get(document.id) ?? selectionWindow(tree);
     const view = blockView(tree, {
