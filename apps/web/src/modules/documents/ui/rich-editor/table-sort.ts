@@ -17,7 +17,12 @@ export const sortColumn = (editor: Editor, direction: 1 | -1) => {
   const rect = selectedRect(state);
   const rows: Node[] = [];
   rect.table.forEach((row) => rows.push(row));
-  const headed = rows[0]?.firstChild?.type.name === "tableHeader";
+  // A header row is all header cells; one header cell first is a header column.
+  const first = rows[0];
+  let headed = Boolean(first?.childCount);
+  first?.forEach((cell) => {
+    headed &&= cell.type.name === "tableHeader";
+  });
   const header = headed ? rows.slice(0, 1) : [];
   const body = headed ? rows.slice(1) : rows;
   if (body.length < 2) return;

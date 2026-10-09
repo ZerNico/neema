@@ -187,8 +187,12 @@ describe("document editor", () => {
     act(() => {
       editor.chain().focus().setTextSelection(textAt("Area")).deleteRow().run();
     });
+    // A header column is not a header row: its first cell alone is a header.
     act(() => {
-      editor.chain().focus().setTextSelection(textAt("Sync")).run();
+      editor.chain().focus().setTextSelection(textAt("Sync")).toggleHeaderColumn().run();
+    });
+    act(() => {
+      editor.chain().focus().setTextSelection(textAt("Grace")).run();
       sortColumn(editor, 1);
     });
     expect(sync.markdown()).toBe("| Editor | Ada   |\n| ------ | ----- |\n| Sync   | Grace |");
