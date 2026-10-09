@@ -127,6 +127,11 @@ describe("document Markdown", () => {
     expect(ours.parse(markdown)).toEqual(upstream.parse(markdown));
   });
 
+  it("leaves a shortcode typed into code as it is in the people's Markdown", () => {
+    const markdown = '```\nconst due = \'[date value="2026-10-09"]\';\n```';
+    expect(toMarkdown(parseMarkdown(markdown))).toBe(markdown);
+  });
+
   it("reads and writes chips as shortcodes for the model, and as text for people", () => {
     const markdown = 'Ship on [date value="2026-10-20"] with [@ id="u1" label="Ada"].';
     const doc = parseMarkdown(markdown);

@@ -89,7 +89,7 @@ const serialize = (json: JSONContent) =>
 export const toModelMarkdown = (node: Node) => serialize(node.toJSON());
 
 /** The Markdown a tree reads as for people: stored beside it for cards, search and Copy. */
-export const toMarkdown = (node: Node) => plainChips(toModelMarkdown(node));
+export const toMarkdown = (node: Node) => toModelMarkdown(plainChips(node));
 
 /** A document tree from Markdown; empty Markdown is an empty document. */
 export const parseMarkdown = (markdown: string) =>

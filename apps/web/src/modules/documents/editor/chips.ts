@@ -1,5 +1,7 @@
 import { createInlineMarkdownSpec, Node } from "@tiptap/core";
 import { Mention } from "@tiptap/extension-mention";
+import type { Node as TreeNode } from "@tiptap/pm/model";
+import { Transform } from "@tiptap/pm/transform";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -49,20 +51,30 @@ export const PersonMention = Mention.configure({
   renderText: ({ node }) => `@${String(node.attrs.label ?? node.attrs.id ?? "")}`,
 });
 
-const SHORTCODE_ATTRIBUTE = /(\w+)="([^"]*)"/g;
-const attributesOf = (source: string) =>
-  Object.fromEntries(
-    [...source.matchAll(SHORTCODE_ATTRIBUTE)].map((match) => [match[1]!, match[2]!]),
-  );
-
 /**
- * Markdown for people and exports: each chip as the text it stands for. The
+ * The tree for people and exports: each chip as the text it stands for. The
  * model's view keeps the shortcodes so it can tell a chip from typed text.
+ * Done on the tree, not the Markdown, so the same characters typed into a
+ * code block stay as they are.
  */
-export const plainChips = (markdown: string) =>
-  markdown
-    .replace(/\[date ([^\]]*)\]/g, (whole, source: string) => attributesOf(source).value ?? whole)
-    .replace(/\[@ ([^\]]*)\]/g, (whole, source: string) => {
-      const { label, id } = attributesOf(source);
-      return label || id ? `@${label ?? id}` : whole;
-    });
+export const plainChips = (doc: TreeNode): TreeNode => {
+  const chips: { position: number; node: TreeNode }[] = [];
+  doc.descendants((node, position) => {
+    if (node.type.name === "dateChip" || node.type.name === "mention")
+      chips.push({ position, node });
+    return true;
+  });
+  if (!chips.length) return doc;
+  const tr = new Transform(doc);
+  for (const { position, node } of chips.toReversed()) {
+    const text =
+      node.type.name === "dateChip"
+        ? String(node.attrs.value ?? "")
+        : `@${String(node.attrs.label ?? node.attrs.id ?? "")}`;
+    const at = tr.mapping.map(position);
+    if (text && text !== "@")
+      tr.replaceWith(at, at + node.nodeSize, doc.type.schema.text(text, node.marks));
+    else tr.delete(at, at + node.nodeSize);
+  }
+  return tr.doc;
+};
