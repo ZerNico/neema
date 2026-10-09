@@ -1299,17 +1299,25 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           baseline.order.map((block, index) => [block.id, { ...block, index }]),
         );
         const now = new Set(rendered.order.map((block) => block.id));
-        const lines: string[] = [];
+        // Where an added block sits, by the block before it in the document,
+        // not in the window: a window's first block is not the document's.
+        const previousOf = new Map<string, string | null>();
         let previous: string | null = null;
+        tree.forEach((block) => {
+          const id = blockIdOf(block);
+          if (!id) return;
+          previousOf.set(id, previous);
+          previous = id;
+        });
+        const lines: string[] = [];
         for (const block of rendered.order) {
           const old = before.get(block.id);
           if (!old || old.hash !== block.hash)
             lines.push(
               old
                 ? `<changed id="${block.id}">${block.xml}</changed>`
-                : `<added after="${previous ?? "start"}">${block.xml}</added>`,
+                : `<added after="${previousOf.get(block.id) ?? "start"}">${block.xml}</added>`,
             );
-          previous = block.id;
         }
         // Removed means gone from the document, not out of the window shown.
         const present = new Set<string>();

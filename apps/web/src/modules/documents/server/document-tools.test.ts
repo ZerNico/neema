@@ -140,7 +140,18 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
       "user",
     );
   };
-  return { service, rows, userWrite };
+  /** A paragraph a person types after one block, with its own fresh ID, as an editor gives it. */
+  const userInsert = (documentId: string, afterIndex: number, text: string) => {
+    const row = rows.get(documentId)!;
+    let position = 0;
+    for (let index = 0; index <= afterIndex; index++) position += row.doc.child(index).nodeSize;
+    const paragraph = documentSchema.nodes.paragraph!.create(
+      { id: "typed1" },
+      documentSchema.text(text),
+    );
+    write(documentId, new Transform(row.doc).insert(position, paragraph).doc, "user");
+  };
+  return { service, rows, userWrite, userInsert };
 }
 const prepare = (
   service: DocumentToolService,
@@ -333,6 +344,22 @@ describe("document tools", () => {
     const view = send(tools).join("\n");
     expect(view).toContain(`<p id="${late}">80 `);
     expect(view).toContain(`selected="${late}"`);
+  });
+
+  it("places a block added at a window's start after its neighbour in the document", async () => {
+    const line = "x".repeat(400);
+    const content = Array.from({ length: 100 }, (_, index) => `${index} ${line}`).join("\n\n");
+    const { service, userInsert, rows } = fakeService([{ id: "doc-1", title: "Long", content }]);
+    const doc = rows.get("doc-1")!.doc;
+    // A late selection opens the view two blocks before it, at block 78.
+    const tools = await prepare(service, "doc-1", [blockIdOf(doc.child(80))!]);
+    send(tools);
+    // A person adds a block after 78: the selection moves down one, and the
+    // window now opens on the new block.
+    userInsert("doc-1", 78, "Inserted");
+    await Effect.runPromise(tools.refresh());
+    const update = send(tools).at(-1)!;
+    expect(update).toContain(`<added after="${blockIdOf(doc.child(78))}">`);
   });
 
   it("never reports blocks that only left the window as removed", async () => {
