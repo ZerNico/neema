@@ -97,6 +97,7 @@ const legacyServer = async (request: Request) => {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
     onsessioninitialized: (session) => void legacySessions.set(session, transport),
+    onsessionclosed: (session) => void legacySessions.delete(session),
   });
   await buildServer().connect(transport);
   return transport.handleRequest(request);
@@ -224,6 +225,13 @@ describe("an MCP server through the adapter", () => {
     expect(legacy.entries.map((entry) => entry.mcpName)).toEqual(
       modern.entries.map((entry) => entry.mcpName),
     );
+  });
+
+  it("ends a legacy session once its work is done, so sessions do not pile up on the server", async () => {
+    const before = legacySessions.size;
+    await list(sessionAt("/legacy"));
+    await list(sessionAt("/legacy"));
+    expect(legacySessions.size).toBe(before);
   });
 
   it("learns a server's era per credential, since what it says may depend on who asks", async () => {

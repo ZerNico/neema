@@ -18,6 +18,8 @@ const CLIENT_INFO = { name: "neema", version: "1.0.0" };
 /** One request, a person's answer to an elicitation included. Stop ends it sooner. */
 const REQUEST_TIMEOUT_MS = 5 * 60_000;
 const CONNECT_TIMEOUT_MS = 30_000;
+/** How long a legacy session's closing request may take before it is left to expire. */
+const TERMINATE_TIMEOUT_MS = 5_000;
 /** How long a server's protocol era is trusted before it is probed again. */
 const ERA_TTL_MS = 10 * 60_000;
 
@@ -60,6 +62,8 @@ export const authHeaders = (
 
 export interface Connection {
   readonly client: Client;
+  /** The Streamable HTTP transport in use, if any, to end a legacy session with. */
+  readonly transport: () => StreamableHTTPClientTransport | null;
   /** The server's last `WWW-Authenticate` challenge, for a refusal the SDK words vaguely. */
   readonly challenge: () => AuthChallenge | null;
 }
@@ -134,12 +138,13 @@ export const connect = (input: {
       const cached = eras.get(key);
       const known = cached && cached.until > Date.now() ? cached.era : null;
 
+      let current: StreamableHTTPClientTransport | null = null;
       const streamable = () =>
-        new StreamableHTTPClientTransport(input.url, {
+        (current = new StreamableHTTPClientTransport(input.url, {
           fetch,
           requestInit: { headers },
           redirectPolicy: "same-origin",
-        });
+        }));
       const sse = () => new SSEClientTransport(input.url, { fetch, requestInit: { headers } });
 
       const attempt = (era: "streamable" | "sse", prior?: Era) =>
@@ -185,9 +190,24 @@ export const connect = (input: {
         Effect.mapError((error) => toFailure(input.integrationId, error, challenge)),
       );
       if (!known) remember(connected);
-      return { client, challenge: () => challenge } satisfies Connection;
+      return {
+        client,
+        challenge: () => challenge,
+        transport: () => current,
+      } satisfies Connection;
     }),
-    ({ client }) => Effect.promise(() => client.close().catch(() => undefined)),
+    // A legacy server keeps a session until told it is over; closing the
+    // client only drops our side, so the session is ended first, briefly.
+    ({ client, transport }) =>
+      Effect.promise(async () => {
+        const session = transport();
+        if (session?.sessionId)
+          await Promise.race([
+            session.terminateSession().catch(() => undefined),
+            new Promise((resolve) => setTimeout(resolve, TERMINATE_TIMEOUT_MS)),
+          ]);
+        await client.close().catch(() => undefined);
+      }),
   );
 
 export const REQUEST_OPTIONS = { timeout: REQUEST_TIMEOUT_MS } as const;
