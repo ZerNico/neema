@@ -94,7 +94,7 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import type { Attachment, MessageAttachment } from "~/modules/attachments/schema.ts";
 import {
   AttachmentPreviewDialog,
-  FilePreviewBody,
+  filePanelRequest,
 } from "~/modules/attachments/ui/attachment-preview.tsx";
 import {
   useDetailPanel,
@@ -551,22 +551,14 @@ function StoredAttachmentChip({
 // Files this page already opened by itself: the list remounts rows on scroll.
 const AUTO_OPENED_FILES = new Set<string>();
 
-const filePanelRequest = (attachment: Attachment) => ({
-  id: `file:${attachment.id}`,
-  title: attachment.fileName,
-  body: (
-    <FilePreviewBody
-      target={{
-        fileName: attachment.fileName,
-        size: attachment.size,
-        kind: attachment.kind,
-        url: attachmentUrl(attachment.id),
-        office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
-      }}
-      linkable
-    />
-  ),
-});
+const attachmentPanelRequest = (attachment: Attachment) =>
+  filePanelRequest({
+    fileName: attachment.fileName,
+    size: attachment.size,
+    kind: attachment.kind,
+    url: attachmentUrl(attachment.id),
+    office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
+  });
 
 /**
  * A document an answer delivers opens beside the chat as it arrives, as
@@ -576,9 +568,9 @@ const filePanelRequest = (attachment: Attachment) => ({
 function useDeliveredFilePanel(attachment: Attachment, fresh: boolean) {
   const panel = useDetailPanel();
   const available = useDetailPanelAvailable();
-  const id = `file:${attachment.id}`;
+  const request = useMemo(() => attachmentPanelRequest(attachment), [attachment]);
+  const { id } = request;
   const open = useDetailPanelTabIds().includes(id);
-  const request = useMemo(() => filePanelRequest(attachment), [attachment]);
   useDetailPanelTabContent(id, open ? request : null);
   useEffect(() => {
     if (!fresh || !available || attachment.kind === "image" || AUTO_OPENED_FILES.has(id)) return;
