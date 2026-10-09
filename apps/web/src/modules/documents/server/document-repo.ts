@@ -136,7 +136,11 @@ export class DocumentRepo extends Context.Service<
     ): Effect.Effect<void, DocumentNotAvailable>;
     /** Oldest first, with each author's name. */
     comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
-    /** Caller holds the document's lock. */
+    /** Hands a chat's document to a project. Caller holds the document's lock. */
+    moveToProject(tx: DbTx, documentId: string, projectId: string): Effect.Effect<void>;
+    /** A person's display name, for the cursor others see. */
+    userName(userId: string): Effect.Effect<string>;
+    /** Caller holds the document's lock. False when the comment's ID is already taken. */
     addComment(
       tx: DbTx,
       row: {
@@ -149,7 +153,7 @@ export class DocumentRepo extends Context.Service<
         quote?: string | null;
         toAssistant?: boolean;
       },
-    ): Effect.Effect<void>;
+    ): Effect.Effect<boolean>;
     resolveThread(
       tx: DbTx,
       documentId: string,
@@ -318,6 +322,28 @@ export class DocumentRepo extends Context.Service<
         remove: Effect.fn("DocumentRepo.remove")(function* (tx, documentId) {
           yield* tx.delete(documents).where(eq(documents.id, documentId)).pipe(Effect.orDie);
         }),
+        moveToProject: Effect.fn("DocumentRepo.moveToProject")(
+          function* (tx, documentId, projectId) {
+            yield* tx
+              .update(documents)
+              .set({
+                projectId,
+                conversationId: null,
+                createdByMessageId: null,
+                updatedAt: new Date(),
+              })
+              .where(eq(documents.id, documentId))
+              .pipe(Effect.orDie);
+          },
+        ),
+        userName: Effect.fn("DocumentRepo.userName")(function* (userId) {
+          const [row] = yield* db
+            .select({ name: user.name })
+            .from(user)
+            .where(eq(user.id, userId))
+            .pipe(Effect.orDie);
+          return row?.name ?? "Someone";
+        }),
         comments: Effect.fn("DocumentRepo.comments")(function* (documentId, tx) {
           const rows = yield* (tx ?? db)
             .select({
@@ -356,7 +382,13 @@ export class DocumentRepo extends Context.Service<
           }));
         }),
         addComment: Effect.fn("DocumentRepo.addComment")(function* (tx, row) {
-          yield* tx.insert(documentComments).values(row).pipe(Effect.orDie);
+          const inserted = yield* tx
+            .insert(documentComments)
+            .values(row)
+            .onConflictDoNothing()
+            .returning({ id: documentComments.id })
+            .pipe(Effect.orDie);
+          return inserted.length > 0;
         }),
         resolveThread: Effect.fn("DocumentRepo.resolveThread")(
           function* (tx, documentId, threadId, resolved) {

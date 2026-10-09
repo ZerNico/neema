@@ -119,6 +119,7 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
         );
       }),
     discard: (_userId, documentId) => Effect.sync(() => void rows.delete(documentId)),
+    moveToProject: () => Effect.die("no streamed creations in these tests"),
     beginLive: () => Effect.succeed(null),
     updateLive: () => Effect.succeed(false),
     settleLive: () => Effect.die("no live edits in these tests"),
@@ -321,6 +322,49 @@ describe("document tools", () => {
     await call(tools, "read_chat_document", { documentId: "doc-1", ...JSON.parse(next) });
     const [, , update] = send(tools);
     expect(update).toContain("<gap blocks=");
+  });
+
+  it("opens a long document's view at the selection when it lies past the first window", async () => {
+    const line = "x".repeat(400);
+    const content = Array.from({ length: 100 }, (_, index) => `${index} ${line}`).join("\n\n");
+    const { service, rows } = fakeService([{ id: "doc-1", title: "Long", content }]);
+    const late = blockIdOf(rows.get("doc-1")!.doc.child(80))!;
+    const tools = await prepare(service, "doc-1", [late]);
+    const view = send(tools).join("\n");
+    expect(view).toContain(`<p id="${late}">80 `);
+    expect(view).toContain(`selected="${late}"`);
+  });
+
+  it("never reports blocks that only left the window as removed", async () => {
+    const line = "x".repeat(400);
+    const content = Array.from({ length: 100 }, (_, index) => `${index} ${line}`).join("\n\n");
+    const { service, userWrite } = fakeService([{ id: "doc-1", title: "Long", content }]);
+    const tools = await prepare(service, "doc-1");
+    const [, view = ""] = send(tools);
+    // The window shifts by three blocks, as it does to show a write.
+    const third = [...view.matchAll(/<p id="([a-z0-9]+)"/g)][3]![1]!;
+    await call(tools, "read_chat_document", { documentId: "doc-1", fromBlock: third });
+    // A person changes a block in the window; the three it left behind all still exist.
+    userWrite("doc-1", content.replace(`10 ${line}`, `10 changed`));
+    await Effect.runPromise(tools.refresh());
+    const update = send(tools).at(-1)!;
+    expect(update).not.toContain("<removed");
+  });
+
+  it("keeps showing a document focused partway through the answer in every later request", async () => {
+    const { service } = fakeService([
+      { id: "doc-1", title: "One", content: "First document text" },
+      { id: "doc-2", title: "Two", content: "Second document text" },
+    ]);
+    const tools = await prepare(service, "doc-1");
+    expect(send(tools).join("\n")).toContain("First document text");
+    // The reader moves the focus, as a steer does, between two requests.
+    tools.focus("doc-2", undefined, undefined);
+    // Each round refreshes before its request, as streaming does.
+    await Effect.runPromise(tools.refresh());
+    expect(send(tools).join("\n")).toContain("Second document text");
+    await Effect.runPromise(tools.refresh());
+    expect(send(tools).join("\n")).toContain("Second document text");
   });
 
   it("requires an id among several documents, and lists them", async () => {

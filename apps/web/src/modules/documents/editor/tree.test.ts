@@ -231,6 +231,30 @@ describe("comments shown to the model", () => {
     answered: false,
   });
 
+  it("always shows the asking thread, however many older threads there are", () => {
+    const words = Array.from({ length: 31 }, (_, index) => `word${index}`).join(" ");
+    const marked = withIds(words);
+    const tr = new Transform(marked);
+    const paragraph = marked.firstChild!;
+    let offset = 1;
+    for (let index = 0; index < 31; index++) {
+      const word = `word${index}`;
+      tr.addMark(
+        offset,
+        offset + word.length,
+        documentSchema.marks.comment!.create({ thread: `t${index}` }),
+      );
+      offset += word.length + 1;
+    }
+    expect(paragraph.type.name).toBe("paragraph");
+    const threads = Array.from({ length: 31 }, (_, index) =>
+      comment(`t${index}`, `t${index}`, `Note ${index}`),
+    );
+    const view = commentsView(tr.doc, threads, "t30");
+    expect(view).toContain('id="t30"');
+    expect(view.match(/<thread /g)).toHaveLength(30);
+  });
+
   it("lists open threads on text still there, with their block and quote", () => {
     const doc = withIds("Ship the beta <soon>\n\nOther");
     const mark = (thread: string) => documentSchema.marks.comment!.create({ thread });

@@ -16,7 +16,7 @@ import {
 } from "effect";
 import { uuidv7 } from "uuidv7";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import {
   conversationDrafts,
   conversations,
@@ -40,6 +40,9 @@ import {
   skillRevisions,
   usageEvents,
   workTurnReservations,
+  documentSteps,
+  documents,
+  projects,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
@@ -2384,6 +2387,308 @@ describe("conversation documents", () => {
     }
   });
 
+  it("reports a conflict, not a second copy, when a person edits a streaming insert", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const gate = await runtime.runPromise(Deferred.make<void>());
+    const text = "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length > 2) return reply();
+      const params = { target: "end", content: text };
+      const json = JSON.stringify(params);
+      const cut = json.indexOf("delta");
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "edit_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+            ).pipe(
+              // The provider pauses while the person types into what has landed.
+              Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+              Stream.concat(
+                Stream.make(
+                  AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                  AiResponse.makePart("tool-params-end", { id }),
+                  AiResponse.makePart("tool-call", {
+                    id,
+                    name: "edit_document",
+                    params,
+                    providerExecuted: false,
+                  }),
+                  authoringFinish("tool-calls"),
+                ),
+              ),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      const [created] = await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const found = yield* Effect.promise(() => documentsOf(seed));
+            if (found[0]?.content.includes("Alpha bravo charlie")) return found;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const editor = await collabEditor(runtime.runPromise, seed.userId, created!.id);
+      await editor!.type((markdown) => markdown.replace("Alpha bravo", "Alpha PERSON bravo"));
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.split("Alpha")).toHaveLength(2);
+      expect(document!.content).toContain("Alpha PERSON bravo");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "conflict",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it.each([
+    ["a scope sent after the content", { scope: "chat" }, null],
+    ["no scope, which in a project means the project", {}, "project"],
+  ] as const)(
+    "streams a project chat's new document in private until the call says where (%s)",
+    async (_label, extra, expected) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const projectId = uuidv7();
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db.insert(projects).values({ id: projectId, userId: seed.userId, name: "Launch" });
+          yield* db
+            .update(conversations)
+            .set({ projectId })
+            .where(eq(conversations.id, seed.conversation.id));
+        }),
+      );
+      const gate = await runtime.runPromise(Deferred.make<void>());
+      // The content first, any scope only after it, as a model may write them.
+      const params = {
+        title: "Notes",
+        content: "Alpha bravo charlie delta echo foxtrot",
+        ...extra,
+      };
+      let calls = 0;
+      authoringScript = (input) => {
+        calls++;
+        if (calls > 1) return reply();
+        const json = JSON.stringify(params);
+        const cut = json.indexOf("delta");
+        const id = uuidv7();
+        const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+        return Stream.unwrap(
+          LanguageModel.make({
+            generateText: () => Effect.die("only streaming is used here"),
+            streamText: () =>
+              Stream.make(
+                AiResponse.makePart("tool-params-start", {
+                  id,
+                  name: "create_document",
+                  providerExecuted: false,
+                }),
+                AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+              ).pipe(
+                Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+                Stream.concat(
+                  Stream.make(
+                    AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                    AiResponse.makePart("tool-params-end", { id }),
+                    AiResponse.makePart("tool-call", {
+                      id,
+                      name: "create_document",
+                      params,
+                      providerExecuted: false,
+                    }),
+                    authoringFinish("tool-calls"),
+                  ),
+                ),
+                Stream.mapEffect((part) => encodePart(part)),
+                Stream.orDie,
+              ),
+          }).pipe(
+            Effect.map((model) =>
+              model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+            ),
+          ),
+        ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+      };
+      const stored = () =>
+        runtime.runPromise(
+          Effect.flatMap(Db, (db) =>
+            db
+              .select({
+                id: documents.id,
+                projectId: documents.projectId,
+                content: documents.content,
+              })
+              .from(documents)
+              .where(
+                or(
+                  eq(documents.conversationId, seed.conversation.id),
+                  eq(documents.projectId, projectId),
+                ),
+              ),
+          ),
+        );
+      try {
+        const sent = await send(seed);
+        const streaming = await runtime.runPromise(
+          Effect.gen(function* () {
+            for (;;) {
+              const found = yield* Effect.promise(stored);
+              if (found[0]?.content.includes("Alpha bravo")) return found;
+              yield* Effect.sleep(Duration.millis(50));
+            }
+          }).pipe(Effect.timeout(Duration.seconds(10))),
+        );
+        // While it streams, it is the chat's alone.
+        expect(streaming).toMatchObject([{ projectId: null }]);
+        await runtime.runPromise(Deferred.succeed(gate, undefined));
+        await settle(sent.assistantMessageId);
+        const final = await stored();
+        expect(final).toHaveLength(1);
+        expect(final[0]!.id).toBe(streaming[0]!.id);
+        expect(final[0]!.projectId).toBe(expected === "project" ? projectId : null);
+        expect(final[0]!.content).toContain("foxtrot");
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
+
+  it("keeps what a person types into a document while its creation streams", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const gate = await runtime.runPromise(Deferred.make<void>());
+    const params = {
+      title: "Trip",
+      content: "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima",
+    };
+    let calls = 0;
+    authoringScript = (input) => {
+      calls++;
+      if (calls > 1) return reply();
+      const json = JSON.stringify(params);
+      const cut = json.indexOf("delta");
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "create_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+            ).pipe(
+              Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+              Stream.concat(
+                Stream.make(
+                  AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                  AiResponse.makePart("tool-params-end", { id }),
+                  AiResponse.makePart("tool-call", {
+                    id,
+                    name: "create_document",
+                    params,
+                    providerExecuted: false,
+                  }),
+                  authoringFinish("tool-calls"),
+                ),
+              ),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      const [created] = await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const found = yield* Effect.promise(() => documentsOf(seed));
+            if (found[0]?.content.includes("Alpha bravo charlie")) return found;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const editor = await collabEditor(runtime.runPromise, seed.userId, created!.id);
+      await editor!.type((markdown) => `${markdown}\n\nMy own note`);
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain("My own note");
+      expect(document!.content).toContain("Alpha bravo charlie");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "conflict",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("deletes a block when a streamed edit replaces it with nothing", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length === 2)
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: blockIdIn(input, "tag build"), content: "" },
+          6,
+          Duration.millis(20),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toBe(CHECKLIST.replace("- [ ] tag build\n", ""));
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("keeps what a streamed edit wrote when the answer is stopped mid-write", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];
@@ -2548,6 +2853,18 @@ describe("conversation documents", () => {
       // Typed out over many writes, none carrying more than a short stretch of new text.
       expect(inserted.length).toBeGreaterThan(8);
       expect(inserted.filter((size) => size > 200)).toHaveLength(0);
+      // Each paced write is stored as the generation's, like any other model write.
+      const steps = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ origin: documentSteps.origin, generationId: documentSteps.generationId })
+            .from(documentSteps)
+            .where(eq(documentSteps.documentId, document!.id)),
+        ),
+      );
+      const model = steps.filter((step) => step.origin === "model");
+      expect(model.length).toBeGreaterThan(8);
+      expect(model.filter((step) => step.generationId === null)).toEqual([]);
     } finally {
       authoringScript = null;
       if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));

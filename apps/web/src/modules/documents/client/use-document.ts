@@ -8,23 +8,14 @@ import {
   pushDocument,
   resolveDocumentThread,
 } from "../server/document-functions.ts";
+import { presenceUser } from "../presence-user.ts";
 import { documentQuery } from "./document-queries.ts";
 import { selectedBlockIds } from "../editor/block-ids.ts";
 import type { DocumentSync } from "./document-sync.ts";
 
-const CURSOR_COLORS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4"] as const;
-/** A stable colour per person, so their cursor looks the same in every tab. */
-const cursorUser = (user: { id: string; name: string } | null | undefined) => {
-  const id = user?.id ?? "";
-  let hash = 0;
-  for (const character of id) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  const token = CURSOR_COLORS[Math.abs(hash) % CURSOR_COLORS.length]!;
-  return {
-    name: user?.name ?? "You",
-    color: `var(${token})`,
-    colorLight: `color-mix(in oklab, var(${token}) 25%, transparent)`,
-  };
-};
+/** This tab's own cursor label; the server replaces it with the signed-in person's. */
+const cursorUser = (user: { id: string; name: string } | null | undefined) =>
+  presenceUser({ id: user?.id ?? "", name: user?.name ?? "You" });
 
 /**
  * The connection, its editor and the unsent-changes store, loaded with the

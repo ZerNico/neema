@@ -22,6 +22,7 @@ export const DOCUMENT_LIMITS = {
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const DocumentTitle = Schema.String.check(
   Schema.isMinLength(1),
+  Schema.isPattern(/\S/),
   Schema.isMaxLength(DOCUMENT_LIMITS.title),
 );
 

@@ -31,14 +31,17 @@ const ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 export const newBlockId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => ALPHABET[byte % 36]).join("");
 
+/** What a block ID may be. Anything else, from a stray or hostile client, is replaced. */
+const VALID_ID = /^[a-z0-9]{1,16}$/;
+
 export const blockIdOf = (node: Node): string | null => {
   const id: unknown = node.attrs[BLOCK_ID];
-  return typeof id === "string" && id ? id : null;
+  return typeof id === "string" && VALID_ID.test(id) ? id : null;
 };
 
 /**
- * Gives every block an ID it lacks and a fresh one to every repeat after the
- * first. Editors mint IDs for what people type; this covers what the server
+ * Gives every block an ID it lacks, or holds one not shaped like an ID, and
+ * a fresh one to every repeat after the first. Editors mint IDs for what people type; this covers what the server
  * builds from Markdown, and repeats an undo or a stray client brought back.
  */
 export const ensureIds = <T extends Transform>(tr: T, mint: () => string = newBlockId): T => {

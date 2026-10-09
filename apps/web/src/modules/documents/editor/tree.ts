@@ -73,11 +73,19 @@ const TAGS: Record<string, string> = {
  * shows as one element under the item's ID. Every block drawn in full is
  * added to `seen`.
  */
+/** A heading's level as a tag number; anything a stray client set is read as 2. */
+const headingLevel = (node: Node) => {
+  const level: unknown = node.attrs.level;
+  return typeof level === "number" && Number.isInteger(level) && level >= 1 && level <= 6
+    ? level
+    : 2;
+};
+
 const render = (node: Node, seen: SeenBlock[]): string => {
   const id = blockIdOf(node);
   if (id) seen.push({ id, hash: blockHash(node) });
   const name = node.type.name;
-  const tag = name === "heading" ? `h${node.attrs.level as number}` : (TAGS[name] ?? name);
+  const tag = name === "heading" ? `h${headingLevel(node)}` : (TAGS[name] ?? name);
   const head = (extra: Record<string, string | number | boolean | null | undefined> = {}) =>
     `<${tag}${attributes({ id, ...extra })}`;
   switch (name) {
@@ -133,9 +141,9 @@ const gap = (skipped: Node[]) => {
     .filter((block) => block.type.name === "heading" && blockIdOf(block))
     .slice(0, GAP_HEADINGS)
     .map((block) => {
-      const level = Number(block.attrs.level) || 2;
+      const level = headingLevel(block);
       const text = block.textContent.slice(0, GAP_HEADING_CHARS);
-      return `<h${level} id="${blockIdOf(block)}">${escapeText(text)}</h${level}>`;
+      return `<h${level}${attributes({ id: blockIdOf(block) })}>${escapeText(text)}</h${level}>`;
     });
   const open = `<gap${attributes({ blocks: skipped.length, last })}`;
   return headings.length ? `${open}>\n${headings.join("\n")}\n</gap>` : `${open}/>`;
@@ -223,13 +231,13 @@ export const commentsView = (
   asking: string | null = null,
 ) => {
   const anchors = commentAnchors(doc);
-  const threads = comments
-    .filter(
-      (each) =>
-        each.id === each.threadId &&
-        (each.id === asking || (!each.resolvedAt && anchors.has(each.id))),
-    )
-    .slice(0, COMMENT_THREADS);
+  // The thread the message was sent from always has a place; the rest share what is left.
+  const asked = comments.filter((each) => each.id === asking && each.id === each.threadId);
+  const others = comments.filter(
+    (each) =>
+      each.id === each.threadId && each.id !== asking && !each.resolvedAt && anchors.has(each.id),
+  );
+  const threads = [...asked, ...others.slice(0, COMMENT_THREADS - asked.length)];
   if (!threads.length) return "";
   const lines = threads.map((thread) => {
     const anchor = anchors.get(thread.id);

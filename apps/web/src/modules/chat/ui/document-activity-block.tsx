@@ -112,7 +112,10 @@ function DocumentActivityRow({
 
 export function DocumentActivityBlock({ activity }: { activity: DocumentToolActivity }) {
   const reference = activity.result?.documentId;
-  const create = activity.name === "create_document" && activity.result?.outcome === "created";
+  // A creation someone typed into as it streamed still made the document.
+  const create =
+    activity.name === "create_document" &&
+    (activity.result?.outcome === "created" || activity.result?.outcome === "conflict");
   if (reference && create)
     return (
       <DocumentWidget
