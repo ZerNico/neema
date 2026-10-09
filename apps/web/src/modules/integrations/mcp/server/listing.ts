@@ -15,7 +15,7 @@ const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Keywords a provider has no use for, or that hold definitions we inline. */
-const DROPPED = new Set(["$schema", "$id", "$defs", "definitions", "$comment"]);
+const DROPPED = new Set(["$schema", "$id", "$defs", "definitions", "$comment", "$async"]);
 /** Keywords whose value is data, copied as written: `{"$ref": …}` in a `const` is a value. */
 const LITERAL = new Set(["const", "enum", "default", "examples", "required", "type"]);
 /** Keywords whose value maps names to schemas: a property may be called `definitions`. */

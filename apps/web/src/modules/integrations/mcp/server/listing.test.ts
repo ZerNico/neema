@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { listingEntries, normalizeSchema } from "./listing.ts";
+import { argumentCheck } from "./validate.ts";
 
 describe("input schemas", () => {
   it("inlines local references and drops what providers cannot use", () => {
@@ -135,6 +136,32 @@ describe("a schema the argument check cannot compile", () => {
       [],
     );
     expect(entry?.unsupported).toBe("Its input schema is not valid JSON Schema.");
+  });
+});
+
+describe("an asynchronous schema", () => {
+  it("is checked synchronously, so a wrong argument is refused", () => {
+    const [entry] = listingEntries(
+      "docs",
+      [
+        {
+          name: "odd",
+          inputSchema: {
+            $async: true,
+            type: "object",
+            properties: { q: { type: "string" } },
+            required: ["q"],
+          },
+        },
+      ],
+      [],
+    );
+    expect(entry?.unsupported).toBeUndefined();
+    const check = argumentCheck(entry!.fingerprint, entry!.inputSchema);
+    expect("error" in check).toBe(false);
+    if ("error" in check) return;
+    expect(check({ q: 5 }).valid).toBe(false);
+    expect(check({ q: "x" }).valid).toBe(true);
   });
 });
 
