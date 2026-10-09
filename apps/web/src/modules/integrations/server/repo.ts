@@ -211,20 +211,24 @@ export class IntegrationRepo extends Context.Service<
     catalog(integrationId: string): Effect.Effect<ToolCatalogRow | null>;
     /** Makes a catalog due for a check now, creating it on first use. */
     scheduleCatalogCheck(integrationId: string): Effect.Effect<void>;
-    /**
-     * Claims catalogs due for a check under a lease, so two processes or a
-     * manual check never list one server twice at once.
-     */
+    /** Claims catalogs due for a check under a lease, so two sweeps never take the same one. */
     claimCatalogChecks(input: {
       kinds: ReadonlyArray<string>;
       limit: number;
       leaseMs: number;
     }): Effect.Effect<ReadonlyArray<ToolCatalogRow>>;
+    /**
+     * Starts a check, sweep or manual, and returns its token. Starting one
+     * supersedes any still running: only the newest may record what it saw.
+     */
+    startCatalogCheck(integrationId: string): Effect.Effect<string>;
+    /** False when a newer check or a change of address superseded this one; nothing is written. */
     recordCatalogCheck(
       integrationId: string,
+      token: string,
       outcome: { latest: McpToolEntry[]; server: Record<string, string> } | { error: string },
       nextCheckAt: Date,
-    ): Effect.Effect<void>;
+    ): Effect.Effect<boolean>;
     /** Replaces what is offered with what the admin approved. */
     approveCatalog(
       integrationId: string,
@@ -737,26 +741,43 @@ export class IntegrationRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
-        recordCatalogCheck: Effect.fn("IntegrationRepo.recordCatalogCheck")(
-          function* (integrationId, outcome, nextCheckAt) {
-            const now = new Date();
+        startCatalogCheck: Effect.fn("IntegrationRepo.startCatalogCheck")(
+          function* (integrationId) {
+            const token = uuidv7();
             yield* db
               .insert(integrationToolCatalogs)
-              .values({ integrationId, nextCheckAt })
-              .onConflictDoNothing()
+              .values({ integrationId, checkToken: token })
+              .onConflictDoUpdate({
+                target: integrationToolCatalogs.integrationId,
+                set: { checkToken: token },
+              })
               .pipe(Effect.orDie);
-            yield* db
+            return token;
+          },
+        ),
+
+        recordCatalogCheck: Effect.fn("IntegrationRepo.recordCatalogCheck")(
+          function* (integrationId, token, outcome, nextCheckAt) {
+            const rows = yield* db
               .update(integrationToolCatalogs)
               .set({
                 ...("error" in outcome
                   ? { checkError: outcome.error }
                   : { latest: outcome.latest, server: outcome.server, checkError: null }),
-                checkedAt: now,
+                checkedAt: new Date(),
                 nextCheckAt,
                 checkLeaseUntil: null,
+                checkToken: null,
               })
-              .where(eq(integrationToolCatalogs.integrationId, integrationId))
+              .where(
+                and(
+                  eq(integrationToolCatalogs.integrationId, integrationId),
+                  eq(integrationToolCatalogs.checkToken, token),
+                ),
+              )
+              .returning({ integrationId: integrationToolCatalogs.integrationId })
               .pipe(Effect.orDie);
+            return rows.length > 0;
           },
         ),
 

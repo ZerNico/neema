@@ -210,6 +210,9 @@ export const integrationToolCatalogs = pgTable(
     nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
     // A claimed check's lease; the sweep skips a catalog until it lapses.
     checkLeaseUntil: timestamp("check_lease_until", { withTimezone: true }),
+    // The newest check started. Only it may record what it saw, so a slower,
+    // older listing never overwrites a newer one or one for another address.
+    checkToken: text("check_token"),
   },
   (t) => [index("integration_tool_catalogs_due_idx").on(t.nextCheckAt)],
 );

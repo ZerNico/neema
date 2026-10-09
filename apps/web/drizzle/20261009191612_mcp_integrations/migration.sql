@@ -19,7 +19,8 @@ CREATE TABLE "integration_tool_catalogs" (
 	"reviewed_by" text,
 	"reviewed_at" timestamp with time zone,
 	"next_check_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"check_lease_until" timestamp with time zone
+	"check_lease_until" timestamp with time zone,
+	"check_token" text
 );
 --> statement-breakpoint
 ALTER TABLE "integration_configs" ADD COLUMN "shared_credential_ciphertext" text;--> statement-breakpoint

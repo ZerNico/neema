@@ -679,11 +679,13 @@ export class IntegrationService extends Context.Service<
         integrationId: string,
         asUserId: string | null,
       ) {
+        const token = yield* repo.startCatalogCheck(integrationId);
         const current = yield* repo.catalog(integrationId);
         const fail = (reason: string) =>
           repo
             .recordCatalogCheck(
               integrationId,
+              token,
               { error: reason },
               new Date(Date.now() + CATALOG_RETRY_MS),
             )
@@ -698,11 +700,17 @@ export class IntegrationService extends Context.Service<
           .list(context.session, integrationId, previous)
           .pipe(Effect.catch((error) => fail(failureReason(error))));
         const next = new Date(Date.now() + (listed.recheckAfterMs ?? CATALOG_RECHECK_MS));
-        yield* repo.recordCatalogCheck(
+        // A newer check, or the admin moving the server, made this listing stale: drop it.
+        const recorded = yield* repo.recordCatalogCheck(
           integrationId,
+          token,
           { latest: listed.entries, server: listed.server },
           next,
         );
+        if (!recorded)
+          return yield* new IntegrationRejected({
+            reason: "A newer check of this server replaced this one. Look again.",
+          });
         yield* bus
           .publishGlobal({ type: "integrations.changed" })
           .pipe(Effect.catchCause(() => Effect.void));

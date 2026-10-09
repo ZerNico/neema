@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "c02ae0bc-5ecf-4fa1-91cc-21066faa3acf",
+  "id": "d5b12c42-3beb-4035-819f-209290132e32",
   "prevIds": [
     "d11b2009-61a8-485b-8f68-b72d3acbcd89"
   ],
@@ -5298,6 +5298,19 @@
       "generated": null,
       "identity": null,
       "name": "check_lease_until",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_tool_catalogs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "check_token",
       "entityType": "columns",
       "schema": "public",
       "table": "integration_tool_catalogs"
