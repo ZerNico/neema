@@ -25,6 +25,7 @@ import {
   deleteProjectDocument,
 } from "~/modules/documents/server/document-functions.ts";
 import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
+import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dialog.tsx";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -384,6 +385,7 @@ function ProjectDocumentRow({
   }, [openNow, open, onOpened]);
   const confirm = useConfirm();
   const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteProjectDocument({ data: { documentId: document.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
@@ -419,6 +421,10 @@ function ProjectDocumentRow({
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setRenaming(true)}>
+              <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+              Rename
+            </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
               disabled={remove.isPending}
@@ -437,6 +443,9 @@ function ProjectDocumentRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      ) : null}
+      {editable ? (
+        <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
       ) : null}
     </ListRow>
   );

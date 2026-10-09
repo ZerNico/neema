@@ -272,6 +272,12 @@ export class DocumentService extends Context.Service<
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
     /** Deletes a project's document; a chat's goes only with its answer. */
     remove(userId: string, documentId: string): Effect.Effect<void, DocumentError>;
+    /** A new title, by anyone who may edit the document. */
+    rename(
+      userId: string,
+      documentId: string,
+      title: string,
+    ): Effect.Effect<EditableDocument, DocumentError>;
     create<E = never, R = never>(
       userId: string,
       input: CreateDocumentInput,
@@ -1317,6 +1323,19 @@ export class DocumentService extends Context.Service<
             ).pipe(Effect.tap(() => drop(documentId))),
           );
           yield* documentChanged(userId, removed);
+        }),
+        rename: Effect.fn("DocumentService.rename")(function* (userId, documentId, title) {
+          const renamed = yield* exclusive(documentId)(
+            transaction((tx) =>
+              Effect.gen(function* () {
+                yield* requireDocuments(userId, tx);
+                yield* documents.lock(tx, userId, documentId);
+                return yield* documents.write(tx, userId, documentId, { title });
+              }),
+            ),
+          );
+          yield* documentChanged(userId, renamed);
+          return renamed;
         }),
         create,
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {

@@ -33,6 +33,10 @@ export const CreateProjectDocumentInput = Schema.Struct({
   projectId: ResourceId,
   title: DocumentTitle,
 });
+export const RenameDocumentInput = Schema.Struct({
+  documentId: ResourceId,
+  title: DocumentTitle,
+});
 /** Exactly one owner: a chat, or a project. */
 export const CreateDocumentInput = Schema.Struct({
   conversationId: Schema.optionalKey(ResourceId),

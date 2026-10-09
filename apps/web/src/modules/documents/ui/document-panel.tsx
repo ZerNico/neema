@@ -1,4 +1,10 @@
-import { Copy01Icon, Download04Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  Download04Icon,
+  MoreHorizontalIcon,
+  PencilEdit02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
@@ -8,6 +14,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
@@ -18,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
 import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
+import { RenameDocumentDialog } from "./rename-document-dialog.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
 const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
@@ -60,6 +68,8 @@ export function DocumentPanelActions({
   toolbarSlot: (element: HTMLElement | null) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const document = controller.document;
   return (
     <div className="flex items-center gap-2">
       {/* The editor's formatting fills the row; Copy sits at its end. */}
@@ -83,29 +93,43 @@ export function DocumentPanelActions({
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="Export document"
+                      aria-label="Document actions"
                       className="text-muted-foreground"
                     />
                   }
                 />
               }
             >
-              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </TooltipTrigger>
-            <TooltipContent>Export</TooltipContent>
+            <TooltipContent>More</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end">
+            {document?.canEdit ? (
+              <>
+                <DropdownMenuItem onClick={() => setRenaming(true)}>
+                  <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
             <DropdownMenuItem
               disabled={!controller.sync}
               onClick={() => void exportAs(controller, "pdf")}
             >
-              PDF
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              Export as PDF
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void exportAs(controller, "markdown")}>
-              Markdown
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              Export as Markdown
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {document?.canEdit ? (
+          <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

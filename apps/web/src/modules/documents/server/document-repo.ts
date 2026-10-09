@@ -22,7 +22,7 @@ import {
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<DocumentRow, "content" | "revision" | "lastEditedBy" | "lastEditorUserId">
+  Pick<DocumentRow, "title" | "content" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
 type Reader = Pick<DbTx, "select">;
 

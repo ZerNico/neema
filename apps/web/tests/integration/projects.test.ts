@@ -373,6 +373,19 @@ describe("project documents", () => {
       ),
     ).toBe(true);
 
+    // Renaming is editing: an editor may, a viewer or stranger may not.
+    await expect(docs((s) => s.rename(viewer, document.id, "Viewer's"))).rejects.toMatchObject({
+      _tag: "DocumentRejected",
+    });
+    await expect(docs((s) => s.rename(stranger, document.id, "Mine"))).rejects.toMatchObject({
+      _tag: "DocumentNotAvailable",
+    });
+    const renamed = await docs((s) => s.rename(editor, document.id, "Launch plan"));
+    expect(renamed.title).toBe("Launch plan");
+    expect((await docs((s) => s.get(viewer, document.id)))!.title).toBe("Launch plan");
+    // The text is untouched by a rename.
+    expect((await docs((s) => s.get(owner, document.id)))!.content).toBe(stored!.content);
+
     await expect(docs((s) => s.remove(viewer, document.id))).rejects.toMatchObject({
       _tag: "DocumentRejected",
     });

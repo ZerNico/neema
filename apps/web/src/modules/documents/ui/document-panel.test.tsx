@@ -7,7 +7,7 @@ import {
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
 import type { EditableDocument } from "../schema.ts";
-import { getDocument, pushDocument } from "../server/document-functions.ts";
+import { getDocument, pushDocument, renameDocument } from "../server/document-functions.ts";
 import { DocumentOwner } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -19,6 +19,7 @@ vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
   listDocuments: vi.fn(),
+  renameDocument: vi.fn(),
 }));
 vi.mock("./rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,
@@ -155,6 +156,33 @@ describe("document panel", () => {
     fireEvent.change(source, { target: { value: "first and more" } });
     act(() => panel.refresh({ id: "document:document-1", title: "x", body: null }));
     expect(source).toHaveValue("first and more");
+  });
+
+  it("renames from the panel's menu for an editor, and offers no rename to a viewer", async () => {
+    vi.mocked(renameDocument).mockImplementation(async ({ data }) => ({
+      ...fresh(),
+      title: data.title,
+    }));
+    await fixture();
+    await openSource();
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const field = await screen.findByRole("textbox", { name: "Title" });
+    fireEvent.change(field, { target: { value: "  Launch list  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await waitFor(() =>
+      expect(renameDocument).toHaveBeenCalledWith({
+        data: { documentId: "document-1", title: "Launch list" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    cleanup();
+    server.seed({ ...fresh(), canEdit: false });
+    await fixture();
+    await openSource();
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Export as Markdown" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
   });
 
   it("copies the current source and offers no rename, delete or download", async () => {

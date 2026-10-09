@@ -10,6 +10,7 @@ import {
   DocumentIdInput,
   ProjectDocumentsInput,
   PushDocumentInput,
+  RenameDocumentInput,
   ResolveThreadInput,
   type DocumentNotAvailable,
   type DocumentRejected,
@@ -90,6 +91,19 @@ export const createProjectDocument = createServerFn({ method: "POST" })
             by: "user",
           }),
         ).pipe(Effect.map((result) => result.document)),
+      ),
+    ),
+  );
+/** A chat's or a project's document, renamed by someone who may edit it. */
+export const renameDocument = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(RenameDocumentInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.rename(context.session.user.id, data.documentId, data.title.trim()),
+        ),
       ),
     ),
   );
