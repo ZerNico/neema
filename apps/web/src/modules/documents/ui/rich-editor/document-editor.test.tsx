@@ -10,6 +10,7 @@ import { outbox } from "../../client/outbox.ts";
 import { toMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 import DocumentEditor from "./document-editor.tsx";
+import { sortColumn } from "./table-sort.ts";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
 import { browserEditorExtensions, browserEditorProps } from "./editor-extensions.ts";
@@ -168,6 +169,29 @@ describe("document editor", () => {
     });
     const headers = screen.getAllByRole("columnheader").map((cell) => cell.textContent);
     expect(headers).toEqual(["Editor", "Ada"]);
+  });
+
+  it("sorts every row of a table without a header row", async () => {
+    const sync = await replica(
+      "| Area | Owner |\n| --- | --- |\n| Sync | Grace |\n| Editor | Ada |",
+    );
+    mount(sync);
+    const editor = await editorOf();
+    const textAt = (text: string) => {
+      let found = -1;
+      editor.state.doc.descendants((node, position) => {
+        if (found < 0 && node.isText && node.text === text) found = position;
+      });
+      return found;
+    };
+    act(() => {
+      editor.chain().focus().setTextSelection(textAt("Area")).deleteRow().run();
+    });
+    act(() => {
+      editor.chain().focus().setTextSelection(textAt("Sync")).run();
+      sortColumn(editor, 1);
+    });
+    expect(sync.markdown()).toBe("| Editor | Ada   |\n| ------ | ----- |\n| Sync   | Grace |");
   });
 
   it("keeps two people's editors on one document in step", async () => {
