@@ -8,6 +8,7 @@ import {
   type ElicitRequest,
   type ElicitResult,
 } from "@modelcontextprotocol/client";
+import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { IntegrationAuthFailed, IntegrationRequestFailed } from "../../errors.ts";
 import type { AdapterFailure, Credential } from "../../server/adapter.ts";
@@ -34,15 +35,17 @@ type Era =
   | { transport: "sse" };
 
 /**
- * Each server's era, by address and credential holder, so a stateless
- * (2026-07-28) server costs no extra round trip per call, and an old SSE
- * server is not probed with Streamable HTTP every time.
+ * Each server's era, by address and credential, so a stateless (2026-07-28)
+ * server costs no extra round trip per call, and an old SSE server is not
+ * probed with Streamable HTTP every time. Per credential, since what a
+ * server says about itself may depend on who asks.
  */
 const eras = new Map<string, { era: Era; until: number }>();
 /** Servers times accounts; past this the oldest are probed again, which only costs a round trip. */
 const MAX_ERAS = 2_000;
 
-const eraKey = (url: URL, holder: string) => `${url.href}\u0000${holder}`;
+const eraKey = (url: URL, headers: Record<string, string>) =>
+  `${url.href}\u0000${createHash("sha256").update(JSON.stringify(headers)).digest("base64url")}`;
 
 export const authHeaders = (
   credential: Credential,
@@ -105,8 +108,6 @@ export const connect = (input: {
   url: URL;
   credential: Credential;
   header: string | undefined;
-  /** Who the credential belongs to, so eras are not shared across accounts. */
-  holder: string;
   elicit?: Elicit;
 }) =>
   Effect.acquireRelease(
@@ -129,7 +130,7 @@ export const connect = (input: {
       const elicit = input.elicit;
       if (elicit)
         client.setRequestHandler("elicitation/create", (request) => elicit(request.params));
-      const key = eraKey(input.url, input.holder);
+      const key = eraKey(input.url, headers);
       const cached = eras.get(key);
       const known = cached && cached.until > Date.now() ? cached.era : null;
 
@@ -161,11 +162,13 @@ export const connect = (input: {
                 transport,
                 prior: discover ? { kind: "modern", discover } : { kind: "legacy" },
               };
-        eras.delete(key);
         eras.set(key, { era, until: Date.now() + ERA_TTL_MS });
         if (eras.size > MAX_ERAS) eras.delete(eras.keys().next().value!);
       };
 
+      // Learned once and trusted until it lapses, counted from when it was
+      // learned: steady traffic must not keep a server from being asked again.
+      // An attempt on what was learned that fails forgets it.
       const connected = yield* (
         known?.transport === "sse" ? attempt("sse") : attempt("streamable", known ?? undefined)
       ).pipe(
@@ -176,17 +179,15 @@ export const connect = (input: {
           // 404 or 405; the spec's compatibility path is to try it next.
           if (known === null && (status === 404 || status === 405 || status === 400))
             return attempt("sse").pipe(Effect.as("sse" as const));
+          if (known) eras.delete(key);
           return Effect.fail(error);
         }),
         Effect.mapError((error) => toFailure(input.integrationId, error, challenge)),
       );
-      remember(connected);
+      if (!known) remember(connected);
       return { client, challenge: () => challenge } satisfies Connection;
     }),
     ({ client }) => Effect.promise(() => client.close().catch(() => undefined)),
   );
-
-/** Forgets what was learned about a server, after it changed address or failed oddly. */
-export const forgetEra = (url: URL, holder: string) => eras.delete(eraKey(url, holder));
 
 export const REQUEST_OPTIONS = { timeout: REQUEST_TIMEOUT_MS } as const;

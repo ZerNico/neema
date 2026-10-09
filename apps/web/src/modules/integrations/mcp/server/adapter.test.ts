@@ -226,6 +226,14 @@ describe("an MCP server through the adapter", () => {
     );
   });
 
+  it("learns a server's era per credential, since what it says may depend on who asks", async () => {
+    seen.length = 0;
+    await list(sessionAt("/mcp-era/per-account"));
+    await list(sessionAt("/mcp-era/per-account"));
+    await list(sessionAt("/mcp-era/per-account", { kind: "api_key", values: { token: "other" } }));
+    expect(seen.filter((line) => line.endsWith("server/discover"))).toHaveLength(2);
+  });
+
   it("returns text for the model and links as citable sources", async () => {
     const { entries } = await list(sessionAt("/mcp"));
     const exit = await run(sessionAt("/mcp"), byName(entries, "search"), { q: "billing" });

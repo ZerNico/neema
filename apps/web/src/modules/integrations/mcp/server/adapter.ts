@@ -166,7 +166,6 @@ const callTool = (
         url: new URL(session.config.url!),
         credential,
         header: session.config.header,
-        holder: integrationId,
         // Nobody to ask (a scheduled run): the server is not told it may.
         ...(call ? { elicit } : {}),
       });
@@ -302,7 +301,6 @@ export const mcpAdapter: IntegrationAdapter = {
           url: new URL(session.config.url!),
           credential,
           header: session.config.header,
-          holder: `verify ${Math.random()}`,
         });
         // A server that lets anyone connect may still refuse a bad token on a real request.
         yield* Effect.tryPromise({
@@ -347,7 +345,6 @@ export const mcpAdapter: IntegrationAdapter = {
             url: new URL(session.config.url!),
             credential,
             header: session.config.header,
-            holder: integrationId,
           });
           const listed = yield* Effect.tryPromise({
             try: (signal) =>
