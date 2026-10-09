@@ -422,5 +422,15 @@ describe("an MCP server set up by an admin", () => {
       handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "e" }),
     );
     expect(found).toMatchObject({ ok: true });
+
+    // A personal token would make it theirs, with every tool: not on offer here.
+    const refused = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        Effect.flip(s.connectApiKey(person, id, { token: "admin-key" })),
+      ),
+    );
+    expect(refused).toMatchObject({ reason: "API keys are turned off for this integration." });
+    const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
+    expect(after.find((row) => row.id === id)?.connection?.authKind).toBe("shared");
   });
 });

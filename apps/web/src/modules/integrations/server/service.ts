@@ -970,7 +970,16 @@ export class IntegrationService extends Context.Service<
               integrationId,
             );
             const form = manifest.apiKey;
-            if (!row.allowApiKeys || !form)
+            // The same rule Settings shows: an MCP server set to sign-in or the
+            // shared key takes no personal token, whatever the old switch says.
+            const methods = methodsFor(
+              manifest,
+              adapter,
+              row,
+              config,
+              Boolean(row.sharedCredentialCiphertext),
+            );
+            if (!methods.apiKey || !form)
               return yield* new IntegrationRejected({
                 reason: "API keys are turned off for this integration.",
               });
