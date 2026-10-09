@@ -722,6 +722,7 @@ describe("approvals", () => {
             rowIdFor: () => Effect.succeed("pending-call"),
             reportAuthFailure: (session) =>
               service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+            reportMissingScopes: () => Effect.void,
             allowanceUses: unlimited,
           });
           const handler = prepared?.group.handlers.int_outline__create_document as
@@ -788,6 +789,7 @@ describe("prepared calls", () => {
         rowIdFor: () => Effect.succeed("pending-call"),
         reportAuthFailure: (session) =>
           service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+        reportMissingScopes: () => Effect.void,
         allowanceUses: unlimited,
       });
       return prepared?.group.handlers[`int_outline__${tool}`] as (
@@ -1352,6 +1354,7 @@ describe("several integrations of one type", () => {
             integrations.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
           rowIdFor: () => Effect.succeed("call"),
           reportAuthFailure: () => Effect.void,
+          reportMissingScopes: () => Effect.void,
           allowanceUses: unlimited,
         })!;
         const search = prepared.group.handlers["int_outline-2__search"] as (

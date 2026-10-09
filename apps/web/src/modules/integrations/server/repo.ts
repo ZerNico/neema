@@ -211,8 +211,10 @@ export class IntegrationRepo extends Context.Service<
     agentIntegrationIds(conversationId: string): Effect.Effect<ReadonlyArray<string> | null>;
     /** The admin's shared credential, decrypted, for the adapter only. */
     sharedCredential(row: IntegrationConfigRow): Effect.Effect<Record<string, string> | null>;
-    /** Scopes a call was refused for; null once a sign-in granted them. */
-    setRequiredScopes(connectionId: string, scopes: string[] | null): Effect.Effect<void>;
+    /** Clears the scopes calls were refused for, once a sign-in asked for them. */
+    clearRequiredScopes(connectionId: string): Effect.Effect<void>;
+    /** Adds scopes a call was refused for to what the next sign-in asks for. */
+    addRequiredScopes(connectionId: string, scopes: ReadonlyArray<string>): Effect.Effect<void>;
     catalog(integrationId: string): Effect.Effect<ToolCatalogRow | null>;
     /** Makes a catalog due for a check now, creating it on first use. */
     scheduleCatalogCheck(integrationId: string): Effect.Effect<void>;
@@ -685,11 +687,24 @@ export class IntegrationRepo extends Context.Service<
           return Option.getOrNull(decodeShared(plain));
         }),
 
-        setRequiredScopes: Effect.fn("IntegrationRepo.setRequiredScopes")(
-          function* (connectionId, scopes) {
+        clearRequiredScopes: Effect.fn("IntegrationRepo.clearRequiredScopes")(
+          function* (connectionId) {
             yield* db
               .update(integrationConnections)
-              .set({ requiredScopes: scopes, updatedAt: new Date() })
+              .set({ requiredScopes: null, updatedAt: new Date() })
+              .where(eq(integrationConnections.id, connectionId))
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        addRequiredScopes: Effect.fn("IntegrationRepo.addRequiredScopes")(
+          function* (connectionId, scopes) {
+            // A union in one statement, so two refused calls at once both count.
+            yield* db
+              .update(integrationConnections)
+              .set({
+                requiredScopes: sql`(select jsonb_agg(distinct listed.scope order by listed.scope) from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes.slice(0, 50))}::jsonb) as listed(scope))`,
+              })
               .where(eq(integrationConnections.id, connectionId))
               .pipe(Effect.orDie);
           },

@@ -13,6 +13,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { conversations, user } from "~/db/schema/index.ts";
 import type { CatalogDecision } from "~/modules/integrations/server/adapter.ts";
+import { mcpAdapter } from "~/modules/integrations/mcp/server/adapter.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -134,14 +135,23 @@ const serve = async (request: IncomingMessage, response: ServerResponse) => {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+  const body = Buffer.concat(chunks).toString("utf8");
   if (url.pathname === "/keyed" && request.headers["x-api-key"] !== "admin-key") {
     response.writeHead(401).end();
+    return;
+  }
+  // Signed in, but calls need a scope the sign-in did not grant.
+  if (url.pathname === "/scoped" && body.includes('"tools/call"')) {
+    response
+      .writeHead(403, {
+        "www-authenticate": 'Bearer error="insufficient_scope", scope="docs:read docs:write"',
+      })
+      .end();
     return;
   }
   const headers = new Headers();
   for (const [key, value] of Object.entries(request.headers))
     if (typeof value === "string") headers.set(key, value);
-  const body = Buffer.concat(chunks).toString("utf8");
   const reply = await handler.fetch(
     new Request(url, { method: request.method ?? "GET", headers, ...(body ? { body } : {}) }),
   );
@@ -262,6 +272,8 @@ const toolsFor = (userId: string, conversationId: string, unattended = false) =>
         // One durable row per provider call, as the stream observer mints it.
         rowIdFor: (providerCallId) => Effect.succeed(`row-${providerCallId}-${conversationId}`),
         reportAuthFailure: () => Effect.void,
+        reportMissingScopes: (session, scopes) =>
+          service.reportMissingScopes({ userId, connectionId: session.connectionId }, scopes),
         allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
       });
     }),
@@ -597,6 +609,41 @@ describe("an MCP server set up by an admin", () => {
       }),
     );
     expect(answered).toMatchObject({ ok: true, result: { content: "staging in eu." } });
+  });
+
+  it("remembers the scopes a call lacked, so the next sign-in asks for them", async () => {
+    const admin = await newUser();
+    const config = { url: `${base}/scoped`, auth: "oauth" };
+    const id = await setUp("Docs scoped", config);
+    const normalized = mcpAdapter.normalizeConfig(config);
+    if ("error" in normalized) throw new Error(normalized.error);
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.saveConnection({
+          userId: admin,
+          integrationId: id,
+          authKind: "oauth",
+          credentials: { kind: "oauth", accessToken: "t", refreshToken: null, expiresAt: null },
+          accountLabel: "ada",
+          fingerprint: normalized.fingerprint,
+        }),
+      ),
+    );
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    const conversationId = await newConversation(admin);
+    const prepared = await toolsFor(admin, conversationId);
+    const refused = await run(
+      handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "s" }),
+    );
+    expect(JSON.stringify(refused)).toMatch(/Grant more access/);
+    const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(admin)));
+    expect(listed.find((row) => row.id === id)?.connection).toMatchObject({
+      status: "active",
+      requiredScopes: ["docs:read", "docs:write"],
+    });
   });
 
   it("with one key for everyone, only reads are ever offered", async () => {

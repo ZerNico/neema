@@ -426,6 +426,7 @@ describe("a connection limited to some projects", () => {
       sessionFor: () => Effect.succeed(connected),
       rowIdFor: (id) => Effect.succeed(`row-${id}`),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
     })!;
     const call = (tool: string, args: unknown) =>

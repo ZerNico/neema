@@ -1441,6 +1441,11 @@ export class StreamEngine extends Context.Service<
                     userId: input.userId,
                     connectionId: session.connectionId,
                   }),
+                reportMissingScopes: (session, scopes) =>
+                  integrations.reportMissingScopes(
+                    { userId: input.userId, connectionId: session.connectionId },
+                    scopes,
+                  ),
                 allowanceUses: {
                   reserve: (integrationId, allowance) =>
                     integrations.reserveAllowance({

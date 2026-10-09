@@ -73,6 +73,7 @@ export const NoIntegrations = Layer.mergeAll(
     session: (_userId, integrationId) =>
       Effect.fail(new IntegrationNotAvailable({ integrationId })),
     reportAuthFailure: () => Effect.void,
+    reportMissingScopes: () => Effect.void,
     chatIntegrations: () => Effect.succeed([]),
     resolveOffer: () => Effect.succeed([]),
     permissionsFor: () => Effect.succeed({ permissions: {}, allowedInChat: [] }),

@@ -223,6 +223,7 @@ describe("sending under a schedule's allowance", () => {
       sessionFor: () => Effect.succeed(session),
       rowIdFor: (id) => Effect.succeed(`row-${id}`),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: {
         reserve: (_integration, allowance) =>
           Effect.sync(() => {

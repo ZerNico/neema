@@ -307,6 +307,11 @@ export class IntegrationService extends Context.Service<
     ): Effect.Effect<ConnectedSession, IntegrationNotAvailable>;
     /** Marks a connection whose credentials the service refused. */
     reportAuthFailure(connection: { userId: string; connectionId: string }): Effect.Effect<void>;
+    /** Records scopes a call lacked, so Settings offers to grant them. */
+    reportMissingScopes(
+      connection: { userId: string; connectionId: string },
+      scopes: ReadonlyArray<string>,
+    ): Effect.Effect<void>;
     /**
      * Connected, usable integrations and whether this chat offers them: the
      * chat's own choice, else the agent's attachments, else the connection's
@@ -1211,7 +1216,7 @@ export class IntegrationService extends Context.Service<
                 accountLabel,
                 fingerprint,
               });
-              yield* repo.setRequiredScopes(saved.id, null);
+              yield* repo.clearRequiredScopes(saved.id);
               yield* changed(userId);
               return { returnTo: stored.returnTo ?? null };
             }
@@ -1306,6 +1311,15 @@ export class IntegrationService extends Context.Service<
           yield* repo.markNeedsReauth(input.connectionId);
           yield* changed(input.userId);
         }),
+
+        reportMissingScopes: Effect.fn("IntegrationService.reportMissingScopes")(
+          function* (input, scopes) {
+            const words = scopes.filter((scope) => /^[\x21\x23-\x5B\x5D-\x7E]{1,200}$/.test(scope));
+            if (words.length === 0) return;
+            yield* repo.addRequiredScopes(input.connectionId, words);
+            yield* changed(input.userId);
+          },
+        ),
       });
     }),
   );

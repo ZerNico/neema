@@ -123,6 +123,11 @@ export function prepareIntegrationTools(input: {
   /** The persisted row id for a provider call, once the observer minted it. */
   rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
   reportAuthFailure: (session: ConnectedSession) => Effect.Effect<void>;
+  /** Remembers scopes a call was refused for, so Settings can ask for them. */
+  reportMissingScopes: (
+    session: ConnectedSession,
+    scopes: ReadonlyArray<string>,
+  ) => Effect.Effect<void>;
   /** This answer's uses of each allowance, durable so a resumed answer keeps them. */
   allowanceUses: {
     reserve(integrationId: string, allowance: IntegrationAllowance): Effect.Effect<boolean>;
@@ -250,6 +255,16 @@ export function prepareIntegrationTools(input: {
               ),
             );
         if (error._tag === "IntegrationRejected") return Effect.succeed(failure(error.reason));
+        if (error.missingScopes?.length && session.authKind === "oauth")
+          return input
+            .reportMissingScopes(session, error.missingScopes)
+            .pipe(
+              Effect.as(
+                failure(
+                  `${name} needs more access than the user granted. Tell the user to choose “Grant more access” for ${name} in Settings → Integrations, then try again.`,
+                ),
+              ),
+            );
         return Effect.succeed(failure(error.message));
       };
       handlers[modelName] = (args: unknown, context: { readonly toolCallId: string }) =>

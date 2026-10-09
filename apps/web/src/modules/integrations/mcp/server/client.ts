@@ -73,6 +73,7 @@ export const toFailure = (
     return new IntegrationRequestFailed({
       status: 403,
       message: "The server needs more access than this sign-in granted.",
+      ...(challenge.scopes.length ? { missingScopes: challenge.scopes } : {}),
     });
   if (error instanceof ProtocolError)
     return new IntegrationRequestFailed({
