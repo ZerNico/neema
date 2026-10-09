@@ -35,6 +35,35 @@ describe("input schemas", () => {
     });
   });
 
+  it("keeps a property named like a keyword, and values exactly as written", () => {
+    const literal = { $ref: "#/$defs/x", $comment: "part of the value" };
+    const normalized = normalizeSchema({
+      type: "object",
+      properties: {
+        definitions: { type: "string" },
+        $id: { type: "string" },
+        mode: { const: literal },
+        kind: { enum: [literal, "plain"] },
+        options: { type: "object", default: { $schema: "kept" }, examples: [{ $id: "kept" }] },
+      },
+      required: ["definitions"],
+      $defs: { x: { type: "number" } },
+    });
+    expect(normalized).toEqual({
+      schema: {
+        type: "object",
+        properties: {
+          definitions: { type: "string" },
+          $id: { type: "string" },
+          mode: { const: literal },
+          kind: { enum: [literal, "plain"] },
+          options: { type: "object", default: { $schema: "kept" }, examples: [{ $id: "kept" }] },
+        },
+        required: ["definitions"],
+      },
+    });
+  });
+
   it("refuses what cannot be named arguments", () => {
     expect(normalizeSchema({ type: "string" })).toEqual({
       error: "It does not take named arguments.",

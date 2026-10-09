@@ -14,8 +14,12 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Keys a provider has no use for, or that would point at definitions we inline. */
+/** Keywords a provider has no use for, or that hold definitions we inline. */
 const DROPPED = new Set(["$schema", "$id", "$defs", "definitions", "$comment"]);
+/** Keywords whose value is data, copied as written: `{"$ref": …}` in a `const` is a value. */
+const LITERAL = new Set(["const", "enum", "default", "examples", "required", "type"]);
+/** Keywords whose value maps names to schemas: a property may be called `definitions`. */
+const NAMED = new Set(["properties", "patternProperties", "dependentSchemas", "dependencies"]);
 
 /** Inlining stops here; deeper (or recursive) references become an open schema. */
 const MAX_DEPTH = 8;
@@ -38,6 +42,7 @@ const resolvePointer = (root: Json, ref: string): unknown => {
   return node;
 };
 
+/** One schema with local references inlined; keywords say what is a schema and what is data. */
 const inline = (
   node: unknown,
   root: Json,
@@ -46,7 +51,6 @@ const inline = (
   budget: { nodes: number },
 ): unknown => {
   if (++budget.nodes > MAX_NODES) throw new TooComplex();
-  if (Array.isArray(node)) return node.map((item) => inline(item, root, depth, trail, budget));
   if (!isObject(node)) return node;
   const ref = typeof node.$ref === "string" ? node.$ref : null;
   if (ref) {
@@ -60,10 +64,17 @@ const inline = (
     const { $ref: _ref, ...siblings } = node;
     return inline({ ...target, ...siblings }, root, depth + 1, new Set([...trail, ref]), budget);
   }
+  const walk = (value: unknown) => inline(value, root, depth, trail, budget);
   const out: Json = {};
   for (const [key, value] of Object.entries(node)) {
     if (DROPPED.has(key)) continue;
-    out[key] = inline(value, root, depth, trail, budget);
+    out[key] = LITERAL.has(key)
+      ? value
+      : NAMED.has(key) && isObject(value)
+        ? Object.fromEntries(Object.entries(value).map(([name, schema]) => [name, walk(schema)]))
+        : Array.isArray(value)
+          ? value.map(walk)
+          : walk(value);
   }
   return out;
 };
