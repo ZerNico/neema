@@ -433,6 +433,39 @@ describe("an MCP server set up by an admin", () => {
     expect(await offeredNames(admin, conversationId)).toEqual([]);
   });
 
+  it("does not let an approval read before a move land after it", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs approve race", { url: `${base}/mcp`, auth: "none" });
+    await check(id, admin);
+    const read = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs approve race",
+          enabled: true,
+          config: { url: `${base}/elsewhere`, auth: "none" },
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    // The approval's write, arriving after the move, finds another listing and writes nothing.
+    const wrote = await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.approveCatalog(
+          id,
+          read!.latest!.map((entry) => ({ ...entry, enabled: true })),
+          admin,
+          read!.checkedAt!,
+        ),
+      ),
+    );
+    expect(wrote).toBe(false);
+    const after = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+    expect(after?.approved).toEqual([]);
+  });
+
   it("calls a read straight away and asks before a destructive call, showing every argument", async () => {
     const admin = await newUser();
     const id = await setUp("Docs calls", { url: `${base}/mcp`, auth: "none" });

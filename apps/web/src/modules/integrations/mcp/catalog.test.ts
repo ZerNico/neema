@@ -86,12 +86,8 @@ describe("drift", () => {
 
   it("offers only approved tools the server still lists unchanged", () => {
     expect(offeredEntries(approved, latest).map((tool) => tool.mcpName)).toEqual(["search"]);
-    // Before any listing, what was approved stands.
-    expect(offeredEntries(approved, null).map((tool) => tool.mcpName)).toEqual([
-      "search",
-      "delete",
-      "gone",
-    ]);
+    // Without a listing to compare with, nothing is offered.
+    expect(offeredEntries(approved, null)).toEqual([]);
   });
 
   it("never offers a tool that cannot be offered, even if it was turned on", () => {

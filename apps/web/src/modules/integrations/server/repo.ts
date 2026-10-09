@@ -237,12 +237,17 @@ export class IntegrationRepo extends Context.Service<
       outcome: { latest: McpToolEntry[]; server: Record<string, string> } | { error: string },
       nextCheckAt: Date,
     ): Effect.Effect<boolean>;
-    /** Replaces what is offered with what the admin approved. */
+    /**
+     * Replaces what is offered with what the admin approved, only if the
+     * listing is still the one checked at `listedAt`; false when a check or a
+     * move replaced it meanwhile.
+     */
     approveCatalog(
       integrationId: string,
       approved: McpToolEntry[],
       reviewedBy: string,
-    ): Effect.Effect<void>;
+      listedAt: Date,
+    ): Effect.Effect<boolean>;
     oauthClient(integrationId: string, issuer: string): Effect.Effect<StoredOAuthClient | null>;
     /** The issuer the admin's client was first used with, if it was. */
     preregisteredIssuer(integrationId: string, clientId: string): Effect.Effect<string | null>;
@@ -834,12 +839,20 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         approveCatalog: Effect.fn("IntegrationRepo.approveCatalog")(
-          function* (integrationId, approved, reviewedBy) {
-            yield* db
+          function* (integrationId, approved, reviewedBy, listedAt) {
+            const rows = yield* db
               .update(integrationToolCatalogs)
               .set({ approved, reviewedBy, reviewedAt: new Date() })
-              .where(eq(integrationToolCatalogs.integrationId, integrationId))
+              .where(
+                and(
+                  eq(integrationToolCatalogs.integrationId, integrationId),
+                  eq(integrationToolCatalogs.checkedAt, listedAt),
+                  sql`${integrationToolCatalogs.latest} is not null`,
+                ),
+              )
+              .returning({ integrationId: integrationToolCatalogs.integrationId })
               .pipe(Effect.orDie);
+            return rows.length > 0;
           },
         ),
 

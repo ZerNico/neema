@@ -156,12 +156,14 @@ export const offeredEntries = (
   approved: ReadonlyArray<McpToolEntry>,
   latest: ReadonlyArray<McpToolEntry> | null,
 ) => {
-  const current = latest ? new Map(latest.map((entry) => [entry.mcpName, entry])) : null;
+  // No listing to compare with means nothing is known to still hold: offer nothing.
+  if (!latest) return [];
+  const current = new Map(latest.map((entry) => [entry.mcpName, entry]));
   return approved.filter(
     (entry) =>
       entry.enabled &&
       !entry.unsupported &&
-      (current === null || current.get(entry.mcpName)?.fingerprint === entry.fingerprint),
+      current.get(entry.mcpName)?.fingerprint === entry.fingerprint,
   );
 };
 

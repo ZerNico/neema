@@ -1027,7 +1027,7 @@ export class IntegrationService extends Context.Service<
                 reason: "This integration does not list its own tools.",
               });
             const current = yield* repo.catalog(integrationId);
-            if (!current?.latest)
+            if (!current?.latest || !current.checkedAt)
               return yield* new IntegrationRejected({ reason: "Check the server’s tools first." });
             // Approving is approving what was seen: a listing that changed since is shown again.
             if (catalog.version(current.latest) !== input.version)
@@ -1037,7 +1037,18 @@ export class IntegrationService extends Context.Service<
             const applied = catalog.apply(current.approved, current.latest, input.decisions);
             if ("error" in applied)
               return yield* new IntegrationRejected({ reason: applied.error });
-            yield* repo.approveCatalog(integrationId, applied.approved, adminId);
+            // Written only over the listing just read: a check or a move since shows it again.
+            if (
+              !(yield* repo.approveCatalog(
+                integrationId,
+                applied.approved,
+                adminId,
+                current.checkedAt,
+              ))
+            )
+              return yield* new IntegrationRejected({
+                reason: "The server’s tools changed while you were looking. Review them again.",
+              });
             yield* bus
               .publishGlobal({ type: "integrations.changed" })
               .pipe(Effect.catchCause(() => Effect.void));
