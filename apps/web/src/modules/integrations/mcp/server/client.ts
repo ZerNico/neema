@@ -62,6 +62,8 @@ export const authHeaders = (
 
 export interface Connection {
   readonly client: Client;
+  /** Forgets what was learned about the server: a request on it failed, so ask again next time. */
+  readonly forget: () => void;
   /** The Streamable HTTP transport in use, if any, to end a legacy session with. */
   readonly transport: () => StreamableHTTPClientTransport | null;
   /** The server's last `WWW-Authenticate` challenge, for a refusal the SDK words vaguely. */
@@ -127,6 +129,8 @@ export const connect = (input: {
       const client = new Client(CLIENT_INFO, {
         capabilities: input.elicit ? { elicitation: { form: {}, url: {} } } : {},
         versionNegotiation: { mode: "auto" },
+        // Pages a listing may follow; the byte limit on the fetch bounds them too.
+        listMaxPages: 10,
       });
       // A legacy server asks mid-call; a modern one answers `input_required`,
       // which the SDK turns into this same request and retries with the answer.
@@ -188,26 +192,31 @@ export const connect = (input: {
           return Effect.fail(error);
         }),
         Effect.mapError((error) => toFailure(input.integrationId, error, challenge)),
+        // A handshake that opened a session and then failed still ends it.
+        Effect.onError(() => Effect.promise(() => release(client, current))),
       );
       if (!known) remember(connected);
       return {
         client,
         challenge: () => challenge,
+        forget: () => void eras.delete(key),
         transport: () => current,
       } satisfies Connection;
     }),
-    // A legacy server keeps a session until told it is over; closing the
-    // client only drops our side, so the session is ended first, briefly.
-    ({ client, transport }) =>
-      Effect.promise(async () => {
-        const session = transport();
-        if (session?.sessionId)
-          await Promise.race([
-            session.terminateSession().catch(() => undefined),
-            new Promise((resolve) => setTimeout(resolve, TERMINATE_TIMEOUT_MS)),
-          ]);
-        await client.close().catch(() => undefined);
-      }),
+    ({ client, transport }) => Effect.promise(() => release(client, transport())),
   );
+
+/**
+ * A legacy server keeps a session until told it is over; closing the
+ * client only drops our side, so the session is ended first, briefly.
+ */
+const release = async (client: Client, session: StreamableHTTPClientTransport | null) => {
+  if (session?.sessionId)
+    await Promise.race([
+      session.terminateSession().catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, TERMINATE_TIMEOUT_MS)),
+    ]);
+  await client.close().catch(() => undefined);
+};
 
 export const REQUEST_OPTIONS = { timeout: REQUEST_TIMEOUT_MS } as const;

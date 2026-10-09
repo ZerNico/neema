@@ -21,7 +21,7 @@ import {
 } from "../catalog.ts";
 import { MCP_AUTH, mcpAuthOf } from "../manifest.ts";
 import { mcpOAuth } from "./auth.ts";
-import { connect, REQUEST_OPTIONS, toFailure, type Elicit } from "./client.ts";
+import { connect, REQUEST_OPTIONS, toFailure, type Connection, type Elicit } from "./client.ts";
 import { promptOf, resultOf } from "./elicitation.ts";
 import { listingEntries } from "./listing.ts";
 import { argumentCheck } from "./validate.ts";
@@ -151,6 +151,18 @@ export const mapResult = (result: CallToolResult, entry: McpToolEntry) => {
   };
 };
 
+/** How long a whole listing may take, every page included. */
+const LIST_TIMEOUT_MS = 2 * 60_000;
+
+/**
+ * A request that failed: what was learned about the server may be why (it
+ * went back to an older protocol), so the next connection asks again.
+ */
+const failed = (integrationId: string, connection: Connection, error: unknown) => {
+  connection.forget();
+  return toFailure(integrationId, error, connection.challenge());
+};
+
 const callTool = (
   session: IntegrationSession,
   integrationId: string,
@@ -195,7 +207,7 @@ const callTool = (
               toolDefinition: tool,
             },
           ),
-        catch: (error) => toFailure(integrationId, error, connection.challenge()),
+        catch: (error) => failed(integrationId, connection, error),
       });
       const mapped = mapResult(result, entry);
       if (mapped.isError)
@@ -314,7 +326,7 @@ export const mcpAdapter: IntegrationAdapter = {
         // A server that lets anyone connect may still refuse a bad token on a real request.
         yield* Effect.tryPromise({
           try: (signal) => connection.client.listTools(undefined, { signal, timeout: 30_000 }),
-          catch: (error) => toFailure("verify", error, connection.challenge()),
+          catch: (error) => failed("verify", connection, error),
         });
         return { accountLabel: accountLabel(session, credential) };
       }),
@@ -349,11 +361,12 @@ export const mcpAdapter: IntegrationAdapter = {
           const listed = yield* Effect.tryPromise({
             try: (signal) =>
               connection.client.listTools(undefined, {
-                signal,
+                // One deadline for all pages, not one per page.
+                signal: AbortSignal.any([signal, AbortSignal.timeout(LIST_TIMEOUT_MS)]),
                 timeout: 60_000,
                 cacheMode: "refresh",
               }),
-            catch: (error) => toFailure(integrationId, error, connection.challenge()),
+            catch: (error) => failed(integrationId, connection, error),
           });
           const version = connection.client.getServerVersion();
           const server: Record<string, string> = {};

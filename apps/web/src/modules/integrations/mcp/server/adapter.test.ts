@@ -103,6 +103,9 @@ const legacyServer = async (request: Request) => {
   return transport.handleRequest(request);
 };
 
+/** `/switch` answers as a current server until this is set, then as a 2025-era one. */
+let switchedToLegacy = false;
+
 /** Which requests the test server saw, to tell the eras apart. */
 const seen: string[] = [];
 /** What each `initialize` said the client can do. */
@@ -135,9 +138,9 @@ const serve = async (request: IncomingMessage, response: ServerResponse) => {
     headers,
     ...(body ? { body } : {}),
   });
-  const reply = await (url.pathname.startsWith("/legacy")
-    ? legacyServer(forwarded)
-    : handler.fetch(forwarded));
+  const legacy =
+    url.pathname.startsWith("/legacy") || (url.pathname === "/switch" && switchedToLegacy);
+  const reply = await (legacy ? legacyServer(forwarded) : handler.fetch(forwarded));
   response.writeHead(reply.status, Object.fromEntries(reply.headers));
   if (reply.body) for await (const chunk of reply.body) response.write(chunk);
   response.end();
@@ -232,6 +235,22 @@ describe("an MCP server through the adapter", () => {
     await list(sessionAt("/legacy"));
     await list(sessionAt("/legacy"));
     expect(legacySessions.size).toBe(before);
+  });
+
+  it("asks a server its era again once a request relying on what it said fails", async () => {
+    const credential: Credential = { kind: "api_key", values: { token: "switching" } };
+    await list(sessionAt("/switch", credential));
+    switchedToLegacy = true;
+    try {
+      // The first try still trusts the old answer and fails; it is forgotten for the next.
+      await Effect.runPromiseExit(
+        mcpAdapter.catalog!.list(sessionAt("/switch", credential), "mcp", []),
+      );
+      const again = await list(sessionAt("/switch", credential));
+      expect(again.server.protocol).not.toBe("2026-07-28");
+    } finally {
+      switchedToLegacy = false;
+    }
   });
 
   it("learns a server's era per credential, since what it says may depend on who asks", async () => {

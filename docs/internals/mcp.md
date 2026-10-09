@@ -120,13 +120,15 @@ private, like a self-hosted Outline. Every other address (protected resource met
 another host, the authorization server, registration) comes from the server, so it goes
 through `resolvePublicHttpUrl` and `fetchPinned`. A self-hosted authorization server on a
 private network is therefore refused unless it shares the MCP server's origin; that is the
-price of not letting a server point us at the internal network. Responses are capped at
-25 MB, results at 40 000 characters before the model sees them, files at 8 per call and
-10 MB in total.
+price of not letting a server point us at the internal network. One piece of work (a call,
+or a listing with all its pages, which also has one two-minute deadline) reads at most
+25 MB; results are capped at 40 000 characters and 20 citations before the model sees them,
+files at 8 per call and 10 MB in total.
 
 The SDK client lives for one call. A current (stateless) server costs no extra round trip,
-since the era verdict and `server/discover` result are cached for ten minutes. A legacy
-session never outlives the answer that opened it. Stop interrupts the call, which aborts
+since the era verdict and `server/discover` result are cached for ten minutes per
+credential, and forgotten when a request relying on them fails. A legacy session is ended
+when its work is, also when the handshake that opened it failed. Stop interrupts the call, which aborts
 the request.
 
 ## Results

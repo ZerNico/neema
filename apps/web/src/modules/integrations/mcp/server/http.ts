@@ -3,7 +3,10 @@ import { fetchPinned, resolvePublicHttpUrl } from "~/modules/tools/server/url-sa
 
 type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
-/** A response body past this many bytes fails the request rather than filling memory. */
+/**
+ * Bytes one piece of work (a call, a listing and all its pages) may read
+ * before its requests fail rather than fill memory.
+ */
 const MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 
 /**
@@ -33,13 +36,13 @@ export const readChallenge = (response: Response): AuthChallenge | null => {
   };
 };
 
-const capped = (response: Response) => {
+const capped = (response: Response, read: { bytes: number }) => {
   if (!response.body) return response;
-  let seen = 0;
   const limit = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      seen += chunk.byteLength;
-      if (seen > MAX_RESPONSE_BYTES) controller.error(new Error("The response was too large."));
+      read.bytes += chunk.byteLength;
+      if (read.bytes > MAX_RESPONSE_BYTES)
+        controller.error(new Error("The response was too large."));
       else controller.enqueue(chunk);
     },
   });
@@ -81,6 +84,8 @@ export const scopedFetch = (
     signal?: AbortSignal;
   } = {},
 ): Fetch => {
+  // Counted across every request this fetch makes, so many pages cannot add up past it.
+  const read = { bytes: 0 };
   return async (input, init) => {
     const url = new URL(input);
     const own = options.signal;
@@ -92,13 +97,17 @@ export const scopedFetch = (
       response = await fetch(url, { ...request, redirect: "manual" });
     } else {
       if (options.sameOriginOnly) throw new Error(`Refused a request to ${url.origin}.`);
-      const target = await Effect.runPromise(resolvePublicHttpUrl(url.toString())).catch(() => {
+      // Looking the address up is part of the request: stopping or timing out ends it too.
+      const target = await Effect.runPromise(
+        resolvePublicHttpUrl(url.toString()),
+        signal ? { signal } : undefined,
+      ).catch(() => {
         throw new Error(`Refused a request to ${url.origin}: it is not a public address.`);
       });
       response = await fetchPinned(target, request);
     }
     const challenge = readChallenge(response);
     if (challenge) options.onChallenge?.(challenge);
-    return capped(response);
+    return capped(response, read);
   };
 };
