@@ -65,6 +65,50 @@ describe("input schemas", () => {
     });
   });
 
+  it("keeps every constraint, in the dialect the validator reads", () => {
+    const normalized = normalizeSchema({
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: {
+        point: {
+          type: "array",
+          items: [{ type: "number" }, { type: "number" }],
+          additionalItems: false,
+        },
+        owner: { $ref: "#/definitions/person", required: ["email"] },
+      },
+      dependencies: { definitions: ["companion"], card: { required: ["billing"] } },
+      dependentRequired: { other: ["x"] },
+      definitions: { person: { type: "object", required: ["name"] } },
+    });
+    expect(normalized).toEqual({
+      schema: {
+        type: "object",
+        properties: {
+          point: {
+            type: "array",
+            prefixItems: [{ type: "number" }, { type: "number" }],
+            items: false,
+          },
+          owner: {
+            allOf: [{ type: "object", required: ["name"] }, { required: ["email"] }],
+          },
+        },
+        dependentRequired: { other: ["x"], definitions: ["companion"] },
+        dependentSchemas: { card: { required: ["billing"] } },
+      },
+    });
+    const check = argumentCheck(
+      "draft-07-constraints",
+      "schema" in normalized ? normalized.schema : {},
+    );
+    if ("error" in check) throw new Error(check.error);
+    expect(check({ definitions: 1 }).valid).toBe(false);
+    expect(check({ owner: { name: "a" } }).valid).toBe(false);
+    expect(check({ owner: { name: "a", email: "b" }, point: [1, 2] }).valid).toBe(true);
+    expect(check({ point: [1, 2, 3] }).valid).toBe(false);
+  });
+
   it("refuses what cannot be named arguments", () => {
     expect(normalizeSchema({ type: "string" })).toEqual({
       error: "It does not take named arguments.",

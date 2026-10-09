@@ -17,9 +17,61 @@ const isObject = (value: unknown): value is Json =>
 /** Keywords a provider has no use for, or that hold definitions we inline. */
 const DROPPED = new Set(["$schema", "$id", "$defs", "definitions", "$comment", "$async"]);
 /** Keywords whose value is data, copied as written: `{"$ref": …}` in a `const` is a value. */
-const LITERAL = new Set(["const", "enum", "default", "examples", "required", "type"]);
+const LITERAL = new Set([
+  "const",
+  "enum",
+  "default",
+  "examples",
+  "required",
+  "type",
+  "dependentRequired",
+]);
 /** Keywords whose value maps names to schemas: a property may be called `definitions`. */
-const NAMED = new Set(["properties", "patternProperties", "dependentSchemas", "dependencies"]);
+const NAMED = new Set(["properties", "patternProperties", "dependentSchemas"]);
+
+/**
+ * Draft-07 spellings as 2020-12 says them. The `$schema` that named the
+ * dialect is dropped and the validator reads 2020-12, which would ignore
+ * `dependencies` and refuse tuple `items`, so each is rewritten as it means.
+ */
+const as2020 = (node: Json): Json => {
+  let out = node;
+  if (Array.isArray(out.items)) {
+    const { items, additionalItems, ...rest } = out;
+    out = {
+      ...rest,
+      prefixItems: items,
+      ...(additionalItems === undefined ? {} : { items: additionalItems }),
+    };
+  }
+  if (isObject(out.dependencies)) {
+    const { dependencies, ...rest } = out;
+    const required: Json = {};
+    const schemas: Json = {};
+    for (const [name, value] of Object.entries(dependencies))
+      (Array.isArray(value) ? required : schemas)[name] = value;
+    out = {
+      ...rest,
+      ...(Object.keys(required).length
+        ? {
+            dependentRequired: {
+              ...(isObject(rest.dependentRequired) ? rest.dependentRequired : {}),
+              ...required,
+            },
+          }
+        : {}),
+      ...(Object.keys(schemas).length
+        ? {
+            dependentSchemas: {
+              ...(isObject(rest.dependentSchemas) ? rest.dependentSchemas : {}),
+              ...schemas,
+            },
+          }
+        : {}),
+    };
+  }
+  return out;
+};
 
 /** Inlining stops here; deeper (or recursive) references become an open schema. */
 const MAX_DEPTH = 8;
@@ -75,11 +127,16 @@ const inline = (
       return inline(rest, root, depth, trail, budget);
     }
     const { $ref: _ref, ...siblings } = node;
-    return inline({ ...target, ...siblings }, root, depth + 1, new Set([...trail, ref]), budget);
+    // Both say something about one keyword (two `required` lists, say): both
+    // must hold, so they are kept apart rather than one overwriting the other.
+    const merged = Object.keys(siblings).some((key) => key in target)
+      ? { allOf: [target, siblings] }
+      : { ...target, ...siblings };
+    return inline(merged, root, depth + 1, new Set([...trail, ref]), budget);
   }
   const walk = (value: unknown) => inline(value, root, depth, trail, budget);
   const out: Json = {};
-  for (const [key, value] of Object.entries(node)) {
+  for (const [key, value] of Object.entries(as2020(node))) {
     if (DROPPED.has(key)) continue;
     spend(budget, key.length + (LITERAL.has(key) ? (JSON.stringify(value)?.length ?? 0) : 0));
     out[key] = LITERAL.has(key)
