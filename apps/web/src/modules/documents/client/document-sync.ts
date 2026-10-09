@@ -44,6 +44,14 @@ const MAX_BACKOFF_MS = 10_000;
 const MAX_PUSH_FAILURES = 5;
 /** Server steps kept to place cursors sent at an older revision. */
 const STEP_LOG = 1_000;
+/** The assistant's cursor stays this long after its last write. */
+const ASSISTANT_IDLE_MS = 3_000;
+const ASSISTANT = "model";
+const assistantUser = {
+  name: "Assistant",
+  color: "var(--primary)",
+  colorLight: "color-mix(in oklab, var(--primary) 15%, transparent)",
+};
 
 const frameTypes = ["reset", "steps", "presence", "gone"] as const;
 
@@ -112,6 +120,9 @@ export class DocumentSync {
   #presenceDirty = false;
   #lastPresencePush = 0;
   #remote = new Map<string, DocumentPresence>();
+  #assistantTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Scroll to the assistant's cursor once it is drawn, unless the person is typing here. */
+  #reveal = false;
   #log: Step[] = [];
   #logStart = 0;
   #inflight: Promise<void> | null = null;
@@ -198,7 +209,7 @@ export class DocumentSync {
     if (this.#destroyed) return;
     this.#save();
     this.#destroyed = true;
-    for (const timer of [this.#timer, this.#saveTimer, this.#reconnectTimer])
+    for (const timer of [this.#timer, this.#saveTimer, this.#reconnectTimer, this.#assistantTimer])
       if (timer) clearTimeout(timer);
     this.#source?.close();
     this.#listeners.clear();
@@ -491,8 +502,38 @@ export class DocumentSync {
       this.#log.splice(0, this.#log.length - STEP_LOG);
     }
     this.#scheduleSave();
+    this.#followAssistant(steps, clientIds, frame.revision - steps.length);
     this.#showCarets();
     if (this.pending()) this.#schedule(BATCH_MS);
+  }
+
+  /**
+   * Where the assistant just wrote, as a cursor of its own, so a reader sees
+   * what it is changing; it fades once the assistant has paused.
+   */
+  #followAssistant(steps: Step[], clientIds: ReadonlyArray<string>, start: number) {
+    let at: { revision: number; position: number } | null = null;
+    steps.forEach((step, index) => {
+      if (clientIds[index] !== ASSISTANT) return;
+      step.getMap().forEach((_oldStart, _oldEnd, _newStart, newEnd) => {
+        at = { revision: start + index + 1, position: newEnd };
+      });
+    });
+    if (!at) return;
+    const { revision, position } = at;
+    this.#remote.set(ASSISTANT, {
+      anchor: position,
+      head: position,
+      revision,
+      user: assistantUser,
+    });
+    this.#reveal = true;
+    if (this.#assistantTimer) clearTimeout(this.#assistantTimer);
+    this.#assistantTimer = setTimeout(() => {
+      this.#assistantTimer = null;
+      this.#remote.delete(ASSISTANT);
+      this.#showCarets();
+    }, ASSISTANT_IDLE_MS);
   }
 
   #keepRecovered(steps: Step[]) {
@@ -522,5 +563,20 @@ export class DocumentSync {
       });
     }
     editor.view.dispatch(showCarets(editor.state, carets));
+    if (!this.#reveal) return;
+    this.#reveal = false;
+    const view = editor.view;
+    if (!view.dom.isConnected || view.dom.contains(document.activeElement)) return;
+    const caret = view.dom.querySelector(`[data-caret-client="${ASSISTANT}"]`);
+    const scroller = view.dom.closest(".overflow-y-auto");
+    if (!caret || !scroller) return;
+    const at = caret.getBoundingClientRect();
+    const frame = scroller.getBoundingClientRect();
+    // Only once it leaves the visible part, so following it never jitters.
+    if (at.top >= frame.top && at.bottom <= frame.bottom) return;
+    scroller.scrollTo?.({
+      top: scroller.scrollTop + at.top - frame.top - frame.height / 3,
+      behavior: "smooth",
+    });
   }
 }

@@ -75,6 +75,13 @@ class Connections {
       for (const listener of this.#listeners) listener();
     }, 0);
   };
+  /** The blocks selected in the open editor right now, for the next message to name. */
+  selectedBlocks = () => {
+    const open = this.current?.editor;
+    if (!open) return [];
+    const { from, to } = open.state.selection;
+    return selectedBlockIds(open.state.doc, from, to);
+  };
   open(documentId: string) {
     let closed = false;
     let opened: DocumentSync | null = null;
@@ -144,13 +151,7 @@ export function useDocument(documentId: string, live: boolean) {
     [connections],
   );
   const dismissRecovered = useCallback(() => sync?.dismissRecovered(), [sync]);
-  /** The blocks selected in the open editor right now, for the next message to name. */
-  const selectedBlocks = useCallback(() => {
-    const open = connections.current?.editor;
-    if (!open) return [];
-    const { from, to } = open.state.selection;
-    return selectedBlockIds(open.state.doc, from, to);
-  }, [connections]);
+  const selectedBlocks = connections.selectedBlocks;
 
   return {
     documentId,

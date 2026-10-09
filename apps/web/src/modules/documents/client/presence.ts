@@ -13,9 +13,10 @@ export interface RemoteCaret {
 
 const key = new PluginKey<DecorationSet>("documentPresence");
 
-const caret = (user: DocumentPresence["user"]) => {
+const caret = (clientId: string, user: DocumentPresence["user"]) => {
   const element = document.createElement("span");
   element.className = "collaboration-carets__caret";
+  element.dataset.caretClient = clientId;
   element.style.borderColor = user.color;
   const label = element.appendChild(document.createElement("div"));
   label.className = "collaboration-carets__label";
@@ -33,7 +34,10 @@ const decorate = (doc: Node, carets: ReadonlyArray<RemoteCaret>) =>
       const from = clamp(doc, Math.min(anchor, head));
       const to = clamp(doc, Math.max(anchor, head));
       const marks = [
-        Decoration.widget(clamp(doc, head), () => caret(user), { key: clientId, side: 10 }),
+        Decoration.widget(clamp(doc, head), () => caret(clientId, user), {
+          key: clientId,
+          side: 10,
+        }),
       ];
       if (from < to)
         marks.push(Decoration.inline(from, to, { style: `background-color: ${user.colorLight}` }));
