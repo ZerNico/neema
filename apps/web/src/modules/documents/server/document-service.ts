@@ -10,7 +10,7 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { Node } from "@tiptap/pm/model";
+import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { eq } from "drizzle-orm";
 import { projects } from "~/db/schema/index.ts";
@@ -21,10 +21,26 @@ import { projectCan } from "~/modules/projects/schema.ts";
 import { projectAudience, projectRole } from "~/modules/projects/server/access.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import { ensureIds } from "../editor/block-ids.ts";
+import {
+  BLOCK_ID,
+  blockIdOf,
+  ensureIds,
+  findBlocks,
+  isBlock,
+  plannedIds,
+} from "../editor/block-ids.ts";
+import { PENDING_INTENT_CHARS } from "../editor/pending.ts";
+import {
+  applyTreeEdit,
+  checkSeen,
+  fitBlocks,
+  resolveRange,
+  type SeenBlocks,
+  type TreeEdit,
+} from "../editor/tree-edit.ts";
+import { blockHash } from "../editor/tree.ts";
 import {
   documentSchema,
-  normalizeMarkdown,
   parseMarkdown,
   replaceDifference,
   toMarkdown,
@@ -34,15 +50,12 @@ import {
   DOCUMENT_LIMITS,
   DocumentNotAvailable,
   DocumentRejected,
-  EditDocumentInput,
   PushDocumentInput,
-  ReplaceDocumentInput,
+  type ApplyDocumentResult,
   type DocumentFrame,
   type DocumentPresence,
   type EditableDocument,
-  type EditDocumentResult,
   type PushDocumentResult,
-  type WriteDocumentResult,
 } from "../schema.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 
@@ -99,13 +112,6 @@ interface Stored {
   compacted: { snapshot: Node; revision: number } | null;
 }
 
-const countOccurrences = (haystack: string, needle: string) => {
-  let count = 0;
-  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) count++;
-  return count;
-};
-const preview = (content: string) =>
-  content.split("\n").slice(0, DOCUMENT_LIMITS.noMatchPreviewLines).join("\n");
 const decode =
   <S extends Schema.Top>(schema: S, reason: string) =>
   (input: S["Type"]) =>
@@ -135,21 +141,21 @@ const applySteps = (doc: Node, json: ReadonlyArray<Record<string, unknown>>) =>
     catch: () => new DocumentRejected({ reason: "invalid document step" }),
   });
 /**
- * One streamed model edit, anchored in the document's Markdown: the region
- * it rewrites is found again each time by the text it now holds, with the
- * Markdown just before it to tell repeats apart.
+ * One model edit written while its arguments stream. It owns the blocks it
+ * wrote, by ID, and the hash each had when it wrote it: a person changing
+ * one of them ends the preview. `original` is what it replaced, put back if
+ * no call claims it.
  */
 export interface LiveEdit {
   readonly userId: string;
   readonly documentId: string;
-  readonly old: string;
-  /** Up to this much Markdown before the region, as it read when the edit began. */
-  before: string;
-  current: string;
-  /** Someone else's typing landed inside the region; it is left to them. */
+  readonly edit: Extract<TreeEdit, { kind: "blocks" }>;
+  readonly seen: SeenBlocks | null;
+  owned: string[];
+  written: Map<string, string>;
+  original: Node[] | null;
   broken: boolean;
 }
-const ANCHOR_CHARS = 80;
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
 
@@ -167,14 +173,69 @@ const lockProjectForEditing = (tx: DbTx, userId: string, projectId: string) =>
     if (!projectCan.edit(role))
       return yield* new DocumentRejected({ reason: "this project is read-only for you" });
   });
-/** Where a live edit's region sits in `markdown` now, or null when it cannot be told apart. */
-const liveRegion = (live: LiveEdit, markdown: string) => {
-  const anchored = live.before + live.current;
-  if (anchored && countOccurrences(markdown, anchored) === 1)
-    return markdown.indexOf(anchored) + live.before.length;
-  return live.current && countOccurrences(markdown, live.current) === 1
-    ? markdown.indexOf(live.current)
-    : null;
+/** The tree-size limits Markdown length cannot see: planned sections write none. */
+const withinTreeCap = (doc: Node) => {
+  let blocks = 0;
+  let intents = 0;
+  doc.descendants((node) => {
+    if (isBlock(node)) blocks++;
+    if (node.type.name === "pending") intents += String(node.attrs.intent ?? "").length;
+    return true;
+  });
+  if (blocks > DOCUMENT_LIMITS.blocks)
+    return Effect.fail(
+      new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.blocks} blocks` }),
+    );
+  return withinCap(intents);
+};
+/** The owned blocks of a live edit as one sibling range, or null if a person touched them. */
+const ownedRange = (doc: Node, live: LiveEdit) => {
+  const found = live.owned.map((id) => findBlocks(doc, id));
+  if (found.some((each) => each.length !== 1)) return null;
+  const nodes = found.map((each) => each[0]!);
+  const $first = doc.resolve(nodes[0]!.position);
+  const parent = $first.parent;
+  const startIndex = $first.index();
+  for (const [offset, { node, position }] of nodes.entries()) {
+    const $node = doc.resolve(position);
+    if ($node.parent !== parent || $node.index() !== startIndex + offset) return null;
+    if (live.written.get(blockIdOf(node)!) !== blockHash(node)) return null;
+  }
+  const last = nodes.at(-1)!;
+  return {
+    parent,
+    startIndex,
+    endIndex: startIndex + nodes.length,
+    from: nodes[0]!.position,
+    to: last.position + last.node.nodeSize,
+  };
+};
+
+/** Markdown, then a planned section per outline entry, with every block given an ID. */
+const buildDocument = (content: string, outline: ReadonlyArray<string> = []) => {
+  const parsed = parseMarkdown(content);
+  const pending = outline.map((intent) =>
+    documentSchema.nodes.pending!.create({ intent: intent.slice(0, PENDING_INTENT_CHARS) }),
+  );
+  // An empty document still holds one empty paragraph to type into.
+  const doc = documentSchema.nodes.doc!.createAndFill(null, [
+    ...Array.from({ length: parsed.childCount }, (_, index) => parsed.child(index)),
+    ...pending,
+  ])!;
+  return ensureIds(new Transform(doc)).doc;
+};
+/**
+ * Where the preview writes now: its own blocks once it has some, else the
+ * target as the edit names it. Null when that cannot be told any more.
+ */
+const liveSpot = (doc: Node, live: LiveEdit) => {
+  if (live.owned.length) return ownedRange(doc, live);
+  const range = resolveRange(doc, live.edit.target, live.edit.through);
+  if ("outcome" in range) return null;
+  if (live.edit.position === "replace") return checkSeen(range, live.seen) ? null : range;
+  const index = live.edit.position === "before" ? range.startIndex : range.endIndex;
+  const at = live.edit.position === "before" ? range.from : range.to;
+  return { parent: range.parent, startIndex: index, endIndex: index, from: at, to: at };
 };
 
 export class DocumentService extends Context.Service<
@@ -188,39 +249,71 @@ export class DocumentService extends Context.Service<
       userId: string,
       input: CreateDocumentInput,
       guard?: DocumentWriteGuard<E, R>,
-    ): Effect.Effect<{ outcome: "created"; document: EditableDocument }, DocumentError | E, R>;
+    ): Effect.Effect<
+      { outcome: "created"; document: EditableDocument; planned: string[] },
+      DocumentError | E,
+      R
+    >;
+    /** The live tree, for rendering what the model reads. Null when not this person's. */
+    read(
+      userId: string,
+      documentId: string,
+    ): Effect.Effect<{ document: EditableDocument; doc: Node } | null>;
     /**
-     * Anchor-guarded patch: `old` must occur exactly once in the current
-     * content, which is the conflict check. `expectedRevision` only flags a
-     * stale read, so a person typing elsewhere never blocks the model's edit.
+     * One model edit aimed at blocks by ID or at text in one block. A replace
+     * or delete must cover only blocks `seen` holds as they are now, so a
+     * person's typing since the model read is never written over.
      */
-    edit<E = never, R = never>(
+    apply<E = never, R = never>(
       userId: string,
-      input: EditDocumentInput,
+      input: { documentId: string; edit: TreeEdit; seen: SeenBlocks | null },
       guard?: DocumentWriteGuard<E, R>,
-    ): Effect.Effect<EditDocumentResult, DocumentError | E, R>;
-    replace<E = never, R = never>(
-      userId: string,
-      input: ReplaceDocumentInput,
-      guard?: DocumentWriteGuard<E, R>,
-    ): Effect.Effect<WriteDocumentResult, DocumentError | E, R>;
+    ): Effect.Effect<ApplyDocumentResult, DocumentError | E, R>;
     /**
-     * A model edit written as it streams. `beginLive` finds `old` exactly once
-     * and notes the Markdown before it; each `updateLive` finds that region
-     * again and rewrites it to the text streamed so far; `finishLive` reads the
-     * result. Null from `beginLive` means no unique anchor: the ordinary edit
-     * then runs when the call completes, and says why.
+     * Makes the whole document read as `markdown` and `outline`, as the
+     * smallest change: what a streamed `create_document` writes into the
+     * document it created.
+     */
+    rewrite<E = never, R = never>(
+      userId: string,
+      input: { documentId: string; content: string; outline?: ReadonlyArray<string> },
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<EditableDocument | null, DocumentError | E, R>;
+    /** Deletes a chat document an unclaimed streamed creation left behind. */
+    discard<E = never, R = never>(
+      userId: string,
+      documentId: string,
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<void, DocumentError | E, R>;
+    /**
+     * A `blocks` edit written while it streams. `beginLive` checks the target
+     * now; each `updateLive` replaces the blocks the preview owns with the
+     * Markdown streamed so far (a person touching one ends it); `settleLive`
+     * writes the final text under the full fence; `revertLive` puts back what
+     * an unclaimed preview replaced.
      */
     beginLive(
       userId: string,
-      input: { documentId: string; old: string },
+      input: {
+        documentId: string;
+        edit: Extract<TreeEdit, { kind: "blocks" }>;
+        seen: SeenBlocks | null;
+      },
     ): Effect.Effect<LiveEdit | null>;
     updateLive<E, R>(
       live: LiveEdit,
-      next: string,
+      content: string,
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<boolean, DocumentError | E, R>;
-    finishLive(live: LiveEdit): Effect.Effect<EditableDocument | null>;
+    settleLive<E, R>(
+      live: LiveEdit,
+      content: string,
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<ApplyDocumentResult, DocumentError | E, R>;
+    revertLive<E, R>(
+      live: LiveEdit,
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<void, DocumentError | E, R>;
     /** A person's editor: steps on a revision and/or its cursor. */
     push(
       userId: string,
@@ -499,18 +592,14 @@ export class DocumentService extends Context.Service<
        * fence goes first, so a Stop, retry or lost lease interrupts before
        * anything moves. The entry moves only after the commit.
        */
-      const modelWrite = <
-        A extends { outcome: string; document: EditableDocument },
-        E = never,
-        R = never,
-      >(
+      const modelWrite = <A extends { document: EditableDocument }, E = never, R = never>(
         userId: string,
         documentId: string,
         guard: DocumentWriteGuard<E, R> | undefined,
         decide: (
-          markdown: string,
+          doc: Node,
           document: EditableDocument,
-        ) => Effect.Effect<{ result: A; next: string | null }, DocumentRejected>,
+        ) => Effect.Effect<{ result: A; tr: Transform | null }, DocumentRejected>,
       ) => {
         const attempt = exclusive(documentId)(
           Effect.gen(function* () {
@@ -521,12 +610,10 @@ export class DocumentService extends Context.Service<
                 yield* requireDocuments(userId, tx);
                 const locked = yield* documents.lock(tx, userId, documentId);
                 if (locked.revision !== entry.revision) return yield* new StaleEntry();
-                const decided = yield* decide(toMarkdown(entry.doc), locked);
-                if (decided.next === null) return { result: decided.result, stored: null };
-                const tr = ensureIds(
-                  replaceDifference(new Transform(entry.doc), parseMarkdown(decided.next)),
-                );
-                if (!tr.docChanged) return { result: decided.result, stored: null };
+                const decided = yield* decide(entry.doc, locked);
+                const tr = decided.tr;
+                if (!tr?.docChanged) return { result: decided.result, stored: null };
+                yield* withinTreeCap(tr.doc);
                 const stored = yield* store(tx, documentId, entry, tr.doc, tr.steps, {
                   origin: "model",
                   userId,
@@ -560,10 +647,11 @@ export class DocumentService extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
-          const doc = ensureIds(new Transform(parseMarkdown(parsed.content))).doc;
+          const doc = buildDocument(parsed.content, parsed.outline);
           // Stored as the editor will write it back, so the next read matches.
           const content = toMarkdown(doc);
           yield* withinCap(content.length);
+          yield* withinTreeCap(doc);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
             : parsed.conversationId
@@ -593,81 +681,67 @@ export class DocumentService extends Context.Service<
             }),
           );
           yield* documentChanged(userId, document);
-          return { outcome: "created" as const, document };
+          return { outcome: "created" as const, document, planned: plannedIds(doc) };
         });
 
-      const edit = <E = never, R = never>(
+      const apply = <E = never, R = never>(
         userId: string,
-        input: EditDocumentInput,
+        input: { documentId: string; edit: TreeEdit; seen: SeenBlocks | null },
         guard?: DocumentWriteGuard<E, R>,
       ) =>
-        Effect.gen(function* () {
-          const parsed = yield* decode(EditDocumentInput, "invalid document edit")(input);
-          return yield* modelWrite<EditDocumentResult, E, R>(
-            userId,
-            parsed.documentId,
-            guard,
-            (current, document) =>
-              Effect.gen(function* () {
-                const staleRead =
-                  parsed.expectedRevision !== undefined &&
-                  parsed.expectedRevision !== document.revision;
-                const count = countOccurrences(current, parsed.old);
-                if (count === 0)
-                  return {
-                    result: {
-                      outcome: "no_match" as const,
-                      document,
-                      preview: preview(current),
-                      staleRead,
-                    },
-                    next: null,
-                  };
-                if (count > 1)
-                  return {
-                    result: { outcome: "ambiguous" as const, document, count, staleRead },
-                    next: null,
-                  };
-                if (parsed.old === parsed.new)
-                  return {
-                    result: { outcome: "unchanged" as const, document, staleRead },
-                    next: null,
-                  };
-                yield* withinCap(current.length - parsed.old.length + parsed.new.length);
-                const at = current.indexOf(parsed.old);
-                return {
-                  result: { outcome: "updated" as const, document, staleRead },
-                  next: current.slice(0, at) + parsed.new + current.slice(at + parsed.old.length),
-                };
-              }),
-          );
-        });
+        modelWrite<ApplyDocumentResult, E, R>(userId, input.documentId, guard, (doc, document) =>
+          Effect.sync(() => {
+            const applied = applyTreeEdit(doc, input.edit, input.seen);
+            if ("outcome" in applied) return { result: { ...applied, document }, tr: null };
+            return {
+              result: {
+                outcome: applied.tr.docChanged ? ("updated" as const) : ("unchanged" as const),
+                document,
+                touched: applied.touched,
+              },
+              tr: applied.tr,
+            };
+          }),
+        );
 
-      const replace = <E = never, R = never>(
+      const rewrite = <E = never, R = never>(
         userId: string,
-        input: ReplaceDocumentInput,
-        guard?: DocumentWriteGuard<E, R>,
+        input: { documentId: string; content: string; outline?: ReadonlyArray<string> },
+        guard: DocumentWriteGuard<E, R>,
       ) =>
-        Effect.gen(function* () {
-          const parsed = yield* decode(ReplaceDocumentInput, "invalid document replacement")(input);
-          yield* withinCap(parsed.content.length);
-          return yield* modelWrite<WriteDocumentResult, E, R>(
-            userId,
-            parsed.documentId,
-            guard,
-            (current, document) =>
-              Effect.succeed(
-                document.revision !== parsed.expectedRevision
-                  ? { result: { outcome: "conflict" as const, document }, next: null }
-                  : normalizeMarkdown(parsed.content) === current
-                    ? { result: { outcome: "unchanged" as const, document }, next: null }
-                    : {
-                        result: { outcome: "updated" as const, document },
-                        next: parsed.content,
-                      },
-              ),
-          );
-        });
+        modelWrite<{ document: EditableDocument }, E, R>(
+          userId,
+          input.documentId,
+          guard,
+          (doc, document) =>
+            Effect.gen(function* () {
+              const next = buildDocument(input.content, input.outline);
+              yield* withinCap(toMarkdown(next).length);
+              return {
+                result: { document },
+                tr: ensureIds(replaceDifference(new Transform(doc), next)),
+              };
+            }),
+        ).pipe(
+          Effect.map((result) => result.document),
+          Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
+        );
+
+      const discard = <E = never, R = never>(
+        userId: string,
+        documentId: string,
+        guard: DocumentWriteGuard<E, R>,
+      ) =>
+        exclusive(documentId)(
+          transaction((tx) =>
+            Effect.gen(function* () {
+              yield* guard(tx);
+              const document = yield* documents.lock(tx, userId, documentId);
+              yield* documents.remove(tx, documentId);
+              return document;
+            }),
+          ).pipe(Effect.tap(() => drop(documentId))),
+        ).pipe(Effect.flatMap((document) => documentChanged(userId, document)));
 
       const push = Effect.fn("DocumentService.push")(function* (
         userId: string,
@@ -802,21 +876,27 @@ export class DocumentService extends Context.Service<
 
       const beginLive = Effect.fn("DocumentService.beginLive")(function* (
         userId: string,
-        input: { documentId: string; old: string },
+        input: {
+          documentId: string;
+          edit: Extract<TreeEdit, { kind: "blocks" }>;
+          seen: SeenBlocks | null;
+        },
       ) {
         return yield* exclusive(input.documentId)(
           Effect.gen(function* () {
             const { entry, document } = yield* load(userId, input.documentId);
-            if (!document.canEdit || !input.old) return null;
-            const current = toMarkdown(entry.doc);
-            if (countOccurrences(current, input.old) !== 1) return null;
-            const at = current.indexOf(input.old);
+            if (!document.canEdit) return null;
+            const range = resolveRange(entry.doc, input.edit.target, input.edit.through);
+            if ("outcome" in range) return null;
+            if (input.edit.position === "replace" && checkSeen(range, input.seen)) return null;
             const live: LiveEdit = {
               userId,
               documentId: input.documentId,
-              old: input.old,
-              before: current.slice(Math.max(0, at - ANCHOR_CHARS), at),
-              current: input.old,
+              edit: input.edit,
+              seen: input.seen,
+              owned: [],
+              written: new Map(),
+              original: null,
               broken: false,
             };
             return live;
@@ -824,50 +904,96 @@ export class DocumentService extends Context.Service<
         ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
       });
 
-      const updateLive = <E, R>(live: LiveEdit, next: string, guard: DocumentWriteGuard<E, R>) =>
-        Effect.gen(function* () {
-          if (live.broken) return false;
-          if (next === live.current) return true;
-          let around: { before: string; after: string } | null = null;
-          const result = yield* modelWrite<
-            { outcome: "updated" | "broken"; document: EditableDocument },
-            E,
-            R
-          >(live.userId, live.documentId, guard, (markdown, document) =>
-            Effect.gen(function* () {
-              const from = liveRegion(live, markdown);
-              if (from === null)
-                return { result: { outcome: "broken" as const, document }, next: null };
-              const before = markdown.slice(0, from);
-              const after = markdown.slice(from + live.current.length);
-              yield* withinCap(before.length + next.length + after.length);
-              around = { before, after };
+      const writeLive = <E, R>(live: LiveEdit, content: string, guard: DocumentWriteGuard<E, R>) =>
+        modelWrite<{ document: EditableDocument; written: boolean }, E, R>(
+          live.userId,
+          live.documentId,
+          guard,
+          (doc, document) =>
+            Effect.sync(() => {
+              const none = { result: { document, written: false }, tr: null };
+              if (live.broken) return none;
+              const spot = liveSpot(doc, live);
+              if (!spot) {
+                live.broken = true;
+                return none;
+              }
+              const fitted = content.trim()
+                ? fitBlocks(spot.parent, spot.startIndex, spot.endIndex, content)
+                : Fragment.empty;
+              // Half-written Markdown that does not fit yet: wait for more.
+              if (!(fitted instanceof Fragment) || (!fitted.size && !live.owned.length))
+                return none;
+              // Blocks keep the IDs they had in the last write, by place and type.
+              const previous = Array.from({ length: spot.endIndex - spot.startIndex }, (_, index) =>
+                spot.parent.child(spot.startIndex + index),
+              );
+              live.original ??= live.edit.position === "replace" ? previous : [];
+              const nodes: Node[] = [];
+              fitted.forEach((node, _offset, index) => {
+                const before = live.owned.length ? previous[index] : undefined;
+                nodes.push(
+                  before && before.type === node.type
+                    ? node.type.create(
+                        { ...node.attrs, [BLOCK_ID]: blockIdOf(before) },
+                        node.content,
+                        node.marks,
+                      )
+                    : node,
+                );
+              });
+              const tr = new Transform(doc).replaceWith(spot.from, spot.to, nodes);
+              ensureIds(tr);
+              const written = tr.doc.slice(
+                spot.from,
+                spot.from + Fragment.from(nodes).size,
+              ).content;
+              live.owned = [];
+              live.written = new Map();
+              written.forEach((node) => {
+                const id = blockIdOf(node)!;
+                live.owned.push(id);
+                live.written.set(id, blockHash(node));
+              });
+              return { result: { document, written: true }, tr };
+            }),
+        );
+
+      const updateLive = <E, R>(live: LiveEdit, content: string, guard: DocumentWriteGuard<E, R>) =>
+        writeLive(live, content, guard).pipe(Effect.map(() => !live.broken));
+
+      const settleLive = <E, R>(live: LiveEdit, content: string, guard: DocumentWriteGuard<E, R>) =>
+        writeLive(live, content, guard).pipe(
+          Effect.map(({ document }): ApplyDocumentResult =>
+            live.broken
+              ? {
+                  outcome: "conflict",
+                  document,
+                  message:
+                    "Someone edited those blocks while you were writing them. Their change stays; read the current content and aim again.",
+                }
+              : { outcome: "updated", document, touched: [...live.owned] },
+          ),
+        );
+
+      const revertLive = <E, R>(live: LiveEdit, guard: DocumentWriteGuard<E, R>) =>
+        modelWrite<{ document: EditableDocument }, E, R>(
+          live.userId,
+          live.documentId,
+          guard,
+          (doc, document) =>
+            Effect.sync(() => {
+              const none = { result: { document }, tr: null };
+              if (live.broken || !live.owned.length || !live.original) return none;
+              const spot = ownedRange(doc, live);
+              if (!spot) return none;
+              live.broken = true;
               return {
-                result: { outcome: "updated" as const, document },
-                next: before + next + after,
+                result: { document },
+                tr: new Transform(doc).replaceWith(spot.from, spot.to, live.original),
               };
             }),
-          );
-          if (result.outcome === "broken" || !around) {
-            live.broken = true;
-            return false;
-          }
-          // The stored Markdown is the tree written back, which may normalise
-          // the partial text; the region is whatever now sits between the
-          // unchanged text around it.
-          const { before, after } = around as { before: string; after: string };
-          const stored = result.document.content;
-          live.current =
-            stored.startsWith(before) && stored.endsWith(after)
-              ? stored.slice(before.length, stored.length - after.length)
-              : next;
-          live.before = before.slice(-ANCHOR_CHARS);
-          return true;
-        });
-
-      const finishLive = Effect.fn("DocumentService.finishLive")(function* (live: LiveEdit) {
-        return yield* documents.get(live.userId, live.documentId);
-      });
+        ).pipe(Effect.asVoid);
 
       // Idle entries leave memory; one still watched stays however old it is.
       yield* Effect.gen(function* () {
@@ -912,13 +1038,23 @@ export class DocumentService extends Context.Service<
           yield* documentChanged(userId, removed);
         }),
         create,
-        edit,
-        replace,
+        read: Effect.fn("DocumentService.read")(function* (userId, documentId) {
+          if (!(yield* policy.can(userId, "documents"))) return null;
+          return yield* exclusive(documentId)(
+            load(userId, documentId).pipe(
+              Effect.map(({ entry, document }) => ({ document, doc: entry.doc })),
+            ),
+          ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+        }),
+        apply,
+        rewrite,
+        discard,
         push,
         subscribe,
         beginLive,
         updateLive,
-        finishLive,
+        settleLive,
+        revertLive,
       });
     }),
   ).pipe(Layer.provide(DocumentRepo.layer));

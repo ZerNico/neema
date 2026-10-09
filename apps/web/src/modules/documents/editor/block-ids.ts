@@ -143,3 +143,13 @@ const withId = (current: Node, next: Node, content: Fragment) => {
   if (!id && content === next.content) return next;
   return next.type.create(id ? { ...next.attrs, [BLOCK_ID]: id } : next.attrs, content, next.marks);
 };
+
+/** The planned sections at the top level, in order: what a new outline left to fill. */
+export const plannedIds = (doc: Node) => {
+  const ids: string[] = [];
+  doc.forEach((block) => {
+    const id = blockIdOf(block);
+    if (block.type.name === "pending" && id) ids.push(id);
+  });
+  return ids;
+};

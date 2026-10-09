@@ -3,7 +3,11 @@ import { Schema } from "effect";
 export const DOCUMENT_LIMITS = {
   chars: 200_000,
   title: 200,
-  noMatchPreviewLines: 40,
+  /** Planned sections one new document may start with, and one's description. */
+  outline: 30,
+  intent: 200,
+  /** Blocks one document may hold; past this the tree, not its Markdown, is the cost. */
+  blocks: 5_000,
   /** Steps in one push; a keystroke batch is a handful. */
   steps: 2_000,
   /** Serialized length of one push's steps. */
@@ -11,7 +15,6 @@ export const DOCUMENT_LIMITS = {
 } as const;
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const DocumentTitle = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(DOCUMENT_LIMITS.title),
@@ -33,23 +36,16 @@ export const CreateDocumentInput = Schema.Struct({
   createdByMessageId: Schema.optionalKey(ResourceId),
   title: DocumentTitle,
   content: Schema.String,
+  /** Planned sections after the content, each one placeholder's intent. */
+  outline: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(DOCUMENT_LIMITS.intent))).check(
+      Schema.isMaxLength(DOCUMENT_LIMITS.outline),
+    ),
+  ),
   /** Who wrote the first text: the model by default, a person starting a blank one. */
   by: Schema.optionalKey(Schema.Literals(["user", "model"])),
 });
 export type CreateDocumentInput = typeof CreateDocumentInput.Type;
-export const EditDocumentInput = Schema.Struct({
-  documentId: ResourceId,
-  old: Schema.String.check(Schema.isMinLength(1)),
-  new: Schema.String,
-  expectedRevision: Schema.optionalKey(Revision),
-});
-export type EditDocumentInput = typeof EditDocumentInput.Type;
-export const ReplaceDocumentInput = Schema.Struct({
-  documentId: ResourceId,
-  content: Schema.String,
-  expectedRevision: Revision,
-});
-export type ReplaceDocumentInput = typeof ReplaceDocumentInput.Type;
 /** One ProseMirror step, `JSON.stringify(step.toJSON())`; the server rebuilds and checks it. */
 const StepJson = Schema.String.check(
   Schema.isMinLength(2),
@@ -120,14 +116,14 @@ export interface EditableDocument {
   updatedAt: string;
 }
 
-export type EditDocumentResult =
-  | { outcome: "updated" | "unchanged"; document: EditableDocument; staleRead: boolean }
-  | { outcome: "no_match"; document: EditableDocument; preview: string; staleRead: boolean }
-  | { outcome: "ambiguous"; document: EditableDocument; count: number; staleRead: boolean };
-export interface WriteDocumentResult {
-  outcome: "updated" | "unchanged" | "conflict";
-  document: EditableDocument;
-}
+/** What one model edit did: the blocks it wrote, or why it changed nothing. */
+export type ApplyDocumentResult =
+  | { outcome: "updated" | "unchanged"; document: EditableDocument; touched: string[] }
+  | {
+      outcome: "not_found" | "ambiguous" | "conflict" | "invalid" | "no_match";
+      document: EditableDocument;
+      message: string;
+    };
 /** `conflict`: the steps were built on an older revision; rebase and send again. */
 export interface PushDocumentResult {
   revision: number;

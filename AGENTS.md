@@ -235,7 +235,7 @@ skipped one on purpose.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
 - `docs/internals/documents.md`: server-ordered ProseMirror steps, rebasing and offline
-  recovery, transcript boundaries, exact-match and streamed model edits, the one-writer hub.
+  recovery, block IDs and the XML view, guarded and streamed model edits, the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
   kind served only as a download, what the model sees, working drafts and publication.
 - `docs/internals/pdf.md`: PDF reading in worker processes, what makes a page a scan, who reads

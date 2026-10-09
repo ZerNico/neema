@@ -1085,8 +1085,7 @@ export class StreamEngine extends Context.Service<
                     ),
                   ),
                   geocode: (query) => mapLookups.value.geocode(maps.services, query),
-                  route: (mode, stops) =>
-                    mapLookups.value.route(maps.services, mode, stops),
+                  route: (mode, stops) => mapLookups.value.route(maps.services, mode, stops),
                   record: (update) => recordLookups(fence, update),
                 })
               : null;
@@ -2531,6 +2530,9 @@ export class StreamEngine extends Context.Service<
                   )
                 : [];
               modelCallOpen = true;
+              const prompt = requestPrompt();
+              // Only what this request carries counts as what the model saw of a document.
+              documents.sent(prompt);
               return gateway
                 .streamChat({
                   imageOutput,
@@ -2540,7 +2542,7 @@ export class StreamEngine extends Context.Service<
                   // Rebuilt every round and always last: the recap has to sit
                   // behind the tool results it competes with. It is budgeted but
                   // never fed back into the continuation transcript.
-                  prompt: requestPrompt(),
+                  prompt,
                   ...(activeToolkit && toolRoundsLeft
                     ? {
                         toolkit: activeToolkit,
@@ -2684,29 +2686,29 @@ export class StreamEngine extends Context.Service<
                                                   ? "notify"
                                                   : part.name === MAP_ROUTE_TOOL && mapRouteTools
                                                     ? "map"
-                                                  : (part.name === "publish_file" &&
-                                                        publishFileTool) ||
-                                                      (part.name === "create_file" &&
-                                                        createFileTool)
-                                                    ? "tool-file"
-                                                    : officeFamilyOf(part.name)
-                                                      ? officeFamilyOf(part.name)!.family
-                                                      : Schema.is(SkillToolName)(part.name)
-                                                        ? "skill"
-                                                        : Schema.is(KnowledgeToolName)(part.name)
-                                                          ? "knowledge"
-                                                          : part.name === "deep_research"
-                                                            ? "research"
-                                                            : part.name === "web_search" ||
-                                                                part.name === "read_url"
-                                                              ? "web"
-                                                              : customToolNames.has(part.name)
-                                                                ? "custom"
-                                                                : integrationTools?.names.has(
-                                                                      part.name,
-                                                                    )
-                                                                  ? "integration"
-                                                                  : null;
+                                                    : (part.name === "publish_file" &&
+                                                          publishFileTool) ||
+                                                        (part.name === "create_file" &&
+                                                          createFileTool)
+                                                      ? "tool-file"
+                                                      : officeFamilyOf(part.name)
+                                                        ? officeFamilyOf(part.name)!.family
+                                                        : Schema.is(SkillToolName)(part.name)
+                                                          ? "skill"
+                                                          : Schema.is(KnowledgeToolName)(part.name)
+                                                            ? "knowledge"
+                                                            : part.name === "deep_research"
+                                                              ? "research"
+                                                              : part.name === "web_search" ||
+                                                                  part.name === "read_url"
+                                                                ? "web"
+                                                                : customToolNames.has(part.name)
+                                                                  ? "custom"
+                                                                  : integrationTools?.names.has(
+                                                                        part.name,
+                                                                      )
+                                                                    ? "integration"
+                                                                    : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -3596,9 +3598,7 @@ export class StreamEngine extends Context.Service<
                           }
                           if (part.name === MAP_ROUTE_TOOL && mapRouteTools) {
                             if (isPreliminary) return;
-                            const decoded = Schema.decodeUnknownOption(MapRouteResult)(
-                              part.result,
-                            );
+                            const decoded = Schema.decodeUnknownOption(MapRouteResult)(part.result);
                             const result: MapRouteResult =
                               !part.isFailure && Option.isSome(decoded)
                                 ? decoded.value

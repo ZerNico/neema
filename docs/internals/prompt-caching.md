@@ -16,7 +16,9 @@ the whole input again on every turn.
   catalogue and pinned roots, kept drafts and the runtime clock, as the answer's first
   request saw them. Then the answer's rounds.
 - After the rounds, rebuilt per request: whatever in that trailing data changed during the
-  answer (an edited draft or document, a skill loaded mid-answer), then the reminder. The
+  answer (an edited draft, a skill loaded mid-answer), then the reminder. A document keeps its
+  first view as it was and sends only its changes since, cumulatively, so a long document is not
+  resent uncached after every edit ([documents](documents.md)). The
   data policies say a later snapshot replaces an earlier one. Rewriting the data ahead of the
   rounds instead uncached every round each time a tool touched a draft.
 - History renders the same whatever the attempt is offered: citation markers stay in

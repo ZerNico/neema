@@ -22,7 +22,9 @@ import {
   type EditableDocument,
   type DocumentFrame,
 } from "~/modules/documents/schema.ts";
+import { blockIdOf } from "~/modules/documents/editor/block-ids.ts";
 import { normalizeMarkdown } from "~/modules/documents/editor/markdown.ts";
+import { blockView } from "~/modules/documents/editor/tree.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
@@ -128,11 +130,22 @@ const create = (userId: string, conversationId: string, content = CHECKLIST, tit
   service((s) => s.create(userId, { conversationId, title, content })).then((r) => r.document);
 const get = (userId: string, document: Pick<EditableDocument, "id">) =>
   service((s) => s.get(userId, document.id));
-const edit = (
-  userId: string,
-  document: EditableDocument,
-  patch: { old: string; new: string; expectedRevision?: number },
-) => service((s) => s.edit(userId, { documentId: document.id, ...patch }));
+const edit = (userId: string, document: EditableDocument, patch: { old: string; new: string }) =>
+  service((s) =>
+    s.apply(userId, {
+      documentId: document.id,
+      edit: { kind: "find", find: patch.old, content: patch.new },
+      seen: null,
+    }),
+  );
+/** What the model has been shown of a document: every block as it is now. */
+const seenNow = (userId: string, document: Pick<EditableDocument, "id">) =>
+  service((s) => s.read(userId, document.id)).then(
+    (read) =>
+      new Map(
+        blockView(read!.doc, { budget: 1_000_000 }).seen.map((block) => [block.id, block.hash]),
+      ),
+  );
 /** A person's editor on the document, opened from its live feed like the panel's. */
 const openEditor = async (userId: string, document: Pick<EditableDocument, "id">) => {
   const editor = await collabEditor(run, userId, document.id);
@@ -164,93 +177,86 @@ describe("model patches", () => {
     expect(normalizeMarkdown(CHECKLIST)).toBe(CHECKLIST);
   });
 
-  it("creates, then edits by a unique anchor, reporting no_match, ambiguous and unchanged", async () => {
+  it("creates with an outline, then edits by text and by block", async () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
-    const created = await create(owner, conversationId);
-    expect(created).toMatchObject({
+    const created = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        title: "Release",
+        content: CHECKLIST,
+        outline: ["Rollback plan"],
+      }),
+    );
+    expect(created.document).toMatchObject({
       conversationId,
       title: "Release",
       content: CHECKLIST,
       revision: 0,
       lastEditedBy: "model",
     });
-    expect(await get(owner, created)).toEqual(created);
+    expect(created.planned).toHaveLength(1);
+    expect(await get(owner, created.document)).toEqual(created.document);
 
-    const updated = await edit(owner, created, {
-      old: "- [ ] tag build",
-      new: "- [ ] tag build v2",
-      expectedRevision: 0,
-    });
-    expect(updated).toMatchObject({ outcome: "updated", staleRead: false });
-    expect(updated.document.revision).toBe(1);
+    const updated = await edit(owner, created.document, { old: "tag build", new: "tag build v2" });
+    expect(updated).toMatchObject({ outcome: "updated", document: { revision: 1 } });
     expect(updated.document.content).toContain("- [ ] tag build v2\n");
-    expect(updated.document.content).not.toContain("- [ ] tag build\n");
-
-    const missing = await edit(owner, updated.document, { old: "- [ ] deploy", new: "x" });
-    expect(missing.outcome).toBe("no_match");
-    if (missing.outcome !== "no_match") throw new Error("expected no_match");
-    expect(missing.preview).toBe(updated.document.content);
-    expect(missing.document.revision).toBe(1);
-
-    const ambiguous = await edit(owner, updated.document, { old: "- [ ] ", new: "- [x] " });
-    expect(ambiguous).toMatchObject({ outcome: "ambiguous", count: 5 });
-
+    expect(await edit(owner, created.document, { old: "deploy", new: "x" })).toMatchObject({
+      outcome: "no_match",
+    });
+    expect(await edit(owner, created.document, { old: "[ ]", new: "[x]" })).toMatchObject({
+      outcome: "no_match",
+    });
+    expect(await edit(owner, created.document, { old: "ship", new: "sink" })).toMatchObject({
+      outcome: "updated",
+    });
     // Same text again is not a write: no revision bump, no event.
     const before = changedEvents().length;
-    expect(
-      await edit(owner, updated.document, { old: "tag build v2", new: "tag build v2" }),
-    ).toMatchObject({ outcome: "unchanged", document: { revision: 1 } });
+    expect(await edit(owner, created.document, { old: "v2", new: "v2" })).toMatchObject({
+      outcome: "unchanged",
+      document: { revision: 2 },
+    });
     expect(changedEvents()).toHaveLength(before);
-    // Longer preview stops at the cap so a huge document does not come back whole.
-    const long = await create(
-      owner,
-      conversationId,
-      Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"),
+
+    // The planned section is filled by its id, under the guard of what was seen.
+    const filled = await service((s) =>
+      s.apply(owner, {
+        documentId: created.document.id,
+        edit: {
+          kind: "blocks",
+          target: created.planned[0]!,
+          position: "replace",
+          content: "## Rollback\n\nRevert the tag.",
+        },
+        seen: null,
+      }),
     );
-    const capped = await edit(owner, long, { old: "nothing here", new: "" });
-    if (capped.outcome !== "no_match") throw new Error("expected no_match");
-    expect(capped.preview.split("\n")).toHaveLength(DOCUMENT_LIMITS.noMatchPreviewLines);
+    expect(filled.outcome).toBe("updated");
+    expect(filled.document.revision).toBeGreaterThan(2);
+    expect(filled.document.content).toMatch(/## Rollback\n\nRevert the tag\.$/);
   });
 
-  it("flags a stale expectedRevision on edit without refusing it", async () => {
+  it("refuses to replace a block a person changed after the model was shown it", async () => {
     const owner = await createUser();
     const created = await create(owner, await createConversation(owner));
+    const seen = await seenNow(owner, created);
     const editor = await openEditor(owner, created);
-    expect(await editor.type((markdown) => tick(markdown, "- [ ] write notes"))).toEqual({
-      revision: 1,
-    });
-    const result = await edit(owner, created, {
-      old: "- [ ] ship",
-      new: "- [ ] ship it",
-      expectedRevision: created.revision,
-    });
-    expect(result).toMatchObject({ outcome: "updated", staleRead: true });
-    expect(result.document.content).toContain("- [x] write notes");
-    expect(result.document.content).toContain("- [ ] ship it");
-    expect(result.document.revision).toBe(2);
-  });
-
-  it("replaces the whole content only at the expected revision", async () => {
-    const owner = await createUser();
-    const created = await create(owner, await createConversation(owner));
-    const replaced = await service((s) =>
-      s.replace(owner, { documentId: created.id, content: "# New", expectedRevision: 0 }),
-    );
-    expect(replaced).toMatchObject({
-      outcome: "updated",
-      document: { content: "# New", revision: 1, lastEditedBy: "model" },
-    });
-    expect(
-      await service((s) =>
-        s.replace(owner, { documentId: created.id, content: "# Stale", expectedRevision: 0 }),
-      ),
-    ).toEqual({ outcome: "conflict", document: replaced.document });
-    expect(
-      await service((s) =>
-        s.replace(owner, { documentId: created.id, content: "# New", expectedRevision: 1 }),
-      ),
-    ).toEqual({ outcome: "unchanged", document: replaced.document });
+    await editor.type((markdown) => tick(markdown, "- [ ] write notes"));
+    const read = await service((s) => s.read(owner, created.id));
+    const ids: string[] = [];
+    read!.doc.forEach((block) => ids.push(blockIdOf(block)!));
+    // The first list holds the ticked task; the heading did not change.
+    const replaceBlock = (target: string) =>
+      service((s) =>
+        s.apply(owner, {
+          documentId: created.id,
+          edit: { kind: "blocks", target, position: "replace", content: "Replaced" },
+          seen,
+        }),
+      );
+    expect(await replaceBlock(ids[1]!)).toMatchObject({ outcome: "conflict" });
+    expect(await replaceBlock(ids[0]!)).toMatchObject({ outcome: "updated" });
+    expect((await get(owner, created))!.content).toContain("- [x] write notes");
   });
 
   it("interrupts a fenced write once the generation is superseded", async () => {
@@ -259,8 +265,14 @@ describe("model patches", () => {
     const created = await create(owner, conversationId);
     const fence = await generation(owner, conversationId);
     const write = Effect.flatMap(DocumentService, (s) =>
-      s.edit(owner, { documentId: created.id, old: "- [ ] ship", new: "- [ ] ship late" }, (tx) =>
-        lockGeneration(tx, fence),
+      s.apply(
+        owner,
+        {
+          documentId: created.id,
+          edit: { kind: "find", find: "ship", content: "ship late" },
+          seen: null,
+        },
+        (tx) => lockGeneration(tx, fence),
       ),
     );
     const creating = Effect.flatMap(DocumentService, (s) =>
@@ -295,9 +307,13 @@ describe("person and model writing together", () => {
     try {
       const model = run(
         Effect.flatMap(DocumentService, (s) =>
-          s.edit(
+          s.apply(
             owner,
-            { documentId: created.id, old: "- [ ] write notes", new: "- [ ] write the notes" },
+            {
+              documentId: created.id,
+              edit: { kind: "find", find: "write notes", content: "write the notes" },
+              seen: null,
+            },
             (tx) =>
               lockGeneration(tx, fence).pipe(
                 Effect.andThen(Deferred.succeed(reached, undefined)),
@@ -559,7 +575,11 @@ describe("ownership, limits and sync", () => {
         service((s) => s.create(stranger, { conversationId, title: "Intruder", content: "" })),
         edit(stranger, created, { old: "ship", new: "sink" }),
         service((s) =>
-          s.replace(stranger, { documentId: created.id, content: "", expectedRevision: 0 }),
+          s.apply(stranger, {
+            documentId: created.id,
+            edit: { kind: "blocks", target: "anything", position: "replace" },
+            seen: null,
+          }),
         ),
         service((s) =>
           s.push(stranger, {
@@ -615,7 +635,7 @@ describe("ownership, limits and sync", () => {
     await edit(owner, created, { old: "nothing", new: "x" });
     expect(changedEvents(owner)).toHaveLength(1);
     publishingFails = true;
-    const edited = await edit(owner, created, { old: "- [ ] ship", new: "- [x] ship" });
+    const edited = await edit(owner, created, { old: "ship", new: "ship it" });
     expect(edited.outcome).toBe("updated");
     expect(await get(owner, created)).toEqual(edited.document);
     expect(changedEvents(owner)).toHaveLength(1);

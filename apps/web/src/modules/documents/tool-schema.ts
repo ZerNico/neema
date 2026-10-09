@@ -5,7 +5,6 @@ export const DocumentToolName = Schema.Literals([
   "create_document",
   "edit_document",
   "read_chat_document",
-  "replace_document",
   "list_chat_documents",
 ]);
 export type DocumentToolName = typeof DocumentToolName.Type;
@@ -16,6 +15,7 @@ export const DocumentToolOutcome = Schema.Literals([
   "read",
   "listed",
   "no_match",
+  "not_found",
   "ambiguous",
   "conflict",
   "invalid",

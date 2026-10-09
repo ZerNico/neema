@@ -4,8 +4,7 @@ export function documentActivityLabel(activity: DocumentToolActivity) {
   const title = activity.result?.title;
   if (activity.status === "running") {
     if (activity.name === "create_document") return "Creating a document";
-    if (activity.name === "edit_document" || activity.name === "replace_document")
-      return "Updating the document";
+    if (activity.name === "edit_document") return "Updating the document";
     return "Reading documents";
   }
   switch (activity.result?.outcome) {

@@ -2052,29 +2052,57 @@ describe("conversation documents", () => {
   // back, as opposed to the trailing data, which carries the document on purpose.
   const toolMessages = (input: GatewayInput) =>
     JSON.stringify(input.prompt.content.filter((message) => message.role === "tool"));
-  const trailing = (input: GatewayInput) => {
-    const message = [...input.prompt.content]
-      .toReversed()
-      .find(
+  /** Every document view the request carried, in order, as the model reads it. */
+  const documentText = (input: GatewayInput) =>
+    [...input.prompt.content]
+      .filter(
         (candidate) =>
           candidate.role === "assistant" &&
-          JSON.stringify(candidate.content).includes("Application-provided documents"),
-      );
-    if (!message) return null;
-    const text = (message.content as ReadonlyArray<{ text?: string }>)
-      .map((part) => part.text ?? "")
-      .join("");
-    return JSON.parse(text.split("\n").slice(1).join("\n")) as {
-      focused: {
-        id: string;
-        title: string;
-        revision: number;
-        lastEditedBy: string;
-        editedSinceYourLastWrite: boolean;
-        content: string;
-      } | null;
-      others: ReadonlyArray<{ id: string; title: string; chars: number }>;
+          JSON.stringify(candidate.content).includes("Application-provided document"),
+      )
+      .map((message) =>
+        (message.content as ReadonlyArray<{ text?: string }>)
+          .map((part) => part.text ?? "")
+          .join(""),
+      )
+      .join("\n");
+  const attributes = (tag: string) =>
+    Object.fromEntries(
+      [...tag.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [match[1]!, match[2]!]),
+    );
+  /** The focused document's latest header and the others' summaries, from the XML. */
+  const trailing = (input: GatewayInput) => {
+    const text = documentText(input);
+    if (!text) return null;
+    const headers = [...text.matchAll(/<document ([^>]*?)\/?>/g)].map((match) =>
+      attributes(match[1]!),
+    );
+    const focused = headers.filter((header) => header.focused === "true").at(-1);
+    const lastBlock = text.slice(text.lastIndexOf("<documents>"));
+    const others = [...lastBlock.matchAll(/<document ([^>]*?)\/>/g)].map((match) => {
+      const header = attributes(match[1]!);
+      return { id: header.id, title: header.title, chars: Number(header.chars) };
+    });
+    return {
+      text,
+      focused: focused
+        ? {
+            id: focused.id,
+            title: focused.title,
+            revision: Number(focused.revision),
+            lastEditedBy: focused.lastEditedBy,
+            editedSinceYourLastWrite: focused.editedSinceYourLastWrite === "true",
+          }
+        : null,
+      others,
     };
+  };
+  /** The id the request showed for the block holding `text`, as a model would read it. */
+  const blockIdIn = (input: GatewayInput, text: string) => {
+    const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(`id="([a-z0-9]+)"[^>]*>${escaped}<`).exec(documentText(input));
+    if (!match) throw new Error(`no block holding ${text} in the request`);
+    return match[1]!;
   };
 
   it.each([false, true])(
@@ -2095,7 +2123,7 @@ describe("conversation documents", () => {
           return authoringTool(
             input,
             "edit_document",
-            { old: "- [ ] ship", new: "- [ ] ship\n- [ ] announce", expectedRevision: 0 },
+            { target: blockIdIn(input, "ship"), position: "after", content: "- [ ] announce" },
             hermes,
           );
         return reply();
@@ -2108,15 +2136,16 @@ describe("conversation documents", () => {
         expect(JSON.stringify(prompts[0]!.prompt)).not.toContain("DATA TO EDIT");
         expect(trailing(prompts[0]!)).toBeNull();
         expect(trailing(prompts[1]!)).toMatchObject({
-          focused: { title: "Release checklist", revision: 0, content: CHECKLIST },
+          focused: { title: "Release checklist" },
           others: [],
         });
+        expect(trailing(prompts[1]!)!.text).toContain(">write notes</task>");
         expect(trailing(prompts[2]!)!.focused).toMatchObject({
-          revision: 1,
           lastEditedBy: "model",
           editedSinceYourLastWrite: false,
-          content: `${CHECKLIST}\n- [ ] announce`,
         });
+        expect(trailing(prompts[2]!)!.focused!.revision).toBeGreaterThan(0);
+        expect(trailing(prompts[2]!)!.text).toContain(">announce</task>");
         // The continuation carries pointers, never the document.
         expect(toolMessages(prompts[2]!)).toContain("trailing application data");
         expect(toolMessages(prompts[2]!)).not.toContain("write notes");
@@ -2124,7 +2153,6 @@ describe("conversation documents", () => {
         const [document] = await documentsOf(seed);
         expect(document).toMatchObject({
           title: "Release checklist",
-          revision: 1,
           lastEditedBy: "model",
           content: `${CHECKLIST}\n- [ ] announce`,
         });
@@ -2140,14 +2168,15 @@ describe("conversation documents", () => {
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 0,
+            // A streamed creation writes its content after the document exists.
+            revision: expect.any(Number),
           },
           {
             outcome: "updated",
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 1,
+            revision: document!.revision,
           },
         ]);
         expect(detail.toolCalls.every((call) => call.status === "complete")).toBe(true);
@@ -2206,8 +2235,8 @@ describe("conversation documents", () => {
         return Stream.fromEffectDrain(watch).pipe(
           Stream.concat(
             streamedTool(input, "edit_document", {
-              old: "- [ ] tag build",
-              new: "- [ ] tag the build and publish the release notes for everyone",
+              target: blockIdIn(input, "tag build"),
+              content: "- [ ] tag the build and publish the release notes for everyone",
             }),
           ),
         );
@@ -2276,11 +2305,11 @@ describe("conversation documents", () => {
           content: CHECKLIST,
         });
       if (prompts.length === 2)
-        // A revision that is not a number: the preview streams, the call is refused.
+        // A position that does not exist: the preview streams, the call is refused.
         return streamedTool(input, "edit_document", {
-          old: "- [ ] tag build",
-          new: "- [ ] tag a completely different build instead",
-          expectedRevision: "soon",
+          target: blockIdIn(input, "tag build"),
+          content: "- [ ] tag a completely different build instead",
+          position: "instead",
         });
       return reply();
     };
@@ -2298,7 +2327,7 @@ describe("conversation documents", () => {
     }
   });
 
-  it("shows a person's edit between rounds and returns a preview when the anchor is gone", async () => {
+  it("shows a person's edit between rounds, flagged until the model has been sent it", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];
     // Resolved when it runs: the document only exists once round one has landed.
@@ -2329,14 +2358,15 @@ describe("conversation documents", () => {
         });
       if (prompts.length === 2)
         return authoringTool(input, "edit_document", {
-          old: "- [ ] tag build",
-          new: "- [ ] tag build\n- [ ] run tests",
+          target: blockIdIn(input, "tag build"),
+          position: "after",
+          content: "- [ ] run tests",
         }).pipe(Stream.concat(Stream.fromEffectDrain(personTicks)));
       if (prompts.length === 3)
+        // Aimed at the task the person ticked, which this request has shown it.
         return authoringTool(input, "edit_document", {
-          old: "- [ ] write notes",
-          new: "- [ ] write release notes",
-          expectedRevision: 1,
+          target: blockIdIn(input, "write notes"),
+          content: "- [ ] write release notes",
         });
       return reply();
     };
@@ -2344,46 +2374,33 @@ describe("conversation documents", () => {
       const sent = await send(seed);
       await settle(sent.assistantMessageId);
       expect(prompts).toHaveLength(4);
+      const [document] = await documentsOf(seed);
       expect(trailing(prompts[2]!)!.focused).toMatchObject({
-        revision: 2,
         lastEditedBy: "user",
         editedSinceYourLastWrite: true,
-        content: "# Release\n\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
       });
-      // Having seen the current revision through the failed edit, the flag clears.
+      expect(trailing(prompts[2]!)!.text).toContain('checked="true">write notes</task>');
+      expect(trailing(prompts[2]!)!.text).toContain(">run tests</task>");
+      // Having been sent the person's change and written after it, the flag clears.
       expect(trailing(prompts[3]!)!.focused).toMatchObject({
-        revision: 2,
+        revision: document!.revision,
+        lastEditedBy: "model",
         editedSinceYourLastWrite: false,
       });
-      const [document] = await documentsOf(seed);
-      expect(document).toMatchObject({ revision: 2, lastEditedBy: "user" });
+      expect(document!.content).toBe(
+        "# Release\n\n- [ ] write release notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
+      );
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
-      const missed = detail.toolCalls[2]!;
-      expect(missed.status).toBe("error");
-      expect(missed.result).toMatchObject({
-        outcome: "no_match",
-        documentId: document!.id,
-        documentConversationId: seed.conversation.id,
-        title: "Release checklist",
-        revision: 2,
-      });
-      expect(Object.keys(missed.result as object).toSorted()).toEqual([
-        "documentConversationId",
-        "documentId",
-        "message",
-        "outcome",
-        "revision",
-        "title",
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+        "updated",
       ]);
-      expect(missed.error?.code).toBe("DocumentNotUpdated");
-      expect(missed.error?.message).toContain("does not occur");
-      expect(missed.error?.message).toContain("changed since revision 1");
-      // The preview reached the model in the tool result of its own round, and
-      // is then dropped from the continuation like the rest of the content.
-      expect(JSON.stringify(detail)).not.toContain("[x] write notes");
-      expect(toolMessages(prompts[3]!)).not.toContain("[x] write notes");
+      // The document reached the model only as trailing data, never in a tool result.
+      expect(JSON.stringify(detail)).not.toContain("write notes");
+      expect(toolMessages(prompts[3]!)).not.toContain("write notes");
     } finally {
       authoringScript = null;
     }
@@ -2431,9 +2448,7 @@ describe("conversation documents", () => {
         });
       if (round === 2)
         return Stream.fromEffectDrain(supersede).pipe(
-          Stream.concat(
-            authoringTool(input, "edit_document", { old: "- [ ] ship", new: "- [ ] STALE" }),
-          ),
+          Stream.concat(authoringTool(input, "edit_document", { find: "ship", content: "STALE" })),
         );
       return reply();
     };
@@ -2484,10 +2499,11 @@ describe("conversation documents", () => {
       const sent = await send(seed, first.document.id);
       await settle(sent.assistantMessageId);
       expect(trailing(prompts[0]!)).toMatchObject({
-        focused: { id: first.document.id, content: "one" },
+        focused: { id: first.document.id },
         others: [{ id: second.document.id, title: "Second", chars: 3 }],
       });
-      expect(JSON.stringify(trailing(prompts[0]!)!.others)).not.toContain("two");
+      expect(trailing(prompts[0]!)!.text).toContain(">one</p>");
+      expect(trailing(prompts[0]!)!.text).not.toContain(">two<");
     } finally {
       authoringScript = null;
     }

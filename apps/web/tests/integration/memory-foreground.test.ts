@@ -56,7 +56,6 @@ const DOCUMENT_TOOLS = [
   "create_document",
   "edit_document",
   "read_chat_document",
-  "replace_document",
   "list_chat_documents",
 ] as const;
 
