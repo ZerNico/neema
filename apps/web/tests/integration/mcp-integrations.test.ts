@@ -8,7 +8,7 @@ import {
   inputRequired,
   McpServer,
 } from "@modelcontextprotocol/server";
-import { Effect, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
+import { Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { conversations, user } from "~/db/schema/index.ts";
@@ -431,6 +431,33 @@ describe("an MCP server set up by an admin", () => {
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
     const conversationId = await newConversation(admin);
     expect(await offeredNames(admin, conversationId)).toEqual([]);
+  });
+
+  it("never hands a session made for one address the credential saved for the next", async () => {
+    const person = await newUser();
+    const id = await setUp("Docs tokens", { url: `${base}/mcp`, auth: "token" });
+    const connect = (token: string) =>
+      run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token })));
+    await connect("first");
+    const before = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs tokens",
+          enabled: true,
+          config: { url: `${base}/elsewhere`, auth: "token" },
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    await connect("second");
+    // A call prepared before the move still names the old address: it gets nothing.
+    const stale = await runtime.runPromiseExit(before.credential);
+    expect(Exit.isFailure(stale)).toBe(true);
+    const after = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    expect(await run(after.credential)).toEqual({ kind: "api_key", values: { token: "second" } });
   });
 
   it("does not let an approval read before a move land after it", async () => {

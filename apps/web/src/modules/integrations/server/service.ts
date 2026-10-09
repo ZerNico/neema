@@ -516,10 +516,16 @@ export class IntegrationService extends Context.Service<
           return result as RefreshResult;
         });
 
+      /**
+       * The connection's credential for the setup a session was made for. A
+       * session keeps the address it started with, so a credential from a
+       * later setup (a move, then a reconnect) must never be paired with it.
+       */
       const credentialFor = (
         connection: IntegrationConnectionRow,
         row: IntegrationConfigRow,
         adapter: IntegrationAdapter,
+        fingerprint: string,
       ): Effect.Effect<Credential, IntegrationAuthFailed | IntegrationRequestFailed> =>
         Effect.gen(function* () {
           const current = yield* repo.getConnectionById(connection.id);
@@ -528,7 +534,11 @@ export class IntegrationService extends Context.Service<
           const enabled = yield* available(connection.userId, row.id).pipe(
             Effect.orElseSucceed(() => null),
           );
-          if (!enabled || current.configFingerprint !== enabled.fingerprint)
+          if (
+            !enabled ||
+            enabled.fingerprint !== fingerprint ||
+            current.configFingerprint !== fingerprint
+          )
             return yield* new IntegrationRequestFailed({
               status: null,
               message: "This integration is no longer available.",
@@ -579,7 +589,7 @@ export class IntegrationService extends Context.Service<
           tools: yield* toolsOf(manifest, adapter, row.id),
           authKind: connection.authKind,
           config,
-          credential: credentialFor(connection, row, adapter),
+          credential: credentialFor(connection, row, adapter, fingerprint),
           // Read fresh, so narrowing it applies to an answer already running.
           // A connection gone meanwhile reaches nothing.
           scope: manifest.scope
