@@ -18,6 +18,7 @@ import {
   sanitizeSummary,
   selectCompactionBoundary,
   shrinkForOverflow,
+  skillRootChars,
   buildSummaryPrompt,
   clearOlderResults,
   summaryAppendix,
@@ -27,6 +28,7 @@ import {
   type CompactionInput,
   type ActiveRound,
 } from "./compaction.ts";
+import { INTERACTIVE_UI_SKILL_ROOT } from "~/modules/genui/skill.ts";
 import type { HistoryMessage } from "./prompt.ts";
 import type { CompactionCheckpointRow } from "./repo.ts";
 
@@ -191,6 +193,23 @@ describe("calibrationFactor", () => {
     expect(calibrationFactor({ firstInputTokens: 500, estimatedFirstInputTokens: 10_000 })).toBe(
       COMPACTION_CONFIG.calibrationMin,
     );
+  });
+});
+
+describe("skillRootChars", () => {
+  it("converts a fifth of the token budget to characters, so a default model holds the interactive-ui skill", () => {
+    // A model of unknown size with web search: the smallest budget an attempt gets.
+    const input = computeBudget({ contextLength: undefined, webToolsEnabled: true }).input;
+    expect(skillRootChars(input, null)).toBe(Math.floor(input * 0.2 * 4));
+    expect(skillRootChars(input, null)).toBeGreaterThan(INTERACTIVE_UI_SKILL_ROOT.length);
+  });
+
+  it("shrinks for a model whose tokenizer counts more tokens than estimated", () => {
+    const tight = skillRootChars(10_000, {
+      firstInputTokens: 15_000,
+      estimatedFirstInputTokens: 10_000,
+    });
+    expect(tight).toBeLessThan(skillRootChars(10_000, null));
   });
 });
 

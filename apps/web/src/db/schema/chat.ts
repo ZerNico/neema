@@ -316,6 +316,27 @@ export const messageToolCalls = pgTable(
 );
 
 /**
+ * What a reader set in an answer's ```ui block, so a reload or a branch shows
+ * it again. One row per block (its ordinal among the answer's ui fences).
+ * `source_hash` is the block's code when saved: a save is accepted only for
+ * the stored answer's current block, and a row whose hash no longer matches
+ * is ignored (docs/internals/generative-ui.md).
+ */
+export const messageUiStates = pgTable(
+  "message_ui_states",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    ordinal: integer().notNull(),
+    sourceHash: text("source_hash").notNull(),
+    state: jsonb().$type<JsonValue>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.ordinal] })],
+);
+
+/**
  * A failed call's arguments in full, for debugging. The row itself keeps a
  * trimmed copy; this one goes with its call and is swept after a week. Never
  * written for memory saves or typed browser text.

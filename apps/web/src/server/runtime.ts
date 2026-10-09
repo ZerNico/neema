@@ -1,4 +1,5 @@
 import { Layer, ManagedRuntime } from "effect";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
@@ -86,7 +87,11 @@ const ReposLayer = Layer.mergeAll(
   SkillRepo.layer,
   ScheduleRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
-const ToolsLayer = Layer.mergeAll(WebSearchExecutor.layer, UrlReaderExecutor.layer).pipe(
+const ToolsLayer = Layer.mergeAll(
+  WebSearchExecutor.layer,
+  UrlReaderExecutor.layer,
+  MapLookups.layer,
+).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       SearchProviders.layer,

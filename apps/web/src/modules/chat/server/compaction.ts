@@ -195,6 +195,20 @@ export const estimatePromptTokens = (messages: ReadonlyArray<EstimableMessage>):
  * FIRST model call. Clamped, because a wildly wrong ratio is a bug in the
  * measurement, not a reason to double the prompt.
  */
+/**
+ * How many characters of loaded skill instructions an attempt may hold: a
+ * fifth of the input budget. The budget is in tokens and instructions are
+ * measured in characters, so it converts with the same estimate the rest of
+ * the prompt uses, divided by this model's learned calibration.
+ */
+export const skillRootChars = (
+  inputTokens: number,
+  prior: Parameters<typeof calibrationFactor>[0],
+): number =>
+  Math.floor(
+    (inputTokens * 0.2 * COMPACTION_CONFIG.charsPerToken) / Math.max(1, calibrationFactor(prior)),
+  );
+
 export const calibrationFactor = (
   prior: { firstInputTokens?: number; estimatedFirstInputTokens?: number } | null | undefined,
 ): number => {

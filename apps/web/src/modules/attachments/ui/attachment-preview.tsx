@@ -1,5 +1,5 @@
-import { Download01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
-import { useEffect, useState, type ReactNode } from "react";
+import { Download01Icon, LinkSquare02Icon, PanelRightIcon } from "@hugeicons/core-free-icons";
+import { use, useEffect, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { CodeViewer } from "./code-viewer.tsx";
@@ -21,6 +21,9 @@ import { PreviewAction } from "./preview-action.tsx";
 import { SpreadsheetPreview } from "./spreadsheet-preview.tsx";
 import { WordPreview } from "./word-preview.tsx";
 import { LINK_SAFETY } from "~/ui/link-safety.tsx";
+import { DetailPanelAvailableContext, DetailPanelContext } from "~/ui/detail-panel-context.ts";
+import type { DetailPanelRequest } from "~/ui/detail-panel-state.ts";
+import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 
 /** Each Office family's preview; the compiler keeps the table complete. */
 const OFFICE_PREVIEWS = {
@@ -37,7 +40,8 @@ function OfficeFilePreview({ office }: { office: OfficePreview }) {
 /** What the preview needs to render an attachment's content. */
 export interface AttachmentPreviewTarget {
   readonly fileName: string;
-  readonly size: number;
+  /** Bytes, shown under the name; unknown for images a ui block found before sizes were kept. */
+  readonly size?: number | undefined;
   readonly kind: AttachmentKind;
   /** Authenticated bytes route, or an object URL for a not-yet-stored image. */
   readonly url: string;
@@ -77,6 +81,13 @@ export function AttachmentPreviewDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const panel = use(DetailPanelContext);
+  const panelAvailable = use(DetailPanelAvailableContext);
+  // In the desktop app a new tab is the computer's browser, which may not be
+  // signed in, so a file with a preview opens beside the chat instead. A
+  // settings page has no panel and keeps the plain actions.
+  const sidebar =
+    useDesktop() !== null && panel && panelAvailable && hasPreview(target) ? panel : null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
@@ -89,25 +100,63 @@ export function AttachmentPreviewDialog({
             <DialogTitle className="min-w-0 flex-1 truncate">{target.fileName}</DialogTitle>
             <div className="flex shrink-0 items-center gap-2">
               {actions ??
-                (target.kind === "file" ? (
-                  <PreviewAction
-                    icon={Download01Icon}
-                    label="Download"
-                    href={target.url}
-                    download={target.fileName}
-                  />
+                (sidebar ? (
+                  <>
+                    <PreviewAction
+                      icon={PanelRightIcon}
+                      label="Open in sidebar"
+                      onClick={() => {
+                        sidebar.open(filePanelRequest(target));
+                        onOpenChange(false);
+                      }}
+                    />
+                    <DownloadAction target={target} />
+                  </>
+                ) : target.kind === "file" ? (
+                  <DownloadAction target={target} />
                 ) : (
                   <PreviewAction icon={LinkSquare02Icon} label="Open original" href={target.url} />
                 ))}
             </div>
           </div>
-          <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
+          {target.size === undefined ? null : (
+            <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
+          )}
         </DialogHeader>
         <FilePreviewBody target={target} linkable={!actions} />
       </DialogContent>
     </Dialog>
   );
 }
+
+const hasPreview = (target: AttachmentPreviewTarget) =>
+  target.kind !== "file" || (!!target.office && !target.unsupported);
+
+function DownloadAction({ target }: { target: AttachmentPreviewTarget }) {
+  return (
+    <PreviewAction
+      icon={Download01Icon}
+      label="Download"
+      href={target.url}
+      download={target.fileName}
+    />
+  );
+}
+
+/**
+ * A stored file as a panel tab, keyed by its address so the dialog and a
+ * delivered document open the same one.
+ */
+export const filePanelRequest = (target: AttachmentPreviewTarget): DetailPanelRequest => ({
+  id: `file:${target.url}`,
+  title: target.fileName,
+  actions: (
+    <div className="flex justify-end">
+      <DownloadAction target={target} />
+    </div>
+  ),
+  body: <FilePreviewBody target={target} linkable={false} />,
+});
 
 /**
  * A file's content as every preview shows it: the one place a kind of file

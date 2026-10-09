@@ -3,7 +3,7 @@ import { findTags, tagWords } from "../tags.ts";
 import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
-import type { AssistantFile } from "../assistant-output.ts";
+import { NO_LOOKUPS, type AssistantFile, type UiLookups } from "../assistant-output.ts";
 import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -94,7 +94,7 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import type { Attachment, MessageAttachment } from "~/modules/attachments/schema.ts";
 import {
   AttachmentPreviewDialog,
-  FilePreviewBody,
+  filePanelRequest,
 } from "~/modules/attachments/ui/attachment-preview.tsx";
 import {
   useDetailPanel,
@@ -113,6 +113,11 @@ import {
 } from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { keyUiFences, scanUiFences } from "~/modules/genui/fences.ts";
+import { prewarmGenui } from "~/modules/genui/client/prewarm.ts";
+import { GenuiMessageContext, type SavedUiState } from "~/modules/genui/ui/context.ts";
+
+const NO_UI_STATES: ReadonlyMap<number, SavedUiState> = new Map();
 
 // The sources change with every streamed token, but the components must not:
 // a new component function is a new element type to React, which remounts the
@@ -229,6 +234,14 @@ export interface DisplayMessage {
   inheritedSources?: InheritedSources;
   /** Files sent with this message, in position order. */
   attachments?: ReadonlyArray<MessageAttachment>;
+  /** The attempt that wrote this answer, which names the attempt in a block's save. */
+  generationId?: string | null;
+  /** Saved ```ui block state by ordinal. */
+  uiStates?: ReadonlyMap<number, SavedUiState>;
+  /** In a temporary chat, which leaves nothing behind on the device either. */
+  temporary?: boolean;
+  /** What the answer's ```ui blocks looked up: images, places, routes. */
+  uiLookups?: UiLookups;
   /**
    * Files this send copied into the chat's workspace, by basename. The path
    * joins against the machine's current workspace root at click time: the
@@ -538,22 +551,14 @@ function StoredAttachmentChip({
 // Files this page already opened by itself: the list remounts rows on scroll.
 const AUTO_OPENED_FILES = new Set<string>();
 
-const filePanelRequest = (attachment: Attachment) => ({
-  id: `file:${attachment.id}`,
-  title: attachment.fileName,
-  body: (
-    <FilePreviewBody
-      target={{
-        fileName: attachment.fileName,
-        size: attachment.size,
-        kind: attachment.kind,
-        url: attachmentUrl(attachment.id),
-        office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
-      }}
-      linkable
-    />
-  ),
-});
+const attachmentPanelRequest = (attachment: Attachment) =>
+  filePanelRequest({
+    fileName: attachment.fileName,
+    size: attachment.size,
+    kind: attachment.kind,
+    url: attachmentUrl(attachment.id),
+    office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
+  });
 
 /**
  * A document an answer delivers opens beside the chat as it arrives, as
@@ -563,9 +568,9 @@ const filePanelRequest = (attachment: Attachment) => ({
 function useDeliveredFilePanel(attachment: Attachment, fresh: boolean) {
   const panel = useDetailPanel();
   const available = useDetailPanelAvailable();
-  const id = `file:${attachment.id}`;
+  const request = useMemo(() => attachmentPanelRequest(attachment), [attachment]);
+  const { id } = request;
   const open = useDetailPanelTabIds().includes(id);
-  const request = useMemo(() => filePanelRequest(attachment), [attachment]);
   useDetailPanelTabContent(id, open ? request : null);
   useEffect(() => {
     if (!fresh || !available || attachment.kind === "image" || AUTO_OPENED_FILES.has(id)) return;
@@ -691,6 +696,36 @@ const AssistantBody = memo(function AssistantBody({
   reasoningActive: boolean;
 }) {
   const streaming = message.status === "streaming";
+  const uiFenceStarts = useMemo(
+    () => scanUiFences(message.content).map((f) => f.start),
+    [message.content],
+  );
+  const hasUiBlocks = uiFenceStarts.length > 0;
+  // A block waits on cached trees, its renderer and QuickJS: start them now, together.
+  useEffect(() => {
+    if (hasUiBlocks) void prewarmGenui();
+  }, [hasUiBlocks]);
+  const iso = message.time?.iso;
+  const genui = useMemo(
+    () => ({
+      messageId: message.id,
+      createdAt: iso ? Date.parse(iso) || 0 : 0,
+      streaming,
+      generationId: message.generationId ?? null,
+      saved: message.uiStates ?? NO_UI_STATES,
+      lookups: message.uiLookups ?? NO_LOOKUPS,
+      temporary: message.temporary === true,
+    }),
+    [
+      message.id,
+      iso,
+      streaming,
+      message.generationId,
+      message.uiStates,
+      message.uiLookups,
+      message.temporary,
+    ],
+  );
   const usedIndexes = useMemo(() => new Set(sources.map((source) => source.index)), [sources]);
   // Working files a publish in this answer delivered, whichever tool made them.
   const publishedFiles: ReadonlySet<string> = useMemo(
@@ -713,13 +748,18 @@ const AssistantBody = memo(function AssistantBody({
       return <AssistantFileAttachment key={part.key} file={part.file} fresh={streaming} />;
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
+      // Keyed on the raw text, before any citation rewrite changes lengths.
+      const content = keyUiFences(
+        part.content,
+        uiFenceStarts.filter((start) => start < part.start).length,
+      );
       return (
         <div key={part.key} className="mb-3 last:mb-0">
           <FileReferenceMachine value={message.desktopMachineId ?? null}>
             {sources.length > 0 ? (
-              <CitedAnswer content={part.content} sources={sources} streaming={part.streaming} />
+              <CitedAnswer content={content} sources={sources} streaming={part.streaming} />
             ) : (
-              <AssistantMarkdown content={part.content} streaming={part.streaming} />
+              <AssistantMarkdown content={content} streaming={part.streaming} />
             )}
           </FileReferenceMachine>
         </div>
@@ -850,23 +890,27 @@ const AssistantBody = memo(function AssistantBody({
       />
     );
   };
-  return parts.map((part, index) => {
-    const live = streaming && index === parts.length - 1;
-    if (part.kind !== "work") return renderPart(part);
-    // A lone step without calls (reasoning, a compaction) keeps its own row:
-    // a work line would only repeat it. Any call, even one, gets the line.
-    if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
-      return renderPart(part.steps[0]!);
-    return (
-      <WorkGroupBlock
-        key={part.key}
-        part={part}
-        live={live}
-        approvals={message.desktopApprovals}
-        renderStep={(step) => renderPart(step)}
-      />
-    );
-  });
+  return (
+    <GenuiMessageContext value={genui}>
+      {parts.map((part, index) => {
+        const live = streaming && index === parts.length - 1;
+        if (part.kind !== "work") return renderPart(part);
+        // A lone step without calls (reasoning, a compaction) keeps its own row:
+        // a work line would only repeat it. Any call, even one, gets the line.
+        if (part.steps.length === 1 && stepActivities(part.steps[0]!).length === 0)
+          return renderPart(part.steps[0]!);
+        return (
+          <WorkGroupBlock
+            key={part.key}
+            part={part}
+            live={live}
+            approvals={message.desktopApprovals}
+            renderStep={(step) => renderPart(step)}
+          />
+        );
+      })}
+    </GenuiMessageContext>
+  );
 });
 
 // Mount the panel binding beside, not around, the body: receiving the first

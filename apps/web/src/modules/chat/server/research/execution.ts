@@ -1,4 +1,5 @@
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
+import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import {
   AgentDraftToolName,
   agentDraftFailureReason,
@@ -48,6 +49,7 @@ import {
   COMPACTION_CONFIG,
   computeBudget,
   estimatePromptTokens,
+  skillRootChars,
   type CompactionDeps,
 } from "../compaction.ts";
 import {
@@ -286,17 +288,20 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   // Same offer as ordinary chat: selections are pinned, the library is visible.
   const skillManifest = [
     ...(deps.config.skills ?? []),
-    ...(yield* skillReader.catalogue(
-      deps.userId,
-      (deps.config.skills ?? []).map((entry) => entry.skillId),
-    )),
+    ...(yield* skillReader.catalogue(deps.userId, [
+      ...(deps.config.skills ?? []).map((entry) => entry.skillId),
+      // A run's workers write briefs nobody renders, so blocks would only cost tokens.
+      INTERACTIVE_UI_SKILL_ID,
+    ])),
   ];
   const skillTools = skillManifest.length
     ? yield* prepareSkillTools({
         userId: deps.userId,
         manifest: skillManifest,
-        maxRootChars: Math.floor(
-          computeBudget({ contextLength: model?.contextLength, webToolsEnabled: true }).input * 0.2,
+        // A run has no earlier answer of its own to calibrate from.
+        maxRootChars: skillRootChars(
+          computeBudget({ contextLength: model?.contextLength, webToolsEnabled: true }).input,
+          null,
         ),
       }).pipe(Effect.provideService(SkillReader, skillReader))
     : null;

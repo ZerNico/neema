@@ -31,6 +31,7 @@ const unavailable = (tool: "web_search" | "read_url") => () =>
 export const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
   researchSearchLimit: () => Effect.die("no research in these tests"),
   handler: unavailable("web_search"),
+  images: unavailable("web_search"),
   availability: () => Effect.succeed({ configured: false, enabled: false }),
 });
 export const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {

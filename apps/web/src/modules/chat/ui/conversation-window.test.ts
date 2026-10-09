@@ -8,6 +8,7 @@ const part = (ids: string[], olderCursor: string | null) => ({
   attachments: [],
   generations: [],
   priorSources: [{ index: ids.length }],
+  uiStates: ids.map((id) => ({ messageId: id, ordinal: 0 })),
   olderCursor,
 });
 const head = (ids: string[], olderCursor: string | null) => ({
@@ -27,6 +28,7 @@ describe("withHistory", () => {
     const merged = withHistory(head(["c"], "c"), [part(["b"], "b"), part(["a"], null)]);
     expect(merged.messages.map((m) => m.id)).toEqual(["a", "b", "c"]);
     expect(merged.toolCalls.map((call) => call.messageId)).toEqual(["a", "b", "c"]);
+    expect(merged.uiStates.map((row) => row.messageId)).toEqual(["a", "b", "c"]);
     expect(merged.priorSources).toHaveLength(3);
     expect(merged.hasOlder).toBe(false);
   });

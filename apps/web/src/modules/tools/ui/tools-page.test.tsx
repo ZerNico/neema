@@ -15,6 +15,7 @@ import {
   listSearchProviders,
   setSearchProviderOrder,
   testSearchProvider,
+  updateInteractiveUiTool,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -41,6 +42,8 @@ vi.mock("../server/functions.ts", () => ({
   updateDocumentParserTool: vi.fn(),
   getOfficeFilesTool: vi.fn(),
   updateOfficeFilesTool: vi.fn(),
+  getInteractiveUiTool: vi.fn(),
+  updateInteractiveUiTool: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -109,10 +112,12 @@ const defaultProviders = [
 const renderPage = ({
   webSearch = tool("web_search", { maxResults: 8 }),
   officeFiles = tool("office_files", {}),
+  interactiveUi = tool("interactive_ui", { images: true }),
   providers = defaultProviders,
 }: {
   webSearch?: ReturnType<typeof tool> | null;
   officeFiles?: ReturnType<typeof tool> | null;
+  interactiveUi?: ReturnType<typeof tool> | null;
   providers?: Provider[];
 } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -128,6 +133,7 @@ const renderPage = ({
   client.setQueryData(["admin", "tools", "memory"], memory);
   client.setQueryData(["admin", "presentation-fonts"], []);
   client.setQueryData(["admin", "tools", "office-files"], officeFiles);
+  client.setQueryData(["admin", "tools", "interactive-ui"], interactiveUi);
   client.setQueryData(["admin", "tools", "web-search"], webSearch);
   client.setQueryData(
     ["admin", "tools", "url-reader"],
@@ -165,6 +171,55 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(updateMemoryTool).toHaveBeenCalledWith({ data: { enabled: false } }),
     );
+  });
+
+  it("switches interactive answers off, and their images with them", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateInteractiveUiTool).mockResolvedValue(undefined as never);
+    renderPage();
+
+    await user.click(screen.getByRole("switch", { name: "Images in interactive answers" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { images: false } }),
+    );
+    await user.click(screen.getByRole("switch", { name: "Interactive answers enabled" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+    );
+  });
+
+  it("switches maps and saves their services", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateInteractiveUiTool).mockResolvedValue(undefined as never);
+    renderPage();
+
+    const routing = screen.getByLabelText("Routing");
+    expect(routing).toHaveValue("https://routing.openstreetmap.de");
+    await user.clear(routing);
+    await user.type(routing, "https://osrm.example.org");
+    await user.click(within(routing.closest("form")!).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({
+        data: {
+          mapStyleLight: "https://tiles.openfreemap.org/styles/positron",
+          mapStyleDark: "https://tiles.openfreemap.org/styles/dark",
+          mapGeocoder: "https://photon.komoot.io",
+          mapRouting: "https://osrm.example.org",
+        },
+      }),
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Maps in interactive answers" }));
+    await waitFor(() =>
+      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { maps: false } }),
+    );
+  });
+
+  it("shows images as off while interactive answers are off", () => {
+    renderPage({ interactiveUi: { ...tool("interactive_ui", { images: true }), enabled: false } });
+    const images = screen.getByRole("switch", { name: "Images in interactive answers" });
+    expect(images).not.toBeChecked();
+    expect(images).toHaveAttribute("aria-disabled", "true");
   });
 
   it("submits the web search form on Enter and keeps the label while pending", async () => {
@@ -271,9 +326,11 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(updateUrlReaderTool).toHaveBeenCalledWith({ data: { perPageCharCap: 15000 } }),
     );
-    // The URL reader's own button confirms; the web search one is untouched.
-    expect(await screen.findByRole("button", { name: "Saved" })).toBeInTheDocument();
-    expect(saveButtons()).toHaveLength(1);
+    // The URL reader's own button confirms; the web search and map ones are untouched.
+    expect(
+      await within(cap.closest("form")!).findByRole("button", { name: "Saved" }),
+    ).toBeInTheDocument();
+    expect(saveButtons()).toHaveLength(2);
   });
 
   it("tests a provider from its dialog, keeping the label while testing", async () => {

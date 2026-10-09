@@ -5,6 +5,12 @@
  * the app; a replayed old message reads today's text, which is acceptable
  * because instructions are app behaviour, not user data.
  */
+import {
+  INTERACTIVE_UI_SKILL_DESCRIPTION,
+  INTERACTIVE_UI_SKILL_ID,
+  INTERACTIVE_UI_SKILL_ROOT,
+} from "~/modules/genui/skill.ts";
+
 export interface BuiltinSkill {
   id: `builtin:${string}`;
   name: string;
@@ -86,9 +92,18 @@ Common recipes, minute hour day-of-month month day-of-week:
 `,
 };
 
+/** Lives with the language it teaches; see `genui/skill.ts`. */
+export const INTERACTIVE_UI_SKILL: BuiltinSkill = {
+  id: INTERACTIVE_UI_SKILL_ID,
+  name: "interactive-ui",
+  description: INTERACTIVE_UI_SKILL_DESCRIPTION,
+  root: INTERACTIVE_UI_SKILL_ROOT,
+};
+
 export const BUILTIN_SKILLS: ReadonlyArray<BuiltinSkill> = [
   AGENT_AUTHORING_SKILL,
   SCHEDULE_AUTHORING_SKILL,
+  INTERACTIVE_UI_SKILL,
 ];
 export const findBuiltinSkill = (skillId: string): BuiltinSkill | undefined =>
   BUILTIN_SKILLS.find((skill) => skill.id === skillId);

@@ -64,6 +64,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
+import { hashSource } from "~/modules/genui/fences.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { EditNotAllowed } from "~/modules/chat/errors.ts";
 import { imageStandIn, RESUME_REMINDER } from "~/modules/chat/server/prompt.ts";
@@ -92,6 +93,11 @@ import {
   NoIntegrations,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
+import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { ToolsRepo } from "~/modules/tools/server/repo.ts";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
+import { routeKey } from "~/modules/genui/extract.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
@@ -110,6 +116,30 @@ const FakeKnowledge = Layer.mergeAll(
   Layer.succeed(KnowledgeService, {} as never),
 );
 
+/** Image search for ```ui blocks; unset means web search is unavailable. */
+let imageSearch: ((query: string) => ReadonlyArray<string>) | undefined;
+const imageFetches: string[] = [];
+const mapLookupCalls: string[] = [];
+const ImageSearchingWebSearch = Layer.effect(
+  WebSearchExecutor,
+  Effect.gen(function* () {
+    const base = yield* WebSearchExecutor;
+    return WebSearchExecutor.of({
+      ...base,
+      images: (query) =>
+        imageSearch
+          ? Effect.succeed(
+              imageSearch(query).map((url) => ({
+                imageUrl: url,
+                pageUrl: `${url}/page`,
+                title: `Found ${url}`,
+              })),
+            )
+          : Effect.fail(new ToolUnavailable({ tool: "web_search", reason: "disabled" })),
+    });
+  }),
+).pipe(Layer.provide(FakeWebSearch));
+
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
   | AgentRepo
@@ -126,6 +156,7 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | AttachmentService
   | ExternalCompletion
   | ScheduleRepo
+  | ToolsRepo
   | KeptWorkingFiles,
   unknown
 >;
@@ -344,6 +375,7 @@ beforeAll(async () => {
     KnowledgeRepo.layer,
     ProviderRepo.layer,
     ScheduleRepo.layer,
+    ToolsRepo.layer,
   ).pipe(
     Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
     Layer.provideMerge(FeaturePolicy.layer),
@@ -352,7 +384,40 @@ beforeAll(async () => {
   const EngineCore = Layer.mergeAll(
     FakeGateway,
     FakeKnowledge,
-    FakeWebSearch,
+    ImageSearchingWebSearch,
+    Layer.succeed(MapLookups, {
+      geocode: (_services, query) =>
+        Effect.sync(() => {
+          mapLookupCalls.push(`place:${query}`);
+          return query.includes("Atlantis") ? [] : [{ lat: 52.5, lng: 13.4, name: query }];
+        }),
+      route: (_services, mode, stops) =>
+        Effect.sync(() => {
+          mapLookupCalls.push(`route:${mode}:${stops.length}`);
+          return {
+            status: "resolved",
+            path: [
+              [13.4, 52.5],
+              [13.05, 52.39],
+            ],
+            distance: 34000,
+            duration: 2400,
+          } as const;
+        }),
+    }),
+    Layer.succeed(ImageFetcher, {
+      fetch: (imageUrl) =>
+        Effect.suspend(() => {
+          imageFetches.push(imageUrl);
+          return imageUrl.includes("broken")
+            ? Effect.fail(new ImageFetchFailed({ url: imageUrl, message: "HTTP 404" }))
+            : Effect.succeed({
+                bytes: Uint8Array.from(generatedPng),
+                mediaType: "image/png",
+                size: { width: 640, height: 480 },
+              });
+        }),
+    }),
     FakeUrlReader,
     ImageBlobStore,
     FakeDocumentParser,
@@ -704,6 +769,68 @@ describe("conversational agent authoring", () => {
           call.messageId === again.assistantMessageId && call.toolName === "read_attachment",
       );
       expect(reread?.result).toMatchObject({ ok: true, fileName: "big.csv", matches: 1 });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("tells the next answer how the reader left an earlier answer's blocks, after history", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const block = "<script>let answers = $state([]);</script><quiz answers={answers}/>";
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", {
+          id: "t",
+          delta:
+            prompts.length === 1 ? `Here:\n\n\`\`\`ui\n${block}\n\`\`\`\n` : "You picked Porto.",
+        }),
+        authoringFinish(),
+      );
+    };
+    const send = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    try {
+      const quiz = await send("Quiz me on capitals");
+      await collectDraftTurn(quiz.assistantMessageId);
+      const saved = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const row = (yield* repo.listMessages(seed.conversation.id)).find(
+            (message) => message.id === quiz.assistantMessageId,
+          );
+          return yield* repo.saveUiState({
+            userId: seed.userId,
+            messageId: row!.id,
+            generationId: row!.generationId ?? null,
+            ordinal: 0,
+            sourceHash: hashSource(block),
+            state: { answers: ["Porto"], __seed: 3 },
+          });
+        }),
+      );
+      expect(saved).toBe("saved");
+      const next = await send("Which did I pick?");
+      await collectDraftTurn(next.assistantMessageId);
+      const prompt = JSON.stringify(prompts[1]!.prompt);
+      const line = String.raw`Block 1 of your answer to \"Quiz me on capitals\": {\"answers\":[\"Porto\"]}`;
+      expect(prompt).toContain(line);
+      // After the earlier answer and the new question, so history stays cacheable.
+      expect(prompt.indexOf(line)).toBeGreaterThan(prompt.indexOf("Which did I pick?"));
+      expect(prompt).not.toContain("__seed");
     } finally {
       authoringScript = null;
     }
@@ -1961,6 +2088,32 @@ describe("conversation documents", () => {
     } finally {
       authoringScript = null;
       if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("never ends the request after a new document on its assistant-role data", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      expect(prompts).toHaveLength(2);
+      // The document's data is an assistant message; ending on it is a prefill,
+      // which models without prefill support reject with a 400.
+      const roles = prompts[1]!.prompt.content.map((message) => message.role);
+      expect(roles.at(-1)).not.toBe("assistant");
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("Application-provided documents");
+    } finally {
+      authoringScript = null;
     }
   });
 
@@ -5406,6 +5559,263 @@ describe("generated image streaming", () => {
             turns: [{ unit: { reasoningDetails: [{ data: "private-replay" }] } }],
           },
         });
+      }),
+    );
+  });
+});
+
+describe("ui block images", () => {
+  const answer = (...queries: string[]) => [
+    AiResponse.makePart("text-delta", { id: "t", delta: "Here:\n```ui\n" }),
+    AiResponse.makePart("text-delta", {
+      id: "t",
+      delta: queries.map((q) => `<image query="${q}"/>`).join("\n"),
+    }),
+    AiResponse.makePart("text-delta", { id: "t", delta: "\n```\nDone." }),
+    AiResponse.makePart("finish", {
+      reason: "stop",
+      usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+    }),
+  ];
+  const generate = (searchEnabled: boolean) =>
+    Effect.gen(function* () {
+      const engine = yield* StreamEngine;
+      const seed = yield* setupConversation;
+      yield* engine.startGeneration({
+        userId: seed.userId,
+        conversationId: seed.conversation.id,
+        messageId: seed.assistant.id,
+        generationId: seed.assistant.generationId ?? undefined,
+        modelId: textModelId,
+        searchEnabled,
+      });
+      const events = yield* engine
+        .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+        .pipe(Stream.runCollect);
+      return { ...seed, events: [...events] };
+    });
+
+  it("stores found images with the answer, out of its files, and branches them", async () => {
+    terminalFixtures = [answer("gear hub", "nothing here")];
+    imageSearch = (query) =>
+      query === "gear hub"
+        ? ["https://img.test/broken", "https://img.test/a", "https://img.test/b"]
+        : [];
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const attachmentRepo = yield* AttachmentRepo;
+          const files = yield* AttachmentService;
+          const { userId, conversation, assistant, events } = yield* generate(true);
+          const message = yield* repo.getMessage(assistant.id);
+          expect(message!.status).toBe("complete");
+          const images = message!.assistantOutput!.images!;
+          expect(images["nothing here"]).toEqual({ status: "unavailable", items: [] });
+          const found = images["gear hub"]!;
+          expect(found.status).toBe("resolved");
+          expect(found.items.map((item) => item.pageUrl)).toEqual([
+            "https://img.test/a/page",
+            "https://img.test/b/page",
+          ]);
+          expect(message!.assistantOutput!.files).toEqual([]);
+          const bytes = yield* files.read({ userId, attachmentId: found.items[0]!.attachmentId });
+          expect(Buffer.from(bytes.bytes).equals(generatedPng)).toBe(true);
+          // Live subscribers heard about it before the answer finished.
+          const announced = events.flatMap((event) =>
+            event.kind === "lookups" ? [event.lookups] : [],
+          );
+          expect(announced.at(-1)?.images["gear hub"]?.status).toBe("resolved");
+          // Never listed as the answer's files, nor as the chat's.
+          expect(yield* attachmentRepo.listForMessages([assistant.id])).toEqual([]);
+          expect(yield* attachmentRepo.listWithBlobsForMessages([assistant.id])).toEqual([]);
+          expect(yield* attachmentRepo.listForConversation(userId, conversation.id)).toEqual([]);
+
+          const branch = yield* repo.cloneConversationPrefix({
+            userId,
+            sourceConversationId: conversation.id,
+            throughMessageId: assistant.id,
+          });
+          const copied = (yield* repo.listMessages(branch.id)).find((m) => m.role === "assistant")!;
+          const copiedFound = copied.assistantOutput!.images!["gear hub"]!;
+          expect(copiedFound.items).toHaveLength(2);
+          expect(copiedFound.items[0]!.attachmentId).not.toBe(found.items[0]!.attachmentId);
+          const copiedBytes = yield* files.read({
+            userId,
+            attachmentId: copiedFound.items[0]!.attachmentId,
+          });
+          expect(Buffer.from(copiedBytes.bytes).equals(generatedPng)).toBe(true);
+          expect(yield* attachmentRepo.listForMessages([copied.id])).toEqual([]);
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+      imageSearch = undefined;
+    }
+  });
+
+  it("records that images need web search when the attempt had none, without searching", async () => {
+    terminalFixtures = [answer("anything")];
+    imageSearch = () => {
+      throw new Error("searched without web search");
+    };
+    const fetchesBefore = imageFetches.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const { assistant } = yield* generate(false);
+          const message = yield* repo.getMessage(assistant.id);
+          expect(message!.assistantOutput!.images).toEqual({
+            anything: { status: "search_off", items: [] },
+          });
+          expect(imageFetches.length).toBe(fetchesBefore);
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+      imageSearch = undefined;
+    }
+  });
+});
+
+describe("ui block maps", () => {
+  const answer = [
+    AiResponse.makePart("text-delta", { id: "t", delta: "Your day trip:\n```ui\n<map>\n" }),
+    AiResponse.makePart("text-delta", {
+      id: "t",
+      delta: [
+        '<pin place="Berlin Hauptbahnhof"/>',
+        '<pin place="Atlantis"/>',
+        '<route mode="drive" stops={["Berlin Hauptbahnhof", "Potsdam"]}/>',
+      ].join("\n"),
+    }),
+    AiResponse.makePart("text-delta", { id: "t", delta: "\n</map>\n```\nEnjoy." }),
+    AiResponse.makePart("finish", {
+      reason: "stop",
+      usage: new AiResponse.Usage({ inputTokens: {}, outputTokens: {} }),
+    }),
+  ];
+
+  it("stores the places and routes a map named, and tells subscribers", async () => {
+    terminalFixtures = [answer];
+    const before = mapLookupCalls.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const engine = yield* StreamEngine;
+          const seed = yield* setupConversation;
+          yield* engine.startGeneration({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            generationId: seed.assistant.generationId ?? undefined,
+            modelId: textModelId,
+            searchEnabled: false,
+          });
+          const events = yield* engine
+            .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+            .pipe(Stream.runCollect);
+          const output = (yield* repo.getMessage(seed.assistant.id))!.assistantOutput!;
+          // Not web search: maps resolve with search off.
+          expect(output.places?.["Berlin Hauptbahnhof"]).toMatchObject({ status: "resolved" });
+          expect(output.places?.["Atlantis"]).toEqual({ status: "unavailable" });
+          const key = routeKey({ mode: "drive", stops: ["Berlin Hauptbahnhof", "Potsdam"] });
+          expect(output.routes?.[key]).toMatchObject({ status: "resolved", distance: 34000 });
+          // Each place once, though the route names the station again.
+          expect(mapLookupCalls.slice(before).toSorted()).toEqual([
+            "place:Atlantis",
+            "place:Berlin Hauptbahnhof",
+            "place:Potsdam",
+            "route:drive:2",
+          ]);
+          const last = [...events].flatMap((e) => (e.kind === "lookups" ? [e.lookups] : [])).at(-1);
+          expect(last?.routes[key]?.status).toBe("resolved");
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+    }
+  });
+  it("marks every place and route as maps off when an admin switched maps off, asking nothing", async () => {
+    terminalFixtures = [answer];
+    const before = mapLookupCalls.length;
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const tools = yield* ToolsRepo;
+          const engine = yield* StreamEngine;
+          yield* tools.updateTool("interactive_ui", { config: { maps: false } });
+          try {
+            const seed = yield* setupConversation;
+            yield* engine.startGeneration({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              messageId: seed.assistant.id,
+              generationId: seed.assistant.generationId ?? undefined,
+              modelId: textModelId,
+              searchEnabled: false,
+            });
+            yield* engine
+              .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+              .pipe(Stream.runCollect);
+            const output = (yield* repo.getMessage(seed.assistant.id))!.assistantOutput!;
+            const key = routeKey({ mode: "drive", stops: ["Berlin Hauptbahnhof", "Potsdam"] });
+            expect(output.places).toEqual({
+              "Berlin Hauptbahnhof": { status: "maps_off" },
+              Atlantis: { status: "maps_off" },
+              Potsdam: { status: "maps_off" },
+            });
+            expect(output.routes).toEqual({ [key]: { status: "maps_off" } });
+            expect(mapLookupCalls.length).toBe(before);
+          } finally {
+            yield* tools.updateTool("interactive_ui", { config: {} });
+          }
+        }),
+      );
+    } finally {
+      terminalFixtures = undefined;
+    }
+  });
+});
+
+describe("interactive answers setting", () => {
+  const offered = (prompt: Prompt.Prompt) =>
+    JSON.stringify(prompt).includes("builtin:interactive-ui");
+  const answer = () =>
+    Effect.gen(function* () {
+      const engine = yield* StreamEngine;
+      const seed = yield* setupConversation;
+      const before = streamPrompts.length;
+      yield* engine.startGeneration({
+        userId: seed.userId,
+        conversationId: seed.conversation.id,
+        messageId: seed.assistant.id,
+        generationId: seed.assistant.generationId ?? undefined,
+        modelId: textModelId,
+        searchEnabled: false,
+      });
+      yield* engine
+        .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
+        .pipe(Stream.runCollect);
+      return streamPrompts.slice(before);
+    });
+
+  it("offers the skill by default and not once an admin switches it off", async () => {
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const tools = yield* ToolsRepo;
+        expect((yield* answer()).some(offered)).toBe(true);
+        yield* tools.updateTool("interactive_ui", { enabled: false });
+        try {
+          const prompts = yield* answer();
+          expect(prompts.length).toBeGreaterThan(0);
+          expect(prompts.some(offered)).toBe(false);
+        } finally {
+          yield* tools.updateTool("interactive_ui", { enabled: true });
+        }
       }),
     );
   });

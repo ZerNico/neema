@@ -33,6 +33,17 @@ learns which provider answered.
 - Each attempt has its own timeout, and a query starts no new attempt past its deadline.
   Otherwise a list of four slow providers would stall the model for a minute.
 
+## Image search
+
+- Image search (for ```ui blocks, see [generative UI](generative-ui.md)) walks only the
+  providers whose adapter has `searchImages`, in the same order and with the same rules.
+- Its health is a separate record per provider (`id:images`). An image outage must not
+  cool a provider down for web search, nor the other way round. Status lists web search
+  health only.
+- SearXNG asks the enabled engines in its `images` category, or the category itself when
+  `/config` is unknown. Protocol-relative thumbnails are made https; anything that is not
+  http(s) is dropped.
+
 ## Research
 
 Fallbacks run inside the one permit and budget unit a query was admitted with: the

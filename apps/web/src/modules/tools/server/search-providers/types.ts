@@ -16,6 +16,22 @@ export interface SearchHit {
   readonly score?: number;
 }
 
+export interface ImageSearchRequest {
+  readonly query: string;
+  readonly maxResults: number;
+}
+
+/** One image result: the picture itself and the page it appears on. */
+export interface ImageHit {
+  readonly imageUrl: string;
+  /** A smaller copy the provider serves, preferred when present. */
+  readonly thumbnailUrl?: string;
+  readonly pageUrl: string;
+  readonly title: string;
+  readonly width?: number;
+  readonly height?: number;
+}
+
 /** One configured provider as an attempt sees it: decoded settings, decrypted secret. */
 export interface SearchProviderSnapshot {
   readonly id: string;
@@ -59,4 +75,9 @@ export interface SearchAdapter {
     provider: SearchProviderSnapshot,
     request: SearchRequest,
   ): Effect.Effect<ReadonlyArray<SearchHit>, SearchProviderError>;
+  /** Image search, for providers that have it. */
+  searchImages?(
+    provider: SearchProviderSnapshot,
+    request: ImageSearchRequest,
+  ): Effect.Effect<ReadonlyArray<ImageHit>, SearchProviderError>;
 }

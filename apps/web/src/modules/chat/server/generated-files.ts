@@ -1,13 +1,38 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { messageAttachments, messageChunks, messages } from "~/db/schema/index.ts";
+import {
+  attachmentBlobs,
+  attachments,
+  messageAttachments,
+  messageChunks,
+  messages,
+} from "~/db/schema/index.ts";
 import { AttachmentRejected } from "~/modules/attachments/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { IMAGE_MEDIA_TYPES, type AttachmentKind } from "~/modules/attachments/constants.ts";
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
-import { type AssistantFile, ASSISTANT_FILE_LIMITS } from "../assistant-output.ts";
+import {
+  type AssistantFile,
+  type AssistantOutput,
+  ASSISTANT_FILE_LIMITS,
+} from "../assistant-output.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
+
+/**
+ * The next free position among everything the message holds. Answer files and
+ * search images are written by different fibers, so neither may count only
+ * its own kind.
+ */
+export const nextAttachmentPosition = (tx: DbTx, messageId: string) =>
+  tx
+    .select({ next: sql<number>`coalesce(max(${messageAttachments.position}) + 1, 0)::int` })
+    .from(messageAttachments)
+    .where(eq(messageAttachments.messageId, messageId))
+    .pipe(
+      Effect.map(([row]) => row?.next ?? 0),
+      Effect.orDie,
+    );
 
 /** Strict base64 only: remote outputs are refused, never fetched. */
 export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Array) =>
@@ -68,6 +93,7 @@ export const acceptGeneratedFile = (
 ) =>
   Effect.gen(function* () {
     let file: AssistantFile | undefined;
+    let output: AssistantOutput | null = null;
     let previous: ReadonlyArray<AssistantFile> = [];
     let discard: ReadonlyArray<string> = [];
     yield* service.upload({
@@ -80,7 +106,8 @@ export const acceptGeneratedFile = (
         before: (tx) =>
           Effect.gen(function* () {
             const message = yield* lockGeneration(tx, input.fence);
-            previous = message.assistantOutput?.files ?? [];
+            output = message.assistantOutput;
+            previous = output?.files ?? [];
             if (
               previous.length >= ASSISTANT_FILE_LIMITS.count ||
               previous.reduce((sum, item) => sum + item.attachment.size, 0) + input.bytes.length >
@@ -107,12 +134,13 @@ export const acceptGeneratedFile = (
               .values({
                 messageId: input.fence.messageId,
                 attachmentId: attachment.id,
-                position: previous.length,
+                position: yield* nextAttachmentPosition(tx, input.fence.messageId),
               })
               .pipe(Effect.orDie);
             yield* tx
               .update(messages)
-              .set({ assistantOutput: { v: 1, files: [...previous, file] } })
+              // Merged, never replaced: search images live in the same column.
+              .set({ assistantOutput: { ...output, v: 1, files: [...previous, file] } })
               .where(eq(messages.id, input.fence.messageId))
               .pipe(Effect.orDie);
             yield* tx
@@ -155,4 +183,67 @@ export const acceptGeneratedImage = (
       bytes,
       allowedKinds: ["image"],
     });
+  });
+
+/** Bounds for the images ```ui blocks ask for, across every attempt of one answer. */
+export const SEARCH_IMAGE_LIMITS = {
+  count: 32,
+  totalBytes: 16 * 1024 * 1024,
+} as const;
+
+/**
+ * Stores one fetched search image and claims it for the answer, under the
+ * generation fence. Bytes are stored as fetched; the browser decodes them.
+ */
+export const acceptSearchImage = (
+  service: AttachmentService["Service"],
+  input: { fence: GenerationIdentity; fileName: string; mediaType: string; bytes: Uint8Array },
+) =>
+  service.upload({
+    userId: input.fence.userId,
+    fileName: input.fileName,
+    declaredMediaType: input.mediaType,
+    bytes: input.bytes,
+    allowedKinds: ["image"],
+    association: {
+      before: (tx) =>
+        Effect.gen(function* () {
+          yield* lockGeneration(tx, input.fence);
+          const [held] = yield* tx
+            .select({
+              count: sql<number>`count(*)::int`,
+              bytes: sql<number>`coalesce(sum(${attachmentBlobs.size}), 0)::bigint`,
+            })
+            .from(messageAttachments)
+            .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
+            .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+            .where(
+              and(
+                eq(messageAttachments.messageId, input.fence.messageId),
+                eq(messageAttachments.kind, "search_image"),
+              ),
+            )
+            .pipe(Effect.orDie);
+          if (
+            (held?.count ?? 0) >= SEARCH_IMAGE_LIMITS.count ||
+            Number(held?.bytes ?? 0) + input.bytes.length > SEARCH_IMAGE_LIMITS.totalBytes
+          )
+            return yield* new AttachmentRejected({
+              cause: "size",
+              reason: "This answer already holds as many images as it may.",
+            });
+        }),
+      after: (tx, attachment) =>
+        Effect.gen(function* () {
+          yield* tx
+            .insert(messageAttachments)
+            .values({
+              messageId: input.fence.messageId,
+              attachmentId: attachment.id,
+              position: yield* nextAttachmentPosition(tx, input.fence.messageId),
+              kind: "search_image",
+            })
+            .pipe(Effect.orDie);
+        }),
+    },
   });

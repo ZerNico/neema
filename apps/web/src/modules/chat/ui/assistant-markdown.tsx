@@ -1,5 +1,6 @@
 import { memo, useMemo, type ComponentProps } from "react";
-import { Streamdown, defaultRehypePlugins, type ExtraProps } from "streamdown";
+import UiBlockFrame from "~/modules/genui/ui/frame.tsx";
+import { Streamdown, defaultRehypePlugins, type ExtraProps, type PluginConfig } from "streamdown";
 import { FileReferenceLink } from "./file-reference.tsx";
 import { isFileReferenceHref } from "../file-references.ts";
 import { markdownReferenceLinks } from "./markdown-reference-links.ts";
@@ -22,6 +23,14 @@ export function MarkdownReferenceSpan({
 }
 
 const referenceComponents: MarkdownComponents = { span: MarkdownReferenceSpan };
+
+// ```ui fences are interactive blocks in answers only: reasoning, file and
+// skill previews keep the shared plugins and show the source as code.
+// The frame is small and eager; the block behind it loads on first use.
+const answerPlugins: PluginConfig = {
+  ...markdownPlugins,
+  renderers: [{ language: "ui", component: UiBlockFrame }],
+};
 
 /**
  * How an answer's markdown renders. Model-authored markdown in the transcript
@@ -62,7 +71,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
       linkSafety={LINK_SAFETY}
       mode={streaming ? "streaming" : "static"}
       parseIncompleteMarkdown
-      plugins={markdownPlugins}
+      plugins={answerPlugins}
       isAnimating={streaming}
       animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
       // Streamdown caps tables at 300px and scrolls them inside the transcript's

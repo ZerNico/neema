@@ -24,6 +24,14 @@ declared type, and only the kinds we understand are shown or handed to a model.
   Office files may also be previewed through separate read-only endpoints; the original
   remains a download. See [presentations](presentations.md).
 
+- A message's attachments carry a `kind`: `file`, or `search_image` for an image a ```ui
+  block asked for (see [generative UI](generative-ui.md)). A search image belongs to the
+  answer for lifetime, retry and branch, but it is page material, not a file of the chat.
+  The listings filter it out where they are defined (`listForMessages`,
+  `listWithBlobsForMessages`, `listForConversation`), so the model, the answer's file cards,
+  tool file names and project saves never see one. A new reader of `message_attachments`
+  must choose its kind.
+
 ## What the model sees
 
 - Images and PDFs go as bytes when the model takes them, PDFs as extracted text otherwise

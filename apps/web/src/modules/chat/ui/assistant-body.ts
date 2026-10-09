@@ -12,6 +12,7 @@ import type {
 } from "../client/use-message-stream.ts";
 import { isOfficeActivity } from "../client/use-message-stream.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
+import { scanUiFences } from "~/modules/genui/fences.ts";
 
 /**
  * A message the person steered into this answer while it ran. It belongs to
@@ -41,7 +42,14 @@ export type AssistantBodyPart =
   /** The answer's reasoning, drawn as the first step of the work it leads. */
   | { kind: "reasoning"; key: string }
   | WorkPart
-  | { kind: "text"; key: string; content: string; streaming: boolean }
+  | {
+      kind: "text";
+      key: string;
+      content: string;
+      streaming: boolean;
+      /** UTF-16 offset of `content` in the answer, which keys its ```ui blocks. */
+      start: number;
+    }
   | { kind: "web"; key: string; activities: WebToolActivity[] }
   | { kind: "skill"; key: string; activities: SkillToolActivity[] }
   | { kind: "knowledge"; key: string; activities: KnowledgeToolActivity[] }
@@ -347,6 +355,7 @@ export function projectAssistantBody({
         key: `text-${start}`,
         content: content.slice(start, end),
         streaming: active,
+        start,
       });
   };
   if (!chronological) {
@@ -355,9 +364,15 @@ export function projectAssistantBody({
     return { chronological, parts: groupWork(placeWorkingFiles(parts)) };
   }
 
+  // A ```ui block is one widget: an activity anchored inside it shows after
+  // it, so the fence never splits across two markdown renders. Display only;
+  // the stored offsets are untouched.
+  const fences = scanUiFences(content);
+  const outsideFence = (offset: number) =>
+    fences.find((fence) => offset > fence.start && offset < fence.end)?.end ?? offset;
   let cursor = 0;
   for (const item of activities) {
-    const offset = item.activity.textOffset!;
+    const offset = outsideFence(item.activity.textOffset!);
     // A durable start can be ahead of the raw snapshot too. While streaming,
     // wait rather than reveal it early or fabricate a temporary legacy order.
     if (offset > content.length) break;

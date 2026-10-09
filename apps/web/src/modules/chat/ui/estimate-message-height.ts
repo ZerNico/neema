@@ -19,6 +19,9 @@ const CODE_BLOCK = 62;
 const CODE_PADDING = 32;
 const CODE_LINE = 20;
 const CODE_MAX_BODY = 400;
+/** A ```ui block renders as a widget, not code; most fit about this tall. */
+const UI_BLOCK = 320;
+const UI_FENCE = /^\s*(```|~~~)ui(\s|$)/;
 const TABLE = 58;
 const TABLE_ROW = 35;
 const LIST_ITEM = 8;
@@ -60,10 +63,16 @@ function markdownHeight(content: string, textWidth: number): number {
     const line = lines[index]!;
     if (FENCE.test(line)) {
       flush();
+      const opener = line;
       let codeLines = 0;
       for (index += 1; index < lines.length && !FENCE.test(lines[index]!); index += 1)
         codeLines += 1;
-      block(CODE_BLOCK + Math.min(CODE_PADDING + codeLines * CODE_LINE, CODE_MAX_BODY), true);
+      block(
+        UI_FENCE.test(opener)
+          ? UI_BLOCK
+          : CODE_BLOCK + Math.min(CODE_PADDING + codeLines * CODE_LINE, CODE_MAX_BODY),
+        true,
+      );
     } else if (TABLE_LINE.test(line)) {
       flush();
       let rows = 0;

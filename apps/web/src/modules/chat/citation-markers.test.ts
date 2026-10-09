@@ -31,3 +31,12 @@ describe("stripUndefinedCitationMarkers", () => {
     expect(stripUndefinedCitationMarkers("Streaming along[^1")).toBe("Streaming along");
   });
 });
+
+describe("citation markers next to ui blocks", () => {
+  const block = "```ui\n<script>const re = /[^5]/;</script>\n<text>[^1]</text>\n```";
+
+  it("leaves a ui block byte-for-byte", () => {
+    expect(stripCitationMarkers(`Fact[^1].\n\n${block}`)).toBe(`Fact.\n\n${block}`);
+    expect(stripUndefinedCitationMarkers(`Fact[^2].\n\n${block}`)).toBe(`Fact.\n\n${block}`);
+  });
+});

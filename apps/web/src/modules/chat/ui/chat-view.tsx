@@ -17,7 +17,7 @@ import {
 } from "~/modules/schedules/tool-schema.ts";
 
 import { applyFileChunk, learnServerClock } from "../client/use-message-stream.ts";
-import type { AssistantFile } from "../assistant-output.ts";
+import { lookupsOf, mergeLookups, NO_LOOKUPS, type AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
 
@@ -54,6 +54,7 @@ import {
   editMessage,
   resumeMessage,
   retryMessage,
+  saveUiState,
   sendMessage,
   stopGeneration,
   updateWorkSettings,
@@ -116,6 +117,12 @@ import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
+import {
+  GenuiActionsContext,
+  type SavedUiState,
+  type UiStateSave,
+} from "~/modules/genui/ui/context.ts";
+import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
 import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
@@ -382,6 +389,7 @@ export function ChatView({
       reasoningSeen: reasoningChunks.length > 0,
       tools,
       compactions,
+      lookups: lookupsOf(streamingMessage.assistantOutput),
       lastSeq,
     };
   }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
@@ -641,6 +649,7 @@ export function ChatView({
   const checkWorkReady = () => work.check();
   const prepareGeneration = async () => {
     checkWorkReady();
+    await flushBlockSaves();
     await flushAgentDraft();
     await flushScheduleDraft();
     await flushDocuments();
@@ -817,6 +826,7 @@ export function ChatView({
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
     onMutate: async () => {
+      await flushBlockSaves();
       await flushAgentDraft();
       await flushDocuments();
       closeEdit();
@@ -852,6 +862,7 @@ export function ChatView({
   const editMutation = useMutation({
     onMutate: async () => {
       checkWorkReady();
+      await flushBlockSaves();
       await flushAgentDraft();
       await flushDocuments();
       setAnchorRequested(true);
@@ -981,6 +992,24 @@ export function ChatView({
     [data.messages],
   );
   const tailMessageId = turnMessages.at(-1)?.id;
+  // What ```ui blocks may do here: suggestions go out as ordinary sends,
+  // anything else waits in the composer, and state saves are best effort.
+  const mutateSend = sendMutation.mutate;
+  const genuiActions = useMemo(
+    () => ({
+      tailId: tailMessageId,
+      disabled: generationDisabled,
+      send: (text: string) =>
+        mutateSend({ content: text, attachmentIds: [], researchEnabled: false, skillIds: [] }),
+      offer: (text: string) => composer.current?.offerDraft(text),
+      save: (input: UiStateSave) =>
+        saveUiState({ data: input }).then(
+          () => {},
+          () => {},
+        ),
+    }),
+    [tailMessageId, generationDisabled, mutateSend],
+  );
 
   // A rewind takes the documents, drafts and unpublished files those answers
   // created with it, so the dialog names them: a checklist someone has been
@@ -1124,6 +1153,16 @@ export function ChatView({
 
   // Grouped once per query result, since the display map below runs on every
   // stream chunk and must not rescan the flat list per message.
+  const uiStatesByMessage = useMemo(() => {
+    const grouped = new Map<string, Map<number, SavedUiState>>();
+    for (const row of data.uiStates) {
+      const states = grouped.get(row.messageId) ?? new Map<number, SavedUiState>();
+      states.set(row.ordinal, { sourceHash: row.sourceHash, state: JSON.stringify(row.state) });
+      grouped.set(row.messageId, states);
+    }
+    return grouped;
+  }, [data.uiStates]);
+
   const toolCallsByMessage = useMemo(() => {
     const grouped = new Map<string, ToolActivity[]>();
     for (const row of data.toolCalls) {
@@ -1433,6 +1472,11 @@ export function ChatView({
           : {}),
         reasoning,
         files: message.assistantOutput?.files ?? [],
+        uiLookups: lookupsOf(message.assistantOutput),
+        temporary: data.conversation.temporary,
+        ...(uiStatesByMessage.has(message.id)
+          ? { uiStates: uiStatesByMessage.get(message.id)! }
+          : {}),
         desktopMachineId: machinesByMessage.get(message.id) ?? null,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
@@ -1533,6 +1577,8 @@ export function ChatView({
     stamps,
     steersByAnswer,
     toolCallsByMessage,
+    uiStatesByMessage,
+    data.conversation.temporary,
     visibleMessages,
     data.priorSources,
   ]);
@@ -1608,6 +1654,7 @@ export function ChatView({
           ],
           liveStream: { text: stream.live, status: stream.status },
           reading: stream.reading,
+          uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, stream.lookups),
         };
       }),
     [
@@ -1633,6 +1680,7 @@ export function ChatView({
       editResearchEnabled,
       stream.compactions,
       stream.files,
+      stream.lookups,
       stream.live,
       stream.reading,
       stream.status,
@@ -1790,13 +1838,15 @@ export function ChatView({
                   }
                 >
                   <FileReferenceContext value={fileReferences}>
-                    <VirtualMessageList
-                      messages={withPlacedCards}
-                      anchorId={anchorId}
-                      onReleaseAnchor={releaseAnchor}
-                      onReachStart={loadOlder}
-                      loadingOlder={loadingOlder}
-                    />
+                    <GenuiActionsContext value={genuiActions}>
+                      <VirtualMessageList
+                        messages={withPlacedCards}
+                        anchorId={anchorId}
+                        onReleaseAnchor={releaseAnchor}
+                        onReachStart={loadOlder}
+                        loadingOlder={loadingOlder}
+                      />
+                    </GenuiActionsContext>
                   </FileReferenceContext>
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>

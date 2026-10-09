@@ -86,6 +86,11 @@ edit the wrong thing.
 - **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
   lists and search, neither reads nor saves memory, and is swept a day after its last
   activity. Keep clears the flag; nothing sets it later.
+- **ui block**: a ```` ```ui ```` fence in an answer, drawn as interactive UI. Its logic runs
+  in QuickJS and only JSON reaches the page. Identity is the fence's ordinal in the raw
+  message text. State the reader sets is saved per block, and images are found by query
+  when the fence closes. Not an attachment, not a tool. See
+  [generative UI](docs/internals/generative-ui.md).
 - **queue entry / steer**: a message held behind the live generation, with its
   own claimed files; it becomes a user message when promoted. A steer hands one
   to the running generation at its next safe boundary instead, and from then on
@@ -285,6 +290,10 @@ skipped one on purpose.
   by main, one profile per server, pages outside the routes laid over panel slots, the
   lifecycle that freezes and discards them, and the model's browser tools (desktop-family
   tools run by the page), site approvals and the navigation gate.
+- `docs/internals/generative-ui.md`: ```ui blocks in answers. The language, the mutation
+  contract that makes a rebuilt block equal the live one, and the QuickJS JSON boundary.
+- `docs/internals/device-cache.md`: IndexedDB caches on the reader's device. One store keyed by
+  owner and namespace, synchronous reads once warm, owner scoping and clearing on identity change.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 

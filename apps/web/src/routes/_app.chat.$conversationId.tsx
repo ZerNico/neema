@@ -1,3 +1,4 @@
+import { prewarmGenui } from "~/modules/genui/client/prewarm.ts";
 import { BubbleChatCancelIcon } from "@hugeicons/core-free-icons";
 import { Link, createFileRoute, notFound, useLocation, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -29,6 +30,12 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
         .then(async (detail) => {
           // Guard cached results too, before the view dereferences the conversation.
           if (!detail?.conversation) throw notFound();
+          // Blocks draw from the renderer's code, the device's cached trees and
+          // QuickJS: start them with the data. The code is briefly waited for,
+          // so the answer appears whole rather than with placeholders that resize.
+          if (detail.messages.some((message) => /(?:```|~~~)ui\b/.test(message.content)))
+            // Under the 200 ms pendingMs, so the wait never shows the pending view.
+            await Promise.race([prewarmGenui(), new Promise((done) => setTimeout(done, 180))]);
           if (detail.conversation.mode === "work")
             await prepareWorkFolder(
               context.queryClient,

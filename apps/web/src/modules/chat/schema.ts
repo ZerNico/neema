@@ -139,6 +139,16 @@ export const WorkTurnReservationStatus = Schema.Struct({
   assistantMessageId: Schema.NullOr(Schema.String),
 });
 
+/** One ```ui block's state; the JSON the block's runtime reported, at most 16 KB. */
+export const SaveUiStateInput = Schema.Struct({
+  messageId: Schema.String,
+  /** Null for an answer a branch copied, which has no attempt of its own. */
+  generationId: Schema.NullOr(Schema.String),
+  ordinal: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 7 })),
+  sourceHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/)),
+  state: Schema.String.check(Schema.isMaxLength(16 * 1024)),
+});
+
 export const AnswerQuestionInput = Schema.Struct({
   conversationId: Schema.String,
   callId: Schema.String,

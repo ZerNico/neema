@@ -31,4 +31,5 @@ Retry throws an answer away and starts over. Resume keeps it: the same assistant
 - Kept drafts already include the answer's own rows, and a keep updates the same (file, answer) row, so a resumed deck edit continues from the last saved round. Drafts made only in the lost round are gone; a stale revision is refused with the current one named, which the model can recover from. Retrying after a resume still restores what the answer started from.
 - Each attempt appends its own `usage_events` row. The message's `usage` sums the attempts, because its text spans them.
 - A research run was fenced by the attempt that started it and stays terminal; the model may start another. A run may settle its own call row after its generation ended, and resume keeps that row.
+- Saved ```ui block state and the images its blocks found stay with the row. The new attempt skips image queries already settled and counts them against the answer's caps. See [generative UI](generative-ui.md).
 - The client drops a `writing` marker whose `runId` names an earlier attempt: that attempt ended mid-call, so nothing would ever replace it.

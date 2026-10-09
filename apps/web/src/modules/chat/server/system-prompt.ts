@@ -3,6 +3,7 @@ import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
 import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
 import { desktopToolsSystemHint } from "~/modules/desktop/tool-schema.ts";
 import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
+import { interactiveUiPolicy } from "~/modules/genui/skill.ts";
 import { KNOWLEDGE_SYSTEM_HINT } from "~/modules/knowledge/server/context.ts";
 import { fileReferencesSystemHint } from "../file-references.ts";
 import { RESEARCH_APP_POLICY } from "./research/tool.ts";
@@ -65,6 +66,11 @@ export interface FixedPrefixInput {
     readonly commands: boolean;
   } | null;
   readonly browser: boolean;
+  /**
+   * The interactive-ui skill is offered, so the model is told what ui blocks are
+   * for; `photos` when image blocks can be filled, which takes web search.
+   */
+  readonly interactiveUi?: { readonly photos: boolean } | null;
   /** Memory policy and data, already rendered. */
   readonly memory: ReadonlyArray<Prompt.MessageEncoded>;
   readonly project: { readonly name: string; readonly instructions: string } | null;
@@ -97,6 +103,7 @@ export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded
     : []),
   ...(input.agentAuthoring ? [system(AGENT_APP_POLICY)] : []),
   ...(input.documents ? [system(DOCUMENT_APP_POLICY)] : []),
+  ...(input.interactiveUi ? [system(interactiveUiPolicy(input.interactiveUi.photos))] : []),
   ...(input.knowledge ? [system(KNOWLEDGE_SYSTEM_HINT)] : []),
   ...(input.web ? [system(webToolsSystemHint(input.web))] : []),
   ...(input.integrations ? [system(integrationsPolicy(input.integrations))] : []),

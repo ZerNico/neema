@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { INTERACTIVE_UI_TOOL } from "~/modules/genui/settings.ts";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -229,6 +230,43 @@ export const updateOfficeFilesTool = createServerFn({ method: "POST" })
       ToolsRepo.use((repo) => repo.updateTool("office_files", { enabled: data.enabled })),
     ),
   );
+
+/** Map services are reached from the server and named in the reader's map: https only. */
+const MapServiceUrl = Schema.String.check(
+  Schema.isMaxLength(500),
+  Schema.isPattern(/^https:\/\/[^\s/]+(\/\S*)?$/),
+);
+
+export const getInteractiveUiTool = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
+
+export const updateInteractiveUiTool = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(
+    standard(
+      Schema.Struct({
+        enabled: Schema.optionalKey(Schema.Boolean),
+        images: Schema.optionalKey(Schema.Boolean),
+        maps: Schema.optionalKey(Schema.Boolean),
+        mapStyleLight: Schema.optionalKey(MapServiceUrl),
+        mapStyleDark: Schema.optionalKey(MapServiceUrl),
+        mapGeocoder: Schema.optionalKey(MapServiceUrl),
+        mapRouting: Schema.optionalKey(MapServiceUrl),
+      }),
+    ),
+  )
+  .handler(({ data }) => {
+    const { enabled, ...config } = data;
+    return runtime.runPromise(
+      ToolsRepo.use((repo) =>
+        repo.updateTool(INTERACTIVE_UI_TOOL, {
+          ...(enabled !== undefined ? { enabled } : {}),
+          ...(Object.keys(config).length > 0 ? { config } : {}),
+        }),
+      ),
+    );
+  });
 
 export const getDocumentParserTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])

@@ -57,10 +57,15 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
                   sentAt: Date.now(),
                   ...(event.runId ? { runId: event.runId } : {}),
                 })
-              : sseFrame("done", {
-                  status: event.status,
-                  ...(event.runId ? { runId: event.runId } : {}),
-                }),
+              : event.kind === "lookups"
+                ? sseFrame("lookups", {
+                    lookups: event.lookups,
+                    ...(event.runId ? { runId: event.runId } : {}),
+                  })
+                : sseFrame("done", {
+                    status: event.status,
+                    ...(event.runId ? { runId: event.runId } : {}),
+                  }),
         );
       },
     },

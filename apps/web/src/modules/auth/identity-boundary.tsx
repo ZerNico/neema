@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Activity, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { authClient } from "./client.ts";
 import { getSessionIdentity } from "./server/functions.ts";
 import {
+  cacheOwnerOf,
   isUnauthenticatedError,
   projectSessionIdentity,
   sameIdentity,
@@ -40,6 +42,9 @@ import {
  * BFCache snapshot: `pagehide` hides synchronously because the frozen page
  * can be shown again without any script running first.
  */
+/** How long leaving waits for the device cache to be cleared. */
+const CLEAR_WAIT_MS = 500;
+
 export function IdentityBoundary({
   identity,
   children,
@@ -49,6 +54,8 @@ export function IdentityBoundary({
 }) {
   const queryClient = useQueryClient();
   const [initialIdentity] = useState(identity);
+  const cacheOwner = cacheOwnerOf(initialIdentity);
+  useEffect(() => setDeviceCacheOwner(cacheOwner), [cacheOwner]);
   const [leaving, setLeaving] = useState(false);
   const [frozen, setFrozen] = useState(false);
   const state = useRef({
@@ -67,6 +74,13 @@ export function IdentityBoundary({
       flushSync(() => setLeaving(true));
       void queryClient.cancelQueries();
       queryClient.clear();
+      // What this device kept for the identity leaving goes with it. Replacing
+      // the document can abort a clear still in flight, so the (already hidden)
+      // tree waits for it, briefly: a clear that hangs must not trap the reader.
+      const cleared = Promise.race([
+        clearDeviceCaches(),
+        new Promise((done) => setTimeout(done, CLEAR_WAIT_MS)),
+      ]);
       if (broadcast) {
         try {
           localStorage.setItem(IDENTITY_CHANGE_KEY, crypto.randomUUID());
@@ -74,7 +88,7 @@ export function IdentityBoundary({
           /* Focus checks cover unavailable storage. */
         }
       }
-      identityNavigation.replace(destination);
+      void cleared.finally(() => identityNavigation.replace(destination));
     },
     [queryClient],
   );

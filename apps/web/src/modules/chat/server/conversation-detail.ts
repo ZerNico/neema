@@ -84,6 +84,7 @@ const loadMessageRows = Effect.fn("chat.loadMessageRows")(function* (
       // manifests stay server-side; only
       // names travel, resolved client-side against what the viewer may read.
       generations: repo.listGenerationDisplay(assistantIds),
+      uiStates: repo.listUiStates(assistantIds),
       priorSources: first
         ? repo
             .listSourcesBefore(conversationId, first.id, [...cited])

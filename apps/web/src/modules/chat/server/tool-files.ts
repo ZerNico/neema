@@ -64,6 +64,8 @@ export const makeToolFileResolver = (input: {
         and(
           eq(messages.conversationId, input.conversationId),
           eq(attachments.userId, input.userId),
+          // Images a ```ui block found are the page's, not the chat's files.
+          eq(messageAttachments.kind, "file"),
           or(eq(attachments.id, reference), eq(attachments.fileName, reference)),
         ),
       )

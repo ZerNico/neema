@@ -64,7 +64,14 @@ import {
 } from "~/modules/office/server/families.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
-import { acceptGeneratedFile, acceptGeneratedImage } from "./generated-files.ts";
+import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
+import { lookupsOf, type UiLookups } from "../assistant-output.ts";
+import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
+import { INTERACTIVE_UI_TOOL, readInteractiveUi } from "~/modules/genui/settings.ts";
+import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
+import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
+import { makeMapResolver, type MapResolver } from "~/modules/genui/server/map-resolver.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
 import {
@@ -180,6 +187,7 @@ import {
   calibrationFactor,
   compileActivePrompt,
   computeBudget,
+  skillRootChars,
   estimatePromptTokens,
   estimateToolSchemaTokens,
   ContextTooLarge,
@@ -215,6 +223,7 @@ import {
 import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 
 import { runtimeContextMessage } from "./runtime-context.ts";
+import { uiStateContextMessage } from "~/modules/genui/server/ui-state-context.ts";
 import { buildSearchReminder, MAX_PRIOR_SOURCES, systemReminderMessage } from "./search-prompt.ts";
 import { ChatRepo, type ChunkKind } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
@@ -253,9 +262,21 @@ export interface StatusEvent {
   readonly reading: { readonly read: number; readonly total: number } | null;
 }
 
+/**
+ * What the answer's ```ui blocks looked up so far: images, places, routes.
+ * Like status, never a chunk: the row holds them and a late subscriber gets
+ * a snapshot, so a repeated event only restates what the client has.
+ */
+export interface LookupsEvent {
+  readonly messageId: string;
+  readonly runId?: string;
+  readonly lookups: UiLookups;
+}
+
 export type StreamEvent =
   | ({ readonly kind: "chunk" } & ChunkEvent)
   | ({ readonly kind: "status" } & StatusEvent)
+  | ({ readonly kind: "lookups" } & LookupsEvent)
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
@@ -441,6 +462,12 @@ export class StreamEngine extends Context.Service<
       // Postgres by seq, and `done` re-syncs the final row.
       const pubsub = yield* PubSub.sliding<StreamEvent>(4096);
       const imageAttachments = yield* Effect.serviceOption(AttachmentService);
+      // Optional so test engines need not reach map services.
+      const mapLookups = yield* Effect.serviceOption(MapLookups);
+      // Tests replace the network; everything else fetches search images itself.
+      const imageFetcher = Option.getOrElse(yield* Effect.serviceOption(ImageFetcher), () =>
+        ImageFetcher.of({ fetch: fetchImage }),
+      );
       // Optional so test engines need not build blob storage for it.
       const projectFiles = yield* Effect.serviceOption(ProjectFileService);
       // Optional for the same reason; without it a tool's file parameter
@@ -563,6 +590,15 @@ export class StreamEngine extends Context.Service<
         // and pricing even if the admin deletes or reprices it mid-generation.
         const model = yield* providers.getModel(input.modelId);
         const history = yield* repo.listMessages(input.conversationId);
+        // What the reader did in earlier answers' blocks, as of this send.
+        const uiStateContext = uiStateContextMessage(
+          history,
+          yield* repo.listUiStates(
+            history
+              .filter((message) => message.role === "assistant" && message.id !== input.messageId)
+              .map((message) => message.id),
+          ),
+        );
         // A resumed answer starts from what it already produced: its rows are
         // the rounds this attempt continues, read once here.
         const resuming = input.resume === true && currentMessage !== null;
@@ -747,6 +783,23 @@ export class StreamEngine extends Context.Service<
           else if (kind === "text") assembled += delta;
           buffer.push({ seq, kind, delta });
         };
+
+        /** Stores lookups under the fence, then tells subscribers everything found so far. */
+        const recordLookups = (
+          owner: GenerationIdentity,
+          update: Parameters<typeof repo.recordUiLookups>[1],
+        ) =>
+          repo.recordUiLookups(owner, update).pipe(
+            Effect.flatMap((lookups) =>
+              PubSub.publish(pubsub, {
+                kind: "lookups",
+                messageId: input.messageId,
+                runId: owner.generationId,
+                lookups,
+              }),
+            ),
+            Effect.asVoid,
+          );
 
         const publishStatus = (reading: StatusEvent["reading"]) =>
           Effect.suspend(() => {
@@ -968,6 +1021,62 @@ export class StreamEngine extends Context.Service<
               })
             : null;
 
+          // Admins can switch interactive answers, or only their images, off in
+          // Tools. Read once per attempt, so a change applies to the next answer.
+          const interactiveUi = readInteractiveUi(
+            Option.isSome(toolRegistry)
+              ? yield* toolRegistry.value.getTool(INTERACTIVE_UI_TOOL)
+              : null,
+          );
+          // Images named by the answer's ```ui blocks, looked up while it streams.
+          // Only with the search this attempt was offered; otherwise each query
+          // is recorded as needing it, so the reader is told why.
+          const imageResolver: ImageResolver | null =
+            interactiveUi.images && fence && Option.isSome(imageAttachments)
+              ? yield* makeImageResolver({
+                  searchOn: permissions.webSearch && input.searchEnabled,
+                  settled: new Set(
+                    Object.keys((resuming && currentMessage?.assistantOutput?.images) || {}),
+                  ),
+                  search: (query, maxResults) => webSearch.images(query, maxResults),
+                  fetch: (url) => imageFetcher.fetch(url),
+                  store: (image, fileName) =>
+                    acceptSearchImage(imageAttachments.value, {
+                      fence,
+                      fileName,
+                      mediaType: image.mediaType,
+                      bytes: image.bytes,
+                    }),
+                  record: (query, result) => recordLookups(fence, { images: { [query]: result } }),
+                })
+              : null;
+          if (imageResolver) yield* imageResolver.observe(assembled);
+          // Places and routes on the answer's maps. Not web search: they go to
+          // the map services an admin configured, and only place names leave.
+          const earlier = (resuming && currentMessage?.assistantOutput) || null;
+          // With maps off nothing is asked, but each place is marked so, so the
+          // reader is told why rather than that it could not be found.
+          const mapResolver: MapResolver | null =
+            fence && Option.isSome(mapLookups)
+              ? yield* makeMapResolver({
+                  off: !interactiveUi.maps,
+                  settled: {
+                    places: new Set(Object.keys(earlier?.places ?? {})),
+                    routes: new Set(Object.keys(earlier?.routes ?? {})),
+                  },
+                  known: new Map(
+                    Object.entries(earlier?.places ?? {}).filter(
+                      ([, place]) => place.status === "resolved",
+                    ),
+                  ),
+                  geocode: (query) => mapLookups.value.geocode(interactiveUi.mapServices, query),
+                  route: (mode, stops) =>
+                    mapLookups.value.route(interactiveUi.mapServices, mode, stops),
+                  record: (update) => recordLookups(fence, update),
+                })
+              : null;
+          if (mapResolver) yield* mapResolver.observe(assembled);
+
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
           // than answering from the part that remains. The session is scoped
@@ -986,21 +1095,24 @@ export class StreamEngine extends Context.Service<
           const skillManifest = permissions.skillsUse
             ? [
                 ...(config.skills ?? []),
-                ...(yield* skillReader.catalogue(
-                  input.userId,
-                  (config.skills ?? []).map((entry) => entry.skillId),
-                )),
+                ...(yield* skillReader.catalogue(input.userId, [
+                  ...(config.skills ?? []).map((entry) => entry.skillId),
+                  // Switched off, the skill is not offered; blocks already
+                  // in earlier answers still render.
+                  ...(interactiveUi.enabled ? [] : [INTERACTIVE_UI_SKILL_ID]),
+                ])),
               ]
             : [];
           const skillTools = skillManifest.length
             ? yield* prepareSkillTools({
                 userId: input.userId,
                 manifest: skillManifest,
-                maxRootChars: Math.floor(
+                maxRootChars: skillRootChars(
                   computeBudget({
                     contextLength: model?.contextLength,
                     webToolsEnabled: !!webTools,
-                  }).input * 0.2,
+                  }).input,
+                  priorUsage,
                 ),
               }).pipe(Effect.provideService(SkillReader, skillReader))
             : null;
@@ -1737,8 +1849,13 @@ export class StreamEngine extends Context.Service<
                 : null,
               planReminder(),
             ].filter(Boolean);
+            const updates = contextUpdates();
+            // Context data rides as assistant messages (documents), and a request
+            // that ends on one is a prefill, which some models refuse outright.
+            if (sections.length === 0 && updates.at(-1)?.role === "assistant")
+              sections.push("The application data above is current. Continue the answer.");
             const messages = [
-              ...contextUpdates(),
+              ...updates,
               ...(sections.length > 0 ? [systemReminderMessage(sections.join("\n\n"))] : []),
             ];
             return messages.length > 0 ? Prompt.make(messages) : null;
@@ -1755,6 +1872,7 @@ export class StreamEngine extends Context.Service<
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             ...keptNotice,
+            ...(uiStateContext ? [uiStateContext] : []),
             runtimeContext,
           ];
           // Fixed as the answer's first request saw it: it sits ahead of every
@@ -1824,6 +1942,9 @@ export class StreamEngine extends Context.Service<
               ? { folders: input.desktopFolders ?? [], commands: config.desktopCommands ?? false }
               : null,
             browser: !!browserTools,
+            interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)
+              ? { photos: interactiveUi.images && !!webTools?.tools.search }
+              : null,
             memory: conversationContext.messages(),
             project: config.resolvedProject ?? null,
             agent: config.resolvedAgent ?? null,
@@ -2480,6 +2601,11 @@ export class StreamEngine extends Context.Service<
                         }
                         case "text-delta": {
                           pushChunk("text", part.delta);
+                          // Only a fence line can close a block.
+                          if (/[`~]/.test(part.delta)) {
+                            if (imageResolver) yield* imageResolver.observe(assembled);
+                            if (mapResolver) yield* mapResolver.observe(assembled);
+                          }
                           if (buffer.length >= 16) yield* flush;
                           return;
                         }
@@ -4073,6 +4199,11 @@ export class StreamEngine extends Context.Service<
             }
             transcript = buildTranscript();
           }
+          // Before the scope closes and finalize runs: recording needs the row still streaming.
+          yield* Effect.all(
+            [imageResolver?.drain ?? Effect.void, mapResolver?.drain ?? Effect.void],
+            { concurrency: "unbounded", discard: true },
+          );
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
           // A resumed answer starts from its earlier text, so it is never empty.
@@ -4318,7 +4449,22 @@ export class StreamEngine extends Context.Service<
               status && status.runId === runId
                 ? Stream.make({ kind: "status", ...status })
                 : Stream.empty;
-            return replay.pipe(Stream.concat(reading), Stream.concat(live));
+            // Read after subscribing, so an image recorded since the loader ran is in one or the other.
+            const output = afterReplay.assistantOutput;
+            const imageSnapshot: Stream.Stream<StreamEvent> =
+              output?.images || output?.places || output?.routes
+                ? Stream.make({
+                    kind: "lookups",
+                    messageId,
+                    ...(runId ? { runId } : {}),
+                    lookups: lookupsOf(output),
+                  })
+                : Stream.empty;
+            return replay.pipe(
+              Stream.concat(reading),
+              Stream.concat(imageSnapshot),
+              Stream.concat(live),
+            );
           }),
         );
 
