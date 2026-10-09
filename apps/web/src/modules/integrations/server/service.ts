@@ -1077,12 +1077,12 @@ export class IntegrationService extends Context.Service<
             const current = yield* repo.catalog(integrationId);
             if (!current?.latest || !current.listingId)
               return yield* new IntegrationRejected({ reason: "Check the server’s tools first." });
-            const changed = new IntegrationRejected({
+            const outdated = new IntegrationRejected({
               reason: "The server’s tools changed while you were looking. Review them again.",
             });
             // Approving is approving what was seen: another listing, or another
             // approval since, is shown again rather than overwritten.
-            if (reviewVersion(current) !== input.version) return yield* changed;
+            if (reviewVersion(current) !== input.version) return yield* outdated;
             const applied = catalog.apply(current.approved, current.latest, input.decisions);
             if ("error" in applied)
               return yield* new IntegrationRejected({ reason: applied.error });
@@ -1090,7 +1090,7 @@ export class IntegrationService extends Context.Service<
               listingId: current.listingId,
               reviewSeq: current.reviewSeq,
             });
-            if (!written) return yield* changed;
+            if (!written) return yield* outdated;
             yield* bus
               .publishGlobal({ type: "integrations.changed" })
               .pipe(Effect.catchCause(() => Effect.void));
