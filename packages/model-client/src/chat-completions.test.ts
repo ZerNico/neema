@@ -93,6 +93,23 @@ describe("request shapes per preset", () => {
     }),
   );
 
+  effect("asks a router in front of Claude to stream tool arguments as written", () =>
+    Effect.gen(function* () {
+      const claude = harness({
+        preset: "custom",
+        call: { model: "cc/claude-opus-5-5" },
+        answers: [chatSse([usage()])],
+      });
+      yield* claude.stream("Hi");
+      expect(claude.exchanges[0]!.headers).toMatchObject({
+        "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
+      });
+      const other = harness({ preset: "custom", answers: [chatSse([usage()])] });
+      yield* other.stream("Hi");
+      expect(other.exchanges[0]!.headers).not.toHaveProperty("anthropic-beta");
+    }),
+  );
+
   effect("moves an answer's files to a user message after its tool results", () =>
     Effect.gen(function* () {
       const run = harness({ preset: "custom", answers: [chatSse([usage()])] });

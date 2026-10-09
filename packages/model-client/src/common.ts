@@ -251,3 +251,13 @@ export const parseArguments = (text: string): { ok: true; value: unknown } | { o
     return { ok: false };
   }
 };
+
+/**
+ * Anthropic holds a tool call's argument values back until each is complete
+ * unless asked for fine-grained streaming, so a document the model writes
+ * through a tool landed in one burst instead of as it was written. Routers in
+ * front of Claude pass the header on (measured with 9router); other backends
+ * ignore it, so it goes to every model named Claude.
+ */
+export const claudeHeaders = (call: { readonly model: string }): Record<string, string> =>
+  /claude/i.test(call.model) ? { "anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } : {};

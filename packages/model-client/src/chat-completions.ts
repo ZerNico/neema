@@ -23,6 +23,7 @@ import {
   toolSelection,
   type FinishReason,
   type StreamPart,
+  claudeHeaders,
 } from "./common.ts";
 import type { HttpClient } from "effect/unstable/http";
 import {
@@ -309,7 +310,7 @@ export const streamChat = (
       const body = yield* buildChatRequest(connection, call, options);
       options.span.attribute("gen_ai.system", connection.preset.id);
       options.span.attribute("gen_ai.request.model", call.model);
-      const response = yield* postJson(connection, "/chat/completions", body);
+      const response = yield* postJson(connection, "/chat/completions", body, claudeHeaders(call));
       const idGenerator = yield* IdGenerator.IdGenerator;
       const decoder = makeChatDecoder(connection, call, idGenerator);
       return sseEvents(responseBytes(response), () =>
