@@ -3738,11 +3738,11 @@ export class StreamEngine extends Context.Service<
                             const { sources, access, files } = integrationTools!.take(part.id);
                             // Files a service returned become attachments of the answer,
                             // stored under the fence like a custom tool's; a failed one is noted.
-                            const undelivered: string[] = [];
+                            const undelivered = new Map<string, string>();
                             for (const file of files) {
                               const stored = yield* deliverFile(file, rowId);
                               if ("reason" in stored) {
-                                undelivered.push(`${file.name} (${stored.reason})`);
+                                undelivered.set(file.name, stored.reason.slice(0, 200));
                                 continue;
                               }
                               turnFiles.push(
@@ -3756,18 +3756,25 @@ export class StreamEngine extends Context.Service<
                                 }),
                               );
                             }
-                            // The result already names the files, so say which did not arrive.
+                            // The result already names each file; mark the ones that did not arrive.
                             const returned = part.result as { ok?: unknown; result?: unknown };
+                            const output = returned.result as { files?: unknown } | null | undefined;
                             if (
-                              undelivered.length &&
+                              undelivered.size &&
                               returned.ok === true &&
-                              typeof returned.result === "object" &&
-                              returned.result !== null
+                              output &&
+                              Array.isArray(output.files)
                             ) {
-                              const note = `Not attached, so do not say they are: ${undelivered.join("; ")}`;
                               const noted = {
                                 ...returned,
-                                result: { ...returned.result, undelivered: note.slice(0, 500) },
+                                result: {
+                                  ...output,
+                                  files: output.files.map((entry: { name?: unknown }) =>
+                                    typeof entry.name === "string" && undelivered.has(entry.name)
+                                      ? { ...entry, notAttached: undelivered.get(entry.name) }
+                                      : entry,
+                                  ),
+                                },
                               };
                               Object.assign(part, { result: noted, encodedResult: noted });
                             }
