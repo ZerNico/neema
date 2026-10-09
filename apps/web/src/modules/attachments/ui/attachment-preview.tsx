@@ -1,4 +1,5 @@
 import { Download01Icon, LinkSquare02Icon, PanelRightIcon } from "@hugeicons/core-free-icons";
+import { markdownTableComponents } from "~/ui/markdown-components.ts";
 import { use, useEffect, useState, type ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
@@ -269,6 +270,7 @@ function TextPreview({
             linkSafety={LINK_SAFETY}
             mode="static"
             plugins={markdownPlugins}
+            components={markdownTableComponents}
             className="space-y-3 text-sm [&_pre]:overflow-x-auto"
           >
             {state.text}

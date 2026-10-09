@@ -1,4 +1,5 @@
 import { memo, useMemo, type ComponentProps } from "react";
+import { markdownTableComponents } from "~/ui/markdown-components.ts";
 import UiBlockFrame from "~/modules/genui/ui/frame.tsx";
 import { Streamdown, defaultRehypePlugins, type ExtraProps, type PluginConfig } from "streamdown";
 import { FileReferenceLink } from "./file-reference.tsx";
@@ -22,7 +23,10 @@ export function MarkdownReferenceSpan({
   return <span {...props}>{children}</span>;
 }
 
-const referenceComponents: MarkdownComponents = { span: MarkdownReferenceSpan };
+const referenceComponents: MarkdownComponents = {
+  span: MarkdownReferenceSpan,
+  ...markdownTableComponents,
+};
 
 // ```ui fences are interactive blocks in answers only: reasoning, file and
 // skill previews keep the shared plugins and show the source as code.
@@ -74,10 +78,6 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
       plugins={answerPlugins}
       isAnimating={streaming}
       animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
-      // Streamdown caps tables at 300px and scrolls them inside the transcript's
-      // own scroll, which hid most rows and caught the wheel. A table is read,
-      // so it takes its full height; wide ones still scroll sideways.
-      tableMaxHeight={0}
       components={renderedComponents}
       rehypePlugins={rehypePlugins}
       className={cn("space-y-3 [&_pre]:overflow-x-auto", className)}

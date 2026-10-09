@@ -11,6 +11,7 @@ import {
   Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { markdownTableComponents } from "~/ui/markdown-components.ts";
 import { lazy, Suspense, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import type { ReactNode } from "react";
@@ -49,6 +50,7 @@ const noFindings: SkillFinding[] = [];
 const previewPlugins = { ...markdownPlugins };
 delete previewPlugins.mermaid;
 const previewComponents = {
+  ...markdownTableComponents,
   img: ({ alt }: { alt?: string | undefined }) => (
     <span className="text-muted-foreground">[Image{alt ? `: ${alt}` : ""}, not loaded]</span>
   ),

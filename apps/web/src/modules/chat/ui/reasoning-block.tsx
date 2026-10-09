@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { markdownTableComponents } from "~/ui/markdown-components.ts";
 import { Streamdown } from "streamdown";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
@@ -80,6 +81,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
             mode={active ? "streaming" : "static"}
             parseIncompleteMarkdown
             plugins={markdownPlugins}
+            components={markdownTableComponents}
             isAnimating={active}
             animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
             className="space-y-2"

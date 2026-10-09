@@ -2297,9 +2297,9 @@ describe("answer tables", () => {
         }}
       />,
     );
-    const table = await waitFor(() => container.querySelector('[data-streamdown="table"]')!);
+    const table = await waitFor(() => container.querySelector("table")!);
     expect(table.querySelectorAll("tbody tr")).toHaveLength(30);
-    // Streamdown puts its cap on the table's own scroll container.
+    // A table is read in full: nothing scrolls it inside the transcript's own scroll.
     expect((table.parentElement as HTMLElement).style.maxHeight).toBe("");
   });
 });
