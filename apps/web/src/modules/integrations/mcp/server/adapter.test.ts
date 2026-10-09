@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CallContext, Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { ElicitationAnswer, ElicitationPrompt } from "../../schema.ts";
 import type { McpToolEntry } from "../catalog.ts";
-import { mcpAdapter } from "./adapter.ts";
+import { mapResult, mcpAdapter } from "./adapter.ts";
 
 /** A one-pixel PNG, as a server would return a chart. */
 const PIXEL =
@@ -236,6 +236,22 @@ describe("an MCP server through the adapter", () => {
         read: false,
       },
     ]);
+  });
+
+  it("keeps a result's line breaks and indentation for the model", () => {
+    const text = "| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n  indented()\n```";
+    const mapped = mapResult({ content: [{ type: "text", text }] }, {
+      key: "t",
+      mcpName: "t",
+      title: "T",
+      description: "",
+      inputSchema: { type: "object", properties: {} },
+      annotations: {},
+      access: "read",
+      enabled: true,
+      fingerprint: "f",
+    });
+    expect(mapped.result.output).toEqual({ content: text });
   });
 
   it("turns returned images into files of the answer", async () => {

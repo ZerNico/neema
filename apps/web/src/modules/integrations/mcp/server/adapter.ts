@@ -53,6 +53,10 @@ const fileName = (uri: string | undefined, mediaType: string, index: number) => 
   return cleaned && cleaned.includes(".") ? cleaned : `result-${index + 1}.${extension(mediaType)}`;
 };
 
+/** Cut to fit without touching layout: code, tables and lists reach the model as written. */
+const clip = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
 /** Only a web address can be a citation the reader opens; anything else stays text. */
 const HTTP_LINK = /^https?:\/\//i;
 
@@ -123,10 +127,10 @@ export const mapResult = (result: CallToolResult, entry: McpToolEntry) => {
       : undefined;
   const output: Record<string, unknown> =
     structured === undefined
-      ? { content: briefValue(text, MCP_LIMITS.resultChars) }
+      ? { content: clip(text, MCP_LIMITS.resultChars) }
       : JSON.stringify(structured).length <= MCP_LIMITS.resultChars
         ? { structured }
-        : { content: briefValue(JSON.stringify(structured), MCP_LIMITS.resultChars) };
+        : { content: clip(JSON.stringify(structured), MCP_LIMITS.resultChars) };
   if (files.length)
     output.files = files.map((file) => ({ name: file.name, mediaType: file.mediaType }));
   if (skipped.length)
