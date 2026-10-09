@@ -531,6 +531,10 @@ html[data-panel-resizing] webview {
       content: attr(data-placeholder);
     }
   }
+  /* A mentioned person, as a chip inside the line like a date chip. */
+  .rich-editor span[data-type="mention"] {
+    @apply bg-muted text-foreground rounded-md px-1.5 text-[0.9em] font-medium;
+  }
   /* Other people's carets, as Tiptap's collaboration caret draws them. */
   .collaboration-carets__caret {
     @apply pointer-events-none relative -mx-px border-x;

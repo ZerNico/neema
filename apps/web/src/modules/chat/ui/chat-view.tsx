@@ -587,10 +587,10 @@ export function ChatView({
       : undefined;
   const openDocument = useRef<string | undefined>(undefined);
   openDocument.current = openDocumentId;
-  const documentFocus = () => {
+  const documentFocus = (named?: ReadonlyArray<string>) => {
     const id = openDocument.current;
     if (!id) return {};
-    const selected = documents.current?.selectedBlocks(id) ?? [];
+    const selected = named ? [...named] : (documents.current?.selectedBlocks(id) ?? []);
     return { openDocument: selected.length ? { id, selected } : { id } };
   };
 
@@ -683,6 +683,8 @@ export function ChatView({
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
       workspaceImports?: WorkspaceImports;
+      /** Blocks named when the request was made, instead of the editor's selection at send. */
+      selectedBlocks?: ReadonlyArray<string>;
     }) => {
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
@@ -691,7 +693,7 @@ export function ChatView({
         searchEnabled,
         reasoningEffort,
         timeZone: browserTimeZone(),
-        ...documentFocus(),
+        ...documentFocus(input.selectedBlocks),
         attachmentIds: input.attachmentIds,
         researchEnabled: input.researchEnabled,
         skillIds: [...(input.skillIds ?? [])],
@@ -981,6 +983,23 @@ export function ChatView({
   // Generation actions (edit/retry/answer/save) wait on the folder; branch
   // copies history and must stay available in a browser.
   const generationDisabled = actionsDisabled || work.readOnly;
+  const sendAsk = sendMutation.mutateAsync;
+  const focusComposer = useCallback(() => composer.current?.focus(), []);
+  // A request typed inside a document: sent like the composer's, with the spot selected.
+  const askFromDocument = useCallback(
+    async (request: string, selectedBlocks: ReadonlyArray<string>) => {
+      if (generationDisabled) return false;
+      await sendAsk({
+        content: request,
+        attachmentIds: [],
+        researchEnabled: false,
+        skillIds: [],
+        selectedBlocks,
+      });
+      return true;
+    },
+    [generationDisabled, sendAsk],
+  );
   // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
   // oxlint-disable react-hooks/exhaustive-deps
   const respondToQuestion = useCallback(
@@ -1815,6 +1834,8 @@ export function ChatView({
       goneIds={scopedForgottenDocuments}
       onGone={forgetDocument}
       autoOpenIds={liveCreated.document}
+      onAsk={askFromDocument}
+      onFocusComposer={focusComposer}
       ref={documents}
     >
       <AgentDraftOwner

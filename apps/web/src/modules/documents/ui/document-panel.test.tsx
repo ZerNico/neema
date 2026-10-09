@@ -104,13 +104,10 @@ beforeEach(() => {
 });
 
 describe("document panel", () => {
-  it("opens the editor for everyone, and offers the Markdown", async () => {
+  it("opens the editor for everyone, with no separate Markdown view", async () => {
     await fixture();
     expect(await openSource()).toBeInTheDocument();
-    const markdown = screen.getByRole("button", { name: "Show Markdown" });
-    expect(markdown).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(markdown);
-    expect(markdown).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Show Markdown" })).not.toBeInTheDocument();
     cleanup();
     server.seed({ ...fresh(), canEdit: false });
     await fixture();

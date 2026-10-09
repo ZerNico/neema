@@ -10,6 +10,8 @@ export interface SlashItem {
   /** Extra words it is found by. */
   keywords: string;
   run: (editor: Editor, range: Range) => void;
+  /** Offered only where this holds; always when absent. */
+  available?: (editor: Editor) => boolean;
 }
 
 export interface MenuHandle {

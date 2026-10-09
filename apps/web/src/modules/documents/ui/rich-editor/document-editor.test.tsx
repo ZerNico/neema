@@ -9,7 +9,7 @@ import { DocumentSync } from "../../client/document-sync.ts";
 import { outbox } from "../../client/outbox.ts";
 import { toMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
-import DocumentEditor, { type DocumentEditorMode } from "./document-editor.tsx";
+import DocumentEditor from "./document-editor.tsx";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
 import { browserEditorExtensions, browserEditorProps } from "./editor-extensions.ts";
@@ -69,10 +69,8 @@ const replica = async (markdown = "", documentId?: string) => {
 };
 type Replica = Awaited<ReturnType<typeof replica>>;
 
-const mount = (
-  sync: Replica,
-  { mode = "live", readOnly = false }: { mode?: DocumentEditorMode; readOnly?: boolean } = {},
-) => render(<DocumentEditor sync={sync} mode={mode} readOnly={readOnly} toolbarSlot={slot()} />);
+const mount = (sync: Replica, { readOnly = false }: { readOnly?: boolean } = {}) =>
+  render(<DocumentEditor sync={sync} readOnly={readOnly} toolbarSlot={slot()} />);
 
 /** Text inside a link, as a click on it would land. */
 const anchor = (href: string) => {
@@ -125,10 +123,10 @@ describe("document editor", () => {
     const sync = await replica("- [ ] ship");
     const toolbar = slot();
     const { rerender } = render(
-      <DocumentEditor sync={sync} mode="live" readOnly={false} toolbarSlot={toolbar} />,
+      <DocumentEditor sync={sync} readOnly={false} toolbarSlot={toolbar} />,
     );
     await editorOf();
-    rerender(<DocumentEditor sync={sync} mode="live" readOnly toolbarSlot={toolbar} />);
+    rerender(<DocumentEditor sync={sync} readOnly toolbarSlot={toolbar} />);
     fireEvent.click(screen.getByRole("checkbox"));
     expect(sync.markdown()).toBe("- [ ] ship");
   });
@@ -173,10 +171,10 @@ describe("document editor", () => {
     render(
       <>
         <section aria-label="First">
-          <DocumentEditor sync={one} mode="live" readOnly={false} toolbarSlot={slot()} />
+          <DocumentEditor sync={one} readOnly={false} toolbarSlot={slot()} />
         </section>
         <section aria-label="Second">
-          <DocumentEditor sync={two} mode="live" readOnly={false} toolbarSlot={slot()} />
+          <DocumentEditor sync={two} readOnly={false} toolbarSlot={slot()} />
         </section>
       </>,
     );
@@ -201,14 +199,6 @@ describe("document editor", () => {
       "contenteditable",
       "false",
     );
-  });
-
-  it("shows the Markdown as stored, following the tree", async () => {
-    const sync = await replica("# Plan");
-    mount(sync, { mode: "source" });
-    expect(screen.getByLabelText("Document Markdown")).toHaveTextContent("# Plan");
-    act(() => server.editElsewhere(sync.id, () => "# Plan\n\n- [ ] ship"));
-    expect(screen.getByLabelText("Document Markdown").textContent).toBe("# Plan\n\n- [ ] ship");
   });
 
   it("never renders a script address the Markdown carries as a link", async () => {
@@ -245,11 +235,11 @@ describe("document editor", () => {
     const toolbar = slot();
     const sync = await replica("Plan");
     const { rerender } = render(
-      <DocumentEditor sync={sync} mode="live" readOnly={false} toolbarSlot={toolbar} />,
+      <DocumentEditor sync={sync} readOnly={false} toolbarSlot={toolbar} />,
     );
     await editorOf();
     expect(within(toolbar).getByRole("toolbar", { name: "Formatting" })).toBeInTheDocument();
-    rerender(<DocumentEditor sync={sync} mode="live" readOnly toolbarSlot={toolbar} />);
+    rerender(<DocumentEditor sync={sync} readOnly toolbarSlot={toolbar} />);
     expect(within(toolbar).queryByRole("toolbar")).not.toBeInTheDocument();
   });
 

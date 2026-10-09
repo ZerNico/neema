@@ -3,6 +3,7 @@ import { Placeholder } from "@tiptap/extensions";
 import { documentExtensions } from "../../editor/extensions.ts";
 import { SizeCap } from "./size-cap.ts";
 import { SlashCommand } from "./slash-command.tsx";
+import { DocumentDateChip, DocumentMention } from "./chip-items.tsx";
 import { DocumentPending } from "./pending-item.tsx";
 import { DocumentTaskItem } from "./task-item.tsx";
 import { openLink } from "./links.ts";
@@ -13,12 +14,14 @@ import { openLink } from "./links.ts";
  * unchanged), the `/` menu and the size cap. The connection adds collaboration and other people's cursors.
  */
 export const browserEditorExtensions = [
-  ...documentExtensions.map((extension) =>
-    extension.name === "taskItem"
-      ? DocumentTaskItem
-      : extension.name === "pending"
-        ? DocumentPending
-        : extension,
+  ...documentExtensions.map(
+    (extension) =>
+      ({
+        taskItem: DocumentTaskItem,
+        pending: DocumentPending,
+        dateChip: DocumentDateChip,
+        mention: DocumentMention,
+      })[extension.name] ?? extension,
   ),
   Placeholder.configure({ placeholder: "Write, or type / for blocks" }),
   SlashCommand,

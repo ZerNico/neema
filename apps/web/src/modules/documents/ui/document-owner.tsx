@@ -2,6 +2,7 @@ import { File01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { projectMembersQuery } from "~/modules/projects/client/queries.ts";
 import {
   useCallback,
   useEffect,
@@ -16,7 +17,7 @@ import { useDocument } from "../client/use-document.ts";
 import { taskProgress } from "../task-items.ts";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
-import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
+import type { EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
 import {
   useDetailPanel,
   useDetailPanelReconciler,
@@ -42,6 +43,13 @@ interface DocumentOwnerProps {
   ref?: Ref<DocumentOwnerHandle> | undefined;
   /** Documents the answer being watched just created; their panel opens by itself. */
   autoOpenIds?: ReadonlySet<string> | undefined;
+  /**
+   * Sends a request typed inside a document as a chat message, with the spot
+   * it was asked at selected; false when it cannot go now. Absent outside a chat.
+   */
+  onAsk?: ((request: string, blocks: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  /** Moves focus to the chat's input, keeping the document's selection for the message. */
+  onFocusComposer?: (() => void) | undefined;
 }
 interface Session {
   entry: DocumentPanelEntry;
@@ -55,6 +63,8 @@ export function DocumentOwner({
   goneIds = EMPTY_DOCUMENT_IDS,
   onGone,
   autoOpenIds,
+  onAsk,
+  onFocusComposer,
   children,
   ref,
 }: DocumentOwnerProps) {
@@ -117,6 +127,8 @@ export function DocumentOwner({
           forget={forget}
           onGone={onGone}
           autoOpen={autoOpenIds?.has(documentId) ?? false}
+          onAsk={onAsk}
+          onFocusComposer={onFocusComposer}
         />
       ))}
       <DocumentPanelContext.Provider value={value}>{children}</DocumentPanelContext.Provider>
@@ -130,17 +142,20 @@ function DocumentSession({
   forget,
   onGone,
   autoOpen,
+  onAsk,
+  onFocusComposer,
 }: {
   documentId: string;
   publish: (documentId: string, session: Session) => void;
   forget: (documentId: string) => void;
   onGone: (documentId: string) => void;
   autoOpen: boolean;
+  onAsk: ((request: string, blocks: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  onFocusComposer: (() => void) | undefined;
 }) {
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
   // The editor for everyone (read-only for a viewer) until they pick the Markdown.
-  const [mode, setMode] = useState<DocumentEditorMode>("live");
   // The actions row the editor portals its formatting controls into.
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const id = `document:${documentId}`;
@@ -152,6 +167,33 @@ function DocumentSession({
   });
   const { data: me } = useQuery(sessionUserQuery);
   const subtitle = documentSubtitle(controller, me?.id);
+  const projectId = controller.document?.projectId ?? null;
+  const { data: members } = useQuery({
+    ...projectMembersQuery(projectId ?? ""),
+    enabled: projectId !== null,
+  });
+  const people = useMemo<MentionCandidate[]>(
+    () => [
+      ...(me ? [{ id: me.id, label: me.name, detail: me.email }] : []),
+      ...(members?.users ?? [])
+        .filter((user) => user.userId !== me?.id)
+        .map((user) => ({ id: user.userId, label: user.name, detail: user.email })),
+    ],
+    [me, members],
+  );
+  // Read when the @ list opens, so members loading late still show.
+  const candidates = useRef<MentionCandidate[]>([]);
+  useEffect(() => {
+    candidates.current = people;
+  }, [people]);
+  const hooks = useMemo<EditorHooks>(
+    () => ({
+      mentions: () => candidates.current,
+      ask: onAsk ?? null,
+      focusComposer: onFocusComposer ?? null,
+    }),
+    [onAsk, onFocusComposer],
+  );
   const request = useMemo(
     () => ({
       id,
@@ -159,17 +201,10 @@ function DocumentSession({
       subtitle,
       icon: File01Icon,
       restorable: true,
-      actions: (
-        <DocumentPanelActions
-          controller={controller}
-          mode={mode}
-          onModeChange={setMode}
-          toolbarSlot={setToolbarSlot}
-        />
-      ),
-      body: <DocumentPanelBody controller={controller} mode={mode} toolbarSlot={toolbarSlot} />,
+      actions: <DocumentPanelActions controller={controller} toolbarSlot={setToolbarSlot} />,
+      body: <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />,
     }),
-    [controller, id, mode, subtitle, toolbarSlot],
+    [controller, hooks, id, subtitle, toolbarSlot],
   );
   // The card opens the request this session last committed, not the one its
   // own render captured: a card published just before the connection landed

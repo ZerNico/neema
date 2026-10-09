@@ -1,4 +1,4 @@
-import { CodeIcon, Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
@@ -6,13 +6,12 @@ import { Suspense, lazy, useState } from "react";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
-import { Toggle } from "~/ui/primitives/toggle";
 import { motionEase } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
-import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
+import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
 
 // The editor and its schema load with the first open document, not the chat.
 const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
@@ -31,40 +30,18 @@ const copyMarkdown = async (controller: Controller) => {
 
 export function DocumentPanelActions({
   controller,
-  mode,
-  onModeChange,
   toolbarSlot,
 }: {
   controller: Controller;
-  mode: DocumentEditorMode;
-  onModeChange: (mode: DocumentEditorMode) => void;
   /** Receives the element the editor puts its formatting controls in. */
   toolbarSlot: (element: HTMLElement | null) => void;
 }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-2">
-      {/* The editor's formatting fills the row; the view and Copy sit at its end. */}
+      {/* The editor's formatting fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                size="icon"
-                variant="toolbar"
-                aria-label="Show Markdown"
-                pressed={mode === "source"}
-                onPressedChange={(pressed) => onModeChange(pressed ? "source" : "live")}
-              />
-            }
-          >
-            <HugeiconsIcon icon={CodeIcon} strokeWidth={2} />
-          </TooltipTrigger>
-          <TooltipContent>
-            {mode === "source" ? "Back to the editor" : "Show Markdown"}
-          </TooltipContent>
-        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -93,12 +70,12 @@ export function DocumentPanelActions({
 
 export function DocumentPanelBody({
   controller,
-  mode,
   toolbarSlot,
+  hooks,
 }: {
   controller: Controller;
-  mode: DocumentEditorMode;
   toolbarSlot: HTMLElement | null;
+  hooks?: EditorHooks | undefined;
 }) {
   const reducedMotion = useAppReducedMotion();
 
@@ -146,9 +123,9 @@ export function DocumentPanelBody({
                   <DocumentEditor
                     key={controller.documentId}
                     sync={controller.sync}
-                    mode={mode}
                     readOnly={!controller.document?.canEdit}
                     toolbarSlot={toolbarSlot}
+                    hooks={hooks}
                   />
                 </div>
               </div>

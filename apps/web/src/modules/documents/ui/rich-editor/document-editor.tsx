@@ -2,38 +2,38 @@ import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import { DocumentMarkdownView } from "./markdown-view.tsx";
+import { AskPopover } from "./ask-popover.tsx";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
+import { setEditorHooks, type EditorHooks } from "./editor-hooks.ts";
 import { DocumentTableMenu } from "./table-menu.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 
-export type DocumentEditorMode = "live" | "source";
 /** The connection's editor; the connection itself stays with the caller. */
 export interface DocumentEditorSync {
   readonly editor: Editor;
 }
 
 /**
- * The live document: the connection's rich editor mounted here, or its
- * Markdown, read-only. Loaded with the first open document, not the chat.
+ * The live document: the connection's rich editor mounted here. Loaded with
+ * the first open document, not the chat.
  */
 export default function DocumentEditor({
   sync,
-  mode,
   readOnly,
   toolbarSlot,
+  hooks,
 }: {
   sync: DocumentEditorSync;
-  mode: DocumentEditorMode;
   readOnly: boolean;
   /** The panel's actions row, where the formatting controls sit. */
   toolbarSlot: HTMLElement | null;
+  /** Who can be mentioned and how to ask the assistant; none in tests and outside a chat. */
+  hooks?: EditorHooks | undefined;
 }) {
-  return mode === "live" ? (
-    <RichEditor editor={sync.editor} readOnly={readOnly} toolbarSlot={toolbarSlot} />
-  ) : (
-    <DocumentMarkdownView editor={sync.editor} />
-  );
+  useEffect(() => {
+    if (hooks) setEditorHooks(sync.editor, hooks);
+  }, [hooks, sync.editor]);
+  return <RichEditor editor={sync.editor} readOnly={readOnly} toolbarSlot={toolbarSlot} />;
 }
 
 function RichEditor({
@@ -61,6 +61,7 @@ function RichEditor({
         <>
           <DocumentBubbleMenu editor={editor} />
           <DocumentTableMenu editor={editor} />
+          <AskPopover editor={editor} />
         </>
       )}
     </div>
