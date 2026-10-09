@@ -217,6 +217,7 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
   parameters: entry.inputSchema,
   summarize: summarizeArguments,
   details: argumentDetails,
+  revision: entry.fingerprint,
   prepare: (session, args, call) =>
     Effect.gen(function* () {
       const checked = validate(entry, args);

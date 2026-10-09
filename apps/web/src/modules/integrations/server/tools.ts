@@ -326,6 +326,19 @@ export function prepareIntegrationTools(input: {
           const session = yield* input.sessionFor(offer.integrationId);
           if (!session || session.connectionId !== offer.session.connectionId)
             return failure(`${name} is no longer connected or available.`, true);
+          // Taken off, reclassified or changed since the answer started (an
+          // admin's review, a shared key): what was decided above no longer holds.
+          const current = session.tools.find((entry) => entry.name === tool.name);
+          if (
+            !current ||
+            current.access !== tool.access ||
+            current.revision !== tool.revision ||
+            (session.authKind === "shared" && current.access !== "read")
+          )
+            return failure(
+              `“${tool.title}” in ${name} changed since this answer started, so it did not run.`,
+              true,
+            );
           const narrowed = yield* outsideScope(call);
           if (narrowed) return narrowed;
           // Unattended, each call reaching people takes one of the run's few

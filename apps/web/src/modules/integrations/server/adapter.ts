@@ -147,6 +147,11 @@ export interface OfferedTool extends IntegrationToolInfo {
   summarize(args: unknown): string | null;
   /** The arguments as an approval card lists them, when the summary cannot say enough. */
   details?(args: unknown): ReadonlyArray<{ readonly key: string; readonly value: string }>;
+  /**
+   * Which approved version this is, for a catalog tool. A call runs only if
+   * the tool is still offered at this version when it would go out.
+   */
+  readonly revision?: string;
   readonly prepare: ErasedHandler;
 }
 

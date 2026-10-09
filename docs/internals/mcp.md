@@ -23,6 +23,10 @@ when it is approved, on, supported, and `latest` lists it with the same fingerpr
 - a new or changed tool waits for review, never runs under words nobody read;
 - a tool the server dropped is gone at once, the safe direction.
 
+The same check runs again as each call goes out, after any approval wait, against the
+fingerprint and access the answer was offered: a tool turned off, reclassified or changed
+meanwhile does not run, however long the answer has been going.
+
 An approval names the listing it was made on (`version`, a hash of the names and
 fingerprints), so an admin cannot approve a listing they did not see. Offered tools keep
 the server's order and a model-facing key fixed at first approval, which keeps the tool

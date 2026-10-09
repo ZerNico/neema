@@ -437,6 +437,42 @@ describe("an MCP server set up by an admin", () => {
     expect(deleted).toEqual(["p-1"]);
   });
 
+  it("does not run a call whose tool the admin took off while it waited", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs revoked", { url: `${base}/mcp`, auth: "none" });
+    const catalog = await check(id, admin);
+    const both = [
+      { mcpName: "search", enabled: true, access: "read" },
+      { mcpName: "delete_page", enabled: true, access: "destructive" },
+    ] as const;
+    await approve(admin, id, catalog.version!, both);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    const conversationId = await newConversation(admin);
+    const prepared = await toolsFor(admin, conversationId);
+
+    deleted.length = 0;
+    const outcome = await run(
+      Effect.gen(function* () {
+        const approvals = yield* IntegrationApprovals;
+        const waiting = yield* Effect.forkChild(
+          handlerOf(prepared, `int_${id}__delete_page`)!({ id: "p-2" }, { toolCallId: "r" }),
+        );
+        const [pending] = yield* waitForPending(admin);
+        yield* Effect.promise(() =>
+          approve(admin, id, catalog.version!, [
+            both[0],
+            { mcpName: "delete_page", enabled: false, access: "destructive" },
+          ]),
+        );
+        yield* approvals.decide(admin, pending!.callId, "allow");
+        return yield* Fiber.join(waiting);
+      }),
+    );
+    expect(outcome).toMatchObject({ ok: false, refused: true });
+    expect(JSON.stringify(outcome)).toMatch(/changed since this answer started/);
+    expect(deleted).toEqual([]);
+  });
+
   it("puts a server's question to the person mid-call, and declines it in a scheduled run", async () => {
     const admin = await newUser();
     const id = await setUp("Docs release", { url: `${base}/mcp`, auth: "none" });
