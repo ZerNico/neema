@@ -37,6 +37,7 @@ import {
   type GenuiMessage,
   type TrustedEvent,
 } from "./context.ts";
+import { registerBlockFlush, trackBlockSave, trackBlockWork } from "./pending-saves.ts";
 import { BlockSkeleton } from "./frame.tsx";
 import { Nodes } from "./tree.tsx";
 
@@ -204,7 +205,7 @@ function useBlock({
         Date.now() - click.at < QUEUED_CLICK_MS &&
         shapeOf(next) === click.shape
       ) {
-        void run.current(next, click.handler, click, at);
+        trackBlockWork(run.current(next, click.handler, click, at));
       }
     },
     [block, client, streaming, keep],
@@ -266,8 +267,11 @@ function useBlock({
         return;
       }
       if (stamp !== client.epoch() || ref.rev !== reply.rev) return;
-      // Awaited, so a control waits for this reply before sending its next value.
-      await run.current(reply, ref.$h, click, client.epoch());
+      // Awaited, so a control waits for this reply before sending its next value;
+      // tracked, so a send waits for the state it produces.
+      const work = run.current(reply, ref.$h, click, client.epoch());
+      trackBlockWork(work);
+      await work;
     },
     [block, client, live, reply, stamp],
   );
@@ -339,7 +343,9 @@ function useBlockSave(message: GenuiMessage, block: string, ordinal: number, cod
       const state = unsaved.get(block);
       if (state === undefined || !canSave) return;
       unsaved.delete(block);
-      actions.save({ messageId, generationId, ordinal, sourceHash: hashSource(code), state });
+      trackBlockSave(block, () =>
+        actions.save({ messageId, generationId, ordinal, sourceHash: hashSource(code), state }),
+      );
     };
   });
 
@@ -353,6 +359,8 @@ function useBlockSave(message: GenuiMessage, block: string, ordinal: number, cod
     if (canSave && unsaved.has(block)) schedule();
   }, [canSave, block, schedule]);
 
+  // A send flushes it too, so the answer it starts reads this block's latest state.
+  useEffect(() => registerBlockFlush(() => flush.current()), []);
   useEffect(() => () => flush.current(), []);
 
   return useCallback(

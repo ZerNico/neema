@@ -122,6 +122,7 @@ import {
   type SavedUiState,
   type UiStateSave,
 } from "~/modules/genui/ui/context.ts";
+import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
 import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
@@ -648,6 +649,7 @@ export function ChatView({
   const checkWorkReady = () => work.check();
   const prepareGeneration = async () => {
     checkWorkReady();
+    await flushBlockSaves();
     await flushAgentDraft();
     await flushScheduleDraft();
     await flushDocuments();
@@ -824,6 +826,7 @@ export function ChatView({
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
     onMutate: async () => {
+      await flushBlockSaves();
       await flushAgentDraft();
       await flushDocuments();
       closeEdit();
@@ -859,6 +862,7 @@ export function ChatView({
   const editMutation = useMutation({
     onMutate: async () => {
       checkWorkReady();
+      await flushBlockSaves();
       await flushAgentDraft();
       await flushDocuments();
       setAnchorRequested(true);
@@ -998,7 +1002,11 @@ export function ChatView({
       send: (text: string) =>
         mutateSend({ content: text, attachmentIds: [], researchEnabled: false, skillIds: [] }),
       offer: (text: string) => composer.current?.offerDraft(text),
-      save: (input: UiStateSave) => void saveUiState({ data: input }).catch(() => {}),
+      save: (input: UiStateSave) =>
+        saveUiState({ data: input }).then(
+          () => {},
+          () => {},
+        ),
     }),
     [tailMessageId, generationDisabled, mutateSend],
   );

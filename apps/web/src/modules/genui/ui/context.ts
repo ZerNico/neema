@@ -46,7 +46,8 @@ export interface GenuiActions {
   readonly send: (text: string) => void;
   /** Puts text in the composer for the reader to send. */
   readonly offer: (text: string) => void;
-  readonly save: (input: UiStateSave) => void;
+  /** Resolves once the server answered, so a send can wait for it. */
+  readonly save: (input: UiStateSave) => Promise<void>;
 }
 
 export const GenuiActionsContext = createContext<GenuiActions | null>(null);

@@ -9,6 +9,7 @@ import { cachedTree, keepTree } from "../client/tree-cache.ts";
 import type { GenuiClient } from "../client/host.ts";
 import { routeKey } from "../extract.ts";
 import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
+import { flushBlockSaves } from "./pending-saves.ts";
 import {
   GenuiActionsContext,
   GenuiClientContext,
@@ -268,7 +269,6 @@ describe("ui blocks in answers", () => {
     expect(await screen.findByText("Rang")).toBeInTheDocument();
   });
 
-  it("walks a wizard one step at a time", async () => {
   it("runs a routine's phases in turn from one Start and tells the block at the end", async () => {
     draw(
       [
@@ -375,6 +375,7 @@ describe("ui blocks in answers", () => {
     expect(await screen.findByText("Done", {}, { timeout: 4000 })).toBeInTheDocument();
   });
 
+  it("walks a wizard one step at a time", async () => {
     draw(
       [
         "```ui",
@@ -795,7 +796,7 @@ describe("what blocks may do", () => {
       disabled: false,
       send: vi.fn(),
       offer: vi.fn(),
-      save: vi.fn(),
+      save: vi.fn(async () => {}),
       ...actions,
     };
     const engine = new BlockEngine(quickjs);
@@ -844,6 +845,20 @@ describe("what blocks may do", () => {
     expect(actions.send).toHaveBeenCalledTimes(1);
   });
 
+  it("saves at once when a send flushes, so the next answer reads the latest pick", async () => {
+    const actions = drawWith({}, "m-flush", BLOCK, "m-flush");
+    const step = await screen.findByRole("button", { name: "Step" });
+    await act(async () => {
+      fireEvent.click(step);
+    });
+    expect(await screen.findByText("Count 1")).toBeInTheDocument();
+    // Within the debounce: nothing saved yet, until a send flushes.
+    expect(actions.save).not.toHaveBeenCalled();
+    await act(() => flushBlockSaves());
+    expect(actions.save).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(actions.save).mock.calls[0]![0]).toMatchObject({ messageId: "m-flush" });
+  });
+
   it("puts a handler's message in the composer and saves the new state", async () => {
     // Its own block: blocks are remembered by key across tests, as across remounts.
     const actions = drawWith({}, "m-step", BLOCK, "m-step");
@@ -878,7 +893,7 @@ describe("what blocks may do", () => {
     const hash = hashSource(scanUiFences(COUNTER)[0]!.code);
 
     function mount(messageId: string, generationId: string | null, streaming: boolean) {
-      const save = vi.fn();
+      const save = vi.fn(async () => {});
       const actions: GenuiActions = {
         tailId: messageId,
         disabled: false,
