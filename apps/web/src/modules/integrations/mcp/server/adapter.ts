@@ -263,7 +263,7 @@ export const mcpAdapter: IntegrationAdapter = {
     if (!URL.canParse(raw)) return { error: "Enter the MCP server’s address." };
     const url = new URL(raw);
     if (url.protocol !== "https:" && url.protocol !== "http:")
-      return { error: "The server address must start with https://." };
+      return { error: "The server address must start with https:// or http://." };
     if (url.username || url.password)
       return { error: "Leave credentials out of the address; choose a sign-in instead." };
     url.hash = "";
