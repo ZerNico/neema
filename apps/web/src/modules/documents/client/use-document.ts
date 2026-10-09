@@ -95,13 +95,19 @@ class Connections {
     const { from, to } = open.state.selection;
     return selectedBlockIds(open.state.doc, from, to);
   };
+  /** Connections closed but still storing their last changes, by document. */
+  #closing = new Map<string, DocumentSync>();
   open(documentId: string) {
     let closed = false;
     let opened: DocumentSync | null = null;
     let unsubscribe: (() => void) | null = null;
     void (syncFactory ??= loadSync()).then((create) => {
       if (closed) return;
-      const next = create(documentId);
+      // Reopened before the last connection finished storing: carry on with it,
+      // since a second one would start without its unsent typing.
+      const lingering = this.#closing.get(documentId);
+      this.#closing.delete(documentId);
+      const next = lingering ?? create(documentId);
       opened = next;
       this.all.add(next);
       this.current = next;
@@ -115,7 +121,11 @@ class Connections {
       if (!next) return;
       if (this.current === next) this.current = null;
       this.#changed();
+      this.#closing.set(documentId, next);
       void next.flush().finally(() => {
+        // Taken up again by a reopen meanwhile: it stays.
+        if (this.#closing.get(documentId) !== next) return;
+        this.#closing.delete(documentId);
         this.all.delete(next);
         next.destroy();
       });

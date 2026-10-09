@@ -190,10 +190,7 @@ export class DocumentSync {
 
   constructor(private readonly options: DocumentSyncOptions) {
     this.#clientId = randomClient();
-    void claimOutbox(options.documentId, this.#released, () => {
-      this.#ownsOutbox = true;
-      this.#scheduleSave();
-    }).then((owned) => {
+    void claimOutbox(options.documentId, this.#released, () => this.#takeOver()).then((owned) => {
       if (this.#destroyed) return;
       this.#ownsOutbox = owned;
       const saved = owned ? options.outbox.get(options.documentId) : undefined;
@@ -282,6 +279,33 @@ export class DocumentSync {
     this.#listeners.clear();
     this.#editor?.destroy();
     this.#release();
+  }
+
+  /**
+   * The tab that owned the outbox closed: what it left unsent was typed
+   * under its own identity and cannot be rebased here, so its text is kept
+   * as recovered, to copy back, rather than overwritten.
+   */
+  #takeOver() {
+    if (this.#destroyed) return;
+    this.#ownsOutbox = true;
+    const left = this.options.outbox.get(this.options.documentId);
+    const schema = this.#editor?.schema;
+    if (left && left.clientId !== this.#clientId && schema) {
+      const texts = [
+        left.recovered ?? "",
+        ...left.steps.map((json) => {
+          try {
+            return insertedText(Step.fromJSON(schema, JSON.parse(json)));
+          } catch {
+            return "";
+          }
+        }),
+      ].filter(Boolean);
+      if (texts.length) this.#keepRecovered([], texts.join("\n\n"));
+    }
+    this.#save();
+    this.#notify();
   }
 
   #dropOutbox() {
@@ -626,8 +650,8 @@ export class DocumentSync {
     }, ASSISTANT_IDLE_MS);
   }
 
-  #keepRecovered(steps: Step[]) {
-    const text = steps.map(insertedText).filter(Boolean).join("\n\n");
+  #keepRecovered(steps: Step[], extra = "") {
+    const text = [...steps.map(insertedText), extra].filter(Boolean).join("\n\n");
     if (!text) return;
     this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
     // Kept on the device at once: a closed panel must not take it along.

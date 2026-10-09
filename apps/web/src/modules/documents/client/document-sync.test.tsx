@@ -117,6 +117,11 @@ describe("document connection", () => {
         .map((push) => push.clientId);
       expect(pushed).not.toContain(outbox.get("plan")!.clientId);
       expect(outbox.get("plan")!.steps).toHaveLength(1);
+      // The first tab closes with that text unsent: the second takes the
+      // outbox over and keeps the text to copy back, rather than wiping it.
+      reload(first);
+      await waitFor(() => expect(second.recovered).toBe("Please"));
+      expect(outbox.get("plan")!.recovered).toBe("Please");
     } finally {
       Reflect.deleteProperty(navigator, "locks");
     }
