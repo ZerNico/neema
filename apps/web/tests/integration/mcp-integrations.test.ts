@@ -660,9 +660,9 @@ describe("an MCP server set up by an admin", () => {
     const person = await newUser();
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(person, id)));
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
-    expect(listed.find((row) => row.id === id)?.connection).toMatchObject({
-      authKind: "shared",
-      accountLabel: "Shared key",
+    expect(listed.find((row) => row.id === id)).toMatchObject({
+      connection: { authKind: "shared", accountLabel: "Shared key" },
+      tools: [{ name: "search", access: "read" }],
     });
     const conversationId = await newConversation(person);
     const prepared = await toolsFor(person, conversationId);

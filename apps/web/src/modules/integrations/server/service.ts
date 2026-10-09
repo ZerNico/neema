@@ -945,13 +945,16 @@ export class IntegrationService extends Context.Service<
               name: entry.config.name,
               available: open,
               methods,
-              tools: (yield* toolsOf(manifest, adapter, entry.config.id)).map((tool) => ({
-                name: tool.name,
-                title: tool.title,
-                label: tool.label,
-                description: tool.description,
-                access: tool.access,
-              })),
+              // A shared key only ever reads, so its other tools are not anyone's to set.
+              tools: (yield* toolsOf(manifest, adapter, entry.config.id))
+                .filter((tool) => methods.open !== "shared" || tool.access === "read")
+                .map((tool) => ({
+                  name: tool.name,
+                  title: tool.title,
+                  label: tool.label,
+                  description: tool.description,
+                  access: tool.access,
+                })),
               apiKeyHelpUrl: configured
                 ? (manifest.apiKey?.helpUrl(normalized.config) ?? null)
                 : null,
