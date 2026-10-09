@@ -39,6 +39,8 @@ type Era =
  * server is not probed with Streamable HTTP every time.
  */
 const eras = new Map<string, { era: Era; until: number }>();
+/** Servers times accounts; past this the oldest are probed again, which only costs a round trip. */
+const MAX_ERAS = 2_000;
 
 const eraKey = (url: URL, holder: string) => `${url.href}\u0000${holder}`;
 
@@ -159,7 +161,9 @@ export const connect = (input: {
                 transport,
                 prior: discover ? { kind: "modern", discover } : { kind: "legacy" },
               };
+        eras.delete(key);
         eras.set(key, { era, until: Date.now() + ERA_TTL_MS });
+        if (eras.size > MAX_ERAS) eras.delete(eras.keys().next().value!);
       };
 
       const connected = yield* (
