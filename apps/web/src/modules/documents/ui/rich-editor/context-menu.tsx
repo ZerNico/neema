@@ -123,11 +123,15 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
           shortcut="⌘X"
           disabled={state.empty}
           onClick={() => {
-            // Removed only once it is on the clipboard: a refused write must not lose the text.
-            const { from, to } = editor.state.selection;
+            // Removed only once it is on the clipboard: a refused write must not
+            // lose the text. The selection follows edits meanwhile; if what it
+            // holds changed, nothing is removed.
+            const text = selected();
             void navigator.clipboard
-              .writeText(selected())
-              .then(() => run((chain) => chain.deleteRange({ from, to })))
+              .writeText(text)
+              .then(() => {
+                if (selected() === text) run((chain) => chain.deleteSelection());
+              })
               .catch((error: unknown) => toastError("Couldn’t cut the selection.", error));
           }}
         />
