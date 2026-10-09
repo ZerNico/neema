@@ -121,7 +121,7 @@ export function Format({
   );
 }
 
-function Action({
+export function Action({
   icon,
   label,
   shortcut,
@@ -534,9 +534,17 @@ function InsertTableItem({ editor }: { editor: Editor }) {
 function TableItems({ editor }: { editor: Editor }) {
   return (
     <>
+      <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowBefore())}>
+        <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
+        Add row above
+      </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowAfter())}>
         <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
         Add row below
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnBefore())}>
+        <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />
+        Add column left
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnAfter())}>
         <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />

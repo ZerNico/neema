@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { DocumentMarkdownView } from "./markdown-view.tsx";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
+import { DocumentTableMenu } from "./table-menu.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 
 export type DocumentEditorMode = "live" | "source";
@@ -52,10 +53,16 @@ function RichEditor({
       {toolbarSlot && !readOnly
         ? createPortal(<DocumentToolbar editor={editor} />, toolbarSlot)
         : null}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      {/* Room above the first line for another person's cursor label. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-7 pb-4">
         <EditorContent editor={editor} className="h-full" />
       </div>
-      {readOnly ? null : <DocumentBubbleMenu editor={editor} />}
+      {readOnly ? null : (
+        <>
+          <DocumentBubbleMenu editor={editor} />
+          <DocumentTableMenu editor={editor} />
+        </>
+      )}
     </div>
   );
 }
