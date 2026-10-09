@@ -240,17 +240,20 @@ describe("an MCP server through the adapter", () => {
 
   it("keeps a result's line breaks and indentation for the model", () => {
     const text = "| a | b |\n|---|---|\n| 1 | 2 |\n\n```\n  indented()\n```";
-    const mapped = mapResult({ content: [{ type: "text", text }] }, {
-      key: "t",
-      mcpName: "t",
-      title: "T",
-      description: "",
-      inputSchema: { type: "object", properties: {} },
-      annotations: {},
-      access: "read",
-      enabled: true,
-      fingerprint: "f",
-    });
+    const mapped = mapResult(
+      { content: [{ type: "text", text }] },
+      {
+        key: "t",
+        mcpName: "t",
+        title: "T",
+        description: "",
+        inputSchema: { type: "object", properties: {} },
+        annotations: {},
+        access: "read",
+        enabled: true,
+        fingerprint: "f",
+      },
+    );
     expect(mapped.result.output).toEqual({ content: text });
   });
 

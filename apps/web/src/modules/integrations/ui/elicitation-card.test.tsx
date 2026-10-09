@@ -56,7 +56,12 @@ describe("a server asking mid-call", () => {
     await user.click(send);
     await waitFor(() =>
       expect(answerIntegrationElicitation).toHaveBeenCalledWith({
-        data: { callId: "row-1", promptId: "q-1", action: "accept", values: { name: "v2", count: 3 } },
+        data: {
+          callId: "row-1",
+          promptId: "q-1",
+          action: "accept",
+          values: { name: "v2", count: 3 },
+        },
       }),
     );
   });

@@ -365,7 +365,10 @@ export class IntegrationRepo extends Context.Service<
                   yield* tx
                     .insert(integrationToolCatalogs)
                     .values({ integrationId: input.id, ...fresh })
-                    .onConflictDoUpdate({ target: integrationToolCatalogs.integrationId, set: fresh });
+                    .onConflictDoUpdate({
+                      target: integrationToolCatalogs.integrationId,
+                      set: fresh,
+                    });
                 }
                 return rows[0];
               }),

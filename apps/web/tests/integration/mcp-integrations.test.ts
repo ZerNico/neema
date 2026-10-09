@@ -585,13 +585,11 @@ describe("an MCP server set up by an admin", () => {
             values: valueFor[firstMessage],
           }),
         ).toBe(true);
-        const [second] = yield* approvals
-          .pending(admin)
-          .pipe(
-            Effect.repeat({
-              until: (pending) => pending[0] !== undefined && pending[0].promptId !== first!.promptId,
-            }),
-          );
+        const [second] = yield* approvals.pending(admin).pipe(
+          Effect.repeat({
+            until: (pending) => pending[0] !== undefined && pending[0].promptId !== first!.promptId,
+          }),
+        );
         expect(second!.callId).toBe(first!.callId);
         const secondMessage = second!.prompt!.message as keyof typeof valueFor;
         expect(secondMessage).not.toBe(firstMessage);

@@ -34,7 +34,9 @@ function StatusBadge({ integration }: { integration: UserIntegration }) {
   if (connection.status === "needs_reauth")
     return (
       <Badge variant="destructive">
-        {connection.authKind === "shared" || connection.authKind === "none" ? "Paused" : "Signed out"}
+        {connection.authKind === "shared" || connection.authKind === "none"
+          ? "Paused"
+          : "Signed out"}
       </Badge>
     );
   return <Badge variant="secondary">Connected</Badge>;
@@ -256,15 +258,15 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
               ? `${integration.name} changed. Turn it on again to keep using it.`
               : needsReauth
                 ? `Sign in to ${integration.name} again to keep using it.`
-              : connection?.authKind === "shared"
-                ? "Everyone here uses one key, so chats only read."
-                : connection?.authKind === "none"
-                  ? `${integration.name} needs no account.`
-                  : connection
-                    ? `Chats use ${integration.name} as this account.`
-                    : integration.methods.open
-                      ? `Turn ${integration.name} on to use it in chats.`
-                      : `Connect your ${integration.name} account to use it in chats.`}
+                : connection?.authKind === "shared"
+                  ? "Everyone here uses one key, so chats only read."
+                  : connection?.authKind === "none"
+                    ? `${integration.name} needs no account.`
+                    : connection
+                      ? `Chats use ${integration.name} as this account.`
+                      : integration.methods.open
+                        ? `Turn ${integration.name} on to use it in chats.`
+                        : `Connect your ${integration.name} account to use it in chats.`}
         </span>
       </div>
       {canConnect && !connection ? <ConnectActions integration={integration} /> : null}

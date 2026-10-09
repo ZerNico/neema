@@ -246,7 +246,11 @@ export function prepareIntegrationTools(input: {
       const report = (session: ConnectedSession) => (error: AdapterFailure) => {
         // Nobody here signed in: the admin's key, or a server that now wants an
         // account, is the admin's to fix, so no one's connection is marked.
-        if (error._tag === "IntegrationAuthFailed" && session.authKind !== "oauth" && session.authKind !== "api_key")
+        if (
+          error._tag === "IntegrationAuthFailed" &&
+          session.authKind !== "oauth" &&
+          session.authKind !== "api_key"
+        )
           return Effect.succeed(
             failure(
               session.authKind === "shared"

@@ -1193,7 +1193,8 @@ export class IntegrationService extends Context.Service<
             const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
             if (stored.fingerprint !== fingerprint)
               return yield* new IntegrationRejected({
-                reason: "This integration’s setup changed during the sign-in. Start again from Settings.",
+                reason:
+                  "This integration’s setup changed during the sign-in. Start again from Settings.",
               });
             if (stored.server && adapter.discoveredOAuth) {
               const tokens = yield* adapter.discoveredOAuth.complete({
