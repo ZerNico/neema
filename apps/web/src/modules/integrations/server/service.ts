@@ -92,6 +92,11 @@ interface OAuthStateValue {
   returnTo?: string;
   /** Recorded when the sign-in was discovered: where the code goes, and who must answer. */
   server?: DiscoveredServer;
+  /**
+   * The setup the sign-in started under. Tokens are only kept for that one:
+   * an admin who changed the address meanwhile must not get them sent there.
+   */
+  fingerprint?: string;
 }
 
 export interface ConnectedSession extends IntegrationSession {
@@ -1059,7 +1064,10 @@ export class IntegrationService extends Context.Service<
 
         beginOAuth: Effect.fn("IntegrationService.beginOAuth")(
           function* (userId, integrationId, origin, returnTo) {
-            const { manifest, adapter, row, config } = yield* available(userId, integrationId);
+            const { manifest, adapter, row, config, fingerprint } = yield* available(
+              userId,
+              integrationId,
+            );
             const state = randomToken();
             const redirectUri = `${origin}${callbackPath(integrationId)}`;
             const store = (value: OAuthStateValue) =>
@@ -1105,6 +1113,7 @@ export class IntegrationService extends Context.Service<
                 verifier: started.verifier,
                 redirectUri,
                 server: started.server,
+                fingerprint,
                 ...(returnTo ? { returnTo } : {}),
               });
               return { state, url: started.url };
@@ -1119,6 +1128,7 @@ export class IntegrationService extends Context.Service<
               integrationId,
               verifier,
               redirectUri,
+              fingerprint,
               ...(returnTo ? { returnTo } : {}),
             };
             yield* store(value);
@@ -1159,6 +1169,10 @@ export class IntegrationService extends Context.Service<
             if (!stored || stored.userId !== userId || stored.integrationId !== integrationId)
               return yield* expired;
             const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
+            if (stored.fingerprint !== fingerprint)
+              return yield* new IntegrationRejected({
+                reason: "This integration’s setup changed during the sign-in. Start again from Settings.",
+              });
             if (stored.server && adapter.discoveredOAuth) {
               const tokens = yield* adapter.discoveredOAuth.complete({
                 server: stored.server,

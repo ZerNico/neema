@@ -403,6 +403,47 @@ describe("connections", () => {
     expect(Exit.isFailure(await complete(started.state))).toBe(true);
   });
 
+  it("spends no sign-in code once the admin pointed the integration elsewhere", async () => {
+    const userId = await newUser();
+    const started = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.beginOAuth(userId, "outline", "https://chat.example.com"),
+      ),
+    );
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id: "outline",
+          name: "Outline",
+          enabled: true,
+          config: { baseUrl: "https://elsewhere.example.com" },
+          oauthClientId: "client",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    const before = tokenCalls.length;
+    try {
+      const refused = await run(
+        Effect.flatMap(IntegrationService, (s) =>
+          Effect.flip(
+            s.completeOAuth(userId, "outline", {
+              code: "good-code",
+              state: started.state,
+              cookieState: started.state,
+              iss: null,
+            }),
+          ),
+        ),
+      );
+      expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
+      expect(tokenCalls.length).toBe(before);
+      expect((await outlineFor(userId))?.connection).toBeNull();
+    } finally {
+      await configure();
+    }
+  });
+
   it("rotates an expired token once however many callers need it", async () => {
     const userId = await newUser();
     await run(
