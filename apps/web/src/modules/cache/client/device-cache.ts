@@ -34,6 +34,11 @@ export interface DeviceCache<V> {
   warm(): Promise<void>;
   /** The value, if warm and present. */
   get(key: string): V | undefined;
+  /**
+   * The value as storage holds it now, for one another tab may have written
+   * since this one warmed. A local change not yet written stays ahead of it.
+   */
+  reload(key: string): Promise<V | undefined>;
   set(key: string, value: V): void;
   delete(key: string): void;
 }
@@ -190,6 +195,27 @@ class NamespaceCache<V> implements DeviceCache<V> {
 
   get(key: string): V | undefined {
     return this.memory.get(key)?.value;
+  }
+
+  async reload(key: string): Promise<V | undefined> {
+    await ownerKnown;
+    const forOwner = owner;
+    const db = await open();
+    if (!db || forOwner === null || this.dirty.has(key)) return this.get(key);
+    try {
+      const tx = db.transaction(STORE, "readonly");
+      const id: Key = [forOwner, this.options.namespace, key];
+      const entry = (await request(tx.objectStore(STORE).get(id))) as Stored<V> | undefined;
+      if (owner !== forOwner || this.dirty.has(key)) return this.get(key);
+      this.drop(key);
+      if (entry) {
+        this.memory.set(key, entry);
+        this.bytes += entry.bytes;
+      }
+      return entry?.value;
+    } catch {
+      return this.get(key);
+    }
   }
 
   set(key: string, value: V): void {

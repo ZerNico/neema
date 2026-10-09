@@ -18,6 +18,10 @@ export interface OutboxEntry {
 export interface OutboxStore {
   warm(): Promise<void>;
   get(documentId: string): OutboxEntry | undefined;
+  /** The entry as stored now, which another tab may have written. */
+  reload(documentId: string): Promise<OutboxEntry | undefined>;
+  /** Writes pending changes, so another tab reading after this sees them. */
+  flush(): Promise<void>;
   set(documentId: string, entry: OutboxEntry): void;
   delete(documentId: string): void;
 }

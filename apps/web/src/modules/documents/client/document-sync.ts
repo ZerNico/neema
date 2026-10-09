@@ -190,16 +190,18 @@ export class DocumentSync {
 
   constructor(private readonly options: DocumentSyncOptions) {
     this.#clientId = randomClient();
-    void claimOutbox(options.documentId, this.#released, () => this.#takeOver()).then((owned) => {
-      if (this.#destroyed) return;
-      this.#ownsOutbox = owned;
-      const saved = owned ? options.outbox.get(options.documentId) : undefined;
-      if (saved) {
-        this.#clientId = saved.clientId;
-        this.#restore(saved);
-      }
-      this.#connect();
-    });
+    void claimOutbox(options.documentId, this.#released, () => void this.#takeOver()).then(
+      (owned) => {
+        if (this.#destroyed) return;
+        this.#ownsOutbox = owned;
+        const saved = owned ? options.outbox.get(options.documentId) : undefined;
+        if (saved) {
+          this.#clientId = saved.clientId;
+          this.#restore(saved);
+        }
+        this.#connect();
+      },
+    );
   }
 
   /** Null until the first frame: the panel should not open on an empty document. */
@@ -278,7 +280,8 @@ export class DocumentSync {
     this.#source?.close();
     this.#listeners.clear();
     this.#editor?.destroy();
-    this.#release();
+    // The next tab to own the outbox reads it from storage: written first.
+    void this.options.outbox.flush().finally(() => this.#release());
   }
 
   /**
@@ -286,10 +289,11 @@ export class DocumentSync {
    * under its own identity and cannot be rebased here, so its text is kept
    * as recovered, to copy back, rather than overwritten.
    */
-  #takeOver() {
+  async #takeOver() {
+    // Read from storage: this tab's copy is from before the old owner wrote.
+    const left = await this.options.outbox.reload(this.options.documentId);
     if (this.#destroyed) return;
     this.#ownsOutbox = true;
-    const left = this.options.outbox.get(this.options.documentId);
     const schema = this.#editor?.schema;
     if (left && left.clientId !== this.#clientId && schema) {
       const texts = [

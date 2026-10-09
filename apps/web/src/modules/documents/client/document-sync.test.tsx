@@ -1,3 +1,5 @@
+// Storage the way a browser has it, so a second tab reads what the first wrote.
+import "fake-indexeddb/auto";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -8,7 +10,8 @@ import { toMarkdown } from "../editor/markdown.ts";
 import type { PushDocumentInput, PushDocumentResult } from "../schema.ts";
 import { browserEditorExtensions } from "../ui/rich-editor/editor-extensions.ts";
 import { DocumentSync } from "./document-sync.ts";
-import { outbox } from "./outbox.ts";
+import { deviceCache } from "~/modules/cache/client/device-cache.ts";
+import { outbox, type OutboxEntry, type OutboxStore } from "./outbox.ts";
 import { caretsOf } from "./presence.ts";
 
 let server: ReturnType<typeof fakeDocumentServer>;
@@ -36,13 +39,16 @@ afterEach(() => {
 
 const offline = (): Promise<PushDocumentResult> => Promise.reject(new Error("offline"));
 /** An editor on the plan; pushes reach the server unless they are cut off. */
-const connect = async (push: (data: PushDocumentInput) => Promise<PushDocumentResult>) => {
+const connect = async (
+  push: (data: PushDocumentInput) => Promise<PushDocumentResult>,
+  store: OutboxStore = outbox,
+) => {
   const sync = new DocumentSync({
     documentId: "plan",
     push,
     connect: (url) => new server.EventSource(url),
     extensions: browserEditorExtensions,
-    outbox,
+    outbox: store,
     user: { name: "Ada", color: "red", colorLight: "pink" },
   });
   open.add(sync);
@@ -107,7 +113,13 @@ describe("document connection", () => {
       first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");
       await waitFor(() => expect(outbox.get("plan")).toBeDefined());
 
-      const second = await connect(online);
+      // Another tab: its own copy of the cache, over the same storage.
+      const otherTab = deviceCache<OutboxEntry>({
+        namespace: "document-outbox",
+        maxBytes: 1 << 24,
+      });
+      await otherTab.warm();
+      const second = await connect(online, otherTab);
       // The second tab neither takes the first one's text nor its identity.
       expect(markdown(second)).toBe("Keep this\n\nRemove me");
       second.editor!.commands.insertContentAt(at(second, "Remove"), "Do ");
@@ -121,7 +133,7 @@ describe("document connection", () => {
       // outbox over and keeps the text to copy back, rather than wiping it.
       reload(first);
       await waitFor(() => expect(second.recovered).toBe("Please"));
-      expect(outbox.get("plan")!.recovered).toBe("Please");
+      expect(otherTab.get("plan")!.recovered).toBe("Please");
     } finally {
       Reflect.deleteProperty(navigator, "locks");
     }
