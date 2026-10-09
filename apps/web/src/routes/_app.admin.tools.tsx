@@ -3,6 +3,7 @@ import { ToolsPage } from "~/modules/tools/ui/tools-page.tsx";
 import {
   memoryToolQuery,
   interactiveUiToolQuery,
+  mapsToolQuery,
   officeFilesToolQuery,
   urlReaderToolQuery,
   webSearchToolQuery,
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_app/admin/tools")({
       context.queryClient.ensureQueryData(presentationFontsQuery),
       context.queryClient.ensureQueryData(officeFilesToolQuery),
       context.queryClient.ensureQueryData(interactiveUiToolQuery),
+      context.queryClient.ensureQueryData(mapsToolQuery),
     ]),
   component: ToolsPage,
 });

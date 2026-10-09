@@ -132,6 +132,14 @@ const SVG_SHAPE = {
   onclick: handler(),
   label: text(120),
 };
+/** Names an element for `reveal(anchor)`, which scrolls it into view within the block. */
+const ANCHOR = text(80);
+/** One emoji, a pin's mark on the map: a flag, or a pictograph with its modifiers and joins. */
+const EMOJI = matching(
+  /^(?:\p{Regional_Indicator}{2}|\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?(?:\u200D\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?){0,4})$/u,
+  "one emoji",
+  32,
+);
 const POINTS = matching(/^[\d\s,.eE+-]*$/, "points", TREE_LIMITS.pathChars);
 
 export const CATALOG: Readonly<Record<string, TagSpec>> = {
@@ -144,6 +152,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       align: oneOf(["start", "center", "end", "stretch"]),
       border: flag(),
       surface: flag(),
+      anchor: ANCHOR,
     },
     children: "block",
   },
@@ -155,23 +164,34 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       align: oneOf(["start", "center", "end", "baseline"]),
       justify: oneOf(["start", "center", "end", "between"]),
       wrap: flag(),
+      anchor: ANCHOR,
     },
     children: "block",
   },
   col: {
     group: "layout",
     doc: "Column inside a row; takes the free width.",
-    props: { gap: SPACE() },
+    props: { gap: SPACE(), anchor: ANCHOR },
     children: "block",
   },
   grid: {
     group: "layout",
     doc: "Grid of cells.",
-    props: { columns: int(1, 6), gap: SPACE() },
+    props: { columns: int(1, 6), gap: SPACE(), anchor: ANCHOR },
     children: "block",
   },
-  cell: { group: "layout", doc: "Grid cell.", props: { span: int(1, 6) }, children: "block" },
-  card: { group: "layout", doc: "Bordered card.", props: { title: text(200) }, children: "block" },
+  cell: {
+    group: "layout",
+    doc: "Grid cell.",
+    props: { span: int(1, 6), anchor: ANCHOR },
+    children: "block",
+  },
+  card: {
+    group: "layout",
+    doc: "Bordered card.",
+    props: { title: text(200), anchor: ANCHOR },
+    children: "block",
+  },
   divider: { group: "layout", doc: "Horizontal rule.", props: {}, children: "none" },
   tabs: {
     group: "layout",
@@ -608,18 +628,20 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
       ),
       selected: text(80),
       onselect: handler(),
+      anchor: ANCHOR,
     },
     children: { only: ["pin", "route", "area"] },
   },
   pin: {
     group: "map",
-    doc: "Marker at a place or lat/lng. Its content shows when tapped.",
+    doc: "Marker at a place or lat/lng, labelled on the map. Its content shows when tapped.",
     props: {
       id: text(80),
       place: text(200),
       lat: between(-90, 90),
       lng: between(-180, 180),
       label: text(120),
+      icon: EMOJI,
       color: named("mapColor", MAP_COLORS),
     },
     children: "inline",

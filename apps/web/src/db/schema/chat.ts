@@ -331,6 +331,8 @@ export const messageUiStates = pgTable(
     ordinal: integer().notNull(),
     sourceHash: text("source_hash").notNull(),
     state: jsonb().$type<JsonValue>().notNull(),
+    /** What the block showed when saved, in a line per control, for the next answer to read. */
+    digest: text(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.ordinal] })],

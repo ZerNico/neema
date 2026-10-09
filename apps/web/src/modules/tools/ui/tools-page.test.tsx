@@ -16,6 +16,7 @@ import {
   setSearchProviderOrder,
   testSearchProvider,
   updateInteractiveUiTool,
+  updateMapsTool,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -44,6 +45,8 @@ vi.mock("../server/functions.ts", () => ({
   updateOfficeFilesTool: vi.fn(),
   getInteractiveUiTool: vi.fn(),
   updateInteractiveUiTool: vi.fn(),
+  getMapsTool: vi.fn(),
+  updateMapsTool: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -113,11 +116,13 @@ const renderPage = ({
   webSearch = tool("web_search", { maxResults: 8 }),
   officeFiles = tool("office_files", {}),
   interactiveUi = tool("interactive_ui", { images: true }),
+  maps = tool("maps", {}),
   providers = defaultProviders,
 }: {
   webSearch?: ReturnType<typeof tool> | null;
   officeFiles?: ReturnType<typeof tool> | null;
   interactiveUi?: ReturnType<typeof tool> | null;
+  maps?: ReturnType<typeof tool> | null;
   providers?: Provider[];
 } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -134,6 +139,7 @@ const renderPage = ({
   client.setQueryData(["admin", "presentation-fonts"], []);
   client.setQueryData(["admin", "tools", "office-files"], officeFiles);
   client.setQueryData(["admin", "tools", "interactive-ui"], interactiveUi);
+  client.setQueryData(["admin", "tools", "maps"], maps);
   client.setQueryData(["admin", "tools", "web-search"], webSearch);
   client.setQueryData(
     ["admin", "tools", "url-reader"],
@@ -188,10 +194,12 @@ describe("ToolsPage", () => {
     );
   });
 
-  it("switches maps and saves their services", async () => {
+  it("switches maps on their own and saves their services", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateInteractiveUiTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateMapsTool).mockResolvedValue(undefined as never);
     renderPage();
+    // Maps are not part of interactive answers any more.
+    expect(screen.queryByRole("switch", { name: "Maps in interactive answers" })).toBeNull();
 
     const routing = screen.getByLabelText("Routing");
     expect(routing).toHaveValue("https://routing.openstreetmap.de");
@@ -199,20 +207,25 @@ describe("ToolsPage", () => {
     await user.type(routing, "https://osrm.example.org");
     await user.click(within(routing.closest("form")!).getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(updateInteractiveUiTool).toHaveBeenCalledWith({
+      expect(updateMapsTool).toHaveBeenCalledWith({
         data: {
-          mapStyleLight: "https://tiles.openfreemap.org/styles/positron",
-          mapStyleDark: "https://tiles.openfreemap.org/styles/dark",
-          mapGeocoder: "https://photon.komoot.io",
-          mapRouting: "https://osrm.example.org",
+          styleLight: "https://tiles.openfreemap.org/styles/positron",
+          styleDark: "https://tiles.openfreemap.org/styles/dark",
+          geocoder: "https://photon.komoot.io",
+          routing: "https://osrm.example.org",
         },
       }),
     );
 
-    await user.click(screen.getByRole("switch", { name: "Maps in interactive answers" }));
-    await waitFor(() =>
-      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { maps: false } }),
-    );
+    await user.click(screen.getByRole("switch", { name: "Maps enabled" }));
+    await waitFor(() => expect(updateMapsTool).toHaveBeenCalledWith({ data: { enabled: false } }));
+  });
+
+  it("keeps maps on while interactive answers are off", () => {
+    renderPage({ interactiveUi: { ...tool("interactive_ui", { images: true }), enabled: false } });
+    const maps = screen.getByRole("switch", { name: "Maps enabled" });
+    expect(maps).toBeChecked();
+    expect(maps).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("shows images as off while interactive answers are off", () => {

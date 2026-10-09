@@ -1,8 +1,11 @@
-// What an admin allows for ```ui blocks, kept in the `interactive_ui` row of
-// the tools registry. Read once per attempt, like the Office files switch, so
-// a change applies to the next answer. A missing row means the defaults: on.
+// What an admin allows for ```ui blocks and for maps, each in its own row of
+// the tools registry (`interactive_ui`, `maps`). Maps serve more than blocks:
+// the route tool works in any chat. Read once per attempt, like the Office
+// files switch, so a change applies to the next answer. A missing row means
+// the defaults: on.
 
 export const INTERACTIVE_UI_TOOL = "interactive_ui";
+export const MAPS_TOOL = "maps";
 
 /**
  * The public OpenStreetMap services maps use unless an admin points them
@@ -30,10 +33,15 @@ export interface InteractiveUiSettings {
   readonly enabled: boolean;
   /** Image tags are looked up; still only with the attempt's web search. */
   readonly images: boolean;
-  /** Maps draw, and their places and routes are looked up. */
-  readonly maps: boolean;
-  readonly mapServices: MapServices;
 }
+
+export interface MapSettings {
+  /** Places and routes are looked up, for blocks and the route tool, and tiles are served. */
+  readonly enabled: boolean;
+  readonly services: MapServices;
+}
+
+type ToolRow = { readonly enabled: boolean; readonly config: Readonly<Record<string, unknown>> };
 
 const httpsUrl = (value: unknown, fallback: string): string => {
   if (typeof value !== "string") return fallback;
@@ -46,24 +54,25 @@ const httpsUrl = (value: unknown, fallback: string): string => {
 };
 
 /**
- * Off switches the whole feature off for new answers, images and maps
- * included. Blocks already in earlier answers keep rendering: they are
- * stored text, and hiding them would change history.
+ * Off switches blocks off for new answers, images included. Blocks already in
+ * earlier answers keep rendering: they are stored text, and hiding them would
+ * change history.
  */
-export function readInteractiveUi(
-  tool: { readonly enabled: boolean; readonly config: Readonly<Record<string, unknown>> } | null,
-): InteractiveUiSettings {
+export function readInteractiveUi(tool: ToolRow | null): InteractiveUiSettings {
   const enabled = tool?.enabled ?? true;
+  return { enabled, images: enabled && tool?.config.images !== false };
+}
+
+/** Off means no route tool, no lookups for blocks (they say maps are off) and no tiles. */
+export function readMaps(tool: ToolRow | null): MapSettings {
   const config = tool?.config ?? {};
   return {
-    enabled,
-    images: enabled && config.images !== false,
-    maps: enabled && config.maps !== false,
-    mapServices: {
-      styleLight: httpsUrl(config.mapStyleLight, MAP_SERVICE_DEFAULTS.styleLight),
-      styleDark: httpsUrl(config.mapStyleDark, MAP_SERVICE_DEFAULTS.styleDark),
-      geocoder: httpsUrl(config.mapGeocoder, MAP_SERVICE_DEFAULTS.geocoder),
-      routing: httpsUrl(config.mapRouting, MAP_SERVICE_DEFAULTS.routing),
+    enabled: tool?.enabled ?? true,
+    services: {
+      styleLight: httpsUrl(config.styleLight, MAP_SERVICE_DEFAULTS.styleLight),
+      styleDark: httpsUrl(config.styleDark, MAP_SERVICE_DEFAULTS.styleDark),
+      geocoder: httpsUrl(config.geocoder, MAP_SERVICE_DEFAULTS.geocoder),
+      routing: httpsUrl(config.routing, MAP_SERVICE_DEFAULTS.routing),
     },
   };
 }

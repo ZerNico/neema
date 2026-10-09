@@ -1204,6 +1204,7 @@ function Node({ node }: { node: ValidNode }) {
     case "box":
       return (
         <div
+          data-ui-anchor={str(p.anchor)}
           className={cn(
             "flex flex-col",
             step(p.gap, GAP, 3),
@@ -1219,6 +1220,7 @@ function Node({ node }: { node: ValidNode }) {
     case "row":
       return (
         <div
+          data-ui-anchor={str(p.anchor)}
           className={cn(
             "flex flex-row",
             step(p.gap, GAP, 2),
@@ -1232,21 +1234,34 @@ function Node({ node }: { node: ValidNode }) {
       );
     case "col":
       return (
-        <div className={cn("flex min-w-0 flex-1 flex-col", step(p.gap, GAP, 2))}>{children}</div>
+        <div
+          data-ui-anchor={str(p.anchor)}
+          className={cn("flex min-w-0 flex-1 flex-col", step(p.gap, GAP, 2))}
+        >
+          {children}
+        </div>
       );
     case "grid":
       return (
-        <div className={cn("grid grid-cols-1", COLS[num(p.columns) ?? 2], step(p.gap, GAP, 3))}>
+        <div
+          data-ui-anchor={str(p.anchor)}
+          className={cn("grid grid-cols-1", COLS[num(p.columns) ?? 2], step(p.gap, GAP, 3))}
+        >
           {children}
         </div>
       );
     case "cell":
       return (
-        <div className={cn("flex min-w-0 flex-col gap-2", SPAN[num(p.span) ?? 0])}>{children}</div>
+        <div
+          data-ui-anchor={str(p.anchor)}
+          className={cn("flex min-w-0 flex-col gap-2", SPAN[num(p.span) ?? 0])}
+        >
+          {children}
+        </div>
       );
     case "card":
       return (
-        <Card>
+        <Card data-ui-anchor={str(p.anchor)}>
           {str(p.title) ? (
             <CardHeader>
               <CardTitle>{str(p.title)}</CardTitle>

@@ -476,7 +476,6 @@ describe("ui blocks in answers", () => {
     expect(screen.getByRole("button", { name: "Atlantis" })).toBeDisabled();
     expect(screen.getByText("Couldn’t find Atlantis")).toBeInTheDocument();
     expect(screen.getByText(/34 km · 40 min/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Fix the map" })).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(station);
     });
@@ -797,6 +796,7 @@ describe("what blocks may do", () => {
       send: vi.fn(),
       offer: vi.fn(),
       save: vi.fn(async () => {}),
+      lookupMap: vi.fn(async () => ({ lookups: null, busy: false })),
       ...actions,
     };
     const engine = new BlockEngine(quickjs);
@@ -878,7 +878,46 @@ describe("what blocks may do", () => {
       // The hash the server computes from the stored message, or every save is refused.
       sourceHash: hashSource(scanUiFences(BLOCK)[0]!.code),
       state: '{"n":1,"__seed":0}',
+      digest: null,
     });
+  });
+
+  it("reveals an anchor in its own block after a click, never after a field changes", async () => {
+    const scrolled: Element[] = [];
+    // jsdom has no scrolling; recording what would scroll is the point here.
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    // The same anchor outside the block must never move.
+    const outside = document.createElement("div");
+    outside.dataset.uiAnchor = "far";
+    document.body.append(outside);
+    drawWith(
+      {},
+      "m-reveal",
+      [
+        "```ui",
+        '<box anchor="far"><text>Far away</text></box>',
+        '<button onclick={() => reveal("far")}>Go</button>',
+        '<input label="Name" onchange={() => reveal("far")}/>',
+        "```",
+      ].join("\n"),
+      "m-reveal",
+    );
+    const field = await screen.findByRole("textbox", { name: "Name" });
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "x" } });
+    });
+    expect(scrolled).toEqual([]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    });
+    await waitFor(() => expect(scrolled).toHaveLength(1));
+    expect(scrolled[0]).toHaveTextContent("Far away");
+    expect(scrolled[0]).not.toBe(outside);
+    outside.remove();
+    Element.prototype.scrollIntoView = original;
   });
 
   describe("saving", () => {
@@ -900,6 +939,7 @@ describe("what blocks may do", () => {
         send: vi.fn(),
         offer: vi.fn(),
         save,
+        lookupMap: vi.fn(async () => ({ lookups: null, busy: false })),
       };
       const engine = new BlockEngine(quickjs);
       const view = (live: boolean) => (
@@ -946,7 +986,54 @@ describe("what blocks may do", () => {
         ordinal: 0,
         sourceHash: hash,
         state: '{"n":1,"__seed":0}',
+        digest: null,
       });
+    });
+
+    it("saves a stored block again when what it shows changed, and leaves an untouched one", async () => {
+      const markdown = [
+        "```ui",
+        '<script>let amount = $state(3);</script><slider label="Amount" min={0} max={10} value={amount}/>',
+        "```",
+        "",
+        "```ui",
+        '<slider label="Untouched" min={0} max={10} value={5}/>',
+        "```",
+      ].join("\n");
+      const code = scanUiFences(markdown)[0]!.code;
+      const save = vi.fn(async () => {});
+      const actions: GenuiActions = {
+        tailId: "m-digest",
+        disabled: false,
+        send: vi.fn(),
+        offer: vi.fn(),
+        save,
+        lookupMap: vi.fn(async () => ({ lookups: null, busy: false })),
+      };
+      render(
+        <GenuiClientContext value={inProcess(new BlockEngine(quickjs))}>
+          <GenuiActionsContext value={actions}>
+            <GenuiMessageContext
+              value={{
+                messageId: "m-digest",
+                createdAt: 0,
+                streaming: false,
+                generationId: "g1",
+                // Saved before the page could say what the block shows.
+                saved: new Map([
+                  [0, { sourceHash: hashSource(code), state: '{"amount":3}', digest: null }],
+                ]),
+              }}
+            >
+              <AssistantMarkdown content={keyUiFences(markdown, 0)} streaming={false} />
+            </GenuiMessageContext>
+          </GenuiActionsContext>
+        </GenuiClientContext>,
+      );
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ ordinal: 0, digest: "Amount: 3" }),
+      );
     });
 
     it("saves in a branch's copy, which has no attempt of its own", async () => {

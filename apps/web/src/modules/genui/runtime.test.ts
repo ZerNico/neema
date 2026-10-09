@@ -196,6 +196,24 @@ describe("BlockRuntime", () => {
     rt.dispose();
   });
 
+  it("queues reveal with an anchor, taking an index as its text", () => {
+    const rt = boot(
+      '<map label="M" onselect={(id) => reveal(id)}/><button onclick={() => reveal(3)}>go</button>',
+    );
+    const nodes = render(rt).nodes;
+    const tagged = (tag: string) =>
+      nodes.find((n): n is TreeNode => typeof n !== "string" && n.tag === tag)!;
+    const map = handlerOf(tagged("map"), "onselect");
+    expect(rt.call(map.rev, map.$h, ["museum"])).toMatchObject({
+      actions: [{ kind: "reveal", value: "museum" }],
+    });
+    const button = handlerOf(tagged("button"), "onclick");
+    expect(rt.call(button.rev, button.$h, [])).toMatchObject({
+      actions: [{ kind: "reveal", value: "3" }],
+    });
+    rt.dispose();
+  });
+
   it("passes handler arguments as JSON", () => {
     const rt = boot(
       "<script>let v = $state(1);</script><slider min={0} max={10} value={v} onchange={(x) => v = x}/><text>{v}</text>",

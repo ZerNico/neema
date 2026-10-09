@@ -5,6 +5,8 @@ import { lookupOf, type UiLookups } from "~/modules/chat/assistant-output.ts";
 import type { ValidNode } from "../catalog.ts";
 import { normalizeQuery, routeKey, type RouteMode, type RouteStop } from "../extract.ts";
 
+type RoutedMode = Exclude<RouteMode, "straight">;
+
 /** `pending`: still being looked up. `missing`: not found, or never looked up. `off`: maps were off. */
 export type Resolution = "ready" | "pending" | "missing" | "off";
 
@@ -12,6 +14,8 @@ export interface MapPin {
   readonly id: string;
   readonly label: string;
   readonly color: string;
+  /** One emoji drawn in place of the dot. */
+  readonly icon?: string;
   readonly content: ValidNode["children"];
   readonly status: Resolution;
   readonly lat?: number;
@@ -59,8 +63,12 @@ function stopsOf(value: unknown): RouteStop[] {
   });
 }
 
-export function resolveMap(node: ValidNode, lookups: UiLookups, streaming: boolean): MapModel {
-  const absent: Resolution = streaming ? "pending" : "missing";
+/**
+ * `waiting`: what has no result yet may still get one, because the answer
+ * streams or the page asked the server for it.
+ */
+export function resolveMap(node: ValidNode, lookups: UiLookups, waiting: boolean): MapModel {
+  const absent: Resolution = waiting ? "pending" : "missing";
   const where = (place: string) => {
     const found = lookupOf(lookups.places, normalizeQuery(place));
     if (!found) return { status: absent };
@@ -87,10 +95,12 @@ export function resolveMap(node: ValidNode, lookups: UiLookups, streaming: boole
           : place
             ? where(place)
             : { status: "missing" as const };
+      const icon = str(p.icon);
       pins.push({
         id: str(p.id) ?? `pin-${index}`,
         label: str(p.label) ?? ("name" in found ? found.name : undefined) ?? place ?? "Place",
         color,
+        ...(icon ? { icon } : {}),
         content: child.children,
         status: found.status,
         ...("lat" in found ? { lat: found.lat, lng: found.lng } : {}),
@@ -154,8 +164,46 @@ export function resolveMap(node: ValidNode, lookups: UiLookups, streaming: boole
   return { pins, routes, areas };
 }
 
+/** Places and routes a map draws that the answer has no result for. */
+export interface MapNeeds {
+  readonly places: readonly string[];
+  readonly routes: ReadonlyArray<{ readonly mode: RoutedMode; readonly stops: readonly RouteStop[] }>;
+}
+
+/**
+ * What a finished answer's map still needs looked up: names and stops its
+ * state computed, which streaming never saw. Literal ones were settled then.
+ */
+export function mapNeeds(node: ValidNode, lookups: UiLookups): MapNeeds {
+  const places = new Set<string>();
+  const routes = new Map<string, MapNeeds["routes"][number]>();
+  const need = (name: string) => {
+    const query = normalizeQuery(name);
+    if (query !== "" && !lookupOf(lookups.places, query)) places.add(query);
+  };
+  for (const child of node.children) {
+    if (typeof child === "string") continue;
+    const p = child.props;
+    if (child.tag === "pin") {
+      const place = str(p.place);
+      if (place && (num(p.lat) === undefined || num(p.lng) === undefined)) need(place);
+    } else if (child.tag === "route") {
+      const mode = (str(p.mode) ?? "drive") as RouteMode;
+      const stops = stopsOf(p.stops);
+      for (const stop of stops) if (typeof stop === "string") need(stop);
+      if (mode === "straight" || stops.length < 2) continue;
+      const key = routeKey({ mode, stops });
+      if (!lookupOf(lookups.routes, key)) routes.set(key, { mode, stops });
+    }
+  }
+  return { places: [...places], routes: [...routes.values()] };
+}
+
 /** "34 km · 40 min" in the reader's locale; walking distances stay in metres below 1 km. */
-export function routeSummary(route: MapRoute, locale?: string): string | null {
+export function routeSummary(
+  route: { readonly distance?: number | undefined; readonly duration?: number | undefined },
+  locale?: string,
+): string | null {
   if (route.distance === undefined || route.duration === undefined) return null;
   const km = route.distance / 1000;
   const distance =
@@ -199,4 +247,29 @@ export function circleRing(
   });
   ring.push(ring[0]!);
   return ring;
+}
+
+/** The first share of a path, by length, ending partway along a segment. */
+export function partialPath(
+  path: ReadonlyArray<readonly [number, number]>,
+  share: number,
+): Array<[number, number]> {
+  if (path.length < 2 || share >= 1) return path.map(([x, y]) => [x, y]);
+  const lengths = path.slice(1).map(([x, y], i) => Math.hypot(x - path[i]![0], y - path[i]![1]));
+  let left = lengths.reduce((sum, n) => sum + n, 0) * Math.max(0, share);
+  const out: Array<[number, number]> = [[path[0]![0], path[0]![1]]];
+  for (let i = 0; i < lengths.length; i++) {
+    const [x1, y1] = path[i + 1]!;
+    if (left >= lengths[i]!) {
+      out.push([x1, y1]);
+      left -= lengths[i]!;
+      continue;
+    }
+    const [x0, y0] = path[i]!;
+    const length = lengths[i]!;
+    const t = length === 0 ? 0 : left / length;
+    out.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
+    break;
+  }
+  return out;
 }

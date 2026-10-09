@@ -61,6 +61,8 @@ export function stepLabel(step: WorkStep): string {
           return "Working with project files";
         case "attachment":
           return "Reading a file";
+        case "map":
+          return "Looking up a route";
         case "desktop":
           if (isBrowserTool(call.name)) return "Using the browser";
           if (call.name === "run_command") return "Running a command";
@@ -92,6 +94,7 @@ const PAST: Record<string, string> = {
   "Summarizing earlier messages": "Summarized earlier messages",
   "Working with project files": "Worked with project files",
   "Reading a file": "Read a file",
+  "Looking up a route": "Looked up a route",
   "Running a command": "Ran a command",
   "Editing files": "Edited files",
   "Looking through files": "Looked through files",

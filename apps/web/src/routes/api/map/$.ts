@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Option } from "effect";
 import { proxyMap } from "~/modules/genui/server/map-proxy.ts";
-import { INTERACTIVE_UI_TOOL, readInteractiveUi } from "~/modules/genui/settings.ts";
+import { MAPS_TOOL, readMaps } from "~/modules/genui/settings.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { approvedSession, unauthorized } from "~/server/approved-route.ts";
 import { publicUrl } from "~/server/public-url.ts";
@@ -21,14 +21,12 @@ export const Route = createFileRoute("/api/map/$")({
         const settings = await runtime.runPromise(
           Effect.gen(function* () {
             const tools = yield* Effect.serviceOption(ToolsRepo);
-            return readInteractiveUi(
-              Option.isSome(tools) ? yield* tools.value.getTool(INTERACTIVE_UI_TOOL) : null,
-            );
+            return readMaps(Option.isSome(tools) ? yield* tools.value.getTool(MAPS_TOOL) : null);
           }),
         );
-        if (!settings.maps) return new Response("Not found", { status: 404 });
+        if (!settings.enabled) return new Response("Not found", { status: 404 });
         const url = new URL(request.url);
-        return proxyMap(params._splat ?? "", url, settings.mapServices, publicUrl() ?? url.origin);
+        return proxyMap(params._splat ?? "", url, settings.services, publicUrl() ?? url.origin);
       },
     },
   },

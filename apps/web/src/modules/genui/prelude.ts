@@ -146,6 +146,8 @@ export const PRELUDE = String.raw`(function () {
   function action(kind) {
     return function (value) {
       if (!inHandler) throw new TypeError(kind + "() is only available in event handlers");
+      // An anchor named by an index ({#each} rows) is as good as its text.
+      if (kind === "reveal" && typeof value === "number") value = String(value);
       if (typeof value !== "string") throw new TypeError(kind + "() takes a string");
       // One action per event; later ones are ignored, not errors, so a
       // handler that queues two still applies its state changes.
@@ -183,6 +185,7 @@ export const PRELUDE = String.raw`(function () {
   g.send = action("send");
   g.open = action("open");
   g.copy = action("copy");
+  g.reveal = action("reveal");
   Object.defineProperty(g, "now", { get: function () { return nowValue; } });
 
   g.__host = Object.freeze({

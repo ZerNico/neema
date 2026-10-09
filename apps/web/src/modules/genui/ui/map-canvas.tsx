@@ -9,9 +9,44 @@ import * as maplibre from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
-import { circleRing, type MapModel } from "./map-model.ts";
+import { circleRing, partialPath, type MapModel } from "./map-model.ts";
 
 maplibre.setWorkerUrl(workerUrl);
+
+const styleUrl = (dark: boolean) => `${location.origin}/api/map/style/${dark ? "dark" : "light"}`;
+/** What this map adds to a style, carried across a theme change. */
+const OWN_SOURCES = ["areas", "routes", "labels"];
+const OWN_LAYERS = new Set(["areas", "areas-edge", "routes", "routes-straight", "labels"]);
+
+/** How long a route takes to draw itself when it arrives. */
+const DRAW_MS = 700;
+/** The labels' font when the style names none MapLibre can read; OpenFreeMap serves it. */
+const LABEL_FONT = ["Noto Sans Regular"];
+
+/**
+ * Routes each block has already drawn on this page, by block. A route draws
+ * itself only when it arrives while the reader watches, never on a reload or
+ * when the block remounts (Streamdown, the virtual list, the expanded view).
+ */
+const drawnRoutes = new Map<string, Set<string>>();
+const MAX_BLOCKS = 200;
+
+/** Which of these routes are new to the block; the first sight of a block counts as drawn. */
+function arrivedRoutes(block: string, keys: readonly string[]): Set<string> {
+  let seen = drawnRoutes.get(block);
+  if (!seen) {
+    drawnRoutes.set(block, new Set(keys));
+    if (drawnRoutes.size > MAX_BLOCKS) {
+      const oldest = drawnRoutes.keys().next().value;
+      if (oldest !== undefined) drawnRoutes.delete(oldest);
+    }
+    return new Set();
+  }
+  const fresh = new Set(keys.filter((key) => !seen.has(key)));
+  for (const key of fresh) seen.add(key);
+  return fresh;
+}
+
 
 /** A theme colour as rgb, which MapLibre's layers can read; CSS variables and oklch they cannot. */
 function resolveColor(name: string): string {
@@ -26,20 +61,61 @@ function resolveColor(name: string): string {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-function featureCollections(model: MapModel) {
+function routeFeatures(model: MapModel, drawing: ReadonlySet<string>, share: number) {
   return {
-    routes: {
+    type: "FeatureCollection" as const,
+    features: model.routes.flatMap((route) =>
+      route.path
+        ? [
+            {
+              type: "Feature" as const,
+              properties: { color: resolveColor(route.color), dashed: route.mode === "straight" },
+              geometry: {
+                type: "LineString" as const,
+                coordinates: partialPath(route.path, drawing.has(route.key) ? share : 1),
+              },
+            },
+          ]
+        : [],
+    ),
+  };
+}
+
+/**
+ * How far below its point a pin's label starts, in ems of the 12px label:
+ * clear of the marker drawn there, which is larger with an emoji and when picked.
+ */
+function labelOffset(pin: MapModel["pins"][number], picked: boolean): number {
+  if (pin.icon) return picked ? 1.8 : 1.5;
+  return picked ? 1.2 : 0.9;
+}
+
+/** The font the style's own labels use, which its glyph server is sure to have. */
+function labelFont(map: maplibre.Map): string[] {
+  for (const layer of map.getStyle().layers) {
+    if (layer.type !== "symbol") continue;
+    const font: unknown = layer.layout?.["text-font"];
+    if (Array.isArray(font) && font.every((name) => typeof name === "string")) return font;
+  }
+  return LABEL_FONT;
+}
+
+function featureCollections(model: MapModel, selected: string | null) {
+  return {
+    labels: {
       type: "FeatureCollection" as const,
-      features: model.routes.flatMap((route) =>
-        route.path
+      features: model.pins.flatMap((pin) =>
+        pin.lat !== undefined && pin.lng !== undefined
           ? [
               {
                 type: "Feature" as const,
-                properties: { color: resolveColor(route.color), dashed: route.mode === "straight" },
-                geometry: {
-                  type: "LineString" as const,
-                  coordinates: route.path.map(([x, y]) => [x, y]),
+                // The selected pin's label wins a collision with its neighbours'.
+                properties: {
+                  label: pin.label,
+                  rank: pin.id === selected ? 0 : 1,
+                  offset: [0, labelOffset(pin, pin.id === selected)],
                 },
+                geometry: { type: "Point" as const, coordinates: [pin.lng, pin.lat] },
               },
             ]
           : [],
@@ -69,6 +145,8 @@ function drawnCount(model: MapModel): number {
 }
 
 const FIT = { padding: 48, maxZoom: 14 } as const;
+/** How close a picked pin is shown: its streets, still with some neighbourhood. */
+const PICK_ZOOM = 13;
 
 function boundsOf(model: MapModel): maplibre.LngLatBounds | null {
   const bounds = new maplibre.LngLatBounds();
@@ -94,7 +172,7 @@ export interface MapCanvasProps {
   /** The style never loaded: the figure falls back to its list. */
   readonly onBroken: () => void;
   /**
-   * A new map was made (on mount, a theme change or a fixed zoom), numbered
+   * A new map was made (on mount or a fixed zoom), numbered
    * so painting and revealing refer to that map, not to an earlier one.
    */
   readonly onCreated: (map: number) => void;
@@ -106,6 +184,10 @@ export interface MapCanvasProps {
   readonly shown: boolean;
   /** A view the block fixed; otherwise the map fits what it draws. */
   readonly view: { readonly center?: [number, number]; readonly zoom?: number };
+  /** The block the map is in, so a route draws itself once per page, not per mount. */
+  readonly block: string;
+  /** Changed to fit the view to everything the map draws again. */
+  readonly fitAll: number;
 }
 
 export default function MapCanvas({
@@ -120,23 +202,38 @@ export default function MapCanvas({
   onRevealed,
   shown,
   view,
+  block,
+  fitAll,
 }: MapCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibre.Map | null>(null);
   const markers = useRef<maplibre.Marker[]>([]);
   const fitted = useRef(0);
   // The map whose layers exist. Compared with the current map in each effect,
-  // so a map made since, in any theme, is not drawn on before its own load.
+  // so a map made since is not drawn on before its own load.
   const [loaded, setLoaded] = useState<maplibre.Map | null>(null);
   const made = useRef(0);
   const fixedZoom = view.zoom !== undefined;
   // Read when a map is made, not followed: later changes do not move a map the reader panned.
-  const latest = useRef({ model, onSelect, onBroken, onCreated, onPainted, onRevealed, view });
+  const latest = useRef({
+    model,
+    onSelect,
+    onBroken,
+    onCreated,
+    onPainted,
+    onRevealed,
+    view,
+    dark,
+  });
   useEffect(() => {
-    latest.current = { model, onSelect, onBroken, onCreated, onPainted, onRevealed, view };
+    latest.current = { model, onSelect, onBroken, onCreated, onPainted, onRevealed, view, dark };
   });
 
-  // One map per theme: a style swap would drop the layers drawn on it.
+  // The theme a map was last styled for, so a theme change restyles it in place.
+  const styled = useRef(dark);
+  // Bumped once a restyled map has loaded, to redraw in the new theme's colours.
+  const [restyled, setRestyled] = useState(0);
+
   useEffect(() => {
     const element = container.current;
     if (!element) return;
@@ -153,7 +250,7 @@ export default function MapCanvas({
     try {
       map = new maplibre.Map({
         container: element,
-        style: `${location.origin}/api/map/style/${dark ? "dark" : "light"}`,
+        style: styleUrl(opening.dark),
         attributionControl: { compact: true },
         cooperativeGestures: true,
         ...(known
@@ -165,6 +262,7 @@ export default function MapCanvas({
       return;
     }
     mapRef.current = map;
+    styled.current = opening.dark;
     let everLoaded = false;
     map.addControl(new maplibre.NavigationControl({ showCompass: false }), "top-right");
     map.once("idle", () => {
@@ -209,6 +307,31 @@ export default function MapCanvas({
         filter: ["get", "dashed"],
         paint: { "line-color": ["get", "color"], "line-width": 2.5, "line-dasharray": [2, 2] },
       });
+      map.addSource("labels", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      // A symbol layer, not text in the markers: MapLibre hides labels that
+      // would collide, so a dense map shows what fits instead of a pile.
+      map.addLayer({
+        id: "labels",
+        type: "symbol",
+        source: "labels",
+        layout: {
+          "text-field": ["get", "label"],
+          "text-font": labelFont(map),
+          "text-size": 12,
+          "text-anchor": "top",
+          "text-offset": ["get", "offset"],
+          "text-max-width": 10,
+          "symbol-sort-key": ["get", "rank"],
+        },
+        paint: {
+          "text-color": resolveColor("foreground"),
+          "text-halo-color": resolveColor("background"),
+          "text-halo-width": 1.5,
+        },
+      });
       everLoaded = true;
       setLoaded(map);
     });
@@ -223,15 +346,49 @@ export default function MapCanvas({
       map.remove();
       mapRef.current = null;
     };
-  }, [dark, fixedZoom]);
+  }, [fixedZoom]);
+
+  // A theme change swaps the style under the same map: the view, the drawn
+  // routes and the reader's place stay, only the basemap and colours change.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || loaded !== map || styled.current === dark) return;
+    styled.current = dark;
+    map.setStyle(styleUrl(dark), {
+      transformStyle: (previous, next) =>
+        previous
+          ? {
+              ...next,
+              sources: {
+                ...next.sources,
+                ...Object.fromEntries(
+                  OWN_SOURCES.flatMap((id) =>
+                    previous.sources[id] ? [[id, previous.sources[id]]] : [],
+                  ),
+                ),
+              },
+              layers: [
+                ...next.layers,
+                ...previous.layers.filter((layer) => OWN_LAYERS.has(layer.id)),
+              ],
+            }
+          : next,
+    });
+    map.once("style.load", () => setRestyled((n) => n + 1));
+  }, [dark, loaded]);
 
   // Draw what is known so far, and fit the view whenever more of it arrives.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || loaded !== map) return;
-    const data = featureCollections(model);
-    (map.getSource("routes") as maplibre.GeoJSONSource | undefined)?.setData(data.routes);
+    const data = featureCollections(model, selected);
+    const routes = map.getSource("routes") as maplibre.GeoJSONSource | undefined;
     (map.getSource("areas") as maplibre.GeoJSONSource | undefined)?.setData(data.areas);
+    (map.getSource("labels") as maplibre.GeoJSONSource | undefined)?.setData(data.labels);
+    if (map.getLayer("labels")) {
+      map.setPaintProperty("labels", "text-color", resolveColor("foreground"));
+      map.setPaintProperty("labels", "text-halo-color", resolveColor("background"));
+    }
     for (const marker of markers.current) marker.remove();
     markers.current = model.pins.flatMap((pin) => {
       if (pin.lat === undefined || pin.lng === undefined) return [];
@@ -239,16 +396,27 @@ export default function MapCanvas({
       button.type = "button";
       button.setAttribute("aria-label", pin.label);
       button.setAttribute("aria-pressed", String(pin.id === selected));
-      // MapLibre positions this element by its transform, so only the dot inside may scale.
-      button.className =
-        "grid size-6 cursor-pointer place-items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
-      const dot = document.createElement("span");
-      dot.className = cn(
-        "size-4 rounded-full border-2 border-background shadow-md transition-[scale] motion-reduce:transition-none",
-        pin.id === selected && "scale-150",
+      // MapLibre positions this element by its transform, so only the mark inside may scale.
+      // As large as the mark inside, so MapLibre centres the mark on the point.
+      button.className = cn(
+        "grid cursor-pointer place-items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        pin.icon ? "size-7" : "size-6",
       );
-      dot.style.background = `var(--${pin.color})`;
-      button.append(dot);
+      const mark = document.createElement("span");
+      if (pin.icon) {
+        mark.className = cn(
+          "bg-background grid size-7 place-items-center rounded-full text-base leading-none shadow-md transition-[scale] motion-reduce:transition-none",
+          pin.id === selected && "ring-primary scale-125 ring-2",
+        );
+        mark.textContent = pin.icon;
+      } else {
+        mark.className = cn(
+          "size-4 rounded-full border-2 border-background shadow-md transition-[scale] motion-reduce:transition-none",
+          pin.id === selected && "scale-150",
+        );
+        mark.style.background = `var(--${pin.color})`;
+      }
+      button.append(mark);
       button.addEventListener("click", () => latest.current.onSelect(pin.id));
       return [new maplibre.Marker({ element: button }).setLngLat([pin.lng, pin.lat]).addTo(map)];
     });
@@ -259,17 +427,55 @@ export default function MapCanvas({
       fitted.current = count;
       map.fitBounds(bounds, { ...FIT, animate: !first && !prefersReducedMotion() });
     }
-  }, [model, loaded, selected, fixedZoom]);
 
-  // A pin chosen from the list may be off screen; bring it into view.
+    const drawing = arrivedRoutes(
+      block,
+      model.routes.flatMap((route) => (route.path ? [route.key] : [])),
+    );
+    if (drawing.size === 0 || prefersReducedMotion()) {
+      routes?.setData(routeFeatures(model, new Set(), 1));
+      return;
+    }
+    const start = performance.now();
+    let frame = requestAnimationFrame(function step(now) {
+      const t = Math.min(1, (now - start) / DRAW_MS);
+      routes?.setData(routeFeatures(model, drawing, 1 - (1 - t) ** 3));
+      if (t < 1) frame = requestAnimationFrame(step);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      routes?.setData(routeFeatures(model, new Set(), 1));
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `restyled` redraws in the colours of a theme the map just changed to
+  }, [model, loaded, selected, fixedZoom, block, restyled]);
+
+  // "Show all": back to everything the map draws, wherever the reader panned.
+  useEffect(() => {
+    const map = mapRef.current;
+    const bounds = boundsOf(latest.current.model);
+    if (fitAll === 0 || !map || loaded !== map || !bounds) return;
+    map.fitBounds(bounds, { ...FIT, animate: !prefersReducedMotion() });
+  }, [fitAll, loaded]);
+
+  // A picked pin is flown to: out over the way between, then in on it. The
+  // selection a map opens with is not a pick, and the opening view stands.
+  const flownFrom = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     // Through the ref: only a new selection moves the view, not new lookups.
     const map = mapRef.current;
+    if (!map || loaded !== map) return;
+    const previous = flownFrom.current;
+    flownFrom.current = selected;
+    if (previous === undefined || previous === selected) return;
     const pin = latest.current.model.pins.find((candidate) => candidate.id === selected);
-    if (!map || loaded !== map || pin?.lat === undefined || pin.lng === undefined) return;
-    const at: [number, number] = [pin.lng, pin.lat];
-    if (!map.getBounds().contains(at)) map.easeTo({ center: at, animate: !prefersReducedMotion() });
-  }, [selected, loaded]);
+    if (pin?.lat === undefined || pin.lng === undefined) return;
+    const camera = {
+      center: [pin.lng, pin.lat] as [number, number],
+      zoom: fixedZoom ? map.getZoom() : Math.max(map.getZoom(), PICK_ZOOM),
+    };
+    if (prefersReducedMotion()) map.jumpTo(camera);
+    else map.flyTo({ ...camera, essential: false });
+  }, [selected, loaded, fixedZoom]);
 
   return (
     <div

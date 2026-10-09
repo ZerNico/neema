@@ -67,11 +67,22 @@ import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
 import { lookupsOf, type UiLookups } from "../assistant-output.ts";
 import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
-import { INTERACTIVE_UI_TOOL, readInteractiveUi } from "~/modules/genui/settings.ts";
+import {
+  INTERACTIVE_UI_TOOL,
+  MAPS_TOOL,
+  readInteractiveUi,
+  readMaps,
+} from "~/modules/genui/settings.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
 import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
 import { makeMapResolver, type MapResolver } from "~/modules/genui/server/map-resolver.ts";
+import { prepareMapRouteTool } from "~/modules/genui/server/map-tool.ts";
+import {
+  MAP_ROUTE_TOOL,
+  MapRouteResult,
+  summarizeMapRoute,
+} from "~/modules/genui/map-tool-schema.ts";
 import { fileForModel } from "./file-for-model.ts";
 import { attachmentReferenceHint } from "../file-references.ts";
 import {
@@ -1022,11 +1033,15 @@ export class StreamEngine extends Context.Service<
             : null;
 
           // Admins can switch interactive answers, or only their images, off in
-          // Tools. Read once per attempt, so a change applies to the next answer.
+          // Tools, and maps apart from both. Read once per attempt, so a change
+          // applies to the next answer.
           const interactiveUi = readInteractiveUi(
             Option.isSome(toolRegistry)
               ? yield* toolRegistry.value.getTool(INTERACTIVE_UI_TOOL)
               : null,
+          );
+          const maps = readMaps(
+            Option.isSome(toolRegistry) ? yield* toolRegistry.value.getTool(MAPS_TOOL) : null,
           );
           // Images named by the answer's ```ui blocks, looked up while it streams.
           // Only with the search this attempt was offered; otherwise each query
@@ -1059,7 +1074,7 @@ export class StreamEngine extends Context.Service<
           const mapResolver: MapResolver | null =
             fence && Option.isSome(mapLookups)
               ? yield* makeMapResolver({
-                  off: !interactiveUi.maps,
+                  off: !maps.enabled,
                   settled: {
                     places: new Set(Object.keys(earlier?.places ?? {})),
                     routes: new Set(Object.keys(earlier?.routes ?? {})),
@@ -1069,9 +1084,9 @@ export class StreamEngine extends Context.Service<
                       ([, place]) => place.status === "resolved",
                     ),
                   ),
-                  geocode: (query) => mapLookups.value.geocode(interactiveUi.mapServices, query),
+                  geocode: (query) => mapLookups.value.geocode(maps.services, query),
                   route: (mode, stops) =>
-                    mapLookups.value.route(interactiveUi.mapServices, mode, stops),
+                    mapLookups.value.route(maps.services, mode, stops),
                   record: (update) => recordLookups(fence, update),
                 })
               : null;
@@ -1168,6 +1183,17 @@ export class StreamEngine extends Context.Service<
               ? prepareNotifyTool(database.value, {
                   messageId: input.messageId,
                   generationId: fence.generationId,
+                })
+              : null;
+          // Real distances for any chat while maps are on; inside an answer what
+          // it finds is also the answer's map lookups, so a block of the same
+          // route draws at once and agrees with the prose.
+          const mapRouteTools =
+            maps.enabled && Option.isSome(mapLookups)
+              ? prepareMapRouteTool({
+                  geocode: (query) => mapLookups.value.geocode(maps.services, query),
+                  route: (mode, stops) => mapLookups.value.route(maps.services, mode, stops),
+                  ...(mapResolver ? { seed: mapResolver.seed } : {}),
                 })
               : null;
           // Admins switch Office file editing off in Tools; read per attempt so
@@ -1571,6 +1597,7 @@ export class StreamEngine extends Context.Service<
             ...(webTools ? [webTools.group] : []),
             ...(planTools ? [planTools.group] : []),
             ...(notifyTools ? [notifyTools.group] : []),
+            ...(mapRouteTools ? [mapRouteTools] : []),
             ...officeTools.map((tool) => tool.group),
             ...(customTools ? [customTools.group] : []),
             ...(publishFileTool ? [publishFileTool.group] : []),
@@ -2655,6 +2682,8 @@ export class StreamEngine extends Context.Service<
                                                 ? "plan"
                                                 : part.name === "notify_user" && notifyTools
                                                   ? "notify"
+                                                  : part.name === MAP_ROUTE_TOOL && mapRouteTools
+                                                    ? "map"
                                                   : (part.name === "publish_file" &&
                                                         publishFileTool) ||
                                                       (part.name === "create_file" &&
@@ -2790,7 +2819,8 @@ export class StreamEngine extends Context.Service<
                             family === "memory" ||
                             family === "ask" ||
                             family === "plan" ||
-                            family === "notify"
+                            family === "notify" ||
+                            family === "map"
                           ) {
                             yield* pushToolChunk(
                               family === "plan"
@@ -3561,6 +3591,38 @@ export class StreamEngine extends Context.Service<
                               name: "notify_user",
                               ok,
                               ...(ok ? { message: result.message } : { error: result.message }),
+                            });
+                            return;
+                          }
+                          if (part.name === MAP_ROUTE_TOOL && mapRouteTools) {
+                            if (isPreliminary) return;
+                            const decoded = Schema.decodeUnknownOption(MapRouteResult)(
+                              part.result,
+                            );
+                            const result: MapRouteResult =
+                              !part.isFailure && Option.isSome(decoded)
+                                ? decoded.value
+                                : { v: 1, outcome: "rejected", message: "No route was found." };
+                            const summary = summarizeMapRoute(result);
+                            const ok = summary !== null;
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(result),
+                              status: ok ? "complete" : "error",
+                              ...(result.outcome === "rejected"
+                                ? { error: { code: "RouteNotFound", message: result.message } }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "map",
+                              phase: "result",
+                              callId: rowId,
+                              name: MAP_ROUTE_TOOL,
+                              ok,
+                              ...(summary
+                                ? { route: summary }
+                                : { error: result.outcome === "rejected" ? result.message : "" }),
                             });
                             return;
                           }

@@ -72,6 +72,8 @@ export interface UiRoute {
   readonly path?: ReadonlyArray<readonly [number, number]>;
   /** Metres. */
   readonly distance?: number;
+  /** Each stretch between consecutive stops, in metres and seconds. */
+  readonly legs?: ReadonlyArray<{ readonly distance: number; readonly duration: number }>;
   /** Seconds. */
   readonly duration?: number;
 }

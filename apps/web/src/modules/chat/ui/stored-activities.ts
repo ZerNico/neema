@@ -43,6 +43,11 @@ import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schem
 import { readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
+import {
+  MAP_ROUTE_TOOL,
+  MapRouteResult,
+  summarizeMapRoute,
+} from "~/modules/genui/map-tool-schema.ts";
 import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
 
@@ -164,6 +169,20 @@ export function toActivity(row: {
         row.status === "running" ? "running" : result?.status === "complete" ? "complete" : "error",
       ...(row.researchRunId ? { runId: row.researchRunId } : {}),
       ...(row.researchTaskId ? { taskId: row.researchTaskId } : {}),
+    };
+  }
+  if (row.toolName === MAP_ROUTE_TOOL) {
+    const result = Option.getOrNull(Schema.decodeUnknownOption(MapRouteResult)(row.result));
+    const route = result ? summarizeMapRoute(result) : null;
+    return {
+      family: "map",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status === "running" ? "running" : route ? "complete" : "error",
+      ...(route ? { route } : {}),
     };
   }
   if (row.toolName === "notify_user") {

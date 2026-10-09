@@ -85,6 +85,6 @@ describe("the interactive-ui skill", () => {
   });
 
   it("stays small enough to load beside a long conversation", () => {
-    expect(INTERACTIVE_UI_SKILL_ROOT.length).toBeLessThan(16_000);
+    expect(INTERACTIVE_UI_SKILL_ROOT.length).toBeLessThan(17_000);
   });
 });

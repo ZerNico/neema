@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NO_LOOKUPS, type UiLookups } from "~/modules/chat/assistant-output.ts";
 import type { ValidNode } from "../catalog.ts";
 import { routeKey } from "../extract.ts";
-import { circleRing, resolveMap, routeSummary } from "./map-model.ts";
+import { circleRing, mapNeeds, partialPath, resolveMap, routeSummary } from "./map-model.ts";
 
 const el = (tag: string, props: Record<string, unknown>, children: ValidNode["children"] = []) =>
   ({ tag, props, children }) as ValidNode;
@@ -93,18 +93,9 @@ describe("resolveMap with maps off", () => {
 
 describe("routeSummary", () => {
   it("says distance and time", () => {
-    expect(
-      routeSummary(
-        { key: "", mode: "drive", color: "", status: "ready", distance: 34000, duration: 2400 },
-        "en",
-      ),
-    ).toBe("34 km · 40 min");
-    expect(
-      routeSummary(
-        { key: "", mode: "walk", color: "", status: "ready", distance: 850, duration: 4000 },
-        "en",
-      ),
-    ).toBe("850 m · 1 h 7 min");
+    expect(routeSummary({ distance: 34000, duration: 2400 }, "en")).toBe("34 km · 40 min");
+    expect(routeSummary({ distance: 850, duration: 4000 }, "en")).toBe("850 m · 1 h 7 min");
+    expect(routeSummary({ distance: 850 }, "en")).toBeNull();
   });
 });
 
@@ -132,5 +123,51 @@ describe("circleRing", () => {
     const ring = circleRing(52.5, 13.4, 1000, 8);
     expect(ring).toHaveLength(9);
     expect(ring[0]).toEqual(ring[8]);
+  });
+});
+
+describe("mapNeeds", () => {
+  it("asks for places and roads without a result, never for straight lines or coordinates", () => {
+    const needs = mapNeeds(map, lookups);
+    expect(needs.places).toEqual(["Not yet", "Potsdam"]);
+    expect(needs.routes).toEqual([]);
+    const kept = el("map", { label: "Kept" }, [
+      el("route", { mode: "walk", stops: ["Berlin Hauptbahnhof", { lat: 52.39, lng: 13.06 }] }),
+      el("route", { mode: "straight", stops: ["Berlin Hauptbahnhof", "Somewhere"] }),
+    ]);
+    expect(mapNeeds(kept, lookups)).toEqual({
+      places: ["Somewhere"],
+      routes: [{ mode: "walk", stops: ["Berlin Hauptbahnhof", { lat: 52.39, lng: 13.06 }] }],
+    });
+  });
+
+  it("shows what has no result as pending while it is asked for, missing after", () => {
+    const pin = el("map", { label: "One" }, [el("pin", { place: "Not yet" })]);
+    expect(resolveMap(pin, lookups, true).pins[0]!.status).toBe("pending");
+    expect(resolveMap(pin, lookups, false).pins[0]!.status).toBe("missing");
+  });
+});
+
+describe("partialPath", () => {
+  const path = [
+    [0, 0],
+    [1, 0],
+    [1, 3],
+  ] as const;
+
+  it("ends partway along the segment the share reaches, by length", () => {
+    expect(partialPath(path, 0.5)).toEqual([
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ]);
+    expect(partialPath(path, 0)).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+
+  it("returns the whole path at the end", () => {
+    expect(partialPath(path, 1)).toEqual(path.map(([x, y]) => [x, y]));
   });
 });

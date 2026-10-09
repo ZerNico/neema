@@ -101,6 +101,7 @@ const WORK_FAMILIES = new Set<ToolActivity["family"]>([
   "integration",
   "project-file",
   "attachment",
+  "map",
 ]);
 
 const isWorkStep = (part: WorkStep) =>

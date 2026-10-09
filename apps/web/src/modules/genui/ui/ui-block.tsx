@@ -17,7 +17,7 @@ import * as m from "motion/react-m";
 import { toast } from "sonner";
 import type { CustomRendererProps } from "streamdown";
 import { motionEase } from "~/ui/motion-presets.ts";
-import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
+import { prefersReducedMotion, useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { LeaveDialog } from "~/ui/leave-dialog.tsx";
 import type { RenderReply } from "../client/engine.ts";
 import { sharedWorkerClient, type GenuiClient, type Unavailable } from "../client/host.ts";
@@ -28,6 +28,7 @@ import type { BlockAction } from "../runtime.ts";
 import { copiedPreview, hasHiddenText, mentionsUrl } from "../text.ts";
 import {
   BlockKeyContext,
+  BlockOrdinalContext,
   DispatchContext,
   GenuiActionsContext,
   GenuiClientContext,
@@ -35,11 +36,14 @@ import {
   SuggestContext,
   type Dispatch,
   type GenuiMessage,
+  type SavedUiState,
   type TrustedEvent,
 } from "./context.ts";
 import { registerBlockFlush, trackBlockSave, trackBlockWork } from "./pending-saves.ts";
 import { BlockSkeleton } from "./frame.tsx";
 import { Nodes } from "./tree.tsx";
+import { digestTree } from "./digest.ts";
+import { useMessageLookups } from "./map-requests.ts";
 
 /** While a block is still being written, it re-renders at most this often. */
 const STREAMING_RENDER_MS = 250;
@@ -105,6 +109,8 @@ interface BlockProps {
   keep: boolean;
   onActions: (actions: readonly BlockAction[], trusted: TrustedEvent) => void;
   onState: (state: string) => void;
+  /** What the block shows now, with the state it shows it from. */
+  onDigest: (digest: string | null, state: string) => void;
 }
 
 /**
@@ -281,7 +287,17 @@ function useBlock({
 
 function Block(props: BlockProps & { suggest: ((text: string) => void) | null }) {
   const { reply, dispatch } = useBlock(props);
-  const { block, code, streaming, suggest } = props;
+  const { block, ordinal, code, streaming, suggest, onDigest } = props;
+  const lookups = useMessageLookups();
+  const digest = useMemo(
+    () => (reply?.ok ? digestTree(reply.nodes, lookups) : null),
+    [reply, lookups],
+  );
+  const state = reply?.ok ? reply.state : null;
+  // A finished block only: what a streaming one shows is not settled yet.
+  useEffect(() => {
+    if (!streaming && state !== null) onDigest(digest, state);
+  }, [digest, state, streaming, onDigest]);
   const reduced = useAppReducedMotion();
   // Fade in only what replaces a skeleton: a block the virtual list remounts
   // from memory is already on screen in the reader's mind.
@@ -306,7 +322,9 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
       <DispatchContext value={dispatch}>
         <SuggestContext value={suggest}>
           <BlockKeyContext value={block}>
-            <Nodes nodes={reply.nodes} />
+            <BlockOrdinalContext value={ordinal}>
+              <Nodes nodes={reply.nodes} />
+            </BlockOrdinalContext>
           </BlockKeyContext>
         </SuggestContext>
       </DispatchContext>
@@ -320,6 +338,16 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
  * made while it streamed first becomes savable.
  */
 const unsaved = new Map<string, string>();
+/** What each block shows now, by block, for the save that follows. */
+const digests = new Map<string, string | null>();
+/** The digest each block last saved, or its stored row holds. */
+const savedDigests = new Map<string, string | null>();
+/**
+ * Blocks with a row: changed by the reader, or stored. Only these save when
+ * what they show changes alone (a route resolving after an edit); a block
+ * nobody touched writes nothing.
+ */
+const kept = new Set<string>();
 
 /**
  * Saves what the reader set, once they settle. A change made while the answer
@@ -327,7 +355,13 @@ const unsaved = new Map<string, string>();
  * state, and a save still waiting when the block unmounts (scrolled away, chat
  * switched) is sent then rather than dropped.
  */
-function useBlockSave(message: GenuiMessage, block: string, ordinal: number, code: string) {
+function useBlockSave(
+  message: GenuiMessage,
+  block: string,
+  ordinal: number,
+  code: string,
+  stored: SavedUiState | null,
+) {
   const actions = use(GenuiActionsContext);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useRef(() => {});
@@ -343,8 +377,17 @@ function useBlockSave(message: GenuiMessage, block: string, ordinal: number, cod
       const state = unsaved.get(block);
       if (state === undefined || !canSave) return;
       unsaved.delete(block);
+      const digest = digests.get(block) ?? null;
+      savedDigests.set(block, digest);
       trackBlockSave(block, () =>
-        actions.save({ messageId, generationId, ordinal, sourceHash: hashSource(code), state }),
+        actions.save({
+          messageId,
+          generationId,
+          ordinal,
+          sourceHash: hashSource(code),
+          state,
+          digest,
+        }),
       );
     };
   });
@@ -359,17 +402,45 @@ function useBlockSave(message: GenuiMessage, block: string, ordinal: number, cod
     if (canSave && unsaved.has(block)) schedule();
   }, [canSave, block, schedule]);
 
+  // A stored row makes the block one that keeps its digest current.
+  useEffect(() => {
+    if (!stored) return;
+    kept.add(block);
+    if (!savedDigests.has(block)) savedDigests.set(block, stored.digest);
+  }, [block, stored]);
+
   // A send flushes it too, so the answer it starts reads this block's latest state.
   useEffect(() => registerBlockFlush(() => flush.current()), []);
   useEffect(() => () => flush.current(), []);
 
-  return useCallback(
+  const onState = useCallback(
     (state: string) => {
+      kept.add(block);
       unsaved.set(block, state);
       if (canSave) schedule();
     },
     [block, canSave, schedule],
   );
+  const onDigest = useCallback(
+    (digest: string | null, state: string) => {
+      digests.set(block, digest);
+      if (!kept.has(block) || savedDigests.get(block) === digest) return;
+      if (!unsaved.has(block)) unsaved.set(block, state);
+      if (canSave) schedule();
+    },
+    [block, canSave, schedule],
+  );
+  return { onState, onDigest };
+}
+
+/** Scrolls the block's element with this anchor into view, if it is not already. */
+function revealIn(block: string, anchor: string) {
+  const root = document.querySelector(`[data-genui-block="${CSS.escape(block)}"]`);
+  const target = root?.querySelector(`[data-ui-anchor="${CSS.escape(anchor)}"]`);
+  target?.scrollIntoView({
+    block: "nearest",
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+  });
 }
 
 /**
@@ -377,7 +448,13 @@ function useBlockSave(message: GenuiMessage, block: string, ordinal: number, cod
  * event fired, on which element, and what the text says. A prompt-injected
  * block can draw a misleading button; it cannot send on the reader's behalf.
  */
-function useBlockActions(message: GenuiMessage, block: string, ordinal: number, code: string) {
+function useBlockActions(
+  message: GenuiMessage,
+  block: string,
+  ordinal: number,
+  code: string,
+  stored: SavedUiState | null,
+) {
   const actions = use(GenuiActionsContext);
   const [leaving, setLeaving] = useState<string | null>(null);
   const canSend =
@@ -400,13 +477,20 @@ function useBlockActions(message: GenuiMessage, block: string, ordinal: number, 
           void navigator.clipboard?.writeText(action.value).then(() => {
             toast.success("Copied", { description: copiedPreview(action.value) });
           });
+        } else if (
+          action.kind === "reveal" &&
+          (trusted.event === "click" || (trusted.event === "change" && trusted.tag === "map"))
+        ) {
+          // Scrolling stays inside this block, so a tap or a picked pin may do it;
+          // a slider or a field moving the page as it changes would not be.
+          revealIn(block, action.value);
         }
       }
     },
-    [actions, canSend],
+    [actions, block, canSend],
   );
 
-  const onState = useBlockSave(message, block, ordinal, code);
+  const { onState, onDigest } = useBlockSave(message, block, ordinal, code, stored);
 
   const suggest = useMemo(() => {
     if (!canSend || !actions) return null;
@@ -432,7 +516,7 @@ function useBlockActions(message: GenuiMessage, block: string, ordinal: number, 
       }}
     />
   ) : null;
-  return { onActions, onState, suggest, dialog };
+  return { onActions, onState, onDigest, suggest, dialog };
 }
 
 export default function UiBlock({ code, isIncomplete, meta }: CustomRendererProps) {
@@ -476,9 +560,17 @@ function KeyedBlock({
   // initial state, rather than inheriting what the reader set on the last.
   // A resume reopens from the saved row, which only a finished answer has.
   const block = `${message.messageId}:${message.generationId ?? "copy"}:${ordinal}`;
-  const { onActions, onState, suggest, dialog } = useBlockActions(message, block, ordinal, code);
-  const stored = message.saved?.get(ordinal);
-  const persisted = stored && stored.sourceHash === hashSource(code) ? stored.state : null;
+  const saved = message.saved?.get(ordinal);
+  // A row counts only while it is for this source, as on the server.
+  const stored = saved && saved.sourceHash === hashSource(code) ? saved : null;
+  const persisted = stored?.state ?? null;
+  const { onActions, onState, onDigest, suggest, dialog } = useBlockActions(
+    message,
+    block,
+    ordinal,
+    code,
+    stored,
+  );
   return (
     <>
       {/* A tree this build cannot render costs its block, shown as source, not the chat. */}
@@ -494,6 +586,7 @@ function KeyedBlock({
           keep={message.temporary !== true}
           onActions={onActions}
           onState={onState}
+          onDigest={onDigest}
           suggest={suggest}
         />
       </BlockBoundary>

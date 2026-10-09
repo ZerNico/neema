@@ -7,6 +7,7 @@ import { runtime } from "~/server/runtime.ts";
 import {
   AnswerQuestionInput,
   SaveUiStateInput,
+  LookupUiMapInput,
   BranchConversationInput,
   ConversationArchiveInput,
   ConversationDetailInput,
@@ -33,6 +34,10 @@ import {
 } from "../schema.ts";
 import { loadConversationDetail, loadConversationHistory } from "./conversation-detail.ts";
 import { ChatRepo } from "./repo.ts";
+import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
+import { resolvePageLookups } from "~/modules/genui/server/page-lookups.ts";
+import { MAPS_TOOL, readMaps } from "~/modules/genui/settings.ts";
+import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService, type DesktopFolderRef } from "./service.ts";
 
@@ -787,7 +792,57 @@ export const saveUiState = createServerFn({ method: "POST" })
           ordinal: data.ordinal,
           sourceHash: data.sourceHash,
           state,
+          digest: data.digest,
         }),
       ).pipe(Effect.map((outcome) => ({ saved: outcome === "saved" }))),
     );
+  });
+
+/** Readers with a map lookup in flight: one each, so edits cannot queue a burst upstream. */
+const mapLookupsInFlight = new Set<string>();
+
+/**
+ * Looks up the places and routes a finished answer's map computes from its
+ * state. Null lookups when refused or busy; the page then shows what it has.
+ */
+export const lookupUiMap = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(LookupUiMapInput))
+  .handler(async ({ data, context }) => {
+    const userId = context.session.user.id;
+    if (mapLookupsInFlight.has(userId)) return { lookups: null, busy: true };
+    mapLookupsInFlight.add(userId);
+    try {
+      const lookups = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const target = yield* repo.uiBlockForLookups({ userId, ...data });
+          if (!target) return null;
+          const tools = yield* ToolsRepo;
+          const maps = readMaps(yield* tools.getTool(MAPS_TOOL));
+          const services = yield* MapLookups;
+          const found = yield* resolvePageLookups(
+            {
+              off: !maps.enabled,
+              code: target.code,
+              existing: target.lookups,
+              geocode: (query) => services.geocode(maps.services, query),
+              route: (mode, stops) => services.route(maps.services, mode, stops),
+            },
+            data,
+          );
+          if (Object.keys(found.places).length === 0 && Object.keys(found.routes).length === 0)
+            return target.lookups;
+          return yield* repo.recordPageLookups({
+            userId,
+            messageId: data.messageId,
+            generationId: data.generationId,
+            ...found,
+          });
+        }),
+      );
+      return { lookups, busy: false };
+    } finally {
+      mapLookupsInFlight.delete(userId);
+    }
   });

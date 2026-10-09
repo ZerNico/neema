@@ -1,40 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { MAP_SERVICE_DEFAULTS, readInteractiveUi } from "./settings.ts";
+import { MAP_SERVICE_DEFAULTS, readInteractiveUi, readMaps } from "./settings.ts";
 
 describe("readInteractiveUi", () => {
   it("defaults to on when the row is missing", () => {
-    expect(readInteractiveUi(null)).toEqual({
-      enabled: true,
-      images: true,
-      maps: true,
-      mapServices: MAP_SERVICE_DEFAULTS,
-    });
+    expect(readInteractiveUi(null)).toEqual({ enabled: true, images: true });
   });
 
   it("keeps images on unless switched off", () => {
     expect(readInteractiveUi({ enabled: true, config: {} })).toMatchObject({ images: true });
-    expect(readInteractiveUi({ enabled: true, config: { images: false } })).toMatchObject({
+    expect(readInteractiveUi({ enabled: true, config: { images: false } })).toEqual({
       enabled: true,
       images: false,
     });
   });
 
   it("turns images off with the whole feature", () => {
-    expect(
-      readInteractiveUi({ enabled: false, config: { images: true, maps: true } }),
-    ).toMatchObject({ enabled: false, images: false, maps: false });
+    expect(readInteractiveUi({ enabled: false, config: { images: true } })).toEqual({
+      enabled: false,
+      images: false,
+    });
+  });
+});
+
+describe("readMaps", () => {
+  it("defaults to on with the public services when the row is missing", () => {
+    expect(readMaps(null)).toEqual({ enabled: true, services: MAP_SERVICE_DEFAULTS });
   });
 
-  it("takes an admin's https map services and falls back for anything else", () => {
-    const settings = readInteractiveUi({
+  it("follows its own switch, whatever interactive answers do", () => {
+    expect(readMaps({ enabled: false, config: {} }).enabled).toBe(false);
+    expect(readMaps({ enabled: true, config: {} }).enabled).toBe(true);
+  });
+
+  it("takes an admin's https services and falls back for anything else", () => {
+    const settings = readMaps({
       enabled: true,
       config: {
-        mapStyleLight: " https://tiles.example.org/styles/light/ ",
-        mapGeocoder: "http://insecure.example.org",
-        mapRouting: "not a url",
+        styleLight: " https://tiles.example.org/styles/light/ ",
+        geocoder: "http://insecure.example.org",
+        routing: "not a url",
       },
     });
-    expect(settings.mapServices).toEqual({
+    expect(settings.services).toEqual({
       styleLight: "https://tiles.example.org/styles/light",
       styleDark: MAP_SERVICE_DEFAULTS.styleDark,
       geocoder: MAP_SERVICE_DEFAULTS.geocoder,

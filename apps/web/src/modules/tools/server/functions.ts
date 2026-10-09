@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { INTERACTIVE_UI_TOOL } from "~/modules/genui/settings.ts";
+import { INTERACTIVE_UI_TOOL, MAPS_TOOL } from "~/modules/genui/settings.ts";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -248,11 +248,6 @@ export const updateInteractiveUiTool = createServerFn({ method: "POST" })
       Schema.Struct({
         enabled: Schema.optionalKey(Schema.Boolean),
         images: Schema.optionalKey(Schema.Boolean),
-        maps: Schema.optionalKey(Schema.Boolean),
-        mapStyleLight: Schema.optionalKey(MapServiceUrl),
-        mapStyleDark: Schema.optionalKey(MapServiceUrl),
-        mapGeocoder: Schema.optionalKey(MapServiceUrl),
-        mapRouting: Schema.optionalKey(MapServiceUrl),
       }),
     ),
   )
@@ -261,6 +256,35 @@ export const updateInteractiveUiTool = createServerFn({ method: "POST" })
     return runtime.runPromise(
       ToolsRepo.use((repo) =>
         repo.updateTool(INTERACTIVE_UI_TOOL, {
+          ...(enabled !== undefined ? { enabled } : {}),
+          ...(Object.keys(config).length > 0 ? { config } : {}),
+        }),
+      ),
+    );
+  });
+
+export const getMapsTool = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(MAPS_TOOL))));
+
+export const updateMapsTool = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(
+    standard(
+      Schema.Struct({
+        enabled: Schema.optionalKey(Schema.Boolean),
+        styleLight: Schema.optionalKey(MapServiceUrl),
+        styleDark: Schema.optionalKey(MapServiceUrl),
+        geocoder: Schema.optionalKey(MapServiceUrl),
+        routing: Schema.optionalKey(MapServiceUrl),
+      }),
+    ),
+  )
+  .handler(({ data }) => {
+    const { enabled, ...config } = data;
+    return runtime.runPromise(
+      ToolsRepo.use((repo) =>
+        repo.updateTool(MAPS_TOOL, {
           ...(enabled !== undefined ? { enabled } : {}),
           ...(Object.keys(config).length > 0 ? { config } : {}),
         }),

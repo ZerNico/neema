@@ -3,6 +3,7 @@ import {
   getDocumentParserTool,
   getMemoryTool,
   getInteractiveUiTool,
+  getMapsTool,
   getOfficeFilesTool,
   getScanReading,
   getUrlReaderTool,
@@ -33,6 +34,11 @@ export const officeFilesToolQuery = queryOptions({
 export const interactiveUiToolQuery = queryOptions({
   queryKey: ["admin", "tools", "interactive-ui"],
   queryFn: () => getInteractiveUiTool(),
+});
+
+export const mapsToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "maps"],
+  queryFn: () => getMapsTool(),
 });
 
 export const searchProvidersQuery = queryOptions({

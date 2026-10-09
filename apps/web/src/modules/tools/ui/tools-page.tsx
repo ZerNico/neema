@@ -4,6 +4,7 @@ import { integerBetween } from "./integer-between.ts";
 import {
   Brain02Icon,
   DashboardSquare01Icon,
+  MapsIcon,
   GlobalSearchIcon,
   Link01Icon,
   Presentation01Icon,
@@ -19,6 +20,7 @@ import { Switch } from "~/ui/primitives/switch";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
 import {
   updateInteractiveUiTool,
+  updateMapsTool,
   updateMemoryTool,
   updateOfficeFilesTool,
   updateUrlReaderTool,
@@ -33,8 +35,9 @@ import {
   urlReaderToolQuery,
   officeFilesToolQuery,
   interactiveUiToolQuery,
+  mapsToolQuery,
 } from "../client/queries.ts";
-import { readInteractiveUi, type MapServices } from "~/modules/genui/settings.ts";
+import { readInteractiveUi, readMaps, type MapServices } from "~/modules/genui/settings.ts";
 
 const WebSearchForm = Schema.Struct({
   maxResults: integerBetween(1, 20),
@@ -49,13 +52,14 @@ export function ToolsPage() {
   return (
     <Page
       title="Tools"
-      description="Web tools, memory, Office files and interactive answers available in chats."
+      description="Web tools, memory, Office files, interactive answers and maps available in chats."
     >
       <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
       <OfficeFilesSection />
       <InteractiveUiSection />
+      <MapsSection />
     </Page>
   );
 }
@@ -377,7 +381,7 @@ function InteractiveUiSection() {
   const { data: tool } = useSuspenseQuery(interactiveUiToolQuery);
   const queryClient = useQueryClient();
   const update = useMutation({
-    mutationFn: (patch: { enabled?: boolean; images?: boolean; maps?: boolean }) =>
+    mutationFn: (patch: { enabled?: boolean; images?: boolean }) =>
       updateInteractiveUiTool({ data: patch }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
     onError: (error) => toastError("Could not update interactive answers.", error),
@@ -424,56 +428,81 @@ function InteractiveUiSection() {
             aria-label="Images in interactive answers"
           />
         </ListRow>
+      </ListCard>
+    </Section>
+  );
+}
+
+/**
+ * Places and routes: the route tool in any chat, and the maps interactive
+ * answers draw. Its own section, since it works without interactive answers.
+ */
+function MapsSection() {
+  const { data: tool } = useSuspenseQuery(mapsToolQuery);
+  const queryClient = useQueryClient();
+  const update = useMutation({
+    mutationFn: (enabled: boolean) => updateMapsTool({ data: { enabled } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: mapsToolQuery.queryKey }),
+    onError: (error) => toastError("Could not update maps.", error),
+  });
+
+  if (!tool) {
+    return (
+      <Section title="Maps">
+        <EmptyState icon={MapsIcon} title="This tool isn’t set up yet" />
+      </Section>
+    );
+  }
+
+  const settings = readMaps(tool);
+  return (
+    <Section title="Maps">
+      <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-medium">Maps</span>
             <span className="text-muted-foreground text-xs">
-              Draws maps with places and routes, looked up through the services below.
+              Looks up places and routes for answers, and draws them in interactive answers.
             </span>
           </div>
           <Switch
-            checked={settings.maps}
-            onCheckedChange={(checked) => update.mutate({ maps: checked })}
-            disabled={update.isPending || !settings.enabled}
-            aria-label="Maps in interactive answers"
+            checked={settings.enabled}
+            onCheckedChange={(checked) => update.mutate(checked)}
+            disabled={update.isPending}
+            aria-label="Maps enabled"
           />
         </ListRow>
-        {settings.maps ? <MapServicesRow services={settings.mapServices} /> : null}
+        {settings.enabled ? <MapServicesRow services={settings.services} /> : null}
       </ListCard>
     </Section>
   );
 }
 
 const MapServicesForm = Schema.Struct({
-  mapStyleLight: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  mapStyleDark: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  mapGeocoder: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  mapRouting: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  styleLight: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  styleDark: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  geocoder: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
+  routing: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
 });
 
 /** Where maps get their tiles, places and routes. The public OpenStreetMap services by default. */
 function MapServicesRow({ services }: { services: MapServices }) {
   const queryClient = useQueryClient();
   const { justSaved, markSaved } = useSaveStatus();
-  const defaults = {
-    mapStyleLight: services.styleLight,
-    mapStyleDark: services.styleDark,
-    mapGeocoder: services.geocoder,
-    mapRouting: services.routing,
-  };
+  const defaults = { ...services };
   const form = useAppForm({
     defaultValues: defaults,
     validators: { onSubmit: Schema.toStandardSchemaV1(MapServicesForm) },
     onSubmit: async ({ value }) => {
       try {
-        await updateInteractiveUiTool({ data: value });
+        await updateMapsTool({ data: value });
       } catch {
         toast.error("Could not save the map services.");
         return;
       }
       markSaved();
       form.reset(value);
-      await queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey });
+      await queryClient.invalidateQueries({ queryKey: mapsToolQuery.queryKey });
     },
   });
   return (
@@ -487,16 +516,16 @@ function MapServicesRow({ services }: { services: MapServices }) {
         }}
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <form.AppField name="mapStyleLight">
+          <form.AppField name="styleLight">
             {(field) => <field.TextField label="Light map style" type="url" />}
           </form.AppField>
-          <form.AppField name="mapStyleDark">
+          <form.AppField name="styleDark">
             {(field) => <field.TextField label="Dark map style" type="url" />}
           </form.AppField>
-          <form.AppField name="mapGeocoder">
+          <form.AppField name="geocoder">
             {(field) => <field.TextField label="Place search" type="url" />}
           </form.AppField>
-          <form.AppField name="mapRouting">
+          <form.AppField name="routing">
             {(field) => <field.TextField label="Routing" type="url" />}
           </form.AppField>
         </div>

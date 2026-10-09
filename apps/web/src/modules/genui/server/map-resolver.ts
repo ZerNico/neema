@@ -40,6 +40,14 @@ export interface MapResolverDeps {
 
 export interface MapResolver {
   readonly observe: (text: string) => Effect.Effect<void>;
+  /**
+   * Places and routes found elsewhere in this attempt (the route tool), taken
+   * as decided: a block naming them later draws them without asking again.
+   */
+  readonly seed: (update: {
+    readonly places?: Readonly<Record<string, UiPlace>>;
+    readonly routes?: Readonly<Record<string, UiRoute>>;
+  }) => Effect.Effect<void>;
   readonly drain: Effect.Effect<void>;
 }
 
@@ -301,5 +309,22 @@ export const makeMapResolver = (
           yield* recordRoute(key, UNAVAILABLE);
     });
 
-    return { observe, drain };
+    const seed: MapResolver["seed"] = (update) =>
+      Effect.gen(function* () {
+        // A name a block already asked for is that block's to decide.
+        for (const [query, place] of Object.entries(update.places ?? {})) {
+          if (places.has(query)) continue;
+          const deferred = yield* Deferred.make<UiPlace>();
+          places.set(query, deferred);
+          yield* decide(query, place);
+          yield* recordPlace(query, place);
+        }
+        for (const [key, route] of Object.entries(update.routes ?? {})) {
+          if (routes.has(key)) continue;
+          routes.add(key);
+          yield* recordRoute(key, route);
+        }
+      });
+
+    return { observe, seed, drain };
   });

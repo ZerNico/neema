@@ -4,6 +4,7 @@ import {
   MAP_LOOKUP_LIMITS,
   blockMapLookups,
   extractImageQueries,
+  quotedStrings,
   routeKey,
 } from "./extract.ts";
 
@@ -76,5 +77,23 @@ describe("blockMapLookups", () => {
     const stops = JSON.stringify(Array.from({ length: 14 }, (_, i) => `Stop ${i}`));
     const [route] = blockMapLookups(`<route mode="bike" stops={${stops}}/>`).routes;
     expect(route?.stops).toHaveLength(MAP_LOOKUP_LIMITS.stopsPerRoute);
+  });
+});
+
+describe("quotedStrings", () => {
+  it("collects attribute values and script literals of every quote, normalised", () => {
+    const code = `<script>
+  let stops = $state([{ place: "Museum  Barberini, Potsdam" }, { place: 'Sanssouci' }]);
+  const dock = \`Lange Brücke\`;
+  const said = "say \\"hi\\"";
+</script>
+<pin place="Potsdam Hauptbahnhof"/>`;
+    expect([...quotedStrings(code)].toSorted()).toEqual(
+      ["Lange Brücke", "Museum Barberini, Potsdam", "Potsdam Hauptbahnhof", "Sanssouci", 'say "hi"'].toSorted(),
+    );
+  });
+
+  it("skips templates with interpolation, whose text the reader may supply", () => {
+    expect(quotedStrings("const q = `${typed} street`;").has(" street")).toBe(false);
   });
 });

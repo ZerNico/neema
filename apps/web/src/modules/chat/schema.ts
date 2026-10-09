@@ -147,6 +147,29 @@ export const SaveUiStateInput = Schema.Struct({
   ordinal: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 7 })),
   sourceHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/)),
   state: Schema.String.check(Schema.isMaxLength(16 * 1024)),
+  digest: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2_000))),
+});
+
+const MapPoint = Schema.Struct({
+  lat: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+  lng: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
+});
+
+export const LookupUiMapInput = Schema.Struct({
+  messageId: Schema.String,
+  generationId: Schema.NullOr(Schema.String),
+  ordinal: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 7 })),
+  places: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
+    Schema.isMaxLength(40),
+  ),
+  routes: Schema.Array(
+    Schema.Struct({
+      mode: Schema.Literals(["drive", "walk", "bike"]),
+      stops: Schema.Array(
+        Schema.Union([Schema.String.check(Schema.isMaxLength(200)), MapPoint]),
+      ).check(Schema.isMinLength(2), Schema.isMaxLength(10)),
+    }),
+  ).check(Schema.isMaxLength(10)),
 });
 
 export const AnswerQuestionInput = Schema.Struct({

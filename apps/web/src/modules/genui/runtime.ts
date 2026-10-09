@@ -25,7 +25,7 @@ export const RUNTIME_LIMITS = {
 } as const;
 
 export interface BlockAction {
-  readonly kind: "send" | "open" | "copy";
+  readonly kind: "send" | "open" | "copy" | "reveal";
   readonly value: string;
 }
 
@@ -57,7 +57,10 @@ function parseJson(text: string): unknown {
 function isAction(value: unknown): value is BlockAction {
   return (
     isRecord(value) &&
-    (value.kind === "send" || value.kind === "open" || value.kind === "copy") &&
+    (value.kind === "send" ||
+      value.kind === "open" ||
+      value.kind === "copy" ||
+      value.kind === "reveal") &&
     typeof value.value === "string"
   );
 }

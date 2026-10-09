@@ -472,6 +472,51 @@ const lockOwnedConversation = (tx: DbTx, userId: string, conversationId: string)
     if (owned.length === 0) return yield* new ConversationNotFound({ conversationId });
   });
 
+/**
+ * A finished answer of the reader's own, still on the named attempt; null
+ * otherwise. Locked, the conversation row is the one retry and edit take, so
+ * a reset cannot slip between this check and the caller's write.
+ */
+const ownFinishedAnswer = Effect.fn("ChatRepo.ownFinishedAnswer")(function* (
+  tx: DbTx,
+  input: { userId: string; messageId: string; generationId: string | null; lock: boolean },
+) {
+  const [target] = yield* tx
+    .select({ conversationId: messages.conversationId })
+    .from(messages)
+    .where(eq(messages.id, input.messageId))
+    .pipe(Effect.orDie);
+  if (!target) return null;
+  const owner = tx
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(
+      and(eq(conversations.id, target.conversationId), eq(conversations.userId, input.userId)),
+    );
+  const owned = yield* (input.lock ? owner.for("update") : owner).pipe(Effect.orDie);
+  if (owned.length === 0) return null;
+  const [message] = yield* tx
+    .select({
+      role: messages.role,
+      status: messages.status,
+      generationId: messages.generationId,
+      content: messages.content,
+      assistantOutput: messages.assistantOutput,
+    })
+    .from(messages)
+    .where(eq(messages.id, input.messageId))
+    .pipe(Effect.orDie);
+  if (
+    !message ||
+    message.role !== "assistant" ||
+    message.status === "streaming" ||
+    message.generationId !== input.generationId
+  ) {
+    return null;
+  }
+  return message;
+});
+
 const questionForMessage = Effect.fn("ChatRepo.questionForMessage")(function* (
   tx: Pick<DbTx, "select">,
   owner: MessageRow | undefined,
@@ -1162,7 +1207,31 @@ export class ChatRepo extends Context.Service<
       ordinal: number;
       sourceHash: string;
       state: JsonValue;
+      /** What the block showed; absent saves none. */
+      digest?: string | null;
     }): Effect.Effect<"saved" | "refused">;
+    /**
+     * A finished answer's ```ui block source and its lookups so far, for the
+     * page to ask for places and routes the block's state computes. Null when
+     * the reader may not, as for a state save.
+     */
+    uiBlockForLookups(input: {
+      userId: string;
+      messageId: string;
+      generationId: string | null;
+      ordinal: number;
+    }): Effect.Effect<{ code: string; lookups: UiLookups } | null>;
+    /**
+     * Adds lookups the page asked for to a finished answer, never replacing a
+     * key it holds. Null when the answer moved on since they were asked.
+     */
+    recordPageLookups(input: {
+      userId: string;
+      messageId: string;
+      generationId: string | null;
+      places: UiPlaces;
+      routes: UiRoutes;
+    }): Effect.Effect<UiLookups | null>;
     /**
      * Merges what an answer's ```ui blocks looked up (images, places, routes)
      * into its output under the generation fence. Returns every result so far.
@@ -3471,6 +3540,52 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.catchTag("SqlError", Effect.die));
         }),
 
+        uiBlockForLookups: Effect.fn("ChatRepo.uiBlockForLookups")(function* (input) {
+          if (
+            !Number.isSafeInteger(input.ordinal) ||
+            input.ordinal < 0 ||
+            input.ordinal >= MAX_UI_BLOCKS
+          ) {
+            return null;
+          }
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const message = yield* ownFinishedAnswer(tx, { ...input, lock: false });
+                const fence = message ? scanUiFences(message.content)[input.ordinal] : undefined;
+                if (!message || !fence?.closed) return null;
+                return { code: fence.code, lookups: lookupsOf(message.assistantOutput) };
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
+        recordPageLookups: Effect.fn("ChatRepo.recordPageLookups")(function* (input) {
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const message = yield* ownFinishedAnswer(tx, { ...input, lock: true });
+                if (!message) return null;
+                const output = message.assistantOutput;
+                // What the answer holds wins: two tabs asking at once store one result.
+                const next = {
+                  ...output,
+                  v: 1 as const,
+                  files: output?.files ?? [],
+                  places: { ...input.places, ...output?.places },
+                  routes: { ...input.routes, ...output?.routes },
+                };
+                yield* tx
+                  .update(messages)
+                  .set({ assistantOutput: next })
+                  .where(eq(messages.id, input.messageId))
+                  .pipe(Effect.orDie);
+                return lookupsOf(next);
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
+        }),
+
         saveUiState: Effect.fn("ChatRepo.saveUiState")(function* (input) {
           if (
             !Number.isSafeInteger(input.ordinal) ||
@@ -3530,12 +3645,14 @@ export class ChatRepo extends Context.Service<
                     ordinal: input.ordinal,
                     sourceHash: input.sourceHash,
                     state: input.state,
+                    digest: input.digest ?? null,
                   })
                   .onConflictDoUpdate({
                     target: [messageUiStates.messageId, messageUiStates.ordinal],
                     set: {
                       sourceHash: input.sourceHash,
                       state: input.state,
+                      digest: input.digest ?? null,
                       updatedAt: new Date(),
                     },
                   })

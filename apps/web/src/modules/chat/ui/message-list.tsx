@@ -74,6 +74,7 @@ import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx"
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
 import { NotifyActivityRow } from "./notify-activity-row.tsx";
+import { MapActivityRow } from "./map-activity-row.tsx";
 import { ProjectFileActivityRow } from "./project-file-activity-row.tsx";
 import { SaveToProjectActions } from "~/modules/projects/ui/save-to-project.tsx";
 import { useWritableChatProject } from "~/modules/projects/ui/writable-chat-project-context.ts";
@@ -855,6 +856,8 @@ const AssistantBody = memo(function AssistantBody({
       return <AttachmentActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "notify")
       return <NotifyActivityRow key={part.key} activity={part.activity} />;
+    if (part.activity.family === "map")
+      return <MapActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "custom") {
       return (
         <CustomToolActivityBlock

@@ -6,6 +6,8 @@ export interface SavedUiState {
   readonly sourceHash: string;
   /** The state JSON the block's runtime reported. */
   readonly state: string;
+  /** What the block showed when saved; null for a row from before digests. */
+  readonly digest: string | null;
 }
 
 /** What a block needs to know about the answer it sits in. */
@@ -31,6 +33,19 @@ export interface UiStateSave {
   readonly ordinal: number;
   readonly sourceHash: string;
   readonly state: string;
+  /** What the block shows, a line per control, for the next answer (`ui/digest.ts`). */
+  readonly digest: string | null;
+}
+
+export interface UiMapLookup {
+  readonly messageId: string;
+  readonly generationId: string | null;
+  readonly ordinal: number;
+  readonly places: readonly string[];
+  readonly routes: ReadonlyArray<{
+    readonly mode: "drive" | "walk" | "bike";
+    readonly stops: ReadonlyArray<string | { readonly lat: number; readonly lng: number }>;
+  }>;
 }
 
 /**
@@ -48,6 +63,13 @@ export interface GenuiActions {
   readonly offer: (text: string) => void;
   /** Resolves once the server answered, so a send can wait for it. */
   readonly save: (input: UiStateSave) => Promise<void>;
+  /**
+   * Asks the server for places and routes a finished answer's map computes.
+   * Null lookups when refused; `busy` when another lookup is still running.
+   */
+  readonly lookupMap: (
+    input: UiMapLookup,
+  ) => Promise<{ readonly lookups: UiLookups | null; readonly busy: boolean }>;
 }
 
 export const GenuiActionsContext = createContext<GenuiActions | null>(null);
@@ -81,3 +103,6 @@ export const DispatchContext = createContext<Dispatch>(async () => {});
 
 /** The block a node draws in, for state that must outlive a remount (a running timer). */
 export const BlockKeyContext = createContext("");
+
+/** The block's fence ordinal in its answer, which names it to the server. */
+export const BlockOrdinalContext = createContext(-1);

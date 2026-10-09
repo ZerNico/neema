@@ -10,15 +10,21 @@ import {
   useMemo,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type ReactNode,
 } from "react";
-import { NO_LOOKUPS } from "~/modules/chat/assistant-output.ts";
+import { CenterFocusIcon, FullScreenIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "~/ui/primitives/button";
+import { Dialog, DialogContent, DialogTitle } from "~/ui/primitives/dialog";
 import { Skeleton } from "~/ui/primitives/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
-import { GenuiMessageContext } from "./context.ts";
+import { BlockKeyContext } from "./context.ts";
 import { handlerOf, useHandler } from "./handler.ts";
-import { resolveMap, routeSummary } from "./map-model.ts";
+import { resolveMap, routeSummary, type MapModel } from "./map-model.ts";
+import { useMapLookups } from "./map-requests.ts";
 
 // MapLibre is large; it loads only for a block that draws a map.
 const MapCanvas = lazy(() => import("./map-canvas.tsx"));
@@ -45,6 +51,121 @@ function canDraw(): boolean {
   return webgl;
 }
 
+/** The drawn map in a box already sized, under one skeleton until its first tiles are in. */
+function MapBox({
+  model,
+  label,
+  selected,
+  onSelect,
+  view,
+  block,
+  fitAll,
+  onBroken,
+  className,
+  style,
+}: {
+  model: MapModel;
+  label: string;
+  selected: string | null;
+  onSelect: (id: string) => void;
+  view: { center?: [number, number]; zoom?: number };
+  block: string;
+  fitAll: number;
+  onBroken: () => void;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const dark = useSyncExternalStore(observeDark, isDark, () => false);
+  // The theme whose map has drawn its first tiles. One skeleton covers the
+  // chunk loading and the tiles arriving, so it never restarts or blinks.
+  // By map number, so a map made since (a fixed zoom) starts hidden again.
+  const [created, setCreated] = useState(0);
+  const [painted, setPainted] = useState(0);
+  const shown = created > 0 && painted === created;
+  // It stays under the map until the fade ends, so the map never fades in over nothing.
+  const [revealed, setRevealed] = useState(0);
+  return (
+    <div className={cn("relative w-full overflow-hidden rounded-2xl", className)} style={style}>
+      {created > 0 && revealed === created ? null : <Skeleton className="absolute inset-0" />}
+      <Suspense fallback={null}>
+        <MapCanvas
+          model={model}
+          label={label}
+          dark={dark}
+          selected={selected}
+          onSelect={onSelect}
+          onBroken={onBroken}
+          onCreated={setCreated}
+          onPainted={setPainted}
+          onRevealed={setRevealed}
+          shown={shown}
+          view={view}
+          block={block}
+          fitAll={fitAll}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function MapButton({
+  label,
+  icon,
+  onClick,
+}: {
+  label: string;
+  icon: typeof FullScreenIcon;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="secondary" size="icon-sm" aria-label={label} onClick={onClick} />}
+      >
+        <HugeiconsIcon icon={icon} strokeWidth={2} />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PlaceList({
+  model,
+  selected,
+  onSelect,
+}: {
+  model: MapModel;
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
+  if (model.pins.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5" aria-label="Places">
+      {model.pins.map((pin) => (
+        <li key={pin.id}>
+          <button
+            type="button"
+            aria-pressed={pin.id === selected}
+            disabled={pin.status !== "ready"}
+            onClick={() => onSelect(pin.id)}
+            className={cn(
+              "border-border flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
+              pin.id === selected ? "bg-accent" : "hover:bg-accent/60",
+            )}
+          >
+            {pin.icon ? (
+              <span aria-hidden>{pin.icon}</span>
+            ) : (
+              <span className="size-2 rounded-full" style={{ background: `var(--${pin.color})` }} />
+            )}
+            {pin.label}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function UiMap({
   node,
   renderContent,
@@ -54,11 +175,9 @@ export function UiMap({
   renderContent: (nodes: ValidNode["children"]) => ReactNode;
 }) {
   const p = node.props;
-  const message = use(GenuiMessageContext);
-  const model = useMemo(
-    () => resolveMap(node, message?.lookups ?? NO_LOOKUPS, message?.streaming ?? false),
-    [node, message?.lookups, message?.streaming],
-  );
+  const block = use(BlockKeyContext);
+  const { lookups, waiting } = useMapLookups(node);
+  const model = useMemo(() => resolveMap(node, lookups, waiting), [node, lookups, waiting]);
   const fire = useHandler(handlerOf(p.onselect), { event: "change", tag: "map" });
   const given = typeof p.selected === "string" ? p.selected : null;
   const [picked, setPicked] = useState<{ value: string | null; base: string | null } | null>(null);
@@ -68,16 +187,9 @@ export function UiMap({
     fire?.([id]);
   };
 
-  const dark = useSyncExternalStore(observeDark, isDark, () => false);
   const [broken, setBroken] = useState(false);
-  // The theme whose map has drawn its first tiles. One skeleton covers the
-  // chunk loading and the tiles arriving, so it never restarts or blinks.
-  // By map number, so a map made since (theme change, fixed zoom) starts hidden again.
-  const [created, setCreated] = useState(0);
-  const [painted, setPainted] = useState(0);
-  const shown = created > 0 && painted === created;
-  // It stays under the map until the fade ends, so the map never fades in over nothing.
-  const [revealed, setRevealed] = useState(0);
+  const [expanded, setExpanded] = useState(false);
+  const [fitAll, setFitAll] = useState(0);
   const off =
     model.pins.some((pin) => pin.status === "off") ||
     model.routes.some((route) => route.status === "off");
@@ -97,30 +209,41 @@ export function UiMap({
   const missingPlaces = off ? [] : model.pins.filter((pin) => pin.status === "missing");
   const missingRoutes = off ? [] : model.routes.filter((route) => route.status === "missing");
   const current = model.pins.find((pin) => pin.id === selected);
-  const routed = model.routes.some((route) => route.mode !== "straight" && route.path);
+  const shared = { model, label, selected, onSelect: select, view, block, onBroken: () => setBroken(true) };
 
   return (
-    <figure className="flex flex-col gap-2">
+    <figure
+      className="flex flex-col gap-2"
+      data-ui-anchor={typeof p.anchor === "string" ? p.anchor : undefined}
+    >
       {failed ? null : (
-        <div className="relative w-full overflow-hidden rounded-2xl" style={{ height }}>
-          {created > 0 && revealed === created ? null : <Skeleton className="absolute inset-0" />}
-          <Suspense fallback={null}>
-            <MapCanvas
-              model={model}
-              label={label}
-              dark={dark}
-              selected={selected}
-              onSelect={select}
-              onBroken={() => setBroken(true)}
-              onCreated={setCreated}
-              onPainted={setPainted}
-              onRevealed={setRevealed}
-              shown={shown}
-              view={view}
-            />
-          </Suspense>
+        <div className="relative">
+          <MapBox {...shared} fitAll={fitAll} style={{ height }} />
+          <div className="absolute top-2 left-2 flex gap-1.5">
+            <MapButton label="Expand map" icon={FullScreenIcon} onClick={() => setExpanded(true)} />
+            {view.zoom === undefined ? (
+              <MapButton
+                label="Show everything"
+                icon={CenterFocusIcon}
+                onClick={() => setFitAll((n) => n + 1)}
+              />
+            ) : null}
+          </div>
         </div>
       )}
+      {expanded && !failed ? (
+        <Dialog open onOpenChange={(open) => setExpanded(open)}>
+          <DialogContent className="sm:max-w-5xl">
+            <DialogTitle>{label}</DialogTitle>
+            {/* Its own map: moving the inline canvas into a portal would remount it anyway. */}
+            <MapBox {...shared} fitAll={0} className="h-[min(70dvh,640px)]" />
+            <PlaceList model={model} selected={selected} onSelect={select} />
+            {current && current.content.length > 0 ? (
+              <div className="text-sm">{renderContent(current.content)}</div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      ) : null}
       <figcaption className="flex flex-col gap-2 text-sm">
         {model.routes.some((r) => r.distance !== undefined) ? (
           <ul className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
@@ -137,30 +260,7 @@ export function UiMap({
             )}
           </ul>
         ) : null}
-        {model.pins.length > 0 ? (
-          <ul className="flex flex-wrap gap-1.5" aria-label="Places">
-            {model.pins.map((pin) => (
-              <li key={pin.id}>
-                <button
-                  type="button"
-                  aria-pressed={pin.id === selected}
-                  disabled={pin.status !== "ready"}
-                  onClick={() => select(pin.id)}
-                  className={cn(
-                    "border-border flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
-                    pin.id === selected ? "bg-accent" : "hover:bg-accent/60",
-                  )}
-                >
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ background: `var(--${pin.color})` }}
-                  />
-                  {pin.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <PlaceList model={model} selected={selected} onSelect={select} />
         {current && current.content.length > 0 ? (
           <div className="text-sm">{renderContent(current.content)}</div>
         ) : null}
@@ -176,19 +276,6 @@ export function UiMap({
             ]
               .filter(Boolean)
               .join(". ")}
-          </span>
-        ) : null}
-        {routed ? (
-          <span className="text-muted-foreground text-xs">
-            Routes from OpenStreetMap.{" "}
-            <a
-              href="https://www.openstreetmap.org/fixthemap"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="underline underline-offset-2"
-            >
-              Fix the map
-            </a>
           </span>
         ) : null}
       </figcaption>

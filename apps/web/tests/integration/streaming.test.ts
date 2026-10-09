@@ -819,6 +819,7 @@ describe("conversational agent authoring", () => {
             ordinal: 0,
             sourceHash: hashSource(block),
             state: { answers: ["Porto"], __seed: 3 },
+            digest: "Capitals: 1 of 3 answered, 0 right",
           });
         }),
       );
@@ -826,11 +827,157 @@ describe("conversational agent authoring", () => {
       const next = await send("Which did I pick?");
       await collectDraftTurn(next.assistantMessageId);
       const prompt = JSON.stringify(prompts[1]!.prompt);
-      const line = String.raw`Block 1 of your answer to \"Quiz me on capitals\": {\"answers\":[\"Porto\"]}`;
+      const line = String.raw`Block 1 of your answer to \"Quiz me on capitals\": shows: Capitals: 1 of 3 answered, 0 right | $state: {\"answers\":[\"Porto\"]}`;
       expect(prompt).toContain(line);
       // After the earlier answer and the new question, so history stays cacheable.
       expect(prompt.indexOf(line)).toBeGreaterThan(prompt.indexOf("Which did I pick?"));
       expect(prompt).not.toContain("__seed");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("lets a block draw the route map_route found, asking the services once", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const block = `<map label="Trip"><pin place="Bernau"/><route mode="bike" stops={["Bernau", "Leipzig"]}/></map>`;
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "map_route", { stops: ["Bernau", "Leipzig"], mode: "bike" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", {
+          id: "t",
+          delta: `34 km by bike:\n\n\`\`\`ui\n${block}\n\`\`\`\n`,
+        }),
+        authoringFinish(),
+      );
+    };
+    const before = mapLookupCalls.length;
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "How far is Leipzig by bike?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      // The model got the real numbers back to write its prose from.
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("34000");
+      // The block's pin and route came from the tool: nothing asked twice.
+      expect(mapLookupCalls.slice(before).toSorted()).toEqual([
+        "place:Bernau",
+        "place:Leipzig",
+        "route:bike:2",
+      ]);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      const answer = detail.messages.find((message) => message.id === assistantMessageId)!;
+      const key = routeKey({ mode: "bike", stops: ["Bernau", "Leipzig"] });
+      expect(answer.assistantOutput?.routes?.[key]).toMatchObject({ distance: 34000 });
+      expect(answer.assistantOutput?.places?.Bernau).toMatchObject({ status: "resolved" });
+      // The row keeps the summary for the activity line and reloads with it.
+      const call = detail.toolCalls.find((row) => row.toolName === "map_route");
+      expect(call).toMatchObject({ status: "complete" });
+      expect(call?.result).toMatchObject({ outcome: "routed", distance: 34000, mode: "bike" });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("adds the page's map lookups to a finished answer only for its owner and attempt", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const block = `<script>let stops = $state(["Innsbruck", "Salzburg"]);</script><map label="Trip">{#each stops as s}<pin place={s}/>{/each}</map>`;
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: `Trip:\n\n\`\`\`ui\n${block}\n\`\`\`\n` }),
+        authoringFinish(),
+      );
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Plan a trip",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      const outcome = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const row = (yield* repo.listMessages(seed.conversation.id)).find(
+            (message) => message.id === assistantMessageId,
+          );
+          const own = {
+            userId: seed.userId,
+            messageId: assistantMessageId,
+            generationId: row!.generationId ?? null,
+          };
+          const target = yield* repo.uiBlockForLookups({ ...own, ordinal: 0 });
+          const stranger = yield* repo.uiBlockForLookups({
+            ...own,
+            userId: "someone-else",
+            ordinal: 0,
+          });
+          const stale = yield* repo.uiBlockForLookups({ ...own, generationId: "old", ordinal: 0 });
+          const missing = yield* repo.uiBlockForLookups({ ...own, ordinal: 1 });
+          const first = yield* repo.recordPageLookups({
+            ...own,
+            places: { Innsbruck: { status: "resolved", lat: 47.27, lng: 11.39 } },
+            routes: {},
+          });
+          // A second tab asking at once stores nothing over the first result.
+          const second = yield* repo.recordPageLookups({
+            ...own,
+            places: {
+              Innsbruck: { status: "unavailable" },
+              Salzburg: { status: "resolved", lat: 47.81, lng: 13.06 },
+            },
+            routes: {},
+          });
+          const refused = yield* repo.recordPageLookups({
+            ...own,
+            generationId: "old",
+            places: { Vienna: { status: "unavailable" } },
+            routes: {},
+          });
+          return { target, stranger, stale, missing, first, second, refused };
+        }),
+      );
+      expect(outcome.target).toEqual({
+        code: block,
+        lookups: { images: {}, places: {}, routes: {} },
+      });
+      expect(outcome.stranger).toBeNull();
+      expect(outcome.stale).toBeNull();
+      expect(outcome.missing).toBeNull();
+      expect(outcome.first?.places).toEqual({
+        Innsbruck: { status: "resolved", lat: 47.27, lng: 11.39 },
+      });
+      expect(outcome.second?.places).toEqual({
+        Innsbruck: { status: "resolved", lat: 47.27, lng: 11.39 },
+        Salzburg: { status: "resolved", lat: 47.81, lng: 13.06 },
+      });
+      expect(outcome.refused).toBeNull();
+      // Stored with the answer, so a reload reads them without asking again.
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(JSON.stringify(detail)).toContain("Salzburg");
     } finally {
       authoringScript = null;
     }
@@ -5747,7 +5894,7 @@ describe("ui block maps", () => {
           const repo = yield* ChatRepo;
           const tools = yield* ToolsRepo;
           const engine = yield* StreamEngine;
-          yield* tools.updateTool("interactive_ui", { config: { maps: false } });
+          yield* tools.updateTool("maps", { enabled: false });
           try {
             const seed = yield* setupConversation;
             yield* engine.startGeneration({
@@ -5771,7 +5918,7 @@ describe("ui block maps", () => {
             expect(output.routes).toEqual({ [key]: { status: "maps_off" } });
             expect(mapLookupCalls.length).toBe(before);
           } finally {
-            yield* tools.updateTool("interactive_ui", { config: {} });
+            yield* tools.updateTool("maps", { enabled: true });
           }
         }),
       );

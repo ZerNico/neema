@@ -108,6 +108,34 @@ export const MAP_LOOKUP_LIMITS = {
   stopsPerRoute: 10,
 } as const;
 
+/**
+ * What the page may add to a finished answer for maps its state computes, on
+ * top of what streaming looked up. High, since every edit is a new stop list.
+ */
+export const PAGE_LOOKUP_LIMITS = {
+  placesPerAnswer: 40,
+  routesPerAnswer: 30,
+} as const;
+
+const QUOTED = /"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\$]|\\.)*)`/g;
+
+/**
+ * Every quoted string in a block's source, normalised: attribute values and
+ * script literals alike. A name the page asks the server to look up must be
+ * one of them, so only what the model wrote ever leaves, never what the
+ * reader typed into the block.
+ */
+export function quotedStrings(code: string): Set<string> {
+  const out = new Set<string>();
+  for (const match of code.matchAll(QUOTED)) {
+    const raw = match[1] ?? match[2] ?? match[3] ?? "";
+    const text = raw.replace(/\\(.)/g, "$1");
+    const normalized = normalizeQuery(text);
+    if (normalized !== "") out.add(normalized);
+  }
+  return out;
+}
+
 export type RouteMode = "drive" | "walk" | "bike" | "straight";
 export const ROUTE_MODES: readonly RouteMode[] = ["drive", "walk", "bike", "straight"];
 

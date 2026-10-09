@@ -36,6 +36,9 @@ const OsrmResponse = Schema.Struct({
       Schema.Struct({
         distance: Schema.Finite,
         duration: Schema.Finite,
+        legs: Schema.optionalKey(
+          Schema.Array(Schema.Struct({ distance: Schema.Finite, duration: Schema.Finite })),
+        ),
         geometry: Schema.Struct({
           coordinates: Schema.Array(Schema.Tuple([Schema.Finite, Schema.Finite])),
         }),
@@ -165,6 +168,15 @@ export class MapLookups extends Context.Service<
               path: thinPath(best.geometry.coordinates),
               distance: Math.round(best.distance),
               duration: Math.round(best.duration),
+              // Between consecutive stops: a trip's stages, each its own day.
+              ...(best.legs && best.legs.length === stops.length - 1
+                ? {
+                    legs: best.legs.map((leg) => ({
+                      distance: Math.round(leg.distance),
+                      duration: Math.round(leg.duration),
+                    })),
+                  }
+                : {}),
             } satisfies UiRoute;
           }).pipe(Effect.catch(() => Effect.succeed(UNAVAILABLE))),
       });

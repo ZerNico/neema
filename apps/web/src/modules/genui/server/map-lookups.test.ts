@@ -52,6 +52,7 @@ describe("MapLookups", () => {
           {
             distance: 1720.4,
             duration: 1376.2,
+            legs: [{ distance: 1720.4, duration: 1376.2 }],
             geometry: {
               coordinates: [
                 [-122.393435, 37.795538],
@@ -81,6 +82,7 @@ describe("MapLookups", () => {
       ],
       distance: 1720,
       duration: 1376,
+      legs: [{ distance: 1720, duration: 1376 }],
     });
   });
 

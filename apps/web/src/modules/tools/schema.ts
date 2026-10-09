@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
 import { PresentationToolEnvelope } from "~/modules/presentations/tool-schema.ts";
 import { SpreadsheetToolEnvelope } from "~/modules/spreadsheets/tool-schema.ts";
 import { WordToolEnvelope } from "~/modules/word/tool-schema.ts";
@@ -327,6 +328,27 @@ export const ToolChunkEnvelope = Schema.Union([
     ok: Schema.Boolean,
     /** The text that goes out when the answer ends. */
     message: Schema.optionalKey(Schema.String),
+    error: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    family: Schema.Literals(["map"]),
+    phase: Schema.Literals(["start"]),
+    callId: Schema.String,
+    name: Schema.Literals(["map_route"]),
+    turnIndex: Schema.Int,
+    callIndex: Schema.Int,
+    textOffset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    v: Schema.Literals([1]),
+    family: Schema.Literals(["map"]),
+    phase: Schema.Literals(["result"]),
+    callId: Schema.String,
+    name: Schema.Literals(["map_route"]),
+    ok: Schema.Boolean,
+    /** The stops as found and the whole route, for a one-line row; never geometry. */
+    route: Schema.optionalKey(MapRouteSummary),
     error: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["start"]) }),

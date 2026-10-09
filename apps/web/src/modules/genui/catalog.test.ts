@@ -185,3 +185,25 @@ describe("catalogReference", () => {
     expect(reference).toBe(catalogReference());
   });
 });
+
+describe("map pins and anchors", () => {
+  it("keeps one emoji as a pin's icon and drops anything else", () => {
+    for (const icon of ["🏰", "🖼️", "👩🏽‍🍳", "🇩🇪"]) {
+      const pin = only(only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes).children);
+      expect(pin.props.icon).toBe(icon);
+    }
+    for (const icon of ["A", "🏰🏰", "<b>", "🏰 castle"]) {
+      const pin = only(only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes).children);
+      expect(pin.props.icon).toBeUndefined();
+    }
+  });
+
+  it("keeps an anchor on containers and maps", () => {
+    for (const tag of ["box", "row", "col", "grid", "cell", "card"]) {
+      expect(only(validateTree([el(tag, { anchor: "museum" })]).nodes).props.anchor).toBe("museum");
+    }
+    expect(only(validateTree([el("map", { label: "M", anchor: "map" })]).nodes).props.anchor).toBe(
+      "map",
+    );
+  });
+});

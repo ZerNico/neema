@@ -108,14 +108,27 @@ export const SKILL_EXAMPLES = {
   <question options={["der", "die"]} answer="der" explain="mit always takes the dative.">Ich fahre mit ___ Bahn.</question>
 </quiz>`,
   map: `<script>
+  let stops = $state([
+    { id: "station", place: "Potsdam Hauptbahnhof", icon: "🚉", note: "Trains every 10 min." },
+    { id: "museum", place: "Museum Barberini, Potsdam", icon: "🖼️", note: "Closed Tuesdays." },
+    { id: "palace", place: "Sanssouci Palace, Potsdam", icon: "🏰", note: "Book ahead." },
+  ]);
+  let skipped = $state([]);
   let stop = $state("museum");
+  const kept = $derived(stops.filter((s) => !skipped.includes(s.id)));
 </script>
-<map label="A day in Potsdam" selected={stop} onselect={(id) => stop = id}>
-  <pin id="station" place="Potsdam Hauptbahnhof" label="Station">Trains from Berlin every 10 minutes.</pin>
-  <pin id="museum" place="Museum Barberini, Potsdam" label="Barberini" color="chart-2">Impressionists, closed Tuesdays.</pin>
-  <pin id="palace" place="Sanssouci Palace, Potsdam" label="Sanssouci" color="chart-3">Book the palace tour ahead.</pin>
-  <route mode="walk" stops={["Potsdam Hauptbahnhof", "Museum Barberini, Potsdam", "Sanssouci Palace, Potsdam"]} label="Walk"/>
-</map>`,
+<map label="Potsdam" anchor="map" selected={stop} onselect={(id) => { stop = id; reveal(id); }}>
+  {#each kept as s}
+    <pin id={s.id} place={s.place} icon={s.icon}>{s.note}</pin>
+  {/each}
+  <route mode="walk" stops={kept.map((s) => s.place)}/>
+</map>
+{#each stops as s}
+  <row anchor={s.id}>
+    <button variant="ghost" onclick={() => { stop = s.id; reveal("map"); }}>{s.icon} {s.place}</button>
+    <button variant="outline" onclick={() => skipped = skipped.includes(s.id) ? skipped.filter((x) => x !== s.id) : [...skipped, s.id]}>{skipped.includes(s.id) ? "Keep" : "Skip"}</button>
+  </row>
+{/each}`,
 } as const;
 
 const fence = (body: string) => "```ui\n" + body + "\n```";
@@ -158,15 +171,16 @@ An answer may contain \`\`\`ui fenced blocks, drawn with the app's own component
 - An optional \`<script>\` comes first. \`let x = $state(initial)\` declares state the reader changes. \`const y = $derived(expression)\` is recomputed on every render. Plain \`const\` and \`function\` declarations are allowed.
 - Events: \`onclick={() => …}\` on buttons and on drawing shapes, \`onchange={(value) => …}\` on inputs. The argument is the new value. A tappable shape needs a \`label\` saying what it selects; it can change state but never send, open or copy.
 - Text is plain: no Markdown, no citations, no HTML. Use \`<b>\`, \`<i>\`, \`<code>\`, \`<link>\` inline.
+- Tabs holding variants of one thing (two plans) share a layout so they compare; other tabs may differ.
 
 ## Rules the runtime enforces
 
 - Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source. Inside \`{#each items as item, i}\`, write through the state (\`items[i].done = true\`), never to \`item\`. Keep everything the reader changes in \`$state\`: a \`Set\`, \`Map\` or closure variable is lost when the block reloads.
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
-- There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, for timed phases that run on their own (breathing, intervals) \`<routine>\`; both count in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
+- There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, for timed phases that run on their own (breathing, intervals) \`<routine>\`; both count in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\`, \`copy(text)\` and \`reveal(anchor)\` (scrolls to the element with that \`anchor\`), one per event.
 - Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale.
 - Images: show physical things (places, products, dishes, animals, the stages of a process) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
-- Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal: its name on a map plus its town ("Museum Barberini, Potsdam", not "the museum" or "Potsdam old town"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
+- Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal: its name on a map plus its town ("Museum Barberini, Potsdam", not "the museum" or "Potsdam old town"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. Call \`map_route\` before stating a distance or time, and give the \`<route>\` its stops and mode. A place that cannot be found is listed as such, never guessed. Pins and stops may come from \`$state\` when each name is a string in the block; names the reader types are never looked up.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Use them only at a real fork the reader has to choose; most blocks need none.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
 
@@ -196,7 +210,7 @@ A quiz that explains each option:
 
 ${fence(SKILL_EXAMPLES.quiz)}
 
-A map whose pins the reader taps:
+A trip the reader edits, with pins and rows that lead to each other:
 
 ${fence(SKILL_EXAMPLES.map)}
 `;

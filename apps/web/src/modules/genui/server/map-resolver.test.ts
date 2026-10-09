@@ -124,6 +124,33 @@ describe("map resolver", () => {
     }),
   );
 
+  it.effect("draws a block's route from what the route tool already found, asking nothing", () =>
+    Effect.gen(function* () {
+      const h = harness();
+      const resolver = yield* makeMapResolver(h.deps);
+      const walk = routeKey({ mode: "walk", stops: ["Ferry Building", "Coit Tower"] });
+      const road: UiRoute = { status: "resolved", path: [[0, 0]], distance: 2000, duration: 1500 };
+      yield* resolver.seed({
+        places: {
+          "Ferry Building": { status: "resolved", ...COORDS["Ferry Building"] },
+          "Coit Tower": { status: "resolved", ...COORDS["Coit Tower"] },
+        },
+        routes: { [walk]: road },
+      });
+      yield* resolver.observe(
+        block(
+          '<pin place="Coit Tower"/>',
+          '<route mode="walk" stops={["Ferry Building", "Coit Tower"]}/>',
+        ),
+      );
+      yield* resolver.drain;
+      expect(h.geocoded).toEqual([]);
+      expect(h.routed).toEqual([]);
+      expect(h.routes.get(walk)).toEqual(road);
+      expect(h.places.get("Coit Tower")).toMatchObject({ status: "resolved" });
+    }),
+  );
+
   it.effect("chooses among a name's matches by the other places on its map", () =>
     Effect.gen(function* () {
       const h = harness();

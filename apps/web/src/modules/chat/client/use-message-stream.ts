@@ -57,6 +57,7 @@ import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/as
 import { PlanStep } from "~/modules/tools/plan-schema.ts";
 import { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
+import { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -78,6 +79,12 @@ export interface PlanToolActivity extends ToolActivityBase {
 export interface NotifyToolActivity extends ToolActivityBase {
   family: "notify";
   message?: string;
+}
+
+/** A route looked up with real distances; the row names its stops and totals. */
+export interface MapToolActivity extends ToolActivityBase {
+  family: "map";
+  route?: MapRouteSummary;
 }
 
 export interface AttachmentToolActivity extends ToolActivityBase {
@@ -247,6 +254,7 @@ export type ToolActivity =
   | AskToolActivity
   | PlanToolActivity
   | NotifyToolActivity
+  | MapToolActivity
   | ToolLoadActivity
   | AttachmentToolActivity
   | ResearchToolActivity
@@ -375,6 +383,7 @@ export function applyToolChunk(
     textOffset?: unknown;
     args?: { targets?: string[] };
     ok?: boolean;
+    route?: unknown;
     outcome?: unknown;
     reason?: unknown;
     scope?: unknown;
@@ -403,6 +412,7 @@ export function applyToolChunk(
     e.family !== "ask" &&
     e.family !== "plan" &&
     e.family !== "notify" &&
+    e.family !== "map" &&
     e.family !== "tool-load" &&
     e.family !== "attachment" &&
     e.family !== "research" &&
@@ -766,6 +776,32 @@ export function applyToolChunk(
       callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
       status: e.phase === "start" ? "running" : questions ? "complete" : "error",
       ...(questions ? { questions } : {}),
+    };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
+  }
+
+  if (family === "map") {
+    if (
+      e.name !== "map_route" ||
+      (e.phase !== "start" && e.phase !== "result") ||
+      (existing && e.phase === "start")
+    )
+      return tools;
+    const route =
+      e.phase === "result"
+        ? Option.getOrUndefined(Schema.decodeUnknownOption(MapRouteSummary)(e.route))
+        : undefined;
+    const next: MapToolActivity = {
+      family: "map",
+      ...position,
+      callId: e.callId,
+      name: e.name,
+      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
+      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
+      status: e.phase === "start" ? "running" : e.ok && route ? "complete" : "error",
+      ...(route ? { route } : {}),
     };
     return index === -1
       ? [...tools, next]

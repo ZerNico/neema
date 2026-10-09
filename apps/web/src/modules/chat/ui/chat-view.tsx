@@ -54,6 +54,7 @@ import {
   editMessage,
   resumeMessage,
   retryMessage,
+  lookupUiMap,
   saveUiState,
   sendMessage,
   stopGeneration,
@@ -120,6 +121,7 @@ import { toastError } from "~/ui/error-toast.ts";
 import {
   GenuiActionsContext,
   type SavedUiState,
+  type UiMapLookup,
   type UiStateSave,
 } from "~/modules/genui/ui/context.ts";
 import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
@@ -1007,6 +1009,11 @@ export function ChatView({
           () => {},
           () => {},
         ),
+      lookupMap: (input: UiMapLookup) =>
+        lookupUiMap({ data: input }).then(
+          (result) => result,
+          () => ({ lookups: null, busy: false }),
+        ),
     }),
     [tailMessageId, generationDisabled, mutateSend],
   );
@@ -1157,7 +1164,11 @@ export function ChatView({
     const grouped = new Map<string, Map<number, SavedUiState>>();
     for (const row of data.uiStates) {
       const states = grouped.get(row.messageId) ?? new Map<number, SavedUiState>();
-      states.set(row.ordinal, { sourceHash: row.sourceHash, state: JSON.stringify(row.state) });
+      states.set(row.ordinal, {
+        sourceHash: row.sourceHash,
+        state: JSON.stringify(row.state),
+        digest: row.digest ?? null,
+      });
       grouped.set(row.messageId, states);
     }
     return grouped;

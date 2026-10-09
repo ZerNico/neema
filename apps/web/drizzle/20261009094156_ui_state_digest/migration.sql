@@ -1,0 +1,1 @@
+ALTER TABLE "message_ui_states" ADD COLUMN "digest" text;

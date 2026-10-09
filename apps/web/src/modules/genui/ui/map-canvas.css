@@ -31,3 +31,21 @@
 .dark [data-genui-map] .maplibregl-ctrl-attrib-button {
   filter: invert(1);
 }
+
+/*
+ * The attribution inherits the chat's text size, taller than the 24px box
+ * MapLibre pins its button to the top of. The open line gets MapLibre's own
+ * size back, and the button is centred on whatever height it ends up.
+ */
+[data-genui-map] .maplibregl-ctrl-attrib.maplibregl-compact {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+[data-genui-map] .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+  top: 50%;
+  translate: 0 -50%;
+}
