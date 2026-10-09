@@ -67,6 +67,12 @@ const missing = (prompt: ElicitationPrompt, values: Values) =>
   prompt.mode === "form" &&
   prompt.fields.some((field) => {
     const value = values[field.key];
+    // How many to pick is part of the question; the server checks it again.
+    if (Array.isArray(value) && value.length > 0)
+      return (
+        (field.min !== undefined && value.length < field.min) ||
+        (field.max !== undefined && value.length > field.max)
+      );
     return (
       field.required &&
       (value === undefined || value === "" || (Array.isArray(value) && value.length === 0))

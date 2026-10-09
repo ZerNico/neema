@@ -87,6 +87,18 @@ describe("elicitation prompts", () => {
     expect(wide(30)).not.toBeNull();
     // Too many to show, or a key an answer could not carry back: declined, not cut short.
     expect(wide(31)).toBeNull();
+    // A required answer longer than an answer may carry could never be given.
+    expect(
+      promptOf({
+        mode: "form",
+        message: "Essay",
+        requestedSchema: {
+          type: "object",
+          properties: { essay: { type: "string", minLength: 4_001 } },
+          required: ["essay"],
+        },
+      }),
+    ).toBeNull();
     expect(wide(1, () => "k".repeat(101))).toBeNull();
     expect(
       promptOf({ mode: "url", message: "Go", url: "https://example.com/pay" } as never),
@@ -95,6 +107,36 @@ describe("elicitation prompts", () => {
       message: "Go",
       url: "https://example.com/pay",
     });
+  });
+
+  it("keeps how many choices to pick, and what was picked to start with", () => {
+    const pick = promptOf({
+      mode: "form",
+      message: "Labels",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          labels: {
+            type: "array",
+            items: { enum: ["bug", "ux", "docs"] },
+            minItems: 1,
+            maxItems: 2,
+            default: ["bug"],
+          },
+        },
+      } as never,
+    });
+    expect(pick?.mode === "form" && pick.fields[0]).toMatchObject({
+      kind: "choices",
+      min: 1,
+      max: 2,
+      default: ["bug"],
+    });
+    if (!pick) return;
+    const answer = (labels: string[]) =>
+      resultOf(pick, { action: "accept", values: { labels } }).action;
+    expect(answer(["bug", "ux"])).toBe("accept");
+    expect(answer(["bug", "ux", "docs"])).toBe("decline");
   });
 
   it("sends only answers that fit the form, never half of one", () => {

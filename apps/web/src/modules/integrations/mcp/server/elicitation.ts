@@ -38,6 +38,9 @@ const optionsOf = (schema: Json): ElicitationField["options"] | null => {
 /** What a card can hold, and what an answer may carry back (`AnswerElicitationInput`). */
 const MAX_FIELDS = 30;
 const MAX_KEY = 100;
+/** The longest text an answer may carry (`AnswerElicitationInput`). */
+const MAX_TEXT = 4_000;
+const TEXT_KINDS = new Set<ElicitationField["kind"]>(["text", "email", "url", "date", "datetime"]);
 
 const fieldOf = (key: string, schema: unknown, required: boolean): ElicitationField | null => {
   if (!isObject(schema)) return null;
@@ -88,7 +91,17 @@ const fieldOf = (key: string, schema: unknown, required: boolean): ElicitationFi
   if (schema.type === "array" && isObject(schema.items)) {
     const choices = optionsOf(schema.items);
     if (!choices) return null;
-    return { ...base, kind: "choices", options: choices };
+    const preset = Array.isArray(schema.default) ? schema.default : null;
+    return {
+      ...base,
+      kind: "choices",
+      options: choices,
+      ...(preset?.every((value) => choices.some((option) => option.value === value))
+        ? { default: preset as string[] }
+        : {}),
+      ...(typeof schema.minItems === "number" ? { min: schema.minItems } : {}),
+      ...(typeof schema.maxItems === "number" ? { max: schema.maxItems } : {}),
+    };
   }
   return null;
 };
@@ -113,9 +126,14 @@ export const promptOf = (params: ElicitRequest["params"]): ElicitationPrompt | n
   // Cutting a form short, or a key, would send an answer to a question nobody asked.
   const entries = Object.entries(schema.properties);
   if (entries.length > MAX_FIELDS || entries.some(([key]) => key.length > MAX_KEY)) return null;
-  const fields = entries.map(([key, property]) => fieldOf(key, property, required.has(key)));
-  if (fields.some((field) => field === null)) return null;
-  return { mode: "form", message, fields: fields as ElicitationField[] };
+  const fields: ElicitationField[] = [];
+  for (const [key, property] of entries) {
+    const field = fieldOf(key, property, required.has(key));
+    // Not drawable as asked, or a text no answer could be long enough for.
+    if (!field || (TEXT_KINDS.has(field.kind) && (field.min ?? 0) > MAX_TEXT)) return null;
+    fields.push(field);
+  }
+  return { mode: "form", message, fields };
 };
 
 const fits = (field: ElicitationField, value: ElicitationValue) => {
@@ -136,7 +154,9 @@ const fits = (field: ElicitationField, value: ElicitationValue) => {
     case "choices":
       return (
         Array.isArray(value) &&
-        value.every((item) => field.options!.some((option) => option.value === item))
+        value.every((item) => field.options!.some((option) => option.value === item)) &&
+        (field.min === undefined || value.length >= field.min) &&
+        (field.max === undefined || value.length <= field.max)
       );
     default:
       return (
