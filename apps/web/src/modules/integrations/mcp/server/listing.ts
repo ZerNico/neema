@@ -7,6 +7,7 @@ import {
   type McpAnnotations,
   type McpToolEntry,
 } from "../catalog.ts";
+import { argumentCheck } from "./validate.ts";
 
 type Json = Record<string, unknown>;
 
@@ -172,7 +173,11 @@ export const listingEntries = (
   return unique.map((tool): McpToolEntry => {
     const name = tool.name as string;
     const annotations = annotationsOf(tool.annotations);
-    const input = normalizeSchema(tool.inputSchema);
+    const fingerprint = fingerprintOf(tool);
+    const normalized = normalizeSchema(tool.inputSchema);
+    // Checked now, so a tool whose arguments could never be checked is never offered.
+    const check = "schema" in normalized ? argumentCheck(fingerprint, normalized.schema) : null;
+    const input = check && "error" in check ? check : normalized;
     const output = isObject(tool.outputSchema) ? normalizeSchema(tool.outputSchema) : null;
     const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
     const title =
@@ -196,7 +201,7 @@ export const listingEntries = (
       access: accessFromAnnotations(annotations),
       enabled: false,
       ...(unsupported ? { unsupported } : {}),
-      fingerprint: fingerprintOf(tool),
+      fingerprint,
     };
   });
 };

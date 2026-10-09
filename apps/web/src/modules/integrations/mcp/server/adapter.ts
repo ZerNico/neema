@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { CallToolResult, Tool as McpTool } from "@modelcontextprotocol/client";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { Effect } from "effect";
 import { IntegrationRejected, IntegrationRequestFailed } from "../../errors.ts";
 import type {
@@ -26,23 +25,10 @@ import { mcpOAuth } from "./auth.ts";
 import { connect, REQUEST_OPTIONS, toFailure, type Elicit } from "./client.ts";
 import { promptOf, resultOf } from "./elicitation.ts";
 import { listingEntries } from "./listing.ts";
+import { argumentCheck } from "./validate.ts";
 
 /** How often a catalog is looked at without a hint from the server, and at least. */
 const RECHECK_MS = { default: 24 * 60 * 60_000, min: 60 * 60_000 } as const;
-
-const validator = new AjvJsonSchemaValidator();
-const compiled = new Map<string, ReturnType<typeof validator.getValidator>>();
-/** Compiled once per approved schema; a changed schema is a new fingerprint. */
-const validate = (entry: McpToolEntry, args: unknown) => {
-  let check = compiled.get(entry.fingerprint);
-  if (!check) {
-    check = validator.getValidator(
-      entry.inputSchema as Parameters<typeof validator.getValidator>[0],
-    );
-    compiled.set(entry.fingerprint, check);
-  }
-  return check(args ?? {});
-};
 
 const isEntry = (value: unknown): value is McpToolEntry => {
   if (!value || typeof value !== "object") return false;
@@ -220,7 +206,9 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
   revision: entry.fingerprint,
   prepare: (session, args, call) =>
     Effect.gen(function* () {
-      const checked = validate(entry, args);
+      const check = argumentCheck(entry.fingerprint, entry.inputSchema);
+      if ("error" in check) return yield* new IntegrationRejected({ reason: check.error });
+      const checked = check(args ?? {});
       if (!checked.valid)
         return yield* new IntegrationRejected({
           reason: `The arguments do not fit ${entry.title}: ${briefValue(checked.errorMessage, 300)}`,

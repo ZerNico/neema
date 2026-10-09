@@ -93,6 +93,22 @@ describe("listing entries", () => {
   });
 });
 
+describe("a schema the argument check cannot compile", () => {
+  it("is listed as one that cannot be offered", () => {
+    const [entry] = listingEntries(
+      "docs",
+      [
+        {
+          name: "odd",
+          inputSchema: { type: "object", properties: { q: { type: "string", pattern: "(" } } },
+        },
+      ],
+      [],
+    );
+    expect(entry?.unsupported).toBe("Its input schema is not valid JSON Schema.");
+  });
+});
+
 describe("a schema built to explode", () => {
   it("is refused quickly instead of expanded", () => {
     // Each definition names the next ten times: 10^8 nodes within the depth limit.

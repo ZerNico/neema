@@ -9,7 +9,7 @@ import {
   McpServer,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
-import { Effect, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CallContext, Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { ElicitationAnswer, ElicitationPrompt } from "../../schema.ts";
@@ -258,6 +258,18 @@ describe("an MCP server through the adapter", () => {
     expect(Exit.isFailure(exit)).toBe(true);
     expect(JSON.stringify(exit)).toMatch(/IntegrationRejected/);
     expect(seen.filter((line) => line.endsWith("tools/call"))).toEqual([]);
+  });
+
+  it("refuses, rather than crashes on, an approved schema that cannot be checked", async () => {
+    const { entries } = await list(sessionAt("/mcp"));
+    const broken: McpToolEntry = {
+      ...byName(entries, "search"),
+      fingerprint: "pattern-that-does-not-compile",
+      inputSchema: { type: "object", properties: { q: { type: "string", pattern: "(" } } },
+    };
+    const exit = await run(sessionAt("/mcp"), broken, { q: "x" });
+    expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(true);
+    expect(JSON.stringify(exit)).toMatch(/not valid JSON Schema/);
   });
 
   it("reports a tool's own error as a failure in its words", async () => {
