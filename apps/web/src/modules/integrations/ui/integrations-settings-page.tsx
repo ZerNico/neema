@@ -116,17 +116,29 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
         </ListCard>
       </Section>
       {usable && manifest.scope ? <ScopeSection integration={integration} /> : null}
-      {usable ? (
+      {integration.tools.length === 0 ? (
+        <Section title="What chats can do">
+          <EmptyState
+            icon={PlugSocketIcon}
+            title="No tools yet"
+            description="An admin approves which of this server’s tools chats may use."
+          />
+        </Section>
+      ) : usable ? (
         <Section
           title="Tool permissions"
-          description="Choose when chats may use each tool. Blocked tools are never offered."
+          description={
+            connection.authKind === "shared"
+              ? "Chats only read with a key everyone shares. Choose when they may."
+              : "Choose when chats may use each tool. Blocked tools are never offered."
+          }
         >
           <PermissionsEditor integration={integration} />
         </Section>
       ) : (
         <Section title="What chats can do">
           <ListCard>
-            {manifest.tools.map((tool) => (
+            {integration.tools.map((tool) => (
               <ListRow key={tool.name}>
                 <span className="text-sm">{tool.title}</span>
               </ListRow>
@@ -237,12 +249,25 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
             ? "An admin turned this integration off."
             : needsReauth
               ? `Sign in to ${integration.name} again to keep using it.`
-              : connection
-                ? `Chats use ${integration.name} as this account.`
-                : `Connect your ${integration.name} account to use it in chats.`}
+              : connection?.authKind === "shared"
+                ? "Everyone here uses one key, so chats only read."
+                : connection?.authKind === "none"
+                  ? `${integration.name} needs no account.`
+                  : connection
+                    ? `Chats use ${integration.name} as this account.`
+                    : integration.methods.open
+                      ? `Turn ${integration.name} on to use it in chats.`
+                      : `Connect your ${integration.name} account to use it in chats.`}
         </span>
       </div>
       {canConnect && !connection ? <ConnectActions integration={integration} /> : null}
+      {canConnect &&
+      !needsReauth &&
+      connection?.requiredScopes?.length &&
+      integration.methods.oauth ? (
+        // A call needed more than this sign-in granted; signing in again asks for both.
+        <SignInButton integration={integration}>Grant more access</SignInButton>
+      ) : null}
       {reconnectWithOAuth ? (
         <SignInButton integration={integration}>Reconnect</SignInButton>
       ) : needsReauth && canConnect && integration.methods.apiKey ? (
@@ -267,7 +292,7 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
           <DropdownMenuContent align="end" className="w-52">
             {reconnectWithOAuth && integration.methods.apiKey ? (
               <DropdownMenuItem onClick={() => setKeyOpen(true)}>
-                Use an API key instead
+                Use {findIntegrationType(integration.kind)?.apiKey?.noun ?? "an API key"} instead
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
@@ -317,6 +342,12 @@ function PermissionsEditor({ integration }: { integration: UserIntegration }) {
   return (
     <ToolPermissions
       kind={integration.kind}
+      // Shared keys only ever read, so their other tools have nothing to set.
+      tools={
+        integration.connection?.authKind === "shared"
+          ? integration.tools.filter((tool) => tool.access === "read")
+          : integration.tools
+      }
       permissions={integration.connection!.toolPermissions}
       onChange={(toolPermissions) => update.mutate({ toolPermissions })}
     />

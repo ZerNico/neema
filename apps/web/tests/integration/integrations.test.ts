@@ -390,6 +390,7 @@ describe("connections", () => {
             code: "good-code",
             state: started.state,
             cookieState,
+            iss: null,
           }),
         ),
       );

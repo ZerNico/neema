@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { IntegrationApprovals } from "../../server/approvals.ts";
 import type { ConnectedSession } from "../../server/service.ts";
-import { prepareIntegrationTools } from "../../server/tools.ts";
+import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
+import { jiraManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { jiraAdapter } from "./adapter.ts";
@@ -394,6 +395,8 @@ describe("a connection limited to some projects", () => {
     const request = vi.fn(() => Effect.succeed("allow" as const));
     const approvals: IntegrationApprovals["Service"] = {
       request,
+      elicit: () => Effect.succeed({ action: "cancel" as const }),
+      answer: () => Effect.succeed(false),
       decide: () => Effect.succeed(false),
       get: () => Effect.succeed(null),
       pending: () => Effect.succeed([]),
@@ -403,6 +406,8 @@ describe("a connection limited to some projects", () => {
       connectionId: "c",
       integration: { id: "jira", kind: "jira", name: "Jira" },
       adapter: jiraAdapter,
+      tools: shippedTools(jiraManifest, jiraAdapter),
+      authKind: "api_key",
     };
     const tools = prepareIntegrationTools({
       offered: [

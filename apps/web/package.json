@@ -36,6 +36,7 @@
     "@hugeicons/core-free-icons": "^4.3.5",
     "@hugeicons/react": "^1.1.10",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@napi-rs/canvas": "1.0.10",
     "@npmcli/arborist": "10.0.3",
     "@office-kit/docx": "0.1.1",
@@ -113,6 +114,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@modelcontextprotocol/server": "2.3.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testcontainers/postgresql": "^12.1.0",
     "@testing-library/dom": "^10.4.2",

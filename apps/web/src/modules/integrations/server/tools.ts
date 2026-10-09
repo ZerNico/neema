@@ -18,11 +18,18 @@ import {
   summarizeCall,
   type IntegrationAllowance,
   type IntegrationManifest,
-  type IntegrationToolDefinition,
   type ToolAccess,
 } from "../manifest.ts";
+import type { ElicitationAnswer } from "../schema.ts";
 import type { IntegrationModelResult } from "../tool-schema.ts";
-import type { AdapterFailure, PreparedCall } from "./adapter.ts";
+import type {
+  AdapterFailure,
+  AdapterFile,
+  CallContext,
+  IntegrationAdapter,
+  OfferedTool,
+  PreparedCall,
+} from "./adapter.ts";
 import type { ApprovalAnswer, IntegrationApprovals } from "./approvals.ts";
 import type { ConnectedSession } from "./service.ts";
 
@@ -37,8 +44,27 @@ export interface OfferedIntegration {
 
 export interface IntegrationToolEntry {
   readonly integrationId: string;
-  readonly tool: IntegrationToolDefinition;
+  readonly tool: OfferedTool;
 }
+
+/** A shipped type's tools, each with its handler; one without a handler is not offered. */
+export const shippedTools = (manifest: IntegrationManifest, adapter: IntegrationAdapter) =>
+  manifest.tools.flatMap((tool): OfferedTool[] => {
+    const prepare = adapter.handlers[tool.name];
+    if (!prepare) return [];
+    return [
+      {
+        name: tool.name,
+        title: tool.title,
+        label: tool.label,
+        description: tool.description,
+        access: tool.access,
+        parameters: tool.parameters,
+        summarize: (args) => summarizeCall(tool, args),
+        prepare,
+      },
+    ];
+  });
 
 export interface PreparedIntegrationTools {
   readonly group: ToolGroup;
@@ -51,6 +77,8 @@ export interface PreparedIntegrationTools {
   take(providerCallId: string): {
     sources: ReadonlyArray<IntegrationSource>;
     access: ToolAccess | null;
+    /** Files the call returned, for the engine to store under the generation fence. */
+    files: ReadonlyArray<AdapterFile>;
   };
 }
 
@@ -105,6 +133,7 @@ export function prepareIntegrationTools(input: {
   const handlers: Record<string, unknown> = {};
   const names = new Map<string, IntegrationToolEntry>();
   const pendingSources = new Map<string, IntegrationSource[]>();
+  const pendingFiles = new Map<string, ReadonlyArray<AdapterFile>>();
   const effectiveAccessByCall = new Map<string, ToolAccess>();
 
   for (const offer of input.offered) {
@@ -113,9 +142,11 @@ export function prepareIntegrationTools(input: {
     // The integration's own name, so two of one type read apart: "Jira · Acme".
     const name = offer.session.integration.name;
     const changes = Semaphore.makeUnsafe(1);
-    for (const tool of manifest.tools) {
-      const prepare = offer.session.adapter.handlers[tool.name];
-      if (!prepare) continue;
+    // A shared key acts as the admin's account for whoever chats: reads only.
+    const shared = offer.session.authKind === "shared";
+    for (const tool of offer.session.tools) {
+      const prepare = tool.prepare;
+      if (shared && tool.access !== "read") continue;
       // Blocked tools are not offered at all, so the model never plans around them.
       if (permissionFor(tool, offer.permissions) === "block") continue;
       const modelName = integrationToolName(offer.integrationId, tool.name);
@@ -141,6 +172,11 @@ export function prepareIntegrationTools(input: {
           case "destructive":
             return failure(
               `Not permitted: scheduled runs never ${tool.title.toLowerCase()} in ${name}. ${instead}`,
+              true,
+            );
+          case "shared":
+            return failure(
+              `Not permitted: ${name} is shared by everyone here, so it only reads. ${instead}`,
               true,
             );
           case "grant":
@@ -174,6 +210,7 @@ export function prepareIntegrationTools(input: {
             allowedInChat: now.allowedInChat.includes(tool.name),
             unattended: offer.unattended,
             reach,
+            shared,
           });
         });
       /**
@@ -221,7 +258,28 @@ export function prepareIntegrationTools(input: {
           // Whom it reaches is not known yet; that can only tighten the answer.
           const early = yield* currentConsent(null);
           if (early.kind === "refuse") return refusal(early);
-          const prepared = yield* prepare(offer.session, args).pipe(Effect.result);
+          const callContext: CallContext = {
+            // Nobody to ask in a scheduled run: the service hears "decline" at once.
+            elicit: (prompt) =>
+              offer.unattended !== null
+                ? Effect.succeed<ElicitationAnswer>({ action: "decline" })
+                : Effect.gen(function* () {
+                    const callId = yield* input.rowIdFor(context.toolCallId);
+                    if (!callId) return { action: "cancel" } satisfies ElicitationAnswer;
+                    return yield* input.approvals.elicit(input.owner.userId, {
+                      callId,
+                      conversationId: input.owner.conversationId,
+                      messageId: input.owner.messageId,
+                      integrationId: offer.integrationId,
+                      tool: tool.name,
+                      access: tool.access,
+                      summary: tool.summarize(args),
+                      targets: [],
+                      prompt,
+                    });
+                  }),
+          };
+          const prepared = yield* prepare(offer.session, args, callContext).pipe(Effect.result);
           if (prepared._tag === "Failure") return yield* report(offer.session)(prepared.failure);
           const call = prepared.success;
           const outside = yield* outsideScope(call);
@@ -248,8 +306,9 @@ export function prepareIntegrationTools(input: {
               integrationId: offer.integrationId,
               tool: tool.name,
               access,
-              summary: call.summary ?? summarizeCall(tool, args),
+              summary: prepared.success.summary ?? tool.summarize(args),
               targets: reach ? [...reach.targets] : [],
+              ...(tool.details ? { details: tool.details(args) } : {}),
             });
             if (answer === "deny")
               return failure("The user declined this action. Do not retry it unasked.", true);
@@ -298,6 +357,7 @@ export function prepareIntegrationTools(input: {
                 read: source.read,
               }));
               if (sources.length) pendingSources.set(context.toolCallId, sources);
+              if (result.files?.length) pendingFiles.set(context.toolCallId, result.files);
               return {
                 ok: true,
                 result: result.output,
@@ -326,9 +386,11 @@ export function prepareIntegrationTools(input: {
     take: (providerCallId) => {
       const sources = pendingSources.get(providerCallId) ?? [];
       const access = effectiveAccessByCall.get(providerCallId) ?? null;
+      const files = pendingFiles.get(providerCallId) ?? [];
       pendingSources.delete(providerCallId);
+      pendingFiles.delete(providerCallId);
       effectiveAccessByCall.delete(providerCallId);
-      return { sources, access };
+      return { sources, access, files };
     },
   };
 }

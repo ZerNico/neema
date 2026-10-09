@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { myIntegrationsQuery } from "../client/queries.ts";
+import { outlineManifest } from "../outline/manifest.ts";
 import type { UserIntegration } from "../schema.ts";
 import { connectIntegrationApiKey, updateIntegrationConnection } from "../server/functions.ts";
 import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
@@ -31,7 +32,14 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
   kind: "outline",
   name: "Outline",
   available: true,
-  methods: { oauth: true, apiKey: true },
+  methods: { oauth: true, apiKey: true, open: null },
+  tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
+    name,
+    title,
+    label,
+    description,
+    access,
+  })),
   apiKeyHelpUrl: null,
   connection: connection && {
     id: "connection-1",
@@ -41,6 +49,7 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
     offerByDefault: true,
     toolPermissions: {},
     scope: null,
+    requiredScopes: null,
     createdAt: "2026-09-24T10:00:00Z",
     ...connection,
   },

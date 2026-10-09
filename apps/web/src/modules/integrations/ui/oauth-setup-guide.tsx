@@ -38,7 +38,7 @@ export function OAuthSetupGuide({
   const [open, setOpen] = useState(!configured);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const consoleUrl = setup.console.url(config);
+  const consoleUrl = setup.console?.url(config) ?? null;
   return (
     <Field>
       <FieldLabel htmlFor={id}>Redirect URI</FieldLabel>
@@ -71,22 +71,24 @@ export function OAuthSetupGuide({
         </DisclosureTrigger>
         <DisclosureContent>
           <ol className={cn(disclosureBodyRailClassName, "list-decimal space-y-2 pl-8")}>
-            <li>
-              Open the{" "}
-              {consoleUrl ? (
-                <a
-                  href={consoleUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-foreground underline underline-offset-4"
-                >
-                  {setup.console.label}
-                </a>
-              ) : (
-                setup.console.label
-              )}
-              .
-            </li>
+            {setup.console ? (
+              <li>
+                Open the{" "}
+                {consoleUrl ? (
+                  <a
+                    href={consoleUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline underline-offset-4"
+                  >
+                    {setup.console.label}
+                  </a>
+                ) : (
+                  setup.console.label
+                )}
+                .
+              </li>
+            ) : null}
             {setup.steps.map((step) => (
               <li key={step.text}>
                 {step.text}

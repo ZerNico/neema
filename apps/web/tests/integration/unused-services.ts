@@ -64,6 +64,10 @@ export const NoIntegrations = Layer.mergeAll(
     deleteIntegration: () => Effect.die("no integrations in these tests"),
     beginOAuth: () => Effect.die("no integrations in these tests"),
     completeOAuth: () => Effect.die("no integrations in these tests"),
+    connectOpen: () => Effect.die("no integrations in these tests"),
+    checkCatalog: () => Effect.die("no integrations in these tests"),
+    approveCatalog: () => Effect.die("no integrations in these tests"),
+    checkDueCatalogs: () => Effect.void,
     updatePreferences: () => Effect.die("no integrations in these tests"),
     disconnect: () => Effect.void,
     session: (_userId, integrationId) =>
@@ -78,6 +82,8 @@ export const NoIntegrations = Layer.mergeAll(
   }),
   Layer.succeed(IntegrationApprovals, {
     request: () => Effect.die("no integrations in these tests"),
+    elicit: () => Effect.die("no integrations in these tests"),
+    answer: () => Effect.succeed(false),
     decide: () => Effect.succeed(false),
     get: () => Effect.succeed(null),
     pending: () => Effect.succeed([]),

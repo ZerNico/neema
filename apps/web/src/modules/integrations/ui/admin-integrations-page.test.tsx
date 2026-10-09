@@ -35,6 +35,8 @@ const jira = (id: string, name: string): AdminIntegration & { redirectUri: strin
   allowApiKeys: true,
   audience: "instance",
   connectionCount: 2,
+  sharedCredentialConfigured: false,
+  catalog: null,
   redirectUri: null,
 });
 

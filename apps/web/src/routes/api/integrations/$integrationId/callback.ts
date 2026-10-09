@@ -45,6 +45,8 @@ export const Route = createFileRoute("/api/integrations/$integrationId/callback"
               code,
               state,
               cookieState: readCookie(request.headers.get("cookie"), OAUTH_STATE_COOKIE),
+              // RFC 9207: who answered, checked against who was asked before the code is spent.
+              iss: url.searchParams.get("iss"),
             }),
           ).pipe(
             Effect.map(({ returnTo }) => ({ ok: true as const, returnTo })),

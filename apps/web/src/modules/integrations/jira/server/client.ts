@@ -122,7 +122,7 @@ const route = (site: string, credential: Credential) =>
         authorization: `Bearer ${credential.accessToken}`,
       };
     }
-    const { email = "", token = "" } = credential.values;
+    const { email = "", token = "" } = credential.kind === "api_key" ? credential.values : {};
     return {
       base: `${site}/rest/api/3`,
       authorization: `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`,

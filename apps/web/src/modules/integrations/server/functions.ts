@@ -4,6 +4,8 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
+  AnswerElicitationInput,
+  ApproveCatalogInput,
   BrowseInput,
   ConnectApiKeyInput,
   ConversationIntegrationInput,
@@ -101,6 +103,9 @@ export const saveIntegrationConfig = createServerFn({ method: "POST" })
               ? {}
               : { oauthClientSecret: data.oauthClientSecret }),
             allowApiKeys: data.allowApiKeys,
+            ...(data.sharedCredential === undefined
+              ? {}
+              : { sharedCredential: data.sharedCredential ? { ...data.sharedCredential } : null }),
           }),
         ).pipe(Effect.asVoid),
       ),
@@ -124,6 +129,52 @@ export const connectIntegrationApiKey = createServerFn({ method: "POST" })
         IntegrationService.use((service) =>
           service.connectApiKey(context.session.user.id, data.integrationId, data.values),
         ),
+      ),
+    ),
+  );
+
+/** Turns on an integration that needs no account of one's own. */
+export const connectIntegrationOpen = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      outcome(
+        IntegrationService.use((service) =>
+          service.connectOpen(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** Lists a server's tools now, as the admin asking; nothing is offered until approved. */
+export const checkIntegrationCatalog = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      IntegrationService.use((service) =>
+        service.checkCatalog(data.integrationId, context.session.user.id),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const approveIntegrationCatalog = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(ApproveCatalogInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      IntegrationService.use((service) =>
+        service.approveCatalog(context.session.user.id, data.integrationId, {
+          version: data.fingerprint,
+          decisions: data.decisions,
+        }),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
       ),
     ),
   );
@@ -222,6 +273,24 @@ export const decideIntegrationCall = createServerFn({ method: "POST" })
         );
         return { ok: decided };
       }),
+    ),
+  );
+
+/** Answers a service's question to a running call; the call goes on with the answer. */
+export const answerIntegrationElicitation = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(AnswerElicitationInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      IntegrationApprovals.use((approvals) =>
+        approvals.answer(
+          context.session.user.id,
+          data.callId,
+          data.action === "accept"
+            ? { action: "accept", ...(data.values ? { values: data.values } : {}) }
+            : { action: data.action },
+        ),
+      ).pipe(Effect.map((answered) => ({ ok: answered }))),
     ),
   );
 

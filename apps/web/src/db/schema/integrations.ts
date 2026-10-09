@@ -14,6 +14,7 @@ import { agents } from "./agents.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
+import type { McpToolEntry } from "~/modules/integrations/mcp/catalog.ts";
 
 /**
  * One integration an admin set up: an instance of a type the code ships
@@ -37,6 +38,9 @@ export const integrationConfigs = pgTable(
     // AES-256-GCM via KeyCipher, like provider API keys
     oauthClientSecretCiphertext: text("oauth_client_secret_ciphertext"),
     allowApiKeys: boolean("allow_api_keys").notNull().default(true),
+    // A key the admin holds for everyone, as the manifest's shared credential
+    // fields (KeyCipher JSON). Only a type whose calls cannot act as anyone has one.
+    sharedCredentialCiphertext: text("shared_credential_ciphertext"),
     audience: text({ enum: ["private", "instance"] })
       .notNull()
       .default("instance"),
@@ -89,7 +93,9 @@ export const integrationConnections = pgTable(
     integrationId: text("integration_id")
       .notNull()
       .references(() => integrationConfigs.id, { onDelete: "cascade" }),
-    authKind: text("auth_kind", { enum: ["oauth", "api_key"] }).notNull(),
+    // `none` and `shared` hold no personal secret: the row keeps the person's
+    // own toggles and tool permissions for a service everyone reaches alike.
+    authKind: text("auth_kind", { enum: ["oauth", "api_key", "none", "shared"] }).notNull(),
     // KeyCipher over the JSON credential (token set or key); never leaves the server.
     credentialsCiphertext: text("credentials_ciphertext").notNull(),
     accountLabel: text("account_label").notNull(),
@@ -109,6 +115,9 @@ export const integrationConnections = pgTable(
     // The manifest scope's items (Jira project keys) every call stays inside;
     // null is everything the account can reach.
     scope: jsonb().$type<string[]>(),
+    // OAuth scopes a call was refused for, until the person signs in again
+    // granting them; null when nothing is missing.
+    requiredScopes: jsonb("required_scopes").$type<string[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -174,4 +183,55 @@ export const integrationAllowanceUses = pgTable(
     uses: integer().notNull(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.integrationId, t.allowanceId] })],
+);
+
+/**
+ * The tools of an integration whose type reads them from its server (MCP).
+ * Only `approved` is offered, in its order: a tool new or changed since waits
+ * in `latest` until an admin approves it, so a server cannot put words in the
+ * model's mouth unreviewed.
+ */
+export const integrationToolCatalogs = pgTable(
+  "integration_tool_catalogs",
+  {
+    integrationId: text("integration_id")
+      .primaryKey()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+    approved: jsonb().$type<McpToolEntry[]>().notNull().default([]),
+    // What the server listed at the last check that worked; null before one.
+    latest: jsonb().$type<McpToolEntry[]>(),
+    // What the server says about itself, for the admin.
+    server: jsonb().$type<Record<string, string>>(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    checkError: text("check_error"),
+    // Whose connection the background check lists tools with.
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
+    // A claimed check's lease; the sweep skips a catalog until it lapses.
+    checkLeaseUntil: timestamp("check_lease_until", { withTimezone: true }),
+  },
+  (t) => [index("integration_tool_catalogs_due_idx").on(t.nextCheckAt)],
+);
+
+/**
+ * An OAuth client this app registered with one authorization server, keyed
+ * by its issuer: credentials one issuer gave are never shown to another, and
+ * a server that moves to another issuer gets a fresh registration.
+ */
+export const integrationOAuthClients = pgTable(
+  "integration_oauth_clients",
+  {
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+    issuer: text().notNull(),
+    clientId: text("client_id").notNull(),
+    // KeyCipher; null for a public client (a metadata document, or none issued).
+    clientSecretCiphertext: text("client_secret_ciphertext"),
+    method: text({ enum: ["metadata_document", "dynamic"] }).notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.integrationId, t.issuer] })],
 );

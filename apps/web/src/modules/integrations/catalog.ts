@@ -1,5 +1,6 @@
 import { jiraManifest } from "./jira/manifest.ts";
 import type { IntegrationManifest } from "./manifest.ts";
+import { mcpManifest } from "./mcp/manifest.ts";
 import { outlookManifest } from "./outlook/manifest.ts";
 import { outlineManifest } from "./outline/manifest.ts";
 
@@ -11,6 +12,7 @@ export const INTEGRATION_TYPES: ReadonlyArray<IntegrationManifest> = [
   outlineManifest,
   outlookManifest,
   jiraManifest,
+  mcpManifest,
 ];
 
 /** The type by its `kind`, never by an integration's id. */

@@ -1,4 +1,6 @@
 import { Schema } from "effect";
+import type { IntegrationToolInfo } from "./manifest.ts";
+import type { McpToolEntry } from "./mcp/catalog.ts";
 
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const IntegrationId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$/));
@@ -26,11 +28,26 @@ export interface AdminIntegration {
   allowApiKeys: boolean;
   audience: "private" | "instance";
   connectionCount: number;
+  sharedCredentialConfigured: boolean;
+  /** For a type whose tools come from its server: what was approved and what it lists now. */
+  catalog: AdminCatalog | null;
+}
+
+/** A catalog type's tools as the admin reviews them. */
+export interface AdminCatalog {
+  approved: ReadonlyArray<McpToolEntry>;
+  latest: ReadonlyArray<McpToolEntry> | null;
+  server: Readonly<Record<string, string>> | null;
+  checkedAt: string | null;
+  checkError: string | null;
+  reviewedAt: string | null;
+  /** Names `latest`; an approval sends it back. */
+  version: string | null;
 }
 
 export interface IntegrationConnectionView {
   id: string;
-  authKind: "oauth" | "api_key";
+  authKind: "oauth" | "api_key" | "none" | "shared";
   accountLabel: string;
   status: "active" | "needs_reauth";
   offerByDefault: boolean;
@@ -38,6 +55,8 @@ export interface IntegrationConnectionView {
   toolPermissions: Record<string, ToolPermission>;
   /** The manifest scope's items it is limited to; null is everything. */
   scope: string[] | null;
+  /** OAuth scopes a call was refused for; signing in again grants them. */
+  requiredScopes: string[] | null;
   createdAt: string;
 }
 
@@ -55,7 +74,9 @@ export interface UserIntegration {
   name: string;
   /** Enabled by an admin, configured, and shared with this person. */
   available: boolean;
-  methods: { oauth: boolean; apiKey: boolean };
+  methods: { oauth: boolean; apiKey: boolean; open: "none" | "shared" | null };
+  /** What chats can be offered, in order, before any per-person permission. */
+  tools: ReadonlyArray<IntegrationToolInfo>;
   apiKeyHelpUrl: string | null;
   connection: IntegrationConnectionView | null;
   /** What disconnecting would leave without credentials. */
@@ -86,6 +107,29 @@ export const SaveIntegrationConfigInput = Schema.Struct({
   /** Absent keeps the stored secret; the form never round-trips it. */
   oauthClientSecret: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2_000))),
   allowApiKeys: Schema.Boolean,
+  /** The shared credential's fields; absent keeps it, null clears it. */
+  sharedCredential: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(4_000))).check(
+        Schema.isMaxProperties(10),
+      ),
+    ),
+  ),
+});
+
+export const ToolAccessInput = Schema.Literals(["read", "write", "destructive"]);
+
+export const ApproveCatalogInput = Schema.Struct({
+  integrationId: IntegrationId,
+  /** The listing the admin looked at; a newer one since is refused, not approved unseen. */
+  fingerprint: Schema.String.check(Schema.isMaxLength(200)),
+  decisions: Schema.Array(
+    Schema.Struct({
+      mcpName: Schema.String.check(Schema.isMaxLength(200)),
+      enabled: Schema.Boolean,
+      access: ToolAccessInput,
+    }),
+  ).check(Schema.isMaxLength(500)),
 });
 
 export const ConnectApiKeyInput = Schema.Struct({
@@ -129,6 +173,57 @@ export const DecideIntegrationCallInput = Schema.Struct({
   callId: Id,
   decision: IntegrationDecision,
 });
+
+const ElicitationValue = Schema.Union([
+  Schema.String.check(Schema.isMaxLength(4_000)),
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Array(Schema.String.check(Schema.isMaxLength(500))).check(Schema.isMaxLength(50)),
+]);
+export type ElicitationValue = typeof ElicitationValue.Type;
+
+export const AnswerElicitationInput = Schema.Struct({
+  callId: Id,
+  action: Schema.Literals(["accept", "decline", "cancel"]),
+  values: Schema.optionalKey(
+    Schema.Record(Schema.String.check(Schema.isMaxLength(100)), ElicitationValue).check(
+      Schema.isMaxProperties(30),
+    ),
+  ),
+});
+
+/** One input of a form a service asks the person to fill in mid-call. */
+export interface ElicitationField {
+  key: string;
+  label: string;
+  description: string | null;
+  kind:
+    | "text"
+    | "email"
+    | "url"
+    | "date"
+    | "datetime"
+    | "number"
+    | "integer"
+    | "boolean"
+    | "choice"
+    | "choices";
+  required: boolean;
+  options?: ReadonlyArray<{ value: string; label: string }>;
+  default?: ElicitationValue;
+  min?: number;
+  max?: number;
+}
+
+/** What a service asks for mid-call: a form, or a page to visit first. */
+export type ElicitationPrompt =
+  | { mode: "form"; message: string; fields: ReadonlyArray<ElicitationField> }
+  | { mode: "url"; message: string; url: string };
+
+export type ElicitationAnswer =
+  | { action: "accept"; values?: Readonly<Record<string, ElicitationValue>> }
+  | { action: "decline" }
+  | { action: "cancel" };
 
 export const SourceRule = Schema.Struct({
   nodeId: Id,
@@ -185,6 +280,8 @@ export interface KnowledgeSourceView {
 
 /** A waiting integration call, as the approval card and toasts show it. */
 export interface PendingIntegrationCall {
+  /** An approval before the call runs, or a service's question while it runs. */
+  kind: "approval" | "elicitation";
   callId: string;
   conversationId: string;
   messageId: string;
@@ -195,5 +292,8 @@ export interface PendingIntegrationCall {
   summary: string | null;
   /** Everyone the call would contact, exactly as it would send. */
   targets: ReadonlyArray<string>;
+  /** Every argument, when the summary cannot say what the call sends. */
+  details?: ReadonlyArray<{ key: string; value: string }>;
+  prompt?: ElicitationPrompt;
   expiresAt: number;
 }

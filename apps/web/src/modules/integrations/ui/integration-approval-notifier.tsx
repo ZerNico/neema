@@ -32,7 +32,8 @@ export function IntegrationApprovalNotifier() {
         continue;
       }
       if (shown !== undefined) continue;
-      const id = toast(`${name(call.integrationId)} is waiting for your approval.`, {
+      const waitingFor = call.kind === "elicitation" ? "an answer" : "your approval";
+      const id = toast(`${name(call.integrationId)} is waiting for ${waitingFor}.`, {
         duration: Infinity,
         action: {
           label: "Review",
