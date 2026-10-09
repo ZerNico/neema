@@ -11,7 +11,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
 import {
@@ -255,6 +255,8 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
 function DocumentsSection({ project, editable }: { project: ProjectDetail; editable: boolean }) {
   const documents = useQuery(projectDocumentsQuery(project.id));
   const [creating, setCreating] = useState(false);
+  // A document just made here opens once its row and connection exist.
+  const [justCreated, setJustCreated] = useState<string | null>(null);
   const rows = documents.data ?? [];
   return (
     <Section
@@ -290,12 +292,23 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
         <DocumentOwner documentIds={rows.map((row) => row.id)} onGone={() => undefined}>
           <ListCard>
             {rows.map((document) => (
-              <ProjectDocumentRow key={document.id} document={document} editable={editable} />
+              <ProjectDocumentRow
+                key={document.id}
+                document={document}
+                editable={editable}
+                openNow={document.id === justCreated}
+                onOpened={() => setJustCreated(null)}
+              />
             ))}
           </ListCard>
         </DocumentOwner>
       )}
-      <NewDocumentDialog projectId={project.id} open={creating} onOpenChange={setCreating} />
+      <NewDocumentDialog
+        projectId={project.id}
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={setJustCreated}
+      />
     </Section>
   );
 }
@@ -303,11 +316,21 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
 function ProjectDocumentRow({
   document,
   editable,
+  openNow,
+  onOpened,
 }: {
   document: EditableDocument;
   editable: boolean;
+  openNow: boolean;
+  onOpened: () => void;
 }) {
   const { entry } = useDocumentPanel(document.id);
+  const open = entry?.open;
+  useEffect(() => {
+    if (!openNow || !open) return;
+    open();
+    onOpened();
+  }, [openNow, open, onOpened]);
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const remove = useMutation({
@@ -372,17 +395,20 @@ function NewDocumentDialog({
   projectId,
   open,
   onOpenChange,
+  onCreated,
 }: {
   projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated: (documentId: string) => void;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const save = useMutation({
     mutationFn: () => createProjectDocument({ data: { projectId, title: title.trim() } }),
-    onSuccess: async () => {
+    onSuccess: async (document) => {
+      onCreated(document.id);
       await queryClient.invalidateQueries({ queryKey: ["projects", "documents", projectId] });
       onOpenChange(false);
       setTitle("");
@@ -400,9 +426,7 @@ function NewDocumentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
-          <DialogDescription>
-            A blank Markdown document everyone in the project can edit.
-          </DialogDescription>
+          <DialogDescription>A blank document everyone in the project can edit.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
