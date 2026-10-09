@@ -28,7 +28,12 @@ const UNPLACED = { left: 0, top: 0, width: 0, height: 0, visibility: "hidden" } 
 // Overlays on a page (link status, working frame): the store places them.
 const OVERLAY_UNPLACED = { left: 0, top: 0, visibility: "hidden" } as const;
 
-type WebviewEvent = Event & { url?: string; title?: string };
+type WebviewEvent = Event & {
+  url?: string;
+  title?: string;
+  isMainFrame?: boolean;
+  isInPlace?: boolean;
+};
 
 function GuestPage({ tab }: { tab: BrowserTab }) {
   // Only the first address goes in the markup: changing `src` later would
@@ -77,7 +82,16 @@ function GuestPage({ tab }: { tab: BrowserTab }) {
                 sync();
               },
             ],
-            ["did-start-loading", () => browserTabs.update(id, { loading: true })],
+            // Loading as a browser shows it: the page itself going to a new
+            // document. `did-start-loading` also fires for every frame a page
+            // adds later (ads loading as it scrolls) and for in-page moves.
+            [
+              "did-start-navigation",
+              (event) => {
+                if (event.isMainFrame && !event.isInPlace)
+                  browserTabs.update(id, { loading: true });
+              },
+            ],
             [
               "did-stop-loading",
               () => {

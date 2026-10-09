@@ -192,6 +192,36 @@ describe("browser tabs", () => {
     expect(screen.queryByText("https://b.test/x")).not.toBeInTheDocument();
   });
 
+  it("shows loading only while the page itself goes to a new document", () => {
+    render(<Harness />);
+    act(() => panel.newTab());
+    fireEvent.change(screen.getByPlaceholderText("Search or enter an address"), {
+      target: { value: "https://a.test" },
+    });
+    fireEvent.submit(screen.getByPlaceholderText("Search or enter an address"));
+    const [webview] = webviews();
+    const tab = () =>
+      [...browserTabs.all().values()].find((item) => item.url.startsWith("https://a.test"))!;
+    const navigate = (isMainFrame: boolean, isInPlace: boolean) =>
+      act(() => {
+        webview!.dispatchEvent(
+          Object.assign(new Event("did-start-navigation"), { isMainFrame, isInPlace }),
+        );
+        webview!.dispatchEvent(new Event("did-start-loading"));
+      });
+    const stop = () => act(() => webview!.dispatchEvent(new Event("did-stop-loading")));
+
+    // An ad's frame loading as the page scrolls, and an in-page move.
+    navigate(false, false);
+    expect(tab().loading).toBe(false);
+    navigate(true, true);
+    expect(tab().loading).toBe(false);
+    navigate(true, false);
+    expect(tab().loading).toBe(true);
+    stop();
+    expect(tab().loading).toBe(false);
+  });
+
   it("puts a steady working note in place of the address row while an answer uses the tab", () => {
     render(<Harness />);
     act(() => panel.newTab());
