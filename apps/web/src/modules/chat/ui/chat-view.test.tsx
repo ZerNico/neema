@@ -2401,7 +2401,7 @@ describe("ChatView documents", () => {
       expect(server.content("document-1")).toBe("Reviewed source");
       if (action !== "branch")
         expect(rpc).toHaveBeenCalledWith({
-          data: expect.objectContaining({ openDocumentId: "document-1" }),
+          data: expect.objectContaining({ openDocument: { id: "document-1" } }),
         });
     },
   );

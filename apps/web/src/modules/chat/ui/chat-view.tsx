@@ -587,8 +587,12 @@ export function ChatView({
       : undefined;
   const openDocument = useRef<string | undefined>(undefined);
   openDocument.current = openDocumentId;
-  const documentFocus = () =>
-    openDocument.current ? { openDocumentId: openDocument.current } : {};
+  const documentFocus = () => {
+    const id = openDocument.current;
+    if (!id) return {};
+    const selected = documents.current?.selectedBlocks(id) ?? [];
+    return { openDocument: selected.length ? { id, selected } : { id } };
+  };
 
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),

@@ -1,6 +1,6 @@
 import { Transform } from "@tiptap/pm/transform";
 import { describe, expect, it } from "vitest";
-import { adoptIds, blockIdOf, ensureIds, findBlocks } from "./block-ids.ts";
+import { adoptIds, blockIdOf, ensureIds, findBlocks, selectedBlockIds } from "./block-ids.ts";
 import { documentSchema, parseMarkdown, replaceDifference, toMarkdown } from "./markdown.ts";
 import { blockHash, blockView } from "./tree.ts";
 
@@ -37,6 +37,16 @@ describe("block IDs", () => {
     const ticked = new Transform(doc).setNodeAttribute(1, "checked", true).doc;
     expect(blockHash(ticked.child(0))).not.toBe(blockHash(doc.child(0)));
     expect(blockHash(withIds("- [ ] ship").child(0))).toBe(blockHash(doc.child(0)));
+  });
+});
+
+describe("a selection as block IDs", () => {
+  it("names the blocks and list items it covers, not an item's own paragraph", () => {
+    const doc = withIds("Intro\n\n- one\n- two\n\nOutro");
+    // b1 intro, b2 list, b3 item, b4 its paragraph, b5 item, b6 its paragraph, b7 outro
+    expect(selectedBlockIds(doc, 2, doc.content.size - 2)).toEqual(["b1", "b2", "b3", "b5", "b7"]);
+    expect(selectedBlockIds(doc, 3, 3)).toEqual([]);
+    expect(selectedBlockIds(doc, 2, doc.content.size - 2, 2)).toEqual(["b1", "b2"]);
   });
 });
 

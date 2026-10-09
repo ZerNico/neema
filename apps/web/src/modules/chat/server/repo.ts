@@ -41,7 +41,7 @@ import {
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import { composeFileReferenceAliases } from "../file-reference-aliases.ts";
-import { TEMPORARY_CHAT_HOURS } from "../schema.ts";
+import { TEMPORARY_CHAT_HOURS, type OpenDocument } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { projectResearchProgress } from "../research-schema.ts";
 import { createResearchStore, type ResearchStore } from "./research/repo.ts";
@@ -844,6 +844,12 @@ const remapUiImages = (images: UiImages, attachmentIds: ReadonlyMap<string, stri
     ]),
   );
 
+/** A steer as it joins the answer: its message, and the document it was sent from. */
+export type SteeredMessage = MessageRow & {
+  queueEntryId: string;
+  openDocument?: OpenDocument | undefined;
+};
+
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
@@ -1017,7 +1023,7 @@ export class ChatRepo extends Context.Service<
       textOffset: number;
       /** The model round the steer followed. */
       turnIndex: number;
-    }): Effect.Effect<Array<MessageRow & { queueEntryId: string }>>;
+    }): Effect.Effect<Array<SteeredMessage>>;
     getConversationDefaults(conversationId: string): Effect.Effect<ConversationDefaults>;
     /**
      * Private attempt execution record. Missing rows are an invariant violation;
@@ -2425,7 +2431,7 @@ export class ChatRepo extends Context.Service<
 
         claimSteeredEntries: Effect.fn("ChatRepo.claimSteeredEntries")(function* (input) {
           const fence = yield* GenerationFence;
-          if (!fence) return [] as Array<MessageRow & { queueEntryId: string }>;
+          if (!fence) return [] as Array<SteeredMessage>;
           // Under the generation's own fence: a stopped or superseded attempt
           // is interrupted here, leaving every entry queued with its files.
           return yield* generationWrite((tx) =>
@@ -2442,7 +2448,7 @@ export class ChatRepo extends Context.Service<
                 )
                 .orderBy(asc(conversationQueueEntries.id))
                 .pipe(Effect.orDie);
-              const steered: Array<MessageRow & { queueEntryId: string }> = [];
+              const steered: Array<SteeredMessage> = [];
               if (entries.length === 0) return steered;
               // One at a time, in queue order: uuidv7 ids break the createdAt
               // tie between steers claimed together. They sort after their
@@ -2467,7 +2473,11 @@ export class ChatRepo extends Context.Service<
                   queueEntryId: entry.id,
                   messageId: message!.id,
                 });
-                steered.push({ ...message!, queueEntryId: entry.id });
+                steered.push({
+                  ...message!,
+                  queueEntryId: entry.id,
+                  ...(entry.input.openDocument ? { openDocument: entry.input.openDocument } : {}),
+                });
               }
               yield* tx
                 .delete(conversationQueueEntries)

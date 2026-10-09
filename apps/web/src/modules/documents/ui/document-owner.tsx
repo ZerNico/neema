@@ -31,6 +31,8 @@ import {
 export interface DocumentOwnerHandle {
   /** Every mounted document, so a send never races typing it has not stored yet. */
   flush: () => Promise<boolean>;
+  /** The blocks the person has selected in one document's open editor. */
+  selectedBlocks: (documentId: string) => string[];
 }
 interface DocumentOwnerProps {
   documentIds: ReadonlyArray<string>;
@@ -44,6 +46,7 @@ interface DocumentOwnerProps {
 interface Session {
   entry: DocumentPanelEntry;
   flush: () => Promise<boolean>;
+  selectedBlocks: () => string[];
 }
 
 /** Controllers stay mounted when transcript rows or panel bodies are replaced. */
@@ -92,6 +95,7 @@ export function DocumentOwner({
         for (const session of sessions.values()) ready = (await session.flush()) && ready;
         return ready;
       },
+      selectedBlocks: (documentId) => sessions.get(documentId)?.selectedBlocks() ?? [],
     }),
     [sessions],
   );
@@ -210,9 +214,10 @@ function DocumentSession({
     [available, controller, failed, id, panel, selected, subtitle],
   );
   const flush = controller.flush;
+  const selectedBlocks = controller.selectedBlocks;
   useEffect(() => {
-    publish(documentId, { entry, flush });
-  }, [documentId, entry, flush, publish]);
+    publish(documentId, { entry, flush, selectedBlocks });
+  }, [documentId, entry, flush, selectedBlocks, publish]);
   useEffect(() => () => forget(documentId), [documentId, forget]);
   const gone =
     controller.status === "gone" ||

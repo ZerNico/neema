@@ -568,7 +568,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const { scope: requested, content = "", outline, title } = decoded.value;
     // In a project someone may edit, a document is shared work unless asked otherwise.
     // Outside a project there is only the chat, whatever scope the model named.
-    const scope = input.project ? (requested ?? (input.project.canEdit ? "project" : "chat")) : "chat";
+    const scope = input.project
+      ? (requested ?? (input.project.canEdit ? "project" : "chat"))
+      : "chat";
     if (scope === "project" && !input.project!.canEdit)
       return {
         outcome: "invalid",

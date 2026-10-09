@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { pushDocument } from "../server/document-functions.ts";
 import { documentQuery } from "./document-queries.ts";
+import { selectedBlockIds } from "../editor/block-ids.ts";
 import type { DocumentSync } from "./document-sync.ts";
 
 const CURSOR_COLORS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4"] as const;
@@ -143,6 +144,13 @@ export function useDocument(documentId: string, live: boolean) {
     [connections],
   );
   const dismissRecovered = useCallback(() => sync?.dismissRecovered(), [sync]);
+  /** The blocks selected in the open editor right now, for the next message to name. */
+  const selectedBlocks = useCallback(() => {
+    const open = connections.current?.editor;
+    if (!open) return [];
+    const { from, to } = open.state.selection;
+    return selectedBlockIds(open.state.doc, from, to);
+  }, [connections]);
 
   return {
     documentId,
@@ -154,6 +162,7 @@ export function useDocument(documentId: string, live: boolean) {
     error: sync?.error ?? null,
     recovered: sync?.recovered ?? null,
     dismissRecovered,
+    selectedBlocks,
     flush,
     unpersisted,
   };

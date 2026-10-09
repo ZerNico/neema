@@ -134,6 +134,7 @@ import { createWorkingFiles, type WorkingFiles } from "./working-files.ts";
 import { KeptWorkingFiles } from "./kept-working-files.ts";
 import { formatFileRef, parseFileRef } from "./file-ref.ts";
 import { preparePublishFileTool } from "./publish-file.ts";
+import type { OpenDocument } from "../schema.ts";
 import { ToolFileActivity } from "../tool-file-schema.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachments/server/repo.ts";
@@ -380,7 +381,7 @@ export class StreamEngine extends Context.Service<
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
       /** The document open in the panel, so it is the one the model reads first. */
-      openDocumentId?: string | undefined;
+      openDocument?: OpenDocument | undefined;
       /** Continue the answer from its stored rounds instead of starting it over. */
       resume?: boolean | undefined;
       /**
@@ -561,7 +562,7 @@ export class StreamEngine extends Context.Service<
         desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
-        openDocumentId?: string | undefined;
+        openDocument?: OpenDocument | undefined;
         resume?: boolean | undefined;
         abort: Deferred.Deferred<void>;
       }) {
@@ -985,7 +986,8 @@ export class StreamEngine extends Context.Service<
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,
-            openDocumentId: input.openDocumentId,
+            openDocumentId: input.openDocument?.id,
+            selectedBlocks: input.openDocument?.selected,
             writeGuard,
             liveGuard: (tx: DbTx) => (fence ? ensureGenerationLive(tx, fence) : Effect.interrupt),
             project: config.resolvedProject
@@ -4206,6 +4208,9 @@ export class StreamEngine extends Context.Service<
             ];
             if (steered.length > 0) {
               steeredAfter = round;
+              // The latest steer's document and selection are what "this" now means.
+              const focus = steered.findLast((message) => message.openDocument)?.openDocument;
+              if (focus) documents.focus(focus.id, focus.selected);
               // Built exactly as history builds a user message, so a steered
               // file reaches the model the way an attached one does: native
               // when it can read it, extracted text when it cannot.
@@ -4299,7 +4304,7 @@ export class StreamEngine extends Context.Service<
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
-        openDocumentId?: string | undefined;
+        openDocument?: OpenDocument | undefined;
         resume?: boolean | undefined;
         onSettled?: (input: {
           userId: string;

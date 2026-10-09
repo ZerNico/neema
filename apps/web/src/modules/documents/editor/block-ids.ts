@@ -154,6 +154,27 @@ export const plannedIds = (doc: Node) => {
   return ids;
 };
 
+/** A list item's own paragraph: the model points at the item instead. */
+const isItemText = (node: Node, parent: Node | null) =>
+  node.type.name === "paragraph" &&
+  (parent?.type.name === "listItem" || parent?.type.name === "taskItem");
+
+/**
+ * The blocks a selection covers, as the model's view names them; nothing for
+ * a bare cursor. Bounded, since a select-all should not send every ID.
+ */
+export const selectedBlockIds = (doc: Node, from: number, to: number, limit = 50) => {
+  if (from === to) return [];
+  const ids: string[] = [];
+  doc.nodesBetween(from, to, (node, _position, parent) => {
+    if (ids.length >= limit) return false;
+    const id = isBlock(node) && !isItemText(node, parent) ? blockIdOf(node) : null;
+    if (id) ids.push(id);
+    return true;
+  });
+  return ids;
+};
+
 /**
  * `content` with an ID on every block that lacks one, set before it goes in,
  * so a write is one step rather than one more per new block. IDs already in
@@ -176,7 +197,8 @@ export const withFreshIds = (doc: Node, content: Fragment): Fragment => {
     if (node.isText) return node;
     const children: Node[] = [];
     node.forEach((child) => children.push(visit(child)));
-    const next = isBlock(node) && !blockIdOf(node) ? { ...node.attrs, [BLOCK_ID]: mint() } : node.attrs;
+    const next =
+      isBlock(node) && !blockIdOf(node) ? { ...node.attrs, [BLOCK_ID]: mint() } : node.attrs;
     return node.type.create(next, Fragment.from(children), node.marks);
   };
   const nodes: Node[] = [];

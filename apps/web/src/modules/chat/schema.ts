@@ -13,8 +13,20 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-/** The document open in the panel when the message was sent; the model reads it first. */
-const OpenDocumentId = Schema.optionalKey(ResourceId);
+/**
+ * The document open in the panel when the message was sent, which the model
+ * reads first, and the blocks the person had selected in it.
+ */
+export const OpenDocument = Schema.Struct({
+  id: ResourceId,
+  selected: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))).check(
+      Schema.isMaxLength(50),
+    ),
+  ),
+});
+export type OpenDocument = typeof OpenDocument.Type;
+const OpenDocumentField = Schema.optionalKey(OpenDocument);
 export const desktopSubmissionFields = {
   /**
    * The folders reachable on the sending machine, by real absolute path. Paths
@@ -49,7 +61,7 @@ export type DesktopSubmission = {
 
 const generationFields = {
   timeZone: TimeZone,
-  openDocumentId: OpenDocumentId,
+  openDocument: OpenDocumentField,
   modelId: Schema.String,
   reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   content: MessageContent,
@@ -159,9 +171,7 @@ export const LookupUiMapInput = Schema.Struct({
   messageId: Schema.String,
   generationId: Schema.NullOr(Schema.String),
   ordinal: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 7 })),
-  places: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
-    Schema.isMaxLength(40),
-  ),
+  places: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(40)),
   routes: Schema.Array(
     Schema.Struct({
       mode: Schema.Literals(["drive", "walk", "bike"]),
@@ -182,7 +192,7 @@ export const AnswerQuestionInput = Schema.Struct({
   researchEnabled: Schema.Boolean,
   ...desktopSubmissionFields,
   timeZone: TimeZone,
-  openDocumentId: OpenDocumentId,
+  openDocument: OpenDocumentField,
 });
 
 export const ConversationIdInput = Schema.Struct({
@@ -242,7 +252,7 @@ export const QueueMessageInput = Schema.Struct({
   ...desktopSubmissionFields,
   attachmentIds: AttachmentIds,
   timeZone: TimeZone,
-  openDocumentId: OpenDocumentId,
+  openDocument: OpenDocumentField,
   skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),
   collectionIds: Schema.optionalKey(
     Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
@@ -299,7 +309,7 @@ export const RetryMessageInput = Schema.Struct({
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
   timeZone: TimeZone,
-  openDocumentId: OpenDocumentId,
+  openDocument: OpenDocumentField,
 });
 
 /** Continues the last answer; the same fields as a retry. */
@@ -327,7 +337,7 @@ export const EditMessageInput = Schema.Union([
     researchEnabled: Schema.Boolean,
     ...desktopSubmissionFields,
     timeZone: TimeZone,
-    openDocumentId: OpenDocumentId,
+    openDocument: OpenDocumentField,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,
     content: Schema.optionalKey(Schema.Never),

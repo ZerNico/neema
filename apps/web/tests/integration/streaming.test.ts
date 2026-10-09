@@ -2038,7 +2038,7 @@ describe("conversation documents", () => {
           searchEnabled: false,
           researchEnabled: false,
           attachmentIds: [],
-          openDocumentId,
+          ...(openDocumentId ? { openDocument: { id: openDocumentId } } : {}),
         }),
       ),
     );

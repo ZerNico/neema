@@ -139,7 +139,7 @@ export const sendMessage = createServerFn({ method: "POST" })
           workspaceFiles: data.workspaceFiles,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
-          openDocumentId: data.openDocumentId,
+          openDocument: data.openDocument,
           attachmentIds: data.attachmentIds,
           agentId: data.agentId,
           collectionIds: data.collectionIds,
@@ -211,7 +211,7 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
           workspaceFiles: data.workspaceFiles,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
-          openDocumentId: data.openDocumentId,
+          openDocument: data.openDocument,
           attachmentIds: data.attachmentIds,
           agentId: data.agentId,
           collectionIds: data.collectionIds,
@@ -281,7 +281,7 @@ const queueSubmission = (
     skillIds: data.skillIds,
     collectionIds: data.collectionIds,
     timeZone: data.timeZone,
-    openDocumentId: data.openDocumentId,
+    openDocument: data.openDocument,
   },
   desktop: desktopDispatch(data, session.session.id),
 });
@@ -476,7 +476,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           desktopMachineName: data.desktopMachineName,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
-          openDocumentId: data.openDocumentId,
+          openDocument: data.openDocument,
           attachmentIds: [],
           questionResponse: { callId: data.callId, response: data.response },
           reasoningEffort: data.reasoningEffort,
@@ -521,7 +521,7 @@ export const retryMessage = createServerFn({ method: "POST" })
           messageId: data.messageId,
           modelId: data.modelId,
           timeZone: data.timeZone,
-          openDocumentId: data.openDocumentId,
+          openDocument: data.openDocument,
         }),
       ).pipe(
         Effect.catchTags({
@@ -562,7 +562,7 @@ export const resumeMessage = createServerFn({ method: "POST" })
           messageId: data.messageId,
           modelId: data.modelId,
           timeZone: data.timeZone,
-          openDocumentId: data.openDocumentId,
+          openDocument: data.openDocument,
         }),
       ).pipe(
         Effect.catchTags({
