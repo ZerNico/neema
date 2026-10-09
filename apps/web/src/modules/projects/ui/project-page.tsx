@@ -11,7 +11,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { toast } from "sonner";
 import { uuidv7 } from "uuidv7";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { resolveChatModel } from "~/modules/chat/client/selected-model.ts";
@@ -24,7 +25,7 @@ import {
   createProjectDocument,
   deleteProjectDocument,
 } from "~/modules/documents/server/document-functions.ts";
-import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
+import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dialog.tsx";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
@@ -265,7 +266,8 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
   // A document just made here opens once its row and connection exist.
   const [justCreated, setJustCreated] = useState<string | null>(null);
   const rows = documents.data ?? [];
-  const askInNewChat = useAskInNewChat(project.id);
+  const owner = useRef<DocumentOwnerHandle>(null);
+  const askInNewChat = useAskInNewChat(project.id, owner);
   return (
     <Section
       title="Documents"
@@ -298,6 +300,7 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
         // The owner keeps each document's live controller mounted while the
         // page is open, so closing the panel never discards typing.
         <DocumentOwner
+          ref={owner}
           documentIds={rows.map((row) => row.id)}
           onGone={() => undefined}
           onAsk={askInNewChat}
@@ -330,39 +333,44 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
  * open: it starts a new chat in the project with the default model, about
  * that document and thread, and opens it.
  */
-function useAskInNewChat(projectId: string): DocumentAsk {
+function useAskInNewChat(
+  projectId: string,
+  owner: RefObject<DocumentOwnerHandle | null>,
+): DocumentAsk {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  return useCallback(
-    async (request, asked) => {
-      const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
-      if (!model) return false;
-      const result = await sendMessage({
-        data: {
-          conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
-          modelId: model.id,
-          content: request,
-          searchEnabled: false,
-          researchEnabled: false,
-          timeZone: browserTimeZone(),
-          attachmentIds: [],
-          openDocument: {
-            id: asked.documentId,
-            ...(asked.blocks.length ? { selected: [...asked.blocks] } : {}),
-            ...(asked.thread ? { thread: asked.thread } : {}),
-          },
+  return async (request, asked) => {
+    // The request names blocks, maybe one just planted: they must be stored first.
+    if (!(await owner.current?.flush())) {
+      toast.error("Resolve the changes in your document before continuing.");
+      return false;
+    }
+    const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
+    if (!model) return false;
+    const result = await sendMessage({
+      data: {
+        conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
+        modelId: model.id,
+        content: request,
+        searchEnabled: false,
+        researchEnabled: false,
+        timeZone: browserTimeZone(),
+        attachmentIds: [],
+        openDocument: {
+          id: asked.documentId,
+          ...(asked.blocks.length ? { selected: [...asked.blocks] } : {}),
+          ...(asked.thread ? { thread: asked.thread } : {}),
         },
-      });
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      await navigate({
-        to: "/chat/$conversationId",
-        params: { conversationId: result.conversationId },
-        state: { anchorNewTurn: true },
-      });
-      return true;
-    },
-    [navigate, projectId, queryClient],
-  );
+      },
+    });
+    await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    await navigate({
+      to: "/chat/$conversationId",
+      params: { conversationId: result.conversationId },
+      state: { anchorNewTurn: true },
+    });
+    return true;
+  };
 }
 
 function ProjectDocumentRow({
