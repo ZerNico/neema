@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Effect, Exit } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { Duration, Effect, Exit } from "effect";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveredServer, StoredOAuthClient } from "../../server/repo.ts";
 import { mcpOAuth } from "./auth.ts";
 
@@ -9,6 +9,9 @@ import { mcpOAuth } from "./auth.ts";
 const log = {
   registrations: [] as Array<Record<string, unknown>>,
   tokens: [] as Array<Record<string, string>>,
+  /** Requests to the token endpoint that never answers, and how many the client gave up. */
+  stalled: 0,
+  abandoned: 0,
 };
 let metadataExtras: Record<string, unknown> = {};
 
@@ -30,6 +33,11 @@ const serve = async (request: IncomingMessage, response: ServerResponse) => {
   for await (const chunk of request) chunks.push(chunk as Buffer);
   const body = Buffer.concat(chunks).toString("utf8");
   const path = new URL(request.url ?? "/", base).pathname;
+  if (path === "/stall") {
+    log.stalled++;
+    response.on("close", () => void log.abandoned++);
+    return;
+  }
   if (path === "/mcp")
     return response
       .writeHead(401, {
@@ -95,6 +103,8 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 beforeEach(() => {
   log.registrations.length = 0;
   log.tokens.length = 0;
+  log.stalled = 0;
+  log.abandoned = 0;
   metadataExtras = {};
 });
 
@@ -297,5 +307,18 @@ describe("signing in to an MCP server", () => {
       mcpOAuth.refresh({ server: found, clientSecret: "dyn-secret", refreshToken: "spent" }),
     );
     expect(revoked).toEqual({ ok: false, revoked: true });
+  });
+
+  it("gives up a refresh it stopped waiting for, rather than leave the request open", async () => {
+    const { server: found } = await started();
+    const stalling = { ...found, metadata: { ...found.metadata, token_endpoint: `${base}/stall` } };
+    const outcome = await Effect.runPromise(
+      mcpOAuth
+        .refresh({ server: stalling, clientSecret: "dyn-secret", refreshToken: "refresh-1" })
+        .pipe(Effect.timeoutOption(Duration.millis(300))),
+    );
+    expect(outcome._tag).toBe("None");
+    expect(log.stalled).toBe(1);
+    await vi.waitFor(() => expect(log.abandoned).toBe(1));
   });
 });

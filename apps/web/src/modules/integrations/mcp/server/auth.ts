@@ -19,6 +19,16 @@ import { scopedFetch } from "./http.ts";
 
 const reject = (reason: string) => new IntegrationRejected({ reason });
 
+/** A sign-in request ends with its caller, or on its own after this long. */
+const OAUTH_TIMEOUT_MS = 30_000;
+
+/**
+ * Requests for one step of a sign-in. Refreshing holds the connection's row
+ * lock, so a stalled authorization server must not hold it for long.
+ */
+const bounded = (url: URL, signal: AbortSignal) =>
+  scopedFetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(OAUTH_TIMEOUT_MS)]) });
+
 /**
  * Metadata stored at sign-in, read back. It was the SDK's validated document
  * when stored; this only confirms it still has what a token request needs.
@@ -58,12 +68,11 @@ const messageOf = (error: unknown) =>
  * Asks the server unauthenticated, as the spec's flow starts: a protected
  * server answers 401 with where its metadata is and which scopes it wants.
  */
-const challenge = (url: URL, fetch: ReturnType<typeof scopedFetch>) =>
+const challenge = (url: URL) =>
   Effect.tryPromise({
     try: async (signal) => {
-      const response = await fetch(url, {
+      const response = await bounded(url, signal)(url, {
         method: "POST",
-        signal,
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
@@ -89,12 +98,11 @@ export const mcpOAuth: DiscoveredOAuth = {
   begin: (input) =>
     Effect.gen(function* () {
       const url = new URL(input.config.url!);
-      const fetch = scopedFetch(url);
-      const hint = yield* challenge(url, fetch);
+      const hint = yield* challenge(url);
       const info = yield* Effect.tryPromise({
-        try: () =>
+        try: (signal) =>
           discoverOAuthServerInfo(url, {
-            fetchFn: fetch,
+            fetchFn: bounded(url, signal),
             ...(hint?.resourceMetadataUrl ? { resourceMetadataUrl: hint.resourceMetadataUrl } : {}),
           }),
         catch: (error) => reject(`Could not find the server’s sign-in: ${messageOf(error)}`),
@@ -140,7 +148,7 @@ export const mcpOAuth: DiscoveredOAuth = {
       const scopes = union(base, input.scopes.granted, input.scopes.required, offline);
 
       const issuer = metadata.issuer;
-      const client = yield* clientFor(input, metadata, fetch);
+      const client = yield* clientFor(input, metadata, url);
       const started = yield* Effect.tryPromise({
         try: () =>
           startAuthorization(issuer, {
@@ -171,7 +179,7 @@ export const mcpOAuth: DiscoveredOAuth = {
 
   complete: (input) =>
     Effect.tryPromise({
-      try: () =>
+      try: (signal) =>
         exchangeAuthorization(input.server.issuer, {
           metadata: storedMetadata(input.server.metadata),
           clientInformation: {
@@ -184,7 +192,7 @@ export const mcpOAuth: DiscoveredOAuth = {
           codeVerifier: input.verifier,
           redirectUri: input.redirectUri,
           resource: new URL(input.server.resource),
-          fetchFn: scopedFetch(new URL(input.server.resource)),
+          fetchFn: bounded(new URL(input.server.resource), signal),
         }),
       catch: (error) =>
         error instanceof IssuerMismatchError || /\biss\b|issuer/i.test(messageOf(error))
@@ -194,7 +202,7 @@ export const mcpOAuth: DiscoveredOAuth = {
 
   refresh: (input) =>
     Effect.tryPromise({
-      try: () =>
+      try: (signal) =>
         refreshAuthorization(input.server.issuer, {
           metadata: storedMetadata(input.server.metadata),
           clientInformation: {
@@ -203,7 +211,7 @@ export const mcpOAuth: DiscoveredOAuth = {
           },
           refreshToken: input.refreshToken,
           resource: new URL(input.server.resource),
-          fetchFn: scopedFetch(new URL(input.server.resource)),
+          fetchFn: bounded(new URL(input.server.resource), signal),
         }),
       catch: (error) => error,
     }).pipe(
@@ -225,7 +233,7 @@ export const mcpOAuth: DiscoveredOAuth = {
 const clientFor = (
   input: Parameters<DiscoveredOAuth["begin"]>[0],
   metadata: AuthorizationServerMetadata,
-  fetch: ReturnType<typeof scopedFetch>,
+  url: URL,
 ) =>
   Effect.gen(function* () {
     const admin = input.preregistered;
@@ -256,7 +264,7 @@ const clientFor = (
         ? "client_secret_post"
         : "none";
     const registered = yield* Effect.tryPromise({
-      try: () =>
+      try: (signal) =>
         registerClient(metadata.issuer, {
           metadata,
           clientMetadata: {
@@ -267,7 +275,7 @@ const clientFor = (
             token_endpoint_auth_method: method,
             application_type: "web",
           },
-          fetchFn: fetch,
+          fetchFn: bounded(url, signal),
         }),
       catch: (error) =>
         reject(`The server’s sign-in refused to register this app: ${messageOf(error)}`),

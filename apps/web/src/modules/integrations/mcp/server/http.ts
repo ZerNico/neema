@@ -74,11 +74,19 @@ const plainBody = (init: RequestInit | undefined): RequestInit => {
  */
 export const scopedFetch = (
   serverUrl: URL,
-  options: { onChallenge?: (challenge: AuthChallenge) => void; sameOriginOnly?: boolean } = {},
+  options: {
+    onChallenge?: (challenge: AuthChallenge) => void;
+    sameOriginOnly?: boolean;
+    /** Ends every request made through this fetch, whatever the caller passes. */
+    signal?: AbortSignal;
+  } = {},
 ): Fetch => {
   return async (input, init) => {
     const url = new URL(input);
-    const request = plainBody(init);
+    const own = options.signal;
+    const given = init?.signal ?? undefined;
+    const signal = own && given ? AbortSignal.any([own, given]) : (own ?? given);
+    const request = { ...plainBody(init), ...(signal ? { signal } : {}) };
     let response: Response;
     if (url.origin === serverUrl.origin) {
       response = await fetch(url, { ...request, redirect: "manual" });
