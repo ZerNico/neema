@@ -327,6 +327,19 @@ it("hides the desktop rail on Escape", () => {
   expect(screen.queryByRole("complementary", { name: "Details" })).not.toBeInTheDocument();
 });
 
+it("leaves Escape typed inside a field or editor to that field", () => {
+  render(<Harness />);
+  act(() =>
+    panel.open({
+      id: "one",
+      title: "Details",
+      body: <div contentEditable suppressContentEditableWarning aria-label="Writing" />,
+    }),
+  );
+  fireEvent.keyDown(screen.getByLabelText("Writing"), { key: "Escape" });
+  expect(screen.getByRole("complementary", { name: "Details" })).toBeInTheDocument();
+});
+
 it("deselects immediately, retains only inert presentation, then cleans up on desktop completion", async () => {
   environment.reducedMotion = false;
   render(<Harness />);
