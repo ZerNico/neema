@@ -62,12 +62,18 @@ export function SortableItem({
   className?: string;
   children: ReactNode;
 }) {
-  const { ref, handleRef, isDragging } = useSortable({ id, index });
+  const { ref, handleRef, isDragging, isDropping } = useSortable({ id, index });
   return (
     <li
       ref={ref}
-      // The lifted row covers its neighbours as it passes them.
-      className={cn("bg-card", isDragging && "relative z-10 shadow-md", className)}
+      // dnd-kit lifts the row out of the list's rounded clip until its drop
+      // animation ends, so it stays a rounded card that whole time and settles
+      // flush only once it is back inside the clip.
+      className={cn(
+        "bg-card transition-[border-radius,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+        (isDragging || isDropping) && "relative z-10 rounded-2xl border-transparent! shadow-md",
+        className,
+      )}
     >
       <HandleContext value={handleRef}>{children}</HandleContext>
     </li>
