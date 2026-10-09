@@ -258,6 +258,8 @@ export function prepareIntegrationTools(input: {
           // Whom it reaches is not known yet; that can only tighten the answer.
           const early = yield* currentConsent(null);
           if (early.kind === "refuse") return refusal(early);
+          // A server may ask several things at once; the person sees one at a time.
+          const asking = Semaphore.makeUnsafe(1);
           const callContext: CallContext = {
             // Nobody to ask in a scheduled run: the service hears "decline" at once.
             elicit: (prompt) =>
@@ -266,17 +268,19 @@ export function prepareIntegrationTools(input: {
                 : Effect.gen(function* () {
                     const callId = yield* input.rowIdFor(context.toolCallId);
                     if (!callId) return { action: "cancel" } satisfies ElicitationAnswer;
-                    return yield* input.approvals.elicit(input.owner.userId, {
-                      callId,
-                      conversationId: input.owner.conversationId,
-                      messageId: input.owner.messageId,
-                      integrationId: offer.integrationId,
-                      tool: tool.name,
-                      access: tool.access,
-                      summary: tool.summarize(args),
-                      targets: [],
-                      prompt,
-                    });
+                    return yield* asking.withPermits(1)(
+                      input.approvals.elicit(input.owner.userId, {
+                        callId,
+                        conversationId: input.owner.conversationId,
+                        messageId: input.owner.messageId,
+                        integrationId: offer.integrationId,
+                        tool: tool.name,
+                        access: tool.access,
+                        summary: tool.summarize(args),
+                        targets: [],
+                        prompt,
+                      }),
+                    );
                   }),
           };
           const prepared = yield* prepare(offer.session, args, callContext).pipe(Effect.result);

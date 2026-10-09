@@ -69,7 +69,8 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   return (
     <>
       {asking ? (
-        <ElicitationCard call={asking} name={name} />
+        // A new question starts a fresh form, never one filled in for the last.
+        <ElicitationCard key={asking.promptId} call={asking} name={name} />
       ) : waiting ? (
         <ApprovalCard call={waiting} name={name} label={activity.label} />
       ) : null}

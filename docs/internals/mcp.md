@@ -124,7 +124,9 @@ A server may ask the person something mid-call: a legacy server with
 `elicitation/create`, a 2026 one by answering `input_required` (MRTR). The SDK turns both
 into one handler, which parks on `IntegrationApprovals` exactly like an approval (same row
 handoff, Stop and lease interruption, `integration.approval.changed`) as a `kind:
-"elicitation"` entry with a prompt.
+"elicitation"` entry with a prompt. A server may ask several things at once; the person sees
+them one at a time, each under its own `promptId`, and an answer names the question it
+answers, so a tab still showing the last one cannot answer the next.
 
 - **Forms** are limited to the spec's primitive fields. One the app cannot draw faithfully is
   declined, never half-asked. The answer is checked against the form on the server, since the

@@ -87,6 +87,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
       answerIntegrationElicitation({
         data: {
           callId: call.callId,
+          promptId: call.promptId!,
           action,
           ...(action === "accept" && prompt.mode === "form"
             ? { values: outgoing(prompt, values) }

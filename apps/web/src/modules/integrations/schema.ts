@@ -184,6 +184,8 @@ export type ElicitationValue = typeof ElicitationValue.Type;
 
 export const AnswerElicitationInput = Schema.Struct({
   callId: Id,
+  /** The question answered, so a tab still showing an earlier one cannot answer the next. */
+  promptId: Id,
   action: Schema.Literals(["accept", "decline", "cancel"]),
   values: Schema.optionalKey(
     Schema.Record(Schema.String.check(Schema.isMaxLength(100)), ElicitationValue).check(
@@ -295,5 +297,7 @@ export interface PendingIntegrationCall {
   /** Every argument, when the summary cannot say what the call sends. */
   details?: ReadonlyArray<{ key: string; value: string }>;
   prompt?: ElicitationPrompt;
+  /** Which question this is: one call may ask several, one after another. */
+  promptId?: string;
   expiresAt: number;
 }

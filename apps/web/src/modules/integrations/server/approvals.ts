@@ -1,4 +1,5 @@
 import { Context, Deferred, Duration, Effect, Layer } from "effect";
+import { uuidv7 } from "uuidv7";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { ElicitationAnswer, PendingIntegrationCall } from "../schema.ts";
 
@@ -22,7 +23,7 @@ interface Waiting {
   readonly answer: Deferred.Deferred<Answer>;
 }
 
-type Pending = Omit<PendingIntegrationCall, "expiresAt" | "kind">;
+type Pending = Omit<PendingIntegrationCall, "expiresAt" | "kind" | "promptId">;
 
 /**
  * Integration calls parked on a person: an approval before a call runs, or a
@@ -35,14 +36,22 @@ export class IntegrationApprovals extends Context.Service<
   IntegrationApprovals,
   {
     request(userId: string, call: Pending): Effect.Effect<ApprovalAnswer>;
-    /** Asks the person on a service's behalf; no answer in time cancels. */
+    /**
+     * Asks the person on a service's behalf; no answer in time cancels. One
+     * question per call at a time: the caller asks the next once this returns.
+     */
     elicit(
       userId: string,
       call: Pending & { prompt: NonNullable<PendingIntegrationCall["prompt"]> },
     ): Effect.Effect<ElicitationAnswer>;
     /** False when there is no such waiting call for this person any more. */
     decide(userId: string, callId: string, answer: "allow" | "deny"): Effect.Effect<boolean>;
-    answer(userId: string, callId: string, answer: ElicitationAnswer): Effect.Effect<boolean>;
+    answer(
+      userId: string,
+      callId: string,
+      promptId: string,
+      answer: ElicitationAnswer,
+    ): Effect.Effect<boolean>;
     get(userId: string, callId: string): Effect.Effect<PendingIntegrationCall | null>;
     pending(userId: string): Effect.Effect<ReadonlyArray<PendingIntegrationCall>>;
   }
@@ -78,11 +87,12 @@ export class IntegrationApprovals extends Context.Service<
           );
         });
 
-      const settle = (userId: string, callId: string, answer: Answer) =>
+      const settle = (userId: string, callId: string, answer: Answer, promptId?: string) =>
         Effect.gen(function* () {
           const entry = waiting.get(callId);
           if (!entry || entry.userId !== userId) return false;
           if ((entry.call.kind === "elicitation") !== (answer.kind === "elicitation")) return false;
+          if (entry.call.promptId !== promptId) return false;
           return yield* Deferred.succeed(entry.answer, answer);
         });
 
@@ -101,7 +111,7 @@ export class IntegrationApprovals extends Context.Service<
         elicit: Effect.fn("IntegrationApprovals.elicit")(function* (userId, call) {
           const answered = yield* park(
             userId,
-            { ...call, kind: "elicitation", expiresAt: 0 },
+            { ...call, kind: "elicitation", promptId: uuidv7(), expiresAt: 0 },
             APPROVAL_TIMEOUTS.elicitation,
           );
           return answered._tag === "Some" && answered.value.kind === "elicitation"
@@ -112,8 +122,8 @@ export class IntegrationApprovals extends Context.Service<
         decide: (userId, callId, answer) =>
           settle(userId, callId, { kind: "decision", value: answer }),
 
-        answer: (userId, callId, answer) =>
-          settle(userId, callId, { kind: "elicitation", value: answer }),
+        answer: (userId, callId, promptId, answer) =>
+          settle(userId, callId, { kind: "elicitation", value: answer }, promptId),
 
         get: (userId, callId) =>
           Effect.sync(() => {

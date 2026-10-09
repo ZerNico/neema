@@ -286,6 +286,7 @@ export const answerIntegrationElicitation = createServerFn({ method: "POST" })
         approvals.answer(
           context.session.user.id,
           data.callId,
+          data.promptId,
           data.action === "accept"
             ? { action: "accept", ...(data.values ? { values: data.values } : {}) }
             : { action: data.action },

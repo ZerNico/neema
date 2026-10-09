@@ -88,6 +88,27 @@ const buildServer = () => {
       return { content: [{ type: "text", text: `Released ${answer.name}.` }] };
     },
   );
+  const region = fromJsonSchema<{ region: string }>({
+    type: "object",
+    properties: { region: { type: "string", title: "Region" } },
+    required: ["region"],
+  });
+  server.registerTool(
+    "provision",
+    { description: "Set up an environment.", annotations: { destructiveHint: false } },
+    async (ctx) => {
+      const named = acceptedContent(ctx.mcpReq.inputResponses, "name", confirmation);
+      const placed = acceptedContent(ctx.mcpReq.inputResponses, "region", region);
+      if (!named || !placed)
+        return inputRequired({
+          inputRequests: {
+            name: inputRequired.elicit({ message: "Name it.", requestedSchema: confirmation }),
+            region: inputRequired.elicit({ message: "Where?", requestedSchema: region }),
+          },
+        });
+      return { content: [{ type: "text", text: `${named.name} in ${placed.region}.` }] };
+    },
+  );
   return server;
 };
 
@@ -238,7 +259,8 @@ const toolsFor = (userId: string, conversationId: string, unattended = false) =>
           service.permissionsFor(userId, conversationId, integrationId),
         sessionFor: (integrationId) =>
           service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
-        rowIdFor: () => Effect.succeed(`row-${uuidv7()}`),
+        // One durable row per provider call, as the stream observer mints it.
+        rowIdFor: (providerCallId) => Effect.succeed(`row-${providerCallId}-${conversationId}`),
         reportAuthFailure: () => Effect.void,
         allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
       });
@@ -273,6 +295,7 @@ describe("an MCP server set up by an admin", () => {
       "search",
       "delete_page",
       "release",
+      "provision",
     ]);
     expect(catalog.approved).toEqual([]);
 
@@ -503,7 +526,7 @@ describe("an MCP server set up by an admin", () => {
             fields: [{ key: "name", required: true }],
           },
         });
-        yield* approvals.answer(admin, pending!.callId, {
+        yield* approvals.answer(admin, pending!.callId, pending!.promptId!, {
           action: "accept",
           values: { name: "v2" },
         });
@@ -516,6 +539,64 @@ describe("an MCP server set up by an admin", () => {
     const result = await run(handlerOf(unattended, `int_${id}__release`)!({}, { toolCallId: "d" }));
     expect(JSON.stringify(result)).not.toContain("Released");
     expect(await run(Effect.flatMap(IntegrationApprovals, (a) => a.pending(admin)))).toEqual([]);
+  });
+
+  it("asks one question at a time, and an answer to an earlier one cannot answer the next", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs provision", { url: `${base}/mcp`, auth: "none" });
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "provision", enabled: true, access: "write" },
+    ]);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.updatePreferences(admin, id, { toolPermissions: { provision: "allow" } }),
+      ),
+    );
+    const conversationId = await newConversation(admin);
+    const prepared = await toolsFor(admin, conversationId);
+    const valueFor = { "Name it.": { name: "staging" }, "Where?": { region: "eu" } } as const;
+    const answered = await run(
+      Effect.gen(function* () {
+        const approvals = yield* IntegrationApprovals;
+        const waiting = yield* Effect.forkChild(
+          handlerOf(prepared, `int_${id}__provision`)!({}, { toolCallId: "p" }),
+        );
+        const [first] = yield* waitForPending(admin);
+        expect(yield* approvals.pending(admin)).toHaveLength(1);
+        const firstMessage = first!.prompt!.message as keyof typeof valueFor;
+        expect(
+          yield* approvals.answer(admin, first!.callId, first!.promptId!, {
+            action: "accept",
+            values: valueFor[firstMessage],
+          }),
+        ).toBe(true);
+        const [second] = yield* approvals
+          .pending(admin)
+          .pipe(
+            Effect.repeat({
+              until: (pending) => pending[0] !== undefined && pending[0].promptId !== first!.promptId,
+            }),
+          );
+        expect(second!.callId).toBe(first!.callId);
+        const secondMessage = second!.prompt!.message as keyof typeof valueFor;
+        expect(secondMessage).not.toBe(firstMessage);
+        // A tab still showing the first question cannot answer the second.
+        expect(
+          yield* approvals.answer(admin, first!.callId, first!.promptId!, {
+            action: "accept",
+            values: valueFor[firstMessage],
+          }),
+        ).toBe(false);
+        yield* approvals.answer(admin, second!.callId, second!.promptId!, {
+          action: "accept",
+          values: valueFor[secondMessage],
+        });
+        return yield* Fiber.join(waiting);
+      }),
+    );
+    expect(answered).toMatchObject({ ok: true, result: { content: "staging in eu." } });
   });
 
   it("with one key for everyone, only reads are ever offered", async () => {
