@@ -1,3 +1,4 @@
+import { toastError } from "~/ui/error-toast.ts";
 import {
   AiChat02Icon,
   Calendar03Icon,
@@ -122,8 +123,12 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
           shortcut="⌘X"
           disabled={state.empty}
           onClick={() => {
-            void navigator.clipboard.writeText(selected());
-            run((chain) => chain.deleteSelection());
+            // Removed only once it is on the clipboard: a refused write must not lose the text.
+            const { from, to } = editor.state.selection;
+            void navigator.clipboard
+              .writeText(selected())
+              .then(() => run((chain) => chain.deleteRange({ from, to })))
+              .catch((error: unknown) => toastError("Couldn’t cut the selection.", error));
           }}
         />
         <Item
