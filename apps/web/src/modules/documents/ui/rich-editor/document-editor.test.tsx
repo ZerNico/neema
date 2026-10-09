@@ -147,7 +147,7 @@ describe("document editor", () => {
     expect(filterSlashItems("nothing like this")).toEqual([]);
   });
 
-  it("promotes the next row when the header row is deleted, as the Markdown does", async () => {
+  it("keeps a table without a header row, and toggles one back", async () => {
     const sync = await replica(
       "| Area | Owner |\n| --- | --- |\n| Editor | Ada |\n| Sync | Grace |",
     );
@@ -160,7 +160,12 @@ describe("document editor", () => {
     act(() => {
       editor.chain().focus().setTextSelection(area).deleteRow().run();
     });
+    // The tree keeps it headerless; Markdown, which needs a header line, writes its first row there.
+    expect(screen.queryAllByRole("columnheader")).toEqual([]);
     expect(sync.markdown()).toBe("| Editor | Ada   |\n| ------ | ----- |\n| Sync   | Grace |");
+    act(() => {
+      editor.chain().focus().toggleHeaderRow().run();
+    });
     const headers = screen.getAllByRole("columnheader").map((cell) => cell.textContent);
     expect(headers).toEqual(["Editor", "Ada"]);
   });

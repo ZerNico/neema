@@ -92,15 +92,17 @@ const isEmptyParagraph = (node: Node) => node.type.name === "paragraph" && node.
  * this, only blocks that really changed differ, so an edit keeps every other
  * block's identity and anyone's cursor in it. Empty paragraphs, which
  * Markdown drops, are kept wherever the blocks around them did not change:
- * one may be where someone is about to type.
+ * one may be where someone is about to type. Not with `keepEmpty` off, for a
+ * tree the model is writing, whose empty paragraphs are its own half-written
+ * cells.
  */
-export const adoptIds = (current: Node, next: Node): Node => {
+export const adoptIds = (current: Node, next: Node, keepEmpty = true): Node => {
   if (next.isText || next.isLeaf) return withId(current, next, next.content);
   // Non-empty children of `current`, and the empty paragraphs before each (the last: after all).
   const before: Node[] = [];
   const empties: Node[][] = [[]];
   current.forEach((child) => {
-    if (isEmptyParagraph(child)) empties.at(-1)!.push(child);
+    if (keepEmpty && isEmptyParagraph(child)) empties.at(-1)!.push(child);
     else {
       before.push(child);
       empties.push([]);
@@ -133,7 +135,7 @@ export const adoptIds = (current: Node, next: Node): Node => {
         : index < before.length - tail && before[index]!.type === child.type
           ? before[index]!
           : null;
-    children.push(match && !child.isText ? adoptIds(match, child) : child);
+    children.push(match && !child.isText ? adoptIds(match, child, keepEmpty) : child);
   });
   if (tail > 0 || head === before.length) children.push(...empties[before.length]!);
   return withId(current, next, Fragment.from(children));

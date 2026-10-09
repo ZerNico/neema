@@ -1,5 +1,7 @@
 import type { Node } from "@tiptap/pm/model";
 import { blockIdOf, isBlock } from "./block-ids.ts";
+import type { DocumentComment } from "../schema.ts";
+import { commentAnchors } from "./comments.ts";
 import { toModelMarkdown } from "./markdown.ts";
 
 /** One emitted block and the fingerprint of what the model was shown for it. */
@@ -41,12 +43,14 @@ const attributes = (values: Record<string, string | number | boolean | null | un
 
 /**
  * A paragraph's or heading's text as inline Markdown, what the model also
- * writes. The serializer already writes `&` and `<` in text as entities, so
- * it goes into the XML as it is.
+ * writes, escaped for the XML: text reading `</p><p id="…">` must stay text,
+ * not pass for a block.
  */
 const inline = (node: Node) =>
-  toModelMarkdown(
-    node.type.schema.node("doc", null, [node.type.schema.node("paragraph", null, node.content)]),
+  escapeText(
+    toModelMarkdown(
+      node.type.schema.node("doc", null, [node.type.schema.node("paragraph", null, node.content)]),
+    ),
   );
 
 /** The open tag's name for a block, or null for one drawn through its parent. */
@@ -83,7 +87,7 @@ const render = (node: Node, seen: SeenBlock[]): string => {
     case "codeBlock":
       return `${head({ lang: node.attrs.language as string | null })}>${escapeText(node.textContent)}</${tag}>`;
     case "table":
-      return `${head()}>\n${toModelMarkdown(node.type.schema.node("doc", null, [node]))}\n</${tag}>`;
+      return `${head()}>\n${escapeText(toModelMarkdown(node.type.schema.node("doc", null, [node])))}\n</${tag}>`;
     case "horizontalRule":
       return `${head()}/>`;
     case "pending":
@@ -114,10 +118,34 @@ const children = (node: Node, seen: SeenBlock[]) => {
   return parts.join("");
 };
 
+/** Headings a gap lists at most, and how much of each. */
+const GAP_HEADINGS = 200;
+const GAP_HEADING_CHARS = 120;
+
+/**
+ * Blocks left out of a window, as their outline: the headings among them and
+ * the last block, so the model can place something before or after a section
+ * it has not read, or at the end, without paging there.
+ */
+const gap = (skipped: Node[]) => {
+  const last = blockIdOf(skipped.at(-1)!);
+  const headings = skipped
+    .filter((block) => block.type.name === "heading" && blockIdOf(block))
+    .slice(0, GAP_HEADINGS)
+    .map((block) => {
+      const level = Number(block.attrs.level) || 2;
+      const text = block.textContent.slice(0, GAP_HEADING_CHARS);
+      return `<h${level} id="${blockIdOf(block)}">${escapeText(text)}</h${level}>`;
+    });
+  const open = `<gap${attributes({ blocks: skipped.length, last })}`;
+  return headings.length ? `${open}>\n${headings.join("\n")}\n</gap>` : `${open}/>`;
+};
+
 /**
  * The document as the model reads it: one element per top-level block, each
  * with its ID, bounded by `budget` characters. A window starts at
- * `fromBlock`; blocks skipped either side show as a `<gap/>`. A single block
+ * `fromBlock`; blocks skipped either side show as a `<gap/>` with their
+ * headings and last block. A single block
  * larger than the budget is cut, marked `truncated`, and continues from
  * `fromCharacter`; it is not added to `seen`, so it cannot be replaced
  * before the model has read it whole.
@@ -136,7 +164,7 @@ export const blockView = (
     : 0;
   const seen: SeenBlock[] = [];
   const lines: string[] = [];
-  if (start > 0) lines.push(`<gap blocks="${start}"/>`);
+  if (start > 0) lines.push(gap(blocks.slice(0, start)));
   let used = 0;
   let index = start;
   for (; index < blocks.length; index++) {
@@ -169,7 +197,7 @@ export const blockView = (
     break;
   }
   const rest = blocks.length - index;
-  if (rest > 0) lines.push(`<gap blocks="${rest}"/>`);
+  if (rest > 0) lines.push(gap(blocks.slice(index)));
   const nextBlock = blocks[index];
   const nextId = nextBlock ? blockIdOf(nextBlock) : null;
   return {
@@ -177,4 +205,52 @@ export const blockView = (
     seen,
     ...(rest > 0 && nextId ? { next: { fromBlock: nextId } } : {}),
   };
+};
+
+/** Open threads the model is shown at most, and how much of each comment. */
+const COMMENT_THREADS = 30;
+const COMMENT_CHARS = 600;
+
+/**
+ * Open comment threads on text still in the document, for the model: each
+ * names its block and quotes its text, so "address the comments" can be
+ * aimed. The thread a message was sent from (`asking`) is always shown and
+ * marked, even once its text is gone. Empty when there are none.
+ */
+export const commentsView = (
+  doc: Node,
+  comments: ReadonlyArray<DocumentComment>,
+  asking: string | null = null,
+) => {
+  const anchors = commentAnchors(doc);
+  const threads = comments
+    .filter(
+      (each) =>
+        each.id === each.threadId &&
+        (each.id === asking || (!each.resolvedAt && anchors.has(each.id))),
+    )
+    .slice(0, COMMENT_THREADS);
+  if (!threads.length) return "";
+  const lines = threads.map((thread) => {
+    const anchor = anchors.get(thread.id);
+    const messages = comments
+      .filter((each) => each.threadId === thread.id)
+      .map(
+        (each) =>
+          `<comment${attributes({
+            by: each.byAssistant ? "you" : (each.author?.name ?? "Someone"),
+            to: each.toAssistant ? "you" : null,
+            answered: each.toAssistant ? each.answered : null,
+          })}>${escapeText(each.body.slice(0, COMMENT_CHARS))}</comment>`,
+      );
+    return `<thread${attributes({
+      id: thread.id,
+      block: anchor?.blockId,
+      quote: (anchor?.text ?? thread.quote ?? "").slice(0, 200),
+      detached: anchor ? null : true,
+      resolved: thread.resolvedAt ? true : null,
+      asking: thread.id === asking ? true : null,
+    })}>\n${messages.join("\n")}\n</thread>`;
+  });
+  return `<comments>\n${lines.join("\n")}\n</comments>`;
 };

@@ -10,7 +10,7 @@ import {
   LeftToRightListNumberIcon,
   MinusSignIcon,
   QuoteDownIcon,
-  Table01Icon,
+  LayoutTable01Icon,
   TextIcon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
@@ -92,7 +92,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     title: "Table",
 
-    icon: Table01Icon,
+    icon: LayoutTable01Icon,
     keywords: "grid",
     run: (e, r) => blocks(e, r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },

@@ -152,7 +152,7 @@ describe("tool parameters the model is offered", () => {
     expect(Tool.getJsonSchema(edit)).toMatchObject({
       properties: {
         target: { type: "string", minLength: 1 },
-        position: { enum: ["replace", "before", "after"] },
+        position: { enum: ["replace", "before", "after", "end"] },
         find: { type: "string" },
         content: { type: "string" },
       },

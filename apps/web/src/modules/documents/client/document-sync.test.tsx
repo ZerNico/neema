@@ -9,6 +9,7 @@ import type { PushDocumentInput, PushDocumentResult } from "../schema.ts";
 import { browserEditorExtensions } from "../ui/rich-editor/editor-extensions.ts";
 import { DocumentSync } from "./document-sync.ts";
 import { outbox } from "./outbox.ts";
+import { caretsOf } from "./presence.ts";
 
 let server: ReturnType<typeof fakeDocumentServer>;
 const open = new Set<DocumentSync>();
@@ -90,6 +91,20 @@ describe("document connection", () => {
     );
     expect(markdown(second)).toBe(server.content("plan"));
     expect(second.recovered).toBeNull();
+  });
+
+  it("keeps another person's caret while their newest one waits for its steps", async () => {
+    const sync = await connect(online);
+    const caret = () => caretsOf(sync.editor!.state).find((each) => each.clientId === "bea");
+    const user = { name: "Bea", color: "blue", colorLight: "lightblue" };
+    const doc = sync.editor!.state.doc;
+    // Everything selected: the head is past the last block, placed at the end of its text.
+    server.presence("plan", "bea", { anchor: 0, head: doc.content.size, revision: 0, user });
+    await waitFor(() => expect(caret()).toBeDefined());
+    expect(caret()!.head).toBe(at(sync, "Remove me") + "Remove me".length);
+    // Sent with a step this editor has not received yet.
+    server.presence("plan", "bea", { anchor: 3, head: 3, revision: 1, user });
+    expect(caret()!.head).toBe(at(sync, "Remove me") + "Remove me".length);
   });
 
   it("hands back text that has nowhere to go instead of dropping it", async () => {

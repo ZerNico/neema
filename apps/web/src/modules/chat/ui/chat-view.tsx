@@ -6,6 +6,7 @@ import {
   type ScheduleDraftHandle,
 } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
+import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import { DocumentToolName, projectDocumentResult } from "~/modules/documents/tool-schema.ts";
@@ -587,11 +588,17 @@ export function ChatView({
       : undefined;
   const openDocument = useRef<string | undefined>(undefined);
   openDocument.current = openDocumentId;
-  const documentFocus = (named?: ReadonlyArray<string>) => {
-    const id = openDocument.current;
+  const documentFocus = (asked?: AskTarget & { documentId: string }) => {
+    const id = asked?.documentId ?? openDocument.current;
     if (!id) return {};
-    const selected = named ? [...named] : (documents.current?.selectedBlocks(id) ?? []);
-    return { openDocument: selected.length ? { id, selected } : { id } };
+    const selected = asked ? [...asked.blocks] : (documents.current?.selectedBlocks(id) ?? []);
+    return {
+      openDocument: {
+        id,
+        ...(selected.length ? { selected } : {}),
+        ...(asked?.thread ? { thread: asked.thread } : {}),
+      },
+    };
   };
 
   const questionResponses = useMemo(
@@ -683,8 +690,8 @@ export function ChatView({
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
       workspaceImports?: WorkspaceImports;
-      /** Blocks named when the request was made, instead of the editor's selection at send. */
-      selectedBlocks?: ReadonlyArray<string>;
+      /** Where in a document the request was made, instead of the editor's selection at send. */
+      asked?: AskTarget & { documentId: string };
     }) => {
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
@@ -693,7 +700,7 @@ export function ChatView({
         searchEnabled,
         reasoningEffort,
         timeZone: browserTimeZone(),
-        ...documentFocus(input.selectedBlocks),
+        ...documentFocus(input.asked),
         attachmentIds: input.attachmentIds,
         researchEnabled: input.researchEnabled,
         skillIds: [...(input.skillIds ?? [])],
@@ -987,14 +994,14 @@ export function ChatView({
   const focusComposer = useCallback(() => composer.current?.focus(), []);
   // A request typed inside a document: sent like the composer's, with the spot selected.
   const askFromDocument = useCallback(
-    async (request: string, selectedBlocks: ReadonlyArray<string>) => {
+    async (request: string, asked: AskTarget & { documentId: string }) => {
       if (generationDisabled) return false;
       await sendAsk({
         content: request,
         attachmentIds: [],
         researchEnabled: false,
         skillIds: [],
-        selectedBlocks,
+        asked,
       });
       return true;
     },

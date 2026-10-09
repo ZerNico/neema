@@ -1,13 +1,45 @@
 import { getSchema, type JSONContent } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
 import { Node } from "@tiptap/pm/model";
-import type { Transform } from "@tiptap/pm/transform";
+import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
 import { plainChips } from "./chips.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 
 export const documentSchema = getSchema(documentExtensions);
 const manager = new MarkdownManager({ extensions: documentExtensions });
+
+type EncodeText = (text: string, node: unknown, parent: unknown) => string;
+const upstreamEncode = Reflect.get(manager, "encodeTextForMarkdown") as EncodeText;
+const ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+};
+/**
+ * Upstream writes every `&`, `<` and `>` in text as an HTML entity, so the
+ * Markdown read "LCP &lt; 2.5 s" wherever it left the editor, and the model's
+ * XML view escaped it a second time. A backslash keeps them literal instead,
+ * and only where one would start a tag or an entity.
+ */
+Reflect.set(
+  manager,
+  "encodeTextForMarkdown",
+  function (this: unknown, ...args: Parameters<EncodeText>) {
+    return upstreamEncode
+      .apply(this, args)
+      .replace(/&(?:amp|lt|gt|quot|#39);/g, (entity, offset: number, all: string) => {
+        const character = ENTITIES[entity]!;
+        const after = all.slice(offset + entity.length);
+        if (character === "<" && /^[A-Za-z/!?]/.test(after)) return "\\<";
+        if (character === "&" && /^#?\w+;/.test(after)) return "\\&";
+        if (character === ">" && offset === 0) return "\\>";
+        return character;
+      });
+  },
+);
 
 /**
  * Inline code is written verbatim between the mark's one backtick each side,
@@ -77,8 +109,15 @@ export const normalizeMarkdown = (markdown: string) =>
  * and has no block IDs; it takes the current ones first, so unchanged blocks
  * do not differ by their IDs alone.
  */
-export const replaceDifference = <T extends Transform>(tr: T, built: Node): T => {
-  const next = adoptIds(tr.doc, built);
+export const replaceDifference = <T extends Transform>(tr: T, built: Node): T =>
+  writeDifference(tr, adoptIds(tr.doc, built));
+
+/**
+ * Makes `tr`'s document equal `next`, IDs and all, by replacing only where
+ * they differ: text streaming onto the end of a block lands as just the new
+ * words, which the editor draws in place and a cursor can follow.
+ */
+export const writeDifference = <T extends Transform>(tr: T, next: Node): T => {
   const start = tr.doc.content.findDiffStart(next.content);
   if (start == null) return tr;
   const end = tr.doc.content.findDiffEnd(next.content)!;
@@ -91,6 +130,20 @@ export const replaceDifference = <T extends Transform>(tr: T, built: Node): T =>
     endA += overlap;
     endB += overlap;
   }
-  tr.replace(start, endA, next.slice(start, endB));
+  // A slice cut open inside a table is fitted on replace, by adding cells, so
+  // the result is checked. Failing that, whole top-level blocks are swapped.
+  const attempt = (from: number, toA: number, toB: number) => {
+    const scratch = new Transform(tr.doc).replace(from, toA, next.slice(from, toB));
+    return scratch.doc.eq(next) ? scratch : null;
+  };
+  const $start = tr.doc.resolve(start);
+  const $end = tr.doc.resolve(endA);
+  const from = $start.depth ? $start.before(1) : start;
+  const toA = $end.depth ? $end.after(1) : endA;
+  const written =
+    attempt(start, endA, endB) ??
+    attempt(from, toA, endB + toA - endA) ??
+    new Transform(tr.doc).replaceWith(0, tr.doc.content.size, next.content);
+  for (const step of written.steps) tr.step(step);
   return tr;
 };

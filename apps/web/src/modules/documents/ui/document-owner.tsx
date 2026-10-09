@@ -17,7 +17,7 @@ import { useDocument } from "../client/use-document.ts";
 import { taskProgress } from "../task-items.ts";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
-import type { EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
+import type { DocumentAsk, EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
 import {
   useDetailPanel,
   useDetailPanelReconciler,
@@ -47,7 +47,7 @@ interface DocumentOwnerProps {
    * Sends a request typed inside a document as a chat message, with the spot
    * it was asked at selected; false when it cannot go now. Absent outside a chat.
    */
-  onAsk?: ((request: string, blocks: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  onAsk?: DocumentAsk | undefined;
   /** Moves focus to the chat's input, keeping the document's selection for the message. */
   onFocusComposer?: (() => void) | undefined;
 }
@@ -150,7 +150,7 @@ function DocumentSession({
   forget: (documentId: string) => void;
   onGone: (documentId: string) => void;
   autoOpen: boolean;
-  onAsk: ((request: string, blocks: ReadonlyArray<string>) => Promise<boolean>) | undefined;
+  onAsk: DocumentAsk | undefined;
   onFocusComposer: (() => void) | undefined;
 }) {
   const panel = useDetailPanel();
@@ -189,10 +189,10 @@ function DocumentSession({
   const hooks = useMemo<EditorHooks>(
     () => ({
       mentions: () => candidates.current,
-      ask: onAsk ?? null,
+      ask: onAsk ? (request, target) => onAsk(request, { ...target, documentId }) : null,
       focusComposer: onFocusComposer ?? null,
     }),
-    [onAsk, onFocusComposer],
+    [documentId, onAsk, onFocusComposer],
   );
   const request = useMemo(
     () => ({

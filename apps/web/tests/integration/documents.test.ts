@@ -23,6 +23,7 @@ import {
   type DocumentFrame,
 } from "~/modules/documents/schema.ts";
 import { blockIdOf } from "~/modules/documents/editor/block-ids.ts";
+import { commentAnchors } from "~/modules/documents/editor/comments.ts";
 import { normalizeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { blockView } from "~/modules/documents/editor/tree.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
@@ -380,17 +381,21 @@ describe("person and model writing together", () => {
     const feed = await service((s) =>
       s.subscribe(owner, created.id, { revision: 0, clientId: second.clientId }),
     );
-    const received = Effect.runFork(feed!.pipe(Stream.take(3), Stream.runCollect));
+    const received = Effect.runFork(feed!.pipe(Stream.take(4), Stream.runCollect));
     // Both editors type at once, each against the same starting text.
     await Promise.all([
       first.type((markdown) => tick(markdown, "- [ ] write notes")),
       second.type((markdown) => tick(markdown, "- [ ] ship")),
     ]);
     const frames = [...(await Effect.runPromise(Fiber.join(received)))] as DocumentFrame[];
-    expect(frames[0]).toMatchObject({ type: "steps", steps: [], revision: 0 });
+    // A feed opens with the catch-up, then the comments.
+    expect(frames.slice(0, 2)).toMatchObject([
+      { type: "steps", steps: [], revision: 0 },
+      { type: "comments", comments: [] },
+    ]);
     // Each step comes back to everyone, its sender included: that is how collab confirms it.
     const senders = frames
-      .slice(1)
+      .slice(2)
       .flatMap((frame) => (frame.type === "steps" ? frame.clientIds : []));
     expect(new Set(senders)).toEqual(new Set([first.clientId, second.clientId]));
     const stored = await get(owner, created);
@@ -410,7 +415,7 @@ describe("person and model writing together", () => {
     const secondFeed = await service((s) =>
       s.subscribe(owner, created.id, { revision: 0, clientId: second.clientId }),
     );
-    const toSecond = Effect.runFork(secondFeed!.pipe(Stream.take(2), Stream.runCollect));
+    const toSecond = Effect.runFork(secondFeed!.pipe(Stream.take(3), Stream.runCollect));
     const presence = {
       anchor: 3,
       head: 3,
@@ -421,15 +426,15 @@ describe("person and model writing together", () => {
       s.push(owner, { documentId: created.id, clientId: first.clientId, revision: 0, presence }),
     );
     const frames = [...(await Effect.runPromise(Fiber.join(toSecond)))] as DocumentFrame[];
-    expect(frames[1]).toEqual({ type: "presence", clientId: first.clientId, presence });
+    expect(frames[2]).toEqual({ type: "presence", clientId: first.clientId, presence });
     // A feed opening later is told about the cursor already there.
     const later = await service((s) =>
       s.subscribe(owner, created.id, { revision: 0, clientId: null }),
     );
     const opening = [
-      ...(await Effect.runPromise(later!.pipe(Stream.take(2), Stream.runCollect))),
+      ...(await Effect.runPromise(later!.pipe(Stream.take(3), Stream.runCollect))),
     ] as DocumentFrame[];
-    expect(opening[1]).toEqual({ type: "presence", clientId: first.clientId, presence });
+    expect(opening[2]).toEqual({ type: "presence", clientId: first.clientId, presence });
   });
 
   it("refuses a resent batch instead of storing it twice", async () => {
@@ -683,5 +688,123 @@ describe("ownership, limits and sync", () => {
         ),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("comments", () => {
+  const threadOn = async (owner: string, document: EditableDocument, words: string) => {
+    // What the editor does: mark the words with a fresh thread, then store it.
+    const editor = await openEditor(owner, document);
+    const thread = uuidv7();
+    await editor.mark(words, thread);
+    await service((s) =>
+      s.comment(owner, {
+        documentId: document.id,
+        threadId: thread,
+        body: "Too vague?",
+        quote: words,
+      }),
+    );
+    return thread;
+  };
+
+  it("keeps a thread with its replies, resolves it, and lets only its author delete it", async () => {
+    const owner = await createUser();
+    const created = await create(owner, await createConversation(owner));
+    const thread = await threadOn(owner, created, "tag build");
+    await service((s) =>
+      s.comment(owner, {
+        documentId: created.id,
+        threadId: thread,
+        body: "Agreed",
+        toAssistant: true,
+      }),
+    );
+    let read = await service((s) => s.read(owner, created.id));
+    expect(read!.comments.map((each) => [each.threadId === thread, each.body, each.quote])).toEqual(
+      [
+        [true, "Too vague?", "tag build"],
+        [true, "Agreed", null],
+      ],
+    );
+    expect(read!.comments[1]).toMatchObject({ toAssistant: true, answered: false });
+    await service((s) =>
+      s.resolveThread(owner, { documentId: created.id, threadId: thread, resolved: true }),
+    );
+    read = await service((s) => s.read(owner, created.id));
+    expect(read!.comments[0]!.resolvedAt).not.toBeNull();
+    const stranger = await createUser();
+    await expect(
+      service((s) => s.deleteComment(stranger, { documentId: created.id, commentId: thread })),
+    ).rejects.toThrow();
+    await service((s) => s.deleteComment(owner, { documentId: created.id, commentId: thread }));
+    read = await service((s) => s.read(owner, created.id));
+    expect(read!.comments).toEqual([]);
+  });
+
+  it("lets the assistant start a thread on quoted words and answer one, marking it answered", async () => {
+    const owner = await createUser();
+    const conversationId = await createConversation(owner);
+    const created = await create(owner, conversationId);
+    const asked = await threadOn(owner, created, "ship");
+    await service((s) =>
+      s.comment(owner, {
+        documentId: created.id,
+        threadId: asked,
+        body: "Date?",
+        toAssistant: true,
+      }),
+    );
+    const fence = await generation(owner, conversationId);
+    const guard = (tx: Parameters<typeof lockGeneration>[0]) => lockGeneration(tx, fence);
+    const target = blockIdOf((await service((s) => s.read(owner, created.id)))!.doc.child(2))!;
+    const started = await service((s) =>
+      s.assistantComment(
+        owner,
+        { documentId: created.id, target, quote: "prose", body: "Cut this?" },
+        guard,
+      ),
+    );
+    expect(started).toMatchObject({ outcome: "commented" });
+    const reply = await service((s) =>
+      s.assistantComment(owner, { documentId: created.id, thread: asked, body: "Friday." }, guard),
+    );
+    expect(reply).toMatchObject({ outcome: "commented", thread: asked });
+    const read = await service((s) => s.read(owner, created.id));
+    const anchors = commentAnchors(read!.doc);
+    expect(anchors.get((started as { thread: string }).thread)).toMatchObject({ text: "prose" });
+    expect(read!.comments.find((each) => each.body === "Date?")).toMatchObject({ answered: true });
+    expect(read!.comments.find((each) => each.body === "Friday.")).toMatchObject({
+      byAssistant: true,
+      author: null,
+    });
+  });
+
+  it("refuses a model edit that would strip an open thread of its text, unless asked to", async () => {
+    const owner = await createUser();
+    const created = await create(owner, await createConversation(owner));
+    const thread = await threadOn(owner, created, "Some prose in the middle");
+    const doc = (await service((s) => s.read(owner, created.id)))!.doc;
+    const block = blockIdOf(doc.child(2))!;
+    const seen = await seenNow(owner, created);
+    const rewrite = (allowDetach: boolean) =>
+      service((s) =>
+        s.apply(owner, {
+          documentId: created.id,
+          edit: { kind: "blocks", target: block, position: "replace", content: "New words" },
+          seen,
+          allowDetach,
+        }),
+      );
+    expect(await rewrite(false)).toMatchObject({ outcome: "anchors_affected" });
+    expect((await get(owner, created))!.content).toContain("Some prose in the middle");
+    expect(await rewrite(true)).toMatchObject({ outcome: "updated" });
+    const read = await service((s) => s.read(owner, created.id));
+    expect(commentAnchors(read!.doc).has(thread)).toBe(false);
+    // Detached, the thread stays open with the words it was on.
+    expect(read!.comments[0]).toMatchObject({
+      quote: "Some prose in the middle",
+      resolvedAt: null,
+    });
   });
 });

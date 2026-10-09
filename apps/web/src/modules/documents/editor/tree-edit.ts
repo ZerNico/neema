@@ -1,6 +1,7 @@
-import { Fragment, Slice, type Node } from "@tiptap/pm/model";
+import { Fragment, Slice, type Mark, type Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { BLOCK_ID, blockIdOf, ensureIds, findBlocks, isBlock, withFreshIds } from "./block-ids.ts";
+import { withoutComments } from "./comments.ts";
 import { parseMarkdown, toModelMarkdown } from "./markdown.ts";
 import { PENDING_INTENT_CHARS } from "./pending.ts";
 import { blockHash } from "./tree.ts";
@@ -52,6 +53,40 @@ const locate = (doc: Node, id: string) => {
     index: $position.index(),
     start: $position.start(),
   };
+};
+
+/** Where the model can place content without naming a block: the document's ends. */
+export const DOCUMENT_ENDS = ["start", "end"] as const;
+
+/**
+ * A placement the model can name without reading there, as a block and a
+ * side: `start` and `end` for the document's ends, and position `end` on a
+ * heading for the end of its section (before the next heading as high or
+ * higher). Anything else is returned as it is.
+ */
+export const placement = (
+  doc: Node,
+  target: string,
+  position: "replace" | "before" | "after" | "end",
+): { target: string; position: "replace" | "before" | "after" } => {
+  const blocks: Node[] = [];
+  doc.forEach((block) => blocks.push(block));
+  const first = blocks[0] ? blockIdOf(blocks[0]) : null;
+  const last = blocks.at(-1) ? blockIdOf(blocks.at(-1)!) : null;
+  if (target === "end" && last) return { target: last, position: "after" };
+  if (target === "start" && first) return { target: first, position: "before" };
+  if (position !== "end") return { target, position };
+  const index = blocks.findIndex((block) => blockIdOf(block) === target);
+  const heading = blocks[index];
+  if (index === -1 || heading?.type.name !== "heading") return { target, position: "after" };
+  const level = Number(heading.attrs.level) || 1;
+  let end = index;
+  while (
+    end + 1 < blocks.length &&
+    !(blocks[end + 1]!.type.name === "heading" && Number(blocks[end + 1]!.attrs.level) <= level)
+  )
+    end++;
+  return { target: blockIdOf(blocks[end]!) ?? target, position: "after" };
 };
 
 /** The blocks a `blocks` edit covers, as a sibling range in one parent. */
@@ -166,6 +201,13 @@ const blockText = (node: Node) =>
         ]),
       );
 
+const unescapeXml = (text: string) =>
+  text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&amp;", "&");
+
 /** `text` occurs exactly once across these blocks: the block and where. */
 const findOnce = (scope: Node, offset: number, text: string) => {
   const hits: { node: Node; position: number; at: number }[] = [];
@@ -207,7 +249,15 @@ export const applyTreeEdit = (
       scope = target.node;
       offset = target.position + 1;
     }
-    const hits = findOnce(scope, offset, edit.find);
+    // The model quotes text as its XML view shows it, entities included.
+    let find = edit.find;
+    let replacement = edit.content;
+    let hits = findOnce(scope, offset, find);
+    if (hits.length === 0 && unescapeXml(find) !== find) {
+      find = unescapeXml(find);
+      replacement = unescapeXml(replacement);
+      hits = findOnce(scope, offset, find);
+    }
     if (hits.length === 0)
       return refuse(
         "no_match",
@@ -222,7 +272,7 @@ export const applyTreeEdit = (
       );
     const { node, position, at } = hits[0]!;
     const source = blockText(node);
-    const next = source.slice(0, at) + edit.content + source.slice(at + edit.find.length);
+    const next = source.slice(0, at) + replacement + source.slice(at + find.length);
     if (next === source) return { tr, touched: [] };
     let content: Fragment;
     if (node.type.name === "codeBlock")
@@ -237,10 +287,12 @@ export const applyTreeEdit = (
         );
       content = first ? Fragment.fromJSON(doc.type.schema, first.content.toJSON()) : Fragment.empty;
     }
-    // Only the part of the block that differs, so the rest of its text keeps its place.
-    const start = node.content.findDiffStart(content);
+    // Only the part of the block that differs, so the rest of its text keeps
+    // its place, and comments on it stay: the model never saw their marks.
+    const current = withoutComments(node.content);
+    const start = current.findDiffStart(content);
     if (start !== null) {
-      const end = node.content.findDiffEnd(content)!;
+      const end = current.findDiffEnd(content)!;
       let endA = end.a;
       let endB = end.b;
       const overlap = start - Math.min(endA, endB);
@@ -248,11 +300,14 @@ export const applyTreeEdit = (
         endA += overlap;
         endB += overlap;
       }
-      tr.replace(
-        position + 1 + start,
-        position + 1 + endA,
-        new Slice(content.cut(start, endB), 0, 0),
-      );
+      const from = position + 1 + start;
+      // Comments on the words being replaced move onto the words replacing them.
+      const comments = new Set<Mark>();
+      doc.nodesBetween(from, position + 1 + endA, (child) => {
+        for (const mark of child.marks) if (mark.type.name === "comment") comments.add(mark);
+      });
+      tr.replace(from, position + 1 + endA, new Slice(content.cut(start, endB), 0, 0));
+      for (const mark of comments) tr.addMark(from, position + 1 + endB, mark);
     }
     const id = blockIdOf(node);
     return { tr: ensureIds(tr), touched: id ? [id] : [] };

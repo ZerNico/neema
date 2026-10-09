@@ -18,7 +18,7 @@ import {
   RowDeleteIcon,
   RowInsertIcon,
   SourceCodeIcon,
-  Table01Icon,
+  LayoutTable01Icon,
   TextBoldIcon,
   TextIcon,
   TextItalicIcon,
@@ -283,7 +283,7 @@ const CONTROLS: Control[] = [
     pressed: "codeBlock",
     command: (c) => c.toggleCodeBlock(),
   },
-  { kind: "table", label: "Table", icon: Table01Icon },
+  { kind: "table", label: "Table", icon: LayoutTable01Icon },
   { kind: "action", label: "Divider", icon: MinusSignIcon, command: (c) => c.setHorizontalRule() },
   {
     kind: "action",
@@ -412,7 +412,7 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
         return state.table ? (
           <DropdownMenuSub key="table">
             <DropdownMenuSubTrigger>
-              <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+              <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
               Table
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
@@ -525,7 +525,7 @@ function InsertTableItem({ editor }: { editor: Editor }) {
         run(editor, (chain) => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))
       }
     >
-      <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+      <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
       Insert table
     </DropdownMenuItem>
   );
@@ -595,7 +595,7 @@ function TableMenu({ editor, inTable }: { editor: Editor; inTable: boolean }) {
             />
           }
         >
-          <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+          <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
         </TooltipTrigger>
         <Hint label="Table" />
       </Tooltip>

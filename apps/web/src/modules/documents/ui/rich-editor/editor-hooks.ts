@@ -6,6 +6,16 @@ export interface MentionCandidate {
   label: string;
   detail?: string | undefined;
 }
+/** Where in a document a request was made: the blocks it names and the comment thread it came from. */
+export interface AskTarget {
+  blocks: ReadonlyArray<string>;
+  thread?: string | undefined;
+}
+/** A request about one document, sent as a chat message about it. */
+export type DocumentAsk = (
+  request: string,
+  target: AskTarget & { documentId: string },
+) => Promise<boolean>;
 /**
  * What the panel lends its editor: who can be mentioned, and how to ask the
  * assistant to write at a spot. Kept per editor, since the editor outlives
@@ -14,10 +24,10 @@ export interface MentionCandidate {
 export interface EditorHooks {
   mentions: () => ReadonlyArray<MentionCandidate>;
   /**
-   * Sends the request with these blocks selected; false when it cannot go
-   * now (an answer is running). Null outside a chat.
+   * Sends the request about this spot as a chat message; false when it
+   * cannot go now (an answer is running). Null where nothing can be asked.
    */
-  ask: ((request: string, blocks: ReadonlyArray<string>) => Promise<boolean>) | null;
+  ask: ((request: string, target: AskTarget) => Promise<boolean>) | null;
   /** Moves focus to the chat's input, the selection kept for the message. Null outside a chat. */
   focusComposer: (() => void) | null;
 }

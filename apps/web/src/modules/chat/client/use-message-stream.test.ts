@@ -653,12 +653,24 @@ describe("a deck edit still being written", () => {
     expect(tools.map((tool) => tool.callId)).toEqual(["row-1"]);
   });
 
+  it("shows a document edit as running while its text streams into the panel", () => {
+    expect(
+      applyToolActivityChunk(
+        [],
+        "writing",
+        JSON.stringify({ v: 1, id: "x", name: "edit_document", textOffset: 4, turnIndex: 0 }),
+      ),
+    ).toMatchObject([
+      { family: "document", name: "edit_document", status: "running", callId: "writing:x" },
+    ]);
+  });
+
   it("ignores markers for other tools and malformed ones", () => {
     expect(
       applyToolActivityChunk(
         [],
         "writing",
-        JSON.stringify({ v: 1, id: "x", name: "edit_document", textOffset: 0, turnIndex: 0 }),
+        JSON.stringify({ v: 1, id: "x", name: "web_search", textOffset: 0, turnIndex: 0 }),
       ),
     ).toEqual([]);
     expect(applyToolActivityChunk([], "writing", "{")).toEqual([]);

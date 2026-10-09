@@ -5,6 +5,7 @@ export function documentActivityLabel(activity: DocumentToolActivity) {
   if (activity.status === "running") {
     if (activity.name === "create_document") return "Creating a document";
     if (activity.name === "edit_document") return "Updating the document";
+    if (activity.name === "comment_on_document") return "Commenting";
     return "Reading documents";
   }
   switch (activity.result?.outcome) {
@@ -18,6 +19,8 @@ export function documentActivityLabel(activity: DocumentToolActivity) {
       return title ? `Read ${title}` : "Read a document";
     case "listed":
       return "Checked documents";
+    case "commented":
+      return title ? `Commented on ${title}` : "Commented on a document";
     default:
       return "Couldn’t update the document";
   }

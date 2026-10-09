@@ -18,9 +18,13 @@ import {
   MinusSignIcon,
   QuoteDownIcon,
   RowDeleteIcon,
+  SortByDown01Icon,
+  SortByUp01Icon,
+  TableColumnsSplitIcon,
+  TableRowsSplitIcon,
   ScissorIcon,
   SourceCodeIcon,
-  Table01Icon,
+  LayoutTable01Icon,
   TaskDaily01Icon,
   TextBoldIcon,
   TextIcon,
@@ -43,6 +47,7 @@ import {
   ContextMenuSubTrigger,
 } from "~/ui/primitives/context-menu";
 import { isoDay } from "./dates.ts";
+import { sortColumn } from "./table-sort.ts";
 import { editorHooks } from "./editor-hooks.ts";
 
 type Chain = ReturnType<Editor["chain"]>;
@@ -95,7 +100,7 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
   return (
     <ContextMenu>
       <ContextMenuPrimitive.Trigger
-        render={<div className="h-full" />}
+        render={<div className="flex grow flex-col" />}
         onContextMenu={(event) => {
           if (event.shiftKey || !editor.isEditable) {
             event.preventBaseUIHandler();
@@ -224,7 +229,7 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
         </ContextMenuSub>
         <ContextMenuSub>
           <ContextMenuSubTrigger>
-            <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+            <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
             Insert
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
@@ -241,7 +246,7 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
               }
             />
             <Item
-              icon={Table01Icon}
+              icon={LayoutTable01Icon}
               label="Table"
               onClick={() => run((c) => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))}
             />
@@ -285,6 +290,29 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
               label="Delete column"
               onClick={() => run((c) => c.deleteColumn())}
             />
+            <ContextMenuSeparator />
+            <Item
+              icon={TableRowsSplitIcon}
+              label="Toggle header row"
+              onClick={() => run((c) => c.toggleHeaderRow())}
+            />
+            <Item
+              icon={TableColumnsSplitIcon}
+              label="Toggle header column"
+              onClick={() => run((c) => c.toggleHeaderColumn())}
+            />
+            <ContextMenuSeparator />
+            <Item
+              icon={SortByUp01Icon}
+              label="Sort column ascending"
+              onClick={() => sortColumn(editor, 1)}
+            />
+            <Item
+              icon={SortByDown01Icon}
+              label="Sort column descending"
+              onClick={() => sortColumn(editor, -1)}
+            />
+            <ContextMenuSeparator />
             <Item
               icon={Delete02Icon}
               label="Delete table"

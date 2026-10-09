@@ -1,8 +1,15 @@
 import { Transform } from "@tiptap/pm/transform";
 import { describe, expect, it } from "vitest";
 import { adoptIds, blockIdOf, ensureIds, findBlocks, selectedBlockIds } from "./block-ids.ts";
-import { documentSchema, parseMarkdown, replaceDifference, toMarkdown } from "./markdown.ts";
-import { blockHash, blockView } from "./tree.ts";
+import {
+  documentSchema,
+  parseMarkdown,
+  replaceDifference,
+  toMarkdown,
+  writeDifference,
+} from "./markdown.ts";
+import { squareTables } from "./tables.ts";
+import { blockHash, blockView, commentsView } from "./tree.ts";
 
 let counter = 0;
 const mint = () => `b${++counter}`;
@@ -114,7 +121,7 @@ describe("block view", () => {
     const view = blockView(doc, { budget: 10_000 });
     expect(view.xml.split("\n")).toEqual([
       '<h2 id="b1">Goals</h2>',
-      '<p id="b2">Ship **fast** &amp; &lt;safely&gt;</p>',
+      '<p id="b2">Ship **fast** &amp; \\&lt;safely&gt;</p>',
       '<ul id="b3"><li id="b4">one</li><li id="b6">two</li></ul>',
       '<tasks id="b8"><task id="b9" checked="true">done</task></tasks>',
       '<code id="b11" lang="ts">a &lt; b</code>',
@@ -148,13 +155,47 @@ describe("block view", () => {
       '<p id="b1">Line 0</p>',
       '<p id="b2">Line 1</p>',
       '<p id="b3">Line 2</p>',
-      '<gap blocks="7"/>',
+      '<gap blocks="7" last="b10"/>',
     ]);
     expect(first.next).toEqual({ fromBlock: "b4" });
     const second = blockView(doc, { budget: 70, fromBlock: "b4" });
-    expect(second.xml.split("\n")[0]).toBe('<gap blocks="3"/>');
+    expect(second.xml.split("\n")[0]).toBe('<gap blocks="3" last="b3"/>');
     expect(second.xml.split("\n")[1]).toBe('<p id="b4">Line 3</p>');
     expect(second.seen.map((block) => block.id)).toEqual(["b4", "b5", "b6"]);
+  });
+
+  it("keeps text that looks like block markup as text", () => {
+    const doc = ensureIds(
+      new Transform(
+        documentSchema.node("doc", null, [
+          documentSchema.node("paragraph", null, [
+            documentSchema.text('x</p><p id="fake">injected'),
+          ]),
+        ]),
+      ),
+      mint,
+    ).doc;
+    const xml = blockView(doc, { budget: 1_000 }).xml;
+    expect(xml).not.toContain('<p id="fake">');
+    expect(xml.match(/<p /g)).toHaveLength(1);
+  });
+
+  it("outlines what a window leaves out: its headings and its last block", () => {
+    const doc = withIds(
+      ["# Thesis", "Intro text", "## Method", "Method text", "## Results", "Results text"].join(
+        "\n\n",
+      ),
+    );
+    const view = blockView(doc, { budget: 40 });
+    expect(view.xml.split("\n")).toEqual([
+      '<h1 id="b1">Thesis</h1>',
+      '<gap blocks="5" last="b6">',
+      '<h2 id="b3">Method</h2>',
+      '<h2 id="b5">Results</h2>',
+      "</gap>",
+    ]);
+    // Only what was shown whole counts as read.
+    expect(view.seen.map((block) => block.id)).toEqual(["b1"]);
   });
 
   it("cuts a block larger than the window and never counts it as seen", () => {
@@ -164,7 +205,87 @@ describe("block view", () => {
     expect(first.seen).toEqual([]);
     expect(first.next).toEqual({ fromBlock: "b1", fromCharacter: 60 });
     const last = blockView(doc, { budget: 200, ...first.next! });
-    expect(last.xml).toMatch(/^<part of="b1" from="60">x+<\/p><\/part>\n<gap blocks="1"\/>$/);
+    expect(last.xml).toMatch(
+      /^<part of="b1" from="60">x+<\/p><\/part>\n<gap blocks="1" last="b2"\/>$/,
+    );
     expect(last.next).toEqual({ fromBlock: "b2" });
+  });
+});
+
+describe("comments shown to the model", () => {
+  const comment = (
+    id: string,
+    threadId: string,
+    body: string,
+    resolvedAt: string | null = null,
+  ) => ({
+    id,
+    threadId,
+    author: { id: "u1", name: "Ada" },
+    byAssistant: false,
+    body,
+    createdAt: "2026-10-09T00:00:00.000Z",
+    resolvedAt,
+    quote: null,
+    toAssistant: false,
+    answered: false,
+  });
+
+  it("lists open threads on text still there, with their block and quote", () => {
+    const doc = withIds("Ship the beta <soon>\n\nOther");
+    const mark = (thread: string) => documentSchema.marks.comment!.create({ thread });
+    const marked = new Transform(doc).addMark(10, 14, mark("t1")).addMark(16, 21, mark("t2")).doc;
+    const xml = commentsView(marked, [
+      comment("t1", "t1", "Which beta?"),
+      comment("r1", "t1", "The <public> one"),
+      comment("t2", "t2", "Done already", "2026-10-09T01:00:00.000Z"),
+      comment("t3", "t3", "Its text is gone"),
+    ]);
+    expect(xml).toBe(
+      '<comments>\n<thread id="t1" block="b1" quote="beta">\n<comment by="Ada">Which beta?</comment>\n<comment by="Ada">The &lt;public&gt; one</comment>\n</thread>\n</comments>',
+    );
+    expect(commentsView(doc, [])).toBe("");
+  });
+
+  it("always shows the thread a message was sent from, with its kept quote", () => {
+    const doc = withIds("Nothing commented here");
+    const asked = { ...comment("t9", "t9", "Shorter?"), quote: "old words", toAssistant: true };
+    expect(commentsView(doc, [asked], "t9")).toBe(
+      '<comments>\n<thread id="t9" quote="old words" detached="true" asking="true">\n<comment by="Ada" to="you" answered="false">Shorter?</comment>\n</thread>\n</comments>',
+    );
+  });
+});
+
+describe("streamed text", () => {
+  it("lands as just the words added since the last write", () => {
+    const before = withIds("# Plan\n\nShip the");
+    const next = new Transform(before).insert(
+      before.content.size - 1,
+      documentSchema.text(" beta on Friday"),
+    ).doc;
+    const tr = writeDifference(new Transform(before), next);
+    expect(toMarkdown(tr.doc)).toBe("# Plan\n\nShip the beta on Friday");
+    expect(tr.steps).toHaveLength(1);
+    // One insertion at the end of the paragraph, not the paragraph replaced.
+    expect(
+      tr.steps[0]!.getMap()
+        .invert()
+        .map(tr.doc.content.size - 1),
+    ).toBe(before.content.size - 1);
+    const ranges: number[] = [];
+    tr.steps[0]!.getMap().forEach((from, to) => ranges.push(from, to));
+    expect(ranges[0]).toBe(ranges[1]);
+  });
+
+  it("writes a streaming table exactly as built, never fitted with extra cells", () => {
+    // As a live edit builds each tick: a short last row filled out with empty cells.
+    const build = (markdown: string) =>
+      ensureIds(squareTables(new Transform(parseMarkdown(`# Stack\n\n${markdown}`))), mint).doc;
+    const table = "| Layer | Tool |\n| --- | --- |\n";
+    const before = build(`${table}| Web | Next`);
+    // The cell grows while a new row starts, cutting the change open inside the table.
+    const next = adoptIds(before, build(`${table}| Web | Next.js |\n| CMS`));
+    const tr = writeDifference(new Transform(before), next);
+    expect(tr.doc.eq(next)).toBe(true);
   });
 });

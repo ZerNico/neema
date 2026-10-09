@@ -217,7 +217,14 @@ const authoringFinish = (reason: "stop" | "tool-calls" = "stop") =>
     usage: new AiResponse.Usage({ inputTokens: { total: 100 }, outputTokens: { total: 10 } }),
   });
 /** A native call whose arguments stream in pieces first, the way providers send them. */
-const streamedTool = (input: GatewayInput, name: string, params: unknown, pieces = 12) => {
+/** A call whose arguments arrive in pieces, `pace` apart as a provider would send them. */
+const streamedTool = (
+  input: GatewayInput,
+  name: string,
+  params: unknown,
+  pieces = 12,
+  pace = Duration.zero,
+) => {
   const id = uuidv7();
   const json = JSON.stringify(params);
   const size = Math.ceil(json.length / pieces);
@@ -239,6 +246,9 @@ const streamedTool = (input: GatewayInput, name: string, params: unknown, pieces
           AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
           authoringFinish("tool-calls"),
         ).pipe(
+          Stream.tap((part) =>
+            part.type === "tool-params-delta" ? Effect.sleep(pace) : Effect.void,
+          ),
           Stream.mapEffect((part) => encodePart(part)),
           Stream.orDie,
         ),
@@ -2176,9 +2186,14 @@ describe("conversation documents", () => {
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: document!.revision,
+            // The revision its write landed at; a preview settled with nothing
+            // left to write reports the one it already reached.
+            revision: expect.any(Number),
           },
         ]);
+        expect((detail.toolCalls[1]!.result as { revision: number }).revision).toBeLessThanOrEqual(
+          document!.revision,
+        );
         expect(detail.toolCalls.every((call) => call.status === "complete")).toBe(true);
         expect(JSON.stringify(detail)).not.toContain("write notes");
         const chunks = await runtime.runPromise(
@@ -2234,10 +2249,16 @@ describe("conversation documents", () => {
       if (prompts.length === 2)
         return Stream.fromEffectDrain(watch).pipe(
           Stream.concat(
-            streamedTool(input, "edit_document", {
-              target: blockIdIn(input, "tag build"),
-              content: "- [ ] tag the build and publish the release notes for everyone",
-            }),
+            streamedTool(
+              input,
+              "edit_document",
+              {
+                target: blockIdIn(input, "tag build"),
+                content: "- [ ] tag the build and publish the release notes for everyone",
+              },
+              12,
+              Duration.millis(40),
+            ),
           ),
         );
       return reply();
@@ -2252,7 +2273,7 @@ describe("conversation documents", () => {
           "- [ ] tag the build and publish the release notes for everyone",
         ),
       );
-      // Written while streaming, then settled: more than the one write a plain edit makes.
+      // Written as it streamed, a piece at a time; settling writes only what is still missing.
       const updates = frames.filter((frame) => frame.type === "steps");
       expect(updates.length).toBeGreaterThanOrEqual(2);
       const detail = await runtime.runPromise(
@@ -2265,6 +2286,376 @@ describe("conversation documents", () => {
     } finally {
       authoringScript = null;
       if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("pages through a long document by following each window's note to the end", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const sections = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}. `.repeat(20)}`,
+    );
+    const notes: string[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Long",
+          content: sections.join("\n\n"),
+        });
+      // Later rounds follow the latest read's result. The first view keeps
+      // its first note, so following notes in the views could repeat it.
+      const results = JSON.stringify(input.prompt.content.filter((each) => each.role === "tool"));
+      const note =
+        [...results.matchAll(/call read_chat_document with (\{[^}]*\})/g)]
+          .map((match) => match[1]!.replaceAll('\\"', '"'))
+          .at(-1) ?? /Call read_chat_document with (\{[^}]*\})/.exec(documentText(input))?.[1];
+      if (note && notes.length < 10 && notes.at(-1) !== note) {
+        notes.push(note);
+        return authoringTool(input, "read_chat_document", JSON.parse(note));
+      }
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const last = documentText(prompts.at(-1)!);
+      expect(notes.length).toBeGreaterThan(1);
+      // The final request shows the end of the document, and the last read said so.
+      expect(last).toContain("Section 120");
+      const results = JSON.stringify(
+        prompts.at(-1)!.prompt.content.filter((each) => each.role === "tool"),
+      );
+      expect(results).toContain("reaches the end of the document");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("appends to a long document's end and a section's end without reading there", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const sections = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}. `.repeat(20)}`,
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Long",
+          content: sections.join("\n\n"),
+        });
+      if (prompts.length === 2)
+        return authoringTool(input, "edit_document", { target: "end", content: "Closing words." });
+      if (prompts.length === 3) {
+        // Section 60 lies beyond the first window; its heading is in the gap's outline.
+        const heading = /<h2 id="([a-z0-9]+)">Section 60</.exec(documentText(input))?.[1];
+        return authoringTool(input, "edit_document", {
+          target: heading,
+          position: "end",
+          content: "Added to section 60.",
+        });
+      }
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.endsWith("Closing words.")).toBe(true);
+      // The request after each write shows what it wrote, far past the first window.
+      expect(documentText(prompts[2]!)).toContain("Closing words.");
+      expect(documentText(prompts[3]!)).toContain("Added to section 60.");
+      expect(document!.content).toMatch(
+        /Words of section 60\. ?\n\nAdded to section 60\.\n\n## Section 61/,
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+        "updated",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("keeps what a streamed edit wrote when the answer is stopped mid-write", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const text = "Launch day starts with a final check of every redirect. ".repeat(6).trim();
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      // Half the arguments, then the provider goes quiet until the reader stops.
+      const json = JSON.stringify({ target: "end", content: text });
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "edit_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, 40) }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(40, 200) }),
+            ).pipe(
+              Stream.concat(Stream.never),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      // Wait for the preview to have typed some of it out.
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const [document] = yield* Effect.promise(() => documentsOf(seed));
+            if (document && document.content.includes("final check")) return;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const stopped = await runtime.runPromise(
+        Effect.gen(function* () {
+          const message = yield* (yield* ChatRepo).getMessage(sent.assistantMessageId);
+          return yield* (yield* StreamEngine).stopGeneration(
+            sent.assistantMessageId,
+            message?.generationId ?? undefined,
+          );
+        }),
+      );
+      expect(stopped).toBe(true);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain("Launch day starts with a final check");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("lands a streamed append at the end once, though the end moved as it streamed", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    // Longer than one window, as a thesis is.
+    const long = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}.`.repeat(20)}`,
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Plan",
+          content: [CHECKLIST, ...long].join("\n\n"),
+        });
+      if (prompts.length === 2)
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: "end", content: "## Closing\n\nOne closing paragraph, written once." },
+          12,
+          Duration.millis(30),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.endsWith("## Closing\n\nOne closing paragraph, written once.")).toBe(
+        true,
+      );
+      expect(document!.content.split("## Closing")).toHaveLength(2);
+      // The request after the write shows it, so the model sees its work done.
+      expect(documentText(prompts[2]!)).toContain("written once");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("types out text that arrives in large chunks a few words at a time", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const frames: DocumentFrame[] = [];
+    let watcher: Fiber.Fiber<void> | null = null;
+    const watch = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            revision: null,
+            clientId: "watcher",
+          });
+          watcher = Effect.runFork(
+            Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
+          );
+        }),
+      ),
+    );
+    const paragraph = "The release goes out on Friday once the notes are reviewed. "
+      .repeat(7)
+      .trim();
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length === 2)
+        return Stream.fromEffectDrain(watch).pipe(
+          Stream.concat(
+            // Two big chunks, as a provider that batches sends them.
+            streamedTool(
+              input,
+              "edit_document",
+              { target: blockIdIn(input, "Release"), position: "after", content: paragraph },
+              2,
+              Duration.millis(200),
+            ),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain(paragraph);
+      const inserted = frames
+        .flatMap((frame) => (frame.type === "steps" ? frame.steps : []))
+        .map((step) => {
+          const slice = (step as { slice?: { content?: unknown } }).slice;
+          return JSON.stringify(slice?.content ?? "").length;
+        });
+      // Typed out over many writes, none carrying more than a short stretch of new text.
+      expect(inserted.length).toBeGreaterThan(8);
+      expect(inserted.filter((size) => size > 200)).toHaveLength(0);
+    } finally {
+      authoringScript = null;
+      if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("streams a list as its new words, never rewriting the items already there", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const frames: DocumentFrame[] = [];
+    let watcher: Fiber.Fiber<void> | null = null;
+    const watch = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            revision: null,
+            clientId: "watcher",
+          });
+          watcher = Effect.runFork(
+            Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
+          );
+        }),
+      ),
+    );
+    const list = Array.from(
+      { length: 6 },
+      (_, index) => `- step ${index + 1}: check the release notes and the build once more`,
+    ).join("\n");
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Steps", content: CHECKLIST });
+      if (prompts.length === 2)
+        return Stream.fromEffectDrain(watch).pipe(
+          Stream.concat(
+            streamedTool(
+              input,
+              "edit_document",
+              { target: blockIdIn(input, "Release"), position: "after", content: list },
+              30,
+              Duration.millis(40),
+            ),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const replaced = frames
+        .flatMap((frame) => (frame.type === "steps" ? frame.steps : []))
+        .map((step) => {
+          const { from, to } = step as { from?: number; to?: number };
+          return from === undefined || to === undefined ? 0 : to - from;
+        });
+      expect(replaced.length).toBeGreaterThan(5);
+      // A tick replaces at most the end of the item being written; the list
+      // itself, a few hundred positions by the end, is never written again.
+      expect(Math.max(...replaced)).toBeLessThan(80);
+    } finally {
+      authoringScript = null;
+      if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("keeps a streamed table its own through every tick and settles it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const table = "| Layer | Tool |\n| --- | --- |\n| Web | Next.js |\n| CMS | Payload |";
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Stack", content: CHECKLIST });
+      if (prompts.length === 2)
+        // Paced so ticks land mid-row, when the last row is still short.
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: blockIdIn(input, "Release"), position: "after", content: table },
+          24,
+          Duration.millis(40),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      // Columns come back padded to their widest cell.
+      expect(document!.content.replace(/ +/g, " ").replace(/-{3,}/g, "---")).toBe(
+        CHECKLIST.replace(
+          "# Release",
+          "# Release\n\n| Layer | Tool |\n| --- | --- |\n| Web | Next.js |\n| CMS | Payload |",
+        ),
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+      ]);
+    } finally {
+      authoringScript = null;
     }
   });
 

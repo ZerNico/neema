@@ -15,10 +15,12 @@ const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100))
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /**
  * The document open in the panel when the message was sent, which the model
- * reads first, and the blocks the person had selected in it.
+ * reads first, the blocks the person had selected in it, and the comment
+ * thread the message was sent from.
  */
 export const OpenDocument = Schema.Struct({
   id: ResourceId,
+  thread: Schema.optionalKey(ResourceId),
   selected: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))).check(
       Schema.isMaxLength(50),

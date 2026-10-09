@@ -53,6 +53,18 @@ const cell = (text: string) => ({
 const row = (...texts: string[]) => ({ type: "tableRow", content: texts.map(cell) });
 
 describe("document Markdown", () => {
+  it("writes &, < and > as themselves, escaping only what would start a tag or entity", () => {
+    const text = "A & B < C > D, a <div> tag, &amp; spelled out, x<y";
+    const doc = documentSchema.node("doc", null, [
+      documentSchema.node("paragraph", null, [documentSchema.text(text)]),
+    ]);
+    expect(toMarkdown(doc)).toBe("A & B < C > D, a \\<div> tag, \\&amp; spelled out, x\\<y");
+    expect(parseMarkdown(toMarkdown(doc)).firstChild!.textContent).toBe(text);
+    expect(toMarkdown(parseMarkdown("| a & b | c |\n| --- | --- |\n| 1 < 2 | 3 |"))).toContain(
+      "| a & b | c   |",
+    );
+  });
+
   it("reads back what it was written in canonical form", () => {
     expect(normalizeMarkdown(SAMPLE)).toBe(SAMPLE);
     expect(toMarkdown(parseMarkdown(SAMPLE))).toBe(SAMPLE);
@@ -127,9 +139,11 @@ describe("document Markdown", () => {
   });
 
   it("keeps raw HTML as text instead of markup", () => {
-    expect(normalizeMarkdown("before <b>x</b>\n\n<script>alert(1)</script>")).toBe(
-      "before &lt;b&gt;x&lt;/b&gt;\n\n&lt;script&gt;alert(1)&lt;/script&gt;",
-    );
+    const written = normalizeMarkdown("before <b>x</b>\n\n<script>alert(1)</script>");
+    expect(written).toBe("before \\<b>x\\</b>\n\n\\<script>alert(1)\\</script>");
+    // Read again, it is still the same text, not markup.
+    expect(normalizeMarkdown(written)).toBe(written);
+    expect(parseMarkdown(written).firstChild!.textContent).toBe("before <b>x</b>");
   });
 
   it("changes only the range that differs, so text and cursors around it stay put", () => {

@@ -1,8 +1,11 @@
 import { Transform } from "@tiptap/pm/transform";
 import { describe, expect, it } from "vitest";
 import { blockIdOf, ensureIds } from "./block-ids.ts";
-import { parseMarkdown, toMarkdown } from "./markdown.ts";
-import { applyTreeEdit, type TreeEdit } from "./tree-edit.ts";
+import { commentAnchors } from "./comments.ts";
+import { squareTables } from "./tables.ts";
+import { Node } from "@tiptap/pm/model";
+import { documentSchema, parseMarkdown, toMarkdown } from "./markdown.ts";
+import { applyTreeEdit, placement, type TreeEdit } from "./tree-edit.ts";
 import { blockView } from "./tree.ts";
 
 let counter = 0;
@@ -22,6 +25,29 @@ const apply = (doc: ReturnType<typeof withIds>, edit: TreeEdit, seen = seenAll(d
 
 const DOC = "# Plan\n\nIntro text\n\n- one\n- two\n\nOutro";
 // b1 heading, b2 intro, b3 list, b4 item one, b5 its paragraph, b6 item two, b7 paragraph, b8 outro
+
+describe("placements named without a block", () => {
+  const doc = () =>
+    withIds(
+      "# Thesis\n\nIntro\n\n## Method\n\nSteps\n\n### Detail\n\nMore\n\n## Results\n\nNumbers",
+    );
+  // b1 Thesis, b2 Intro, b3 Method, b4 Steps, b5 Detail, b6 More, b7 Results, b8 Numbers
+  it("puts the document's ends after its last block and before its first", () => {
+    expect(placement(doc(), "end", "replace")).toEqual({ target: "b8", position: "after" });
+    expect(placement(doc(), "start", "after")).toEqual({ target: "b1", position: "before" });
+  });
+
+  it("ends a section before the next heading as high, past its subsections", () => {
+    expect(placement(doc(), "b3", "end")).toEqual({ target: "b6", position: "after" });
+    expect(placement(doc(), "b7", "end")).toEqual({ target: "b8", position: "after" });
+    expect(placement(doc(), "b1", "end")).toEqual({ target: "b8", position: "after" });
+  });
+
+  it("leaves a placement that names a block as it is", () => {
+    expect(placement(doc(), "b4", "replace")).toEqual({ target: "b4", position: "replace" });
+    expect(placement(doc(), "b4", "end")).toEqual({ target: "b4", position: "after" });
+  });
+});
 
 describe("edits aimed at blocks", () => {
   it("replaces one block, keeping its ID when the type stays", () => {
@@ -143,6 +169,17 @@ describe("edits aimed at blocks", () => {
 });
 
 describe("edits by text", () => {
+  it("matches text quoted as the XML view escapes it", () => {
+    const doc = withIds("# Plan\n\nShip fast & safely < Friday");
+    const result = apply(doc, {
+      kind: "find",
+      find: "fast &amp; safely &lt; Friday",
+      content: "fast &amp; safely &lt; Monday",
+    });
+    if ("outcome" in result) throw new Error(result.message);
+    expect(result.doc.lastChild!.textContent).toBe("Ship fast & safely < Monday");
+  });
+
   it("changes text inside one block as the smallest step", () => {
     const doc = withIds(DOC);
     const result = applyTreeEdit(
@@ -181,5 +218,69 @@ describe("edits by text", () => {
       outcome: "no_match",
       message: expect.stringContaining("one block"),
     });
+  });
+});
+
+describe("comments under a model edit", () => {
+  it("keeps a comment on text a find edit did not change", () => {
+    const doc = withIds("Ship the beta on Friday to everyone");
+    const comment = doc.type.schema.marks.comment!.create({ thread: "t1" });
+    // "beta" carries the comment.
+    const marked = new Transform(doc).addMark(10, 14, comment).doc;
+    const result = applyTreeEdit(marked, { kind: "find", find: "Friday", content: "Monday" }, null);
+    if ("outcome" in result) throw new Error(result.message);
+    expect(toMarkdown(result.tr.doc)).toBe("Ship the beta on Monday to everyone");
+    expect(commentAnchors(result.tr.doc).get("t1")).toMatchObject({ text: "beta", blockId: "b1" });
+  });
+
+  it("moves a comment onto the words that replace the ones it was on", () => {
+    const doc = withIds("Ship the beta on Friday");
+    const comment = doc.type.schema.marks.comment!.create({ thread: "t1" });
+    // "Friday" carries the comment; "Monday" shares only its ending.
+    const marked = new Transform(doc).addMark(18, 24, comment).doc;
+    const result = applyTreeEdit(marked, { kind: "find", find: "Friday", content: "Monday" }, null);
+    if ("outcome" in result) throw new Error(result.message);
+    expect(commentAnchors(result.tr.doc).get("t1")).toMatchObject({ text: "Monday" });
+  });
+
+  it("writes no Markdown of its own", () => {
+    const doc = withIds("A note");
+    const marked = new Transform(doc).addMark(
+      1,
+      2,
+      doc.type.schema.marks.comment!.create({ thread: "t1" }),
+    ).doc;
+    expect(toMarkdown(marked)).toBe("A note");
+  });
+});
+
+describe("tables the model writes", () => {
+  it("get the cells a short row lacks, so no editor adds them on its own", () => {
+    // A row still streaming in: Markdown pads a short row, a half-written table does not.
+    const cell = (type: string, text: string) => ({
+      type,
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    });
+    const doc = Node.fromJSON(documentSchema, {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            { type: "tableRow", content: ["A", "B", "C"].map((text) => cell("tableHeader", text)) },
+            { type: "tableRow", content: ["1", "2"].map((text) => cell("tableCell", text)) },
+          ],
+        },
+      ],
+    });
+    const tr = squareTables(new Transform(doc));
+    const rows: number[] = [];
+    tr.doc.descendants((node) => {
+      if (node.type.name === "tableRow") rows.push(node.childCount);
+      return true;
+    });
+    expect(rows).toEqual([3, 3]);
+    expect(tr.docChanged).toBe(true);
+    expect(squareTables(new Transform(tr.doc)).docChanged).toBe(false);
   });
 });

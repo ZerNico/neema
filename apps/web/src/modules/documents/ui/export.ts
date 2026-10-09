@@ -15,10 +15,13 @@ export const fileName = (title: string) =>
     .slice(0, 120) || "Document";
 
 // Print on paper: the app's theme does not apply, and nothing interactive shows.
+// No page margin, where the browser prints its own date and title header; the
+// body's padding, cloned onto every page, is the margin. Whitespace is kept
+// as the editor keeps it, since line breaks are text.
 const PRINT_CSS = `
-@page { margin: 18mm 16mm; }
+@page { margin: 0; }
 html { color: #111; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { font: 11pt/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+body { font: 11pt/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 18mm 16mm; box-decoration-break: clone; -webkit-box-decoration-break: clone; white-space: pre-wrap; overflow-wrap: break-word; }
 h1.title { font-size: 20pt; margin: 0 0 14pt; }
 h1 { font-size: 17pt; } h2 { font-size: 14pt; } h3 { font-size: 12pt; }
 h1, h2, h3 { line-height: 1.25; margin: 16pt 0 6pt; break-after: avoid; }
@@ -41,6 +44,8 @@ th p, td p { margin: 0; }
 hr { border: 0; border-top: 0.75pt solid #d4d4d8; margin: 12pt 0; }
 a { color: inherit; }
 [data-pending] { display: none; }
+figure.diagram { margin: 0 0 9pt; text-align: center; break-inside: avoid; white-space: normal; }
+figure.diagram svg { max-width: 100%; height: auto; }
 `;
 
 /**
@@ -73,6 +78,22 @@ export const printDocument = (editor: Editor, title: string) => {
           month: "short",
           year: "numeric",
         });
+    }
+    // Diagrams print as the editor drew them, matched to their source.
+    const drawn = new Map<string, string>();
+    // One still showing an older version of its source is left as code.
+    for (const diagram of editor.view.dom.querySelectorAll('[data-diagram=""]')) {
+      const source = diagram.parentElement?.querySelector("pre")?.textContent;
+      const svg = diagram.querySelector("svg");
+      if (source && svg) drawn.set(source, svg.outerHTML);
+    }
+    for (const code of page.querySelectorAll("pre > code.language-mermaid")) {
+      const svg = drawn.get(code.textContent ?? "");
+      if (!svg) continue;
+      const figure = page.createElement("figure");
+      figure.className = "diagram";
+      figure.innerHTML = svg;
+      code.parentElement!.replaceWith(figure);
     }
     view.addEventListener("afterprint", () => frame.remove(), { once: true });
     view.focus();

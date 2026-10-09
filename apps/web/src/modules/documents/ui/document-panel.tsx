@@ -21,6 +21,10 @@ import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
 
 // The editor and its schema load with the first open document, not the chat.
 const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
+// Comments need the editor's schema too, so they load with it.
+const CommentsPopover = lazy(() =>
+  import("./comments-popover.tsx").then((module) => ({ default: module.CommentsPopover })),
+);
 
 /**
  * What is on screen, not the stored copy a second behind it: an open
@@ -61,6 +65,15 @@ export function DocumentPanelActions({
       {/* The editor's formatting fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
+        {controller.sync ? (
+          <Suspense fallback={null}>
+            <CommentsPopover
+              editor={controller.sync.editor}
+              discussion={controller.discussion}
+              canEdit={controller.document?.canEdit ?? false}
+            />
+          </Suspense>
+        ) : null}
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger
@@ -177,6 +190,7 @@ export function DocumentPanelBody({
                     readOnly={!controller.document?.canEdit}
                     toolbarSlot={toolbarSlot}
                     hooks={hooks}
+                    discussion={controller.discussion}
                   />
                 </div>
               </div>

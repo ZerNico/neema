@@ -13,6 +13,7 @@ import {
 import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { eq } from "drizzle-orm";
+import { uuidv7 } from "uuidv7";
 import { projects } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
@@ -22,7 +23,7 @@ import { projectAudience, projectRole } from "~/modules/projects/server/access.t
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import {
-  BLOCK_ID,
+  adoptIds,
   blockIdOf,
   ensureIds,
   findBlocks,
@@ -40,19 +41,26 @@ import {
   type TreeEdit,
 } from "../editor/tree-edit.ts";
 import { blockHash } from "../editor/tree.ts";
+import { detachedThreads, quoteRange } from "../editor/comments.ts";
+import { squareTables } from "../editor/tables.ts";
 import {
   documentSchema,
   parseMarkdown,
   replaceDifference,
   toMarkdown,
+  writeDifference,
 } from "../editor/markdown.ts";
 import {
+  CommentInput,
   CreateDocumentInput,
+  DeleteCommentInput,
   DOCUMENT_LIMITS,
   DocumentNotAvailable,
   DocumentRejected,
   PushDocumentInput,
+  ResolveThreadInput,
   type ApplyDocumentResult,
+  type DocumentComment,
   type DocumentFrame,
   type DocumentPresence,
   type EditableDocument,
@@ -61,6 +69,14 @@ import {
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
+/** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
+export interface AssistantCommentInput {
+  documentId: string;
+  thread?: string | undefined;
+  target?: string | undefined;
+  quote?: string | undefined;
+  body?: string | undefined;
+}
 type DocumentError = DocumentNotAvailable | DocumentRejected;
 
 /**
@@ -93,6 +109,7 @@ interface Entry {
   steps: KeptStep[];
   revision: number;
   readonly presence: Map<string, DocumentPresence>;
+  comments: DocumentComment[];
   readonly frames: PubSub.PubSub<DocumentFrame>;
   readonly conversationId: string | null;
   readonly projectId: string | null;
@@ -156,7 +173,16 @@ export interface LiveEdit {
   written: Map<string, string>;
   original: Node[] | null;
   broken: boolean;
+  /** Set when the preview stopped because it would strip open threads of their text. */
+  detached: string[] | null;
+  readonly allowDetach: boolean;
 }
+/** Why a model edit that would strip open threads of all their text landed nothing. */
+const detachRefusal = (threads: ReadonlyArray<string>) => ({
+  outcome: "anchors_affected" as const,
+  message: `Nothing changed: this would remove all the text open comment thread${threads.length > 1 ? "s" : ""} ${threads.slice(0, 5).join(", ")} ${threads.length > 1 ? "are" : "is"} on. Narrow it with find so some of those words stay, or ask in the thread. Resend with allowDetach only when a person asked for that text to go (the comment you are answering counts); the thread then stays open without its text, so say in it what you changed.`,
+});
+
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
 
@@ -223,7 +249,7 @@ const buildDocument = (content: string, outline: ReadonlyArray<string> = []) => 
     ...Array.from({ length: parsed.childCount }, (_, index) => parsed.child(index)),
     ...pending,
   ])!;
-  return ensureIds(new Transform(doc)).doc;
+  return ensureIds(squareTables(new Transform(doc))).doc;
 };
 /**
  * Where the preview writes now: its own blocks once it has some, else the
@@ -259,7 +285,11 @@ export class DocumentService extends Context.Service<
     read(
       userId: string,
       documentId: string,
-    ): Effect.Effect<{ document: EditableDocument; doc: Node } | null>;
+    ): Effect.Effect<{
+      document: EditableDocument;
+      doc: Node;
+      comments: ReadonlyArray<DocumentComment>;
+    } | null>;
     /**
      * One model edit aimed at blocks by ID or at text in one block. A replace
      * or delete must cover only blocks `seen` holds as they are now, so a
@@ -267,7 +297,13 @@ export class DocumentService extends Context.Service<
      */
     apply<E = never, R = never>(
       userId: string,
-      input: { documentId: string; edit: TreeEdit; seen: SeenBlocks | null },
+      input: {
+        documentId: string;
+        edit: TreeEdit;
+        seen: SeenBlocks | null;
+        /** A person asked for text under open comments to go. */
+        allowDetach?: boolean | undefined;
+      },
       guard?: DocumentWriteGuard<E, R>,
     ): Effect.Effect<ApplyDocumentResult, DocumentError | E, R>;
     /**
@@ -299,6 +335,7 @@ export class DocumentService extends Context.Service<
         documentId: string;
         edit: Extract<TreeEdit, { kind: "blocks" }>;
         seen: SeenBlocks | null;
+        allowDetach?: boolean | undefined;
       },
     ): Effect.Effect<LiveEdit | null>;
     updateLive<E, R>(
@@ -330,6 +367,20 @@ export class DocumentService extends Context.Service<
       documentId: string,
       options: { revision: number | null; clientId: string | null },
     ): Effect.Effect<Stream.Stream<DocumentFrame> | null>;
+    /** Starts a thread on text the editor marked with its ID, or replies to one. */
+    comment(userId: string, input: CommentInput): Effect.Effect<void, DocumentError>;
+    resolveThread(userId: string, input: ResolveThreadInput): Effect.Effect<void, DocumentError>;
+    deleteComment(userId: string, input: DeleteCommentInput): Effect.Effect<void, DocumentError>;
+    assistantComment<E, R>(
+      userId: string,
+      input: AssistantCommentInput,
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<
+      | { outcome: "commented"; thread: string }
+      | { outcome: "not_found" | "ambiguous" | "invalid"; message: string },
+      DocumentError | E,
+      R
+    >;
   }
 >()("chat/documents/DocumentService") {
   static readonly layer = Layer.effect(
@@ -411,6 +462,7 @@ export class DocumentService extends Context.Service<
             })),
             revision: state.document.revision,
             presence: new Map(),
+            comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
             conversationId: state.document.conversationId,
             projectId: state.document.projectId,
@@ -600,6 +652,8 @@ export class DocumentService extends Context.Service<
         decide: (
           doc: Node,
           document: EditableDocument,
+          /** Open threads, which a model edit may not strip of all their text. */
+          open: ReadonlySet<string>,
         ) => Effect.Effect<{ result: A; tr: Transform | null }, DocumentRejected>,
       ) => {
         const attempt = exclusive(documentId)(
@@ -611,9 +665,11 @@ export class DocumentService extends Context.Service<
                 yield* requireDocuments(userId, tx);
                 const locked = yield* documents.lock(tx, userId, documentId);
                 if (locked.revision !== entry.revision) return yield* new StaleEntry();
-                const decided = yield* decide(entry.doc, locked);
+                const decided = yield* decide(entry.doc, locked, openThreads(entry));
                 const tr = decided.tr;
                 if (!tr?.docChanged) return { result: decided.result, stored: null };
+                // A table still streaming has a short last row; new cells need IDs too.
+                ensureIds(squareTables(tr));
                 yield* withinTreeCap(tr.doc);
                 const stored = yield* store(tx, documentId, entry, tr.doc, tr.steps, {
                   origin: "model",
@@ -640,6 +696,13 @@ export class DocumentService extends Context.Service<
           ),
         );
       };
+
+      const openThreads = (entry: Entry) =>
+        new Set(
+          entry.comments
+            .filter((each) => each.id === each.threadId && !each.resolvedAt)
+            .map((each) => each.id),
+        );
 
       const create = <E = never, R = never>(
         userId: string,
@@ -687,22 +750,33 @@ export class DocumentService extends Context.Service<
 
       const apply = <E = never, R = never>(
         userId: string,
-        input: { documentId: string; edit: TreeEdit; seen: SeenBlocks | null },
+        input: {
+          documentId: string;
+          edit: TreeEdit;
+          seen: SeenBlocks | null;
+          allowDetach?: boolean | undefined;
+        },
         guard?: DocumentWriteGuard<E, R>,
       ) =>
-        modelWrite<ApplyDocumentResult, E, R>(userId, input.documentId, guard, (doc, document) =>
-          Effect.sync(() => {
-            const applied = applyTreeEdit(doc, input.edit, input.seen);
-            if ("outcome" in applied) return { result: { ...applied, document }, tr: null };
-            return {
-              result: {
-                outcome: applied.tr.docChanged ? ("updated" as const) : ("unchanged" as const),
-                document,
-                touched: applied.touched,
-              },
-              tr: applied.tr,
-            };
-          }),
+        modelWrite<ApplyDocumentResult, E, R>(
+          userId,
+          input.documentId,
+          guard,
+          (doc, document, open) =>
+            Effect.sync(() => {
+              const applied = applyTreeEdit(doc, input.edit, input.seen);
+              if ("outcome" in applied) return { result: { ...applied, document }, tr: null };
+              const lost = input.allowDetach ? [] : detachedThreads(doc, applied.tr.doc, open);
+              if (lost.length) return { result: { ...detachRefusal(lost), document }, tr: null };
+              return {
+                result: {
+                  outcome: applied.tr.docChanged ? ("updated" as const) : ("unchanged" as const),
+                  document,
+                  touched: applied.touched,
+                },
+                tr: applied.tr,
+              };
+            }),
         );
 
       const rewrite = <E = never, R = never>(
@@ -859,7 +933,11 @@ export class DocumentService extends Context.Service<
                   if (!(yield* documents.get(userId, documentId))) return;
                 }
               });
-              return Stream.make(catchUp, ...others).pipe(
+              return Stream.make(
+                catchUp,
+                { type: "comments", comments: entry.comments } satisfies DocumentFrame,
+                ...others,
+              ).pipe(
                 Stream.concat(
                   Stream.fromSubscription(subscription).pipe(
                     Stream.filter((frame) => !ownPresence(frame)),
@@ -875,12 +953,200 @@ export class DocumentService extends Context.Service<
         );
       });
 
+      /**
+       * One change to a document's comments, by someone who may edit it,
+       * then every comment to every open editor.
+       */
+      const commentWrite = <E, R>(
+        userId: string,
+        documentId: string,
+        write: (tx: DbTx) => Effect.Effect<void, DocumentRejected | E, R>,
+      ) =>
+        exclusive(documentId)(
+          Effect.gen(function* () {
+            yield* requireDocuments(userId);
+            const { entry } = yield* load(userId, documentId);
+            const comments = yield* transaction((tx) =>
+              Effect.gen(function* () {
+                yield* documents.lock(tx, userId, documentId);
+                yield* write(tx);
+                return yield* documents.comments(documentId, tx);
+              }),
+            );
+            entry.comments = comments;
+            yield* PubSub.publish(entry.frames, { type: "comments", comments });
+          }),
+        );
+
+      const comment = Effect.fn("DocumentService.comment")(function* (
+        userId: string,
+        input: CommentInput,
+      ) {
+        const parsed = yield* decode(CommentInput, "invalid comment")(input);
+        yield* commentWrite(userId, parsed.documentId, (tx) =>
+          Effect.gen(function* () {
+            const existing = yield* documents.comments(parsed.documentId, tx);
+            if (existing.length >= DOCUMENT_LIMITS.comments)
+              return yield* new DocumentRejected({ reason: "this document has too many comments" });
+            const thread = existing.find((each) => each.id === parsed.threadId);
+            if (thread && thread.threadId !== thread.id)
+              return yield* new DocumentRejected({ reason: "reply to a thread's first comment" });
+            yield* documents.addComment(tx, {
+              id: thread ? uuidv7() : parsed.threadId,
+              documentId: parsed.documentId,
+              threadId: parsed.threadId,
+              userId,
+              origin: "user",
+              body: parsed.body,
+              quote: thread ? null : (parsed.quote ?? null),
+              toAssistant: parsed.toAssistant ?? false,
+            });
+          }),
+        );
+      });
+
+      const resolveThread = Effect.fn("DocumentService.resolveThread")(function* (
+        userId: string,
+        input: ResolveThreadInput,
+      ) {
+        const parsed = yield* decode(ResolveThreadInput, "invalid thread")(input);
+        yield* commentWrite(userId, parsed.documentId, (tx) =>
+          documents
+            .resolveThread(tx, parsed.documentId, parsed.threadId, parsed.resolved)
+            .pipe(
+              Effect.flatMap((found) =>
+                found
+                  ? Effect.void
+                  : Effect.fail(new DocumentRejected({ reason: "no such thread" })),
+              ),
+            ),
+        );
+      });
+
+      const deleteComment = Effect.fn("DocumentService.deleteComment")(function* (
+        userId: string,
+        input: DeleteCommentInput,
+      ) {
+        const parsed = yield* decode(DeleteCommentInput, "invalid comment")(input);
+        yield* commentWrite(userId, parsed.documentId, (tx) =>
+          documents
+            .deleteComment(tx, parsed.documentId, parsed.commentId, userId)
+            .pipe(
+              Effect.flatMap((found) =>
+                found
+                  ? Effect.void
+                  : Effect.fail(
+                      new DocumentRejected({ reason: "only your own or the assistant's comments" }),
+                    ),
+              ),
+            ),
+        );
+      });
+
+      /**
+       * The assistant on a document's comments: a reply in a thread, or a new
+       * thread on text it quotes in one block, which it marks under its fence
+       * like any of its writes. It never resolves: a thread is its people's.
+       */
+      const assistantComment = <E, R>(
+        userId: string,
+        input: AssistantCommentInput,
+        guard: DocumentWriteGuard<E, R>,
+      ) =>
+        Effect.gen(function* () {
+          if (input.thread) {
+            const thread = input.thread;
+            const { entry } = yield* exclusive(input.documentId)(load(userId, input.documentId));
+            const root = entry.comments.find(
+              (each) => each.id === thread && each.threadId === each.id,
+            );
+            if (!root)
+              return {
+                outcome: "not_found" as const,
+                message: "No thread with that id. Its id is on <thread> in the trailing data.",
+              };
+            const body = input.body;
+            if (!body) return { outcome: "invalid" as const, message: "A reply needs content." };
+            yield* commentWrite(userId, input.documentId, (tx) =>
+              Effect.gen(function* () {
+                yield* guard(tx);
+                yield* documents.addComment(tx, {
+                  id: uuidv7(),
+                  documentId: input.documentId,
+                  threadId: thread,
+                  userId: null,
+                  origin: "model",
+                  body,
+                });
+              }),
+            );
+            return { outcome: "commented" as const, thread };
+          }
+          if (!input.target || !input.body)
+            return {
+              outcome: "invalid" as const,
+              message: "A new comment needs target (a block id) and content; quote narrows it.",
+            };
+          const thread = uuidv7();
+          const marked = yield* modelWrite<
+            { document: EditableDocument; refused: string | null; quote: string },
+            E,
+            R
+          >(userId, input.documentId, guard, (doc, document) =>
+            Effect.sync(() => {
+              const range = quoteRange(doc, input.target!, input.quote);
+              if ("refused" in range)
+                return { result: { document, refused: range.refused, quote: "" }, tr: null };
+              return {
+                result: {
+                  document,
+                  refused: null,
+                  quote: doc.textBetween(range.from, range.to, " ", " ").slice(0, 500),
+                },
+                tr: new Transform(doc).addMark(
+                  range.from,
+                  range.to,
+                  documentSchema.marks.comment!.create({ thread }),
+                ),
+              };
+            }),
+          );
+          if (marked.refused)
+            return {
+              outcome: (marked.refused === "ambiguous" ? "ambiguous" : "not_found") as
+                | "ambiguous"
+                | "not_found",
+              message:
+                marked.refused === "ambiguous"
+                  ? "That quote occurs more than once in the block; quote more of it."
+                  : marked.refused === "no_match"
+                    ? "That quote is not in the block as written; copy it from the document."
+                    : "No block with that id has text to comment on.",
+            };
+          yield* commentWrite(userId, input.documentId, (tx) =>
+            Effect.gen(function* () {
+              yield* guard(tx);
+              yield* documents.addComment(tx, {
+                id: thread,
+                documentId: input.documentId,
+                threadId: thread,
+                userId: null,
+                origin: "model",
+                body: input.body!,
+                quote: marked.quote,
+              });
+            }),
+          );
+          return { outcome: "commented" as const, thread };
+        });
+
       const beginLive = Effect.fn("DocumentService.beginLive")(function* (
         userId: string,
         input: {
           documentId: string;
           edit: Extract<TreeEdit, { kind: "blocks" }>;
           seen: SeenBlocks | null;
+          allowDetach?: boolean | undefined;
         },
       ) {
         return yield* exclusive(input.documentId)(
@@ -899,6 +1165,8 @@ export class DocumentService extends Context.Service<
               written: new Map(),
               original: null,
               broken: false,
+              detached: null,
+              allowDetach: input.allowDetach ?? false,
             };
             return live;
           }),
@@ -910,7 +1178,7 @@ export class DocumentService extends Context.Service<
           live.userId,
           live.documentId,
           guard,
-          (doc, document) =>
+          (doc, document, open) =>
             Effect.sync(() => {
               const none = { result: { document, written: false }, tr: null };
               if (live.broken) return none;
@@ -925,7 +1193,9 @@ export class DocumentService extends Context.Service<
               // Half-written Markdown that does not fit yet: wait for more.
               if (!(fitted instanceof Fragment) || (!fitted.size && !live.owned.length))
                 return none;
-              // Blocks keep the IDs they had in the last write, by place and type.
+              // Blocks keep the IDs they had in the last write, by place and
+              // type, down to list items and cells: one minted afresh would
+              // differ from the last tick, and the whole list be written again.
               const previous = Array.from({ length: spot.endIndex - spot.startIndex }, (_, index) =>
                 spot.parent.child(spot.startIndex + index),
               );
@@ -934,25 +1204,29 @@ export class DocumentService extends Context.Service<
               fitted.forEach((node, _offset, index) => {
                 const before = live.owned.length ? previous[index] : undefined;
                 nodes.push(
-                  before && before.type === node.type
-                    ? node.type.create(
-                        { ...node.attrs, [BLOCK_ID]: blockIdOf(before) },
-                        node.content,
-                        node.marks,
-                      )
-                    : node,
+                  before && before.type === node.type ? adoptIds(before, node, false) : node,
                 );
               });
-              const tr = new Transform(doc).replaceWith(
+              const whole = new Transform(doc).replaceWith(
                 spot.from,
                 spot.to,
                 withFreshIds(doc, Fragment.from(nodes)),
               );
-              ensureIds(tr);
-              const written = tr.doc.slice(
-                spot.from,
-                spot.from + Fragment.from(nodes).size,
-              ).content;
+              // Squared here, not only in modelWrite: the hashes below must be
+              // of what is stored, or a streaming table's short last row would
+              // read on the next tick as a person's edit and end the preview.
+              ensureIds(squareTables(whole));
+              // Only what changed since the last tick: usually the words just streamed.
+              const tr = writeDifference(new Transform(doc), whole.doc);
+              const lost = live.allowDetach ? [] : detachedThreads(doc, tr.doc, open);
+              if (lost.length) {
+                live.broken = true;
+                live.detached = lost;
+                return none;
+              }
+              // Sized from the result: squaring may have added cells to what was built.
+              const end = spot.to + tr.doc.content.size - doc.content.size;
+              const written = tr.doc.slice(spot.from, end).content;
               live.owned = [];
               live.written = new Map();
               written.forEach((node) => {
@@ -970,14 +1244,16 @@ export class DocumentService extends Context.Service<
       const settleLive = <E, R>(live: LiveEdit, content: string, guard: DocumentWriteGuard<E, R>) =>
         writeLive(live, content, guard).pipe(
           Effect.map(({ document }): ApplyDocumentResult =>
-            live.broken
-              ? {
-                  outcome: "conflict",
-                  document,
-                  message:
-                    "Someone edited those blocks while you were writing them. Their change stays; read the current content and aim again.",
-                }
-              : { outcome: "updated", document, touched: [...live.owned] },
+            live.detached
+              ? { ...detachRefusal(live.detached), document }
+              : live.broken
+                ? {
+                    outcome: "conflict",
+                    document,
+                    message:
+                      "Someone edited those blocks while you were writing them. Their change stays; read the current content and aim again.",
+                  }
+                : { outcome: "updated", document, touched: [...live.owned] },
           ),
         );
 
@@ -1047,7 +1323,11 @@ export class DocumentService extends Context.Service<
           if (!(yield* policy.can(userId, "documents"))) return null;
           return yield* exclusive(documentId)(
             load(userId, documentId).pipe(
-              Effect.map(({ entry, document }) => ({ document, doc: entry.doc })),
+              Effect.map(({ entry, document }) => ({
+                document,
+                doc: entry.doc,
+                comments: entry.comments,
+              })),
             ),
           ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
         }),
@@ -1060,6 +1340,10 @@ export class DocumentService extends Context.Service<
         updateLive,
         settleLive,
         revertLive,
+        comment,
+        resolveThread,
+        deleteComment,
+        assistantComment,
       });
     }),
   ).pipe(Layer.provide(DocumentRepo.layer));

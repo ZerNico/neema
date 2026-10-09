@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
-import { pushDocument } from "../server/document-functions.ts";
+import type { DocumentComment } from "../schema.ts";
+import {
+  commentOnDocument,
+  deleteDocumentComment,
+  pushDocument,
+  resolveDocumentThread,
+} from "../server/document-functions.ts";
 import { documentQuery } from "./document-queries.ts";
 import { selectedBlockIds } from "../editor/block-ids.ts";
 import type { DocumentSync } from "./document-sync.ts";
@@ -43,6 +49,22 @@ const loadSync = async () => {
     });
 };
 let syncFactory: ReturnType<typeof loadSync> | null = null;
+
+/** A document's comments, and what a reader may do with them. */
+export interface DocumentDiscussion {
+  /** The reader's account, to tell their own comments apart. */
+  me: string | null;
+  comments: ReadonlyArray<DocumentComment>;
+  /** A new thread when `threadId` is new (with its `quote`), else a reply. */
+  comment(
+    threadId: string,
+    body: string,
+    options?: { quote?: string; toAssistant?: boolean },
+  ): Promise<void>;
+  resolve(threadId: string, resolved: boolean): Promise<void>;
+  remove(commentId: string): Promise<void>;
+}
+const NO_COMMENTS: ReadonlyArray<DocumentComment> = [];
 
 /**
  * The connections one controller owns, as an external store: the open one,
@@ -152,6 +174,32 @@ export function useDocument(documentId: string, live: boolean) {
   );
   const dismissRecovered = useCallback(() => sync?.dismissRecovered(), [sync]);
   const selectedBlocks = connections.selectedBlocks;
+  const comments = sync?.comments ?? NO_COMMENTS;
+  const me = user?.id ?? null;
+  const discussion = useMemo<DocumentDiscussion>(
+    () => ({
+      me,
+      comments,
+      comment: async (threadId, body, options) => {
+        await commentOnDocument({
+          data: {
+            documentId,
+            threadId,
+            body,
+            ...(options?.quote ? { quote: options.quote.slice(0, 500) } : {}),
+            ...(options?.toAssistant ? { toAssistant: true } : {}),
+          },
+        });
+      },
+      resolve: async (threadId, resolved) => {
+        await resolveDocumentThread({ data: { documentId, threadId, resolved } });
+      },
+      remove: async (commentId) => {
+        await deleteDocumentComment({ data: { documentId, commentId } });
+      },
+    }),
+    [comments, documentId, me],
+  );
 
   return {
     documentId,
@@ -164,6 +212,7 @@ export function useDocument(documentId: string, live: boolean) {
     recovered: sync?.recovered ?? null,
     dismissRecovered,
     selectedBlocks,
+    discussion,
     flush,
     unpersisted,
   };

@@ -11,7 +11,13 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { uuidv7 } from "uuidv7";
+import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
+import { resolveChatModel } from "~/modules/chat/client/selected-model.ts";
+import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
+import { sendMessage } from "~/modules/chat/server/functions.ts";
+import type { DocumentAsk } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
 import {
@@ -258,6 +264,7 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
   // A document just made here opens once its row and connection exist.
   const [justCreated, setJustCreated] = useState<string | null>(null);
   const rows = documents.data ?? [];
+  const askInNewChat = useAskInNewChat(project.id);
   return (
     <Section
       title="Documents"
@@ -289,7 +296,11 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
       ) : (
         // The owner keeps each document's live controller mounted while the
         // page is open, so closing the panel never discards typing.
-        <DocumentOwner documentIds={rows.map((row) => row.id)} onGone={() => undefined}>
+        <DocumentOwner
+          documentIds={rows.map((row) => row.id)}
+          onGone={() => undefined}
+          onAsk={askInNewChat}
+        >
           <ListCard>
             {rows.map((document) => (
               <ProjectDocumentRow
@@ -310,6 +321,46 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
         onCreated={setJustCreated}
       />
     </Section>
+  );
+}
+
+/**
+ * A comment sent to the assistant from the project page, where no chat is
+ * open: it starts a new chat in the project with the default model, about
+ * that document and thread, and opens it.
+ */
+function useAskInNewChat(projectId: string): DocumentAsk {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  return useCallback(
+    async (request, asked) => {
+      const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
+      if (!model) return false;
+      const result = await sendMessage({
+        data: {
+          conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
+          modelId: model.id,
+          content: request,
+          searchEnabled: false,
+          researchEnabled: false,
+          timeZone: browserTimeZone(),
+          attachmentIds: [],
+          openDocument: {
+            id: asked.documentId,
+            ...(asked.blocks.length ? { selected: [...asked.blocks] } : {}),
+            ...(asked.thread ? { thread: asked.thread } : {}),
+          },
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await navigate({
+        to: "/chat/$conversationId",
+        params: { conversationId: result.conversationId },
+        state: { anchorNewTurn: true },
+      });
+      return true;
+    },
+    [navigate, projectId, queryClient],
   );
 }
 

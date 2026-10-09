@@ -1,16 +1,18 @@
 import type { EditorOptions } from "@tiptap/core";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 import { Placeholder } from "@tiptap/extensions";
-import { documentExtensions } from "../../editor/extensions.ts";
+import { DocumentCodeBlock, documentExtensions } from "../../editor/extensions.ts";
 import { SizeCap } from "./size-cap.ts";
 import { SlashCommand } from "./slash-command.tsx";
 import { DocumentDateChip, DocumentMention } from "./chip-items.tsx";
 import { DocumentPending } from "./pending-item.tsx";
+import { CodeBlockView } from "./code-block-view.tsx";
 import { DocumentTaskItem } from "./task-item.tsx";
 import { openLink } from "./links.ts";
 
 /**
  * The browser's editor: the shared schema, with tasks drawn by the app's
- * checkbox and planned sections as placeholders (rendering only, the schema is
+ * checkbox, Mermaid blocks as diagrams and planned sections as placeholders (rendering only, the schema is
  * unchanged), the `/` menu and the size cap. The connection adds collaboration and other people's cursors.
  */
 export const browserEditorExtensions = [
@@ -21,6 +23,9 @@ export const browserEditorExtensions = [
         pending: DocumentPending,
         dateChip: DocumentDateChip,
         mention: DocumentMention,
+        codeBlock: DocumentCodeBlock.extend({
+          addNodeView: () => ReactNodeViewRenderer(CodeBlockView),
+        }),
       })[extension.name] ?? extension,
   ),
   Placeholder.configure({ placeholder: "Write, or type / for blocks" }),

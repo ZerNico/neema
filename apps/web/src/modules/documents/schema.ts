@@ -12,6 +12,11 @@ export const DOCUMENT_LIMITS = {
   steps: 2_000,
   /** Serialized length of one push's steps. */
   stepChars: 1_000_000,
+  comment: 4_000,
+  /** The commented text kept with a thread. */
+  quote: 500,
+  /** Comments one document may hold, replies included. */
+  comments: 1_000,
 } as const;
 
 const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
@@ -80,6 +85,53 @@ export const PushDocumentInput = Schema.Struct({
 });
 export type PushDocumentInput = typeof PushDocumentInput.Type;
 
+const CommentBody = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(DOCUMENT_LIMITS.comment),
+);
+/**
+ * A comment. A new thread's ID comes from the editor, which marks the text
+ * with it as it sends; naming an existing thread replies to it.
+ */
+export const CommentInput = Schema.Struct({
+  documentId: ResourceId,
+  threadId: ResourceId,
+  body: CommentBody,
+  /** A new thread's text, as the reader saw it. */
+  quote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DOCUMENT_LIMITS.quote))),
+  /** Also sent to the assistant as a chat message. */
+  toAssistant: Schema.optionalKey(Schema.Boolean),
+});
+export type CommentInput = typeof CommentInput.Type;
+export const ResolveThreadInput = Schema.Struct({
+  documentId: ResourceId,
+  threadId: ResourceId,
+  resolved: Schema.Boolean,
+});
+export type ResolveThreadInput = typeof ResolveThreadInput.Type;
+export const DeleteCommentInput = Schema.Struct({
+  documentId: ResourceId,
+  commentId: ResourceId,
+});
+export type DeleteCommentInput = typeof DeleteCommentInput.Type;
+
+export interface DocumentComment {
+  id: string;
+  threadId: string;
+  /** Null for the assistant, or once the account is gone. */
+  author: { id: string; name: string } | null;
+  byAssistant: boolean;
+  body: string;
+  createdAt: string;
+  /** On a thread's first comment only. */
+  resolvedAt: string | null;
+  /** On a thread's first comment only: the text it was about. */
+  quote: string | null;
+  /** Sent to the assistant; `answered` once it replied in the thread after it. */
+  toAssistant: boolean;
+  answered: boolean;
+}
+
 /** What the live document stream sends. */
 export type DocumentFrame =
   | {
@@ -95,6 +147,8 @@ export type DocumentFrame =
       clientIds: ReadonlyArray<string>;
       revision: number;
     }
+  /** Every comment, whenever one changes. */
+  | { type: "comments"; comments: ReadonlyArray<DocumentComment> }
   | { type: "presence"; clientId: string; presence: DocumentPresence | null }
   /** The document was deleted, or this subscriber lost access to it. */
   | { type: "gone" };
@@ -120,7 +174,7 @@ export interface EditableDocument {
 export type ApplyDocumentResult =
   | { outcome: "updated" | "unchanged"; document: EditableDocument; touched: string[] }
   | {
-      outcome: "not_found" | "ambiguous" | "conflict" | "invalid" | "no_match";
+      outcome: "not_found" | "ambiguous" | "conflict" | "invalid" | "no_match" | "anchors_affected";
       document: EditableDocument;
       message: string;
     };

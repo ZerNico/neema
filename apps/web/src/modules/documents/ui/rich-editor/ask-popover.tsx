@@ -56,8 +56,8 @@ export function AskPopover({ editor }: { editor: Editor }) {
       })
       .run();
     // Named now: by the time the message goes out, focus has left this spot.
-    const id = editor.state.doc.nodeAt(position)?.attrs.id as string | undefined;
-    const sent = await ask(text, id ? [id] : []).catch(() => false);
+    const block = editor.state.doc.nodeAt(position)?.attrs.id as string | undefined;
+    const sent = await ask(text, { blocks: block ? [block] : [] }).catch(() => false);
     setSending(false);
     if (!sent) {
       // Put it back as an open question rather than leave a request nobody sent.

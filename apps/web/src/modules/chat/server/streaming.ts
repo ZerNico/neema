@@ -21,6 +21,7 @@ import {
   projectDocumentResult,
   documentResultOk,
   redactDocumentPart,
+  isDocumentWrite,
 } from "~/modules/documents/tool-schema.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -100,6 +101,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Layer,
   Option,
   PubSub,
@@ -988,6 +990,7 @@ export class StreamEngine extends Context.Service<
             messageId: input.messageId,
             openDocumentId: input.openDocument?.id,
             selectedBlocks: input.openDocument?.selected,
+            askingThread: input.openDocument?.thread,
             writeGuard,
             liveGuard: (tx: DbTx) => (fence ? ensureGenerationLive(tx, fence) : Effect.interrupt),
             project: config.resolvedProject
@@ -4022,7 +4025,11 @@ export class StreamEngine extends Context.Service<
                           documents.live.start(part.id, part.name);
                           // An Office edit or a research brief is a call the model
                           // can spend a while writing; say so before it completes.
-                          if (officeFamilyOfEdit(part.name) || part.name === "deep_research") {
+                          if (
+                            officeFamilyOfEdit(part.name) ||
+                            part.name === "deep_research" ||
+                            isDocumentWrite(part.name)
+                          ) {
                             pushChunk(
                               "writing",
                               JSON.stringify({
@@ -4048,7 +4055,11 @@ export class StreamEngine extends Context.Service<
                     }),
                   ),
                   Stream.runDrain,
-                  Effect.ensuring(documents.live.close),
+                  // A stopped answer keeps what its previews wrote; any other end
+                  // undoes the ones no call claimed.
+                  Effect.onExit((exit) =>
+                    Exit.hasInterrupts(exit) ? documents.live.abandon : documents.live.close,
+                  ),
                 );
             });
 
@@ -4210,7 +4221,7 @@ export class StreamEngine extends Context.Service<
               steeredAfter = round;
               // The latest steer's document and selection are what "this" now means.
               const focus = steered.findLast((message) => message.openDocument)?.openDocument;
-              if (focus) documents.focus(focus.id, focus.selected);
+              if (focus) documents.focus(focus.id, focus.selected, focus.thread);
               // Built exactly as history builds a user message, so a steered
               // file reaches the model the way an attached one does: native
               // when it can read it, extracted text when it cannot.

@@ -89,8 +89,24 @@ export async function collabEditor(run: Run, userId: string, documentId: string)
     }
     throw new Error("the server kept refusing this editor's steps");
   };
+  /** Marks the first occurrence of `words` with a comment thread, as the panel does, and sends it. */
+  const mark = async (words: string, thread: string) => {
+    let from = -1;
+    state.doc.descendants((node, position) => {
+      if (from === -1 && node.isText && node.text!.includes(words))
+        from = position + node.text!.indexOf(words);
+      return from === -1;
+    });
+    if (from === -1) throw new Error(`no "${words}" in the document`);
+    state = state.apply(
+      state.tr.addMark(from, from + words.length, documentSchema.marks.comment!.create({ thread })),
+    );
+    const result = await push();
+    if (result.conflict) throw new Error("the comment mark was refused");
+  };
   return {
     clientId,
+    mark,
     markdown: () => toMarkdown(state.doc),
     revision: () => getVersion(state),
     unsent: () => sendableSteps(state)?.steps.length ?? 0,

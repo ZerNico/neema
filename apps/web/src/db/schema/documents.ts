@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
   integer,
@@ -86,4 +87,34 @@ export const documentSteps = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
+);
+
+/**
+ * Comments on a document's text. A thread is its first comment and the
+ * replies naming it; the text it is about carries a `comment` mark with the
+ * thread's ID, so the anchor moves with edits and goes with deleted text,
+ * leaving the thread without one.
+ */
+export const documentComments = pgTable(
+  "document_comments",
+  {
+    id: text().primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    /** The thread's first comment; that comment names itself. */
+    threadId: text("thread_id").notNull(),
+    /** The person who wrote it; null for the assistant, or once the account is gone. */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    origin: text().$type<"user" | "model">().notNull().default("user"),
+    body: text().notNull(),
+    /** Sent to the assistant as a chat message; answered once it replies after it. */
+    toAssistant: boolean("to_assistant").notNull().default(false),
+    /** A thread's first comment only: the text it was about, kept once that text is gone. */
+    quote: text(),
+    /** Set on a thread's first comment only. */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("document_comments_document_idx").on(t.documentId, t.createdAt)],
 );

@@ -10,6 +10,7 @@ import {
 } from "~/modules/documents/editor/markdown.ts";
 import type {
   DocumentFrame,
+  DocumentPresence,
   EditableDocument,
   PushDocumentInput,
   PushDocumentResult,
@@ -162,6 +163,11 @@ export function fakeDocumentServer() {
         replaceDifference(new Transform(found.doc), parseMarkdown(change(toMarkdown(found.doc)))),
       );
       commit(documentId, tr.steps, by === "model" ? "model" : "elsewhere", by);
+    },
+    /** Another editor's cursor, sent to every open editor as is: possibly ahead of its steps. */
+    presence(documentId: string, clientId: string, presence: DocumentPresence) {
+      for (const feed of entry(documentId).feeds)
+        feed.emit({ type: "presence", clientId, presence });
     },
     push: async ({ data }: { data: PushDocumentInput }): Promise<PushDocumentResult> => {
       pushes.push(data);

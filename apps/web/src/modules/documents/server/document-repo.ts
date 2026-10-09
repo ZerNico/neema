@@ -1,12 +1,24 @@
-import { and, asc, eq, gt, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, documents, documentSteps, projects } from "~/db/schema/index.ts";
+import {
+  conversations,
+  documentComments,
+  documents,
+  documentSteps,
+  projects,
+  user,
+} from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
 import { Db } from "~/server/db.ts";
-import { DocumentNotAvailable, DocumentRejected, type EditableDocument } from "../schema.ts";
+import {
+  DocumentNotAvailable,
+  DocumentRejected,
+  type DocumentComment,
+  type EditableDocument,
+} from "../schema.ts";
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
@@ -53,6 +65,7 @@ export interface StoredStep {
   revision: number;
   step: Record<string, unknown>;
   clientId: string;
+  generationId: string | null;
   createdAt: Date;
 }
 export interface StoredDocumentState {
@@ -121,6 +134,35 @@ export class DocumentRepo extends Context.Service<
       userId: string,
       conversationId: string,
     ): Effect.Effect<void, DocumentNotAvailable>;
+    /** Oldest first, with each author's name. */
+    comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
+    /** Caller holds the document's lock. */
+    addComment(
+      tx: DbTx,
+      row: {
+        id: string;
+        documentId: string;
+        threadId: string;
+        userId: string | null;
+        origin: "user" | "model";
+        body: string;
+        quote?: string | null;
+        toAssistant?: boolean;
+      },
+    ): Effect.Effect<void>;
+    resolveThread(
+      tx: DbTx,
+      documentId: string,
+      threadId: string,
+      resolved: boolean,
+    ): Effect.Effect<boolean>;
+    /** A person's own comment or the assistant's; a thread's first takes its replies with it. */
+    deleteComment(
+      tx: DbTx,
+      documentId: string,
+      commentId: string,
+      userId: string,
+    ): Effect.Effect<boolean>;
   }
 >()("chat/documents/DocumentRepo") {
   static readonly layer = Layer.effect(
@@ -216,6 +258,7 @@ export class DocumentRepo extends Context.Service<
                     revision: documentSteps.revision,
                     step: documentSteps.step,
                     clientId: documentSteps.clientId,
+                    generationId: documentSteps.generationId,
                     createdAt: documentSteps.createdAt,
                   })
                   .from(documentSteps)
@@ -275,6 +318,88 @@ export class DocumentRepo extends Context.Service<
         remove: Effect.fn("DocumentRepo.remove")(function* (tx, documentId) {
           yield* tx.delete(documents).where(eq(documents.id, documentId)).pipe(Effect.orDie);
         }),
+        comments: Effect.fn("DocumentRepo.comments")(function* (documentId, tx) {
+          const rows = yield* (tx ?? db)
+            .select({
+              id: documentComments.id,
+              threadId: documentComments.threadId,
+              body: documentComments.body,
+              createdAt: documentComments.createdAt,
+              resolvedAt: documentComments.resolvedAt,
+              origin: documentComments.origin,
+              toAssistant: documentComments.toAssistant,
+              quote: documentComments.quote,
+              authorId: user.id,
+              authorName: user.name,
+            })
+            .from(documentComments)
+            .leftJoin(user, eq(user.id, documentComments.userId))
+            .where(eq(documentComments.documentId, documentId))
+            .orderBy(asc(documentComments.createdAt), asc(documentComments.id))
+            .pipe(Effect.orDie);
+          return rows.map((row, index): DocumentComment => ({
+            id: row.id,
+            threadId: row.threadId,
+            author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
+            byAssistant: row.origin === "model",
+            body: row.body,
+            createdAt: row.createdAt.toISOString(),
+            resolvedAt: row.resolvedAt?.toISOString() ?? null,
+            quote: row.quote,
+            toAssistant: row.toAssistant,
+            // Answered by the assistant writing in the thread after it.
+            answered:
+              row.toAssistant &&
+              rows
+                .slice(index + 1)
+                .some((later) => later.threadId === row.threadId && later.origin === "model"),
+          }));
+        }),
+        addComment: Effect.fn("DocumentRepo.addComment")(function* (tx, row) {
+          yield* tx.insert(documentComments).values(row).pipe(Effect.orDie);
+        }),
+        resolveThread: Effect.fn("DocumentRepo.resolveThread")(
+          function* (tx, documentId, threadId, resolved) {
+            const updated = yield* tx
+              .update(documentComments)
+              .set({ resolvedAt: resolved ? new Date() : null })
+              .where(
+                and(eq(documentComments.documentId, documentId), eq(documentComments.id, threadId)),
+              )
+              .returning({ id: documentComments.id })
+              .pipe(Effect.orDie);
+            return updated.length > 0;
+          },
+        ),
+        deleteComment: Effect.fn("DocumentRepo.deleteComment")(
+          function* (tx, documentId, commentId, userId) {
+            const [own] = yield* tx
+              .select({ threadId: documentComments.threadId })
+              .from(documentComments)
+              .where(
+                and(
+                  eq(documentComments.documentId, documentId),
+                  eq(documentComments.id, commentId),
+                  // A person's own, or the assistant's, which has no hand to take its own back.
+                  or(eq(documentComments.userId, userId), eq(documentComments.origin, "model")),
+                ),
+              )
+              .pipe(Effect.orDie);
+            if (!own) return false;
+            yield* tx
+              .delete(documentComments)
+              .where(
+                and(
+                  eq(documentComments.documentId, documentId),
+                  own.threadId === commentId
+                    ? eq(documentComments.threadId, commentId)
+                    : eq(documentComments.id, commentId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            return true;
+          },
+        ),
       });
     }),
   );

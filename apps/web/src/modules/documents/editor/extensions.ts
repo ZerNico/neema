@@ -11,10 +11,10 @@ import {
 } from "@tiptap/extension-table";
 import { UniqueID } from "@tiptap/extension-unique-id";
 import { Markdown } from "@tiptap/markdown";
-import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { StarterKit } from "@tiptap/starter-kit";
 import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
 import { DateChip, PersonMention } from "./chips.ts";
+import { CommentMark } from "./comments.ts";
 import { Pending } from "./pending.ts";
 import { isRemoteChange } from "./remote.ts";
 
@@ -62,8 +62,10 @@ const DocumentTaskList = TaskList.extend({
   markdownTokenizer: bounded(TaskList.config.markdownTokenizer!, /^[ \t]*[-+*][ \t]+\[[ xX]\]/),
 });
 
-// Upstream always fences with three backticks, which a fence inside the code ends.
-const DocumentCodeBlock = CodeBlock.extend({
+/** Upstream always fences with three backticks, which a fence inside the code ends. */
+export const DocumentCodeBlock = CodeBlock.extend({
+  // Code takes no formatting, but it can be commented on.
+  marks: "comment",
   renderMarkdown: (node, h) => {
     const text = node.content ? h.renderChildren(node.content) : "";
     const fence = fenceFor(text, 3);
@@ -82,9 +84,6 @@ const withHeaderRow = (table: JSONContent): JSONContent => {
   return { ...table, content: [header, ...rest] };
 };
 
-const isLocalEdit = (transaction: Transaction) =>
-  transaction.docChanged && !isRemoteChange(transaction);
-
 // Upstream leaves a cell's `|` bare, which splits the cell on the next read,
 // and pads the table with blank lines the block separator already adds.
 const DocumentTable = Table.extend({
@@ -95,34 +94,10 @@ const DocumentTable = Table.extend({
       renderChildren: (...args: Parameters<typeof h.renderChildren>) =>
         h.renderChildren(...args).replace(/(?<!\\)\|/g, "\\|"),
     });
-    // Without a header row upstream writes an empty one, which comes back
-    // as a blank header nobody put there.
+    // Markdown needs a header line. A table without a header row (the tree
+    // allows one) writes its first row there rather than a blank one, which
+    // would come back as a header nobody put there.
     return renderTableToMarkdown(withHeaderRow(node), cells).trim();
-  },
-  addProseMirrorPlugins() {
-    return [
-      ...(this.parent?.() ?? []),
-      // Deleting the header row promotes the next one, as the Markdown will.
-      // Only a local edit does it: two editors fixing the same row at once
-      // would merge into doubled cells, so collaborators get it as a change.
-      new Plugin({
-        appendTransaction: (transactions, _before, state) => {
-          if (!transactions.some(isLocalEdit)) return null;
-          const header = state.schema.nodes.tableHeader!;
-          let fix: Transaction | null = null;
-          state.doc.descendants((node, position) => {
-            if (node.type.name !== "table") return true;
-            const first = node.firstChild;
-            first?.forEach((cell, offset) => {
-              if (cell.type !== header)
-                (fix ??= state.tr).setNodeMarkup(position + 2 + offset, header, cell.attrs);
-            });
-            return false;
-          });
-          return fix;
-        },
-      }),
-    ];
   },
 });
 
@@ -159,6 +134,7 @@ export const documentExtensions: AnyExtension[] = [
   Pending,
   DateChip,
   PersonMention,
+  CommentMark,
   // Steps received from the server already carry the IDs their sender gave.
   UniqueID.configure({
     attributeName: BLOCK_ID,

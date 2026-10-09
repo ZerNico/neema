@@ -1,12 +1,13 @@
 import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AskPopover } from "./ask-popover.tsx";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
 import { EditorContextMenu } from "./context-menu.tsx";
 import { setEditorHooks, type EditorHooks } from "./editor-hooks.ts";
-import { DocumentTableMenu } from "./table-menu.tsx";
+import type { DocumentDiscussion } from "../../client/use-document.ts";
+import { CommentCard } from "./comment-card.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 
 /** The connection's editor; the connection itself stays with the caller. */
@@ -23,6 +24,7 @@ export default function DocumentEditor({
   readOnly,
   toolbarSlot,
   hooks,
+  discussion,
 }: {
   sync: DocumentEditorSync;
   readOnly: boolean;
@@ -30,22 +32,34 @@ export default function DocumentEditor({
   toolbarSlot: HTMLElement | null;
   /** Who can be mentioned and how to ask the assistant; none in tests and outside a chat. */
   hooks?: EditorHooks | undefined;
+  /** Comments and the assistant's changes; none in tests. */
+  discussion?: DocumentDiscussion | undefined;
 }) {
   useEffect(() => {
     if (hooks) setEditorHooks(sync.editor, hooks);
   }, [hooks, sync.editor]);
-  return <RichEditor editor={sync.editor} readOnly={readOnly} toolbarSlot={toolbarSlot} />;
+  return (
+    <RichEditor
+      editor={sync.editor}
+      readOnly={readOnly}
+      toolbarSlot={toolbarSlot}
+      discussion={discussion}
+    />
+  );
 }
 
 function RichEditor({
   editor,
   readOnly,
   toolbarSlot,
+  discussion,
 }: {
   editor: Editor;
   readOnly: boolean;
   toolbarSlot: HTMLElement | null;
+  discussion: DocumentDiscussion | undefined;
 }) {
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     editor.setEditable(!readOnly);
   }, [editor, readOnly]);
@@ -55,16 +69,29 @@ function RichEditor({
         ? createPortal(<DocumentToolbar editor={editor} />, toolbarSlot)
         : null}
       {/* Room above the first line for another person's cursor label. */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-7 pb-4">
+      <div
+        ref={setScroller}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-7 pb-4"
+      >
         <EditorContextMenu editor={editor}>
-          <EditorContent editor={editor} className="h-full" />
+          <EditorContent editor={editor} className="flex grow flex-col" />
         </EditorContextMenu>
+        {/* Room past the end, so the last lines can be read and written mid-panel. */}
+        <div
+          aria-hidden
+          className="h-[40vh] shrink-0 cursor-text"
+          onMouseDown={(event) => {
+            if (readOnly) return;
+            event.preventDefault();
+            editor.commands.focus("end");
+          }}
+        />
       </div>
       {readOnly ? null : (
         <>
-          <DocumentBubbleMenu editor={editor} />
-          <DocumentTableMenu editor={editor} />
+          <DocumentBubbleMenu editor={editor} scroller={scroller} />
           <AskPopover editor={editor} />
+          {discussion ? <CommentCard editor={editor} discussion={discussion} canEdit /> : null}
         </>
       )}
     </div>

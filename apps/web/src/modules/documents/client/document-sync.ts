@@ -1,15 +1,18 @@
 import { Editor, Extension, type AnyExtension, type EditorOptions } from "@tiptap/core";
 import { Node } from "@tiptap/pm/model";
-import { EditorState, type Plugin, type Transaction } from "@tiptap/pm/state";
+import { EditorState, Selection, type Plugin, type Transaction } from "@tiptap/pm/state";
 import { Mapping, ReplaceAroundStep, ReplaceStep, Step, Transform } from "@tiptap/pm/transform";
 import { collab, getVersion, receiveTransaction, sendableSteps } from "prosemirror-collab";
 import { isRemoteChange, SERVER_RESET } from "../editor/remote.ts";
 import type {
+  DocumentComment,
   DocumentFrame,
   DocumentPresence,
   PushDocumentInput,
   PushDocumentResult,
 } from "../schema.ts";
+import { commentsKey, commentsPlugin } from "./comments-plugin.ts";
+import { codeHighlightPlugin } from "./code-highlight-plugin.ts";
 import type { OutboxStore } from "./outbox.ts";
 import { presencePlugin, showCarets, type RemoteCaret } from "./presence.ts";
 
@@ -53,7 +56,7 @@ const assistantUser = {
   colorLight: "color-mix(in oklab, var(--primary) 15%, transparent)",
 };
 
-const frameTypes = ["reset", "steps", "presence", "gone"] as const;
+const frameTypes = ["reset", "steps", "presence", "comments", "gone"] as const;
 
 interface Rebaseable {
   step: Step;
@@ -88,6 +91,22 @@ const unplaceable = (doc: Node, unconfirmed: Rebaseable[], over: Step[]) => {
   }
   return lost;
 };
+/**
+ * The end of what the assistant just wrote. Its last change can end between
+ * blocks or at the very start of the next one, which draws on the next line;
+ * the caret belongs at the end of the text before.
+ */
+const assistantSpot = (doc: Node, position: number) => {
+  const $position = doc.resolve(Math.min(position, doc.content.size));
+  const atLineStart = $position.parent.isTextblock && $position.parentOffset === 0;
+  const from = atLineStart && $position.depth > 0 ? doc.resolve($position.before()) : $position;
+  return (Selection.findFrom(from, -1, true) ?? Selection.near($position, -1)).head;
+};
+/** A caret between blocks, as after selecting everything, drawn at the end of the text before. */
+const inText = (doc: Node, position: number) => {
+  const $position = doc.resolve(Math.min(position, doc.content.size));
+  return $position.parent.inlineContent ? position : Selection.near($position, -1).head;
+};
 const randomClient = () =>
   typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -120,9 +139,9 @@ export class DocumentSync {
   #presenceDirty = false;
   #lastPresencePush = 0;
   #remote = new Map<string, DocumentPresence>();
+  /** Each client's last presence this editor could place, kept while a newer one waits for its steps. */
+  #placed = new Map<string, DocumentPresence>();
   #assistantTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Scroll to the assistant's cursor once it is drawn, unless the person is typing here. */
-  #reveal = false;
   #log: Step[] = [];
   #logStart = 0;
   #inflight: Promise<void> | null = null;
@@ -135,6 +154,7 @@ export class DocumentSync {
   #destroyed = false;
   #listeners = new Set<() => void>();
   #version = 0;
+  #comments: ReadonlyArray<DocumentComment> = [];
 
   constructor(private readonly options: DocumentSyncOptions) {
     const saved = options.outbox.get(options.documentId);
@@ -160,6 +180,10 @@ export class DocumentSync {
   dismissRecovered() {
     this.#recovered = null;
     this.#notify();
+  }
+  /** Every comment on the document, threads and replies, oldest first. */
+  get comments() {
+    return this.#comments;
   }
   /** Moves whenever anything a reader can see changed; for `useSyncExternalStore`. */
   get version() {
@@ -252,7 +276,12 @@ export class DocumentSync {
         ...this.options.extensions,
         Extension.create({
           name: "documentCollab",
-          addProseMirrorPlugins: () => [this.#collab!, presencePlugin()],
+          addProseMirrorPlugins: () => [
+            this.#collab!,
+            presencePlugin(),
+            commentsPlugin(),
+            codeHighlightPlugin(),
+          ],
         }),
       ],
       content: doc,
@@ -435,8 +464,16 @@ export class DocumentSync {
         return;
       case "presence":
         if (frame.presence) this.#remote.set(frame.clientId, frame.presence);
-        else this.#remote.delete(frame.clientId);
+        else {
+          this.#remote.delete(frame.clientId);
+          this.#placed.delete(frame.clientId);
+        }
         this.#showCarets();
+        return;
+      case "comments":
+        this.#comments = frame.comments;
+        this.#showComments();
+        this.#notify();
         return;
       case "gone":
         this.#source?.close();
@@ -527,11 +564,11 @@ export class DocumentSync {
       revision,
       user: assistantUser,
     });
-    this.#reveal = true;
     if (this.#assistantTimer) clearTimeout(this.#assistantTimer);
     this.#assistantTimer = setTimeout(() => {
       this.#assistantTimer = null;
       this.#remote.delete(ASSISTANT);
+      this.#placed.delete(ASSISTANT);
       this.#showCarets();
     }, ASSISTANT_IDLE_MS);
   }
@@ -541,6 +578,15 @@ export class DocumentSync {
     if (text) this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
   }
 
+  #showComments() {
+    const editor = this.#editor;
+    if (!editor || this.#destroyed) return;
+    const open = this.#comments
+      .filter((comment) => comment.id === comment.threadId && !comment.resolvedAt)
+      .map((comment) => comment.id);
+    editor.view.dispatch(editor.state.tr.setMeta(commentsKey, { open }));
+  }
+
   /** Every other cursor, mapped from the revision it was sent at onto this document. */
   #showCarets() {
     const editor = this.#editor;
@@ -548,35 +594,27 @@ export class DocumentSync {
     const version = getVersion(editor.state);
     const local = unconfirmedOf(this.#collab, editor.state);
     const carets: RemoteCaret[] = [];
-    for (const [clientId, presence] of this.#remote) {
+    for (const [clientId, latest] of this.#remote) {
       if (clientId === this.#clientId) continue;
-      if (presence.revision < this.#logStart || presence.revision > version) continue;
+      // A presence sent with steps not received yet would drop the caret until
+      // they land, a flicker on every keystroke: the last placeable one stays.
+      const fits = (each: DocumentPresence | undefined): each is DocumentPresence =>
+        each !== undefined && each.revision >= this.#logStart && each.revision <= version;
+      const presence = fits(latest) ? latest : this.#placed.get(clientId);
+      if (!fits(presence)) continue;
+      this.#placed.set(clientId, presence);
       const mapping = new Mapping(
         this.#log.slice(presence.revision - this.#logStart).map((step) => step.getMap()),
       );
       for (const { step } of local) mapping.appendMap(step.getMap());
-      carets.push({
-        clientId,
-        anchor: mapping.map(presence.anchor),
-        head: mapping.map(presence.head),
-        user: presence.user,
-      });
+      let anchor = mapping.map(presence.anchor);
+      let head = mapping.map(presence.head);
+      // The assistant's caret is where its last change ended, which after a whole
+      // block is between blocks and would draw on the next line: back it into the text.
+      if (clientId === ASSISTANT) anchor = head = assistantSpot(editor.state.doc, head);
+      else head = inText(editor.state.doc, head);
+      carets.push({ clientId, anchor, head, user: presence.user });
     }
     editor.view.dispatch(showCarets(editor.state, carets));
-    if (!this.#reveal) return;
-    this.#reveal = false;
-    const view = editor.view;
-    if (!view.dom.isConnected || view.dom.contains(document.activeElement)) return;
-    const caret = view.dom.querySelector(`[data-caret-client="${ASSISTANT}"]`);
-    const scroller = view.dom.closest(".overflow-y-auto");
-    if (!caret || !scroller) return;
-    const at = caret.getBoundingClientRect();
-    const frame = scroller.getBoundingClientRect();
-    // Only once it leaves the visible part, so following it never jitters.
-    if (at.top >= frame.top && at.bottom <= frame.bottom) return;
-    scroller.scrollTo?.({
-      top: scroller.scrollTop + at.top - frame.top - frame.height / 3,
-      behavior: "smooth",
-    });
   }
 }

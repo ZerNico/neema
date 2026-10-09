@@ -67,7 +67,7 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
     read: (_userId, documentId) =>
       Effect.sync(() => {
         const row = rows.get(documentId);
-        return row ? { document: row.document, doc: row.doc } : null;
+        return row ? { document: row.document, doc: row.doc, comments: [] } : null;
       }),
     create: (_userId, input) =>
       Effect.sync(() => {
@@ -123,6 +123,12 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
     updateLive: () => Effect.succeed(false),
     settleLive: () => Effect.die("no live edits in these tests"),
     revertLive: () => Effect.void,
+    assistantComment: (_userId, input) =>
+      Effect.succeed(
+        input.thread
+          ? { outcome: "commented" as const, thread: input.thread }
+          : { outcome: "not_found" as const, message: "No block with that id." },
+      ),
   };
   /** What the person's editor does: a user-attributed change. */
   const userWrite = (documentId: string, markdown: string) => {
