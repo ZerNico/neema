@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "75472f50-3179-457c-8750-b126691314e2",
+  "id": "f60483f7-7543-4d82-8bdb-ab714714fae2",
   "prevIds": [
     "d11b2009-61a8-485b-8f68-b72d3acbcd89"
   ],
@@ -4809,6 +4809,32 @@
       "table": "integration_configs"
     },
     {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "fingerprint",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_configs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "1",
+      "generated": null,
+      "identity": null,
+      "name": "revision",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_configs"
+    },
+    {
       "type": "boolean",
       "typeSchema": null,
       "notNull": true,
@@ -5324,6 +5350,32 @@
       "generated": null,
       "identity": null,
       "name": "check_token",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_tool_catalogs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "listing_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "integration_tool_catalogs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "review_seq",
       "entityType": "columns",
       "schema": "public",
       "table": "integration_tool_catalogs"

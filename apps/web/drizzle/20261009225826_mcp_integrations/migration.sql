@@ -20,10 +20,14 @@ CREATE TABLE "integration_tool_catalogs" (
 	"reviewed_at" timestamp with time zone,
 	"next_check_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"check_lease_until" timestamp with time zone,
-	"check_token" text
+	"check_token" text,
+	"listing_id" text,
+	"review_seq" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 ALTER TABLE "integration_configs" ADD COLUMN "oauth_client_issuer" text;--> statement-breakpoint
+ALTER TABLE "integration_configs" ADD COLUMN "fingerprint" text;--> statement-breakpoint
+ALTER TABLE "integration_configs" ADD COLUMN "revision" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "integration_configs" ADD COLUMN "shared_credential_ciphertext" text;--> statement-breakpoint
 ALTER TABLE "integration_connections" ADD COLUMN "required_scopes" jsonb;--> statement-breakpoint
 CREATE INDEX "integration_tool_catalogs_due_idx" ON "integration_tool_catalogs" ("next_check_at");--> statement-breakpoint

@@ -181,8 +181,6 @@ export interface CatalogAdapter {
     approved: ReadonlyArray<CatalogEntry>,
     latest: ReadonlyArray<CatalogEntry> | null,
   ): CatalogEntry[];
-  /** Names one listing, so an approval applies to exactly the listing the admin saw. */
-  version(latest: ReadonlyArray<CatalogEntry>): string;
   /** The approved catalog after a review, or what is wrong with the decisions. */
   apply(
     approved: ReadonlyArray<CatalogEntry>,

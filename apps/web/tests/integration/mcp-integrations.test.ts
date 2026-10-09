@@ -241,6 +241,12 @@ const approve = (
     ),
   );
 
+/** What the review would show now, to approve again after an earlier approval. */
+const currentVersion = (integrationId: string) =>
+  run(Effect.flatMap(IntegrationService, (s) => s.adminList())).then(
+    (rows) => rows.find((row) => row.id === integrationId)!.catalog!.version!,
+  );
+
 const offeredNames = (userId: string, conversationId: string) =>
   run(
     Effect.flatMap(IntegrationService, (s) =>
@@ -468,7 +474,7 @@ describe("an MCP server set up by an admin", () => {
     expect(await run(after.credential)).toEqual({ kind: "api_key", values: { token: "second" } });
   });
 
-  it("pins the admin's client to one issuer, beside the registrations, until it changes", async () => {
+  it("pins the admin's client to one issuer, beside the registrations, for one revision", async () => {
     const id = await setUp("Docs pinned", { url: `${base}/mcp`, auth: "oauth" });
     const save = (clientId: string) =>
       run(
@@ -483,7 +489,12 @@ describe("an MCP server set up by an admin", () => {
           }),
         ),
       );
+    const revision = () =>
+      run(Effect.flatMap(IntegrationRepo, (repo) => repo.getConfig(id))).then(
+        (row) => row!.revision,
+      );
     await save("admin-client");
+    const first = await revision();
     const registered = {
       clientId: "dyn",
       clientSecret: "dyn-secret",
@@ -497,8 +508,8 @@ describe("an MCP server set up by an admin", () => {
         // Two first sign-ins at once: one issuer wins, and both see which.
         const pins = yield* Effect.all(
           [
-            repo.pinClientIssuer(id, "admin-client", "https://as.example.com"),
-            repo.pinClientIssuer(id, "admin-client", "https://evil.example.com"),
+            repo.pinClientIssuer(id, first, "https://as.example.com"),
+            repo.pinClientIssuer(id, first, "https://evil.example.com"),
           ],
           { concurrency: "unbounded" },
         );
@@ -507,14 +518,99 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(new Set(outcome.pins).size).toBe(1);
     expect(outcome.kept).toEqual(registered);
-    // Another client is pinned afresh on its first use.
+
+    // Saving without a change keeps the revision and the pin.
+    await save("admin-client");
+    expect(await revision()).toBe(first);
+    // Another client, even the same one again later, is a new revision: a sign-in
+    // that started before it pins nothing, and the next one pins afresh.
     await save("other-client");
+    await save("admin-client");
+    const latest = await revision();
+    expect(latest).toBe(first + 2);
+    const stale = await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.pinClientIssuer(id, first, "https://old.example.com"),
+      ),
+    );
+    expect(stale).toBeNull();
     const repinned = await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.pinClientIssuer(id, "other-client", "https://idp.example.com"),
+        repo.pinClientIssuer(id, latest, "https://idp.example.com"),
       ),
     );
     expect(repinned).toBe("https://idp.example.com");
+  });
+
+  it("starts review over when a server moves away and back, as the save finds it", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs two saves", { url: `${base}/mcp`, auth: "none" });
+    const catalog = await check(id, null);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    const save = (url: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id,
+            name: "Docs two saves",
+            enabled: true,
+            config: { url, auth: "none" },
+            oauthClientId: "",
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    await save(`${base}/elsewhere`);
+    const moved = await check(id, null);
+    await approve(admin, id, moved.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    // What was approved for /elsewhere is not /mcp's, though /mcp was approved before.
+    await save(`${base}/mcp`);
+    const after = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+    expect(after).toMatchObject({ approved: [], latest: null });
+  });
+
+  it("approves only the listing a review showed, once, whatever the tools look like", async () => {
+    const admin = await newUser();
+    const other = await newUser();
+    const id = await setUp("Docs one review", { url: `${base}/mcp`, auth: "none" });
+    const shown = await check(id, admin);
+    // A background check finding the same tools keeps the review valid.
+    expect((await check(id, admin)).version).toBe(shown.version);
+    const decide = (who: string, version: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          Effect.result(
+            s.approveCatalog(who, id, {
+              version,
+              decisions: [{ mcpName: "search", enabled: true, access: "read" }],
+            }),
+          ),
+        ),
+      );
+    // Two admins approving from the same view: the second is shown it again.
+    expect((await decide(admin, shown.version!))._tag).toBe("Success");
+    expect((await decide(other, shown.version!))._tag).toBe("Failure");
+
+    // The same tools on another server are another listing: the old review approves nothing.
+    const reviewed = (await check(id, admin)).version!;
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs one review",
+          enabled: true,
+          config: { url: `${base}/elsewhere`, auth: "none" },
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    await check(id, admin);
+    expect((await decide(admin, reviewed))._tag).toBe("Failure");
   });
 
   it("does not let an approval read before a move land after it", async () => {
@@ -541,7 +637,7 @@ describe("an MCP server set up by an admin", () => {
           id,
           read!.latest!.map((entry) => ({ ...entry, enabled: true })),
           admin,
-          read!.checkedAt!,
+          { listingId: read!.listingId!, reviewSeq: read!.reviewSeq },
         ),
       ),
     );
@@ -611,8 +707,8 @@ describe("an MCP server set up by an admin", () => {
           handlerOf(prepared, `int_${id}__delete_page`)!({ id: "p-2" }, { toolCallId: "r" }),
         );
         const [pending] = yield* waitForPending(admin);
-        yield* Effect.promise(() =>
-          approve(admin, id, catalog.version!, [
+        yield* Effect.promise(async () =>
+          approve(admin, id, await currentVersion(id), [
             both[0],
             { mcpName: "delete_page", enabled: false, access: "destructive" },
           ]),
@@ -662,8 +758,8 @@ describe("an MCP server set up by an admin", () => {
         yield* Effect.sync(() => reads.permissions).pipe(
           Effect.repeat({ until: (count) => count >= 5 }),
         );
-        yield* Effect.promise(() =>
-          approve(admin, id, catalog.version!, [
+        yield* Effect.promise(async () =>
+          approve(admin, id, await currentVersion(id), [
             release,
             { mcpName: "delete_page", enabled: false, access: "destructive" },
           ]),

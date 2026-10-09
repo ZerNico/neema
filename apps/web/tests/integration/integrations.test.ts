@@ -444,6 +444,40 @@ describe("connections", () => {
     }
   });
 
+  it("gives a session made before a move away and back no credential", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    const before = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const moveTo = (baseUrlNow: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id: "outline",
+            name: "Outline",
+            enabled: true,
+            config: { baseUrl: baseUrlNow },
+            oauthClientId: "client",
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    try {
+      await moveTo("https://elsewhere.example.com");
+      await moveTo(baseUrl);
+      await connectKey(userId);
+      // Same address as before, but another setup: the old session gets nothing.
+      expect(Exit.isFailure(await runtime.runPromiseExit(before.credential))).toBe(true);
+      const after = await run(
+        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      );
+      expect(await run(after.credential)).toMatchObject({ kind: "api_key" });
+    } finally {
+      await configure();
+    }
+  });
+
   it("rotates an expired token once however many callers need it", async () => {
     const userId = await newUser();
     await run(

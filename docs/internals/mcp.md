@@ -27,22 +27,39 @@ The same check runs again as each call goes out, after any approval wait, agains
 fingerprint and access the answer was offered: a tool turned off, reclassified or changed
 meanwhile does not run, however long the answer has been going.
 
-An approval names the listing it was made on (`version`, a hash of the names and
-fingerprints), so an admin cannot approve a listing they did not see. Offered tools keep
+An approval names the listing it was made on and how many approvals came before
+(`version`), so an admin cannot approve a listing they did not see, nor overwrite another
+admin's approval of it. A check that finds the same tools keeps the listing's id, so the
+background sweep does not void an open review. Offered tools keep
 the server's order and a model-facing key fixed at first approval, which keeps the tool
 block byte-stable for [prompt caching](prompt-caching.md) and never renames a tool the
 model already knows.
 
-An approval is of one server, not of words that happen to match: moving the integration to
-another address empties both lists in the same transaction, and the review starts over.
+An approval is of one server, not of words that happen to match: another server empties both
+lists in the same transaction, and the review starts over.
 
 Checks run when the admin asks, and in the background through `IntegrationCatalogSweep`
-(a claim with a lease, like schedules, every ten minutes). Each check takes a token as it
-starts and only the newest token may write, so a slow check never puts back a listing a
-newer one replaced, and a move voids any check still running. Each check sets the next one
+(a claim with a lease, like schedules, every ten minutes, only for integrations that are on).
+Each check takes a token as it starts and only the newest token may write, so a slow check
+never puts back a listing a newer one replaced. Each check sets the next one
 from the server's `ttlMs` hint, between an hour and a day. A check runs as the admin who last
 reviewed, since listing may show what only an account can see. An open or shared-key server
 needs nobody.
+
+## One server per revision
+
+Several things outlive the moment they start: a check, an open review, a sign-in, a
+prepared call waiting for approval, a refresh waiting for its row lock. Each must finish
+against the server it started with. Comparing addresses read earlier does not hold: a save
+in between, or a move away and back, passes any such comparison.
+
+So `integration_configs` keeps the adapter's fingerprint of its setup and a `revision`. A
+save locks the row, compares the stored fingerprint and client ID with the new ones, and
+bumps the revision when either changed; only then does it reset the catalog and the issuer
+pin. Everything started under a revision carries it, and every write it makes requires it
+in the same statement: recording a check, pinning an issuer, completing a sign-in, and
+handing a session its credential, which a refresh checks again under the connection's lock.
+This applies to every integration type, not only MCP.
 
 ## Access is the admin's call, defaulting to the worst case
 
@@ -82,8 +99,8 @@ functions:
   (`integration_oauth_clients`) and never shown to another. The admin's client is pinned to
   the issuer it was first used with, on the integration row and in one statement, so two
   first sign-ins cannot pin two issuers and no registration is overwritten. A server that
-  later names another authorization server never receives its secret; another client ID or
-  server address clears the pin. A metadata document is offered
+  later names another authorization server never receives its secret; a new revision clears
+  the pin, and a sign-in started under an older one pins nothing. A metadata document is offered
   only from an operator-declared public HTTPS `PUBLIC_URL`, because a server that cannot fetch
   it fails the whole sign-in.
 - **Request.** PKCE, the `resource` indicator on authorize, token and refresh, and scopes

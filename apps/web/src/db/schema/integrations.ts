@@ -38,8 +38,15 @@ export const integrationConfigs = pgTable(
     // AES-256-GCM via KeyCipher, like provider API keys
     oauthClientSecretCiphertext: text("oauth_client_secret_ciphertext"),
     // The authorization server a discovered sign-in first used the admin's client
-    // with; its secret goes to no other. Cleared when the client or the server changes.
+    // with; its secret goes to no other. Cleared with each new revision.
     oauthClientIssuer: text("oauth_client_issuer"),
+    // The adapter's fingerprint of `config` as last saved: which server, and how
+    // people reach it. Compared under the row lock, never against a stale read.
+    fingerprint: text(),
+    // Which server this is, as a number: bumped whenever the fingerprint or the
+    // admin's client changes. Work that started under one revision (a check, a
+    // review, a sign-in, a prepared call) may only finish under the same one.
+    revision: integer().notNull().default(1),
     allowApiKeys: boolean("allow_api_keys").notNull().default(true),
     // A key the admin holds for everyone, as the manifest's shared credential
     // fields (KeyCipher JSON). Only a type whose calls cannot act as anyone has one.
@@ -216,6 +223,11 @@ export const integrationToolCatalogs = pgTable(
     // The newest check started. Only it may record what it saw, so a slower,
     // older listing never overwrites a newer one or one for another address.
     checkToken: text("check_token"),
+    // Names the listing in `latest`: a new one per recorded check, null when
+    // there is none. A review approves exactly this listing.
+    listingId: text("listing_id"),
+    // Counts approvals, so two admins reviewing at once cannot both win.
+    reviewSeq: integer("review_seq").notNull().default(0),
   },
   (t) => [index("integration_tool_catalogs_due_idx").on(t.nextCheckAt)],
 );

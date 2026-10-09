@@ -107,13 +107,8 @@ export interface SaveConfig {
   readonly allowApiKeys: boolean;
   /** The shared credential's fields; absent keeps what is stored, null clears it. */
   readonly sharedCredential?: Record<string, string> | null | undefined;
-  /**
-   * Another server address: the tool catalog (approved, listed, any check
-   * still running) was the old server's, so it is forgotten.
-   */
-  readonly serverMoved?: boolean;
-  /** Another client, or another server: the admin's client is pinned again on first use. */
-  readonly unpinClient?: boolean;
+  /** Its tools come from the server, so another server starts their review over. */
+  readonly listsTools: boolean;
 }
 
 export interface StoredOAuthClient {
@@ -234,32 +229,36 @@ export class IntegrationRepo extends Context.Service<
      * supersedes any still running: only the newest may record what it saw.
      */
     startCatalogCheck(integrationId: string): Effect.Effect<string>;
-    /** False when a newer check or a change of address superseded this one; nothing is written. */
+    /**
+     * False when a newer check, or another revision of the integration,
+     * superseded this one; nothing is written then. A listing equal to the
+     * stored one keeps its id, so a background check does not void a review.
+     */
     recordCatalogCheck(
       integrationId: string,
-      token: string,
+      started: { token: string; revision: number },
       outcome: { latest: McpToolEntry[]; server: Record<string, string> } | { error: string },
       nextCheckAt: Date,
     ): Effect.Effect<boolean>;
     /**
-     * Replaces what is offered with what the admin approved, only if the
-     * listing is still the one checked at `listedAt`; false when a check or a
-     * move replaced it meanwhile.
+     * Replaces what is offered with what the admin approved, only over the
+     * listing and approval count the review showed; false when either moved on.
      */
     approveCatalog(
       integrationId: string,
       approved: McpToolEntry[],
       reviewedBy: string,
-      listedAt: Date,
+      reviewed: { listingId: string; reviewSeq: number },
     ): Effect.Effect<boolean>;
     oauthClient(integrationId: string, issuer: string): Effect.Effect<StoredOAuthClient | null>;
     /**
      * Pins the admin's client to an issuer unless it already is, atomically,
-     * and returns the issuer it is pinned to. Null when the client changed.
+     * and returns the issuer it is pinned to. Null when the integration is no
+     * longer at `revision`: the sign-in started under another setup.
      */
     pinClientIssuer(
       integrationId: string,
-      clientId: string,
+      revision: number,
       issuer: string,
     ): Effect.Effect<string | null>;
     saveOAuthClient(
@@ -344,22 +343,34 @@ export class IntegrationRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                // What changed is decided against the row as it is now, locked, so two
+                // admins saving at once cannot each judge against what they read.
+                const [current] = yield* tx
+                  .select()
+                  .from(integrationConfigs)
+                  .where(eq(integrationConfigs.id, input.id))
+                  .for("update");
+                if (!current) return null;
+                const anotherServer = current.fingerprint !== input.fingerprint;
+                const anotherClient = current.oauthClientId !== input.oauthClientId;
                 const rows = yield* tx
                   .update(integrationConfigs)
                   .set({
                     name: input.name,
                     enabled: input.enabled,
                     config: input.config,
+                    fingerprint: input.fingerprint,
                     oauthClientId: input.oauthClientId,
                     ...(secret === undefined ? {} : { oauthClientSecretCiphertext: secret }),
                     ...(shared === undefined ? {} : { sharedCredentialCiphertext: shared }),
-                    ...(input.unpinClient ? { oauthClientIssuer: null } : {}),
+                    ...(anotherServer || anotherClient
+                      ? { revision: current.revision + 1, oauthClientIssuer: null }
+                      : {}),
                     allowApiKeys: input.allowApiKeys,
                     updatedAt: now,
                   })
                   .where(eq(integrationConfigs.id, input.id))
                   .returning();
-                if (!rows[0]) return null;
                 yield* tx
                   .update(integrationConnections)
                   .set({ status: "needs_reauth", updatedAt: now })
@@ -369,10 +380,13 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
-                if (input.serverMoved) {
+                // What was approved and listed was another server's: review starts over,
+                // and a check still running for it finds its token gone.
+                if (anotherServer && input.listsTools) {
                   const fresh = {
                     approved: [],
                     latest: null,
+                    listingId: null,
                     server: null,
                     checkedAt: null,
                     checkError: null,
@@ -390,7 +404,7 @@ export class IntegrationRepo extends Context.Service<
                       set: fresh,
                     });
                 }
-                return rows[0];
+                return rows[0] ?? null;
               }),
             )
             .pipe(Effect.orDie);
@@ -772,6 +786,7 @@ export class IntegrationRepo extends Context.Service<
                   )
                   .where(
                     and(
+                      eq(integrationConfigs.enabled, true),
                       lte(integrationToolCatalogs.nextCheckAt, sql`now()`),
                       or(
                         isNull(integrationToolCatalogs.checkLeaseUntil),
@@ -820,13 +835,19 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         recordCatalogCheck: Effect.fn("IntegrationRepo.recordCatalogCheck")(
-          function* (integrationId, token, outcome, nextCheckAt) {
+          function* (integrationId, started, outcome, nextCheckAt) {
+            const latest = "error" in outcome ? null : JSON.stringify(outcome.latest);
             const rows = yield* db
               .update(integrationToolCatalogs)
               .set({
                 ...("error" in outcome
                   ? { checkError: outcome.error }
-                  : { latest: outcome.latest, server: outcome.server, checkError: null }),
+                  : {
+                      latest: outcome.latest,
+                      listingId: sql`case when ${integrationToolCatalogs.listingId} is not null and ${integrationToolCatalogs.latest} = ${latest}::jsonb then ${integrationToolCatalogs.listingId} else ${uuidv7()} end`,
+                      server: outcome.server,
+                      checkError: null,
+                    }),
                 checkedAt: new Date(),
                 nextCheckAt,
                 checkLeaseUntil: null,
@@ -835,7 +856,8 @@ export class IntegrationRepo extends Context.Service<
               .where(
                 and(
                   eq(integrationToolCatalogs.integrationId, integrationId),
-                  eq(integrationToolCatalogs.checkToken, token),
+                  eq(integrationToolCatalogs.checkToken, started.token),
+                  sql`exists (select 1 from ${integrationConfigs} where ${integrationConfigs.id} = ${integrationId} and ${integrationConfigs.revision} = ${started.revision})`,
                 ),
               )
               .returning({ integrationId: integrationToolCatalogs.integrationId })
@@ -845,15 +867,20 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         approveCatalog: Effect.fn("IntegrationRepo.approveCatalog")(
-          function* (integrationId, approved, reviewedBy, listedAt) {
+          function* (integrationId, approved, reviewedBy, reviewed) {
             const rows = yield* db
               .update(integrationToolCatalogs)
-              .set({ approved, reviewedBy, reviewedAt: new Date() })
+              .set({
+                approved,
+                reviewedBy,
+                reviewedAt: new Date(),
+                reviewSeq: reviewed.reviewSeq + 1,
+              })
               .where(
                 and(
                   eq(integrationToolCatalogs.integrationId, integrationId),
-                  eq(integrationToolCatalogs.checkedAt, listedAt),
-                  sql`${integrationToolCatalogs.latest} is not null`,
+                  eq(integrationToolCatalogs.listingId, reviewed.listingId),
+                  eq(integrationToolCatalogs.reviewSeq, reviewed.reviewSeq),
                 ),
               )
               .returning({ integrationId: integrationToolCatalogs.integrationId })
@@ -886,7 +913,7 @@ export class IntegrationRepo extends Context.Service<
         }),
 
         pinClientIssuer: Effect.fn("IntegrationRepo.pinClientIssuer")(
-          function* (integrationId, clientId, issuer) {
+          function* (integrationId, revision, issuer) {
             const rows = yield* db
               .update(integrationConfigs)
               .set({
@@ -895,7 +922,7 @@ export class IntegrationRepo extends Context.Service<
               .where(
                 and(
                   eq(integrationConfigs.id, integrationId),
-                  eq(integrationConfigs.oauthClientId, clientId),
+                  eq(integrationConfigs.revision, revision),
                 ),
               )
               .returning({ issuer: integrationConfigs.oauthClientIssuer })

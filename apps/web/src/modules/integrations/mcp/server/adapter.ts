@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { CallToolResult, Tool as McpTool } from "@modelcontextprotocol/client";
 import { Effect } from "effect";
 import { IntegrationRejected, IntegrationRequestFailed } from "../../errors.ts";
@@ -328,15 +327,6 @@ export const mcpAdapter: IntegrationAdapter = {
     offer: (approved, latest) =>
       offeredEntries(approved.filter(isEntry), latest ? latest.filter(isEntry) : null),
 
-    version: (latest) =>
-      createHash("sha256")
-        .update(
-          latest
-            .filter(isEntry)
-            .map((entry) => `${entry.mcpName}:${entry.fingerprint}`)
-            .join(","),
-        )
-        .digest("base64url"),
     apply: (approved, latest, decisions) => {
       const next = applyDecisions(approved.filter(isEntry), latest.filter(isEntry), decisions);
       const enabled = next.filter((entry) => entry.enabled).length;
