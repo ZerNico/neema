@@ -35,10 +35,14 @@ const optionsOf = (schema: Json): ElicitationField["options"] | null => {
   return null;
 };
 
+/** What a card can hold, and what an answer may carry back (`AnswerElicitationInput`). */
+const MAX_FIELDS = 30;
+const MAX_KEY = 100;
+
 const fieldOf = (key: string, schema: unknown, required: boolean): ElicitationField | null => {
   if (!isObject(schema)) return null;
   const base = {
-    key: key.slice(0, 100),
+    key,
     label: text(schema.title, 120) || key,
     description: text(schema.description, 500) || null,
     required,
@@ -106,7 +110,9 @@ export const promptOf = (params: ElicitRequest["params"]): ElicitationPrompt | n
   const required = new Set(
     Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string") : [],
   );
-  const entries = Object.entries(schema.properties).slice(0, 30);
+  // Cutting a form short, or a key, would send an answer to a question nobody asked.
+  const entries = Object.entries(schema.properties);
+  if (entries.length > MAX_FIELDS || entries.some(([key]) => key.length > MAX_KEY)) return null;
   const fields = entries.map(([key, property]) => fieldOf(key, property, required.has(key)));
   if (fields.some((field) => field === null)) return null;
   return { mode: "form", message, fields: fields as ElicitationField[] };

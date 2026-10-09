@@ -73,6 +73,21 @@ describe("elicitation prompts", () => {
         elicitationId: "1",
       } as never),
     ).toBeNull();
+    const wide = (count: number, key = (index: number) => `field${index}`) =>
+      promptOf({
+        mode: "form",
+        message: "Many",
+        requestedSchema: {
+          type: "object",
+          properties: Object.fromEntries(
+            Array.from({ length: count }, (_, index) => [key(index), { type: "string" }]),
+          ),
+        },
+      });
+    expect(wide(30)).not.toBeNull();
+    // Too many to show, or a key an answer could not carry back: declined, not cut short.
+    expect(wide(31)).toBeNull();
+    expect(wide(1, () => "k".repeat(101))).toBeNull();
     expect(
       promptOf({ mode: "url", message: "Go", url: "https://example.com/pay" } as never),
     ).toEqual({
