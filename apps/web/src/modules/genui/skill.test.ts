@@ -5,7 +5,12 @@ import type { ValidNode } from "./catalog.ts";
 import { BlockEngine } from "./client/engine.ts";
 import { extractImageQueries } from "./extract.ts";
 import { scanUiFences } from "./fences.ts";
-import { INTERACTIVE_UI_SKILL_ROOT, SKILL_EXAMPLES } from "./skill.ts";
+import {
+  interactiveUiPolicy,
+  INTERACTIVE_UI_SKILL_ROOT,
+  PRIMER_IMAGES_EXAMPLE,
+  SKILL_EXAMPLES,
+} from "./skill.ts";
 
 let quickjs: QuickJSWASMModule;
 beforeAll(async () => {
@@ -59,6 +64,24 @@ describe("the interactive-ui skill", () => {
       "lithium ion battery cell cutaway",
       "battery health screen iphone",
     ]);
+  });
+
+  it("teaches photos in the primer with a block that renders and is searched", () => {
+    const reply = new BlockEngine(quickjs).render({
+      block: "primer:images",
+      code: PRIMER_IMAGES_EXAMPLE,
+      saved: null,
+      now: 0,
+    });
+    if (!reply.ok) throw new Error(`${reply.reason}: ${reply.error ?? ""}`);
+    expect(reply.diagnostics).toEqual([]);
+    expect(scanUiFences(interactiveUiPolicy(true)).map((fence) => fence.code)).toEqual([
+      PRIMER_IMAGES_EXAMPLE,
+    ]);
+    expect(extractImageQueries(interactiveUiPolicy(true))).toHaveLength(2);
+    // Without search there is nothing to fill a gallery: no example, no mention of the tool.
+    expect(scanUiFences(interactiveUiPolicy(false))).toEqual([]);
+    expect(interactiveUiPolicy(false)).not.toContain("web_search");
   });
 
   it("stays small enough to load beside a long conversation", () => {

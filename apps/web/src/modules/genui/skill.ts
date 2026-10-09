@@ -125,8 +125,19 @@ const fence = (body: string) => "```ui\n" + body + "\n```";
  * catalogue line alone, models answered "a quick quiz" in Markdown; with the
  * kinds of block named up front, a block is an ordinary way to answer and the
  * skill is where its syntax lives.
+ *
+ * Photos are the exception that needs no load: next to ChatGPT, answers that
+ * a picture explains (a starter on day 5, an eclipse) went without, because a
+ * whole tool round for a gallery cost more than the model judged it worth.
  */
-export const INTERACTIVE_UI_APP_POLICY = `Answers can contain interactive \`\`\`ui blocks the chat draws with its own components: quizzes, calculators with sliders, charts, diagrams to step through, maps with pins and routes, checklists, timers and image galleries. Use one when seeing, trying or clicking makes the answer clearer than prose: practising or testing what someone learns, numbers they will vary, a process, places, a comparison to explore. Load the skill ${INTERACTIVE_UI_SKILL_ID} with load_skill before writing one; it has the syntax. Keep explanations in Markdown around the block. Most answers still need none.`;
+export const PRIMER_IMAGES_EXAMPLE = `<images query={["sourdough starter doubled in a glass jar", "sourdough starter bubbles close up"]}/>`;
+
+export const interactiveUiPolicy = (photos: boolean) =>
+  `Answers can contain interactive \`\`\`ui blocks the chat draws with its own components: quizzes, calculators with sliders, charts, diagrams to step through, maps with pins and routes, checklists, timers and image galleries. Use one where seeing or trying beats reading: testing what someone learns, numbers they will vary, figures compared across options or over time (a chart, even when nothing changes), a process, places. Load the skill ${INTERACTIVE_UI_SKILL_ID} with load_skill before writing one; it has the syntax. Keep explanations in Markdown around the block. A short factual reply needs none.` +
+  // Only where they can be found: without search a gallery is a row of notes.
+  (photos
+    ? `\n\nPhotos need no skill. Show a physical thing, a stage of a process or a place that a photo explains better than words with a block holding only an images tag, up to 4 literal queries, beside the text it illustrates:\n${fence(PRIMER_IMAGES_EXAMPLE)}`
+    : "");
 
 export const INTERACTIVE_UI_SKILL_DESCRIPTION =
   "Interactive ```ui blocks in answers: quizzes, calculators, charts, diagrams, trip maps, checklists, timers, image galleries. Load it when something to see or click beats prose.";
@@ -154,7 +165,7 @@ An answer may contain \`\`\`ui fenced blocks, drawn with the app's own component
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, which counts in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\` and \`copy(text)\`, one per click.
 - Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale.
-- Images: show physical things (places, products, dishes, animals) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
+- Images: show physical things (places, products, dishes, animals, the stages of a process) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
 - Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal, specific enough to find ("Museum Barberini, Potsdam", not "the museum"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. A place that cannot be found is listed as such, never guessed.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Use them only at a real fork the reader has to choose; most blocks need none.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.

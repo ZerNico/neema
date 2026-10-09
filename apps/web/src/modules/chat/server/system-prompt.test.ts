@@ -46,7 +46,7 @@ const configurations: Record<string, FixedPrefixInput> = {
     agentAuthoring: true,
     documents: true,
     web: { search: true, reader: true },
-    interactiveUi: true,
+    interactiveUi: { photos: true },
     memory: memoryMessages({ memory, projectMemory: null, project: null, saveOffered: true }),
   },
   "project-agent": {

@@ -1924,7 +1924,9 @@ export class StreamEngine extends Context.Service<
               ? { folders: input.desktopFolders ?? [], commands: config.desktopCommands ?? false }
               : null,
             browser: !!browserTools,
-            interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID),
+            interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)
+              ? { photos: interactiveUi.images && !!webTools?.tools.search }
+              : null,
             memory: conversationContext.messages(),
             project: config.resolvedProject ?? null,
             agent: config.resolvedAgent ?? null,
