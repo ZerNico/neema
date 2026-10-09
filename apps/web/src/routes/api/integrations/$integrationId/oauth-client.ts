@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { findIntegrationType } from "~/modules/integrations/catalog.ts";
+import { findAdapterType } from "~/modules/integrations/server/adapters.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { callbackPath } from "~/modules/integrations/server/oauth.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
@@ -21,7 +22,10 @@ export const Route = createFileRoute("/api/integrations/$integrationId/oauth-cli
           Effect.flatMap(IntegrationRepo, (repo) => repo.getConfig(params.integrationId)),
         );
         const type = row ? findIntegrationType(row.kind) : null;
-        if (!row || !origin?.startsWith("https://") || type?.toolSource !== "catalog")
+        // Only while someone could sign in with it: a switched-off or open server names no client.
+        const signsIn =
+          row?.enabled && findAdapterType(row.kind)?.connectMethods?.(row.config).oauth;
+        if (!row || !origin?.startsWith("https://") || type?.toolSource !== "catalog" || !signsIn)
           return new Response("Not found", { status: 404 });
         const clientId = `${origin}/api/integrations/${row.id}/oauth-client`;
         return Response.json(
