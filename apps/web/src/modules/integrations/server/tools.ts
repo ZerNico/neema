@@ -349,79 +349,84 @@ export function prepareIntegrationTools(input: {
             if (answer === "timeout")
               return failure("Nobody approved this action in time, so it did not run.", true);
           }
-          // Permissions may have changed during the wait; the prepared call has not.
-          const after = yield* currentConsent(reach);
-          if (after.kind === "refuse") return refusal(after);
-          if (after.kind === "ask" && before.kind !== "ask")
-            return failure(
-              "This action now needs approval. Ask the user before trying again.",
-              true,
+          // The last checks and the call run together: a change queued behind
+          // another sees what changed while it waited, not what held before.
+          const goOut = Effect.gen(function* () {
+            // Permissions may have changed during the wait; the prepared call has not.
+            const after = yield* currentConsent(reach);
+            if (after.kind === "refuse") return refusal(after);
+            if (after.kind === "ask" && before.kind !== "ask")
+              return failure(
+                "This action now needs approval. Ask the user before trying again.",
+                true,
+              );
+            const session = yield* input.sessionFor(offer.integrationId);
+            if (!session || session.connectionId !== offer.session.connectionId)
+              return failure(`${name} is no longer connected or available.`, true);
+            // Taken off, reclassified or changed since the answer started (an
+            // admin's review, a shared key): what was decided above no longer holds.
+            const current = session.tools.find((entry) => entry.name === tool.name);
+            if (
+              !current ||
+              current.access !== tool.access ||
+              current.revision !== tool.revision ||
+              (session.authKind === "shared" && current.access !== "read")
+            )
+              return failure(
+                `“${tool.title}” in ${name} changed since this answer started, so it did not run.`,
+                true,
+              );
+            const narrowed = yield* outsideScope(call);
+            if (narrowed) return narrowed;
+            // Unattended, each call reaching people takes one of the run's few
+            // uses before it goes out, so parallel calls cannot overshoot the cap.
+            const counted = offer.unattended !== null && allowance !== undefined;
+            if (counted && !(yield* input.allowanceUses.reserve(offer.integrationId, allowance)))
+              return failure(
+                `Not permitted: a scheduled run may ${allowance.label.toLowerCase()} at most ${allowance.cap} times, and this one has. ${instead}`,
+                true,
+              );
+            const execute = call.execute.pipe(
+              Effect.tapError((error) =>
+                counted && notSent(error)
+                  ? input.allowanceUses.release(offer.integrationId, allowance)
+                  : Effect.void,
+              ),
             );
-          const session = yield* input.sessionFor(offer.integrationId);
-          if (!session || session.connectionId !== offer.session.connectionId)
-            return failure(`${name} is no longer connected or available.`, true);
-          // Taken off, reclassified or changed since the answer started (an
-          // admin's review, a shared key): what was decided above no longer holds.
-          const current = session.tools.find((entry) => entry.name === tool.name);
-          if (
-            !current ||
-            current.access !== tool.access ||
-            current.revision !== tool.revision ||
-            (session.authKind === "shared" && current.access !== "read")
-          )
-            return failure(
-              `“${tool.title}” in ${name} changed since this answer started, so it did not run.`,
-              true,
+            return yield* execute.pipe(
+              Effect.map((result): IntegrationModelResult => {
+                const sources = (result.sources ?? []).map((source): IntegrationSource => ({
+                  kind: "integration",
+                  integrationId: offer.integrationId,
+                  index: input.indexer.indexForIntegration(offer.integrationId, source.url),
+                  title: source.title.slice(0, 200),
+                  url: source.url,
+                  snippet: source.snippet.slice(0, 500),
+                  read: source.read,
+                }));
+                if (sources.length) pendingSources.set(context.toolCallId, sources);
+                if (result.files?.length) pendingFiles.set(context.toolCallId, result.files);
+                return {
+                  ok: true,
+                  result: result.output,
+                  ...(result.link ? { link: result.link } : {}),
+                  ...(sources.length
+                    ? {
+                        citations: sources.map((source) => ({
+                          index: source.index,
+                          title: source.title,
+                          url: source.url,
+                        })),
+                      }
+                    : {}),
+                };
+              }),
+              Effect.catch(report(session)),
             );
-          const narrowed = yield* outsideScope(call);
-          if (narrowed) return narrowed;
-          // Unattended, each call reaching people takes one of the run's few
-          // uses before it goes out, so parallel calls cannot overshoot the cap.
-          const counted = offer.unattended !== null && allowance !== undefined;
-          if (counted && !(yield* input.allowanceUses.reserve(offer.integrationId, allowance)))
-            return failure(
-              `Not permitted: a scheduled run may ${allowance.label.toLowerCase()} at most ${allowance.cap} times, and this one has. ${instead}`,
-              true,
-            );
-          const execute = call.execute.pipe(
-            Effect.tapError((error) =>
-              counted && notSent(error)
-                ? input.allowanceUses.release(offer.integrationId, allowance)
-                : Effect.void,
-            ),
-          );
+          });
           // One change at a time per connection: nothing else in this answer
           // edits a draft between the check that read it and its sending.
-          return yield* (tool.access === "read" ? execute : changes.withPermits(1)(execute)).pipe(
-            Effect.map((result): IntegrationModelResult => {
-              const sources = (result.sources ?? []).map((source): IntegrationSource => ({
-                kind: "integration",
-                integrationId: offer.integrationId,
-                index: input.indexer.indexForIntegration(offer.integrationId, source.url),
-                title: source.title.slice(0, 200),
-                url: source.url,
-                snippet: source.snippet.slice(0, 500),
-                read: source.read,
-              }));
-              if (sources.length) pendingSources.set(context.toolCallId, sources);
-              if (result.files?.length) pendingFiles.set(context.toolCallId, result.files);
-              return {
-                ok: true,
-                result: result.output,
-                ...(result.link ? { link: result.link } : {}),
-                ...(sources.length
-                  ? {
-                      citations: sources.map((source) => ({
-                        index: source.index,
-                        title: source.title,
-                        url: source.url,
-                      })),
-                    }
-                  : {}),
-              };
-            }),
-            Effect.catch(report(session)),
-          );
+          return yield* tool.access === "read" ? goOut : changes.withPermits(1)(goOut);
         });
     }
   }

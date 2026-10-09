@@ -249,7 +249,13 @@ const offeredNames = (userId: string, conversationId: string) =>
   ).then((offers) => offers.flatMap((offer) => offer.session.tools.map((tool) => tool.name)));
 
 /** The prepared tools for one person's chat, as a generation builds them. */
-const toolsFor = (userId: string, conversationId: string, unattended = false) =>
+const toolsFor = (
+  userId: string,
+  conversationId: string,
+  unattended = false,
+  /** Counts permission reads, to know how far calls have got without sleeping. */
+  reads = { permissions: 0 },
+) =>
   run(
     Effect.gen(function* () {
       const service = yield* IntegrationService;
@@ -266,7 +272,9 @@ const toolsFor = (userId: string, conversationId: string, unattended = false) =>
         approvals,
         owner: { userId, conversationId, messageId: "answer" },
         permissionsFor: (integrationId) =>
-          service.permissionsFor(userId, conversationId, integrationId),
+          Effect.sync(() => void reads.permissions++).pipe(
+            Effect.andThen(service.permissionsFor(userId, conversationId, integrationId)),
+          ),
         sessionFor: (integrationId) =>
           service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
         // One durable row per provider call, as the stream observer mints it.
@@ -565,6 +573,60 @@ describe("an MCP server set up by an admin", () => {
       }),
     );
     expect(outcome).toMatchObject({ ok: false, refused: true });
+    expect(JSON.stringify(outcome)).toMatch(/changed since this answer started/);
+    expect(deleted).toEqual([]);
+  });
+
+  it("checks a change queued behind another only once its turn comes", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs queued", { url: `${base}/mcp`, auth: "none" });
+    const catalog = await check(id, admin);
+    const release = { mcpName: "release", enabled: true, access: "write" } as const;
+    await approve(admin, id, catalog.version!, [
+      release,
+      { mcpName: "delete_page", enabled: true, access: "destructive" },
+    ]);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.updatePreferences(admin, id, {
+          toolPermissions: { release: "allow", delete_page: "allow" },
+        }),
+      ),
+    );
+    const conversationId = await newConversation(admin);
+    const reads = { permissions: 0 };
+    const prepared = await toolsFor(admin, conversationId, false, reads);
+    deleted.length = 0;
+    const outcome = await run(
+      Effect.gen(function* () {
+        const approvals = yield* IntegrationApprovals;
+        // The release holds the change permit while it waits for an answer.
+        const first = yield* Effect.forkChild(
+          handlerOf(prepared, `int_${id}__release`)!({}, { toolCallId: "w1" }),
+        );
+        const [question] = yield* waitForPending(admin);
+        const second = yield* Effect.forkChild(
+          handlerOf(prepared, `int_${id}__delete_page`)!({ id: "p-3" }, { toolCallId: "w2" }),
+        );
+        // Its two checks before the permit (the release made three).
+        yield* Effect.sync(() => reads.permissions).pipe(
+          Effect.repeat({ until: (count) => count >= 5 }),
+        );
+        yield* Effect.promise(() =>
+          approve(admin, id, catalog.version!, [
+            release,
+            { mcpName: "delete_page", enabled: false, access: "destructive" },
+          ]),
+        );
+        yield* approvals.answer(admin, question!.callId, question!.promptId!, {
+          action: "accept",
+          values: { name: "v3" },
+        });
+        yield* Fiber.join(first);
+        return yield* Fiber.join(second);
+      }),
+    );
     expect(JSON.stringify(outcome)).toMatch(/changed since this answer started/);
     expect(deleted).toEqual([]);
   });
