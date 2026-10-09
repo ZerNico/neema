@@ -3,6 +3,7 @@ import { MarkdownManager } from "@tiptap/markdown";
 import { Node } from "@tiptap/pm/model";
 import type { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
+import { plainChips } from "./chips.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 
 export const documentSchema = getSchema(documentExtensions);
@@ -49,8 +50,14 @@ const withoutPending = (node: JSONContent): JSONContent =>
 const serialize = (json: JSONContent) =>
   manager.serialize(fenceInlineCode(withoutEmptyParagraphs(withoutPending(json))));
 
-/** The Markdown a tree reads as: what is stored beside it for cards, search and Copy. */
-export const toMarkdown = (node: Node) => serialize(node.toJSON());
+/**
+ * The Markdown the model reads and writes: chips as shortcodes
+ * (`[date value="…"]`, `[@ id="…" label="…"]`), so it can tell them from text.
+ */
+export const toModelMarkdown = (node: Node) => serialize(node.toJSON());
+
+/** The Markdown a tree reads as for people: stored beside it for cards, search and Copy. */
+export const toMarkdown = (node: Node) => plainChips(toModelMarkdown(node));
 
 /** A document tree from Markdown; empty Markdown is an empty document. */
 export const parseMarkdown = (markdown: string) =>

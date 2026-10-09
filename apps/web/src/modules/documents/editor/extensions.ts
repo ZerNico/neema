@@ -14,6 +14,7 @@ import { Markdown } from "@tiptap/markdown";
 import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { StarterKit } from "@tiptap/starter-kit";
 import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
+import { DateChip, PersonMention } from "./chips.ts";
 import { Pending } from "./pending.ts";
 import { isRemoteChange } from "./remote.ts";
 
@@ -156,6 +157,8 @@ export const documentExtensions: AnyExtension[] = [
   TableHeader,
   TableCell,
   Pending,
+  DateChip,
+  PersonMention,
   // Steps received from the server already carry the IDs their sender gave.
   UniqueID.configure({
     attributeName: BLOCK_ID,

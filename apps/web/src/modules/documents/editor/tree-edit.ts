@@ -1,7 +1,7 @@
 import { Fragment, Slice, type Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { BLOCK_ID, blockIdOf, ensureIds, findBlocks, isBlock, withFreshIds } from "./block-ids.ts";
-import { parseMarkdown, toMarkdown } from "./markdown.ts";
+import { parseMarkdown, toModelMarkdown } from "./markdown.ts";
 import { PENDING_INTENT_CHARS } from "./pending.ts";
 import { blockHash } from "./tree.ts";
 
@@ -160,7 +160,7 @@ const deleteRange = (tr: Transform, from: number, to: number) => {
 const blockText = (node: Node) =>
   node.type.name === "codeBlock"
     ? node.textContent
-    : toMarkdown(
+    : toModelMarkdown(
         node.type.schema.node("doc", null, [
           node.type.schema.node("paragraph", null, node.content),
         ]),

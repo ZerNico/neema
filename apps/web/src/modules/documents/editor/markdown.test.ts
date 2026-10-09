@@ -12,6 +12,7 @@ import {
   parseMarkdown,
   replaceDifference,
   toMarkdown,
+  toModelMarkdown,
 } from "./markdown.ts";
 
 const SAMPLE = [
@@ -112,6 +113,17 @@ describe("document Markdown", () => {
     });
     const ours = new MarkdownManager({ extensions: documentExtensions });
     expect(ours.parse(markdown)).toEqual(upstream.parse(markdown));
+  });
+
+  it("reads and writes chips as shortcodes for the model, and as text for people", () => {
+    const markdown = 'Ship on [date value="2026-10-20"] with [@ id="u1" label="Ada"].';
+    const doc = parseMarkdown(markdown);
+    const inline = doc.firstChild!;
+    expect(inline.child(1).type.name).toBe("dateChip");
+    expect(inline.child(1).attrs.value).toBe("2026-10-20");
+    expect(inline.child(3).type.name).toBe("mention");
+    expect(toModelMarkdown(doc)).toBe(markdown);
+    expect(toMarkdown(doc)).toBe("Ship on 2026-10-20 with @Ada.");
   });
 
   it("keeps raw HTML as text instead of markup", () => {

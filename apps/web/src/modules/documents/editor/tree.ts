@@ -1,6 +1,6 @@
 import type { Node } from "@tiptap/pm/model";
 import { blockIdOf, isBlock } from "./block-ids.ts";
-import { toMarkdown } from "./markdown.ts";
+import { toModelMarkdown } from "./markdown.ts";
 
 /** One emitted block and the fingerprint of what the model was shown for it. */
 export interface SeenBlock {
@@ -45,7 +45,7 @@ const attributes = (values: Record<string, string | number | boolean | null | un
  * it goes into the XML as it is.
  */
 const inline = (node: Node) =>
-  toMarkdown(
+  toModelMarkdown(
     node.type.schema.node("doc", null, [node.type.schema.node("paragraph", null, node.content)]),
   );
 
@@ -83,7 +83,7 @@ const render = (node: Node, seen: SeenBlock[]): string => {
     case "codeBlock":
       return `${head({ lang: node.attrs.language as string | null })}>${escapeText(node.textContent)}</${tag}>`;
     case "table":
-      return `${head()}>\n${toMarkdown(node.type.schema.node("doc", null, [node]))}\n</${tag}>`;
+      return `${head()}>\n${toModelMarkdown(node.type.schema.node("doc", null, [node]))}\n</${tag}>`;
     case "horizontalRule":
       return `${head()}/>`;
     case "pending":
