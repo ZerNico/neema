@@ -72,6 +72,32 @@ const reload = (sync: DocumentSync) => {
   open.delete(sync);
 };
 
+/** A minimal lock manager, shared as tabs of one browser share it. */
+const installLocks = () => {
+  const held = new Map<string, Promise<void>>();
+  const request = (
+    name: string,
+    ...args: [unknown, ((lock: unknown) => unknown)?] | [(lock: unknown) => unknown]
+  ) => {
+    const [options, callback] =
+      args.length === 2 ? args : [{}, args[0] as (lock: unknown) => unknown];
+    const ifAvailable = (options as { ifAvailable?: boolean }).ifAvailable;
+    const run = async () => {
+      const done = Promise.resolve(callback!({ name })).then(() => held.delete(name));
+      held.set(
+        name,
+        done.then(() => undefined),
+      );
+    };
+    const busy = held.get(name);
+    if (!busy) return run();
+    if (ifAvailable) return Promise.resolve(callback!(null));
+    return busy.then(run);
+  };
+  const query = async () => ({ held: [...held.keys()].map((name) => ({ name })) });
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request, query } });
+};
+
 describe("document connection", () => {
   it("keeps typing the server never got across a reload, and sends it after", async () => {
     const first = await connect(offline);
@@ -86,28 +112,7 @@ describe("document connection", () => {
   });
 
   it("gives a second tab its own identity while the first still owns the unsent steps", async () => {
-    // A minimal lock manager, as tabs of one browser share it.
-    const held = new Map<string, Promise<void>>();
-    const request = (
-      name: string,
-      ...args: [unknown, ((lock: unknown) => unknown)?] | [(lock: unknown) => unknown]
-    ) => {
-      const [options, callback] =
-        args.length === 2 ? args : [{}, args[0] as (lock: unknown) => unknown];
-      const ifAvailable = (options as { ifAvailable?: boolean }).ifAvailable;
-      const run = async () => {
-        const done = Promise.resolve(callback!({ name })).then(() => held.delete(name));
-        held.set(
-          name,
-          done.then(() => undefined),
-        );
-      };
-      const busy = held.get(name);
-      if (!busy) return run();
-      if (ifAvailable) return Promise.resolve(callback!(null));
-      return busy.then(run);
-    };
-    Object.defineProperty(navigator, "locks", { configurable: true, value: { request } });
+    installLocks();
     try {
       const first = await connect(offline);
       // Typed a key at a time, as a person does: one step per character.
@@ -137,6 +142,45 @@ describe("document connection", () => {
       reload(first);
       await waitFor(() => expect(second.recovered).toBe("Please"));
       expect(otherTab.get("plan")!.recovered).toBe("Please");
+    } finally {
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("keeps the words of saved steps that no longer load, instead of dropping them", async () => {
+    // Saved before a schema change: its document no longer fits the schema.
+    outbox.set("plan", {
+      clientId: "old",
+      revision: 0,
+      doc: { type: "no-such-node" },
+      steps: [
+        JSON.stringify({
+          stepType: "replace",
+          from: 1,
+          to: 1,
+          slice: { content: [{ type: "text", text: "Saved words" }] },
+        }),
+      ],
+      savedAt: Date.now(),
+    });
+    const sync = await connect(online);
+    expect(sync.recovered).toBe("Saved words");
+    expect(markdown(sync)).toBe("Keep this\n\nRemove me");
+  });
+
+  it("keeps the typing of a tab that did not own the outbox, once it has closed", async () => {
+    installLocks();
+    try {
+      const owner = await connect(online);
+      const other = await connect(offline);
+      other.editor!.commands.insertContentAt(at(other, "Remove"), "Do not ");
+      reload(other);
+      await outbox.flush();
+      reload(owner);
+      await outbox.flush();
+      // Whoever owns the document next finds what the closed tab left.
+      const next = await connect(online);
+      await waitFor(() => expect(next.recovered).toBe("Do not"));
     } finally {
       Reflect.deleteProperty(navigator, "locks");
     }

@@ -45,6 +45,8 @@ export interface DeviceCache<V> {
    * since this one warmed. A local change not yet written stays ahead of it.
    */
   reload(key: string): Promise<V | undefined>;
+  /** Every stored entry whose key starts with `prefix`, as storage holds them now. */
+  reloadAll(prefix: string): Promise<Array<[string, V]>>;
   set(key: string, value: V): void;
   delete(key: string): void;
 }
@@ -201,6 +203,32 @@ class NamespaceCache<V> implements DeviceCache<V> {
 
   get(key: string): V | undefined {
     return this.memory.get(key)?.value;
+  }
+
+  async reloadAll(prefix: string): Promise<Array<[string, V]>> {
+    await ownerKnown;
+    const forOwner = owner;
+    const db = await open();
+    const local = () =>
+      [...this.memory]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, entry]) => [key, entry.value] as [string, V]);
+    if (!db || forOwner === null) return local();
+    try {
+      const tx = db.transaction(STORE, "readonly");
+      const range = IDBKeyRange.bound(
+        [forOwner, this.options.namespace, prefix],
+        [forOwner, this.options.namespace, `${prefix}\uffff`],
+      );
+      const [keys, values] = await Promise.all([
+        request(tx.objectStore(STORE).getAllKeys(range)),
+        request(tx.objectStore(STORE).getAll(range)),
+      ]);
+      if (owner !== forOwner) return local();
+      return keys.map((raw, index) => [(raw as Key)[2], (values[index] as Stored<V>).value]);
+    } catch {
+      return local();
+    }
   }
 
   async reload(key: string): Promise<V | undefined> {

@@ -20,6 +20,8 @@ export interface OutboxStore {
   get(documentId: string): OutboxEntry | undefined;
   /** The entry as stored now, which another tab may have written. */
   reload(documentId: string): Promise<OutboxEntry | undefined>;
+  /** Every stored entry under a key prefix, which other tabs may have written. */
+  reloadAll(prefix: string): Promise<Array<[string, OutboxEntry]>>;
   /** Writes pending changes, so another tab reading after this sees them. */
   flush(): Promise<void>;
   set(documentId: string, entry: OutboxEntry): void;

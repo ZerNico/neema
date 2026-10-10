@@ -159,6 +159,43 @@ const claimOutbox = (documentId: string, released: Promise<void>, onOwned: () =>
     return owned;
   });
 };
+/** The lock a connection holds while it lives, so the outbox's owner can tell its entry from a closed tab's. */
+const tabLock = (documentId: string, tab: string) => `document-outbox:${documentId}:tab:${tab}`;
+const holdTabLock = (documentId: string, tab: string, released: Promise<void>) => {
+  if (typeof navigator !== "undefined" && navigator.locks)
+    void navigator.locks.request(tabLock(documentId, tab), () => released);
+};
+/** The tabs on this device with a live connection to the document. */
+const liveTabs = async (documentId: string) => {
+  if (typeof navigator === "undefined" || !navigator.locks) return new Set<string>();
+  const prefix = tabLock(documentId, "");
+  const { held = [] } = await navigator.locks.query();
+  return new Set(
+    held.flatMap(({ name }) => (name?.startsWith(prefix) ? [name.slice(prefix.length)] : [])),
+  );
+};
+/**
+ * Every text field a saved step holds, for an entry whose steps no longer
+ * load (a schema changed since): rougher than the change itself, but the
+ * person's words are not lost.
+ */
+const rawText = (steps: ReadonlyArray<string>) => {
+  const texts: string[] = [];
+  const walk = (value: unknown) => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === "object")
+      for (const [key, inner] of Object.entries(value))
+        if (key === "text" && typeof inner === "string") texts.push(inner);
+        else walk(inner);
+  };
+  for (const json of steps)
+    try {
+      walk(JSON.parse(json));
+    } catch {
+      /* Not JSON at all: nothing to read. */
+    }
+  return texts.join("").trim();
+};
 const randomClient = () =>
   typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -209,6 +246,13 @@ export class DocumentSync {
   #comments: ReadonlyArray<DocumentComment> = [];
   /** Only the tab that owns the device's outbox entry for this document reads or writes it. */
   #ownsOutbox = false;
+  /**
+   * This connection's own name on the device. A connection that does not own
+   * the document's entry saves under it instead, so its typing survives it
+   * too; the next owner takes the entries of connections that are gone.
+   */
+  readonly #tab = randomClient();
+  #collectPending = false;
   /** An entry taken over before this tab had an editor to read it with; null for none. */
   #awaitingEditor: OutboxEntry | null | undefined = undefined;
   #release: () => void = () => undefined;
@@ -218,6 +262,7 @@ export class DocumentSync {
 
   constructor(private readonly options: DocumentSyncOptions) {
     this.#clientId = randomClient();
+    holdTabLock(options.documentId, this.#tab, this.#released);
     if (typeof window !== "undefined") {
       window.addEventListener("pagehide", this.#onLeave);
       document.addEventListener("visibilitychange", this.#onLeave);
@@ -232,6 +277,7 @@ export class DocumentSync {
           this.#clientId = saved.clientId;
           this.#restore(saved);
         }
+        if (owned) void this.#collectClosedTabs();
         this.#connect();
       },
     );
@@ -345,7 +391,40 @@ export class DocumentSync {
       if (texts.length) this.#keepRecovered([], texts.join("\n\n"));
     }
     this.#save();
+    void this.#collectClosedTabs();
     this.#notify();
+  }
+  /**
+   * What connections that are gone saved under their own names, kept as
+   * recovered text: typed under other identities, it cannot be rebased.
+   */
+  async #collectClosedTabs() {
+    const schema = this.#editor?.schema;
+    if (!schema) {
+      this.#collectPending = true;
+      return;
+    }
+    this.#collectPending = false;
+    const prefix = `${this.options.documentId}:`;
+    const [entries, live] = await Promise.all([
+      this.options.outbox.reloadAll(prefix),
+      liveTabs(this.options.documentId),
+    ]);
+    if (this.#destroyed || !this.#ownsOutbox) return;
+    const texts: string[] = [];
+    for (const [key, entry] of entries) {
+      const tab = key.slice(prefix.length);
+      if (tab === this.#tab || live.has(tab)) continue;
+      const text = [entry.recovered ?? "", changedText(schema, entry) || rawText(entry.steps)]
+        .filter(Boolean)
+        .join("\n\n");
+      if (text) texts.push(text);
+      this.options.outbox.delete(key);
+    }
+    if (texts.length) {
+      this.#keepRecovered([], texts.join("\n\n"));
+      this.#notify();
+    }
   }
 
   /**
@@ -359,8 +438,13 @@ export class DocumentSync {
     void this.options.outbox.flush();
   };
 
+  get #tabKey() {
+    return `${this.options.documentId}:${this.#tab}`;
+  }
   #dropOutbox() {
     if (this.#ownsOutbox) this.options.outbox.delete(this.options.documentId);
+    else if (this.options.outbox.get(this.#tabKey) !== undefined)
+      this.options.outbox.delete(this.#tabKey);
   }
 
   #notify() {
@@ -417,6 +501,7 @@ export class DocumentSync {
     });
     this.#confirmed = this.#editor.state.doc;
     if (this.#awaitingEditor !== undefined) this.#adopt(this.#awaitingEditor);
+    else if (this.#collectPending) void this.#collectClosedTabs();
   }
 
   /** Reopens on what this device saved: its base document, then its unsent steps on top. */
@@ -425,16 +510,21 @@ export class DocumentSync {
     try {
       this.#createEditor(saved.doc, saved.revision);
       const editor = this.#editor!;
+      // The editor would quietly start empty on content it cannot read; this throws instead.
+      Node.fromJSON(editor.schema, saved.doc).check();
       const steps = saved.steps.map((json) => Step.fromJSON(editor.schema, JSON.parse(json)));
       const tr = editor.state.tr.setMeta("addToHistory", false);
       for (const step of steps) tr.step(step);
       editor.view.dispatch(tr);
     } catch {
-      // A saved entry from another schema or a damaged one: start from the server.
+      // A saved entry from another schema or a damaged one: start from the
+      // server, with its words kept as recovered text rather than dropped.
       this.#editor?.destroy();
       this.#editor = null;
       this.#confirmed = null;
-      this.#dropOutbox();
+      const text = rawText(saved.steps);
+      if (text) this.#recovered = this.#recovered ? `${this.#recovered}\n\n${text}` : text;
+      if (!this.#recovered) this.#dropOutbox();
     }
   }
 
@@ -455,13 +545,16 @@ export class DocumentSync {
   }
   #save() {
     const editor = this.#editor;
-    if (this.#destroyed || !editor || !this.#confirmed || !this.#ownsOutbox) return;
+    if (this.#destroyed || !editor || !this.#confirmed) return;
     const unconfirmed = unconfirmedOf(this.#collab, editor.state);
     if (!unconfirmed.length && !this.#recovered) {
       this.#dropOutbox();
       return;
     }
-    this.options.outbox.set(this.options.documentId, {
+    // Owning the document's entry now, this connection's own is spent.
+    if (this.#ownsOutbox && this.options.outbox.get(this.#tabKey) !== undefined)
+      this.options.outbox.delete(this.#tabKey);
+    this.options.outbox.set(this.#ownsOutbox ? this.options.documentId : this.#tabKey, {
       clientId: this.#clientId,
       revision: getVersion(editor.state),
       doc: this.#confirmed.toJSON() as Record<string, unknown>,
