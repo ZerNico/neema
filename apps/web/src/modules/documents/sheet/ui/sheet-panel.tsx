@@ -52,7 +52,6 @@ import {
   type GridContext,
 } from "@chat/sheet-react/commands";
 import { cellDisplay, cellSource, safeLink } from "@chat/sheet-react/display";
-import { columnPx, drawnLayout, rowPx } from "@chat/sheet-react/layout";
 import {
   SheetGrid,
   type CellEditing,
@@ -103,7 +102,6 @@ import { pictureOf } from "./picture.ts";
 import { PivotDialog, type PivotDraft } from "./pivot-dialog.tsx";
 import { pivotFormula } from "./pivot.ts";
 import { printHtml } from "@chat/sheet-react/print";
-import { collapsedIds } from "@chat/sheet/model/outline";
 import {
   groupSelection,
   outlineAxis,
@@ -265,6 +263,7 @@ export default function SheetPanelBody({
   const [circling, setCircling] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
+  const [cardAnchor, setCardAnchor] = useState<HTMLElement | null>(null);
   const [zoom, setZoom] = useSheetZoom(gridHost);
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
@@ -901,36 +900,11 @@ export default function SheetPanelBody({
         right: cols.at(selectedBox.c2)!,
       }
     : (shownThread?.box ?? null);
-  // Measured as the grid draws: at this zoom, rows a filter or a group hides taking no space.
-  const shownRowLayout = drawnLayout(
-    doc.sheet[sheet]!.rows,
-    doc.sheet[sheet]!.rowProps,
-    [...hiddenByFilter, ...collapsedIds(doc, sheet, "rows")],
-    (props) => rowPx(props) * zoom,
-  );
-  const colLayout = drawnLayout(
-    doc.sheet[sheet]!.cols,
-    doc.sheet[sheet]!.colProps,
-    collapsedIds(doc, sheet, "columns"),
-    (props) => columnPx(props) * zoom,
-  );
-  /** The card's anchor: the cells' box on the page, read when placed, so it follows scrolling. */
-  const cardAnchor = cardBox
+  // The grid places a box over the card's cells; the card sits beside it as the grid scrolls.
+  const cardCells = cardBox
     ? {
-        contextElement: gridHost ?? undefined,
-        getBoundingClientRect: () => {
-          const content = gridHost?.querySelector("[data-sheet-content]");
-          const at = content?.getBoundingClientRect() ?? new DOMRect();
-          const top = at.top + shownRowLayout.starts[cardBox.top - 1]!;
-          const left = at.left + colLayout.starts[cardBox.left - 1]!;
-          return DOMRect.fromRect({
-            x: left,
-            y: top,
-            width: colLayout.starts[cardBox.right]! - colLayout.starts[cardBox.left - 1]!,
-            height:
-              shownRowLayout.starts[cardBox.bottom]! - shownRowLayout.starts[cardBox.top - 1]!,
-          });
-        },
+        anchor: { r: rows.ids[cardBox.top - 1]!, c: cols.ids[cardBox.left - 1]! },
+        head: { r: rows.ids[cardBox.bottom - 1]!, c: cols.ids[cardBox.right - 1]! },
       }
     : null;
   const threadsInOrder = placed
@@ -1187,6 +1161,7 @@ export default function SheetPanelBody({
                   ])
                 }
                 decorations={decorations}
+                beside={cardCells ? { cells: cardCells, onElement: setCardAnchor } : null}
                 overlays={[...overlays, ...imageOverlays]}
                 selectedOverlay={
                   pickedChart

@@ -170,6 +170,14 @@ export interface SheetGridProps {
   /** A row or column dragged to a new size, in pixels. */
   readonly onResize?: (axis: Axis, id: string, px: number) => void;
   readonly decorations?: readonly GridDecoration[];
+  /**
+   * A box laid invisibly over some cells, for something outside the grid to
+   * sit beside (a comment card): the grid places it, as it scrolls and zooms.
+   */
+  readonly beside?: {
+    readonly cells: SheetSelection;
+    readonly onElement: (element: HTMLElement | null) => void;
+  } | null;
   readonly overlays?: readonly GridOverlay[];
   /** The overlay selected instead of cells, by key. */
   readonly selectedOverlay?: string | null;
@@ -225,6 +233,17 @@ function stampText(kind: "date" | "time", locale: SheetLocale) {
     return formatValue((now.getHours() * 60 + now.getMinutes()) / 1440, "h:mm", locale)?.text ?? "";
   const serial = serialOf(now.getFullYear(), now.getMonth() + 1, now.getDate()) ?? 0;
   return formatValue(serial, locale.shortDate, locale)?.text ?? "";
+}
+
+/** The invisible box something outside the grid sits beside, handed out as it mounts. */
+function BesideBox({
+  rect,
+  onElement,
+}: {
+  rect: { top: number; left: number; width: number; height: number };
+  onElement: (element: HTMLElement | null) => void;
+}) {
+  return <div ref={onElement} aria-hidden className="pointer-events-none absolute" style={rect} />;
 }
 
 const FALLBACK = { width: 960, height: 640 };
@@ -286,6 +305,7 @@ export function SheetGrid({
   onPaste,
   onResize,
   decorations = NO_DECORATIONS,
+  beside = null,
   overlays = NO_OVERLAYS,
   selectedOverlay = null,
   onOverlaySelect,
@@ -1716,6 +1736,9 @@ export function SheetGrid({
       width: cols.starts[right + 1]! - cols.starts[left]!,
     };
   };
+  const besideRect = beside ? rectOf(beside.cells) : null;
+  const anchorBox =
+    beside && besideRect ? <BesideBox rect={besideRect} onElement={beside.onElement} /> : null;
   const others = decorations.flatMap((decoration) => {
     const rect = rectOf(decoration.selection);
     if (rect && decoration.marker)
@@ -2028,6 +2051,7 @@ export function SheetGrid({
         >
           {cells}
           {others}
+          {anchorBox}
           {moreBoxes}
           {selectionBox}
           {fillPreview}
