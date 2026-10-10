@@ -87,12 +87,15 @@ export interface Sheet {
   readonly filter?: SheetFilter;
   /** Its conditional formats, the first taking priority. */
   readonly conditional?: readonly ConditionalFormat[];
+  /** What its ranges' cells may hold. */
+  readonly validations?: readonly Validation[];
 }
 
 export type { Chart, ChartSeries } from "./chart.ts";
 import type { Chart } from "./chart.ts";
 import type { SheetFilter } from "./filter.ts";
 import type { ConditionalFormat } from "./conditional.ts";
+import type { Validation } from "./validation.ts";
 
 /** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
 export interface SheetSettings {

@@ -1,6 +1,7 @@
 import { isChart, isChartPatch, type ChartPatch } from "./chart.ts";
 import { isSheetFilter, type SheetFilter } from "./filter.ts";
 import { isConditionalList, type ConditionalFormat } from "./conditional.ts";
+import { isValidationList, type Validation } from "./validation.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -93,6 +94,8 @@ export type SheetOp =
   | { readonly op: "chartDelete"; readonly id: string }
   /** A sheet's whole AutoFilter set, or taken off with null. */
   | { readonly op: "filter"; readonly sh: string; readonly filter: SheetFilter | null }
+  /** A sheet's whole list of data validations. */
+  | { readonly op: "validations"; readonly sh: string; readonly list: readonly Validation[] }
   /** A sheet's whole list of conditional formats, in priority order. */
   | {
       readonly op: "conditional";
@@ -156,6 +159,7 @@ const OP_NAMES = new Set([
   "sort",
   "filter",
   "conditional",
+  "validations",
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -305,6 +309,8 @@ function validOp(op: Record<string, unknown>): boolean {
       return isId(op.sh) && (op.filter === null || isSheetFilter(op.filter));
     case "conditional":
       return isId(op.sh) && isConditionalList(op.list);
+    case "validations":
+      return isId(op.sh) && isValidationList(op.list);
     default:
       return false;
   }
