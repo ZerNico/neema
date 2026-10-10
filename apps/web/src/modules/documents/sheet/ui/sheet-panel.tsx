@@ -21,7 +21,7 @@ import { useContext, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
-import { NEW_SHEET, liveSheets, positions } from "@chat/sheet/model";
+import { NEW_SHEET, liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import {
   chartFromSelection,
@@ -43,6 +43,7 @@ import {
   type GridContext,
 } from "@chat/sheet-react/commands";
 import { cellDisplay, cellSource, cellStyle } from "@chat/sheet-react/display";
+import { axisLayout, columnPx, rowPx } from "@chat/sheet-react/layout";
 import {
   SheetGrid,
   type CellEditing,
@@ -65,6 +66,7 @@ import {
 } from "~/ui/primitives/context-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { uuidv7 } from "uuidv7";
@@ -98,6 +100,7 @@ import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
 import { ChartEditor } from "./chart-editor/chart-editor.tsx";
 import { FillOptions, type FillChoice } from "./fill-options.tsx";
 import { SheetChart } from "./sheet-chart.tsx";
+import { SheetCommentsList } from "./sheet-comments.tsx";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
@@ -161,6 +164,10 @@ export default function SheetPanelBody({
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // Writing a new thread on the active cell.
   const [commenting, setCommenting] = useState(false);
+  // A thread whose card was closed stays closed until the selection moves.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  // The grid's box, which the comment card is placed against and follows the scrolling of.
+  const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
   // A chart selected instead of cells, and the chart open in the editor, by ID.
@@ -208,15 +215,22 @@ export default function SheetPanelBody({
   const style = cellStyle(doc.sheet[sheet]!.cells[head.r]?.[head.c]?.s);
   const comments = state.comments;
   const roots = comments.filter((each) => each.id === each.threadId);
-  /** Threads whose cell is on this sheet, by where they sit. */
+  /** Threads on this sheet with the cells they sit on, by position; a gone corner leaves the first cell. */
   const placed = roots.flatMap((root) => {
     const at = doc.anchors[root.id];
-    return at && at.sh === sheet && rows.at(at.r) !== undefined && cols.at(at.c) !== undefined
-      ? [{ root, at }]
-      : [];
+    const [top, left] = at && at.sh === sheet ? [rows.at(at.r), cols.at(at.c)] : [];
+    if (!at || top === undefined || left === undefined) return [];
+    const bottom = Math.max(top, rows.at(at.r2 ?? at.r) ?? top);
+    const right = Math.max(left, cols.at(at.c2 ?? at.c) ?? left);
+    return [{ root, at, box: { top, left, bottom, right } }];
   });
-  const here = placed.filter(({ at }) => at.r === head.r && at.c === head.c);
+  const [headRow, headCol] = [rows.at(head.r)!, cols.at(head.c)!];
+  const here = placed.filter(
+    ({ box }) =>
+      headRow >= box.top && headRow <= box.bottom && headCol >= box.left && headCol <= box.right,
+  );
   const shownThread = here.find(({ root }) => !root.resolvedAt) ?? here[0] ?? null;
+  const cardOpen = commenting || (shownThread !== null && dismissed !== shownThread.root.id);
   const context: GridContext = {
     doc,
     sheet,
@@ -229,7 +243,10 @@ export default function SheetPanelBody({
     if (!readOnly && ops.length) sync!.dispatch(ops);
   };
   const select = (next: SheetSelection) => {
-    if (next.head.r !== active.head.r || next.head.c !== active.head.c) setCommenting(false);
+    if (next.head.r !== active.head.r || next.head.c !== active.head.c) {
+      setCommenting(false);
+      setDismissed(null);
+    }
     setSelection(next);
     sync?.setCursor({ sheet, anchor: next.anchor, head: next.head });
   };
@@ -279,14 +296,39 @@ export default function SheetPanelBody({
   };
   const decorations: GridDecoration[] = [
     // A corner mark on each open thread's cell.
+    // A corner mark on each open thread's last column, as Excel marks a note.
     ...placed
       .filter(({ root }) => !root.resolvedAt)
-      .map(({ root, at }) => ({
-        key: `thread:${root.id}`,
-        selection: { anchor: at, head: at },
-        color: "var(--warning)",
-        marker: true,
-      })),
+      .map(({ root, at, box }) => {
+        const corner = { r: at.r, c: cols.ids[box.right - 1]! };
+        return {
+          key: `thread:${root.id}`,
+          selection: { anchor: corner, head: corner },
+          color: "var(--warning)",
+          marker: true,
+        };
+      }),
+    // The cells a shown thread is about, outlined while its card is open.
+    ...(shownThread &&
+    cardOpen &&
+    shownThread.box.bottom + shownThread.box.right > shownThread.box.top + shownThread.box.left
+      ? [
+          {
+            key: `thread-range:${shownThread.root.id}`,
+            selection: {
+              anchor: {
+                r: rows.ids[shownThread.box.top - 1]!,
+                c: cols.ids[shownThread.box.left - 1]!,
+              },
+              head: {
+                r: rows.ids[shownThread.box.bottom - 1]!,
+                c: cols.ids[shownThread.box.right - 1]!,
+              },
+            },
+            color: "var(--warning)",
+          },
+        ]
+      : []),
     // Find's matches, a few hundred at most, outlined without a name.
     ...matches.slice(0, 500).map((match) => ({
       key: `find:${match.r}:${match.c}`,
@@ -303,6 +345,7 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const cellName = (r: string, c: string) => `${columnLetters(cols.at(c)!)}${rows.at(r)}`;
   const editedChart = chartEditing ? doc.charts[chartEditing] : undefined;
   // The selection as a range by IDs, corners in order.
   const selectedBox = (() => {
@@ -383,19 +426,14 @@ export default function SheetPanelBody({
         ),
       };
     });
-  const cellOf = (at: { r: string; c: string }) => [sheet, at.r, at.c, at.r, at.c];
-  const sendToAssistant = async (
-    thread: string,
-    quote: string,
-    body: string,
-    at: { r: string; c: string },
-  ) => {
+  const cellOf = (at: CellAnchor) => [sheet, at.r, at.c, at.r2 ?? at.r, at.c2 ?? at.c];
+  const sendToAssistant = async (thread: string, quote: string, body: string, at: CellAnchor) => {
     const sent = await ask?.(commentMessage(quote, body), { blocks: cellOf(at), thread }).catch(
       () => false,
     );
     if (!sent) toastError("Couldn’t send it to the assistant", null);
   };
-  const threadActions = (at: { r: string; c: string }): ThreadActions | null =>
+  const threadActions = (at: CellAnchor): ThreadActions | null =>
     readOnly
       ? null
       : {
@@ -422,9 +460,24 @@ export default function SheetPanelBody({
         };
   const startThread = async (body: string, toAssistant: boolean) => {
     const threadId = uuidv7();
-    const shown = cellDisplay(values.value(sheet, head.r, head.c), style, locale).text;
-    const quote = `${address}${shown ? ` · ${shown}` : ""}`.slice(0, 500);
-    const at = { r: head.r, c: head.c };
+    // The selection, as Excel and Sheets comment on a range; its first cell's text for the quote.
+    const box = selectedBox;
+    const range = box.r1 !== box.r2 || box.c1 !== box.c2;
+    const at: CellAnchor = {
+      sh: sheet,
+      r: box.r1,
+      c: box.c1,
+      ...(range ? { r2: box.r2, c2: box.c2 } : {}),
+    };
+    const shown = cellDisplay(
+      values.value(sheet, box.r1, box.c1),
+      cellStyle(doc.sheet[sheet]!.cells[box.r1]?.[box.c1]?.s),
+      locale,
+    ).text;
+    const where = range
+      ? `${cellName(box.r1, box.c1)}:${cellName(box.r2, box.c2)}`
+      : cellName(box.r1, box.c1);
+    const quote = `${where}${shown ? ` · ${shown}` : ""}`.slice(0, 500);
     try {
       await commentOnDocument({
         data: {
@@ -433,7 +486,7 @@ export default function SheetPanelBody({
           body,
           quote,
           toAssistant,
-          cell: { sh: sheet, ...at },
+          cell: at,
         },
       });
     } catch (error) {
@@ -443,6 +496,85 @@ export default function SheetPanelBody({
     setCommenting(false);
     if (toAssistant) await sendToAssistant(threadId, quote, body, at);
   };
+  // Where the comment card sits: beside the thread's cells, or the selection a new one is about.
+  const cardBox = commenting
+    ? {
+        top: rows.at(selectedBox.r1)!,
+        left: cols.at(selectedBox.c1)!,
+        bottom: rows.at(selectedBox.r2)!,
+        right: cols.at(selectedBox.c2)!,
+      }
+    : (shownThread?.box ?? null);
+  const rowLayout = axisLayout(doc.sheet[sheet]!.rows, doc.sheet[sheet]!.rowProps, rowPx);
+  const colLayout = axisLayout(doc.sheet[sheet]!.cols, doc.sheet[sheet]!.colProps, columnPx);
+  /** The card's anchor: the cells' box on the page, read when placed, so it follows scrolling. */
+  const cardAnchor = cardBox
+    ? {
+        contextElement: gridHost ?? undefined,
+        getBoundingClientRect: () => {
+          const content = gridHost?.querySelector("[data-sheet-content]");
+          const at = content?.getBoundingClientRect() ?? new DOMRect();
+          const top = at.top + rowLayout.starts[cardBox.top - 1]!;
+          const left = at.left + colLayout.starts[cardBox.left - 1]!;
+          return DOMRect.fromRect({
+            x: left,
+            y: top,
+            width: colLayout.starts[cardBox.right]! - colLayout.starts[cardBox.left - 1]!,
+            height: rowLayout.starts[cardBox.bottom]! - rowLayout.starts[cardBox.top - 1]!,
+          });
+        },
+      }
+    : null;
+  const threadsInOrder = placed
+    .toSorted((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
+    .map(({ root, at, box }) => ({
+      root,
+      at,
+      box,
+      where:
+        box.top === box.bottom && box.left === box.right
+          ? cellName(at.r, at.c)
+          : `${cellName(at.r, at.c)}:${cellName(rows.ids[box.bottom - 1]!, cols.ids[box.right - 1]!)}`,
+      replies: comments.filter((each) => each.threadId === root.id && each.id !== root.id).length,
+    }));
+  const commentButtons = (
+    <>
+      {readOnly ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Add comment"
+                className="text-muted-foreground"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setCommenting(true)}
+              />
+            }
+          >
+            <HugeiconsIcon icon={CommentAdd01Icon} strokeWidth={2} />
+          </TooltipTrigger>
+          <TooltipContent>Add comment</TooltipContent>
+        </Tooltip>
+      )}
+      <SheetCommentsList
+        threads={threadsInOrder}
+        onPick={(thread) => {
+          const found = threadsInOrder.find(({ root }) => root.id === thread);
+          if (!found) return;
+          setDismissed(null);
+          select({
+            anchor: {
+              r: rows.ids[found.box.bottom - 1]!,
+              c: cols.ids[found.box.right - 1]!,
+            },
+            head: { r: found.at.r, c: found.at.c },
+          });
+        }}
+      />
+    </>
+  );
   const barText =
     editing && editing.at.r === head.r && editing.at.c === head.c ? editing.text : source;
 
@@ -459,6 +591,7 @@ export default function SheetPanelBody({
               onUndo={() => sync?.undo()}
               onRedo={() => sync?.redo()}
               onCommand={onToolbar}
+              extra={commentButtons}
               preview={(code) => {
                 const value = values.value(sheet, head.r, head.c);
                 const shown = typeof value === "number" ? value : 1234.5;
@@ -507,29 +640,6 @@ export default function SheetPanelBody({
           }}
         />
       </div>
-      {shownThread || commenting ? (
-        <div className="border-border max-h-64 shrink-0 overflow-y-auto border-b p-3">
-          {shownThread ? (
-            <CommentThread
-              root={shownThread.root}
-              replies={comments.filter(
-                (each) => each.threadId === shownThread.root.id && each.id !== shownThread.root.id,
-              )}
-              anchored
-              me={me}
-              actions={threadActions(shownThread.at)}
-              expanded
-            />
-          ) : (
-            <CommentInput
-              placeholder={`Comment on ${address}`}
-              canAsk={ask !== null}
-              autoFocus
-              onSubmit={startThread}
-            />
-          )}
-        </div>
-      ) : null}
       {finding ? (
         <div className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3">
           <Input
@@ -588,7 +698,7 @@ export default function SheetPanelBody({
       <div className="flex min-h-0 flex-1">
         <ContextMenu>
           <ContextMenuTrigger className="relative min-h-0 min-w-0 flex-1">
-            <div className="absolute inset-0">
+            <div ref={setGridHost} className="absolute inset-0">
               <SheetGrid
                 key={sheet}
                 doc={doc}
@@ -743,7 +853,7 @@ export default function SheetPanelBody({
                 <MenuItem
                   icon={CommentAdd01Icon}
                   label="Comment"
-                  disabled={readOnly || !!shownThread}
+                  disabled={readOnly}
                   onClick={() => setCommenting(true)}
                 />
                 <ContextMenuSeparator />
@@ -832,6 +942,43 @@ export default function SheetPanelBody({
           />
         ) : null}
       </div>
+      <Popover
+        open={cardOpen && cardAnchor !== null}
+        onOpenChange={(next) => {
+          if (next) return;
+          setCommenting(false);
+          if (shownThread) setDismissed(shownThread.root.id);
+        }}
+      >
+        {/* A thread opens beside its cells without taking focus from the grid; a new comment's field takes it. */}
+        <PopoverContent
+          anchor={cardAnchor}
+          side="right"
+          align="start"
+          className="w-80"
+          initialFocus={commenting}
+        >
+          {commenting ? (
+            <CommentInput
+              placeholder={`Comment on ${cardBox && (cardBox.top !== cardBox.bottom || cardBox.left !== cardBox.right) ? `${cellName(selectedBox.r1, selectedBox.c1)}:${cellName(selectedBox.r2, selectedBox.c2)}` : address}`}
+              canAsk={ask !== null}
+              autoFocus
+              onSubmit={startThread}
+            />
+          ) : shownThread ? (
+            <CommentThread
+              root={shownThread.root}
+              replies={comments.filter(
+                (each) => each.threadId === shownThread.root.id && each.id !== shownThread.root.id,
+              )}
+              anchored
+              me={me}
+              actions={threadActions(shownThread.at)}
+              expanded
+            />
+          ) : null}
+        </PopoverContent>
+      </Popover>
       <div className="border-border flex shrink-0 items-center gap-3 border-t pr-3">
         <div
           role="tablist"

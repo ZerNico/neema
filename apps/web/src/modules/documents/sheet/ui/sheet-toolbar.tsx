@@ -33,6 +33,7 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ReactNode } from "react";
 import type { ChartKind } from "@chat/sheet-react/commands";
 import type { CellStyle } from "@chat/sheet-react/display";
 import type {
@@ -129,6 +130,7 @@ export function SheetToolbar({
   onRedo,
   onCommand,
   preview,
+  extra,
 }: {
   style: CellStyle;
   canUndo: boolean;
@@ -139,8 +141,18 @@ export function SheetToolbar({
   onCommand: (command: ToolbarCommand) => void;
   /** The active cell's value as a number format would show it, for the format list. */
   preview: (code: string | null) => string;
+  /** Drawn at the toolbar's end, also for a reader: the comment buttons. */
+  extra?: ReactNode;
 }) {
-  if (readOnly) return null;
+  if (readOnly)
+    return extra ? (
+      <Toolbar.Root
+        aria-label="Formatting"
+        className="flex min-w-0 flex-1 items-center justify-end"
+      >
+        {extra}
+      </Toolbar.Root>
+    ) : null;
   const format = (patch: StylePatch) => onCommand({ kind: "format", patch });
   const toggle = (key: "bold" | "italic" | "underline" | "strike" | "wrap") =>
     format({ [key]: style[key] ? null : true });
@@ -361,6 +373,12 @@ export function SheetToolbar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </ToolbarMenu>
+      {extra ? (
+        <>
+          <Separator />
+          {extra}
+        </>
+      ) : null}
     </Toolbar.Root>
   );
 }

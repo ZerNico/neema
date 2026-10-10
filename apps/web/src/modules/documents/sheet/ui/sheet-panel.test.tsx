@@ -159,6 +159,41 @@ describe("an open sheet", () => {
     expect(screen.getByText("Check this total")).toBeTruthy();
   });
 
+  it("opens a thread on a range from any of its cells, and lists every thread", async () => {
+    const doc = apply(emptyDoc(), {
+      op: "anchor",
+      thread: "t1",
+      at: { sh: "s1", r: "s1.r2", c: "s1.c1", r2: "s1.r3", c2: "s1.c2" },
+    });
+    const root = {
+      id: "t1",
+      threadId: "t1",
+      author: { id: "u1", name: "Ada" },
+      byAssistant: false,
+      body: "These two rows look off",
+      createdAt: new Date(0).toISOString(),
+      resolvedAt: null,
+      quote: "A2:B3",
+      toAssistant: false,
+      answered: false,
+    };
+    const slot = document.createElement("div");
+    document.body.append(slot);
+    render(
+      <SheetPanelBody controller={controllerOf(doc, [root])} canEdit={false} toolbarSlot={slot} />,
+    );
+    expect(screen.queryByText("These two rows look off")).toBeNull();
+    // B3, the range's far corner, is 2 columns in and 3 rows down.
+    const grid = screen.getByRole("grid", { name: "Sheet1" });
+    const content = grid.firstElementChild!.lastElementChild!;
+    fireEvent.pointerDown(content, { clientX: 70, clientY: 45, button: 0 });
+    fireEvent.pointerUp(content);
+    expect(await screen.findByText("These two rows look off")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "All comments" }));
+    expect((await screen.findByText("A2:B3")).textContent).toBe("A2:B3");
+    slot.remove();
+  });
+
   it("draws a sheet's charts over its cells", () => {
     const box = { r1: "s1.r1", r2: "s1.r2", c1: "s1.c2", c2: "s1.c2" };
     const doc = apply(

@@ -1381,6 +1381,7 @@ export function SheetGrid({
         </div>
         <div
           ref={content}
+          data-sheet-content=""
           // Its own stacking layer, so charts and the editor stay under the headers and frozen panes.
           className="absolute isolate"
           style={{
