@@ -170,6 +170,15 @@ describe("the clipboard", () => {
     expect([shown(doc, 1, 1), shown(doc, 12, 1)]).toEqual([3, 3]);
   });
 
+  it("wraps a value typed with a line break, so the break shows", () => {
+    const doc = type(emptyDoc(), 1, 1, "Line one\nline two");
+    const { r, c } = at(doc, 1, 1);
+    expect(doc.sheet.s1!.cells[r]![c]).toMatchObject({
+      v: "Line one\nline two",
+      s: '{"wrap":true}',
+    });
+  });
+
   it("types in text from elsewhere, quoted fields included", () => {
     expect(parseTabular('a\t"b\tc"\n"say ""hi"""\t2\n')).toEqual([
       ["a", "b\tc"],

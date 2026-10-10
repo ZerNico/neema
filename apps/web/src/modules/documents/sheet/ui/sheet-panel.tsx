@@ -246,7 +246,7 @@ export default function SheetPanelBody({
     choice: FillChoice | null;
   } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
-  const formulaBar = useRef<HTMLInputElement>(null);
+  const formulaBar = useRef<HTMLTextAreaElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
   const sheet = chosen && sheets.includes(chosen) ? chosen : (sheets[0] ?? null);
   const revision = state?.revision ?? 0;
@@ -775,21 +775,29 @@ export default function SheetPanelBody({
       {state.refused ? <FieldError className="mx-3 mt-2">{state.refused}</FieldError> : null}
       <div className="border-border flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">{address}</span>
-        <Input
+        {/* A textarea, so a cell's line breaks survive editing here; it shows the first line. */}
+        <textarea
           ref={formulaBar}
           aria-label="Formula bar"
           data-sheet-editor="true"
           readOnly={readOnly}
           value={barText}
-          // oxlint-disable-next-line shadcn/no-restyle -- the formula bar sits flat in its row, as in a spreadsheet.
-          className="h-7 border-0 font-mono text-xs shadow-none focus-visible:ring-0"
+          rows={1}
+          spellCheck={false}
+          className="text-foreground h-7 min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-2 py-1.5 font-mono text-xs leading-4 whitespace-pre outline-none"
           onFocus={() => {
             if (!readOnly && !editing) setEditing({ at: head, text: source, mode: "edit" });
           }}
           onChange={(event) => setEditing({ at: head, text: event.target.value, mode: "edit" })}
           onKeyDown={(event) => {
             if (!editing) return;
-            if (event.key === "Enter" || event.key === "Tab") {
+            if (event.key === "Enter" && event.altKey) {
+              // Alt+Enter breaks the line inside the cell, as in Excel.
+              event.preventDefault();
+              const bar = event.currentTarget;
+              bar.setRangeText("\n", bar.selectionStart, bar.selectionEnd, "end");
+              setEditing({ ...editing, text: bar.value });
+            } else if (event.key === "Enter" || event.key === "Tab") {
               event.preventDefault();
               commit(editing.at, editing.text);
               setEditing(null);
@@ -803,7 +811,7 @@ export default function SheetPanelBody({
           onBlur={(event) => {
             if (!editing) return;
             // Into the cell's own editor, the edit carries on there.
-            if (event.relatedTarget instanceof HTMLInputElement) return;
+            if (event.relatedTarget instanceof HTMLTextAreaElement) return;
             commit(editing.at, editing.text);
             setEditing(null);
           }}

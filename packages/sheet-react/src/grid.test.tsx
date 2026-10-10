@@ -265,15 +265,20 @@ describe("the sheet grid", () => {
     render(<Harness doc={emptyDoc()} />);
     const grid = screen.getByRole("grid");
     fireEvent.keyDown(grid, { key: "4" });
-    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     expect(input.value).toBe("4");
+    fireEvent.change(input, { target: { value: "42" } });
+    // Alt+Enter breaks the line at the caret instead of committing.
+    input.setSelectionRange(1, 1);
+    fireEvent.keyDown(input, { key: "Enter", altKey: true });
+    expect(input.value).toBe("4\n2");
     fireEvent.change(input, { target: { value: "42" } });
     // A fresh value commits on an arrow key, and the selection moves on.
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(events).toEqual(["commit s1.r1/s1.c1 42"]);
     expect(screen.getByTestId("selection").textContent).toBe("s1.r2/s1.c1-s1.r2/s1.c1");
     fireEvent.keyDown(grid, { key: "F2" });
-    const editor = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    const editor = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     expect(editor.value).toBe("=A1*2");
     // Editing an existing value, arrows move the caret; Escape drops the edit.
     fireEvent.keyDown(editor, { key: "ArrowLeft" });
@@ -292,6 +297,10 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "V", metaKey: true, shiftKey: true });
     fireEvent.paste(grid, clip("b"));
     expect(events.slice(5)).toEqual(["paste a", "paste values b"]);
+    // Ctrl+; starts typing today's date, as Excel does.
+    fireEvent.keyDown(grid, { key: ";", ctrlKey: true });
+    const stamped = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
+    expect(stamped.value).toMatch(/^\d{1,2}\/\d{1,2}\/\d{4}$/);
   });
 
   it("completes functions, points at cells for references, and cycles $ with F4", () => {
@@ -299,7 +308,7 @@ describe("the sheet grid", () => {
     render(<Harness doc={emptyDoc()} />);
     const grid = screen.getByRole("grid");
     fireEvent.keyDown(grid, { key: "=" });
-    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "=su", selectionStart: 3 } });
     expect(screen.getByRole("listbox", { name: "Functions" }).textContent).toContain("SUMIF");
     fireEvent.keyDown(input, { key: "Tab" });

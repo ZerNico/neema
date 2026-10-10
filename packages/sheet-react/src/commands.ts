@@ -110,13 +110,12 @@ export function enterCell(context: GridContext, at: CellRef, raw: string): Sheet
   const typed = parseTyped(raw, context.locale);
   const value = typed.kind === "empty" ? null : typed.value;
   const ops: SheetOp[] = [{ op: "set", sh: context.sheet, cells: [{ ...at, v: value }] }];
+  const area = { r1: at.r, r2: at.r, c1: at.c, c2: at.c };
   if (typed.kind === "number" && typed.format && !cellStyle(cell?.s).numberFormat)
-    ops.push({
-      op: "format",
-      sh: context.sheet,
-      area: { r1: at.r, r2: at.r, c1: at.c, c2: at.c },
-      patch: { numberFormat: typed.format },
-    });
+    ops.push({ op: "format", sh: context.sheet, area, patch: { numberFormat: typed.format } });
+  // A line break typed in turns on wrapping, so it shows, as Excel does.
+  if (typeof value === "string" && value.includes("\n") && !cellStyle(cell?.s).wrap)
+    ops.push({ op: "format", sh: context.sheet, area, patch: { wrap: true } });
   return ops;
 }
 

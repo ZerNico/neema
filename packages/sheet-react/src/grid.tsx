@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { columnLetters } from "@chat/sheet/a1";
+import { serialOf } from "@chat/sheet/dates";
+import { formatValue } from "@chat/sheet/number-format";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
@@ -166,6 +168,21 @@ export interface SheetGridProps {
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
+/** Ctrl+; asks for today's date and Ctrl+Shift+; (or Cmd+; on a Mac) for the time, as in Excel. */
+const stampOf = (event: KeyboardEvent): "date" | "time" | null => {
+  if (event.altKey || (event.key !== ";" && event.key !== ":")) return null;
+  if (event.ctrlKey && !event.metaKey) return event.shiftKey ? "time" : "date";
+  return event.metaKey && !event.ctrlKey ? "time" : null;
+};
+/** Today or now as the text a cell reads back as that date or time. */
+function stampText(kind: "date" | "time", locale: SheetLocale) {
+  const now = new Date();
+  if (kind === "time")
+    return formatValue((now.getHours() * 60 + now.getMinutes()) / 1440, "h:mm", locale)?.text ?? "";
+  const serial = serialOf(now.getFullYear(), now.getMonth() + 1, now.getDate()) ?? 0;
+  return formatValue(serial, locale.shortDate, locale)?.text ?? "";
+}
+
 const FALLBACK = { width: 960, height: 640 };
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
@@ -352,7 +369,7 @@ export function SheetGrid({
   };
   // The edit just ended: focus leaving its input afterwards must not end it again.
   const ended = useRef<CellEditing | null>(null);
-  const editorInput = useRef<HTMLInputElement>(null);
+  const editorInput = useRef<HTMLTextAreaElement>(null);
   // Where the caret is in the formula being typed, for completions, hints and pointing.
   const [caret, setCaret] = useState(0);
   // The function the arrow keys have picked among the completions offered.
@@ -420,7 +437,7 @@ export function SheetGrid({
     onEditingChange?.(null);
     scroller.current?.focus({ preventScroll: true });
   };
-  const onEditorKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const onEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     event.stopPropagation();
     const arrows: Record<string, [number, number]> = {
       ArrowUp: [-1, 0],
@@ -442,6 +459,16 @@ export function SheetGrid({
       const accepted = acceptCompletion(editing.text, caret, offered.start, name);
       setPicked(0);
       rewrite(accepted.text, accepted.caret);
+      return;
+    }
+    // Alt+Enter breaks the line inside the cell; Ctrl+; and Ctrl+Shift+; type today and now.
+    const stamp = stampOf(event);
+    if (editing && ((event.key === "Enter" && event.altKey) || stamp)) {
+      event.preventDefault();
+      const input = event.currentTarget;
+      const [start, end] = [input.selectionStart ?? caret, input.selectionEnd ?? caret];
+      const added = stamp ? stampText(stamp, locale) : "\n";
+      rewrite(editing.text.slice(0, start) + added + editing.text.slice(end), start + added.length);
       return;
     }
     if (event.key === "F4" && editing) {
@@ -645,6 +672,12 @@ export function SheetGrid({
       else if (event.ctrlKey && !event.shiftKey)
         selectBox({ row: lastRow, col: box.right }, { row: 0, col: box.left });
       else selectBox({ row: lastRow, col: lastCol }, { row: 0, col: 0 });
+      return;
+    }
+    const stamp = stampOf(event);
+    if (writable && stamp) {
+      event.preventDefault();
+      beginEdit(stampText(stamp, locale));
       return;
     }
     // A printable key starts typing a fresh value, as in Excel.
@@ -1388,8 +1421,10 @@ export function SheetGrid({
   })();
   const editor =
     editing && editorRect ? (
-      <input
+      <textarea
         ref={editorInput}
+        rows={1}
+        spellCheck={false}
         aria-label="Cell content"
         autoFocus
         value={editing.text}
@@ -1413,10 +1448,15 @@ export function SheetGrid({
             commit(0, 0);
         }}
         onPointerDown={(event) => event.stopPropagation()}
-        className="bg-background text-foreground border-primary absolute z-40 border-2 px-1 text-sm outline-none"
+        className="bg-background text-foreground border-primary absolute z-40 resize-none overflow-hidden border-2 px-1 text-sm leading-4 whitespace-pre outline-none"
         style={{
           ...editorRect,
-          width: Math.max(editorRect.width, (editing.text.length + 2) * 8),
+          // A text with line breaks grows the editor by a line each, as Excel's does.
+          width: Math.max(
+            editorRect.width,
+            (Math.max(...editing.text.split("\n").map((line) => line.length)) + 2) * 8,
+          ),
+          height: Math.max(editorRect.height, editing.text.split("\n").length * 16 + 4),
         }}
       />
     ) : null;
@@ -1516,7 +1556,7 @@ export function SheetGrid({
       onScroll={onScroll}
       onKeyDown={onKeyDown}
       onDoubleClick={(event) => {
-        if (event.target instanceof HTMLInputElement) return;
+        if (event.target instanceof HTMLTextAreaElement) return;
         beginEdit(null);
       }}
       onCopy={(event) => {
