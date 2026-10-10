@@ -91,6 +91,8 @@ export interface Sheet {
   readonly conditional?: readonly ConditionalFormat[];
   /** What its ranges' cells may hold. */
   readonly validations?: readonly Validation[];
+  /** Its grouped rows and columns. */
+  readonly outline?: SheetOutline;
 }
 
 export type { Chart, ChartSeries } from "./chart.ts";
@@ -98,6 +100,7 @@ import type { Chart } from "./chart.ts";
 import type { SheetFilter } from "./filter.ts";
 import type { ConditionalFormat } from "./conditional.ts";
 import type { Validation } from "./validation.ts";
+import type { SheetOutline } from "./outline.ts";
 
 /** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
 export interface SheetSettings {

@@ -57,6 +57,7 @@ import {
   type GridDecoration,
   type GridFill,
   type GridOverlay,
+  type SheetGridProps,
   type SheetSelection,
 } from "@chat/sheet-react/grid";
 import { Button } from "~/ui/primitives/button";
@@ -93,6 +94,14 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { collapsedIds } from "@chat/sheet/model/outline";
+import {
+  groupSelection,
+  outlineAxis,
+  showLevel,
+  toggleGroup,
+  ungroupSelection,
+} from "@chat/sheet-react/outline-commands";
 import { SheetZoom } from "./sheet-zoom.tsx";
 import { useSheetZoom } from "./zoom.ts";
 import { LinkChip, LinkDialog } from "./link-dialog.tsx";
@@ -387,10 +396,18 @@ export default function SheetPanelBody({
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
     else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "link") setLinking(true);
+    else if (command.kind === "group") run(groupSelection(context, outlineAxis(context)));
+    else if (command.kind === "ungroup") run(ungroupSelection(context, outlineAxis(context)));
     else if (command.kind === "undo") sync?.undo();
     else if (command.kind === "redo") sync?.redo();
     else run(eachRange(context, clearSelection));
   };
+  const onOutline: NonNullable<SheetGridProps["onOutline"]> = (axis, action) =>
+    run(
+      "group" in action
+        ? toggleGroup(doc, sheet, axis, action.group)
+        : showLevel(doc, sheet, axis, action.level),
+    );
   const paste = (
     clip: { text: string; html: string | null },
     options: { part?: PastePart; transpose?: boolean } = {},
@@ -543,6 +560,12 @@ export default function SheetPanelBody({
     else if (command.kind === "validation") setValidating(true);
     else if (command.kind === "circles") setCircling(!circling);
     else if (command.kind === "link") setLinking(true);
+    else if (command.kind === "outline")
+      run(
+        command.group
+          ? groupSelection(context, command.axis)
+          : ungroupSelection(context, command.axis),
+      );
     else insertChart(command.chart);
   };
   const insertChart = (kind: ChartKind) => {
@@ -677,7 +700,11 @@ export default function SheetPanelBody({
     : (shownThread?.box ?? null);
   // Measured as the grid draws: at this zoom, rows a filter hides taking no space.
   const shownRowProps = { ...doc.sheet[sheet]!.rowProps };
-  for (const id of hiddenByFilter) shownRowProps[id] = { ...shownRowProps[id], hidden: true };
+  for (const id of [...hiddenByFilter, ...collapsedIds(doc, sheet, "rows")])
+    shownRowProps[id] = { ...shownRowProps[id], hidden: true };
+  const shownColProps = { ...doc.sheet[sheet]!.colProps };
+  for (const id of collapsedIds(doc, sheet, "columns"))
+    shownColProps[id] = { ...shownColProps[id], hidden: true };
   const shownRowLayout = axisLayout(
     doc.sheet[sheet]!.rows,
     shownRowProps,
@@ -685,7 +712,7 @@ export default function SheetPanelBody({
   );
   const colLayout = axisLayout(
     doc.sheet[sheet]!.cols,
-    doc.sheet[sheet]!.colProps,
+    shownColProps,
     (props) => columnPx(props) * zoom,
   );
   /** The card's anchor: the cells' box on the page, read when placed, so it follows scrolling. */
@@ -908,6 +935,7 @@ export default function SheetPanelBody({
             <div ref={setGridHost} className="absolute inset-0">
               <SheetGrid
                 zoom={zoom}
+                {...(readOnly ? {} : { onOutline })}
                 key={sheet}
                 doc={doc}
                 sheet={sheet}

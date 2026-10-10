@@ -9,6 +9,7 @@
     "./commands": "./src/commands.ts",
     "./format-commands": "./src/format-commands.ts",
     "./filter-commands": "./src/filter-commands.ts",
+    "./outline-commands": "./src/outline-commands.ts",
     "./clipboard": "./src/clipboard.ts"
   },
   "scripts": {

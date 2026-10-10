@@ -274,6 +274,15 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       if (!sheet) return drop(doc, dropped, "frozen panes on a sheet that is gone");
       return withSheet(doc, op.sh, { ...sheet, freeze: { row: op.row, col: op.col } });
     }
+    case "outline": {
+      const sheet = sheetOf(op.sh);
+      if (!sheet) return drop(doc, dropped, "groups on a sheet that is gone");
+      const key = op.axis === "rows" ? "rows" : "cols";
+      const { [key]: _old, ...others } = sheet.outline ?? {};
+      const outline = op.list.length ? { ...others, [key]: op.list } : others;
+      const { outline: _was, ...rest } = sheet;
+      return withSheet(doc, op.sh, Object.keys(outline).length ? { ...rest, outline } : rest);
+    }
     case "validations": {
       const sheet = sheetOf(op.sh);
       if (!sheet) return drop(doc, dropped, "validation on a sheet that is gone");
@@ -485,8 +494,24 @@ function shrinkBoxes(
         ? Object.fromEntries(Object.entries(sheet.filter.rules).filter(([c]) => !deleted.has(c)))
         : sheet.filter.rules,
   };
+  const key = axis === "rows" ? "rows" : "cols";
+  const groups = sheet.outline?.[key];
   const next: Sheet = {
     ...sheet,
+    // A group's deleted ends move inward too, as a range of one row or column.
+    ...(groups
+      ? {
+          outline: {
+            ...sheet.outline,
+            [key]: groups.map((group) => {
+              const span = shrink({ r1: group.from, r2: group.to, c1: group.from, c2: group.to });
+              return axis === "rows"
+                ? { ...group, from: span.r1, to: span.r2 }
+                : { ...group, from: span.c1, to: span.c2 };
+            }),
+          },
+        }
+      : {}),
     ...(filter ? { filter } : {}),
     ...(sheet.conditional
       ? { conditional: sheet.conditional.map((each) => ({ ...each, box: shrink(each.box) })) }

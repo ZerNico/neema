@@ -2,6 +2,7 @@ import { isChart, isChartPatch, type ChartPatch } from "./chart.ts";
 import { isSheetFilter, type SheetFilter } from "./filter.ts";
 import { isConditionalList, type ConditionalFormat } from "./conditional.ts";
 import { isValidationList, type Validation } from "./validation.ts";
+import { isOutlineList, type OutlineGroup } from "./outline.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -98,6 +99,13 @@ export type SheetOp =
   | { readonly op: "filter"; readonly sh: string; readonly filter: SheetFilter | null }
   /** A sheet's whole list of data validations. */
   | { readonly op: "validations"; readonly sh: string; readonly list: readonly Validation[] }
+  /** One axis's whole list of grouped rows or columns. */
+  | {
+      readonly op: "outline";
+      readonly sh: string;
+      readonly axis: Axis;
+      readonly list: readonly OutlineGroup[];
+    }
   /** A sheet's whole list of conditional formats, in priority order. */
   | {
       readonly op: "conditional";
@@ -163,6 +171,7 @@ const OP_NAMES = new Set([
   "filter",
   "conditional",
   "validations",
+  "outline",
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -319,6 +328,8 @@ function validOp(op: Record<string, unknown>): boolean {
       return isId(op.sh) && isConditionalList(op.list);
     case "validations":
       return isId(op.sh) && isValidationList(op.list);
+    case "outline":
+      return isId(op.sh) && isAxis(op.axis) && isOutlineList(op.list);
     default:
       return false;
   }

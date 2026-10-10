@@ -14,6 +14,7 @@ import {
   ChartColumnIcon,
   Link01Icon,
   CheckListIcon,
+  TextIndentMoreIcon,
   DecimalsArrowLeftIcon,
   DecimalsArrowRightIcon,
   EraserIcon,
@@ -70,7 +71,8 @@ export type ToolbarCommand =
   | { readonly kind: "sort" }
   | { readonly kind: "validation" }
   | { readonly kind: "circles" }
-  | { readonly kind: "link" };
+  | { readonly kind: "link" }
+  | { readonly kind: "outline"; readonly group: boolean; readonly axis: "rows" | "columns" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -366,6 +368,30 @@ export function SheetToolbar({
         disabled={false}
         onPress={() => onCommand({ kind: "sort" })}
       />
+      <ToolbarMenu label="Group" icon={TextIndentMoreIcon}>
+        <DropdownMenuContent align="start" className="w-48">
+          <DropdownMenuItem
+            onClick={() => onCommand({ kind: "outline", group: true, axis: "rows" })}
+          >
+            Group rows
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => onCommand({ kind: "outline", group: true, axis: "columns" })}
+          >
+            Group columns
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => onCommand({ kind: "outline", group: false, axis: "rows" })}
+          >
+            Ungroup rows
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => onCommand({ kind: "outline", group: false, axis: "columns" })}
+          >
+            Ungroup columns
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </ToolbarMenu>
       <ToolbarMenu label="Data validation" icon={CheckListIcon}>
         <DropdownMenuContent align="start" className="w-48">
           <DropdownMenuItem onClick={() => onCommand({ kind: "validation" })}>

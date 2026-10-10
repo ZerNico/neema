@@ -265,6 +265,38 @@ describe("the sheet grid", () => {
     expect(changes).toEqual([{ at: at(2, 3), offset: { x: 10, y: 5 }, width: 300, height: 200 }]);
   });
 
+  it("draws grouped rows' outline, hides a collapsed group and reports its buttons", () => {
+    const doc = apply(emptyDoc(), {
+      op: "outline",
+      sh: "s1",
+      axis: "rows",
+      list: [{ from: "s1.r2", to: "s1.r3", collapsed: true }],
+    });
+    const outlined: string[] = [];
+    render(
+      <SheetGrid
+        doc={doc}
+        sheet="s1"
+        values={calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(1, 1), head: at(1, 1) }}
+        onSelectionChange={() => {}}
+        label="Budget"
+        onCommit={() => {}}
+        onOutline={(axis, action) =>
+          outlined.push(
+            `${axis} ${"level" in action ? `level ${action.level}` : action.group.start}`,
+          )
+        }
+      />,
+    );
+    const headers = screen.getAllByRole("rowheader").map((each) => each.textContent);
+    expect(headers.slice(0, 3)).toEqual(["1", "4", "5"]);
+    fireEvent.click(screen.getByRole("button", { name: "Expand rows 2 to 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show row outline level 2" }));
+    expect(outlined).toEqual(["rows 2", "rows level 2"]);
+  });
+
   it("jumps to the data's edges, selects its block, and whole rows and columns", () => {
     let doc = emptyDoc();
     doc = apply(doc, {

@@ -15,8 +15,9 @@ import { serialOf } from "@chat/sheet/dates";
 import { formatValue } from "@chat/sheet/number-format";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
-import type { Axis, SheetDoc } from "@chat/sheet/model";
+import { positions, type Axis, type AxisEntry, type SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
+import { outlineDepth, placeGroups, type PlacedGroup } from "@chat/sheet/model/outline";
 import { cellCss, cellDisplay, cellStyle, safeLink } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
@@ -85,7 +86,9 @@ export interface GridFill {
 }
 
 export type GridCommand =
-  | { readonly kind: "clear" | "undo" | "redo" | "find" | "filter" | "link" }
+  | {
+      readonly kind: "clear" | "undo" | "redo" | "find" | "filter" | "link" | "group" | "ungroup";
+    }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
   | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
 /** Someone else's selection, drawn in their colour. */
@@ -166,6 +169,11 @@ export interface SheetGridProps {
   readonly selectionAccessory?: ReactNode;
   /** Drawn under the active cell, as a link's chip is. */
   readonly activeAccessory?: ReactNode;
+  /** Collapsing or expanding a group, or showing an outline level; without it, no buttons show. */
+  readonly onOutline?: (
+    axis: Axis,
+    action: { readonly group: PlacedGroup } | { readonly level: number },
+  ) => void;
   /**
    * How large the cells draw, 1 as stored. Only this view scales: sizes it
    * reports back, from a resize or a moved chart, are unscaled.
@@ -206,6 +214,18 @@ function stampText(kind: "date" | "time", locale: SheetLocale) {
 }
 
 const FALLBACK = { width: 960, height: 640 };
+/** The outline gutter's width per level. */
+const OUTLINE_STEP = 14;
+/** The IDs collapsed groups hide on an axis. */
+function hiddenBy(entries: readonly AxisEntry[], placed: readonly PlacedGroup[]) {
+  const hidden = new Set<string>();
+  if (!placed.some((each) => each.group.collapsed)) return hidden;
+  const { ids } = positions(entries);
+  for (const each of placed)
+    if (each.group.collapsed)
+      for (let at = each.start; at <= each.end; at++) hidden.add(ids[at - 1]!);
+  return hidden;
+}
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
@@ -269,6 +289,7 @@ export function SheetGrid({
   onDragSelection,
   selectionAccessory,
   activeAccessory,
+  onOutline,
   zoom = 1,
   looks = NO_LOOKS,
   hiddenRows = NO_ROWS,
@@ -282,18 +303,36 @@ export function SheetGrid({
   const content = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ top: 0, left: 0, ...FALLBACK });
   const data = doc.sheet[sheet]!;
+  const rowGroups = useMemo(
+    () => placeGroups(data.rows, data.outline?.rows),
+    [data.rows, data.outline?.rows],
+  );
+  const colGroups = useMemo(
+    () => placeGroups(data.cols, data.outline?.cols),
+    [data.cols, data.outline?.cols],
+  );
   const rows = useMemo(() => {
     const measure = (props: Parameters<typeof rowPx>[0]) => rowPx(props) * zoom;
-    if (!hiddenRows.size) return axisLayout(data.rows, data.rowProps, measure);
-    // Rows a filter hides measure as hidden ones do, without being stored as hidden.
+    const collapsed = hiddenBy(data.rows, rowGroups);
+    if (!hiddenRows.size && !collapsed.size) return axisLayout(data.rows, data.rowProps, measure);
+    // Rows a filter or a collapsed group hides measure as hidden ones do, without being stored so.
     const props = { ...data.rowProps };
-    for (const id of hiddenRows) props[id] = { ...props[id], hidden: true };
+    for (const id of [...hiddenRows, ...collapsed]) props[id] = { ...props[id], hidden: true };
     return axisLayout(data.rows, props, measure);
-  }, [data.rows, data.rowProps, hiddenRows, zoom]);
-  const cols = useMemo(
-    () => axisLayout(data.cols, data.colProps, (props) => columnPx(props) * zoom),
-    [data.cols, data.colProps, zoom],
-  );
+  }, [data.rows, data.rowProps, hiddenRows, rowGroups, zoom]);
+  const cols = useMemo(() => {
+    const measure = (props: Parameters<typeof columnPx>[0]) => columnPx(props) * zoom;
+    const collapsed = hiddenBy(data.cols, colGroups);
+    if (!collapsed.size) return axisLayout(data.cols, data.colProps, measure);
+    const props = { ...data.colProps };
+    for (const id of collapsed) props[id] = { ...props[id], hidden: true };
+    return axisLayout(data.cols, props, measure);
+  }, [data.cols, data.colProps, colGroups, zoom]);
+  // The outline gutters beside and above the headers: a step per level, and one for the buttons.
+  const rowGutter = rowGroups.length ? (outlineDepth(rowGroups) + 1) * OUTLINE_STEP : 0;
+  const colGutter = colGroups.length ? (outlineDepth(colGroups) + 1) * OUTLINE_STEP : 0;
+  const headerWidth = HEADER_COLUMN_PX + rowGutter;
+  const headerHeight = HEADER_ROW_PX + colGutter;
   const merges = useMemo(() => mergeIndex(doc, sheet, rows, cols), [doc, sheet, rows, cols]);
 
   const measure = useCallback(() => {
@@ -368,16 +407,25 @@ export function SheetGrid({
       // A frozen cell is always in view; the rest scrolls clear of the frozen panes.
       if (row >= frozenRows) {
         if (top - frozenHeight < element.scrollTop) element.scrollTop = top - frozenHeight;
-        else if (bottom + HEADER_ROW_PX > element.scrollTop + height)
-          element.scrollTop = bottom + HEADER_ROW_PX - height;
+        else if (bottom + headerHeight > element.scrollTop + height)
+          element.scrollTop = bottom + headerHeight - height;
       }
       if (col >= frozenCols) {
         if (left - frozenWidth < element.scrollLeft) element.scrollLeft = left - frozenWidth;
-        else if (right + HEADER_COLUMN_PX > element.scrollLeft + width)
-          element.scrollLeft = right + HEADER_COLUMN_PX - width;
+        else if (right + headerWidth > element.scrollLeft + width)
+          element.scrollLeft = right + headerWidth - width;
       }
     },
-    [cols.starts, rows.starts, frozenRows, frozenCols, frozenHeight, frozenWidth],
+    [
+      cols.starts,
+      rows.starts,
+      frozenRows,
+      frozenCols,
+      frozenHeight,
+      frozenWidth,
+      headerHeight,
+      headerWidth,
+    ],
   );
 
   // A selection set from outside, as a find does, is scrolled into view like one moved by key.
@@ -648,8 +696,13 @@ export function SheetGrid({
       const found: GridCommand | null =
         lower === "l" && event.shiftKey
           ? { kind: "filter" }
-          : lower === "k"
-            ? { kind: "link" }
+          : lower === "k" || lower === "j"
+            ? // Cmd+Shift+K and J group and ungroup on a Mac; Cmd+K inserts a link.
+              event.shiftKey
+              ? { kind: lower === "k" ? "group" : "ungroup" }
+              : lower === "k"
+                ? { kind: "link" }
+                : null
             : lower === "z"
               ? { kind: event.shiftKey ? "redo" : "undo" }
               : lower === "y"
@@ -709,6 +762,18 @@ export function SheetGrid({
       else if (event.ctrlKey && !event.shiftKey)
         selectBox({ row: lastRow, col: box.right }, { row: 0, col: box.left });
       else selectBox({ row: lastRow, col: lastCol }, { row: 0, col: 0 });
+      return;
+    }
+    // Group and Ungroup, as Excel's Alt+Shift+arrows.
+    if (
+      writable &&
+      event.altKey &&
+      event.shiftKey &&
+      !command &&
+      (event.key === "ArrowRight" || event.key === "ArrowLeft")
+    ) {
+      event.preventDefault();
+      onCommand?.({ kind: event.key === "ArrowRight" ? "group" : "ungroup" });
       return;
     }
     const stamp = stampOf(event);
@@ -1136,9 +1201,10 @@ export function SheetGrid({
       <div
         key={col}
         role="columnheader"
-        className={`border-border text-muted-foreground absolute top-0 flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+        className={`border-border text-muted-foreground absolute flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
         style={{
-          left: HEADER_COLUMN_PX + cols.starts[col]!,
+          top: colGutter,
+          left: headerWidth + cols.starts[col]!,
           width: cols.size(col),
           height: HEADER_ROW_PX,
         }}
@@ -1157,8 +1223,13 @@ export function SheetGrid({
       <div
         key={row}
         role="rowheader"
-        className={`border-border text-muted-foreground absolute left-0 flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
-        style={{ top: offset + rows.starts[row]!, height: rows.size(row), width: HEADER_COLUMN_PX }}
+        className={`border-border text-muted-foreground absolute flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+        style={{
+          top: offset + rows.starts[row]!,
+          left: rowGutter,
+          height: rows.size(row),
+          width: HEADER_COLUMN_PX,
+        }}
         onPointerDown={(event) => startHeaderSelect(event, "rows", row)}
       >
         {row + 1}
@@ -1166,6 +1237,85 @@ export function SheetGrid({
       </div>
     );
   };
+  /** A group's bracket and its button, on the summary row or column after it, as Excel draws them. */
+  const outlineMark = (axis: Axis, group: PlacedGroup) => {
+    const layout = axis === "rows" ? rows : cols;
+    const across = (group.level - 1) * OUTLINE_STEP + OUTLINE_STEP / 2;
+    const [from, to] = [layout.starts[group.start - 1]!, layout.starts[group.end]!];
+    const after = group.end < layout.ids.length ? group.end : group.end - 1;
+    const along = layout.starts[after]! + (layout.size(after) - 12) / 2;
+    const offset = axis === "rows" ? 0 : headerWidth;
+    const line =
+      !group.group.collapsed && to > from ? (
+        <div
+          key={`line-${group.index}`}
+          aria-hidden
+          className="border-muted-foreground/60 pointer-events-none absolute"
+          style={
+            axis === "rows"
+              ? {
+                  top: from + 2,
+                  left: across,
+                  height: to - from - 2,
+                  width: 4,
+                  borderLeftWidth: 1,
+                  borderBottomWidth: 1,
+                }
+              : {
+                  left: offset + from + 2,
+                  top: across,
+                  width: to - from - 2,
+                  height: 4,
+                  borderTopWidth: 1,
+                  borderRightWidth: 1,
+                }
+          }
+        />
+      ) : null;
+    const button = onOutline ? (
+      <button
+        key={`button-${group.index}`}
+        type="button"
+        aria-label={`${group.group.collapsed ? "Expand" : "Collapse"} ${axis === "rows" ? "rows" : "columns"} ${
+          axis === "rows" ? group.start : columnLetters(group.start)
+        } to ${axis === "rows" ? group.end : columnLetters(group.end)}`}
+        className="border-border bg-background text-muted-foreground hover:text-foreground absolute flex size-3 items-center justify-center rounded-xs border text-[10px] leading-none"
+        style={
+          axis === "rows"
+            ? { top: along, left: across - 6 }
+            : { left: offset + along, top: across - 6 }
+        }
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => onOutline(axis, { group })}
+      >
+        {group.group.collapsed ? "+" : "−"}
+      </button>
+    ) : null;
+    return [line, button];
+  };
+  const rowOutline = rowGroups.flatMap((group) => outlineMark("rows", group));
+  const colOutline = colGroups.flatMap((group) => outlineMark("columns", group));
+  // Excel's numbered buttons: show the outline down to a level.
+  const levelButtons = (axis: Axis, depth: number) =>
+    onOutline && depth
+      ? Array.from({ length: depth + 1 }, (_, index) => (
+          <button
+            key={`${axis}-level-${index}`}
+            type="button"
+            aria-label={`Show ${axis === "rows" ? "row" : "column"} outline level ${index + 1}`}
+            className="border-border bg-background text-muted-foreground hover:text-foreground absolute flex size-3 items-center justify-center rounded-xs border text-[9px] leading-none"
+            style={
+              axis === "rows"
+                ? { left: index * OUTLINE_STEP + 1, top: colGutter + (HEADER_ROW_PX - 12) / 2 }
+                : { top: index * OUTLINE_STEP + 1, left: rowGutter + (HEADER_COLUMN_PX - 12) / 2 }
+            }
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onOutline(axis, { level: index + 1 })}
+          >
+            {index + 1}
+          </button>
+        ))
+      : null;
   const columnHeaders: ReactNode[] = [];
   for (let col = visibleCols.first; col <= visibleCols.last; col++)
     columnHeaders.push(columnHeader(col));
@@ -1613,8 +1763,8 @@ export function SheetGrid({
       // Its own stacking layer: outlines inside stay under the headers, as in the content.
       className="bg-background absolute isolate overflow-hidden"
       style={{
-        top: name === "left" ? 0 : HEADER_ROW_PX,
-        left: HEADER_COLUMN_PX,
+        top: name === "left" ? 0 : headerHeight,
+        left: headerWidth,
         width: name === "top" ? cols.total : frozenWidth,
         height: name === "left" ? rows.total : frozenHeight,
         // The line Excel draws where the frozen part ends.
@@ -1683,18 +1833,23 @@ export function SheetGrid({
     >
       <div
         className="relative"
-        style={{ width: HEADER_COLUMN_PX + cols.total, height: HEADER_ROW_PX + rows.total }}
+        style={{ width: headerWidth + cols.total, height: headerHeight + rows.total }}
       >
-        <div className="sticky top-0 z-30" style={{ height: HEADER_ROW_PX + frozenHeight }}>
+        <div className="sticky top-0 z-30" style={{ height: headerHeight + frozenHeight }}>
           <div
             className="sticky left-0 z-10"
-            style={{ width: HEADER_COLUMN_PX + frozenWidth, height: HEADER_ROW_PX + frozenHeight }}
+            style={{ width: headerWidth + frozenWidth, height: headerHeight + frozenHeight }}
           >
             <div
               role="button"
               aria-label="Select all"
-              className="border-border bg-muted absolute top-0 left-0 border-r border-b"
-              style={{ width: HEADER_COLUMN_PX, height: HEADER_ROW_PX }}
+              className="border-border bg-muted absolute border-r border-b"
+              style={{
+                top: colGutter,
+                left: rowGutter,
+                width: HEADER_COLUMN_PX,
+                height: HEADER_ROW_PX,
+              }}
               onPointerDown={(event) => {
                 if (event.button !== 0 || !rows.ids.length || !cols.ids.length) return;
                 event.preventDefault();
@@ -1704,8 +1859,10 @@ export function SheetGrid({
                 );
               }}
             />
+            {levelButtons("rows", rowGutter ? outlineDepth(rowGroups) : 0)}
+            {levelButtons("columns", colGutter ? outlineDepth(colGroups) : 0)}
             {Array.from({ length: frozenCols }, (_, col) => columnHeader(col))}
-            {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, HEADER_ROW_PX))}
+            {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, headerHeight))}
             {frozenRows && frozenCols
               ? pane(
                   "corner",
@@ -1714,17 +1871,19 @@ export function SheetGrid({
                 )
               : null}
           </div>
+          {colOutline}
           {columnHeaders}
           {frozenRows ? pane("top", { first: 0, last: frozenRows - 1 }, visibleCols) : null}
         </div>
         <div
           className="sticky left-0 z-20"
           style={{
-            width: HEADER_COLUMN_PX + frozenWidth,
+            width: headerWidth + frozenWidth,
             height: rows.total,
             marginTop: -frozenHeight,
           }}
         >
+          {rowOutline}
           {rowHeaders}
           {frozenCols ? pane("left", visibleRows, { first: 0, last: frozenCols - 1 }) : null}
         </div>
@@ -1734,8 +1893,8 @@ export function SheetGrid({
           // Its own stacking layer, so charts and the editor stay under the headers and frozen panes.
           className="absolute isolate"
           style={{
-            top: HEADER_ROW_PX,
-            left: HEADER_COLUMN_PX,
+            top: headerHeight,
+            left: headerWidth,
             width: cols.total,
             height: rows.total,
           }}
