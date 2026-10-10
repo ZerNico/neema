@@ -74,6 +74,19 @@ describe("calculating a live sheet", () => {
     expect(values.spill("s1", at(doc, "A1").r, at(doc, "A1").c)?.rows).toHaveLength(3);
   });
 
+  it("does not cut a spill short at the grid's last row: it is #SPILL! until the grid grows", () => {
+    const doc = typed(emptyDoc(), { A999: "=SEQUENCE(3)" });
+    expect(valueAt(doc, "A999")).toEqual(new XError("#SPILL!"));
+    const grown = apply(doc, {
+      op: "insert",
+      sh: "s1",
+      axis: "rows",
+      ids: ["g1"],
+      after: "s1.r1000",
+    });
+    expect(valueAt(grown, "A1001")).toBe(3);
+  });
+
   it("groups and pivots rows with GROUPBY and PIVOTBY, as Excel's pivot formulas", () => {
     const data = {
       A1: "Region",

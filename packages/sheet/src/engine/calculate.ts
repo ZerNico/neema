@@ -50,6 +50,8 @@ export interface CellStore {
   arrayArea(sheet: string, row: number, column: number): CellBox | null;
   /** The last row and column holding anything. */
   extent(sheet: string): { readonly rows: number; readonly columns: number };
+  /** How many rows and columns the sheet has, past which nothing spills: Excel's grid in a file. */
+  bounds(sheet: string): { readonly rows: number; readonly columns: number };
   /** Stores a result; with `area`, the formula becomes a dynamic array filling it. */
   setResult(formula: StoredFormula, result: Scalar, area?: CellBox): void;
   /** Writes a plain value a spill or a legacy array produced. */
@@ -485,7 +487,10 @@ function pass(store: CellStore, limits: CalcLimits) {
       bottom: top + Math.max(grid.height, 1) - 1,
       right: left + Math.max(grid.width, 1) - 1,
     };
-    let blocked = area.bottom > MAX_ROW || area.right > MAX_COLUMN;
+    const bounds = store.bounds(sheet);
+    let blocked =
+      area.bottom > Math.min(MAX_ROW, bounds.rows) ||
+      area.right > Math.min(MAX_COLUMN, bounds.columns);
     if (!blocked && (area.bottom - area.top + 1) * (area.right - area.left + 1) > limits.spill)
       throw new Unsupported("a spill too large to write here");
     for (let row = area.top; row <= area.bottom && !blocked; row++)

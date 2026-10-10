@@ -204,7 +204,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   `RAND()`s in one formula differ, and an insert above a cell does not change its draws.
 - Formulas reach the engine as text rendered at current positions. Every formula written
   live follows Excel 365, spilling; results and spilled values sit beside the document and
-  only a spill's own values are ever cleared, so a typed value always blocks a spill. A
+  only a spill's own values are ever cleared, so a typed value always blocks a spill. So does
+  the grid's edge: a spill past the last row or column is `#SPILL!` until the grid grows, as at
+  Excel's edge, since growing it while calculating would give each replica different IDs. A
   formula the engine cannot read shows `#NAME?`.
 - Without a context (the Excel file tools) `NOW`, `TODAY` and the `RAND` functions stay
   uncalculated and keep the file's value, for Excel to compute on open.

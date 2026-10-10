@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxRef, parseCell, type CellBox } from "../a1.ts";
+import { boxRef, MAX_COLUMN, MAX_ROW, parseCell, type CellBox } from "../a1.ts";
 import { calculate, type CellStore, type StoredFormula } from "./calculate.ts";
 import { XError, type Scalar } from "./evaluate.ts";
 
@@ -47,6 +47,7 @@ function memoryStore(
     value: (_sheet, row, column) => read(row, column)?.value ?? null,
     isFormula: (_sheet, row, column) => read(row, column)?.formula !== undefined,
     arrayArea: (_sheet, row, column) => read(row, column)?.area ?? null,
+    bounds: () => ({ rows: MAX_ROW, columns: MAX_COLUMN }),
     extent: () => {
       let rows = 0;
       let columns = 0;

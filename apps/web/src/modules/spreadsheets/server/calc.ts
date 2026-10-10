@@ -6,7 +6,7 @@ import {
 } from "@office-kit/xlsx/cell";
 import { iterWorksheets, type Workbook } from "@office-kit/xlsx/workbook";
 import { getCell, iterCells, setCell, type Worksheet } from "@office-kit/xlsx/worksheet";
-import { boxRef, parseRange } from "@chat/sheet/a1";
+import { boxRef, MAX_COLUMN, MAX_ROW, parseRange } from "@chat/sheet/a1";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
 import { isDynamic, markDynamic } from "./dynamic-arrays.ts";
 import {
@@ -125,6 +125,7 @@ function workbookStore(workbook: Workbook, authored: ReadonlySet<Cell>): CellSto
         ? parseRange(value.ref)
         : null;
     },
+    bounds: () => ({ rows: MAX_ROW, columns: MAX_COLUMN }),
     extent: (name) => {
       const extent = { rows: 0, columns: 0 };
       for (const [row, columns] of sheetOf(name)?.rows ?? []) {

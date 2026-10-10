@@ -145,6 +145,13 @@ export function calculateSheet(
       const at = ids(name, row, column);
       return at ? (areas.get(key(at.sheet, at.r, at.c)) ?? null) : null;
     },
+    // A live grid ends where its rows and columns do; a spill past them is #SPILL!, never cut short.
+    bounds: (name) => {
+      const sheet = idOf(name);
+      return sheet
+        ? { rows: rowsOf(sheet).ids.length, columns: colsOf(sheet).ids.length }
+        : { rows: 0, columns: 0 };
+    },
     extent: (name) => {
       const sheet = idOf(name);
       if (!sheet) return { rows: 0, columns: 0 };
