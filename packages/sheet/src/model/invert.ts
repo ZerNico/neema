@@ -129,6 +129,7 @@ export function invertChange(before: SheetDoc, after: SheetDoc, now: SheetDoc = 
     middle.push(...cellsUndo(id, old, next, now.sheet[id]), ...layoutUndo(id, old, next));
     last.push(...rows.remove, ...cols.remove);
     if (old.name !== next.name) middle.push({ op: "sheetRename", id, name: old.name });
+    if (old.color !== next.color) middle.push({ op: "sheetColor", id, color: old.color ?? null });
   }
   if (order(before) !== order(after))
     for (const entry of before.sheets)

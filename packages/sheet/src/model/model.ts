@@ -74,6 +74,8 @@ export interface AxisProps {
 
 export interface Sheet {
   readonly name: string;
+  /** Its tab's colour, as #RRGGBB. */
+  readonly color?: string;
   readonly rows: readonly AxisEntry[];
   readonly cols: readonly AxisEntry[];
   /** rowId → colId → cell. Absent rows and cells are empty. */

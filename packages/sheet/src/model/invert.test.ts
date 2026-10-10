@@ -80,8 +80,11 @@ describe("undoing a change", () => {
       { op: "sheetDelete", id: "s2" },
       { op: "sheetAdd", id: "s3", name: "More", after: "s1", rows: ["x"], cols: ["y"] },
       { op: "sheetRename", id: "s1", name: "Main" },
+      { op: "sheetColor", id: "s1", color: "#c00000" },
+      { op: "sheetMove", id: "s1", after: "s2" },
     ]);
     expect(seen(undone)).toEqual(seen(doc));
+    expect(undone.sheet.s1!.color).toBeUndefined();
     doc = undone;
   });
 

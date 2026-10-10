@@ -316,6 +316,12 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       if (!sheet) return drop(doc, dropped, "a sheet that is gone");
       return withSheet(doc, op.id, { ...sheet, name: uniqueName(doc, op.name, op.id) });
     }
+    case "sheetColor": {
+      const sheet = sheetOf(op.id);
+      if (!sheet) return drop(doc, dropped, "a sheet that is gone");
+      const { color: _, ...rest } = sheet;
+      return withSheet(doc, op.id, op.color ? { ...rest, color: op.color.toUpperCase() } : rest);
+    }
     case "sheetMove": {
       if (!sheetOf(op.id)) return drop(doc, dropped, "a sheet that is gone");
       const rest = doc.sheets.filter((entry) => entry.id !== op.id);

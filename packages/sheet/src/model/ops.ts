@@ -86,6 +86,8 @@ export type SheetOp =
     }
   | { readonly op: "sheetRename"; readonly id: string; readonly name: string }
   | { readonly op: "sheetMove"; readonly id: string; readonly after: string | null }
+  /** A sheet's tab colour as #RRGGBB, or none with null. */
+  | { readonly op: "sheetColor"; readonly id: string; readonly color: string | null }
   | { readonly op: "sheetDelete" | "sheetRevive"; readonly id: string }
   | { readonly op: "name"; readonly name: string; readonly f: Formula | null }
   | { readonly op: "settings"; readonly locale?: string; readonly timeZone?: string }
@@ -147,6 +149,7 @@ const OP_NAMES = new Set([
   "sheetAdd",
   "sheetRename",
   "sheetMove",
+  "sheetColor",
   "sheetDelete",
   "sheetRevive",
   "name",
@@ -268,6 +271,11 @@ function validOp(op: Record<string, unknown>): boolean {
       return isId(op.id) && typeof op.name === "string";
     case "sheetMove":
       return isId(op.id) && isIdOrNull(op.after);
+    case "sheetColor":
+      return (
+        isId(op.id) &&
+        (op.color === null || (typeof op.color === "string" && /^#[0-9A-Fa-f]{6}$/.test(op.color)))
+      );
     case "sheetDelete":
     case "sheetRevive":
     case "chartDelete":
