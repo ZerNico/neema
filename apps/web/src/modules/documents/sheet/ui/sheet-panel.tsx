@@ -192,8 +192,14 @@ function writeClipboard(text: string, html: string) {
     .catch(() => clipboard.writeText(text));
 }
 
-/** The overlay key a picture is selected by, beside charts' IDs. */
-const IMAGE_KEY = "image:";
+/** A chart or picture over the cells, as one is selected and acted on. */
+type Picked = { readonly kind: "chart" | "image"; readonly id: string };
+/** The grid knows overlays by one string key; only these two read and write it. */
+const overlayKey = (picked: Picked) => `${picked.kind}:${picked.id}`;
+const pickedOf = (key: string): Picked =>
+  key.startsWith("image:")
+    ? { kind: "image", id: key.slice("image:".length) }
+    : { kind: "chart", id: key.slice("chart:".length) };
 
 /** Excel's Paste Special choices, as the cell menu offers them. */
 const PASTE_SPECIAL: ReadonlyArray<{
@@ -261,7 +267,7 @@ export default function SheetPanelBody({
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
   // A chart selected instead of cells, and the chart open in the editor, by ID.
-  const [chartPicked, setChartPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [chartEditing, setChartEditing] = useState<string | null>(null);
   // Absent outside the app's provider, as in tests, where a drop then replaces without asking.
   const confirm = useContext(ConfirmContext);
@@ -560,13 +566,10 @@ export default function SheetPanelBody({
       c2: cols.ids[Math.max(c1, c2) - 1]!,
     };
   })();
-  const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
-  // Pictures share the overlay selection, by a key of their own.
+  const pickedChart =
+    picked?.kind === "chart" && doc.charts[picked.id]?.sheet === sheet ? picked.id : null;
   const pickedImage =
-    chartPicked?.startsWith(IMAGE_KEY) &&
-    doc.images?.[chartPicked.slice(IMAGE_KEY.length)]?.sheet === sheet
-      ? chartPicked.slice(IMAGE_KEY.length)
-      : null;
+    picked?.kind === "image" && doc.images?.[picked.id]?.sheet === sheet ? picked.id : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const stats = selectionStats(context);
   const headRule = validationAt(doc, sheet, head.r, head.c);
@@ -663,7 +666,7 @@ export default function SheetPanelBody({
     run(ops);
     const added = ops.find((op) => op.op === "chartPut");
     if (added && !readOnly) {
-      setChartPicked(added.id);
+      setPicked({ kind: "chart", id: added.id });
       setChartEditing(added.id);
     }
   };
@@ -673,12 +676,12 @@ export default function SheetPanelBody({
     if (action === "edit") setChartEditing(id);
     else if (action === "delete") {
       run([{ op: "chartDelete", id }]);
-      setChartPicked(null);
+      setPicked(null);
       if (chartEditing === id) setChartEditing(null);
     } else if (action === "duplicate") {
       const copy = sync!.mint();
       run([duplicateChart(doc, chart, copy)]);
-      setChartPicked(copy);
+      setPicked({ kind: "chart", id: copy });
     } else void chartImage(id, chartData(doc, values, chart).title, action);
   };
   /** A picture placed at the active cell, downscaled first; selected once placed. */
@@ -708,25 +711,25 @@ export default function SheetPanelBody({
         },
       },
     ]);
-    setChartPicked(`${IMAGE_KEY}${id}`);
+    setPicked({ kind: "image", id });
   };
   const imageAction = (id: string, action: OverlayCommand) => {
     const image = doc.images?.[id];
     if (!image || readOnly) return;
     if (action === "delete") {
       run([{ op: "imageDelete", id }]);
-      setChartPicked(null);
+      setPicked(null);
     } else if (action === "duplicate") {
       const copy = sync!.mint();
       const { x = 0, y = 0 } = image.offset ?? {};
       run([{ op: "imagePut", id: copy, image: { ...image, offset: { x: x + 16, y: y + 16 } } }]);
-      setChartPicked(`${IMAGE_KEY}${copy}`);
+      setPicked({ kind: "image", id: copy });
     }
   };
   const imageOverlays: GridOverlay[] = Object.entries(doc.images ?? {})
     .filter(([, image]) => image.sheet === sheet)
     .map(([id, image]) => ({
-      key: `${IMAGE_KEY}${id}`,
+      key: overlayKey({ kind: "image", id }),
       at: image.at,
       ...(image.offset ? { offset: image.offset } : {}),
       width: image.size.width,
@@ -747,7 +750,7 @@ export default function SheetPanelBody({
     .map(([id, chart]) => {
       const data = chartData(doc, values, chart);
       return {
-        key: id,
+        key: overlayKey({ kind: "chart", id }),
         at: chart.at,
         ...(chart.offset ? { offset: chart.offset } : {}),
         width: chart.size.width,
@@ -1134,20 +1137,23 @@ export default function SheetPanelBody({
                 }
                 decorations={decorations}
                 overlays={[...overlays, ...imageOverlays]}
-                selectedOverlay={pickedChart ?? (pickedImage ? `${IMAGE_KEY}${pickedImage}` : null)}
-                onOverlaySelect={setChartPicked}
-                onOverlayChange={(id, change) => {
-                  const image = id.startsWith(IMAGE_KEY)
-                    ? doc.images?.[id.slice(IMAGE_KEY.length)]
-                    : undefined;
-                  if (image) {
-                    const { offset: _old, ...rest } = image;
+                selectedOverlay={
+                  pickedChart
+                    ? overlayKey({ kind: "chart", id: pickedChart })
+                    : pickedImage
+                      ? overlayKey({ kind: "image", id: pickedImage })
+                      : null
+                }
+                onOverlaySelect={(key) => setPicked(key === null ? null : pickedOf(key))}
+                onOverlayChange={(key, change) => {
+                  const { kind, id } = pickedOf(key);
+                  if (kind === "image") {
+                    // Its place alone: the picture's bytes are not sent again on every move.
                     run([
                       {
-                        op: "imagePut",
-                        id: id.slice(IMAGE_KEY.length),
-                        image: {
-                          ...rest,
+                        op: "imagePlace",
+                        id,
+                        place: {
                           at: change.at,
                           ...(change.offset.x || change.offset.y ? { offset: change.offset } : {}),
                           size: {
@@ -1174,11 +1180,11 @@ export default function SheetPanelBody({
                     },
                   ]);
                 }}
-                onOverlayCommand={(id, command) =>
-                  id.startsWith(IMAGE_KEY)
-                    ? imageAction(id.slice(IMAGE_KEY.length), command)
-                    : chartAction(id, command)
-                }
+                onOverlayCommand={(key, command) => {
+                  const { kind, id } = pickedOf(key);
+                  if (kind === "image") imageAction(id, command);
+                  else chartAction(id, command);
+                }}
                 onDragSelection={async (shift, copy) => {
                   const result = dragSelection(context, shift, copy);
                   if (!result || readOnly) return;

@@ -134,7 +134,8 @@ browser workers and the Excel file tools); this page records the decisions behin
 - A picture's bytes are in the document, a data URL downscaled on the device first, not an
   attachment. It so has the document's access, undo, copies and live sync, and needs no owner
   kind of its own; the document's byte limit bounds them. SVG is refused, as it can carry
-  script, and a file's pictures too large to keep are named as dropped.
+  script, and a file's pictures too large to keep are named as dropped. Moving or resizing one
+  sends its place alone (`imagePlace`), not its bytes, and undo does the same.
 
 ## Pivot tables
 

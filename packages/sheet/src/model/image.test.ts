@@ -32,4 +32,26 @@ describe("pictures on a sheet", () => {
       }).ok,
     ).toBe(false);
   });
+
+  it("moves a picture by its place alone, and back the same way", () => {
+    const doc = apply(emptyDoc(), [{ op: "imagePut", id: "p1", image: picture }]);
+    const place = { at: { r: "s1.r5", c: "s1.c1" }, size: { width: 50, height: 40 } };
+    const op = { op: "imagePlace", id: "p1", place } as const;
+    expect(parseChange({ clientId: "c", seq: 1, ops: [op] }).ok).toBe(true);
+    // A place cannot smuggle in other fields, the picture's bytes among them.
+    expect(
+      parseChange({
+        clientId: "c",
+        seq: 1,
+        ops: [{ ...op, place: { ...place, src: picture.src } }],
+      }).ok,
+    ).toBe(false);
+    const moved = apply(doc, [op]);
+    expect(moved.images!.p1).toEqual({ ...picture, ...place });
+    const undo = invertChange(doc, moved);
+    expect(undo).toEqual([
+      { op: "imagePlace", id: "p1", place: { at: picture.at, size: picture.size } },
+    ]);
+    expect(apply(moved, undo).images).toEqual(doc.images);
+  });
 });

@@ -7,7 +7,7 @@ import { isBox, isId, isIdList, isIdOrNull, isRecord } from "./check.ts";
 import { isStylePatch, type StylePatch } from "./style.ts";
 import { LIVE_LIMITS } from "./limits.ts";
 import { LIVE_CALC } from "./calc.ts";
-import { isSheetImage, type SheetImage } from "./image.ts";
+import { isImagePlace, isSheetImage, type ImagePlace, type SheetImage } from "./image.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -102,6 +102,8 @@ export type SheetOp =
   | { readonly op: "chartDelete"; readonly id: string }
   | { readonly op: "imagePut"; readonly id: string; readonly image: SheetImage }
   | { readonly op: "imageDelete"; readonly id: string }
+  /** A picture moved or resized: its place alone, so its bytes are not sent again. */
+  | { readonly op: "imagePlace"; readonly id: string; readonly place: ImagePlace }
   /** A sheet's whole AutoFilter set, or taken off with null. */
   | { readonly op: "filter"; readonly sh: string; readonly filter: SheetFilter | null }
   /** A sheet's whole list of data validations. */
@@ -174,6 +176,7 @@ const OP_NAMES = new Set([
   "chartDelete",
   "imagePut",
   "imageDelete",
+  "imagePlace",
   "anchor",
   "move",
   "sort",
@@ -297,6 +300,8 @@ function validOp(op: Record<string, unknown>): boolean {
     case "sheetRevive":
     case "imageDelete":
       return isId(op.id);
+    case "imagePlace":
+      return isId(op.id) && isImagePlace(op.place);
     case "imagePut":
       return isId(op.id) && isSheetImage(op.image);
     case "chartDelete":

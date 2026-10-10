@@ -33,12 +33,14 @@ const DATA_URL = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 const isNumber = (value: unknown, min: number, max: number) =>
   typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 
-/** Whether a picture, as an operation carries one, is well formed. */
-export function isSheetImage(value: unknown): value is SheetImage {
-  if (!isRecord(value) || !isRecord(value.at) || !isRecord(value.size)) return false;
+/** Where a picture sits and how big: what moving or resizing changes, without its bytes. */
+export type ImagePlace = Pick<SheetImage, "at" | "offset" | "size">;
+const PLACE_KEYS = ["at", "offset", "size"] as const;
+
+const isPlace = (value: Record<string, unknown>) => {
+  if (!isRecord(value.at) || !isRecord(value.size)) return false;
   const { width, height } = IMAGE_LIMITS;
   return (
-    isId(value.sheet) &&
     isId(value.at.r) &&
     isId(value.at.c) &&
     (value.offset === undefined ||
@@ -46,7 +48,22 @@ export function isSheetImage(value: unknown): value is SheetImage {
         isNumber(value.offset.x, 0, 2_000) &&
         isNumber(value.offset.y, 0, 2_000))) &&
     isNumber(value.size.width, width.min, width.max) &&
-    isNumber(value.size.height, height.min, height.max) &&
+    isNumber(value.size.height, height.min, height.max)
+  );
+};
+
+/** Whether a picture's place, as `imagePlace` carries one, is well formed. */
+export const isImagePlace = (value: unknown): value is ImagePlace =>
+  isRecord(value) &&
+  isPlace(value) &&
+  Object.keys(value).every((key) => (PLACE_KEYS as readonly string[]).includes(key));
+
+/** Whether a picture, as an operation carries one, is well formed. */
+export function isSheetImage(value: unknown): value is SheetImage {
+  if (!isRecord(value)) return false;
+  return (
+    isId(value.sheet) &&
+    isPlace(value) &&
     typeof value.src === "string" &&
     value.src.length <= IMAGE_LIMITS.src &&
     DATA_URL.test(value.src) &&

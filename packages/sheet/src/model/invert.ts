@@ -200,7 +200,21 @@ function imageUndo(
   if (!now) return [];
   const changes = fieldsUndo(before, after, now);
   if (!Object.keys(changes).length) return [];
-  return [{ op: "imagePut", id, image: mergeFields(now, changes) }];
+  const image = mergeFields(now, changes);
+  // A move or resize goes back as a place alone, without the picture's bytes.
+  if (Object.keys(changes).every((key) => key === "at" || key === "offset" || key === "size"))
+    return [
+      {
+        op: "imagePlace",
+        id,
+        place: {
+          at: image.at,
+          size: image.size,
+          ...(image.offset ? { offset: image.offset } : {}),
+        },
+      },
+    ];
+  return [{ op: "imagePut", id, image }];
 }
 
 /**

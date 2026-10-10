@@ -390,6 +390,12 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
     case "imagePut":
       if (!sheetOf(op.image.sheet)) return drop(doc, dropped, "a picture on a sheet that is gone");
       return { ...doc, images: { ...doc.images, [op.id]: op.image } };
+    case "imagePlace": {
+      const image = doc.images?.[op.id];
+      if (!image) return drop(doc, dropped, "a picture that is gone");
+      const { offset: _old, ...rest } = image;
+      return { ...doc, images: { ...doc.images, [op.id]: { ...rest, ...op.place } } };
+    }
     case "imageDelete": {
       if (!doc.images?.[op.id]) return doc;
       const { [op.id]: _gone, ...images } = doc.images;
