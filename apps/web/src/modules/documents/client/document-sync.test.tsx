@@ -197,6 +197,23 @@ describe("document connection", () => {
     expect(second.recovered).toBeNull();
   });
 
+  it("hands back what was typed, corrections and repeats included, after a reset", async () => {
+    server.editElsewhere("plan", (text) => `${text}!`);
+    const first = await connect(offline);
+    // "Keep this this", typed a key at a time with a slip corrected: the net text is " this".
+    const start = at(first, "Keep this") + "Keep this".length;
+    for (const [offset, character] of [..." thsi"].entries())
+      first.editor!.commands.insertContentAt(start + offset, character);
+    first.editor!.commands.deleteRange({ from: start + 3, to: start + 5 });
+    for (const [offset, character] of [..."is"].entries())
+      first.editor!.commands.insertContentAt(start + 3 + offset, character);
+    reload(first);
+    server.seed({ ...server.row("plan")!, content: "Fresh start" });
+    const second = await connect(online);
+    await waitFor(() => expect(markdown(second)).toBe("Fresh start"));
+    expect(second.recovered).toBe("this");
+  });
+
   it("hands back unsent text when the server can no longer rebase it", async () => {
     server.editElsewhere("plan", (text) => `${text}!`);
     const first = await connect(offline);

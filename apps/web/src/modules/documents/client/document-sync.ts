@@ -81,13 +81,20 @@ const changedText = (schema: Schema, entry: { doc: Record<string, unknown>; step
     let doc = base;
     for (const json of entry.steps)
       doc = Step.fromJSON(schema, JSON.parse(json)).apply(doc).doc ?? doc;
-    const start = base.content.findDiffStart(doc.content);
-    if (start === null) return "";
-    const end = base.content.findDiffEnd(doc.content)!;
-    return doc.textBetween(start, Math.max(start, end.b), "\n\n", " ").trim();
+    return textAdded(base, doc);
   } catch {
     return "";
   }
+};
+/** The text of the stretch where `doc` differs from `base`. */
+const textAdded = (base: Node, doc: Node) => {
+  const start = base.content.findDiffStart(doc.content);
+  if (start === null) return "";
+  const end = base.content.findDiffEnd(doc.content)!;
+  // Both ends count from their own document's end: where text repeats what
+  // comes before it ("bar bar"), the shared tail overlaps the shared head.
+  const overlap = start - Math.min(end.a, end.b);
+  return doc.textBetween(start, end.b + Math.max(0, overlap), "\n\n", " ").trim();
 };
 /**
  * The unsent steps that will not survive rebasing over `over`, found the way
@@ -211,6 +218,10 @@ export class DocumentSync {
 
   constructor(private readonly options: DocumentSyncOptions) {
     this.#clientId = randomClient();
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", this.#onLeave);
+      document.addEventListener("visibilitychange", this.#onLeave);
+    }
     void claimOutbox(options.documentId, this.#released, () => void this.#takeOver()).then(
       async (owned) => {
         // From storage, not this tab's copy: another tab may have written since it loaded.
@@ -302,6 +313,10 @@ export class DocumentSync {
     this.#source?.close();
     this.#listeners.clear();
     this.#editor?.destroy();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", this.#onLeave);
+      document.removeEventListener("visibilitychange", this.#onLeave);
+    }
     // The next tab to own the outbox reads it from storage: written first.
     void this.options.outbox.flush().finally(() => this.#release());
   }
@@ -332,6 +347,17 @@ export class DocumentSync {
     this.#save();
     this.#notify();
   }
+
+  /**
+   * Typing from the last moments before a reload or a close would otherwise
+   * wait on the save timer the page does not live to see: saved and written
+   * now, as the page goes or is hidden.
+   */
+  #onLeave = (event: Event) => {
+    if (event.type === "visibilitychange" && document.visibilityState !== "hidden") return;
+    this.#save();
+    void this.options.outbox.flush();
+  };
 
   #dropOutbox() {
     if (this.#ownsOutbox) this.options.outbox.delete(this.options.documentId);
@@ -596,7 +622,8 @@ export class DocumentSync {
       return;
     }
     const doc = Node.fromJSON(editor.schema, json);
-    this.#keepRecovered(unconfirmedOf(this.#collab, editor.state).map(({ step }) => step));
+    if (unconfirmedOf(this.#collab, editor.state).length)
+      this.#keepRecovered([], textAdded(this.#confirmed ?? editor.state.doc, editor.state.doc));
     const previous = this.#collab;
     this.#collab = collab({ version: revision, clientID: this.#clientId });
     const plugins = editor.state.plugins.map((plugin) =>
