@@ -141,6 +141,29 @@ describe("document editor", () => {
     await waitFor(() => expect(sync.markdown()).toBe("Weight  here"));
   });
 
+  it("leaves a collaborator's change to a formula alone when its field closes untouched", async () => {
+    const sync = await replica("Weight $w_i$ here");
+    mount(sync);
+    const editor = await editorOf();
+    const other = await replica("", sync.id);
+    act(() => {
+      editor.commands.setNodeSelection(8);
+    });
+    const field = await screen.findByRole("textbox", { name: "LaTeX" });
+    act(() => {
+      other.editor.commands.command(({ tr }) => {
+        tr.setNodeMarkup(8, undefined, { latex: "w_k" });
+        return true;
+      });
+    });
+    // The field follows the change while nothing has been typed into it.
+    await waitFor(() => expect(field).toHaveValue("w_k"));
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "LaTeX" })).toBeNull());
+    await waitFor(() => expect(server.content(sync.id)).toBe("Weight $w_k$ here"));
+    expect(sync.markdown()).toBe("Weight $w_k$ here");
+  });
+
   it("inserts a formula from the toolbar, inline in text and on its own line when empty", async () => {
     const sync = await replica("Area is pi r^2\n\n");
     mount(sync);

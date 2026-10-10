@@ -19,21 +19,30 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
   const display = node.type.name === "blockMath";
   const latex = String(node.attrs.latex ?? "");
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [draft, setDraft] = useState<string | null>(latex === "" ? "" : null);
+  // A formula just inserted opens for its LaTeX.
+  const [open, setOpen] = useState(latex === "");
+  // Null until the person types, so the field follows a collaborator's change
+  // to the formula, and closing it untouched writes nothing back.
+  const [typed, setTyped] = useState<string | null>(null);
   // Opens as it becomes selected, not while it is: closing re-renders before
   // the cursor has moved off it, and would open the field again. One created
   // selected, as the toolbar inserts it, counts as becoming selected.
   const [wasSelected, setWasSelected] = useState(false);
   if (selected !== wasSelected) {
     setWasSelected(selected);
-    if (selected && editor.isEditable) setDraft(latex);
+    if (selected) {
+      setOpen(true);
+      setTyped(null);
+    }
   }
-  const editing = draft !== null && editor.isEditable;
-  const shown = editing ? draft : latex;
+  const editing = open && editor.isEditable;
+  const value = typed ?? latex;
+  const shown = editing ? value : latex;
 
   const finish = () => {
-    const next = (draft ?? latex).trim();
-    setDraft(null);
+    const next = value.trim();
+    setOpen(false);
+    setTyped(null);
     const pos = getPos();
     if (typeof pos !== "number") return;
     const chain = editor.chain().focus();
@@ -41,7 +50,8 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
     else
       chain
         .command(({ tr }) => {
-          if (next !== latex) tr.setNodeMarkup(pos, undefined, { ...node.attrs, latex: next });
+          if (typed !== null && next !== latex)
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, latex: next });
           // After a display formula is between blocks, so the nearest place to type.
           tr.setSelection(Selection.near(tr.doc.resolve(pos + node.nodeSize)));
           return true;
@@ -77,9 +87,9 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
         <PopoverContent anchor={anchor} align={display ? "center" : "start"} className="w-80">
           <Textarea
             aria-label="LaTeX"
-            value={draft ?? ""}
+            value={value}
             placeholder="E = mc^2"
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => setTyped(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey) return;
               event.preventDefault();
