@@ -7,8 +7,13 @@ import { commentAnchors } from "../../editor/comments.ts";
 import { commentActions, setComments, shorten } from "../comment-actions.ts";
 import { CommentInput, CommentThread } from "../comment-thread.tsx";
 
-/** A box around a run of document positions, read fresh so the card follows scrolling. */
+/**
+ * A box around a run of document positions, read fresh so the card follows
+ * scrolling. The editor as its context is what tells the positioner which
+ * scrolling to listen to: a bare box has no ancestors to watch.
+ */
 const rangeAnchor = (editor: Editor, from: number, to: number) => ({
+  contextElement: editor.view.dom,
   getBoundingClientRect: () => {
     const start = editor.view.coordsAtPos(from);
     const end = editor.view.coordsAtPos(to);
@@ -66,11 +71,12 @@ export function CommentCard({
         setComments(editor, state.compose ? { compose: null } : { active: null });
       }}
     >
-      {/* A thread opens without taking focus, which would scroll the page to it; a new comment's field takes it. */}
+      {/* A thread opens without taking focus, which would scroll the page to it; a new comment's field takes it.
+          Its text scrolled out of the editor, the card goes with it rather than staying over the toolbar. */}
       <PopoverContent
         anchor={anchor}
         align="start"
-        className="w-80"
+        className="w-80 [[data-anchor-hidden]_&]:invisible"
         initialFocus={compose !== null}
       >
         {compose && actions ? (
