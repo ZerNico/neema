@@ -5,17 +5,6 @@ import {
   type CellValue,
   type FormulaValue,
 } from "@office-kit/xlsx/cell";
-import {
-  makeAreaChart,
-  makeBarChart,
-  makeBarSeries,
-  makeChartSpace,
-  makeLineChart,
-  makePieChart,
-  makeScatterChart,
-  makeScatterSeries,
-  type ChartSpace,
-} from "@office-kit/xlsx/chart";
 import { addChartAt, listChartsOnSheet } from "@office-kit/xlsx/drawing";
 import { fromArrayBuffer, loadWorkbook, workbookToBytes } from "@office-kit/xlsx/io";
 import {
@@ -95,6 +84,7 @@ import {
 } from "./dynamic-arrays.ts";
 import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from "./formulas.ts";
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
+import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
 import { sheetChart, sheetCharts } from "./chart-parts.ts";
 import { OFFICE_THEME_XML } from "./office-theme.ts";
 import { strToU8 } from "fflate";
@@ -379,52 +369,34 @@ function renameReferences(workbook: Workbook, from: string, to: string) {
     for (const item of listChartsOnSheet(sheet)) walk(item);
 }
 
-function chartSpace(
-  workbook: Workbook,
-  operation: Extract<SpreadsheetOperation, { kind: "addChart" }>,
-) {
-  const categories = operation.categories
-    ? absoluteRef(workbook, operation.categories, operation.sheet)
-    : undefined;
-  const series = operation.series.map((item, index) => ({
-    values: absoluteRef(workbook, item.values, operation.sheet),
-    ...(item.name ? { tx: { kind: "literal" as const, value: item.name } } : {}),
-    index,
-  }));
-  const bars = series.map((item) =>
-    makeBarSeries({
-      idx: item.index,
-      val: { ref: item.values },
-      ...(categories ? { cat: { ref: categories } } : {}),
-      ...(item.tx ? { tx: item.tx } : {}),
-    }),
+/** An addChart operation as the file chart it makes. */
+const fileChartOf = (
+  operation: Omit<Extract<SpreadsheetOperation, { kind: "addChart" }>, "kind">,
+): FileChart => ({
+  sheet: operation.sheet,
+  at: operation.at,
+  width: operation.width ?? 480,
+  height: operation.height ?? 300,
+  // The schema offers only the kinds a file chart has.
+  kind: operation.type as FileChart["kind"],
+  ...(operation.title ? { title: operation.title } : {}),
+  // Below the plot, where Excel puts a new chart's legend.
+  ...(operation.series.length > 1 || operation.type === "pie" ? { legend: "bottom" } : {}),
+  series: operation.series.map((item) => ({
+    values: item.values,
+    ...(operation.categories ? { categories: operation.categories } : {}),
+    ...(item.name ? { name: { text: item.name } } : {}),
+  })),
+});
+
+/** Places a file chart on its sheet, its ranges made absolute against the workbook. */
+function placeChart(workbook: Workbook, chart: FileChart) {
+  addChartAt(
+    sheetOf(workbook, chart.sheet),
+    chart.at,
+    chartReference(chart, (ref) => absoluteRef(workbook, ref, chart.sheet)),
+    { widthPx: chart.width, heightPx: chart.height },
   );
-  const chart =
-    operation.type === "column" || operation.type === "bar"
-      ? makeBarChart({ barDir: operation.type === "column" ? "col" : "bar", series: bars })
-      : operation.type === "line"
-        ? makeLineChart({ series: bars })
-        : operation.type === "area"
-          ? makeAreaChart({ series: bars })
-          : operation.type === "pie"
-            ? makePieChart({ series: bars })
-            : makeScatterChart({
-                series: series.map((item) =>
-                  makeScatterSeries({
-                    idx: item.index,
-                    yVal: { ref: item.values },
-                    ...(categories ? { xVal: { ref: categories } } : {}),
-                    ...(item.tx ? { tx: item.tx } : {}),
-                  }),
-                ),
-              });
-  const space: ChartSpace = makeChartSpace({
-    plotArea: { chart },
-    ...(operation.title ? { title: operation.title } : {}),
-    // Below the plot, where Excel puts a new chart's legend.
-    ...(series.length > 1 || operation.type === "pie" ? { legend: { position: "b" } } : {}),
-  });
-  return space;
 }
 
 /** Applies one operation; a failure names it and nothing of the batch is saved. */
@@ -618,15 +590,7 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
       const sheet = sheetOf(workbook, operation.sheet);
       if (listChartsOnSheet(sheet).length >= SPREADSHEET_LIMITS.chartsPerSheet)
         fail("limit", `A sheet can hold at most ${SPREADSHEET_LIMITS.chartsPerSheet} charts.`);
-      addChartAt(
-        sheet,
-        operation.at,
-        { space: chartSpace(workbook, operation) },
-        {
-          widthPx: operation.width ?? 480,
-          heightPx: operation.height ?? 300,
-        },
-      );
+      placeChart(workbook, fileChartOf(operation));
       return;
     }
   }
@@ -839,10 +803,8 @@ export interface LiveSheetExport {
     readonly freeze?: string;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
-  /** Charts as addChart takes them: ranges as A1 text, placed by sheet name and cell. */
-  readonly charts?: ReadonlyArray<
-    Omit<Extract<SpreadsheetOperation, { kind: "addChart" }>, "kind">
-  >;
+  /** Charts by sheet name and cell, their ranges as A1 text. */
+  readonly charts?: readonly FileChart[];
 }
 
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
@@ -903,15 +865,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     if (each.freeze) setFreezePanes(sheet, each.freeze);
   }
   for (const name of spec.names) addDefinedName(workbook, name);
-  for (const chart of spec.charts ?? []) {
-    const operation = { kind: "addChart" as const, ...chart };
-    addChartAt(
-      sheetOf(workbook, chart.sheet),
-      chart.at,
-      { space: chartSpace(workbook, operation) },
-      { widthPx: chart.width ?? 480, heightPx: chart.height ?? 300 },
-    );
-  }
+  for (const chart of spec.charts ?? []) placeChart(workbook, chart);
   recalculate(workbook, { authored });
   return save(workbook);
 }
@@ -938,6 +892,7 @@ export interface LiveSheetImport {
     readonly freeze?: string;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  readonly charts: readonly FileChart[];
   /** What a live sheet does not keep, in words, for the model to tell the person. */
   readonly dropped: readonly string[];
 }
@@ -994,6 +949,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
   const workbook = await openWorkbook(bytes);
   unshareFormulas(workbook);
   const dropped = new Set<string>();
+  const charts: FileChart[] = [];
   const sheets = [...iterWorksheets(workbook)].map((sheet) => {
     const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
     let [rows, cols] = [0, 0];
@@ -1041,7 +997,11 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       const height = getRowDimension(sheet, row);
       if (height?.customHeight && height.height !== undefined) heights.push([row, height.height]);
     }
-    if (listChartsOnSheet(sheet).length) dropped.add("charts");
+    for (const item of listChartsOnSheet(sheet)) {
+      const chart = readFileChart(sheet.title, item);
+      if (chart) charts.push(chart);
+      else dropped.add("charts of kinds a live sheet does not draw");
+    }
     if (listTables(sheet).length) dropped.add("table formatting (the data stays)");
     if (getAutoFilter(sheet)) dropped.add("filters");
     if (sheet.conditionalFormatting.length) dropped.add("conditional formatting");
@@ -1064,6 +1024,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
     names: workbook.definedNames
       .filter((name) => !name.name.startsWith("_xlnm."))
       .map((name) => ({ name: name.name, value: name.value })),
+    charts,
     dropped: [...dropped],
   };
 }

@@ -81,6 +81,98 @@ describe("importing into a live sheet", () => {
     expect(read.dropped).toEqual([]);
   });
 
+  it("keeps a chart's options through Excel and back", async () => {
+    const rows = [
+      ["Month", "Revenue", "Costs"],
+      ["Jan", 100, 60],
+      ["Feb", 140, 80],
+      ["Mar", 120, 70],
+    ];
+    const kinds = [
+      { type: "column", stack: "stacked", at: "E2" },
+      { type: "line", at: "E20" },
+      { type: "doughnut", at: "M2", hole: 0.4, labels: true },
+      { type: "scatter", at: "M20" },
+      { type: "bar", at: "E40" },
+      { type: "waterfall", at: "U2" },
+      { type: "histogram", at: "U20" },
+    ];
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows },
+      ...kinds.map(({ type, ...rest }) => ({
+        kind: "addChart",
+        sheet: "Sheet1",
+        type,
+        title: `${type} chart`,
+        legend: "right",
+        yAxis: { title: "Money", min: 0, max: 200, format: "$#,##0", gridlines: true },
+        ...(type === "line" || type === "scatter"
+          ? {
+              categories: type === "scatter" ? "B2:B4" : "A2:A4",
+              series: [
+                {
+                  values: "C2:C4",
+                  name: "=C1",
+                  color: "#FF0000",
+                  smooth: type === "line",
+                  markers: type === "line",
+                  dashed: type === "line",
+                  trendline: type === "scatter",
+                  labels: true,
+                },
+              ],
+            }
+          : { range: "A1:C4" }),
+        ...rest,
+      })),
+    ]);
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const charts = Object.values(imported.doc.charts);
+    expect(charts.map((each) => each.kind)).toEqual([
+      "column",
+      "line",
+      "doughnut",
+      "scatter",
+      "bar",
+      "waterfall",
+      "histogram",
+    ]);
+    expect(charts[5]).toMatchObject({ title: { text: "waterfall chart" } });
+    const [column, line, doughnut, scatter, bar] = charts;
+    expect(column).toMatchObject({
+      stack: "stacked",
+      title: { text: "column chart" },
+      legend: "right",
+      axes: {
+        y: { title: { text: "Money" }, min: 0, max: 200, format: "$#,##0", gridlines: true },
+      },
+      series: [
+        { name: { cell: { sh: "s1", r: "s1.r1", c: "s1.c2" } } },
+        { name: { cell: { sh: "s1", r: "s1.r1", c: "s1.c3" } } },
+      ],
+    });
+    expect(column!.series[0]!.categories).toEqual({
+      r1: "s1.r2",
+      r2: "s1.r4",
+      c1: "s1.c1",
+      c2: "s1.c1",
+    });
+    expect(line!.series[0]).toMatchObject({
+      color: "#FF0000",
+      labels: { show: true },
+      line: { smooth: true, markers: true, dashed: true },
+    });
+    expect(doughnut).toMatchObject({ style: { hole: 0.4, labels: { show: true } } });
+    expect(doughnut!.series).toHaveLength(1);
+    expect(scatter!.series[0]).toMatchObject({ trendline: true });
+    // A bar chart's value axis runs along the bottom, so its options stay with the vertical axis.
+    expect(bar).toMatchObject({ axes: { y: { min: 0, max: 200 } } });
+    expect(column!.at).toEqual(original.charts[Object.keys(original.charts)[0]!]!.at);
+  });
+
   it("reads CSV in either convention, quoted fields and formulas included", () => {
     const us = sheetFromCsv(
       'Item,Amount\n"Tea, green",1234.5\nTotal,=SUM(B2:B2)\n',

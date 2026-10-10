@@ -14,7 +14,9 @@ import {
   type SheetSettings,
 } from "@chat/sheet/model";
 import { parseTyped } from "@chat/sheet/value-parse";
+import type { Chart } from "@chat/sheet/model/chart";
 import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
+import { chartOfFile } from "./chart-files.ts";
 
 export type Imported =
   | { ok: true; doc: SheetDoc; dropped: string[] }
@@ -159,6 +161,12 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
     if (f) names[name.name.toLowerCase()] = { name: name.name, f };
   }
   doc = { ...doc, names };
+  const charts: Record<string, Chart> = {};
+  for (const [index, file] of read.charts.entries()) {
+    const chart = chartOfFile(doc, file);
+    if (chart) charts[`chart${index + 1}`] = chart;
+  }
+  doc = { ...doc, charts };
   const over = overLimits(doc);
   if (over) return { ok: false, reason: over };
   return { ok: true, doc, dropped: [...read.dropped] };
@@ -207,6 +215,7 @@ export function readCsv(text: string, name: string): LiveSheetImport {
       },
     ],
     names: [],
+    charts: [],
     dropped: [],
   };
 }
