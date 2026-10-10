@@ -165,6 +165,40 @@ describe("undoing a change", () => {
     expect(undone.sheet.s1!.cells["s1.r1"]!["s1.c1"]!.v).toBe("theirs");
   });
 
+  it("leaves a size, a rule and a chart's option someone else changed since", () => {
+    const chart: SheetOp = {
+      op: "chartPut",
+      id: "ch",
+      chart: {
+        sheet: "s1",
+        at: { r: "s1.r1", c: "s1.c5" },
+        size: { width: 400, height: 300 },
+        kind: "column",
+        series: [{ values: { r1: "s1.r2", r2: "s1.r5", c1: "s1.c2", c2: "s1.c2" } }],
+      },
+    };
+    const rule = (id: string) => ({
+      id,
+      box: { r1: "s1.r1", r2: "s1.r2", c1: "s1.c1", c2: "s1.c1" },
+      rule: { kind: "text", op: "contains", text: id, style: { bold: true } } as const,
+    });
+    const doc = apply(emptyDoc(), [chart]);
+    const mine = apply(doc, [
+      { op: "resize", sh: "s1", axis: "columns", ids: ["s1.c1"], size: 100 },
+      { op: "conditional", sh: "s1", list: [rule("mine")] },
+      { op: "chartPatch", id: "ch", patch: { at: { r: "s1.r3", c: "s1.c6" } } },
+    ]);
+    const theirs = apply(mine, [
+      { op: "resize", sh: "s1", axis: "columns", ids: ["s1.c1"], size: 200 },
+      { op: "conditional", sh: "s1", list: [rule("mine"), rule("theirs")] },
+      { op: "chartPatch", id: "ch", patch: { title: { text: "Theirs" } } },
+    ]);
+    const undone = apply(theirs, invertChange(doc, mine, theirs));
+    expect(undone.sheet.s1!.colProps["s1.c1"]?.size).toBe(200);
+    expect(undone.sheet.s1!.conditional?.map((each) => each.id)).toEqual(["theirs"]);
+    expect(undone.charts.ch).toEqual({ ...doc.charts.ch, title: { text: "Theirs" } });
+  });
+
   it("takes any change back to what the sheet showed before it", () => {
     const base = (): SheetDoc => ({
       ...emptyDoc(),

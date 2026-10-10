@@ -243,7 +243,8 @@ export const isChartPatch = (value: unknown) =>
   });
 
 /** A copy of `base` with each key of `changes` set, or removed where it is null. */
-const merge = <T extends object>(base: T, changes: object): T => {
+/** An object with each named field replaced, or removed where the change is null. */
+export const mergeFields = <T extends object>(base: T, changes: object): T => {
   const out: Partial<Record<keyof T, unknown>> = { ...base };
   for (const [key, value] of Object.entries(changes) as Array<[keyof T, unknown]>)
     if (value === null) delete out[key];
@@ -255,9 +256,14 @@ const merge = <T extends object>(base: T, changes: object): T => {
 /** The chart with a patch applied: each key replaced or removed, axes and style merged a level down. */
 export function patchChart(chart: Chart, patch: ChartPatch): Chart {
   const { axes, style, ...rest } = patch;
-  let next = merge(chart, rest);
-  if (axes) next = merge(next, { axes: merge(chart.axes ?? {}, axes) });
-  if (style) next = merge(next, { style: merge(chart.style ?? {}, style) });
+  let next = mergeFields(chart, rest);
+  // A level left empty is removed, so undoing a patch gives back exactly the chart it was.
+  const level = (base: object, changes: object) => {
+    const merged = mergeFields(base, changes);
+    return Object.keys(merged).length ? merged : null;
+  };
+  if (axes) next = mergeFields(next, { axes: level(chart.axes ?? {}, axes) });
+  if (style) next = mergeFields(next, { style: level(chart.style ?? {}, style) });
   return next;
 }
 

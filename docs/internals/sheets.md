@@ -150,8 +150,8 @@ browser workers and the Excel file tools); this page records the decisions behin
   follows. It sits on a cell by IDs with a pixel offset into it, as Excel anchors one, so
   it moves with inserts above it and stays where it was dropped.
 - `chartPatch` replaces each top-level option it names, merges axes and style one level down
-  and replaces series whole. Two people changing different options both keep theirs, and undo
-  is `invertChange` like any other change.
+  and replaces series whole. Two people changing different options both keep theirs, undo
+  included.
 - A chart made from a range keeps that range and how it was read (header row, label column,
   series along rows). A new kind, a changed range or a flipped toggle reads it again, keeping
   each series' own options by place, so a pie keeps one series and columns get them all back.
@@ -177,7 +177,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   the client that made them and makes its own edits under a new one, so two tabs resending the
   same changes is harmless.
 - Undo walks the tab's own history: each step keeps the document before and after, and
-  `invertChange` takes it back except where someone else has changed a cell since.
+  `invertChange` puts back only what still holds what the step left. Someone else's later edit
+  stays, whether to a cell, a size, a rule (lists go item by item) or a chart's or picture's
+  field.
 - Comment threads sit on a cell, or a range from it to a far corner, through the document's
   anchors, written as a change of their writer's own, so a thread follows its cells through
   inserts and sorts. A range whose far corner is deleted keeps its first cell.
