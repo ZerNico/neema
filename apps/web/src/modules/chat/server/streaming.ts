@@ -2,6 +2,7 @@ import type { ExternalOwner } from "~/modules/tools/server/external-completion.t
 import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
+import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
   ProjectFileToolName,
@@ -4558,6 +4559,7 @@ export class StreamEngine extends Context.Service<
     Layer.provideMerge(ScheduleDraftService.layer),
     Layer.provideMerge(AgentDraftService.layer),
     Layer.provideMerge(DocumentService.layer),
+    Layer.provideMerge(SheetService.layer),
     Layer.provideMerge(ProjectMemoryService.layer),
     Layer.provideMerge(AgentRepo.layer),
     Layer.provideMerge(KnowledgeRepo.layer),

@@ -48,6 +48,24 @@ browser workers and the Excel file tools); this page records the decisions behin
 - Styles are stored as a canonical key (properties in a fixed order), so replicas agree on
   the key without sharing a table.
 
+## Serving a sheet
+
+- A sheet is a `documents` row of kind `sheet`: the snapshot is the document's JSON and each
+  `document_steps` row one change. `SheetService` keeps it in memory and orders writes like the
+  text service, but checks no base revision: changes name IDs, so one built on any earlier
+  revision applies as it is. Edits travel as JSON text (`pushSheet`), the feed at
+  `/api/sheets/:id/stream`.
+- Each client's last applied sequence number is kept in `sheet_clients`, apart from the steps,
+  so folding the log never makes an old change look new. A push applies only the run that
+  follows it; a resend is acknowledged, a gap waits. A change the server will not keep (over a
+  limit, an unknown locale or time zone) still uses its number and comes back as refused, so the
+  client drops it rather than resending forever. A reset frame carries the client's last number,
+  telling it which of its pending changes are already in.
+- Steps are folded past 2,000 and 30 days, or sooner once they pass 32 MB. Tombstones are never
+  folded, so a change from before the snapshot still finds its IDs; an editor based there gets
+  the whole document and replays what it has pending.
+- The model's changes come through `change`, numbered in a client of its own per generation.
+
 ## Calculating
 
 - Values are never stored: every replica calculates them from the document and a
