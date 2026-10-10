@@ -20,7 +20,8 @@
     "./model/limits": "./src/model/limits.ts",
     "./model/calc": "./src/model/calc.ts",
     "./model/invert": "./src/model/invert.ts",
-    "./model/chart": "./src/model/chart.ts"
+    "./model/chart": "./src/model/chart.ts",
+    "./model/fill": "./src/model/fill.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
