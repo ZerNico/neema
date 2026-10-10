@@ -147,6 +147,23 @@ describe("importing into a live sheet", () => {
     expect(imported.dropped).toEqual(["names local to one sheet that another name shares"]);
   });
 
+  it("grows the grid to hold what a file places past its last cell", async () => {
+    const read = await importLiveSheet(
+      await exportLiveSheet(
+        liveSheetExport(build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[1]] }])),
+      ),
+    );
+    const sheet = {
+      ...read.sheets[0]!,
+      merges: ["AB3:AC4"],
+      notes: [{ ref: "B1500", entries: [{ author: "", text: "Far down" }] }],
+    };
+    const imported = sheetFromWorkbook({ ...read, sheets: [sheet] }, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(imported.doc.sheet.s1!.merges).toHaveLength(1);
+    expect(imported.notes).toHaveLength(1);
+  });
+
   it("keeps underline, strikethrough and a font through Excel and back", async () => {
     const original = build([
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Title", "Old"]] },

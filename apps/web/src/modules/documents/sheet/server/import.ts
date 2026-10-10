@@ -115,14 +115,42 @@ function filterOf(
  * before any formula is read, so references across sheets find their cells;
  * one reaching past a grid grows it. Over the live limits it is refused.
  */
+/**
+ * How far a sheet of a file reaches: its cells, and everything placed on
+ * them (merges, notes, rules, its filter, pictures and charts), so the grid
+ * holds all of it.
+ */
+function extentOf(read: LiveSheetImport, index: number) {
+  const each = read.sheets[index]!;
+  let [rows, cols] = [each.rows, each.cols];
+  const refs = [
+    ...each.merges,
+    ...(each.notes ?? []).map((note) => note.ref),
+    ...(each.validations ?? []).map((validation) => validation.ref),
+    ...(each.conditional ?? []).map((format) => format.ref),
+    ...(each.filter ? [each.filter.ref] : []),
+    ...[...read.images, ...read.charts]
+      .filter((object) => object.sheet === each.name)
+      .map((object) => object.at),
+  ];
+  for (const ref of refs) {
+    const box = parseRange(ref);
+    if (!box) continue;
+    rows = Math.max(rows, box.bottom);
+    cols = Math.max(cols, box.right);
+  }
+  return { rows, cols };
+}
+
 export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings): Imported {
   if (!read.sheets.length) return { ok: false, reason: "the workbook has no sheets" };
   if (read.sheets.length > LIVE_LIMITS.sheets)
     return { ok: false, reason: `more than ${LIVE_LIMITS.sheets} sheets` };
   // Sized before any grid is built, so a file naming a far cell costs nothing to refuse.
-  if (read.sheets.some((each) => each.rows > LIVE_LIMITS.rows || each.cols > LIVE_LIMITS.cols))
+  const extents = read.sheets.map((_, index) => extentOf(read, index));
+  if (extents.some((each) => each.rows > LIVE_LIMITS.rows || each.cols > LIVE_LIMITS.cols))
     return { ok: false, reason: "a sheet larger than a live sheet holds" };
-  const entries = read.sheets.reduce(
+  const entries = extents.reduce(
     (total, each) =>
       total + Math.max(NEW_SHEET.rows, each.rows) + Math.max(NEW_SHEET.cols, each.cols),
     0,
@@ -137,8 +165,8 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
       read.sheets.map((each, index) => [
         ids[index]!,
         emptySheet(each.name, `${ids[index]}.`, {
-          rows: Math.max(NEW_SHEET.rows, each.rows),
-          cols: Math.max(NEW_SHEET.cols, each.cols),
+          rows: Math.max(NEW_SHEET.rows, extents[index]!.rows),
+          cols: Math.max(NEW_SHEET.cols, extents[index]!.cols),
         }),
       ]),
     ),
