@@ -246,6 +246,11 @@ describe("live sheet tools", () => {
     expect(
       await call(tools, "comment_on_document", { cell: "Nope!B2", content: "x" }),
     ).toMatchObject({ outcome: "not_found" });
+    // A reply changes no cell, yet the next view shows it.
+    expect(
+      await call(tools, "comment_on_document", { thread: "t1", content: "Checked twice." }),
+    ).toMatchObject({ outcome: "commented" });
+    expect(send(tools)).toContain("Checked twice.");
   });
 
   it("starts a sheet from a file the person gave, titled after it", async () => {

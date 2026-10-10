@@ -1835,9 +1835,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const xml = `<document${header(document, { focused: true, ...(shownSelection.length ? { selected: shownSelection.join(" ") } : {}) })}>\n${view.xml}${note}${comments ? `\n${comments}` : ""}\n</document>`;
     return { xml, view, order, comments, selection: shownSelection.join(" ") };
   };
-  // A sheet is calculated for its view; the same revision and window give the same text.
+  // A sheet is calculated for its view; the same revision, window and threads give the same text.
   const sheetRenders = new Map<string, { xml: string; body: string; next: SheetWindow | null }>();
-  /** The focused sheet's view as it is now: its cells calculated, one window of them. */
   /** The person's selection on a sheet as A1, when the message came from it. */
   const sheetSelection = (document: EditableDocument, doc: SheetDoc) => {
     if (document.id !== input.openDocumentId || selectedCells.length !== 5) return null;
@@ -1859,13 +1858,15 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const to = `${columnLetters(Math.max(c1, c2))}${Math.max(r1, r2)}`;
     return { sheet: data.name, range: from === to ? from : `${from}:${to}` };
   };
+  /** The focused sheet's view as it is now: its cells calculated, one window of them. */
   const renderSheet = (document: EditableDocument) => {
     const state = sheetStates.get(document.id);
     if (!state) return null;
     const picked = sheetSelection(document, state.doc);
     // Without a window of its own, the view opens on the sheet the person has selected in.
     const window = sheetWindows.get(document.id) ?? (picked ? { sheet: picked.sheet } : undefined);
-    const key = `${document.id}:${state.revision}:${document.revision}:${document.title}:${editedSinceYourLastWrite(document)}:${JSON.stringify(window ?? {})}:${JSON.stringify(picked)}`;
+    // Threads change without a revision of the sheet, so they are part of what is shown.
+    const key = `${document.id}:${state.revision}:${document.revision}:${document.title}:${editedSinceYourLastWrite(document)}:${JSON.stringify(window ?? {})}:${JSON.stringify(picked)}:${asking}:${JSON.stringify(threads.get(document.id) ?? [])}`;
     const cached = sheetRenders.get(key);
     if (cached) return cached;
     const values: SheetValues = calculateSheet(state.doc, {
