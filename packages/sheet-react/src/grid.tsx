@@ -14,6 +14,7 @@ import { columnLetters } from "@chat/sheet/a1";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
+import type { CellLook } from "@chat/sheet/model/conditional";
 import { cellCss, cellDisplay, cellStyle } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
@@ -145,6 +146,8 @@ export interface SheetGridProps {
   readonly onFill?: (fill: GridFill) => void;
   /** Drawn just past the selection's corner, as Excel's Auto Fill Options button after a fill. */
   readonly selectionAccessory?: ReactNode;
+  /** How conditional formats show cells, by `r|c`. */
+  readonly looks?: ReadonlyMap<string, CellLook>;
   /** Rows out of view for now, such as those a filter hides, by ID. */
   readonly hiddenRows?: ReadonlySet<string>;
   /** A filter's header row and columns, which get its buttons; `active` ones have a rule. */
@@ -164,6 +167,7 @@ const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
 const NO_ROWS: ReadonlySet<string> = new Set();
+const NO_LOOKS: ReadonlyMap<string, CellLook> = new Map();
 const OVERLAY_MIN = { width: 160, height: 120 };
 
 /** Row and column indexes of every merged range, and the cells each hides. */
@@ -221,6 +225,7 @@ export function SheetGrid({
   onFill,
   onDragSelection,
   selectionAccessory,
+  looks = NO_LOOKS,
   hiddenRows = NO_ROWS,
   filterButtons = null,
   onFilterButton,
@@ -807,7 +812,18 @@ export function SheetGrid({
       const r = rows.ids[row]!;
       const c = cols.ids[col]!;
       const cell = sheetCells[r]?.[c];
-      const style = cellStyle(cell?.s);
+      const look = looks.get(`${r}|${c}`);
+      // Conditional formats show over the cell's own style, as Excel draws them.
+      const own = cellStyle(cell?.s);
+      const style = look
+        ? {
+            ...own,
+            ...(look.fill ? { fill: look.fill } : {}),
+            ...(look.fontColor ? { fontColor: look.fontColor } : {}),
+            ...(look.bold ? { bold: true } : {}),
+            ...(look.italic ? { italic: true } : {}),
+          }
+        : own;
       const value = values.value(sheet, r, c);
       const shown = cellDisplay(value, style, locale);
       const bottom = span ? span.bottom : row;
@@ -863,7 +879,18 @@ export function SheetGrid({
             ...(shown.color ? { color: shown.color } : {}),
           }}
         >
-          {shown.text}
+          {look?.bar ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-xs opacity-60"
+              style={{
+                width: `calc(${look.bar.fraction * 100}% - 4px)`,
+                // The rule's own colour, which is the sheet's data.
+                background: `linear-gradient(to right, ${look.bar.color}, color-mix(in oklab, ${look.bar.color} 30%, transparent))`,
+              }}
+            />
+          ) : null}
+          <span className="relative">{shown.text}</span>
         </div>,
       );
     };

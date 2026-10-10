@@ -103,7 +103,7 @@ describe("the sheet grid", () => {
       },
     );
     render(<Harness doc={doc} />);
-    const cell = (text: string) => screen.getByText(text) as HTMLElement;
+    const cell = (text: string) => screen.getByText(text).parentElement!;
     expect(cell("Short").style.width).toBe("64px");
     expect(cell("Short").nextElementSibling?.getAttribute("aria-hidden")).toBeNull();
     expect(cell(long).style.width).toBe("64px");
@@ -230,6 +230,34 @@ describe("the sheet grid", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Filter A" }));
     expect(opened).toEqual(["s1.c1"]);
+  });
+
+  it("draws conditional formats over a cell's own style, and data bars behind its text", () => {
+    let doc = emptyDoc();
+    doc = apply(doc, { op: "set", sh: "s1", cells: [set(doc, 1, 1, 5), set(doc, 2, 1, 9)] });
+    render(
+      <SheetGrid
+        doc={doc}
+        sheet="s1"
+        values={calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={null}
+        onSelectionChange={() => {}}
+        label="Budget"
+        looks={
+          new Map([
+            ["s1.r1|s1.c1", { fill: "#FFC7CE", bold: true }],
+            ["s1.r2|s1.c1", { bar: { fraction: 0.5, color: "#638EC6" } }],
+          ])
+        }
+      />,
+    );
+    const first = document.querySelector<HTMLElement>('[aria-rowindex="1"][aria-colindex="1"]')!;
+    expect(first.style.backgroundColor).toBe("rgb(255, 199, 206)");
+    expect(first.style.fontWeight).toBe("600");
+    const second = document.querySelector('[aria-rowindex="2"][aria-colindex="1"]')!;
+    const bar = second.firstElementChild as HTMLElement;
+    expect(bar.style.width).toBe("calc(50% - 4px)");
   });
 
   it("types a fresh value, edits the formula behind one, and sends commands up", () => {
