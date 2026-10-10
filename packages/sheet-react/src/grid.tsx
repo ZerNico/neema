@@ -51,7 +51,19 @@ export interface CellRef {
 export interface SheetSelection {
   readonly anchor: CellRef;
   readonly head: CellRef;
+  /** Ranges selected before this one with Cmd or Ctrl held, as Excel selects several. */
+  readonly more?: ReadonlyArray<{ readonly anchor: CellRef; readonly head: CellRef }>;
 }
+/** At most this many ranges are selected at once. */
+const MAX_RANGES = 50;
+/** The selection's ranges with a new one begun at `at`, as Cmd or Ctrl and a click do. */
+const adding = (selection: SheetSelection, at: CellRef): SheetSelection => ({
+  anchor: at,
+  head: at,
+  more: [...(selection.more ?? []), { anchor: selection.anchor, head: selection.head }].slice(
+    -MAX_RANGES + 1,
+  ),
+});
 
 /** A cell being typed into. Typing a fresh value lets arrow keys move on; editing one moves the caret. */
 export interface CellEditing {
@@ -335,7 +347,12 @@ export function SheetGrid({
   const select = useCallback(
     (row: number, col: number, extend: boolean) => {
       const at = { r: rows.ids[row]!, c: cols.ids[col]! };
-      onSelectionChange({ anchor: extend && selection ? selection.anchor : at, head: at });
+      // Extending keeps the other ranges; anything else starts over with one.
+      onSelectionChange({
+        anchor: extend && selection ? selection.anchor : at,
+        head: at,
+        ...(extend && selection?.more ? { more: selection.more } : {}),
+      });
     },
     [cols.ids, onSelectionChange, rows.ids, selection],
   );
@@ -569,10 +586,15 @@ export function SheetGrid({
     return { top, bottom, left, right };
   };
   /** Selects a rectangle by indexes, the head at its far corner. */
-  const selectBox = (from: { row: number; col: number }, to: { row: number; col: number }) =>
+  const selectBox = (
+    from: { row: number; col: number },
+    to: { row: number; col: number },
+    more?: SheetSelection["more"],
+  ) =>
     onSelectionChange({
       anchor: { r: rows.ids[from.row]!, c: cols.ids[from.col]! },
       head: { r: rows.ids[to.row]!, c: cols.ids[to.col]! },
+      ...(more ? { more } : {}),
     });
   /** The last row and column anything is written in, where Ctrl+End goes. */
   const usedEnd = () => {
@@ -783,7 +805,9 @@ export function SheetGrid({
     }
     dragging.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    select(at.row, at.col, event.shiftKey);
+    if ((event.metaKey || event.ctrlKey) && selection && !event.shiftKey)
+      onSelectionChange(adding(selection, { r: rows.ids[at.row]!, c: cols.ids[at.col]! }));
+    else select(at.row, at.col, event.shiftKey);
     scroller.current?.focus({ preventScroll: true });
   };
   const onPointerMove = (event: PointerEvent) => {
@@ -1074,11 +1098,18 @@ export function SheetGrid({
     if (selectedOverlay !== null) onOverlaySelect?.(null);
     const columns = axis === "columns";
     const anchorIndex = event.shiftKey && anchor ? (columns ? anchor.col : anchor.row) : index;
+    // Cmd or Ctrl adds the rows or columns to what is selected; Shift extends the active range.
+    const kept =
+      (event.metaKey || event.ctrlKey) && selection
+        ? adding(selection, selection.head).more
+        : event.shiftKey
+          ? selection?.more
+          : undefined;
     const span = (to: number) =>
       // The active cell stays at the top (or left), so the sheet does not scroll to the end.
       columns
-        ? selectBox({ row: rows.ids.length - 1, col: anchorIndex }, { row: 0, col: to })
-        : selectBox({ row: anchorIndex, col: cols.ids.length - 1 }, { row: to, col: 0 });
+        ? selectBox({ row: rows.ids.length - 1, col: anchorIndex }, { row: 0, col: to }, kept)
+        : selectBox({ row: anchorIndex, col: cols.ids.length - 1 }, { row: to, col: 0 }, kept);
     span(index);
     scroller.current?.focus({ preventScroll: true });
     const move = (next: globalThis.PointerEvent) => {
@@ -1373,6 +1404,30 @@ export function SheetGrid({
       />
     ) : null;
 
+  // The other selected ranges, shaded as Excel shades them, without the active range's frame.
+  const moreBoxes = (selection?.more ?? []).flatMap((range) => {
+    const [a, b] = [
+      { row: rowIndex.get(range.anchor.r), col: colIndex.get(range.anchor.c) },
+      { row: rowIndex.get(range.head.r), col: colIndex.get(range.head.c) },
+    ];
+    if (a.row === undefined || a.col === undefined || b.row === undefined || b.col === undefined)
+      return [];
+    const [top, bottom] = [Math.min(a.row, b.row), Math.max(a.row, b.row)];
+    const [left, right] = [Math.min(a.col, b.col), Math.max(a.col, b.col)];
+    return [
+      <div
+        key={`${range.anchor.r}:${range.anchor.c}:${range.head.r}:${range.head.c}`}
+        aria-hidden
+        className="border-primary/60 bg-primary/10 pointer-events-none absolute z-10 border"
+        style={{
+          top: rows.starts[top],
+          left: cols.starts[left],
+          height: rows.starts[bottom + 1]! - rows.starts[top]!,
+          width: cols.starts[right + 1]! - cols.starts[left]!,
+        }}
+      />,
+    ];
+  });
   const selectionBox = box && (
     <div
       aria-hidden
@@ -1574,6 +1629,7 @@ export function SheetGrid({
     >
       {paneCells(rowRange, colRange, false)}
       {others}
+      {moreBoxes}
       {selectionBox}
       {editingPane === name ? editor : null}
       {editingPane === name ? formulaPopup : null}
@@ -1690,6 +1746,7 @@ export function SheetGrid({
         >
           {cells}
           {others}
+          {moreBoxes}
           {selectionBox}
           {fillPreview}
           {shiftPreview}

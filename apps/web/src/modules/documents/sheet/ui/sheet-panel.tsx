@@ -41,6 +41,7 @@ import {
   formatSelection,
   insertAtSelection,
   pasteAtSelection,
+  eachRange,
   sheetCsv,
   type PastePart,
   sortSelection,
@@ -378,13 +379,17 @@ export default function SheetPanelBody({
   const onCommand = (command: GridCommand) => {
     if (command.kind === "find") setFinding({ query: finding?.query ?? "", index: 0 });
     else if (command.kind === "toggle")
-      run(formatSelection(context, { [command.property]: style[command.property] ? null : true }));
+      run(
+        eachRange(context, (each) =>
+          formatSelection(each, { [command.property]: style[command.property] ? null : true }),
+        ),
+      );
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
     else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "link") setLinking(true);
     else if (command.kind === "undo") sync?.undo();
     else if (command.kind === "redo") sync?.redo();
-    else run(clearSelection(context));
+    else run(eachRange(context, clearSelection));
   };
   const paste = (
     clip: { text: string; html: string | null },
@@ -521,13 +526,18 @@ export default function SheetPanelBody({
       ? (formatValue(value, style.numberFormat, locale)?.text ?? generalText(value, locale))
       : generalText(value, locale);
   const onToolbar = (command: ToolbarCommand) => {
-    if (command.kind === "format") run(formatSelection(context, command.patch));
-    else if (command.kind === "borders") run(borderSelection(context, command.border));
-    else if (command.kind === "decimals") run(decimalsSelection(context, command.delta));
+    // Formats and clearing apply to every selected range; the rest to the active one.
+    if (command.kind === "format")
+      run(eachRange(context, (each) => formatSelection(each, command.patch)));
+    else if (command.kind === "borders")
+      run(eachRange(context, (each) => borderSelection(each, command.border)));
+    else if (command.kind === "decimals")
+      run(eachRange(context, (each) => decimalsSelection(each, command.delta)));
     else if (command.kind === "autosum") run(autoSum(context, command.fn));
     else if (command.kind === "merge") run(mergeSelection(context, command.merge));
     else if (command.kind === "freeze") run(freezeAt(context, command.freeze));
-    else if (command.kind === "clear") run(clearSelectionAs(context, command.what));
+    else if (command.kind === "clear")
+      run(eachRange(context, (each) => clearSelectionAs(each, command.what)));
     else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "sort") setSorting(true);
     else if (command.kind === "validation") setValidating(true);

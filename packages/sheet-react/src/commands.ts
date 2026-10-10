@@ -46,6 +46,20 @@ export function selectionBox(context: Pick<GridContext, "doc" | "sheet" | "selec
   };
 }
 
+/** Each selected range as a selection of its own, the active one last. */
+export function rangesOf(context: Pick<GridContext, "selection">): SheetSelection[] {
+  const { anchor, head, more = [] } = context.selection;
+  return [...more.map((range) => ({ anchor: range.anchor, head: range.head })), { anchor, head }];
+}
+
+/** A command run on every selected range, as Excel formats or clears several at once. */
+export function eachRange(
+  context: GridContext,
+  command: (context: GridContext) => SheetOp[],
+): SheetOp[] {
+  return rangesOf(context).flatMap((selection) => command({ ...context, selection }));
+}
+
 /** Grows a working copy of the document by rows or columns at the end, minting their IDs. */
 function grower(context: Pick<GridContext, "doc" | "mint">) {
   let doc = context.doc;

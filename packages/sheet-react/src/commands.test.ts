@@ -20,11 +20,13 @@ import {
   insertAtSelection,
   parseTabular,
   pasteAtSelection,
+  eachRange,
   sheetCsv,
   sortSelection,
   chartFromSelection,
   type GridContext,
 } from "./commands.ts";
+import { selectionStats } from "./format-commands.ts";
 
 let minted = 0;
 let revision = 0;
@@ -208,6 +210,52 @@ describe("the clipboard", () => {
       pasteAtSelection(context(emptyDoc(), [1, 1]), "x\t=1+1\n7%", null),
     );
     expect([shown(doc, 1, 1), shown(doc, 1, 2), shown(doc, 2, 1)]).toEqual(["x", 2, 0.07]);
+  });
+});
+
+describe("several ranges", () => {
+  it("formats each selected range, and leaves the cells between alone", () => {
+    const doc = emptyDoc();
+    const several = {
+      ...context(doc, [3, 3]),
+      selection: {
+        anchor: at(doc, 3, 3),
+        head: at(doc, 3, 3),
+        more: [{ anchor: at(doc, 1, 1), head: at(doc, 1, 2) }],
+      },
+    };
+    const next = apply(
+      doc,
+      eachRange(several, (each) => formatSelection(each, { bold: true })),
+    );
+    const bold = (row: number, col: number) => {
+      const { r, c } = at(next, row, col);
+      return next.sheet.s1!.cells[r]?.[c]?.s;
+    };
+    expect([bold(1, 1), bold(1, 2), bold(3, 3), bold(2, 2)]).toEqual([
+      '{"bold":true}',
+      '{"bold":true}',
+      '{"bold":true}',
+      undefined,
+    ]);
+  });
+
+  it("sums every selected range for the status bar, counting a shared cell once", () => {
+    let doc = type(emptyDoc(), 1, 1, "2");
+    doc = type(doc, 2, 1, "3");
+    doc = type(doc, 5, 5, "10");
+    const stats = selectionStats({
+      ...context(doc, [5, 5]),
+      selection: {
+        anchor: at(doc, 5, 5),
+        head: at(doc, 5, 5),
+        more: [
+          { anchor: at(doc, 1, 1), head: at(doc, 2, 1) },
+          { anchor: at(doc, 2, 1), head: at(doc, 2, 1) },
+        ],
+      },
+    });
+    expect(stats).toMatchObject({ count: 3, sum: 15 });
   });
 });
 

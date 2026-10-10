@@ -4,7 +4,7 @@ import { positions, type Box } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import type { Validation } from "@chat/sheet/model/validation";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
-import { enterCell, selectionBox, type GridContext } from "./commands.ts";
+import { enterCell, rangesOf, selectionBox, type GridContext } from "./commands.ts";
 import { cellStyle } from "./display.ts";
 
 /**
@@ -212,22 +212,29 @@ export function clearSelectionAs(context: GridContext, what: "formats" | "all"):
  * cell, as there it says nothing.
  */
 export function selectionStats(context: GridContext, limit = 200_000) {
-  const box = selectionBox(context);
-  if (box.rowIds.length * box.colIds.length < 2) return null;
+  // Every selected range, each cell counted once where ranges overlap, as Excel's status bar.
+  const boxes = rangesOf(context).map((selection) => selectionBox({ ...context, selection }));
+  if (boxes.length === 1 && boxes[0]!.rowIds.length * boxes[0]!.colIds.length < 2) return null;
   let [count, numbers, sum] = [0, 0, 0];
   let seen = 0;
-  for (const r of box.rowIds)
-    for (const c of box.colIds) {
-      // A whole sheet selected is counted only as far as is quick.
-      if (++seen > limit) return { count, numbers, sum, average: numbers ? sum / numbers : null };
-      const value = context.values.value(context.sheet, r, c);
-      if (value === null || value === "") continue;
-      count++;
-      if (typeof value === "number") {
-        numbers++;
-        sum += value;
+  const counted = new Set<string>();
+  for (const box of boxes)
+    for (const r of box.rowIds)
+      for (const c of box.colIds) {
+        // A whole sheet selected is counted only as far as is quick.
+        if (++seen > limit) return { count, numbers, sum, average: numbers ? sum / numbers : null };
+        if (boxes.length > 1) {
+          if (counted.has(`${r}|${c}`)) continue;
+          counted.add(`${r}|${c}`);
+        }
+        const value = context.values.value(context.sheet, r, c);
+        if (value === null || value === "") continue;
+        count++;
+        if (typeof value === "number") {
+          numbers++;
+          sum += value;
+        }
       }
-    }
   return { count, numbers, sum, average: numbers ? sum / numbers : null };
 }
 

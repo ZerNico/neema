@@ -142,6 +142,46 @@ describe("the sheet grid", () => {
     );
   });
 
+  it("adds ranges with Cmd held, extends the active one with Shift, and starts over on a click", () => {
+    let last: SheetSelection | null = null;
+    function Several() {
+      const [selection, setSelection] = useState<SheetSelection | null>({
+        anchor: at(1, 1),
+        head: at(1, 1),
+      });
+      return (
+        <SheetGrid
+          doc={emptyDoc()}
+          sheet="s1"
+          values={calculateSheet(emptyDoc(), { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+          locale={EN_US}
+          selection={selection}
+          onSelectionChange={(next) => {
+            last = next;
+            setSelection(next);
+          }}
+          label="Budget"
+          onCommit={() => {}}
+        />
+      );
+    }
+    render(<Several />);
+    const content = screen.getByRole("grid").firstElementChild!.lastElementChild!;
+    // Each column is 64 pixels wide and each row 20 high.
+    fireEvent.pointerDown(content, { clientX: 70, clientY: 45, button: 0, metaKey: true });
+    fireEvent.pointerUp(content);
+    fireEvent.pointerDown(content, { clientX: 140, clientY: 65, button: 0, shiftKey: true });
+    fireEvent.pointerUp(content);
+    expect(last).toEqual({
+      anchor: at(3, 2),
+      head: at(4, 3),
+      more: [{ anchor: at(1, 1), head: at(1, 1) }],
+    });
+    fireEvent.pointerDown(content, { clientX: 5, clientY: 5, button: 0 });
+    fireEvent.pointerUp(content);
+    expect(last).toEqual({ anchor: at(1, 1), head: at(1, 1) });
+  });
+
   it("draws a link underlined and opens it on Cmd+click, never a script address", () => {
     let doc = emptyDoc();
     doc = apply(
