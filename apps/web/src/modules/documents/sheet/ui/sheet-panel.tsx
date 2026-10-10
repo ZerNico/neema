@@ -89,8 +89,11 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import {
+  addConditional,
   autoSum,
   borderSelection,
+  clearConditional,
+  editConditional,
   clearSelectionAs,
   decimalsSelection,
   freezeAt,
@@ -114,6 +117,8 @@ import {
   toggleFilter,
 } from "@chat/sheet-react/filter-commands";
 import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
+import { conditionalLooks } from "@chat/sheet/model/conditional";
+import { ConditionalMenu } from "./conditional-menu.tsx";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
@@ -626,6 +631,21 @@ export default function SheetPanelBody({
               onRedo={() => sync?.redo()}
               onCommand={onToolbar}
               extra={commentButtons}
+              conditional={
+                <ConditionalMenu
+                  rules={doc.sheet[sheet]!.conditional ?? []}
+                  where={(rule) => {
+                    const [top, left] = [rows.at(rule.box.r1), cols.at(rule.box.c1)];
+                    const [bottom, right] = [rows.at(rule.box.r2), cols.at(rule.box.c2)];
+                    return top && left && bottom && right
+                      ? `${columnLetters(left)}${top}:${columnLetters(right)}${bottom}`
+                      : "#REF!";
+                  }}
+                  onAdd={(rule) => run(addConditional(context, rule))}
+                  onClear={(scope) => run(clearConditional(context, scope))}
+                  onEdit={(id, action) => run(editConditional(context, id, action))}
+                />
+              }
               filtered={!!sheetFilter}
               preview={(code) => {
                 const value = values.value(sheet, head.r, head.c);
@@ -749,6 +769,7 @@ export default function SheetPanelBody({
                 onCommit={commit}
                 onCommitSelection={(text) => run(enterSelection(context, text))}
                 hiddenRows={hiddenByFilter}
+                looks={conditionalLooks(doc, values, sheet)}
                 filterButtons={
                   filterAt
                     ? {

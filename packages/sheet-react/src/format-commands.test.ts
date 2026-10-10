@@ -8,7 +8,10 @@ import type { SheetOp } from "@chat/sheet/model/ops";
 import { enterCell, type GridContext } from "./commands.ts";
 import { cellStyle } from "./display.ts";
 import {
+  addConditional,
   autoSum,
+  clearConditional,
+  editConditional,
   borderSelection,
   decimalsSelection,
   freezeAt,
@@ -113,5 +116,24 @@ describe("the Home tab's commands", () => {
       average: 15,
     });
     expect(selectionStats(context(doc, [1, 1]))).toBeNull();
+  });
+
+  it("adds conditional rules after the others, reorders them, and clears those on the selection", () => {
+    let doc = apply(
+      emptyDoc(),
+      addConditional(context(emptyDoc(), [1, 1], [3, 1]), { kind: "bar", color: "#638EC6" }),
+    );
+    doc = apply(
+      doc,
+      addConditional(context(doc, [5, 2]), { kind: "blank", style: { bold: true } }),
+    );
+    const [first, second] = doc.sheet.s1!.conditional!;
+    expect([first!.rule.kind, second!.rule.kind]).toEqual(["bar", "blank"]);
+    doc = apply(doc, editConditional(context(doc, [1, 1]), second!.id, "up"));
+    expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank", "bar"]);
+    doc = apply(doc, clearConditional(context(doc, [2, 1]), "selection"));
+    expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank"]);
+    doc = apply(doc, clearConditional(context(doc, [2, 1]), "sheet"));
+    expect(doc.sheet.s1!.conditional).toBeUndefined();
   });
 });

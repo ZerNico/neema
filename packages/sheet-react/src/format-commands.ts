@@ -1,6 +1,7 @@
 import { columnLetters } from "@chat/sheet/a1";
 import { generalText } from "@chat/sheet/number-format";
 import { positions, type Box } from "@chat/sheet/model";
+import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import { enterCell, selectionBox, type GridContext } from "./commands.ts";
 import { cellStyle } from "./display.ts";
@@ -227,4 +228,56 @@ export function selectionStats(context: GridContext, limit = 200_000) {
       }
     }
   return { count, numbers, sum, average: numbers ? sum / numbers : null };
+}
+
+/** A conditional format on the selection, after the sheet's others, as Excel adds a new rule. */
+export function addConditional(context: GridContext, rule: ConditionalRule): SheetOp[] {
+  const list = context.doc.sheet[context.sheet]!.conditional ?? [];
+  return [
+    {
+      op: "conditional",
+      sh: context.sheet,
+      list: [...list, { id: context.mint(), box: selectionBox(context).area, rule }],
+    },
+  ];
+}
+
+/** Clear Rules: those over the selected cells, or every one on the sheet. */
+export function clearConditional(context: GridContext, scope: "selection" | "sheet"): SheetOp[] {
+  const list = context.doc.sheet[context.sheet]!.conditional ?? [];
+  if (!list.length) return [];
+  if (scope === "sheet") return [{ op: "conditional", sh: context.sheet, list: [] }];
+  const sheet = context.doc.sheet[context.sheet]!;
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  const box = selectionBox(context);
+  const overlaps = (area: Box) => {
+    const [top, bottom, left, right] = [
+      rows.at(area.r1) ?? 0,
+      rows.at(area.r2) ?? 0,
+      cols.at(area.c1) ?? 0,
+      cols.at(area.c2) ?? 0,
+    ];
+    return top <= box.bottom && bottom >= box.top && left <= box.right && right >= box.left;
+  };
+  const kept = list.filter((each) => !overlaps(each.box));
+  return kept.length === list.length ? [] : [{ op: "conditional", sh: context.sheet, list: kept }];
+}
+
+/** The sheet's rules after one is removed or moved up or down in priority, as Manage Rules does. */
+export function editConditional(
+  context: GridContext,
+  id: string,
+  action: "remove" | "up" | "down",
+): SheetOp[] {
+  const list = [...(context.doc.sheet[context.sheet]!.conditional ?? [])];
+  const place = list.findIndex((each) => each.id === id);
+  if (place === -1) return [];
+  if (action === "remove") list.splice(place, 1);
+  else {
+    const to = action === "up" ? place - 1 : place + 1;
+    if (to < 0 || to >= list.length) return [];
+    [list[place], list[to]] = [list[to]!, list[place]!];
+  }
+  return [{ op: "conditional", sh: context.sheet, list }];
 }

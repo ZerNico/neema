@@ -135,6 +135,7 @@ export function SheetToolbar({
   onCommand,
   preview,
   extra,
+  conditional,
   filtered = false,
 }: {
   style: CellStyle;
@@ -148,6 +149,8 @@ export function SheetToolbar({
   preview: (code: string | null) => string;
   /** Drawn at the toolbar's end, also for a reader: the comment buttons. */
   extra?: ReactNode;
+  /** The conditional formatting menu, which keeps dialogs of its own. */
+  conditional?: ReactNode;
   /** Whether the sheet has a filter, which the filter button shows pressed. */
   filtered?: boolean;
 }) {
@@ -328,6 +331,7 @@ export function SheetToolbar({
         disabled={false}
         onPress={() => onCommand({ kind: "decimals", delta: 1 })}
       />
+      {conditional}
       <Separator />
       <ToolbarMenu label="AutoSum" icon={SigmaIcon}>
         <DropdownMenuContent align="start" className="w-40">
