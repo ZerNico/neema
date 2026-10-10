@@ -1,3 +1,5 @@
+import { EN_US } from "./locales.ts";
+
 /**
  * Excel's 1900 date system: serial 1 is 1 January 1900, and serial 60 is
  * 29 February 1900, a day that never existed but that Excel keeps for Lotus
@@ -50,15 +52,12 @@ export function clockOf(serial: number) {
   };
 }
 
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTHS = EN_US.months.map((month) => month.toLowerCase());
 const monthNamed = (name: string) => {
   const lower = name.toLowerCase().replace(/\.$/, "");
-  const index = MONTHS.findIndex((month) => lower.startsWith(month));
-  const full = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" })
-    .format(new Date(Date.UTC(2000, index, 1)))
-    .toLowerCase();
+  const index = MONTHS.findIndex((month) => lower.startsWith(month.slice(0, 3)));
   // "Sept" is accepted; any other spelling has to be a prefix of the month's name.
-  return index >= 0 && (full.startsWith(lower) || lower === "sept") ? index + 1 : null;
+  return index >= 0 && (MONTHS[index]!.startsWith(lower) || lower === "sept") ? index + 1 : null;
 };
 
 const TIME = String.raw`(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}(?:\.\d+)?))?\s*(am|pm|a|p)?`;

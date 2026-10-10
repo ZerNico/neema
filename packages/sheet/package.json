@@ -3,7 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./a1": "./src/a1.ts"
+    "./a1": "./src/a1.ts",
+    "./dates": "./src/dates.ts",
+    "./locales": "./src/locales.ts",
+    "./number-format": "./src/number-format.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

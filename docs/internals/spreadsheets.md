@@ -76,6 +76,9 @@ the whole file fail to open, so bisect by group when adding cases.
   on or behind a cycle: they read 0 and are reported as `#CIRCULAR`, as Excel shows them.
 - `INDIRECT` and `OFFSET` compute their references at run time, so a formula they reach
   that is not yet done is computed on demand, to a bounded depth.
+- `TEXT`, `FIXED` and `DOLLAR` format through `@chat/sheet/number-format`, our own reading
+  of Excel's format codes with locale tables and no `Intl`, so the server and every browser
+  write the same text for a value. The parity cases are its reference.
 - What the engine does not evaluate keeps the value the file carried and is listed as not
   calculated: volatile functions (`NOW`, `RAND`), `LAMBDA`, `CELL`, tables it cannot find,
   and any function neither side has. A new formula among them that calls an array function

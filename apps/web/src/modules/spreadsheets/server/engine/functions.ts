@@ -1,9 +1,7 @@
 import * as library from "@formulajs/formulajs";
-import { addWorksheet, createWorkbook } from "@office-kit/xlsx/workbook";
-import { setCell } from "@office-kit/xlsx/worksheet";
-import { getCellDisplayText, setCellNumberFormat } from "@office-kit/xlsx/styles";
 import type { CellBox } from "@chat/sheet/a1";
-import { clockOf, parseDateText, partsOf, serialOf, weekdayOf } from "./dates.ts";
+import { formatValue } from "@chat/sheet/number-format";
+import { clockOf, parseDateText, partsOf, serialOf, weekdayOf } from "@chat/sheet/dates";
 import {
   Areas,
   CALC,
@@ -551,20 +549,9 @@ function takeOrDrop(args: Value[], call: Call, take: boolean): Value {
 // ---------------------------------------------------------------------------
 // Text
 
-let formatBook: {
-  workbook: ReturnType<typeof createWorkbook>;
-  sheet: ReturnType<typeof addWorksheet>;
-} | null = null;
-/** A value in a number format, as Excel's TEXT writes it (US English). */
-function formatted(value: number | string, format: string) {
-  if (!formatBook) {
-    const workbook = createWorkbook();
-    formatBook = { workbook, sheet: addWorksheet(workbook, "Format") };
-  }
-  const cell = setCell(formatBook.sheet, 1, 1, value);
-  setCellNumberFormat(formatBook.workbook, cell, format || "General");
-  return getCellDisplayText(formatBook.workbook, cell);
-}
+/** A value in a number format, as Excel's TEXT writes it (US English); null where Excel gives #VALUE!. */
+const formatted = (value: number | string, format: string) =>
+  formatValue(value, format)?.text ?? null;
 
 /** Rounds half away from zero at `digits` places, as Excel's ROUND does. */
 function roundTo(value: number, digits: number) {
@@ -576,11 +563,8 @@ function roundTo(value: number, digits: number) {
 function fixed(value: number, digits: number, commas: boolean) {
   const rounded = roundTo(value, digits);
   const places = Math.max(0, Math.trunc(digits));
-  return rounded.toLocaleString("en-US", {
-    minimumFractionDigits: places,
-    maximumFractionDigits: places,
-    useGrouping: commas,
-  });
+  const code = `${commas ? "#,##0" : "0"}${places ? `.${"0".repeat(places)}` : ""}`;
+  return formatted(rounded, code)!;
 }
 
 function textAround(args: Value[], call: Call, after: boolean): Value {
@@ -1368,7 +1352,7 @@ export const FUNCTIONS: Record<string, Fn> = {
               ? 0
               : numeric;
       if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-      return formatted(shown ?? (value as string), format);
+      return formatted(shown ?? (value as string), format) ?? VALUE;
     },
   },
   VALUE: {

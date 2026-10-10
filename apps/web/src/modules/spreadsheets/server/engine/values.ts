@@ -1,6 +1,6 @@
 // Loaded by the spreadsheet worker under plain Node in development: relative imports only.
 import type { CellBox } from "@chat/sheet/a1";
-import { parseDateText } from "./dates.ts";
+import { parseDateText } from "@chat/sheet/dates";
 
 /** An Excel error value, e.g. #DIV/0!. */
 export class XError {
