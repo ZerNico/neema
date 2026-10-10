@@ -1,3 +1,5 @@
+import type { Worksheet } from "@office-kit/xlsx/worksheet";
+import { anchorSize, EMU_PER_PIXEL } from "./file-anchors.ts";
 import {
   makeAreaChart,
   makeBarChart,
@@ -96,7 +98,6 @@ const LEGEND: Record<NonNullable<FileChart["legend"]>, LegendPosition> = {
   left: "l",
   right: "r",
 };
-const EMU_PER_PIXEL = 9_525;
 
 const solid = (hex: string) => makeSolidFill(makeColor(makeSrgbColor(hex.replace(/^#/, ""))));
 /** A series' fill and line as Excel draws them: its own colour, a dashed or hidden line. */
@@ -343,8 +344,6 @@ const colorOf = (shape: ShapeProperties | undefined) => {
     ? `#${fill.color.base.value.toUpperCase()}`
     : undefined;
 };
-const columnPx = 64;
-const rowPx = 20;
 const cellRef = (row: number, col: number) => {
   let letters = "";
   for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26))
@@ -356,20 +355,14 @@ const cellRef = (row: number, col: number) => {
  * A chart Excel wrote, read back as a file chart; null for a kind a live
  * sheet does not draw (radar, stock, surface, 3-D and the like).
  */
-export function readFileChart(sheet: string, item: DrawingItem): FileChart | null {
+export function readFileChart(sheet: Worksheet, item: DrawingItem): FileChart | null {
   if (item.content.kind !== "chart") return null;
   const { anchor } = item;
   if (anchor.kind === "absolute") return null;
   const from = anchor.from;
-  const [width, height] =
-    anchor.kind === "oneCell"
-      ? [anchor.ext.cx / EMU_PER_PIXEL, anchor.ext.cy / EMU_PER_PIXEL]
-      : [
-          (anchor.to.col - from.col) * columnPx + (anchor.to.colOff - from.colOff) / EMU_PER_PIXEL,
-          (anchor.to.row - from.row) * rowPx + (anchor.to.rowOff - from.rowOff) / EMU_PER_PIXEL,
-        ];
+  const [width, height] = anchorSize(sheet, anchor);
   const place = {
-    sheet,
+    sheet: sheet.title,
     at: cellRef(from.row, from.col),
     ...(from.colOff || from.rowOff
       ? {

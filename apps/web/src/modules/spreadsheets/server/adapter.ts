@@ -1187,12 +1187,12 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       if (height?.customHeight && height.height !== undefined) heights.push([row, height.height]);
     }
     for (const item of listChartsOnSheet(sheet)) {
-      const chart = readFileChart(sheet.title, item);
+      const chart = readFileChart(sheet, item);
       if (chart) charts.push(chart);
       else dropped.add("charts of kinds a live sheet does not draw");
     }
     for (const item of listImagesOnSheet(sheet)) {
-      const image = readImage(sheet.title, item);
+      const image = readImage(sheet, item);
       if (image) images.push(image);
       else dropped.add("pictures too large or of kinds a live sheet does not show");
     }

@@ -2,6 +2,7 @@ import { parseCell } from "@chat/sheet/a1";
 import { IMAGE_LIMITS } from "@chat/sheet/model/image";
 import { addImageAt, makeOneCellAnchor, type DrawingItem } from "@office-kit/xlsx/drawing";
 import type { Worksheet } from "@office-kit/xlsx/worksheet";
+import { anchorSize, EMU_PER_PIXEL } from "./file-anchors.ts";
 
 /**
  * Pictures as Excel files keep them: embedded bytes on a drawing, anchored
@@ -19,9 +20,6 @@ export interface FileImage {
   readonly alt?: string;
 }
 
-const EMU_PER_PIXEL = 9_525;
-/** Excel's default column width and row height, for a picture anchored across cells. */
-const [COLUMN_PX, ROW_PX] = [64, 20];
 const KINDS = new Set(["png", "jpeg", "gif", "webp"]);
 
 /** Places a picture on its sheet, offset into its cell when it has one. */
@@ -56,7 +54,7 @@ const cellRef = (row: number, col: number) => {
 };
 
 /** A picture Excel wrote, as a live sheet keeps one; null for a kind it does not show or one too large. */
-export function readImage(sheet: string, item: DrawingItem): FileImage | null {
+export function readImage(sheet: Worksheet, item: DrawingItem): FileImage | null {
   if (item.content.kind !== "picture") return null;
   const picture = item.content.picture;
   const image = picture.image;
@@ -65,16 +63,10 @@ export function readImage(sheet: string, item: DrawingItem): FileImage | null {
   if (src.length > IMAGE_LIMITS.src) return null;
   const { anchor } = item;
   const from = anchor.from;
-  const [width, height] =
-    anchor.kind === "oneCell"
-      ? [anchor.ext.cx / EMU_PER_PIXEL, anchor.ext.cy / EMU_PER_PIXEL]
-      : [
-          (anchor.to.col - from.col) * COLUMN_PX + (anchor.to.colOff - from.colOff) / EMU_PER_PIXEL,
-          (anchor.to.row - from.row) * ROW_PX + (anchor.to.rowOff - from.rowOff) / EMU_PER_PIXEL,
-        ];
+  const [width, height] = anchorSize(sheet, anchor);
   const { width: wide, height: tall } = IMAGE_LIMITS;
   return {
-    sheet,
+    sheet: sheet.title,
     at: cellRef(from.row, from.col),
     ...(from.colOff || from.rowOff
       ? {
