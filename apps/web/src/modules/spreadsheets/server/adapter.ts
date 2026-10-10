@@ -20,6 +20,7 @@ import { addChartAt, listChartsOnSheet } from "@office-kit/xlsx/drawing";
 import { fromArrayBuffer, loadWorkbook, workbookToBytes } from "@office-kit/xlsx/io";
 import {
   getCellAlignment,
+  getCellBorder,
   getCellDisplayText,
   getCellFill,
   getCellFont,
@@ -56,8 +57,11 @@ import {
   getColumnDimension,
   getFreezePanes,
   getMergedCells,
+  getRowDimension,
   getValueExtent,
   iterCells,
+  listComments,
+  listDataValidations,
   listTables,
   makeAutoFilter,
   mergeCells,
@@ -81,7 +85,8 @@ import {
   type CellBox,
 } from "@chat/sheet/a1";
 import { parseSpreadsheetOperations, type SpreadsheetOperation } from "../operations.ts";
-import { recalculate, type CalcReport, type FormulaIssue } from "./calc.ts";
+import { recalculate, scalarOf, type CalcReport, type FormulaIssue } from "./calc.ts";
+import { XError } from "@chat/sheet/engine/values";
 import {
   isDynamic,
   markDynamicArrays,
@@ -896,6 +901,158 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
   for (const name of spec.names) addDefinedName(workbook, name);
   recalculate(workbook, { authored });
   return save(workbook);
+}
+
+/** A workbook read for a live sheet: what it keeps by position, and what it leaves behind. */
+export interface LiveSheetImport {
+  readonly sheets: ReadonlyArray<{
+    readonly name: string;
+    readonly rows: number;
+    readonly cols: number;
+    readonly cells: ReadonlyArray<{
+      readonly row: number;
+      readonly column: number;
+      /** A value, or a formula as typed (with "="). */
+      readonly value?: string | number | boolean;
+      readonly formula?: string;
+      /** A legacy array formula's extent; a dynamic one spills by itself. */
+      readonly array?: { readonly rows: number; readonly cols: number };
+      readonly style?: Readonly<Record<string, string | number | boolean>>;
+    }>;
+    readonly merges: readonly string[];
+    readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
+    readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
+    readonly freeze?: string;
+  }>;
+  readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /** What a live sheet does not keep, in words, for the model to tell the person. */
+  readonly dropped: readonly string[];
+}
+
+const rgbOf = (color: { rgb?: string } | undefined) =>
+  color?.rgb && /^[0-9a-f]{8}$/i.test(color.rgb) ? `#${color.rgb.slice(2).toUpperCase()}` : null;
+
+/** A cell's style as a live sheet stores it: only what its format operation knows. */
+function liveStyle(workbook: Workbook, cell: Cell) {
+  const style: Record<string, string | number | boolean> = {};
+  const font = getCellFont(workbook, cell);
+  if (font.bold) style.bold = true;
+  if (font.italic) style.italic = true;
+  if (font.size && font.size !== 11) style.fontSize = font.size;
+  const fontColor = rgbOf(font.color);
+  if (fontColor && fontColor !== "#000000") style.fontColor = fontColor;
+  const fill = getCellFill(workbook, cell);
+  const fillColor =
+    fill.kind === "pattern" && fill.patternType === "solid" ? rgbOf(fill.fgColor) : null;
+  if (fillColor) style.fill = fillColor;
+  const format = getCellNumberFormat(workbook, cell);
+  if (format && format !== "General") style.numberFormat = format;
+  const alignment = getCellAlignment(workbook, cell);
+  if (
+    alignment.horizontal === "left" ||
+    alignment.horizontal === "center" ||
+    alignment.horizontal === "right"
+  )
+    style.horizontal = alignment.horizontal;
+  if (
+    alignment.vertical === "top" ||
+    alignment.vertical === "center" ||
+    alignment.vertical === "bottom"
+  )
+    style.vertical = alignment.vertical;
+  if (alignment.wrapText) style.wrap = true;
+  const border = getCellBorder(workbook, cell);
+  for (const [side, key] of [
+    ["top", "borderTop"],
+    ["bottom", "borderBottom"],
+    ["left", "borderLeft"],
+    ["right", "borderRight"],
+  ] as const)
+    if (border[side]?.style && border[side].style !== "none") style[key] = true;
+  return Object.keys(style).length ? style : undefined;
+}
+
+/**
+ * Reads a workbook for a live sheet: cells by position with their values,
+ * formulas as text and styles, and sizes, merges, panes and names. What a
+ * live sheet cannot hold is listed in `dropped`, never guessed at.
+ */
+export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImport> {
+  const workbook = await openWorkbook(bytes);
+  unshareFormulas(workbook);
+  const dropped = new Set<string>();
+  const sheets = [...iterWorksheets(workbook)].map((sheet) => {
+    const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
+    let [rows, cols] = [0, 0];
+    for (const cell of iterCells(sheet)) {
+      const value = cell.value;
+      const style = liveStyle(workbook, cell);
+      let entry: LiveSheetImport["sheets"][number]["cells"][number] | null = null;
+      if (isFormulaValue(value)) {
+        if (value.t === "array" && value.ref && !isDynamic(workbook, sheet, cell)) {
+          const box = parseRange(value.ref);
+          entry = {
+            row: cell.row,
+            column: cell.col,
+            formula: value.formula,
+            ...(box
+              ? { array: { rows: box.bottom - box.top + 1, cols: box.right - box.left + 1 } }
+              : {}),
+          };
+        } else if (value.formula)
+          entry = { row: cell.row, column: cell.col, formula: value.formula };
+      } else {
+        const scalar = scalarOf(value);
+        if (scalar instanceof XError)
+          entry = { row: cell.row, column: cell.col, value: scalar.code };
+        else if (scalar !== null) entry = { row: cell.row, column: cell.col, value: scalar };
+      }
+      if (!entry && !style) continue;
+      cells.push({
+        ...(entry ?? { row: cell.row, column: cell.col }),
+        ...(style ? { style } : {}),
+      });
+      rows = Math.max(rows, cell.row);
+      cols = Math.max(cols, cell.col);
+    }
+    const merges = getMergedCells(sheet).map((merge) =>
+      boxRef({ top: merge.minRow, left: merge.minCol, bottom: merge.maxRow, right: merge.maxCol }),
+    );
+    const widths: Array<[number, number]> = [];
+    for (let column = 1; column <= Math.max(cols, 26); column++) {
+      const width = getColumnDimension(sheet, column)?.width;
+      if (width !== undefined) widths.push([column, width]);
+    }
+    const heights: Array<[number, number]> = [];
+    for (let row = 1; row <= rows; row++) {
+      const height = getRowDimension(sheet, row);
+      if (height?.customHeight && height.height !== undefined) heights.push([row, height.height]);
+    }
+    if (listChartsOnSheet(sheet).length) dropped.add("charts");
+    if (listTables(sheet).length) dropped.add("table formatting (the data stays)");
+    if (getAutoFilter(sheet)) dropped.add("filters");
+    if (sheet.conditionalFormatting.length) dropped.add("conditional formatting");
+    if (listDataValidations(sheet).length) dropped.add("data validation");
+    if (listComments(sheet).length) dropped.add("cell notes");
+    const freeze = getFreezePanes(sheet);
+    return {
+      name: sheet.title,
+      rows,
+      cols,
+      cells,
+      merges,
+      widths,
+      heights,
+      ...(freeze ? { freeze } : {}),
+    };
+  });
+  return {
+    sheets,
+    names: workbook.definedNames
+      .filter((name) => !name.name.startsWith("_xlnm."))
+      .map((name) => ({ name: name.name, value: name.value })),
+    dropped: [...dropped],
+  };
 }
 
 export interface PreviewCell {

@@ -3,6 +3,7 @@ import {
   createSpreadsheet,
   editSpreadsheet,
   exportLiveSheet,
+  importLiveSheet,
   inspectSpreadsheet,
   previewChart,
   previewSpreadsheet,
@@ -18,6 +19,7 @@ export const spreadsheetJobs = {
   edit: (request: { readonly bytes: Uint8Array; readonly operations: unknown }) =>
     editSpreadsheet(request.bytes, request.operations),
   exportLive: (request: { readonly sheet: LiveSheetExport }) => exportLiveSheet(request.sheet),
+  importLive: (request: { readonly bytes: Uint8Array }) => importLiveSheet(request.bytes),
   preview: (request: { readonly bytes: Uint8Array; readonly sheet?: string }) =>
     previewSpreadsheet(request.bytes, request.sheet),
   chart: (request: {

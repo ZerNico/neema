@@ -4,6 +4,7 @@ import { applyChange } from "@chat/sheet/model/apply";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import type { DocumentComment, EditableDocument } from "../../schema.ts";
+import { readCsv } from "./import.ts";
 import {
   prepareDocumentTools,
   type DocumentToolService,
@@ -28,7 +29,7 @@ function fakeSheets() {
     return { document, dropped: applied.dropped };
   };
   const sheets: SheetToolService = {
-    create: (_userId, input) =>
+    create: (_userId, input, _guard, from) =>
       Effect.sync(() => {
         const document: EditableDocument = {
           id: `sheet-${rows.size + 1}`,
@@ -44,7 +45,7 @@ function fakeSheets() {
         };
         rows.set(document.id, {
           document,
-          doc: emptyDoc("Sheet1", { locale: input.locale ?? "en-US", timeZone: "UTC" }),
+          doc: from ?? emptyDoc("Sheet1", { locale: input.locale ?? "en-US", timeZone: "UTC" }),
         });
         return document;
       }),
@@ -107,6 +108,10 @@ const prepare = (
 ) =>
   Effect.runPromise(
     prepareDocumentTools({
+      readSheetFile: (reference) =>
+        reference === "attachment:costs"
+          ? Effect.succeed({ name: "Costs.csv", read: readCsv("Item,Amount\nTea,4\n", "Costs") })
+          : Effect.fail("No file with that reference."),
       service: fake.service as DocumentToolService,
       sheets: fake.sheets,
       ...(open ? { openDocumentId: open.documentId, selectedBlocks: open.selected } : {}),
@@ -232,5 +237,19 @@ describe("live sheet tools", () => {
     expect(
       await call(tools, "comment_on_document", { cell: "Nope!B2", content: "x" }),
     ).toMatchObject({ outcome: "not_found" });
+  });
+
+  it("starts a sheet from a file the person gave, titled after it", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    expect(await call(tools, "create_sheet", { fromFile: "attachment:costs" })).toMatchObject({
+      outcome: "created",
+      title: "Costs",
+    });
+    expect(send(tools)).toContain('2| A2 "Tea" | B2 4');
+    expect(await call(tools, "create_sheet", { fromFile: "attachment:nope" })).toMatchObject({
+      outcome: "invalid",
+      message: "No file with that reference.",
+    });
   });
 });

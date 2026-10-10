@@ -199,10 +199,12 @@ const decode =
 export class SheetService extends Context.Service<
   SheetService,
   {
+    /** A new sheet: one empty tab, or `doc`, built from a file, when given. */
     create<E = never, R = never>(
       userId: string,
       input: CreateSheetInput,
       guard?: DocumentWriteGuard<E, R>,
+      doc?: SheetDoc,
     ): Effect.Effect<EditableDocument, DocumentError | E, R>;
     /** The live document and what its volatile functions read. Null when not this person's. */
     read(
@@ -547,6 +549,7 @@ export class SheetService extends Context.Service<
         userId: string,
         input: CreateSheetInput,
         guard?: DocumentWriteGuard<E, R>,
+        from?: SheetDoc,
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateSheetInput, "invalid sheet")(input);
@@ -562,7 +565,9 @@ export class SheetService extends Context.Service<
           const locale = SHEET_LOCALES.find((each) => each.id === parsed.locale)?.id ?? "en-US";
           const timeZone =
             parsed.timeZone && validTimeZone(parsed.timeZone) ? parsed.timeZone : "UTC";
-          const doc = emptyDoc("Sheet1", { locale, timeZone });
+          const doc = from
+            ? { ...from, settings: { locale, timeZone } }
+            : emptyDoc("Sheet1", { locale, timeZone });
           const document = yield* transaction((tx) =>
             Effect.gen(function* () {
               if (guard) yield* guard(tx);

@@ -39,7 +39,7 @@ const FILE_LIMITS = {
 const EXCEL_UNIX_DAYS = 25_569;
 
 /** A stored value as the engine reads it. */
-function scalarOf(value: CellValue): Scalar {
+export function scalarOf(value: CellValue): Scalar {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" || typeof value === "string" || typeof value === "boolean")
     return value;

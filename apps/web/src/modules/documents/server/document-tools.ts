@@ -34,6 +34,8 @@ import { convertOperations } from "../sheet/server/convert.ts";
 import { momentAt } from "../sheet/server/moment.ts";
 import type { SheetService } from "../sheet/server/sheet-service.ts";
 import { sheetView, type SheetWindow } from "../sheet/server/sheet-view.ts";
+import { sheetFromWorkbook } from "../sheet/server/import.ts";
+import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 
 /** Above this the focused document is sent as a window of blocks, not whole. */
 export const FOCUS_CHARS = 24_000;
@@ -93,7 +95,8 @@ const CommentParams = Schema.Struct({
 });
 const SheetLocale = Schema.Literals(["en-US", "en-GB", "de-DE", "fr-FR"]);
 const CreateSheetParams = Schema.Struct({
-  title: DocumentTitle,
+  title: Schema.optionalKey(DocumentTitle),
+  fromFile: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300))),
   scope: Schema.optionalKey(Scope),
   locale: Schema.optionalKey(SheetLocale),
   operations: Schema.optionalKey(Schema.Any),
@@ -146,6 +149,9 @@ const FIELD_ALIASES: Record<string, string> = {
   comment: "content",
   reply: "content",
   ops: "operations",
+  file: "fromFile",
+  sourceRef: "fromFile",
+  source: "fromFile",
   edits: "operations",
   changes: "operations",
   from_block: "fromBlock",
@@ -257,11 +263,12 @@ const listTool = Tool.make("list_chat_documents", {
 
 const createSheetTool = Tool.make("create_sheet", {
   description:
-    "Create a live spreadsheet beside this chat, for data the person will keep working with: a budget, a tracker, a list to sort and total. The person watches it and can edit it alongside you. Pass a title and operations to fill it, as edit_sheet takes them; it starts with one empty sheet, Sheet1. Numbers go in as numbers and totals as formulas, so it stays live. locale sets how numbers and dates are shown and typed: choose the person's. scope matters only in a chat that belongs to a project, as for create_document. For an Excel file the person attached or wants to download as a file, use the spreadsheet tools instead. Do not repeat the sheet in your reply.",
+    "Create a live spreadsheet beside this chat, for data the person will keep working with: a budget, a tracker, a list to sort and total. The person watches it and can edit it alongside you. Pass a title and operations to fill it, as edit_sheet takes them; it starts with one empty sheet, Sheet1. To work on an Excel file or a CSV the person gave you as a live sheet, pass it as fromFile (its attachment: or project: reference); its sheets, formulas and formats come with it. Numbers go in as numbers and totals as formulas, so it stays live. locale sets how numbers and dates are shown and typed: choose the person's. scope matters only in a chat that belongs to a project, as for create_document. For an Excel file the person attached or wants to download as a file, use the spreadsheet tools instead. Do not repeat the sheet in your reply.",
   parameters: Schema.Struct({
     title: Schema.optionalKey(transport(DocumentTitle)),
     scope: Schema.optionalKey(transport(Scope)),
     locale: Schema.optionalKey(transport(SheetLocale)),
+    fromFile: Schema.optionalKey(transport(Schema.String)),
     operations: advertisedParameter(liveSheetOperationsJsonSchema),
   }),
   success: Result,
@@ -394,6 +401,10 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   generationId?: string | undefined;
   /** The person's time zone, which a new sheet's NOW follows. */
   timeZone?: string | undefined;
+  /** Reads an Excel file or a CSV the sender may read, by reference, for a sheet to start from. */
+  readSheetFile?:
+    | ((reference: string) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
+    | undefined;
   /** The lighter fence for the many small writes of an edit streaming in. */
   liveGuard?: ((tx: DbTx) => Effect.Effect<unknown>) | undefined;
   project?: DocumentProject | null | undefined;
@@ -1359,7 +1370,31 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     if (!decoded.ok) yield* rejected("create_sheet", decoded.issue);
     if (!decoded.ok)
       return { outcome: "invalid", message: `Provide a title, and operations. ${decoded.issue}` };
-    const { scope: requested, title, locale, operations } = decoded.value;
+    const { scope: requested, locale, operations, fromFile } = decoded.value;
+    let imported: { doc: SheetDoc; dropped: string[]; name: string } | null = null;
+    if (fromFile !== undefined) {
+      if (!input.readSheetFile)
+        return { outcome: "unavailable", message: "Files cannot be read in this chat." };
+      const file = yield* Effect.result(input.readSheetFile(fromFile));
+      if (EffectResult.isFailure(file))
+        return { outcome: "invalid", message: file.failure.slice(0, 600) };
+      const built = sheetFromWorkbook(file.success.read, {
+        locale: locale ?? "en-US",
+        timeZone: input.timeZone ?? "UTC",
+      });
+      if (!built.ok)
+        return {
+          outcome: "invalid",
+          message: `${file.success.name} cannot be a live sheet: ${built.reason}. Work on it with the spreadsheet tools instead.`,
+        };
+      imported = { doc: built.doc, dropped: built.dropped, name: file.success.name };
+    }
+    const title =
+      decoded.value.title ??
+      (imported
+        ? imported.name.replace(/\.[^.]+$/, "").slice(0, DOCUMENT_LIMITS.title) || "Sheet"
+        : null);
+    if (!title) return { outcome: "invalid", message: "Provide a title." };
     const scope = input.project
       ? (requested ?? (input.project.canEdit ? "project" : "chat"))
       : "chat";
@@ -1384,6 +1419,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
               ...settings,
             },
         input.writeGuard,
+        imported?.doc,
       )
       .pipe(
         Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
@@ -1394,7 +1430,11 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     if (typeof created === "string")
       return { outcome: "invalid", message: `The sheet was rejected: ${created}.` };
     yield* afterWrite(created);
-    if (operations === undefined) return { outcome: "created", ...reference(created) };
+    const left = imported?.dropped.length
+      ? `A live sheet does not keep its ${imported.dropped.join(", ")}; tell the person.`
+      : undefined;
+    if (operations === undefined)
+      return { outcome: "created", ...reference(created), ...(left ? { message: left } : {}) };
     const filled = yield* sheetEdit(created, operations);
     const current = known.find((each) => each.id === created.id) ?? created;
     return filled.outcome === "updated" || filled.outcome === "unchanged"

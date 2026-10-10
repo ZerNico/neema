@@ -3,6 +3,8 @@ import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
+import { readSheetFile } from "~/modules/documents/sheet/server/file-import.ts";
+import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
   ProjectFileToolName,
@@ -985,8 +987,18 @@ export class StreamEngine extends Context.Service<
             currentModelId: input.modelId,
             writeGuard,
           });
+          // Set once the attempt's file resolver exists, below; a call reads it when it runs.
+          let sheetFiles:
+            | ((
+                reference: string,
+              ) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
+            | null = null;
           const documents = yield* prepareDocumentTools({
             service: documentService,
+            readSheetFile: (reference) =>
+              sheetFiles
+                ? sheetFiles(reference)
+                : Effect.fail("Files cannot be read in this chat."),
             sheets: sheetService,
             generationId: fence?.generationId,
             timeZone: input.timeZone,
@@ -1284,6 +1296,15 @@ export class StreamEngine extends Context.Service<
                   : {}),
               })
             : undefined;
+          if (toolFiles)
+            sheetFiles = (reference) =>
+              toolFiles
+                .resolve(reference)
+                .pipe(
+                  Effect.flatMap((file) =>
+                    readSheetFile(file, Option.getOrNull(processors.spreadsheet), input.userId),
+                  ),
+                );
           let previewTurnFiles: Array<Prompt.UserMessagePartEncoded> = [];
           let previewCount = 0;
           let previewBytes = 0;
