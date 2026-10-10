@@ -88,19 +88,28 @@ describe("the sheet grid", () => {
     expect(screen.getByRole("grid", { name: "Budget" })).toBeTruthy();
   });
 
-  it("runs text on over empty cells only as far as it needs", () => {
+  it("runs text on over empty cells only as far as it needs, its fill staying in its cell", () => {
     let doc = emptyDoc();
-    doc = apply(doc, {
-      op: "set",
-      sh: "s1",
-      cells: [set(doc, 1, 1, "Short"), set(doc, 2, 1, "A much longer label than one column holds")],
-    });
-    render(<Harness doc={doc} />);
-    const width = (text: string) => (screen.getByText(text) as HTMLElement).style.width;
-    expect(width("Short")).toBe("64px");
-    expect(Number.parseInt(width("A much longer label than one column holds"))).toBeGreaterThan(
-      192,
+    const long = "A much longer label than one column holds";
+    doc = apply(
+      doc,
+      { op: "set", sh: "s1", cells: [set(doc, 1, 1, "Short"), set(doc, 2, 1, long)] },
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: "s1.r2", r2: "s1.r2", c1: "s1.c1", c2: "s1.c1" },
+        patch: { fill: "#DDEBF7" },
+      },
     );
+    render(<Harness doc={doc} />);
+    const cell = (text: string) => screen.getByText(text) as HTMLElement;
+    expect(cell("Short").style.width).toBe("64px");
+    expect(cell("Short").nextElementSibling?.getAttribute("aria-hidden")).toBeNull();
+    expect(cell(long).style.width).toBe("64px");
+    // The text runs over a strip of the empty cells beside it, which keeps their bottom line.
+    const spill = cell(long).previousElementSibling as HTMLElement;
+    expect(Number.parseInt(spill.style.width)).toBeGreaterThanOrEqual(128);
+    expect(spill.style.backgroundColor).toBe("");
   });
 
   it("draws a merged range once, over the cells it covers", () => {

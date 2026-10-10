@@ -663,9 +663,25 @@ export function SheetGrid({
       const value = values.value(sheet, r, c);
       const shown = cellDisplay(value, style, locale);
       const bottom = span ? span.bottom : row;
-      const right = span ? span.right : overflowTo;
+      const right = span ? span.right : col;
       const active = main && head?.row === row && head.col === col;
+      const spills = !span && overflowTo > col;
       drawn.add(key(row, col));
+      // The empty cells text runs over keep their bottom line, without the lines between them.
+      if (spills)
+        cells.push(
+          <div
+            key={`${key(row, col)}-spill`}
+            aria-hidden
+            className="border-border bg-background absolute z-[1] border-b"
+            style={{
+              top: rows.starts[row],
+              left: cols.starts[col + 1],
+              height: rows.size(row),
+              width: cols.starts[overflowTo + 1]! - cols.starts[col + 1]!,
+            }}
+          />,
+        );
       cells.push(
         <div
           key={key(row, col)}
@@ -674,7 +690,7 @@ export function SheetGrid({
           aria-rowindex={main ? row + 1 : undefined}
           aria-colindex={main ? col + 1 : undefined}
           aria-selected={active || undefined}
-          className="border-border text-foreground absolute flex overflow-hidden border-r border-b px-1 text-sm leading-tight whitespace-pre"
+          className={`border-border text-foreground absolute flex border-b px-1 text-sm leading-tight whitespace-pre ${spills ? "overflow-visible" : "overflow-hidden border-r"}`}
           style={{
             top: rows.starts[row],
             left: cols.starts[col],
@@ -693,8 +709,8 @@ export function SheetGrid({
                   ? "center"
                   : "flex-start",
             textAlign: shown.align,
-            zIndex: right > col || span ? 1 : undefined,
-            ...(right > col && !style.fill ? { backgroundColor: "var(--background)" } : {}),
+            // Its fill and borders stay in its own column; only its text runs on, above the spill.
+            zIndex: spills ? 2 : span ? 1 : undefined,
             ...cellCss(style),
             ...(shown.color ? { color: shown.color } : {}),
           }}
