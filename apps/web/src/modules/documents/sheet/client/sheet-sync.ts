@@ -20,14 +20,16 @@ export interface SheetFeedSource {
   close(): void;
 }
 /**
- * Unsent changes kept on the device by client, so a reload or a crash loses
+ * Unsent changes kept on the device one by one, so a reload or a crash loses
  * none. Another tab may load the same ones and resend them: the server
- * applies each client's numbers once, so that is harmless.
+ * applies each client's numbers once, so that is harmless. Only what the
+ * server has answered is forgotten, never a change made since in another tab.
  */
 export interface SheetOutbox {
   load(documentId: string): Promise<ReadonlyArray<SheetChange>>;
-  /** Replaces what is kept for one client; nothing left removes it. */
-  save(documentId: string, clientId: string, changes: readonly SheetChange[]): void;
+  add(documentId: string, change: SheetChange): void;
+  /** Forgets a client's changes numbered up to `seq`. */
+  forget(documentId: string, clientId: string, seq: number): void;
 }
 export interface SheetSyncOptions {
   documentId: string;
@@ -105,8 +107,6 @@ export class SheetSync {
   #state: SheetState;
   #undo: Step[] = [];
   #redo: Step[] = [];
-  /** Every client whose changes this tab keeps on the device: its own and any it recovered. */
-  #saved = new Set<string>();
 
   constructor(private readonly options: SheetSyncOptions) {
     this.clientId = options.clientId ?? crypto.randomUUID().slice(0, 18);
@@ -121,7 +121,6 @@ export class SheetSync {
           change.clientId !== this.clientId && !mine.has(`${change.clientId}:${change.seq}`),
       );
       if (!missing.length) return;
-      for (const change of missing) this.#saved.add(change.clientId);
       this.#pending = [...missing, ...this.#pending];
       this.#rebuild();
       this.#schedule(0);
@@ -170,10 +169,11 @@ export class SheetSync {
   #apply(ops: readonly SheetOp[]): Step | null {
     if (!this.#confirmed || !this.#view || !ops.length || this.#status === "gone") return null;
     const before = this.#view;
-    this.#pending.push({ clientId: this.clientId, seq: ++this.#seq, ops });
+    const change = { clientId: this.clientId, seq: ++this.#seq, ops };
+    this.#pending.push(change);
+    this.options.outbox?.add(this.options.documentId, change);
     this.#refused = null;
     this.#rebuild();
-    this.#persist();
     this.#schedule(BATCH_MS);
     return { before, after: this.#view };
   }
@@ -247,23 +247,9 @@ export class SheetSync {
     ];
     this.#pending = this.#pending.filter((change) => !done(change));
     if (clientId === this.clientId) this.#seq = Math.max(this.#seq, seq);
-    if (before !== this.#pending.length) this.#persist();
+    if (before !== this.#pending.length)
+      this.options.outbox?.forget(this.options.documentId, clientId, seq);
   }
-  /** Keeps each client's unsent changes on the device, and forgets those all sent. */
-  #persist() {
-    const outbox = this.options.outbox;
-    if (!outbox) return;
-    const byClient = new Map<string, SheetChange[]>();
-    for (const change of this.#pending)
-      byClient.set(change.clientId, [...(byClient.get(change.clientId) ?? []), change]);
-    for (const clientId of new Set([...this.#saved, ...byClient.keys()])) {
-      const changes = byClient.get(clientId) ?? [];
-      outbox.save(this.options.documentId, clientId, changes);
-      if (changes.length) this.#saved.add(clientId);
-      else this.#saved.delete(clientId);
-    }
-  }
-
   #schedule(delay: number) {
     if (this.#timer || this.#destroyed) return;
     this.#timer = setTimeout(() => {

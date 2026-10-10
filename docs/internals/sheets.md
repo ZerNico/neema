@@ -174,9 +174,10 @@ browser workers and the Excel file tools); this page records the decisions behin
   turns commands into operations (`commands.ts`, pure and tested without React).
 - A tab shows the server's document with its own unsent changes replayed on top
   (`client/sheet-sync.ts`); its own change coming back through the feed, or an acknowledgement,
-  retires it. Unsent changes are kept on the device by client. A tab sends any it finds under
-  the client that made them and makes its own edits under a new one, so two tabs resending the
-  same changes is harmless.
+  retires it. Unsent changes are kept on the device one per key, by client and number, and
+  only those the server has answered are removed, so a tab never erases another's newer ones. A
+  tab sends any it finds under the client that made them and makes its own edits under a new
+  one, so two tabs resending the same changes is harmless.
 - Undo walks the tab's own history: each step keeps the document before and after, and
   `invertChange` puts back only what still holds what the step left. Someone else's later edit
   stays, whether to a cell, a size, a rule (lists go item by item) or a chart's or picture's

@@ -143,23 +143,26 @@ describe("a sheet's connection", () => {
   });
 
   it("sends what a closed tab left unsent, and forgets it once the server has it", async () => {
-    const saved = new Map<string, SheetChange[]>();
-    saved.set("old", [{ clientId: "old", seq: 4, ops: [write("s1.r1", "s1.c1", "kept")] }]);
+    const saved = new Map<string, SheetChange>();
     const outbox: SheetOutbox = {
-      load: async () => [...saved.values()].flat(),
-      save: (_documentId, clientId, changes) => {
-        if (changes.length) saved.set(clientId, [...changes]);
-        else saved.delete(clientId);
+      load: async () => [...saved.values()],
+      add: (_documentId, change) => saved.set(`${change.clientId}:${change.seq}`, change),
+      forget: (_documentId, clientId, seq) => {
+        for (const [key, change] of saved)
+          if (change.clientId === clientId && change.seq <= seq) saved.delete(key);
       },
     };
+    outbox.add("sheet-1", { clientId: "old", seq: 4, ops: [write("s1.r1", "s1.c1", "kept")] });
     const { sync, pushes, feed } = connection(outbox);
     feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
     // Shown at once, as this tab's own unsent edits are.
     await Promise.resolve();
     expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("kept");
+    // The tab that made them, still open, adds another meanwhile: sending the first keeps it.
+    outbox.add("sheet-1", { clientId: "old", seq: 5, ops: [write("s1.r4", "s1.c1", "later")] });
     await vi.runAllTimersAsync();
     expect(pushes[0]).toMatchObject({ clientId: "old" });
-    expect(saved.size).toBe(0);
+    expect([...saved.keys()]).toEqual(["old:5"]);
     feed({
       type: "changes",
       changes: [{ clientId: "old", seq: 4, ops: [write("s1.r1", "s1.c1", "kept")] }],
@@ -169,6 +172,6 @@ describe("a sheet's connection", () => {
     expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("kept");
     // This tab's own edits go under its own client, kept until sent.
     sync.dispatch([write("s1.r2", "s1.c1", "new")]);
-    expect(saved.get("me")).toHaveLength(1);
+    expect(saved.has("me:1")).toBe(true);
   });
 });
