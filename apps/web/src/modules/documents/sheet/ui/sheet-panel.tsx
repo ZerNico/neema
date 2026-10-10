@@ -623,6 +623,7 @@ export default function SheetPanelBody({
           ? groupSelection(context, command.axis)
           : ungroupSelection(context, command.axis),
       );
+    else if (command.kind === "print") printSheet(sheet);
     else insertChart(command.chart);
   };
   /** A pivot table as its formula: on a sheet of its own, or two columns right of the data. */

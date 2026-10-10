@@ -13,7 +13,9 @@ import {
   BorderTopIcon,
   ChartColumnIcon,
   Link01Icon,
-  Table02Icon,
+  PivotIcon,
+  PrinterIcon,
+  MoreHorizontalIcon,
   ImageAdd01Icon,
   CheckListIcon,
   TextIndentMoreIcon,
@@ -40,7 +42,7 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ChartKind } from "@chat/sheet-react/commands";
 import type { CellStyle } from "@chat/sheet/model/style";
 import type {
@@ -55,6 +57,10 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "~/ui/primitives/dropdown-menu";
+import { Button } from "~/ui/primitives/button";
+import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
+import { Tabs, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { Action, Format } from "../../ui/rich-editor/toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { ColorMenu, ToolbarMenu } from "./toolbar-controls.tsx";
@@ -76,6 +82,7 @@ export type ToolbarCommand =
   | { readonly kind: "link" }
   | { readonly kind: "pivot" }
   | { readonly kind: "picture" }
+  | { readonly kind: "print" }
   | { readonly kind: "outline"; readonly group: boolean; readonly axis: "rows" | "columns" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
@@ -135,7 +142,114 @@ const SUMS: ReadonlyArray<{ fn: AutoSumKind; label: string }> = [
 ];
 const Separator = () => <Toolbar.Separator className="bg-border mx-1 h-4 w-px" />;
 
-/** A sheet's formatting row, as Excel's Home tab; `style` is the active cell's, shown pressed. */
+/** One labelled group of a ribbon tab, as Excel's Font or Alignment. */
+interface RibbonGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly controls: ReactNode;
+}
+const TABS = [
+  { value: "home", label: "Home" },
+  { value: "insert", label: "Insert" },
+  { value: "data", label: "Data" },
+  { value: "view", label: "View" },
+] as const;
+type TabName = (typeof TABS)[number]["value"];
+/** Room kept for the More button when some groups do not fit. */
+const MORE_PX = 40;
+
+/**
+ * A tab's groups on one line. Groups that do not fit go, last first, into a
+ * More popover that holds the same controls, as Excel's simplified ribbon
+ * does; each group is measured while it is on the line.
+ */
+function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGroup[] }) {
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  const [room, setRoom] = useState(Number.POSITIVE_INFINITY);
+  const [widths, setWidths] = useState<Readonly<Record<string, number>>>({});
+  useEffect(() => {
+    if (!row) return;
+    const observer = new ResizeObserver(([entry]) => setRoom(entry?.contentRect.width ?? 0));
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [row]);
+  const measure = (id: string) => (element: HTMLDivElement | null) => {
+    if (!element) return;
+    const width = element.offsetWidth;
+    setWidths((known) => (known[id] === width ? known : { ...known, [id]: width }));
+  };
+  const total = groups.reduce((sum, group) => sum + (widths[group.id] ?? 0), 0);
+  // The first group always stays, so a narrow panel still has its commonest controls.
+  const ends = groups.reduce<number[]>(
+    (sums, group) => [...sums, (sums.at(-1) ?? 0) + (widths[group.id] ?? 0)],
+    [],
+  );
+  const fitting = ends.findIndex((end, index) => index > 0 && end > room - MORE_PX);
+  const shown = total <= room || fitting === -1 ? groups.length : fitting;
+  const more = groups.slice(shown);
+  return (
+    <div ref={setRow} className="flex min-w-0 items-center overflow-hidden">
+      <Toolbar.Root aria-label={label} className="flex shrink-0 items-center">
+        {groups.slice(0, shown).map((group, index) => (
+          <div
+            key={group.id}
+            ref={measure(group.id)}
+            role="group"
+            aria-label={group.label}
+            className="flex shrink-0 items-center gap-0.5"
+          >
+            {index ? <Separator /> : null}
+            {group.controls}
+          </div>
+        ))}
+      </Toolbar.Root>
+      {more.length ? (
+        <Popover>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PopoverTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`More ${label} tools`}
+                      className="text-muted-foreground"
+                    />
+                  }
+                />
+              }
+            >
+              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+            </TooltipTrigger>
+            <TooltipContent>More</TooltipContent>
+          </Tooltip>
+          <PopoverContent align="end" className="w-auto max-w-96">
+            <Toolbar.Root aria-label={`More ${label} tools`} className="flex flex-col gap-3">
+              {more.map((group) => (
+                <div
+                  key={group.id}
+                  role="group"
+                  aria-label={group.label}
+                  className="flex flex-col gap-1"
+                >
+                  <span className="text-muted-foreground text-xs">{group.label}</span>
+                  <div className="flex flex-wrap items-center gap-0.5">{group.controls}</div>
+                </div>
+              ))}
+            </Toolbar.Root>
+          </PopoverContent>
+        </Popover>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * A sheet's ribbon, as Excel's: Undo and Redo always at hand, then tabs of
+ * grouped controls on one line each. `style` is the active cell's, shown
+ * pressed; `extra`, the comment buttons, stays at the end for readers too.
+ */
 export function SheetToolbar({
   style,
   canUndo,
@@ -159,7 +273,7 @@ export function SheetToolbar({
   onCommand: (command: ToolbarCommand) => void;
   /** The active cell's value as a number format would show it, for the format list. */
   preview: (code: string | null) => string;
-  /** Drawn at the toolbar's end, also for a reader: the comment buttons. */
+  /** Drawn at the ribbon's end, also for a reader: the comment buttons. */
   extra?: ReactNode;
   /** The conditional formatting menu, which keeps dialogs of its own. */
   conditional?: ReactNode;
@@ -168,12 +282,10 @@ export function SheetToolbar({
   /** Whether the sheet has a filter, which the filter button shows pressed. */
   filtered?: boolean;
 }) {
+  const [tab, setTab] = useState<TabName>("home");
   if (readOnly)
     return extra ? (
-      <Toolbar.Root
-        aria-label="Formatting"
-        className="flex min-w-0 flex-1 items-center justify-end"
-      >
+      <Toolbar.Root aria-label="Comments" className="flex min-w-0 flex-1 items-center justify-end">
         {extra}
       </Toolbar.Root>
     ) : null;
@@ -182,183 +294,14 @@ export function SheetToolbar({
     format({ [key]: style[key] ? null : true });
   const numberFormat = NUMBER_FORMATS.find((each) => each.code === (style.numberFormat ?? null));
   const vertical = VERTICAL.find((each) => each.value === (style.vertical ?? "bottom"))!;
-  return (
-    <Toolbar.Root
-      aria-label="Formatting"
-      className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5"
-    >
-      <Action icon={Undo02Icon} label="Undo" shortcut="⌘Z" disabled={!canUndo} onPress={onUndo} />
-      <Action icon={Redo02Icon} label="Redo" shortcut="⇧⌘Z" disabled={!canRedo} onPress={onRedo} />
-      <Separator />
-      <ToolbarMenu label="Font" text={style.fontFamily ?? "Default font"}>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuItem onClick={() => format({ fontFamily: null })}>
-            Default font
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {FONTS.map((font) => (
-            <DropdownMenuItem key={font} onClick={() => format({ fontFamily: font })}>
-              <span style={{ fontFamily: font }}>{font}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <ToolbarMenu label="Font size" text={String(style.fontSize ?? 11)}>
-        <DropdownMenuContent align="start" className="w-24">
-          {SIZES.map((size) => (
-            <DropdownMenuItem
-              key={size}
-              onClick={() => format({ fontSize: size === 11 ? null : size })}
-            >
-              {size}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Format
-        icon={TextBoldIcon}
-        label="Bold"
-        shortcut="⌘B"
-        pressed={!!style.bold}
-        onPress={() => toggle("bold")}
-      />
-      <Format
-        icon={TextItalicIcon}
-        label="Italic"
-        shortcut="⌘I"
-        pressed={!!style.italic}
-        onPress={() => toggle("italic")}
-      />
-      <Format
-        icon={TextUnderlineIcon}
-        label="Underline"
-        shortcut="⌘U"
-        pressed={!!style.underline}
-        onPress={() => toggle("underline")}
-      />
-      <Format
-        icon={TextStrikethroughIcon}
-        label="Strikethrough"
-        pressed={!!style.strike}
-        onPress={() => toggle("strike")}
-      />
-      <ColorMenu
-        label="Text colour"
-        icon={TextColorIcon}
-        value={style.fontColor}
-        resetLabel="Automatic"
-        onChange={(color) => format({ fontColor: color })}
-      />
-      <ColorMenu
-        label="Fill colour"
-        icon={PaintBucketIcon}
-        value={style.fill}
-        resetLabel="No fill"
-        onChange={(color) => format({ fill: color })}
-      />
-      <ToolbarMenu label="Borders" icon={BorderAll01Icon}>
-        <DropdownMenuContent align="start" className="w-48">
-          {BORDERS.map((each) => (
-            <DropdownMenuItem
-              key={each.border}
-              onClick={() => onCommand({ kind: "borders", border: each.border })}
-            >
-              <HugeiconsIcon icon={each.icon} strokeWidth={2} />
-              {each.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Separator />
-      {ALIGNMENTS.map((alignment) => (
-        <Format
-          key={alignment.value}
-          icon={alignment.icon}
-          label={alignment.label}
-          pressed={style.horizontal === alignment.value}
-          onPress={() =>
-            format({ horizontal: style.horizontal === alignment.value ? null : alignment.value })
-          }
-        />
-      ))}
-      <ToolbarMenu label="Vertical alignment" icon={vertical.icon}>
-        <DropdownMenuContent align="start" className="w-36">
-          {VERTICAL.map((each) => (
-            <DropdownMenuItem
-              key={each.value}
-              onClick={() => format({ vertical: each.value === "bottom" ? null : each.value })}
-            >
-              <HugeiconsIcon icon={each.icon} strokeWidth={2} />
-              {each.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Format
-        icon={TextWrapIcon}
-        label="Wrap text"
-        pressed={!!style.wrap}
-        onPress={() => toggle("wrap")}
-      />
-      <ToolbarMenu label="Merge" icon={MergeIcon}>
-        <DropdownMenuContent align="start" className="w-44">
-          <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "center" })}>
-            Merge &amp; centre
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "across" })}>
-            Merge across
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "cells" })}>
-            Merge cells
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "unmerge" })}>
-            Unmerge cells
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Separator />
-      <ToolbarMenu label="Number format" text={numberFormat?.label ?? "Custom"}>
-        <DropdownMenuContent align="start" className="w-64">
-          {NUMBER_FORMATS.map((each) => (
-            <DropdownMenuItem key={each.label} onClick={() => format({ numberFormat: each.code })}>
-              <span className="flex-1">{each.label}</span>
-              <span className="text-muted-foreground truncate text-xs">{preview(each.code)}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Format
-        icon={PercentIcon}
-        label="Percent style"
-        pressed={style.numberFormat === "0%"}
-        onPress={() => format({ numberFormat: style.numberFormat === "0%" ? null : "0%" })}
-      />
+  const sortAndFilter = (
+    <>
       <Action
-        icon={DecimalsArrowLeftIcon}
-        label="Decrease decimal"
+        icon={SortingIcon}
+        label="Sort range"
         disabled={false}
-        onPress={() => onCommand({ kind: "decimals", delta: -1 })}
+        onPress={() => onCommand({ kind: "sort" })}
       />
-      <Action
-        icon={DecimalsArrowRightIcon}
-        label="Increase decimal"
-        disabled={false}
-        onPress={() => onCommand({ kind: "decimals", delta: 1 })}
-      />
-      {conditional}
-      <Separator />
-      <ToolbarMenu label="AutoSum" icon={SigmaIcon}>
-        <DropdownMenuContent align="start" className="w-40">
-          {SUMS.map((each) => (
-            <DropdownMenuItem
-              key={each.fn}
-              onClick={() => onCommand({ kind: "autosum", fn: each.fn })}
-            >
-              {each.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
       <Format
         icon={FilterIcon}
         label="Filter"
@@ -366,110 +309,408 @@ export function SheetToolbar({
         pressed={filtered}
         onPress={() => onCommand({ kind: "filter" })}
       />
-      <Action
-        icon={SortingIcon}
-        label="Sort range"
-        disabled={false}
-        onPress={() => onCommand({ kind: "sort" })}
-      />
-      <ToolbarMenu label="Group" icon={TextIndentMoreIcon}>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuItem
-            onClick={() => onCommand({ kind: "outline", group: true, axis: "rows" })}
-          >
-            Group rows
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onCommand({ kind: "outline", group: true, axis: "columns" })}
-          >
-            Group columns
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onCommand({ kind: "outline", group: false, axis: "rows" })}
-          >
-            Ungroup rows
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => onCommand({ kind: "outline", group: false, axis: "columns" })}
-          >
-            Ungroup columns
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <ToolbarMenu label="Data validation" icon={CheckListIcon}>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuItem onClick={() => onCommand({ kind: "validation" })}>
-            Data validation…
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "circles" })}>
-            {circling ? "Clear validation circles" : "Circle invalid data"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <Action
-        icon={Link01Icon}
-        label="Insert link"
-        shortcut="⌘K"
-        disabled={false}
-        onPress={() => onCommand({ kind: "link" })}
-      />
-      <Action
-        icon={ImageAdd01Icon}
-        label="Insert picture"
-        disabled={false}
-        onPress={() => onCommand({ kind: "picture" })}
-      />
-      <Action
-        icon={Table02Icon}
-        label="Insert pivot table"
-        disabled={false}
-        onPress={() => onCommand({ kind: "pivot" })}
-      />
-      <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
-        <DropdownMenuContent align="start" className="w-40">
-          {CHART_KINDS.map((each) => (
-            <DropdownMenuItem
-              key={each.kind}
-              onClick={() => onCommand({ kind: "chart", chart: each.kind })}
-            >
-              <HugeiconsIcon icon={each.icon} strokeWidth={2} />
+    </>
+  );
+  const groups: Record<TabName, readonly RibbonGroup[]> = {
+    home: [
+      {
+        id: "font",
+        label: "Font",
+        controls: (
+          <>
+            <ToolbarMenu label="Font" text={style.fontFamily ?? "Default font"}>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuItem onClick={() => format({ fontFamily: null })}>
+                  Default font
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {FONTS.map((font) => (
+                  <DropdownMenuItem key={font} onClick={() => format({ fontFamily: font })}>
+                    <span style={{ fontFamily: font }}>{font}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <ToolbarMenu label="Font size" text={String(style.fontSize ?? 11)}>
+              <DropdownMenuContent align="start" className="w-24">
+                {SIZES.map((size) => (
+                  <DropdownMenuItem
+                    key={size}
+                    onClick={() => format({ fontSize: size === 11 ? null : size })}
+                  >
+                    {size}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <Format
+              icon={TextBoldIcon}
+              label="Bold"
+              shortcut="⌘B"
+              pressed={!!style.bold}
+              onPress={() => toggle("bold")}
+            />
+            <Format
+              icon={TextItalicIcon}
+              label="Italic"
+              shortcut="⌘I"
+              pressed={!!style.italic}
+              onPress={() => toggle("italic")}
+            />
+            <Format
+              icon={TextUnderlineIcon}
+              label="Underline"
+              shortcut="⌘U"
+              pressed={!!style.underline}
+              onPress={() => toggle("underline")}
+            />
+            <Format
+              icon={TextStrikethroughIcon}
+              label="Strikethrough"
+              pressed={!!style.strike}
+              onPress={() => toggle("strike")}
+            />
+            <ColorMenu
+              label="Text colour"
+              icon={TextColorIcon}
+              value={style.fontColor}
+              resetLabel="Automatic"
+              onChange={(color) => format({ fontColor: color })}
+            />
+            <ColorMenu
+              label="Fill colour"
+              icon={PaintBucketIcon}
+              value={style.fill}
+              resetLabel="No fill"
+              onChange={(color) => format({ fill: color })}
+            />
+            <ToolbarMenu label="Borders" icon={BorderAll01Icon}>
+              <DropdownMenuContent align="start" className="w-48">
+                {BORDERS.map((each) => (
+                  <DropdownMenuItem
+                    key={each.border}
+                    onClick={() => onCommand({ kind: "borders", border: each.border })}
+                  >
+                    <HugeiconsIcon icon={each.icon} strokeWidth={2} />
+                    {each.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+          </>
+        ),
+      },
+      {
+        id: "alignment",
+        label: "Alignment",
+        controls: (
+          <>
+            {ALIGNMENTS.map((alignment) => (
+              <Format
+                key={alignment.value}
+                icon={alignment.icon}
+                label={alignment.label}
+                pressed={style.horizontal === alignment.value}
+                onPress={() =>
+                  format({
+                    horizontal: style.horizontal === alignment.value ? null : alignment.value,
+                  })
+                }
+              />
+            ))}
+            <ToolbarMenu label="Vertical alignment" icon={vertical.icon}>
+              <DropdownMenuContent align="start" className="w-36">
+                {VERTICAL.map((each) => (
+                  <DropdownMenuItem
+                    key={each.value}
+                    onClick={() =>
+                      format({ vertical: each.value === "bottom" ? null : each.value })
+                    }
+                  >
+                    <HugeiconsIcon icon={each.icon} strokeWidth={2} />
+                    {each.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <Format
+              icon={TextWrapIcon}
+              label="Wrap text"
+              pressed={!!style.wrap}
+              onPress={() => toggle("wrap")}
+            />
+            <ToolbarMenu label="Merge" icon={MergeIcon}>
+              <DropdownMenuContent align="start" className="w-44">
+                <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "center" })}>
+                  Merge &amp; centre
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "across" })}>
+                  Merge across
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "cells" })}>
+                  Merge cells
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCommand({ kind: "merge", merge: "unmerge" })}>
+                  Unmerge cells
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </ToolbarMenu>
+          </>
+        ),
+      },
+      {
+        id: "number",
+        label: "Number",
+        controls: (
+          <>
+            <ToolbarMenu label="Number format" text={numberFormat?.label ?? "Custom"}>
+              <DropdownMenuContent align="start" className="w-64">
+                {NUMBER_FORMATS.map((each) => (
+                  <DropdownMenuItem
+                    key={each.label}
+                    onClick={() => format({ numberFormat: each.code })}
+                  >
+                    <span className="flex-1">{each.label}</span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {preview(each.code)}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <Format
+              icon={PercentIcon}
+              label="Percent style"
+              pressed={style.numberFormat === "0%"}
+              onPress={() => format({ numberFormat: style.numberFormat === "0%" ? null : "0%" })}
+            />
+            <Action
+              icon={DecimalsArrowLeftIcon}
+              label="Decrease decimal"
+              disabled={false}
+              onPress={() => onCommand({ kind: "decimals", delta: -1 })}
+            />
+            <Action
+              icon={DecimalsArrowRightIcon}
+              label="Increase decimal"
+              disabled={false}
+              onPress={() => onCommand({ kind: "decimals", delta: 1 })}
+            />
+          </>
+        ),
+      },
+      ...(conditional ? [{ id: "styles", label: "Styles", controls: conditional }] : []),
+      {
+        id: "editing",
+        label: "Editing",
+        controls: (
+          <>
+            <ToolbarMenu label="AutoSum" icon={SigmaIcon}>
+              <DropdownMenuContent align="start" className="w-40">
+                {SUMS.map((each) => (
+                  <DropdownMenuItem
+                    key={each.fn}
+                    onClick={() => onCommand({ kind: "autosum", fn: each.fn })}
+                  >
+                    {each.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            {sortAndFilter}
+            <ToolbarMenu label="Clear" icon={EraserIcon}>
+              <DropdownMenuContent align="start" className="w-40">
+                <DropdownMenuItem onClick={() => onCommand({ kind: "clear", what: "formats" })}>
+                  Clear formats
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCommand({ kind: "clear", what: "all" })}>
+                  Clear all
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </ToolbarMenu>
+          </>
+        ),
+      },
+    ],
+    insert: [
+      {
+        id: "tables",
+        label: "Tables",
+        controls: (
+          <Action
+            icon={PivotIcon}
+            label="Insert pivot table"
+            disabled={false}
+            onPress={() => onCommand({ kind: "pivot" })}
+          />
+        ),
+      },
+      {
+        id: "illustrations",
+        label: "Illustrations",
+        controls: (
+          <Action
+            icon={ImageAdd01Icon}
+            label="Insert picture"
+            disabled={false}
+            onPress={() => onCommand({ kind: "picture" })}
+          />
+        ),
+      },
+      {
+        id: "charts",
+        label: "Charts",
+        controls: (
+          <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
+            <DropdownMenuContent align="start" className="w-40">
+              {CHART_KINDS.map((each) => (
+                <DropdownMenuItem
+                  key={each.kind}
+                  onClick={() => onCommand({ kind: "chart", chart: each.kind })}
+                >
+                  <HugeiconsIcon icon={each.icon} strokeWidth={2} />
+                  {each.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </ToolbarMenu>
+        ),
+      },
+      {
+        id: "links",
+        label: "Links",
+        controls: (
+          <Action
+            icon={Link01Icon}
+            label="Insert link"
+            shortcut="⌘K"
+            disabled={false}
+            onPress={() => onCommand({ kind: "link" })}
+          />
+        ),
+      },
+    ],
+    data: [
+      { id: "sort", label: "Sort and filter", controls: sortAndFilter },
+      {
+        id: "tools",
+        label: "Data tools",
+        controls: (
+          <ToolbarMenu label="Data validation" icon={CheckListIcon}>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem onClick={() => onCommand({ kind: "validation" })}>
+                Data validation…
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCommand({ kind: "circles" })}>
+                {circling ? "Clear validation circles" : "Circle invalid data"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </ToolbarMenu>
+        ),
+      },
+      {
+        id: "outline",
+        label: "Outline",
+        controls: (
+          <ToolbarMenu label="Group" icon={TextIndentMoreIcon}>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem
+                onClick={() => onCommand({ kind: "outline", group: true, axis: "rows" })}
+              >
+                Group rows
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onCommand({ kind: "outline", group: true, axis: "columns" })}
+              >
+                Group columns
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onCommand({ kind: "outline", group: false, axis: "rows" })}
+              >
+                Ungroup rows
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onCommand({ kind: "outline", group: false, axis: "columns" })}
+              >
+                Ungroup columns
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </ToolbarMenu>
+        ),
+      },
+    ],
+    view: [
+      {
+        id: "window",
+        label: "Window",
+        controls: (
+          <ToolbarMenu label="Freeze panes" icon={SnowflakeIcon}>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "selection" })}>
+                Freeze panes
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "top" })}>
+                Freeze top row
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "first" })}>
+                Freeze first column
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "none" })}>
+                Unfreeze panes
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </ToolbarMenu>
+        ),
+      },
+      {
+        id: "print",
+        label: "Print",
+        controls: (
+          <Action
+            icon={PrinterIcon}
+            label="Print"
+            shortcut="⌘P"
+            disabled={false}
+            onPress={() => onCommand({ kind: "print" })}
+          />
+        ),
+      },
+    ],
+  };
+  const label = TABS.find((each) => each.value === tab)!.label;
+  return (
+    <Tabs value={tab} onValueChange={(next: TabName) => setTab(next)} className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1">
+        <Toolbar.Root aria-label="History" className="flex shrink-0 items-center gap-0.5">
+          <Action
+            icon={Undo02Icon}
+            label="Undo"
+            shortcut="⌘Z"
+            disabled={!canUndo}
+            onPress={onUndo}
+          />
+          <Action
+            icon={Redo02Icon}
+            label="Redo"
+            shortcut="⇧⌘Z"
+            disabled={!canRedo}
+            onPress={onRedo}
+          />
+        </Toolbar.Root>
+        <TabsList variant="line">
+          {TABS.map((each) => (
+            <TabsTrigger key={each.value} value={each.value}>
               {each.label}
-            </DropdownMenuItem>
+            </TabsTrigger>
           ))}
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <ToolbarMenu label="Freeze panes" icon={SnowflakeIcon}>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "selection" })}>
-            Freeze panes
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "top" })}>
-            Freeze top row
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "first" })}>
-            Freeze first column
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "freeze", freeze: "none" })}>
-            Unfreeze panes
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      <ToolbarMenu label="Clear" icon={EraserIcon}>
-        <DropdownMenuContent align="start" className="w-40">
-          <DropdownMenuItem onClick={() => onCommand({ kind: "clear", what: "formats" })}>
-            Clear formats
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCommand({ kind: "clear", what: "all" })}>
-            Clear all
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </ToolbarMenu>
-      {extra ? (
-        <>
-          <Separator />
-          {extra}
-        </>
-      ) : null}
-    </Toolbar.Root>
+        </TabsList>
+        {extra ? (
+          <Toolbar.Root aria-label="Comments" className="ml-auto flex shrink-0 items-center">
+            {extra}
+          </Toolbar.Root>
+        ) : null}
+      </div>
+      <RibbonRow key={tab} label={label} groups={groups[tab]} />
+    </Tabs>
   );
 }
