@@ -140,6 +140,8 @@ export function convertOperations(
   const changedSince = (cell: Cell | undefined) =>
     !!cell && cell.w > input.seen && !input.own.has(cell.w);
   /** Refuses touching cells someone else changed since the model's view. */
+  const conflictMessage = (sh: string, r: string, c: string) =>
+    `${label(sh, r, c)} changed since your view of the sheet. Nothing was applied; the view now shows it, so check it and send the call again.`;
   const guard = (
     sh: string,
     rows: ReadonlySet<string> | null,
@@ -149,10 +151,7 @@ export function convertOperations(
       if (rows && !rows.has(r)) continue;
       for (const [c, cell] of Object.entries(row))
         if ((!cols || cols.has(c)) && changedSince(cell))
-          throw new Refused(
-            "conflict",
-            `${label(sh, r, c)} changed since your view of the sheet. Nothing was applied; the view now shows it, so check it and send the call again.`,
-          );
+          throw new Refused("conflict", conflictMessage(sh, r, c));
     }
   };
   /** A range's row and column IDs, the grid grown to hold it. */
@@ -218,7 +217,11 @@ export function convertOperations(
             value,
           })),
         );
-        guard(sh, new Set(targets.map((each) => each.r)), new Set(targets.map((each) => each.c)));
+        // Exactly the cells written: rows of different lengths leave the rest of their box alone.
+        for (const { r, c } of targets) {
+          const cell = view.sheet[sh]!.cells[r]?.[c];
+          if (cell && changedSince(cell)) throw new Refused("conflict", conflictMessage(sh, r, c));
+        }
         // A formula may grow the grid, so writes are built before any is emitted.
         const cells = targets.map((each) => write(each.r, each.c, each.value, sh));
         emit({ op: "set", sh, cells });

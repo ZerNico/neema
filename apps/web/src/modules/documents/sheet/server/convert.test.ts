@@ -113,6 +113,18 @@ describe("converting the model's sheet edits", () => {
     expect(
       edit(doc, [{ kind: "setCells", sheet: "Sheet1", start: "B1", rows: [["mine"]] }], seen),
     ).toMatchObject({ ok: true });
+    // Rows of different lengths write only their own cells: B2 is in their box, not written.
+    const below = applyChange(
+      doc,
+      {
+        clientId: "person",
+        seq: 2,
+        ops: [{ op: "set", sh: "s1", cells: [{ r: "s1.r2", c: "s1.c2", v: "theirs" }] }],
+      },
+      theirs,
+    ).doc;
+    const ragged = [{ kind: "setCells", sheet: "Sheet1", start: "A2", rows: [["x"], ["y", "z"]] }];
+    expect(edit(below, ragged, seen)).toMatchObject({ ok: true });
   });
 
   it("sorts by calculated values, blanks last, keeping the header", () => {
