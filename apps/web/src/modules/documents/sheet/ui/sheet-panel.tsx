@@ -82,7 +82,16 @@ import { CommentInput, CommentThread } from "../../ui/comment-thread.tsx";
 import type { AskTarget } from "../../ui/rich-editor/editor-hooks.ts";
 import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
-import { SheetToolbar } from "./sheet-toolbar.tsx";
+import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
+import {
+  autoSum,
+  borderSelection,
+  clearSelectionAs,
+  decimalsSelection,
+  freezeAt,
+  mergeSelection,
+} from "@chat/sheet-react/format-commands";
+import { formatValue } from "@chat/sheet/number-format";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
 import { ChartEditor } from "./chart-editor/chart-editor.tsx";
@@ -307,6 +316,16 @@ export default function SheetPanelBody({
   })();
   const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
+  const onToolbar = (command: ToolbarCommand) => {
+    if (command.kind === "format") run(formatSelection(context, command.patch));
+    else if (command.kind === "borders") run(borderSelection(context, command.border));
+    else if (command.kind === "decimals") run(decimalsSelection(context, command.delta));
+    else if (command.kind === "autosum") run(autoSum(context, command.fn));
+    else if (command.kind === "merge") run(mergeSelection(context, command.merge));
+    else if (command.kind === "freeze") run(freezeAt(context, command.freeze));
+    else if (command.kind === "clear") run(clearSelectionAs(context, command.what));
+    else insertChart(command.chart);
+  };
   const insertChart = (kind: ChartKind) => {
     const ops = chartFromSelection(context, kind);
     if (!ops.length) {
@@ -432,8 +451,14 @@ export default function SheetPanelBody({
               readOnly={readOnly}
               onUndo={() => sync?.undo()}
               onRedo={() => sync?.redo()}
-              onFormat={(patch) => run(formatSelection(context, patch))}
-              onChart={insertChart}
+              onCommand={onToolbar}
+              preview={(code) => {
+                const value = values.value(sheet, head.r, head.c);
+                const shown = typeof value === "number" ? value : 1234.5;
+                return code
+                  ? (formatValue(shown, code, locale)?.text ?? "")
+                  : cellDisplay(shown, {}, locale).text;
+              }}
             />,
             toolbarSlot,
           )

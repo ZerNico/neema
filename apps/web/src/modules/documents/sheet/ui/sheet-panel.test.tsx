@@ -268,7 +268,7 @@ describe("an open sheet", () => {
     fireEvent.pointerDown(content, { clientX: 5, clientY: 5, button: 0 });
     fireEvent.pointerDown(content, { clientX: 70, clientY: 25, button: 0, shiftKey: true });
     fireEvent.click(screen.getByRole("button", { name: "Insert chart" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Column chart" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Column" }));
     expect(Object.values(sync.getState().doc!.charts)).toMatchObject([
       { kind: "column", series: [{ name: { cell: { r: "s1.r1", c: "s1.c2" } } }] },
     ]);

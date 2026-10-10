@@ -72,7 +72,7 @@ export interface GridFill {
 export type GridCommand =
   | { readonly kind: "clear" | "undo" | "redo" | "find" }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
-  | { readonly kind: "toggle"; readonly property: "bold" | "italic" };
+  | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
 /** Someone else's selection, drawn in their colour. */
 export interface GridDecoration {
   readonly key: string;
@@ -546,7 +546,12 @@ export function SheetGrid({
                   ? { kind: "toggle", property: "bold" }
                   : lower === "i"
                     ? { kind: "toggle", property: "italic" }
-                    : null;
+                    : lower === "u"
+                      ? { kind: "toggle", property: "underline" }
+                      : // Ctrl+5 strikes through, as in Excel.
+                        event.key === "5"
+                        ? { kind: "toggle", property: "strike" }
+                        : null;
       if (found) {
         event.preventDefault();
         onCommand?.(found);
