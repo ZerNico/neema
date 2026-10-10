@@ -424,6 +424,8 @@ export default function SheetPanelBody({
     }
     const frame = document.createElement("iframe");
     frame.setAttribute("aria-hidden", "true");
+    // The sheet's text runs no script there; the page may still reach in to print it.
+    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
     Object.assign(frame.style, { position: "fixed", width: "0", height: "0", border: "0" });
     frame.addEventListener("load", () => {
       const printing = frame.contentWindow;
