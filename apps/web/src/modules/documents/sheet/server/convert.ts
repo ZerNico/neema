@@ -1,4 +1,4 @@
-import { columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
+import { columnIndex, columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
 import type { Scalar } from "@chat/sheet/engine/evaluate";
 import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet, type CalcContext } from "@chat/sheet/model/calc";
@@ -17,6 +17,7 @@ import {
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
+import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
 import { chartOperation } from "./convert-chart.ts";
 
 export interface ConvertInput {
@@ -502,6 +503,57 @@ export function convertOperations(
             },
           }),
         );
+        return;
+      }
+      case "setFilter": {
+        const sh = sheetId(operation.sheet);
+        const existing = view.sheet[sh]!.filter;
+        let box = existing?.box;
+        if (operation.range) {
+          const { ids: whole } = area(sh, operation.range);
+          if (whole.r1 === whole.r2)
+            throw new Refused("invalid", "A filter's range needs a header row and rows below it.");
+          box = { r1: whole.r1!, r2: whole.r2!, c1: whole.c1!, c2: whole.c2! };
+        }
+        if (!box) throw new Refused("invalid", "This sheet has no filter yet; give its range.");
+        // A new range keeps the rules of columns still inside it.
+        const kept = existing && operation.range ? existing.rules : (existing?.rules ?? {});
+        const rules: Record<string, FilterRule> = { ...kept };
+        if (operation.column) {
+          const letters = operation.column.split(":")[0]!;
+          const column = ids(sh, "columns")[columnIndex(letters.toUpperCase()) - 1];
+          const inside = positions(view.sheet[sh]!.cols);
+          const at = column ? inside.at(column) : undefined;
+          if (!column || at === undefined || at < inside.at(box.c1)! || at > inside.at(box.c2)!)
+            throw new Refused("invalid", `Column ${letters} is outside the filter's range.`);
+          if (operation.clear) delete rules[column];
+          else if (operation.keep || operation.condition) {
+            const number = Number(operation.value);
+            rules[column] = {
+              ...(operation.keep ? { values: operation.keep } : {}),
+              ...(operation.condition
+                ? {
+                    condition: {
+                      op: operation.condition as FilterCondition,
+                      ...(operation.value === undefined
+                        ? {}
+                        : {
+                            value:
+                              operation.value.trim() !== "" && Number.isFinite(number)
+                                ? number
+                                : operation.value,
+                          }),
+                    },
+                  }
+                : {}),
+            };
+          }
+        }
+        emit({ op: "filter", sh, filter: { box, rules } });
+        return;
+      }
+      case "removeFilter": {
+        emit({ op: "filter", sh: sheetId(operation.sheet), filter: null });
         return;
       }
       case "removeChart": {

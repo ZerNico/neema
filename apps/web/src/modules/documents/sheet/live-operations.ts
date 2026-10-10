@@ -1,5 +1,6 @@
 import { MAX_COLUMN, MAX_ROW, parseCell, parseRange } from "@chat/sheet/a1";
 import { CHART_KINDS } from "@chat/sheet/model/chart";
+import { FILTER_CONDITIONS } from "@chat/sheet/model/filter";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import {
   SPREADSHEET_OPERATIONS,
@@ -278,6 +279,41 @@ export const LIVE_SHEET_OPERATIONS = {
     },
     required: ["chart"],
     change: ["changed", "chart"],
+  },
+  setFilter: {
+    about:
+      "Put an AutoFilter on a range (its first row the headers) and, optionally, filter one column: keep listed shown values, or a condition. Rows that fail are hidden, not deleted.",
+    fields: {
+      sheet,
+      range: {
+        ...range,
+        about: "The filter's range, headers first; default the existing filter's.",
+      },
+      column: { ...columns, about: 'The column to filter, e.g. "C".' },
+      keep: {
+        type: "list",
+        min: 1,
+        max: 200,
+        about: 'Shown values to keep, as the cells show them; "" keeps empty cells.',
+        of: { type: "string", max: 255, about: "A value." },
+      },
+      condition: {
+        type: "string",
+        max: 16,
+        options: FILTER_CONDITIONS,
+        about: "A test the column's value must pass.",
+      },
+      value: { type: "string", max: 255, about: "What the condition compares with." },
+      clear: { type: "boolean", about: "Remove this column's filter instead." },
+    },
+    required: ["sheet"],
+    change: ["filtered", "range"],
+  },
+  removeFilter: {
+    about: "Remove a sheet's AutoFilter, showing every row it hid.",
+    fields: { sheet },
+    required: ["sheet"],
+    change: ["removed", "filter"],
   },
   removeChart: {
     about: "Remove a chart, by the id the view gives it in <charts>.",

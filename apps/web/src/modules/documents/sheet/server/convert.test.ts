@@ -6,6 +6,7 @@ import { renderFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
+import { sheetView } from "./sheet-view.ts";
 
 const context: CalcContext = { revision: 1, epoch: 0, now: 45_000, seed: 1 };
 let minted = 0;
@@ -166,5 +167,48 @@ describe("converting the model's sheet edits", () => {
       outcome: "not_found",
       message: "No sheet named Nope. Sheets: Sheet1.",
     });
+  });
+});
+
+describe("the model's filters", () => {
+  it("filters a column by a condition, shows what it hides, and removes it", () => {
+    let doc = done(
+      edit(emptyDoc(), [
+        {
+          kind: "setCells",
+          sheet: "Sheet1",
+          start: "A1",
+          rows: [
+            ["Region", "Total"],
+            ["North", 120],
+            ["South", 80],
+            ["East", 40],
+          ],
+        },
+        {
+          kind: "setFilter",
+          sheet: "Sheet1",
+          range: "A1:B4",
+          column: "B",
+          condition: "greater",
+          value: "50",
+        },
+      ]),
+    );
+    expect(doc.sheet.s1!.filter?.rules).toEqual({
+      [at(doc, "B1").c]: { condition: { op: "greater", value: 50 } },
+    });
+    const shown = sheetView(doc, calculateSheet(doc, context)).xml;
+    expect(shown).toContain('<filter range="A1:B4" hides="1 rows">');
+    expect(shown).toContain('<rule column="B" condition="greater" value="50"/>');
+    doc = done(edit(doc, [{ kind: "setFilter", sheet: "Sheet1", column: "A", keep: ["North"] }]));
+    expect(Object.keys(doc.sheet.s1!.filter!.rules)).toHaveLength(2);
+    expect(
+      edit(doc, [{ kind: "setFilter", sheet: "Sheet1", column: "D", keep: ["x"] }]),
+    ).toMatchObject({
+      ok: false,
+    });
+    doc = done(edit(doc, [{ kind: "removeFilter", sheet: "Sheet1" }]));
+    expect(doc.sheet.s1!.filter).toBeUndefined();
   });
 });

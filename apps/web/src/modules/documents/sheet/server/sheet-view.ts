@@ -5,6 +5,7 @@ import type { SheetValues } from "@chat/sheet/model/calc";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import type { ChartText } from "@chat/sheet/model/chart";
+import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
 import { formatValue } from "@chat/sheet/number-format";
 
 /** Above this the focused sheet is sent as a window of rows. */
@@ -192,6 +193,38 @@ export function sheetView(
       : [];
   });
   if (merges.length) lines.push(`<merges>${merges.join(" ")}</merges>`);
+  // The focused sheet's filter and what it hides, so the model does not take hidden rows for gone.
+  const filter = doc.sheet[sheet]!.filter;
+  const span = filter ? filterSpan(doc, sheet, filter) : null;
+  if (filter && span) {
+    const sheetRows = positions(doc.sheet[sheet]!.rows);
+    const sheetCols = positions(doc.sheet[sheet]!.cols);
+    const top = sheetRows.at(span.header)!;
+    const left = sheetCols.at(span.columns[0]!)!;
+    const rules = Object.entries(filter.rules).flatMap(([column, rule]) => {
+      const at = sheetCols.at(column);
+      if (at === undefined) return [];
+      const parts = [
+        `column="${columnLetters(at)}"`,
+        ...(rule.values
+          ? [`keep="${escapeAttribute(rule.values.map((each) => each || "(blank)").join(", "))}"`]
+          : []),
+        ...(rule.condition
+          ? [
+              `condition="${rule.condition.op}"`,
+              ...(rule.condition.value === undefined
+                ? []
+                : [`value="${escapeAttribute(String(rule.condition.value))}"`]),
+            ]
+          : []),
+      ];
+      return [`  <rule ${parts.join(" ")}/>`];
+    });
+    const hiding = filteredRows(doc, values, sheet).size;
+    lines.push(
+      `<filter range="${address(top, left)}:${address(top + span.body.length, left + span.columns.length - 1)}" hides="${hiding} rows">${rules.length ? `\n${rules.join("\n")}\n` : ""}</filter>`,
+    );
+  }
   /** A range by IDs as A1, named with its sheet; null when its rows or columns are gone. */
   const rangeText = (on: string, area: { r1: string; r2: string; c1: string; c2: string }) => {
     const data = doc.sheet[on];
