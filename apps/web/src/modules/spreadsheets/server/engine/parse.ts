@@ -348,6 +348,158 @@ function tokenize(text: string, context: ParseContext): Token[] {
   return tokens;
 }
 
+/** One corner of a reference as written: a row, a column or both, each with its `$`. */
+export interface RefCorner {
+  /** Null for whole columns (`C:C`). */
+  readonly row: number | null;
+  /** Null for whole rows (`2:4`). */
+  readonly column: number | null;
+  readonly rowAbsolute: boolean;
+  readonly columnAbsolute: boolean;
+}
+/**
+ * A formula cut into its references and the text between them, losing
+ * nothing: the pieces' text joined is the formula. What a live sheet stores
+ * a formula as is built from this, so `$` marks and each reference's kind
+ * survive where the evaluator's boxes would drop them.
+ */
+export type Lexeme =
+  | { readonly k: "text"; readonly text: string }
+  | {
+      readonly k: "ref";
+      readonly text: string;
+      /** The sheet named before `!`, unquoted; null for the formula's own. */
+      readonly sheet: string | null;
+      /** `First:Last!A1`, the same cells on every sheet between. */
+      readonly sheets: { readonly first: string; readonly last: string } | null;
+      readonly from: RefCorner;
+      /** The second corner of a range; null for one cell. */
+      readonly to: RefCorner | null;
+    };
+
+const cornerOf = (raw: string): RefCorner => {
+  const [, before = "", letters, after = "", digits] =
+    /^(\$?)([A-Za-z]{1,3})?(\$?)(\d{1,7})?$/.exec(raw)!;
+  if (!letters)
+    return {
+      row: Number(digits),
+      column: null,
+      rowAbsolute: before === "$",
+      columnAbsolute: false,
+    };
+  return {
+    row: digits ? Number(digits) : null,
+    column: columnIndex(letters.toUpperCase()),
+    rowAbsolute: after === "$",
+    columnAbsolute: before === "$",
+  };
+};
+
+/** Cuts a formula into references and text; nothing is evaluated and nothing is lost. */
+export function lex(text: string): Lexeme[] {
+  const out: Lexeme[] = [];
+  const pushText = (piece: string) => {
+    const last = out.at(-1);
+    if (last?.k === "text") out[out.length - 1] = { k: "text", text: last.text + piece };
+    else out.push({ k: "text", text: piece });
+  };
+  const pushRef = (
+    raw: string,
+    area: string,
+    sheet: string | null,
+    sheets: { first: string; last: string } | null,
+  ) => {
+    try {
+      // Past the grid it is not a reference Excel would read; it stays as written.
+      box(area);
+    } catch {
+      return pushText(raw);
+    }
+    const [from, to] = area.split(":") as [string, string?];
+    out.push({
+      k: "ref",
+      text: raw,
+      sheet,
+      sheets,
+      from: cornerOf(from),
+      to: to ? cornerOf(to) : null,
+    });
+  };
+  let index = 0;
+  while (index < text.length) {
+    let match: RegExpExecArray | null;
+    if ((match = at(patterns.string, text, index))) {
+      pushText(match[0]);
+      index += match[0].length;
+      continue;
+    }
+    const error = ERRORS.find(
+      (code) => text.slice(index, index + code.length).toUpperCase() === code,
+    );
+    if (error) {
+      pushText(text.slice(index, index + error.length));
+      index += error.length;
+      continue;
+    }
+    if ((match = at(patterns.sheets, text, index))) {
+      pushRef(match[0], match[3]!, null, { first: match[1]!, last: match[2]! });
+      index += match[0].length;
+      continue;
+    }
+    if ((match = at(patterns.qualified, text, index))) {
+      const sheet = unquote(match[1]!);
+      const split = sheet.indexOf(":");
+      if (split > 0)
+        pushRef(match[0], match[2]!, null, {
+          first: sheet.slice(0, split),
+          last: sheet.slice(split + 1),
+        });
+      else pushRef(match[0], match[2]!, sheet, null);
+      index += match[0].length;
+      continue;
+    }
+    if ((match = at(patterns.area, text, index))) {
+      pushRef(match[0], match[1]!, null, null);
+      index += match[0].length;
+      continue;
+    }
+    if ((match = at(patterns.number, text, index))) {
+      pushText(match[0]);
+      index += match[0].length;
+      continue;
+    }
+    if ((match = at(patterns.id, text, index))) {
+      index += match[0].length;
+      pushText(match[0]);
+      // A table's structured reference stays text: it names columns, not cells.
+      if (text[index] === "[") {
+        const end = bracketedEnd(text, index);
+        pushText(text.slice(index, end));
+        index = end;
+      }
+      continue;
+    }
+    if (text[index] === "[") {
+      const end = bracketedEnd(text, index);
+      pushText(text.slice(index, end));
+      index = end;
+      continue;
+    }
+    pushText(text[index]!);
+    index += 1;
+  }
+  return out;
+}
+
+/** Where a bracketed part from `start` ends, or the formula's end if it never closes. */
+const bracketedEnd = (text: string, start: number) => {
+  try {
+    return bracketed(text, start).end;
+  } catch {
+    return text.length;
+  }
+};
+
 const COMPARE = new Set(["=", "<>", "<", ">", "<=", ">="]);
 
 /**
