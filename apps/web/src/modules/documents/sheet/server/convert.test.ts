@@ -310,6 +310,21 @@ describe("the model's conditional formats", () => {
     expect(
       edit(doc, [{ kind: "setValidation", sheet: "Sheet1", range: "A1", type: "list" }]),
     ).toMatchObject({ ok: false });
+    // A setValidation that would split rules past the sheet's limit refuses the call whole.
+    // With the two rules there, 198 more fill the sheet's 200.
+    const many = Array.from({ length: 198 }, (_, n) => ({
+      kind: "setValidation",
+      sheet: "Sheet1",
+      range: `F${n + 1}`,
+      type: "list",
+      choices: ["a"],
+    }));
+    const full = done(edit(done(edit(doc, many.slice(0, 99))), many.slice(99)));
+    expect(
+      edit(full, [
+        { kind: "setValidation", sheet: "Sheet1", range: "B5", type: "list", choices: ["b"] },
+      ]),
+    ).toMatchObject({ ok: false, outcome: "invalid" });
     // Cleared from C5 alone: the date rule keeps the cells above and below it.
     doc = done(edit(doc, [{ kind: "clearValidation", sheet: "Sheet1", range: "C5" }]));
     expect(sheetView(doc, calculateSheet(doc, context)).xml).toMatch(

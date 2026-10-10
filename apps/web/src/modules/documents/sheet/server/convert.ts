@@ -14,7 +14,7 @@ import {
   type Formula,
   type SheetDoc,
 } from "@chat/sheet/model";
-import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
+import { parseChange, type CellWrite, type SheetOp, type StylePatch } from "@chat/sheet/model/ops";
 import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
@@ -811,5 +811,9 @@ export function convertOperations(
       return { ok: false, outcome: error.outcome, message: error.message };
     throw error;
   }
+  // Held to what a person's change is held to, such as how many rules a sheet keeps.
+  const checked = parseChange({ clientId: "model", seq: 1, ops: plan.ops });
+  if (!checked.ok)
+    return { ok: false, outcome: "invalid", message: `Nothing was applied: ${checked.error}.` };
   return { ok: true, ops: plan.ops, doc: plan.doc };
 }
