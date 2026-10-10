@@ -76,7 +76,8 @@ const HISTORY = 100;
  * so replaying needs no rebasing.
  */
 export class SheetSync {
-  readonly clientId: string;
+  /** The client this tab writes under; a new one after the server rejects its changes. */
+  clientId: string;
   #confirmed: SheetDoc | null = null;
   #revision = 0;
   #moment = NO_MOMENT;
@@ -258,8 +259,9 @@ export class SheetSync {
   }
   /**
    * Drops a client's unsent changes the server will never take. Later ones
-   * would wait behind the gap forever, so they go too, and this tab numbers
-   * its next change where the dropped ones began.
+   * would wait behind the gap forever, so they go too. This tab then writes
+   * under a new client: reusing the dropped numbers could meet some the
+   * server already applied, which it would acknowledge and never apply again.
    */
   #reject(clientId: string, reason: string) {
     const dropped = this.#pending.filter((change) => change.clientId === clientId);
@@ -267,7 +269,10 @@ export class SheetSync {
     this.#pending = this.#pending.filter((change) => change.clientId !== clientId);
     const seqs = dropped.map((change) => change.seq);
     this.options.outbox?.forget(this.options.documentId, clientId, Math.max(...seqs));
-    if (clientId === this.clientId) this.#seq = Math.min(...seqs) - 1;
+    if (clientId === this.clientId) {
+      this.clientId = crypto.randomUUID().slice(0, 18);
+      this.#seq = 0;
+    }
     this.#refused = `Some changes weren’t kept: ${reason}.`;
   }
 

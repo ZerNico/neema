@@ -61,7 +61,8 @@ browser workers and the Excel file tools); this page records the decisions behin
   limit, an unknown locale or time zone) still uses its number and comes back as refused; the
   tab drops it at once, since the feed will never bring it. A push refused whole (a change that
   does not parse, a sheet now read-only) is answered, not thrown, so it is not retried: the tab
-  drops that client's unsent changes and numbers its next one where they began. A reset frame carries the client's last number,
+  drops that client's unsent changes and goes on under a new client, since the server may hold
+  some of the dropped numbers and would take a reused one as a resend. A reset frame carries the client's last number,
   telling it which of its pending changes are already in.
 - Steps are folded past 2,000 and 30 days, or sooner once they pass 32 MB. Tombstones are never
   folded, so a change from before the snapshot still finds its IDs; an editor based there gets

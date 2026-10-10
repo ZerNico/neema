@@ -107,11 +107,15 @@ describe("a sheet's connection", () => {
       refused: "Some changes weren’t kept: this document is read-only for you.",
     });
     expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBeUndefined();
-    // The next edit takes the number the dropped ones began at, so the server has no gap to wait on.
+    // The next edit starts a new client at 1: the server may hold some of the dropped numbers,
+    // and would take a reused one as a resend it need not apply.
     answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
     sync.dispatch([write("s1.r3", "s1.c1", "three")]);
     await vi.runAllTimersAsync();
-    expect(JSON.parse(pushes[1]!.changes![0]!)).toMatchObject({ seq: 1 });
+    const next = JSON.parse(pushes[1]!.changes![0]!) as { clientId: string; seq: number };
+    expect(next.seq).toBe(1);
+    expect(next.clientId).not.toBe("me");
+    expect(pushes[1]!.clientId).toBe(next.clientId);
   });
 
   it("replays unsent edits over what others did meanwhile", async () => {
