@@ -141,6 +141,8 @@ export interface SheetGridProps {
   readonly onOverlayCommand?: (key: string, command: OverlayCommand) => void;
   /** Without this, the selection has no fill handle. */
   readonly onFill?: (fill: GridFill) => void;
+  /** Drawn just past the selection's corner, as Excel's Auto Fill Options button after a fill. */
+  readonly selectionAccessory?: ReactNode;
   /** The selection dragged by its border this far; `copy` when Alt or Ctrl was held. */
   readonly onDragSelection?: (shift: { rows: number; cols: number }, copy: boolean) => void;
 }
@@ -205,6 +207,7 @@ export function SheetGrid({
   onOverlayCommand,
   onFill,
   onDragSelection,
+  selectionAccessory,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -1231,6 +1234,18 @@ export function SheetGrid({
           {shiftPreview}
           {moveEdges}
           {fillHandle}
+          {box && selectionAccessory && !editing ? (
+            <div
+              className="absolute z-20"
+              style={{
+                top: rows.starts[box.bottom + 1]! + 4,
+                left: cols.starts[box.right + 1]! + 4,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {selectionAccessory}
+            </div>
+          ) : null}
           {overlays.flatMap((overlay) => {
             const row = rowIndex.get(overlay.at.r);
             const col = colIndex.get(overlay.at.c);

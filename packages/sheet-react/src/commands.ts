@@ -10,7 +10,7 @@ import { parseDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, cellStyle } from "./display.ts";
-import { fillSeries } from "@chat/sheet/model/fill";
+import { fillSeries, type FillMode, type FillPart } from "@chat/sheet/model/fill";
 import type { CellRef, GridFill, SheetSelection } from "./grid.tsx";
 
 /** What a command reads: the sheet as shown, where the selection is, and a source of new IDs. */
@@ -414,8 +414,9 @@ export function dragSelection(
  */
 export function fillFromHandle(
   context: GridContext,
-  fill: GridFill,
-): { ops: SheetOp[]; selection: SheetSelection } | null {
+  fill: Omit<GridFill, "mode"> & { readonly mode: FillMode },
+  part: FillPart = "all",
+): { ops: SheetOp[]; selection: SheetSelection; count: number } | null {
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
   const rows = positions(sheet.rows).ids;
@@ -445,6 +446,7 @@ export function fillFromHandle(
     return {
       ops: [{ op: "clear", sh: context.sheet, area: cleared, what: "contents" }],
       selection: { anchor: { r: box.area.r1, c: box.area.c1 }, head: keep },
+      count,
     };
   }
   if (count < 1) return null;
@@ -459,6 +461,7 @@ export function fillFromHandle(
     count,
     fill.mode,
     context.locale,
+    part,
   );
   if (!ops.length) return null;
   const grown = grow.doc.sheet[context.sheet]!;
@@ -478,6 +481,7 @@ export function fillFromHandle(
       anchor: { r: allRows[top - 1]!, c: allCols[left - 1]! },
       head: { r: allRows[bottom - 1]!, c: allCols[right - 1]! },
     },
+    count,
   };
 }
 

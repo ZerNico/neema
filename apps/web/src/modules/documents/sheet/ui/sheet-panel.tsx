@@ -46,6 +46,7 @@ import {
   type CellEditing,
   type GridCommand,
   type GridDecoration,
+  type GridFill,
   type GridOverlay,
   type SheetSelection,
 } from "@chat/sheet-react/grid";
@@ -82,6 +83,7 @@ import { SheetToolbar } from "./sheet-toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
 import { ChartEditor } from "./chart-editor/chart-editor.tsx";
+import { FillOptions, type FillChoice } from "./fill-options.tsx";
 import { SheetChart } from "./sheet-chart.tsx";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
@@ -104,6 +106,12 @@ function MenuItem({
     </ContextMenuItem>
   );
 }
+
+const sameSelection = (a: SheetSelection, b: SheetSelection) =>
+  a.anchor.r === b.anchor.r &&
+  a.anchor.c === b.anchor.c &&
+  a.head.r === b.head.r &&
+  a.head.c === b.head.c;
 
 /** A name for a new sheet that no live sheet has: Sheet2, Sheet3 and on. */
 const nextSheetName = (names: readonly string[]) => {
@@ -145,6 +153,13 @@ export default function SheetPanelBody({
   // A chart selected instead of cells, and the chart open in the editor, by ID.
   const [chartPicked, setChartPicked] = useState<string | null>(null);
   const [chartEditing, setChartEditing] = useState<string | null>(null);
+  /** The fill just made, which Auto Fill Options can redo another way while it stays selected. */
+  const [lastFill, setLastFill] = useState<{
+    source: SheetSelection;
+    fill: GridFill & { count: number };
+    result: SheetSelection;
+    choice: FillChoice | null;
+  } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
   const formulaBar = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
@@ -603,7 +618,43 @@ export default function SheetPanelBody({
                   if (!result || readOnly) return;
                   run(result.ops);
                   select(result.selection);
+                  setLastFill(
+                    result.count > 0
+                      ? {
+                          source: active,
+                          fill: { ...fill, count: result.count },
+                          result: result.selection,
+                          choice: null,
+                        }
+                      : null,
+                  );
                 }}
+                selectionAccessory={
+                  lastFill && !readOnly && sameSelection(lastFill.result, active) ? (
+                    <FillOptions
+                      chosen={lastFill.choice}
+                      onChoose={(choice) => {
+                        // Taken back, then made again the chosen way, as one more change.
+                        sync!.undo();
+                        const undone = sync!.getState().doc;
+                        if (!undone) return;
+                        const again = fillFromHandle(
+                          { ...context, doc: undone, selection: lastFill.source },
+                          {
+                            ...lastFill.fill,
+                            mode:
+                              choice === "copy" ? "copy" : choice === "series" ? "series" : "auto",
+                          },
+                          choice === "formats" ? "formats" : choice === "values" ? "values" : "all",
+                        );
+                        if (!again) return;
+                        run(again.ops);
+                        select(again.selection);
+                        setLastFill({ ...lastFill, result: again.selection, choice });
+                      }}
+                    />
+                  ) : null
+                }
               />
             </div>
           </ContextMenuTrigger>
