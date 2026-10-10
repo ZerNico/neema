@@ -16,7 +16,6 @@ import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
-import { calculateSheet } from "@chat/sheet/model/calc";
 import { NEW_SHEET, liveSheets, positions } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import {
@@ -53,6 +52,7 @@ import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import type { SheetController } from "../client/use-sheet.ts";
+import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
 
 function MenuItem({
@@ -105,13 +105,13 @@ export default function SheetPanelBody({
   const formulaBar = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
   const sheet = chosen && sheets.includes(chosen) ? chosen : (sheets[0] ?? null);
-  const values = useMemo(
-    () =>
-      doc && state
-        ? calculateSheet(doc, { revision: state.revision, epoch: 0, ...state.moment })
-        : null,
-    [doc, state],
+  const revision = state?.revision ?? 0;
+  const moment = state?.moment ?? null;
+  const calcContext = useMemo(
+    () => (moment ? { revision, epoch: 0, ...moment } : null),
+    [revision, moment],
   );
+  const values = useSheetValues(doc, calcContext);
   if (!doc || !values || !sheet || !state)
     return <Spinner aria-label="Connecting to sheet" className="text-muted-foreground" />;
 
