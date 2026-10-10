@@ -90,6 +90,11 @@ describe("compiling a sheet chart", () => {
       dataOf(months, [{ name: "Share", values: [5, 3, 2] }]),
     );
     expect(count(pie, /<path/g)).toBeGreaterThanOrEqual(3);
+    const labelled = svgOf(
+      chartOf("pie", [{}], { style: { labels: { show: true } } }),
+      dataOf(months, [{ name: "Share", values: [5, 3, 2] }]),
+    );
+    expect(labelled).toContain(">50%<");
     const scatter = svgOf(
       chartOf("scatter", [{ trendline: true }]),
       dataOf(["1", "2", "3", "4"], [{ name: "y", values: [2, 4, 5, 8] }], { x: [1, 2, 3, 4] }),

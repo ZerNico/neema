@@ -1,7 +1,7 @@
 import { areaY, barX, barY, defineChart, dot, lineY } from "@tanstack/charts";
 import { d3Curve } from "@tanstack/charts/d3/shape";
 import { group } from "@tanstack/charts/group";
-import { pie, polar, radialArc } from "@tanstack/charts/polar";
+import { pie, polar, radialArc, radialText } from "@tanstack/charts/polar";
 import { linearRegressionY } from "@tanstack/charts/regression";
 import { scaleBand } from "@tanstack/charts/scales/band";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
@@ -160,20 +160,48 @@ export function compileChart({ chart, data, locale, hidden = new Set() }: Compil
       value: Math.max(0, row.value ?? 0),
     }));
     const hole = chart.kind === "doughnut" ? (chart.style?.hole ?? 0.55) : (chart.style?.hole ?? 0);
+    const slices = pie(rows, { value: "value" });
+    const labels = chart.style?.labels ?? first?.spec?.labels;
+    const format = formatOf(first?.index ?? 0);
+    const arcs = radialArc(slices, {
+      color: "key",
+      key: "key",
+      ...(hole ? { innerRadius: ({ radius }: { radius: number }) => radius * hole } : {}),
+    });
+    const ring = { inset: 4, radiusRatio: 0.9 };
     return defineChart({
       marks: [
-        polar({
-          inset: 4,
-          radiusRatio: 0.9,
-          marks: [
-            radialArc(pie(rows, { value: "value" }), {
-              color: "key",
-              key: "key",
-              ...(hole ? { innerRadius: ({ radius }: { radius: number }) => radius * hole } : {}),
-            }),
-          ],
-          scales: { angle: null, radius: null },
-        }),
+        labels?.show
+          ? polar({
+              ...ring,
+              marks: [
+                arcs,
+                // Midway across the ring, at each slice's middle angle; slivers go unlabelled.
+                radialText(
+                  slices.filter((slice) => slice.fraction >= 0.03),
+                  {
+                    angle: "angle",
+                    radius: () => (1 + hole) / 2,
+                    key: "key",
+                    text: (slice) =>
+                      labels.content === "category"
+                        ? slice.x
+                        : labels.content === "value"
+                          ? format(slice.value)
+                          : `${Math.round(slice.fraction * 100)}%`,
+                    fill: "white",
+                    fontSize: 11,
+                    fontWeight: 600,
+                  },
+                ),
+              ],
+              // In radians and as a share of the radius, as the labels place themselves.
+              scales: {
+                angle: { scale: scaleLinear().domain([0, 2 * Math.PI]) },
+                radius: { scale: scaleLinear().domain([0, 1]) },
+              },
+            })
+          : polar({ ...ring, marks: [arcs], scales: { angle: null, radius: null } }),
       ],
       scales: { x: null, y: null },
       color: {
