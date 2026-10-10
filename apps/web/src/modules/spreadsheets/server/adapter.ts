@@ -833,6 +833,8 @@ export interface LiveSheetExport {
       readonly row: number;
       readonly column: number;
       readonly input?: string | number | boolean;
+      /** A legacy array formula's extent, from its cell. */
+      readonly array?: { readonly rows: number; readonly cols: number };
       readonly style?: Readonly<Record<string, string | number | boolean>>;
     }>;
     readonly merges: readonly string[];
@@ -923,11 +925,23 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
   const authored = new Set<Cell>();
   for (const each of spec.sheets) {
     const sheet = addWorksheet(workbook, each.name);
-    for (const { row, column, input, style } of each.cells) {
+    for (const { row, column, input, array, style } of each.cells) {
       if (input !== undefined) {
         setCell(sheet, row, column, toCellValue(input));
         const cell = getCell(sheet, row, column);
-        if (cell && isFormulaValue(cell.value)) authored.add(cell);
+        // A legacy array formula keeps its range, and is not authored, so it stays legacy.
+        if (cell && isFormulaValue(cell.value) && array)
+          cell.value = {
+            ...cell.value,
+            t: "array",
+            ref: boxRef({
+              top: row,
+              left: column,
+              bottom: row + array.rows - 1,
+              right: column + array.cols - 1,
+            }),
+          };
+        else if (cell && isFormulaValue(cell.value)) authored.add(cell);
       }
       const link = fileLink(style?.link);
       // A link is Excel's hyperlink on the cell, looking as Excel's Hyperlink style does.

@@ -136,6 +136,7 @@ export function liveSheetExport(
             row: rowAt,
             column,
             ...(input === undefined ? {} : { input }),
+            ...(cell.f && cell.array ? { array: cell.array } : {}),
             ...(style ? { style } : {}),
           });
         }

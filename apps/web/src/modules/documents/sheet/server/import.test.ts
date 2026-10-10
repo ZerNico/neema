@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet } from "@chat/sheet/model/calc";
-import { renderFormula } from "@chat/sheet/model/formula";
+import { parseFormula, renderFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import type { Validation } from "@chat/sheet/model/validation";
@@ -96,6 +96,35 @@ describe("importing into a live sheet", () => {
     if (!imported.ok) throw new Error(imported.reason);
     expect(cellOf(imported.doc, "Sheet1", 2, 1)).toBeUndefined();
     expect(valueOf(imported.doc, "Sheet1", 3, 1)).toBe(3);
+  });
+
+  it("keeps a legacy array formula's range through Excel and back", async () => {
+    const start = build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[1], [2]] }]);
+    const parsed = parseFormula("A1:A2*10", { doc: start, sheet: "s1" });
+    if (!("formula" in parsed)) throw new Error("needs growth");
+    const original = applyChange(
+      start,
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [{ r: "s1.r1", c: "s1.c2", f: parsed.formula, array: { rows: 2, cols: 1 } }],
+          },
+        ],
+      },
+      2,
+    ).doc;
+    const values = calculateSheet(original, context);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original, values))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(cellOf(imported.doc, "Sheet1", 1, 2)?.array).toEqual({ rows: 2, cols: 1 });
+    expect(valueOf(imported.doc, "Sheet1", 2, 2)).toBe(20);
   });
 
   it("keeps underline, strikethrough and a font through Excel and back", async () => {
