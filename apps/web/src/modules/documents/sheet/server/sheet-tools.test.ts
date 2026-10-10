@@ -256,6 +256,15 @@ describe("live sheet tools", () => {
       title: "Costs",
     });
     expect(send(tools)).toContain('2| A2 "Tea" | B2 4');
+    // Operations in the same call may write over the file's cells: the answer put them there.
+    expect(
+      await call(tools, "create_sheet", {
+        fromFile: "attachment:costs",
+        title: "Costs again",
+        operations: [{ kind: "setCells", sheet: "Costs", start: "A2", rows: [["Coffee"]] }],
+      }),
+    ).toMatchObject({ outcome: "created" });
+    expect(send(tools)).toContain('2| A2 "Coffee" | B2 4');
     expect(await call(tools, "create_sheet", { fromFile: "attachment:nope" })).toMatchObject({
       outcome: "invalid",
       message: "No file with that reference.",

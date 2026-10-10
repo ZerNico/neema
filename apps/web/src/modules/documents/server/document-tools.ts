@@ -1692,6 +1692,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       return { outcome: "unavailable", message: "This chat cannot hold documents." };
     if (typeof created === "string")
       return { outcome: "invalid", message: `The sheet was rejected: ${created}.` };
+    // The file's cells carry the revision the sheet was made at; the answer put them there.
+    if (imported) ownRevisions.set(created.id, new Set([created.revision]));
     yield* afterWrite(created);
     const left = imported?.dropped.length
       ? `A live sheet does not keep its ${imported.dropped.join(", ")}; tell the person.`
@@ -1706,7 +1708,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           outcome: "created",
           ...reference(current),
           message:
-            `The sheet was created empty; its operations were not applied: ${filled.message ?? filled.outcome}`.slice(
+            `The sheet was created ${imported ? `from ${imported.name}` : "empty"}; its operations were not applied: ${filled.message ?? filled.outcome}`.slice(
               0,
               600,
             ),
