@@ -1,9 +1,10 @@
 import { columnLetters, parseRange } from "@chat/sheet/a1";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
+import { partsOf } from "@chat/sheet/dates";
 import { sheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
-import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
+import { liveSheets, positions, sheetNamed, type Box, type SheetDoc } from "@chat/sheet/model";
 import type { ChartText } from "@chat/sheet/model/chart";
 import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
 import { formatValue } from "@chat/sheet/number-format";
@@ -38,6 +39,13 @@ const styleText = (key: string) =>
     .map(([name, value]) => (value === true ? name : `${name}=${JSON.stringify(value)}`))
     .join(" ");
 const address = (row: number, col: number) => `${columnLetters(col)}${row}`;
+/** A date serial as the ISO text the model writes. */
+const isoDay = (serial: number) => {
+  const parts = partsOf(serial);
+  return parts
+    ? `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`
+    : String(serial);
+};
 
 /** The part of a sheet holding anything: typed cells and what formulas spill into. */
 function usedBox(doc: SheetDoc, values: SheetValues, sheet: string) {
@@ -239,6 +247,34 @@ export function sheetView(
   });
   if (conditional.length)
     lines.push(`<conditionalFormats>\n${conditional.join("\n")}\n</conditionalFormats>`);
+  // The focused sheet's data validation, so the model writes what its cells accept.
+  const boxText = (sh: string, area: Box) => {
+    const [rowsAt, colsAt] = [positions(doc.sheet[sh]!.rows), positions(doc.sheet[sh]!.cols)];
+    const [top, left, bottom, right] = [
+      rowsAt.at(area.r1),
+      colsAt.at(area.c1),
+      rowsAt.at(area.r2),
+      colsAt.at(area.c2),
+    ];
+    return top && left && bottom && right
+      ? `${address(top, left)}:${address(bottom, right)}`
+      : null;
+  };
+  const validations = (doc.sheet[sheet]!.validations ?? []).flatMap((validation) => {
+    const range = boxText(sheet, validation.box);
+    if (!range) return [];
+    const { rule } = validation;
+    const said =
+      rule.kind === "list"
+        ? rule.source
+          ? `source="${escapeAttribute(`${quoteSheet(doc.sheet[rule.source.sh]?.name ?? "")}!${boxText(rule.source.sh, rule.source.box) ?? "#REF!"}`)}"`
+          : `choices="${escapeAttribute((rule.values ?? []).join(", "))}"`
+        : `test="${rule.test}" value="${rule.values.map(rule.kind === "date" ? isoDay : String).join(" and ")}"`;
+    return [
+      `<validation range="${range}" type="${rule.kind}" ${said} onError="${validation.onError}"${validation.allowBlank ? "" : ' allowBlank="false"'}${validation.message ? ` message="${escapeAttribute(validation.message)}"` : ""}/>`,
+    ];
+  });
+  if (validations.length) lines.push(`<validations>\n${validations.join("\n")}\n</validations>`);
   // The focused sheet's filter and what it hides, so the model does not take hidden rows for gone.
   const filter = doc.sheet[sheet]!.filter;
   const span = filter ? filterSpan(doc, sheet, filter) : null;

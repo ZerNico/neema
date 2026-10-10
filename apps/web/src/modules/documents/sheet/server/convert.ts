@@ -19,6 +19,8 @@ import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
+import type { ValidationRule } from "@chat/sheet/model/validation";
+import { parseDateText } from "@chat/sheet/dates";
 import { chartOperation } from "./convert-chart.ts";
 
 export interface ConvertInput {
@@ -650,6 +652,100 @@ export function convertOperations(
           return top > box.bottom || bottom < box.top || left > box.right || right < box.left;
         });
         emit({ op: "conditional", sh, list: kept });
+        return;
+      }
+      case "setValidation": {
+        const sh = sheetId(operation.sheet);
+        const { box, ids: target } = area(sh, operation.range);
+        let rule: ValidationRule;
+        if (operation.type === "list") {
+          if (operation.source) {
+            const text = operation.source;
+            const bang = text.lastIndexOf("!");
+            const on =
+              bang === -1
+                ? sh
+                : sheetId(
+                    text
+                      .slice(0, bang)
+                      .replace(/^'(.*)'$/, "$1")
+                      .replaceAll("''", "'"),
+                  );
+            const cells = (bang === -1 ? text : text.slice(bang + 1)).replaceAll("$", "");
+            if (!parseRange(cells))
+              throw new Refused("invalid", `source: "${text}" is not a range like Lists!A2:A20.`);
+            rule = { kind: "list", source: { sh: on, box: area(on, cells).ids } };
+          } else if (operation.choices?.length)
+            rule = { kind: "list", values: [...new Set(operation.choices)] };
+          else throw new Refused("invalid", "A list needs choices or a source.");
+        } else {
+          const test = operation.test ?? "between";
+          const number = (text: string | undefined, field: string) => {
+            const read =
+              text === undefined || !text.trim()
+                ? null
+                : Number.isFinite(Number(text))
+                  ? Number(text)
+                  : operation.type === "date"
+                    ? parseDateText(text)
+                    : null;
+            if (read === null)
+              throw new Refused(
+                "invalid",
+                `${operation.type} needs ${field} as a number${operation.type === "date" ? ' or a date like "2026-01-31"' : ""}.`,
+              );
+            return read;
+          };
+          const low = number(operation.value, "value");
+          rule = {
+            kind: operation.type,
+            test,
+            values:
+              test === "between" || test === "notBetween"
+                ? [low, number(operation.value2, "value2")]
+                : [low],
+          };
+        }
+        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
+        const kept = (view.sheet[sh]!.validations ?? []).filter(
+          (each) =>
+            (rows.at(each.box.r1) ?? 0) < box.top ||
+            (rows.at(each.box.r2) ?? 0) > box.bottom ||
+            (cols.at(each.box.c1) ?? 0) < box.left ||
+            (cols.at(each.box.c2) ?? 0) > box.right,
+        );
+        emit({
+          op: "validations",
+          sh,
+          list: [
+            ...kept,
+            {
+              id: input.mint(),
+              box: { r1: target.r1!, r2: target.r2!, c1: target.c1!, c2: target.c2! },
+              rule,
+              onError: operation.onError ?? "stop",
+              allowBlank: operation.allowBlank ?? true,
+              ...(operation.message ? { message: operation.message } : {}),
+            },
+          ],
+        });
+        return;
+      }
+      case "clearValidation": {
+        const sh = sheetId(operation.sheet);
+        const list = view.sheet[sh]!.validations ?? [];
+        if (!operation.range) {
+          emit({ op: "validations", sh, list: [] });
+          return;
+        }
+        const { box } = area(sh, operation.range);
+        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
+        const kept = list.filter((each) => {
+          const [top, bottom] = [rows.at(each.box.r1) ?? 0, rows.at(each.box.r2) ?? 0];
+          const [left, right] = [cols.at(each.box.c1) ?? 0, cols.at(each.box.c2) ?? 0];
+          return top > box.bottom || bottom < box.top || left > box.right || right < box.left;
+        });
+        emit({ op: "validations", sh, list: kept });
         return;
       }
       case "removeFilter": {

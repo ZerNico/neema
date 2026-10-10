@@ -1,6 +1,7 @@
 import { MAX_COLUMN, MAX_ROW, parseCell, parseRange } from "@chat/sheet/a1";
 import { CHART_KINDS } from "@chat/sheet/model/chart";
 import { FILTER_CONDITIONS } from "@chat/sheet/model/filter";
+import { VALIDATION_TESTS } from "@chat/sheet/model/validation";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import {
   SPREADSHEET_OPERATIONS,
@@ -368,6 +369,60 @@ export const LIVE_SHEET_OPERATIONS = {
   clearConditionalFormats: {
     about: "Remove conditional formats: those touching a range, or every one on the sheet.",
     fields: { sheet, range: { ...range, about: "Only those touching this range." } },
+    required: ["sheet"],
+    change: ["cleared", "range"],
+  },
+  setValidation: {
+    about:
+      "Limit what a range's cells may hold, as Excel's Data Validation: a dropdown list, or a test on whole numbers, decimals, dates or text length. It replaces validations inside the range. People see a wrong entry refused or warned about; existing values are not changed.",
+    fields: {
+      sheet,
+      range,
+      type: {
+        type: "string",
+        max: 7,
+        options: ["list", "whole", "decimal", "date", "length"],
+        about: "What the cells may hold.",
+      },
+      choices: {
+        type: "list",
+        min: 1,
+        max: 200,
+        about: "A list's choices.",
+        of: { type: "string", max: 255, about: "A choice." },
+      },
+      source: {
+        type: "string",
+        max: 100,
+        about: 'A list read from cells instead of choices, e.g. "Lists!A2:A20".',
+      },
+      test: {
+        type: "string",
+        max: 14,
+        options: VALIDATION_TESTS,
+        about: "How a number, date or length compares with value (default between).",
+      },
+      value: {
+        type: "string",
+        max: 40,
+        about: 'A number, or a date as "2026-01-31"; between\'s lower bound.',
+      },
+      value2: { type: "string", max: 40, about: "between and notBetween's upper bound." },
+      onError: {
+        type: "string",
+        max: 11,
+        options: ["stop", "warning", "information"],
+        about: "What a wrong entry does: refused (default), kept after a warning, or a note.",
+      },
+      message: { type: "string", max: 255, about: "Said when a wrong entry is typed." },
+      allowBlank: { type: "boolean", about: "Whether an empty cell passes (default true)." },
+    },
+    required: ["sheet", "range", "type"],
+    change: ["validated", "range"],
+  },
+  clearValidation: {
+    about: "Remove data validation: what touches a range, or every rule on the sheet.",
+    fields: { sheet, range: { ...range, about: "Only rules touching this range." } },
     required: ["sheet"],
     change: ["cleared", "range"],
   },

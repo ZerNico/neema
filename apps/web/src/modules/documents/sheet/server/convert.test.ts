@@ -244,4 +244,58 @@ describe("the model's conditional formats", () => {
     doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1" }]));
     expect(doc.sheet.s1!.conditional).toBeUndefined();
   });
+
+  it("sets data validation, replacing rules inside its range, and shows it in the view", () => {
+    let doc = done(
+      edit(emptyDoc(), [
+        { kind: "addSheet", name: "Lists" },
+        { kind: "setCells", sheet: "Lists", start: "A1", rows: [["Open"], ["Done"]] },
+        {
+          kind: "setValidation",
+          sheet: "Sheet1",
+          range: "B2:B9",
+          type: "list",
+          choices: ["Yes", "No"],
+        },
+        {
+          kind: "setValidation",
+          sheet: "Sheet1",
+          range: "B2:B20",
+          type: "list",
+          source: "Lists!A1:A2",
+          onError: "warning",
+        },
+        {
+          kind: "setValidation",
+          sheet: "Sheet1",
+          range: "C2:C9",
+          type: "date",
+          test: "greaterOrEqual",
+          value: "2026-01-31",
+          allowBlank: false,
+          message: "From February on",
+        },
+      ]),
+    );
+    const list = doc.sheet.s1!.validations!;
+    expect(list.map((each) => each.rule.kind)).toEqual(["list", "date"]);
+    expect(list[0]).toMatchObject({ onError: "warning", allowBlank: true });
+    const shown = sheetView(doc, calculateSheet(doc, context)).xml;
+    expect(shown).toContain(
+      '<validation range="B2:B20" type="list" source="Lists!A1:A2" onError="warning"/>',
+    );
+    expect(shown).toContain(
+      '<validation range="C2:C9" type="date" test="greaterOrEqual" value="2026-01-31" onError="stop" allowBlank="false" message="From February on"/>',
+    );
+    expect(
+      edit(doc, [{ kind: "setValidation", sheet: "Sheet1", range: "A1", type: "whole" }]),
+    ).toMatchObject({ ok: false });
+    expect(
+      edit(doc, [{ kind: "setValidation", sheet: "Sheet1", range: "A1", type: "list" }]),
+    ).toMatchObject({ ok: false });
+    doc = done(edit(doc, [{ kind: "clearValidation", sheet: "Sheet1", range: "C5" }]));
+    expect(doc.sheet.s1!.validations).toHaveLength(1);
+    doc = done(edit(doc, [{ kind: "clearValidation", sheet: "Sheet1" }]));
+    expect(doc.sheet.s1!.validations ?? []).toEqual([]);
+  });
 });
