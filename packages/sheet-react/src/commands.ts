@@ -543,7 +543,7 @@ export function chartFromSelection(context: GridContext, kind: ChartKind): Sheet
   const box = selectionBox(context);
   if (box.rowIds.length < 2 && box.colIds.length < 2) return [];
   const source = readSource(context.doc, context.values, context.sheet, box.area);
-  const series = seriesFrom(context.doc, source, kind);
+  const series = seriesFrom(context.doc, source, kind, context.values);
   if (!series.length) return [];
   const grow = grower(context);
   grow.ensure(context.sheet, box.top, box.right + 2);

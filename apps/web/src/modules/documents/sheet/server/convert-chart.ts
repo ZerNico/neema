@@ -126,7 +126,7 @@ export function chartOperation(operation: ChartOperation, tools: ChartTools): Sh
       kind,
       series: [],
     };
-    const rebuilt = rebuildSeries(tools.view(), { ...base, kind }, source);
+    const rebuilt = rebuildSeries(tools.view(), { ...base, kind }, source, values);
     if (!rebuilt.series.length)
       tools.refuse(`range: ${operation.range} holds nothing to chart; give a range with numbers.`);
     patch.series = rebuilt.series;
@@ -163,7 +163,12 @@ export function chartOperation(operation: ChartOperation, tools: ChartTools): Sh
       patch.series = existing.series.map((each) => ({ ...each, categories: categories.box }));
     // A new kind reads its range again, so a pie keeps one series and columns get them all back.
     else if (operation.type && existing.source)
-      patch.series = rebuildSeries(tools.view(), { ...existing, kind }, existing.source).series;
+      patch.series = rebuildSeries(
+        tools.view(),
+        { ...existing, kind },
+        existing.source,
+        calculateSheet(tools.view(), tools.context),
+      ).series;
   }
   const drawn = patch.series ?? existing?.series;
   if (ONE_SERIES.has(kind) && drawn && drawn.length > 1) patch.series = drawn.slice(0, 1);

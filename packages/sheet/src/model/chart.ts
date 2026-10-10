@@ -439,14 +439,30 @@ export function readSource(
   return { sheet, box, headers, labels, byRow: width > height && !labels };
 }
 
-/** The series a source gives a chart of this kind. */
-export function seriesFrom(doc: SheetDoc, source: ChartSource, kind: ChartKind): ChartSeries[] {
+/**
+ * The series a source gives a chart of this kind. With the sheet's values,
+ * columns (or rows) holding no numbers are left out, so a table's text
+ * columns do not become empty series.
+ */
+export function seriesFrom(
+  doc: SheetDoc,
+  source: ChartSource,
+  kind: ChartKind,
+  values?: SheetValues,
+): ChartSeries[] {
   const ids = span(doc, source.sheet, source.box);
   if (!ids) return [];
   const [rows, cols] = source.byRow ? [ids.cols, ids.rows] : [ids.rows, ids.cols];
   // Read as columns: `rows` run along a series, `cols` are one series each.
   const along = source.headers ? rows.slice(1) : rows;
-  const across = source.labels ? cols.slice(1) : cols;
+  const lines = source.labels ? cols.slice(1) : cols;
+  const measured = (line: string) =>
+    along.some((cell) => {
+      const [r, c] = source.byRow ? [line, cell] : [cell, line];
+      return typeof values!.value(source.sheet, r, c) === "number";
+    });
+  const numeric = values ? lines.filter(measured) : lines;
+  const across = numeric.length ? numeric : lines;
   if (!along.length || !across.length) return [];
   const box = (line: string, from: string, to: string): Box =>
     source.byRow
@@ -493,8 +509,13 @@ export function seriesFrom(doc: SheetDoc, source: ChartSource, kind: ChartKind):
 
 /** Options a person set on a series, kept by position when its ranges are read again. */
 const OWN_KEYS = ["kind", "axis", "color", "line", "labels", "trendline"] as const;
-export function rebuildSeries(doc: SheetDoc, chart: Chart, source: ChartSource): Chart {
-  const fresh = seriesFrom(doc, source, chart.kind);
+export function rebuildSeries(
+  doc: SheetDoc,
+  chart: Chart,
+  source: ChartSource,
+  values?: SheetValues,
+): Chart {
+  const fresh = seriesFrom(doc, source, chart.kind, values);
   const series = fresh.map((each, index) => {
     const old = chart.series[index];
     if (!old) return each;
@@ -515,7 +536,7 @@ export function rebuildSeries(doc: SheetDoc, chart: Chart, source: ChartSource):
  */
 export function suggestKinds(doc: SheetDoc, values: SheetValues, source: ChartSource): ChartKind[] {
   const read = reader(doc, values);
-  const series = seriesFrom(doc, source, "column");
+  const series = seriesFrom(doc, source, "column", values);
   if (!series.length) return ["column", "bar", "line"];
   const first = series[0]!;
   const sheet = first.sheet ?? source.sheet;

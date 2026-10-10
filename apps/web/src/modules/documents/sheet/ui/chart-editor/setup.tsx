@@ -74,11 +74,13 @@ export function ChartSetup({ doc, values, chart, readOnly, selection, patch }: E
     if (kind === chart.kind) return;
     // Read again from the range, so a pie keeps one series and a column chart gets them all back.
     patch(
-      source ? { kind, series: rebuildSeries(doc, { ...chart, kind }, source).series } : { kind },
+      source
+        ? { kind, series: rebuildSeries(doc, { ...chart, kind }, source, values).series }
+        : { kind },
     );
   };
   const setSource = (next: ChartSource) => {
-    const rebuilt = rebuildSeries(doc, chart, next);
+    const rebuilt = rebuildSeries(doc, chart, next, values);
     patch({ source: rebuilt.source ?? null, series: rebuilt.series });
   };
   const pickRange = (sheet: string, box: Box) => setSource(readSource(doc, values, sheet, box));

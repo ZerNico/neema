@@ -133,6 +133,17 @@ describe("reading a range for a chart, as Excel does", () => {
     expect(data.series.map((each) => each.broken)).toEqual([true, false]);
   });
 
+  it("leaves a table's text columns out of its series", () => {
+    const orders = table([
+      ["Order", "Customer", "Quantity", "Region", "Total"],
+      ["A-1", "Acme", 12, "North", 240],
+      ["A-2", "Orbit", 5, "South", 250],
+    ]);
+    const source = readSource(orders, values(orders), "s1", box(1, 1, 3, 5));
+    const series = seriesFrom(orders, source, "column", values(orders));
+    expect(series.map((each) => each.values.c1)).toEqual([id("c", 3), id("c", 5)]);
+  });
+
   it("rebuilds series from a changed range, keeping each one's own options", () => {
     const chart = chartOf(sales, box(1, 1, 4, 3));
     const coloured = {
