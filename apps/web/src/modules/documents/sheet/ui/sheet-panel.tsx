@@ -1,5 +1,4 @@
 import {
-  Add01Icon,
   ChartColumnIcon,
   CommentAdd01Icon,
   ArrowDown01Icon,
@@ -23,7 +22,7 @@ import { useContext, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
-import { NEW_SHEET, liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
+import { liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import {
   chartFromSelection,
@@ -41,6 +40,7 @@ import {
   formatSelection,
   insertAtSelection,
   pasteAtSelection,
+  sheetCsv,
   type PastePart,
   sortSelection,
   type CopiedCells,
@@ -90,6 +90,7 @@ import type { AskTarget } from "../../ui/rich-editor/editor-hooks.ts";
 import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
+import { SheetTabs } from "./sheet-tabs.tsx";
 import {
   addConditional,
   autoSum,
@@ -186,12 +187,6 @@ const sameSelection = (a: SheetSelection, b: SheetSelection) =>
   a.head.r === b.head.r &&
   a.head.c === b.head.c;
 
-/** A name for a new sheet that no live sheet has: Sheet2, Sheet3 and on. */
-const nextSheetName = (names: readonly string[]) => {
-  const taken = new Set(names.map((name) => name.toLowerCase()));
-  for (let n = names.length + 1; ; n++) if (!taken.has(`sheet${n}`)) return `Sheet${n}`;
-};
-
 /**
  * An open sheet: the formula bar, the grid and the sheet tabs, with the
  * formatting row in the panel's actions. Values are calculated here from the
@@ -218,7 +213,6 @@ export default function SheetPanelBody({
   const [chosen, setChosen] = useState<string | null>(null);
   const [selection, setSelection] = useState<SheetSelection | null>(null);
   const [editing, setEditing] = useState<CellEditing | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   // Writing a new thread on the active cell.
   const [commenting, setCommenting] = useState(false);
   // A thread whose card was closed stays closed until the selection moves.
@@ -1279,104 +1273,26 @@ export default function SheetPanelBody({
         </PopoverContent>
       </Popover>
       <div className="border-border flex shrink-0 items-center gap-3 border-t pr-3">
-        <div
-          role="tablist"
-          aria-label="Sheets"
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 py-1"
-        >
-          {sheets.map((id) =>
-            renaming?.id === id ? (
-              <Input
-                key={id}
-                autoFocus
-                aria-label="Sheet name"
-                value={renaming.name}
-                maxLength={31}
-                // oxlint-disable-next-line shadcn/no-restyle -- sized to stand in for the tab it renames.
-                className="h-6 w-32 text-xs"
-                onChange={(event) => setRenaming({ id, name: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setRenaming(null);
-                  if (event.key !== "Enter") return;
-                  const name = renaming.name.trim();
-                  if (name && name !== doc.sheet[id]!.name) run([{ op: "sheetRename", id, name }]);
-                  setRenaming(null);
-                }}
-                onBlur={() => setRenaming(null)}
-              />
-            ) : (
-              <ContextMenu key={id}>
-                <ContextMenuTrigger
-                  render={
-                    <Button
-                      role="tab"
-                      aria-selected={id === sheet}
-                      size="xs"
-                      variant={id === sheet ? "secondary" : "ghost"}
-                      onClick={() => {
-                        setChosen(id);
-                        setSelection(null);
-                        setEditing(null);
-                      }}
-                      onDoubleClick={() => {
-                        if (!readOnly) setRenaming({ id, name: doc.sheet[id]!.name });
-                      }}
-                    />
-                  }
-                >
-                  {doc.sheet[id]!.name}
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-44">
-                  <ContextMenuItem
-                    disabled={readOnly}
-                    onClick={() => setRenaming({ id, name: doc.sheet[id]!.name })}
-                  >
-                    Rename
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    variant="destructive"
-                    disabled={readOnly || sheets.length === 1}
-                    onClick={() => run([{ op: "sheetDelete", id }])}
-                  >
-                    Delete
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            ),
-          )}
-          {readOnly ? null : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Add sheet"
-                    className="text-muted-foreground"
-                    onClick={() => {
-                      const id = sync!.mint();
-                      run([
-                        {
-                          op: "sheetAdd",
-                          id,
-                          name: nextSheetName(sheets.map((each) => doc.sheet[each]!.name)),
-                          after: sheets.at(-1) ?? null,
-                          rows: Array.from({ length: NEW_SHEET.rows }, (_, n) => `${id}.r${n + 1}`),
-                          cols: Array.from({ length: NEW_SHEET.cols }, (_, n) => `${id}.c${n + 1}`),
-                        },
-                      ]);
-                      setChosen(id);
-                      setSelection(null);
-                    }}
-                  />
-                }
-              >
-                <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-              </TooltipTrigger>
-              <TooltipContent>Add sheet</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+        <SheetTabs
+          doc={doc}
+          current={sheet}
+          readOnly={readOnly}
+          mint={() => sync!.mint()}
+          run={run}
+          onPick={(id) => {
+            setChosen(id);
+            setSelection(null);
+            setEditing(null);
+          }}
+          onDownload={(id) => {
+            const csv = sheetCsv({ doc, values, locale }, id);
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+            link.download = `${doc.sheet[id]!.name}.csv`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+          }}
+        />
         {stats ? (
           <output
             aria-label="Selection summary"

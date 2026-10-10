@@ -145,37 +145,52 @@ export function ColorMenu({
         <TooltipContent>{label}</TooltipContent>
       </Tooltip>
       <PopoverContent align="start" className="w-64" onMouseDown={keepFocus}>
-        <div className="flex flex-col gap-3">
-          <Button size="sm" variant={value ? "ghost" : "secondary"} onClick={() => onChange(null)}>
-            {resetLabel}
-          </Button>
-          <div className="grid grid-cols-10 gap-1">
-            {PALETTE.map((swatch) => (
-              <button
-                key={swatch}
-                type="button"
-                aria-label={swatch}
-                aria-pressed={value?.toUpperCase() === swatch}
-                className={cn(
-                  "border-border ring-offset-background size-5 rounded-sm border outline-none focus-visible:ring-2",
-                  value?.toUpperCase() === swatch && "ring-ring ring-2 ring-offset-1",
-                )}
-                style={{ backgroundColor: swatch }}
-                onClick={() => onChange(swatch)}
-              />
-            ))}
-          </div>
-          <label className="text-muted-foreground flex items-center justify-between text-xs">
-            More colours
-            <input
-              type="color"
-              value={value ?? "#000000"}
-              className="size-7 cursor-pointer rounded-md border-0 bg-transparent"
-              onChange={(event) => onChange(event.target.value.toUpperCase())}
-            />
-          </label>
-        </div>
+        <ColorSwatches value={value} resetLabel={resetLabel} onChange={onChange} />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** The palette's swatches, any colour, and the default, as a colour menu's content. */
+export function ColorSwatches({
+  value,
+  resetLabel,
+  onChange,
+}: {
+  value: string | undefined;
+  resetLabel: string;
+  onChange: (color: string | null) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <Button size="sm" variant={value ? "ghost" : "secondary"} onClick={() => onChange(null)}>
+        {resetLabel}
+      </Button>
+      <div className="grid grid-cols-10 gap-1">
+        {PALETTE.map((swatch) => (
+          <button
+            key={swatch}
+            type="button"
+            aria-label={swatch}
+            aria-pressed={value?.toUpperCase() === swatch}
+            className={cn(
+              "border-border ring-offset-background size-5 rounded-sm border outline-none focus-visible:ring-2",
+              value?.toUpperCase() === swatch && "ring-ring ring-2 ring-offset-1",
+            )}
+            style={{ backgroundColor: swatch }}
+            onClick={() => onChange(swatch)}
+          />
+        ))}
+      </div>
+      <label className="text-muted-foreground flex items-center justify-between text-xs">
+        More colours
+        <input
+          type="color"
+          value={value ?? "#000000"}
+          className="size-7 cursor-pointer rounded-md border-0 bg-transparent"
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+        />
+      </label>
+    </div>
   );
 }
