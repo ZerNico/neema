@@ -13,7 +13,7 @@ import {
 import { columnLetters } from "@chat/sheet/a1";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
-import type { SheetDoc } from "@chat/sheet/model";
+import type { Axis, SheetDoc } from "@chat/sheet/model";
 import { cellCss, cellDisplay, cellStyle } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
@@ -35,6 +35,25 @@ export interface SheetSelection {
   readonly head: CellRef;
 }
 
+/** A cell being typed into. Typing a fresh value lets arrow keys move on; editing one moves the caret. */
+export interface CellEditing {
+  readonly at: CellRef;
+  readonly text: string;
+  readonly mode: "type" | "edit";
+}
+/** What the keyboard asks of the sheet; the app decides what each writes. */
+export type GridCommand =
+  | { readonly kind: "clear" | "undo" | "redo" }
+  | { readonly kind: "fill"; readonly direction: "down" | "right" }
+  | { readonly kind: "toggle"; readonly property: "bold" | "italic" };
+/** Someone else's selection, drawn in their colour. */
+export interface GridDecoration {
+  readonly key: string;
+  readonly selection: SheetSelection;
+  readonly color: string;
+  readonly label: string;
+}
+
 export interface SheetGridProps {
   readonly doc: SheetDoc;
   /** The sheet shown, by ID. */
@@ -45,11 +64,27 @@ export interface SheetGridProps {
   readonly onSelectionChange: (selection: SheetSelection) => void;
   /** The grid's accessible name. */
   readonly label: string;
+  /** Without editing handlers, or with this set, the grid only reads. */
+  readonly readOnly?: boolean;
+  readonly editing?: CellEditing | null;
+  readonly onEditingChange?: (editing: CellEditing | null) => void;
+  /** A finished edit: what was typed into the cell. */
+  readonly onCommit?: (at: CellRef, text: string) => void;
+  /** What editing a cell starts from: its formula or value as typed. */
+  readonly editSource?: (at: CellRef) => string;
+  readonly onCommand?: (command: GridCommand) => void;
+  /** The text a copy or cut puts on the clipboard, or null for nothing. */
+  readonly onCopy?: (cut: boolean) => string | null;
+  readonly onPaste?: (text: string) => void;
+  /** A row or column dragged to a new size, in pixels. */
+  readonly onResize?: (axis: Axis, id: string, px: number) => void;
+  readonly decorations?: readonly GridDecoration[];
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
 const FALLBACK = { width: 960, height: 640 };
 const key = (row: number, col: number) => `${row}:${col}`;
+const NO_DECORATIONS: readonly GridDecoration[] = [];
 
 /** Row and column indexes of every merged range, and the cells each hides. */
 function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols: AxisLayout) {
@@ -87,6 +122,16 @@ export function SheetGrid({
   selection,
   onSelectionChange,
   label,
+  readOnly = false,
+  editing = null,
+  onEditingChange,
+  onCommit,
+  editSource,
+  onCommand,
+  onCopy,
+  onPaste,
+  onResize,
+  decorations = NO_DECORATIONS,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -172,8 +217,105 @@ export function SheetGrid({
     [cols.starts, rows.starts],
   );
 
+  const writable = !readOnly && !!onEditingChange && !!onCommit;
+  const beginEdit = (text: string | null) => {
+    if (!writable || !selection) return;
+    const at = selection.head;
+    onEditingChange!({
+      at,
+      text: text ?? editSource?.(at) ?? "",
+      mode: text === null ? "edit" : "type",
+    });
+  };
+  // The edit just ended: focus leaving its input afterwards must not end it again.
+  const ended = useRef<CellEditing | null>(null);
+  /** Ends an edit, writing it, then moves on as Enter or Tab would. */
+  const commit = (rowStep: number, colStep: number) => {
+    if (!editing || ended.current === editing) return;
+    ended.current = editing;
+    onCommit!(editing.at, editing.text);
+    onEditingChange!(null);
+    const row = rowIndex.get(editing.at.r);
+    const col = colIndex.get(editing.at.c);
+    if (row !== undefined && col !== undefined) {
+      const next = {
+        row: Math.min(rows.ids.length - 1, Math.max(0, row + rowStep)),
+        col: Math.min(cols.ids.length - 1, Math.max(0, col + colStep)),
+      };
+      select(next.row, next.col, false);
+      reveal(next.row, next.col);
+    }
+    scroller.current?.focus({ preventScroll: true });
+  };
+  const cancel = () => {
+    ended.current = editing;
+    onEditingChange?.(null);
+    scroller.current?.focus({ preventScroll: true });
+  };
+  const onEditorKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    const arrows: Record<string, [number, number]> = {
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    };
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit(event.shiftKey ? -1 : 1, 0);
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      commit(0, event.shiftKey ? -1 : 1);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    } else if (editing?.mode === "type" && arrows[event.key]) {
+      event.preventDefault();
+      commit(...arrows[event.key]!);
+    }
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
+    const command = event.metaKey || event.ctrlKey;
+    if (writable && command && !event.altKey) {
+      const lower = event.key.toLowerCase();
+      const found: GridCommand | null =
+        lower === "z"
+          ? { kind: event.shiftKey ? "redo" : "undo" }
+          : lower === "y"
+            ? { kind: "redo" }
+            : lower === "d"
+              ? { kind: "fill", direction: "down" }
+              : lower === "r"
+                ? { kind: "fill", direction: "right" }
+                : lower === "b"
+                  ? { kind: "toggle", property: "bold" }
+                  : lower === "i"
+                    ? { kind: "toggle", property: "italic" }
+                    : null;
+      if (found) {
+        event.preventDefault();
+        onCommand?.(found);
+        return;
+      }
+    }
+    if (writable && (event.key === "Delete" || event.key === "Backspace")) {
+      event.preventDefault();
+      onCommand?.({ kind: "clear" });
+      return;
+    }
+    if (writable && event.key === "F2") {
+      event.preventDefault();
+      beginEdit(null);
+      return;
+    }
+    // A printable key starts typing a fresh value, as in Excel.
+    if (writable && event.key.length === 1 && !command && !event.altKey) {
+      event.preventDefault();
+      beginEdit(event.key);
+      return;
+    }
     const page = Math.max(1, Math.floor(viewport.height / 20) - 1);
     const moves: Record<string, [number, number]> = {
       ArrowUp: [-1, 0],
@@ -212,8 +354,21 @@ export function SheetGrid({
     };
   };
   const onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0 || !rows.ids.length || !cols.ids.length) return;
+    if (!rows.ids.length || !cols.ids.length) return;
     const at = cellAt(event);
+    // A right click inside the selection keeps it for the menu it opens.
+    if (event.button === 2) {
+      const inside =
+        box &&
+        at.row >= box.top &&
+        at.row <= box.bottom &&
+        at.col >= box.left &&
+        at.col <= box.right;
+      if (!inside) select(at.row, at.col, false);
+      return;
+    }
+    if (event.button !== 0) return;
+    if (editing) commit(0, 0);
     dragging.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     select(at.row, at.col, event.shiftKey);
@@ -227,6 +382,53 @@ export function SheetGrid({
   const stopDragging = () => {
     dragging.current = false;
   };
+
+  // A header edge dragged: the size follows the pointer, and is reported once let go.
+  const [resizing, setResizing] = useState<{
+    axis: Axis;
+    index: number;
+    start: number;
+    size: number;
+  } | null>(null);
+  const resizeHandle = (axis: Axis, index: number) =>
+    writable && onResize ? (
+      <div
+        aria-hidden
+        className={
+          axis === "columns"
+            ? "absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
+            : "absolute -bottom-1 left-0 z-10 h-2 w-full cursor-row-resize"
+        }
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          const layout = axis === "columns" ? cols : rows;
+          setResizing({
+            axis,
+            index,
+            start: axis === "columns" ? event.clientX : event.clientY,
+            size: layout.size(index),
+          });
+        }}
+        onPointerMove={(event) => {
+          if (!resizing) return;
+          const delta =
+            (resizing.axis === "columns" ? event.clientX : event.clientY) - resizing.start;
+          setResizing({
+            ...resizing,
+            start: resizing.start + delta,
+            size: Math.max(4, resizing.size + delta),
+          });
+        }}
+        onPointerUp={() => {
+          if (!resizing) return;
+          const layout = resizing.axis === "columns" ? cols : rows;
+          onResize(resizing.axis, layout.ids[resizing.index]!, Math.round(resizing.size));
+          setResizing(null);
+        }}
+      />
+    ) : null;
 
   const visibleRows = visibleRange(rows, viewport.top, viewport.height);
   const visibleCols = visibleRange(cols, viewport.left, viewport.width);
@@ -328,6 +530,7 @@ export function SheetGrid({
         style={{ left: HEADER_COLUMN_PX + cols.starts[col]!, width: cols.size(col) }}
       >
         {columnLetters(col + 1)}
+        {resizeHandle("columns", col)}
       </div>,
     );
   }
@@ -342,6 +545,7 @@ export function SheetGrid({
         style={{ top: rows.starts[row], height: rows.size(row) }}
       >
         {row + 1}
+        {resizeHandle("rows", row)}
       </div>,
     );
   }
@@ -359,6 +563,69 @@ export function SheetGrid({
     />
   );
 
+  /** A selection's rectangle in content pixels, or null when its cells are gone. */
+  const indexOf = (ref: CellRef) => ({ row: rowIndex.get(ref.r), col: colIndex.get(ref.c) });
+  const rectOf = (of: SheetSelection) => {
+    const [a, b] = [indexOf(of.anchor), indexOf(of.head)];
+    if (a.row === undefined || a.col === undefined || b.row === undefined || b.col === undefined)
+      return null;
+    const [top, bottom] = [Math.min(a.row, b.row), Math.max(a.row, b.row)];
+    const [left, right] = [Math.min(a.col, b.col), Math.max(a.col, b.col)];
+    return {
+      top: rows.starts[top]!,
+      left: cols.starts[left]!,
+      height: rows.starts[bottom + 1]! - rows.starts[top]!,
+      width: cols.starts[right + 1]! - cols.starts[left]!,
+    };
+  };
+  const others = decorations.flatMap((decoration) => {
+    const rect = rectOf(decoration.selection);
+    return rect
+      ? [
+          <div
+            key={decoration.key}
+            aria-hidden
+            className="pointer-events-none absolute z-10 border-2"
+            style={{ ...rect, borderColor: decoration.color }}
+          >
+            <span
+              className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] leading-4 whitespace-nowrap text-white"
+              style={{ backgroundColor: decoration.color }}
+            >
+              {decoration.label}
+            </span>
+          </div>,
+        ]
+      : [];
+  });
+  const editorRect =
+    editing && rowIndex.has(editing.at.r) && colIndex.has(editing.at.c)
+      ? rectOf({ anchor: editing.at, head: editing.at })
+      : null;
+  const editor =
+    editing && editorRect ? (
+      <input
+        aria-label="Cell content"
+        autoFocus
+        value={editing.text}
+        onChange={(event) => onEditingChange?.({ ...editing, text: event.target.value })}
+        onKeyDown={onEditorKeyDown}
+        onBlur={(event) => {
+          // Focus moving to the formula bar keeps the edit going there.
+          if (
+            !(event.relatedTarget instanceof HTMLElement && event.relatedTarget.dataset.sheetEditor)
+          )
+            commit(0, 0);
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="bg-background text-foreground border-primary absolute z-40 border-2 px-1 text-sm outline-none"
+        style={{
+          ...editorRect,
+          width: Math.max(editorRect.width, (editing.text.length + 2) * 8),
+        }}
+      />
+    ) : null;
+
   return (
     <div
       ref={scroller}
@@ -371,6 +638,29 @@ export function SheetGrid({
       tabIndex={0}
       onScroll={onScroll}
       onKeyDown={onKeyDown}
+      onDoubleClick={(event) => {
+        if (event.target instanceof HTMLInputElement) return;
+        beginEdit(null);
+      }}
+      onCopy={(event) => {
+        if (editing || !onCopy) return;
+        const text = onCopy(false);
+        if (text === null) return;
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", text);
+      }}
+      onCut={(event) => {
+        if (editing || !onCopy || !writable) return;
+        const text = onCopy(true);
+        if (text === null) return;
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", text);
+      }}
+      onPaste={(event) => {
+        if (editing || !onPaste || !writable) return;
+        event.preventDefault();
+        onPaste(event.clipboardData.getData("text/plain"));
+      }}
       className="bg-background focus-visible:ring-ring relative h-full w-full overflow-auto outline-none focus-visible:ring-2"
     >
       <div
@@ -402,7 +692,30 @@ export function SheetGrid({
           onPointerCancel={stopDragging}
         >
           {cells}
+          {others}
           {selectionBox}
+          {editor}
+          {resizing ? (
+            <div
+              aria-hidden
+              className="bg-primary pointer-events-none absolute z-50"
+              style={
+                resizing.axis === "columns"
+                  ? {
+                      top: 0,
+                      bottom: 0,
+                      width: 1,
+                      left: cols.starts[resizing.index]! + resizing.size,
+                    }
+                  : {
+                      left: 0,
+                      right: 0,
+                      height: 1,
+                      top: rows.starts[resizing.index]! + resizing.size,
+                    }
+              }
+            />
+          ) : null}
         </div>
       </div>
     </div>

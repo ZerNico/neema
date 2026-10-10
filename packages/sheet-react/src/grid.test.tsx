@@ -7,7 +7,7 @@ import { calculateSheet } from "@chat/sheet/model/calc";
 import { parseFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp } from "@chat/sheet/model/ops";
-import { SheetGrid, type SheetSelection } from "./grid.tsx";
+import { SheetGrid, type CellEditing, type SheetSelection } from "./grid.tsx";
 
 afterEach(cleanup);
 
@@ -24,11 +24,13 @@ const set = (doc: SheetDoc, row: number, col: number, content: string | number):
   return { ...at(row, col), v: content };
 };
 
+const events: string[] = [];
 function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale }) {
   const [selection, setSelection] = useState<SheetSelection | null>({
     anchor: at(1, 1),
     head: at(1, 1),
   });
+  const [editing, setEditing] = useState<CellEditing | null>(null);
   return (
     <div>
       <output data-testid="selection">
@@ -44,6 +46,13 @@ function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale 
         selection={selection}
         onSelectionChange={setSelection}
         label="Budget"
+        editing={editing}
+        onEditingChange={setEditing}
+        onCommit={(cell, text) => events.push(`commit ${cell.r}/${cell.c} ${text}`)}
+        editSource={() => "=A1*2"}
+        onCommand={(command) => events.push(command.kind)}
+        onCopy={(cut) => (cut ? "cut" : "copied")}
+        onPaste={(text) => events.push(`paste ${text}`)}
       />
     </div>
   );
@@ -105,5 +114,31 @@ describe("the sheet grid", () => {
     expect(grid.getAttribute("aria-activedescendant")).toBe(
       document.querySelector('[aria-selected="true"]')!.id,
     );
+  });
+
+  it("types a fresh value, edits the formula behind one, and sends commands up", () => {
+    events.length = 0;
+    render(<Harness doc={emptyDoc()} />);
+    const grid = screen.getByRole("grid");
+    fireEvent.keyDown(grid, { key: "4" });
+    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    expect(input.value).toBe("4");
+    fireEvent.change(input, { target: { value: "42" } });
+    // A fresh value commits on an arrow key, and the selection moves on.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(events).toEqual(["commit s1.r1/s1.c1 42"]);
+    expect(screen.getByTestId("selection").textContent).toBe("s1.r2/s1.c1-s1.r2/s1.c1");
+    fireEvent.keyDown(grid, { key: "F2" });
+    const editor = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    expect(editor.value).toBe("=A1*2");
+    // Editing an existing value, arrows move the caret; Escape drops the edit.
+    fireEvent.keyDown(editor, { key: "ArrowLeft" });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Cell content" })).toBeNull();
+    fireEvent.keyDown(grid, { key: "Delete" });
+    fireEvent.keyDown(grid, { key: "z", metaKey: true });
+    fireEvent.keyDown(grid, { key: "z", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(grid, { key: "d", ctrlKey: true });
+    expect(events.slice(1)).toEqual(["clear", "undo", "redo", "fill"]);
   });
 });
