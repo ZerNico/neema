@@ -92,6 +92,8 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { SheetZoom } from "./sheet-zoom.tsx";
+import { useSheetZoom } from "./zoom.ts";
 import { LinkChip, LinkDialog } from "./link-dialog.tsx";
 import {
   addConditional,
@@ -233,6 +235,7 @@ export default function SheetPanelBody({
   const [circling, setCircling] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
+  const [zoom, setZoom] = useSheetZoom(gridHost);
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
   // A chart selected instead of cells, and the chart open in the editor, by ID.
@@ -662,8 +665,19 @@ export default function SheetPanelBody({
         right: cols.at(selectedBox.c2)!,
       }
     : (shownThread?.box ?? null);
-  const rowLayout = axisLayout(doc.sheet[sheet]!.rows, doc.sheet[sheet]!.rowProps, rowPx);
-  const colLayout = axisLayout(doc.sheet[sheet]!.cols, doc.sheet[sheet]!.colProps, columnPx);
+  // Measured as the grid draws: at this zoom, rows a filter hides taking no space.
+  const shownRowProps = { ...doc.sheet[sheet]!.rowProps };
+  for (const id of hiddenByFilter) shownRowProps[id] = { ...shownRowProps[id], hidden: true };
+  const shownRowLayout = axisLayout(
+    doc.sheet[sheet]!.rows,
+    shownRowProps,
+    (props) => rowPx(props) * zoom,
+  );
+  const colLayout = axisLayout(
+    doc.sheet[sheet]!.cols,
+    doc.sheet[sheet]!.colProps,
+    (props) => columnPx(props) * zoom,
+  );
   /** The card's anchor: the cells' box on the page, read when placed, so it follows scrolling. */
   const cardAnchor = cardBox
     ? {
@@ -671,13 +685,14 @@ export default function SheetPanelBody({
         getBoundingClientRect: () => {
           const content = gridHost?.querySelector("[data-sheet-content]");
           const at = content?.getBoundingClientRect() ?? new DOMRect();
-          const top = at.top + rowLayout.starts[cardBox.top - 1]!;
+          const top = at.top + shownRowLayout.starts[cardBox.top - 1]!;
           const left = at.left + colLayout.starts[cardBox.left - 1]!;
           return DOMRect.fromRect({
             x: left,
             y: top,
             width: colLayout.starts[cardBox.right]! - colLayout.starts[cardBox.left - 1]!,
-            height: rowLayout.starts[cardBox.bottom]! - rowLayout.starts[cardBox.top - 1]!,
+            height:
+              shownRowLayout.starts[cardBox.bottom]! - shownRowLayout.starts[cardBox.top - 1]!,
           });
         },
       }
@@ -882,6 +897,7 @@ export default function SheetPanelBody({
           <ContextMenuTrigger className="relative min-h-0 min-w-0 flex-1">
             <div ref={setGridHost} className="absolute inset-0">
               <SheetGrid
+                zoom={zoom}
                 key={sheet}
                 doc={doc}
                 sheet={sheet}
@@ -1347,6 +1363,7 @@ export default function SheetPanelBody({
             {stats.numbers ? <span>Sum: {shownNumber(stats.sum)}</span> : null}
           </output>
         ) : null}
+        <SheetZoom zoom={zoom} onZoom={setZoom} />
       </div>
     </div>
   );

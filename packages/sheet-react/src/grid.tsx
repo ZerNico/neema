@@ -154,6 +154,11 @@ export interface SheetGridProps {
   readonly selectionAccessory?: ReactNode;
   /** Drawn under the active cell, as a link's chip is. */
   readonly activeAccessory?: ReactNode;
+  /**
+   * How large the cells draw, 1 as stored. Only this view scales: sizes it
+   * reports back, from a resize or a moved chart, are unscaled.
+   */
+  readonly zoom?: number;
   /** How conditional formats show cells, by `r|c`. */
   readonly looks?: ReadonlyMap<string, CellLook>;
   /** Rows out of view for now, such as those a filter hides, by ID. */
@@ -252,6 +257,7 @@ export function SheetGrid({
   onDragSelection,
   selectionAccessory,
   activeAccessory,
+  zoom = 1,
   looks = NO_LOOKS,
   hiddenRows = NO_ROWS,
   filterButtons = null,
@@ -265,15 +271,16 @@ export function SheetGrid({
   const [viewport, setViewport] = useState({ top: 0, left: 0, ...FALLBACK });
   const data = doc.sheet[sheet]!;
   const rows = useMemo(() => {
-    if (!hiddenRows.size) return axisLayout(data.rows, data.rowProps, rowPx);
+    const measure = (props: Parameters<typeof rowPx>[0]) => rowPx(props) * zoom;
+    if (!hiddenRows.size) return axisLayout(data.rows, data.rowProps, measure);
     // Rows a filter hides measure as hidden ones do, without being stored as hidden.
     const props = { ...data.rowProps };
     for (const id of hiddenRows) props[id] = { ...props[id], hidden: true };
-    return axisLayout(data.rows, props, rowPx);
-  }, [data.rows, data.rowProps, hiddenRows]);
+    return axisLayout(data.rows, props, measure);
+  }, [data.rows, data.rowProps, hiddenRows, zoom]);
   const cols = useMemo(
-    () => axisLayout(data.cols, data.colProps, columnPx),
-    [data.cols, data.colProps],
+    () => axisLayout(data.cols, data.colProps, (props) => columnPx(props) * zoom),
+    [data.cols, data.colProps, zoom],
   );
   const merges = useMemo(() => mergeIndex(doc, sheet, rows, cols), [doc, sheet, rows, cols]);
 
@@ -865,7 +872,7 @@ export function SheetGrid({
         onPointerUp={() => {
           if (!resizing) return;
           const layout = resizing.axis === "columns" ? cols : rows;
-          onResize(resizing.axis, layout.ids[resizing.index]!, Math.round(resizing.size));
+          onResize(resizing.axis, layout.ids[resizing.index]!, Math.round(resizing.size / zoom));
           setResizing(null);
         }}
       />
@@ -955,6 +962,7 @@ export function SheetGrid({
             // Its fill and borders stay in its own column; only its text runs on, above the spill.
             zIndex: spills ? 2 : span ? 1 : undefined,
             ...cellCss(style),
+            fontSize: (style.fontSize ? (style.fontSize * 4) / 3 : 14) * zoom,
             ...(shown.color ? { color: shown.color } : {}),
           }}
         >
@@ -993,7 +1001,8 @@ export function SheetGrid({
         if (typeof value === "string" && !style.wrap && (style.horizontal ?? "left") === "left") {
           // Only as far as the text needs: text that fits keeps its cell's borders.
           const needed =
-            textWidth(value, style.fontSize ? (style.fontSize * 4) / 3 : 14, style.bold) + 8;
+            (textWidth(value, style.fontSize ? (style.fontSize * 4) / 3 : 14, style.bold) + 8) *
+            zoom;
           while (
             cols.starts[overflowTo + 1]! - cols.starts[col]! < needed &&
             overflowTo + 1 <= colRange.last &&
@@ -1477,11 +1486,13 @@ export function SheetGrid({
         style={{
           ...editorRect,
           // A text with line breaks grows the editor by a line each, as Excel's does.
+          fontSize: 14 * zoom,
+          lineHeight: `${16 * zoom}px`,
           width: Math.max(
             editorRect.width,
-            (Math.max(...editing.text.split("\n").map((line) => line.length)) + 2) * 8,
+            (Math.max(...editing.text.split("\n").map((line) => line.length)) + 2) * 8 * zoom,
           ),
-          height: Math.max(editorRect.height, editing.text.split("\n").length * 16 + 4),
+          height: Math.max(editorRect.height, editing.text.split("\n").length * 16 * zoom + 4),
         }}
       />
     ) : null;
@@ -1711,18 +1722,21 @@ export function SheetGrid({
             const col = colIndex.get(overlay.at.c);
             if (row === undefined || col === undefined) return [];
             const editable = !readOnly && onOverlayChange !== undefined;
-            const offset = overlay.offset ?? { x: 0, y: 0 };
+            const offset = {
+              x: (overlay.offset?.x ?? 0) * zoom,
+              y: (overlay.offset?.y ?? 0) * zoom,
+            };
             // The cell under its corner becomes its anchor, the rest an offset, as Excel keeps one.
             const placeAt = (top: number, left: number, width: number, height: number) => {
               const [rowAt, colAt] = [rows.indexAt(top), cols.indexAt(left)];
               onOverlayChange?.(overlay.key, {
                 at: { r: rows.ids[rowAt]!, c: cols.ids[colAt]! },
                 offset: {
-                  x: Math.round(Math.max(0, left - cols.starts[colAt]!)),
-                  y: Math.round(Math.max(0, top - rows.starts[rowAt]!)),
+                  x: Math.round(Math.max(0, left - cols.starts[colAt]!) / zoom),
+                  y: Math.round(Math.max(0, top - rows.starts[rowAt]!) / zoom),
                 },
-                width,
-                height,
+                width: Math.round(width / zoom),
+                height: Math.round(height / zoom),
               });
             };
             return [
@@ -1732,12 +1746,15 @@ export function SheetGrid({
                 place={{
                   top: rows.starts[row]! + offset.y,
                   left: cols.starts[col]! + offset.x,
-                  width: overlay.width,
-                  height: overlay.height,
+                  width: overlay.width * zoom,
+                  height: overlay.height * zoom,
                 }}
                 selected={selectedOverlay === overlay.key}
                 editable={editable}
-                min={overlay.min ?? OVERLAY_MIN}
+                min={{
+                  width: (overlay.min ?? OVERLAY_MIN).width * zoom,
+                  height: (overlay.min ?? OVERLAY_MIN).height * zoom,
+                }}
                 onSelect={() => onOverlaySelect?.(overlay.key)}
                 onDeselect={() => {
                   onOverlaySelect?.(null);
@@ -1760,8 +1777,8 @@ export function SheetGrid({
                   placeAt(
                     rows.starts[rowAt]! + Math.min(offset.y, rows.size(rowAt)),
                     cols.starts[colAt]! + Math.min(offset.x, cols.size(colAt)),
-                    overlay.width,
-                    overlay.height,
+                    overlay.width * zoom,
+                    overlay.height * zoom,
                   );
                 }}
                 onCommand={(command) => {

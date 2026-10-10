@@ -178,6 +178,53 @@ describe("the sheet grid", () => {
     }
   });
 
+  it("draws larger at a zoom, and reports what it changed at the stored scale", () => {
+    let doc = emptyDoc();
+    doc = apply(doc, { op: "set", sh: "s1", cells: [set(doc, 1, 1, "Big")] });
+    const changes: OverlayChange[] = [];
+    render(
+      <SheetGrid
+        doc={doc}
+        sheet="s1"
+        values={calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(1, 1), head: at(1, 1) }}
+        onSelectionChange={() => {}}
+        label="Budget"
+        onCommit={() => {}}
+        zoom={2}
+        overlays={[
+          {
+            key: "c1",
+            at: at(2, 2),
+            offset: { x: 10, y: 5 },
+            width: 300,
+            height: 200,
+            label: "Sales chart",
+            content: null,
+          },
+        ]}
+        selectedOverlay="c1"
+        onOverlaySelect={() => {}}
+        onOverlayChange={(_, change) => changes.push(change)}
+      />,
+    );
+    const cell = screen.getByText("Big").parentElement!;
+    expect([cell.style.width, cell.style.height, cell.style.fontSize]).toEqual([
+      "128px",
+      "40px",
+      "28px",
+    ]);
+    const chart = screen.getByRole("group", { name: "Sales chart" });
+    expect([chart.style.top, chart.style.left, chart.style.width]).toEqual([
+      "50px",
+      "148px",
+      "600px",
+    ]);
+    fireEvent.keyDown(chart, { key: "ArrowRight" });
+    expect(changes).toEqual([{ at: at(2, 3), offset: { x: 10, y: 5 }, width: 300, height: 200 }]);
+  });
+
   it("jumps to the data's edges, selects its block, and whole rows and columns", () => {
     let doc = emptyDoc();
     doc = apply(doc, {
