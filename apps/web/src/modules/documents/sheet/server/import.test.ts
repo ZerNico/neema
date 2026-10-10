@@ -332,7 +332,7 @@ describe("importing into a live sheet", () => {
       { type: "waterfall", at: "U2" },
       { type: "histogram", at: "U20" },
     ];
-    const original = build([
+    const built = build([
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows },
       ...kinds.map(({ type, ...rest }) => ({
         kind: "addChart",
@@ -361,6 +361,22 @@ describe("importing into a live sheet", () => {
         ...rest,
       })),
     ]);
+    // A chart dropped part way into its cell keeps that place.
+    const original = applyChange(
+      built,
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          {
+            op: "chartPatch",
+            id: Object.keys(built.charts)[0]!,
+            patch: { offset: { x: 30, y: 7 } },
+          },
+        ],
+      },
+      2,
+    ).doc;
     const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
     expect(read.dropped).toEqual([]);
     const imported = sheetFromWorkbook(read, settings);
@@ -406,6 +422,7 @@ describe("importing into a live sheet", () => {
     // A bar chart's value axis runs along the bottom, so its options stay with the vertical axis.
     expect(bar).toMatchObject({ axes: { y: { min: 0, max: 200 } } });
     expect(column!.at).toEqual(original.charts[Object.keys(original.charts)[0]!]!.at);
+    expect([column!.offset, line!.offset]).toEqual([{ x: 30, y: 7 }, undefined]);
   });
 
   it("reads CSV in either convention, quoted fields and formulas included", () => {

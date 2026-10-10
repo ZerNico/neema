@@ -383,7 +383,7 @@ describe("the sheet grid", () => {
     expect(copies.find((each) => each.closest("[aria-hidden]"))!.closest(".isolate")).toBeTruthy();
   });
 
-  it("selects a chart over the cells, moves it a cell at a time and snaps a drag to a cell", () => {
+  it("selects a chart over the cells, nudges it a cell at a time and drops a drag where it lands", () => {
     const changes: Array<[string, OverlayChange]> = [];
     const commands: string[] = [];
     function Charted() {
@@ -424,13 +424,18 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(chart, { key: "ArrowRight" });
     fireEvent.keyDown(chart, { key: "d", metaKey: true });
     fireEvent.keyDown(chart, { key: "Delete" });
-    expect(changes).toEqual([["c1", { at: at(2, 3), width: 300, height: 200 }]]);
+    expect(changes).toEqual([
+      ["c1", { at: at(2, 3), offset: { x: 0, y: 0 }, width: 300, height: 200 }],
+    ]);
     expect(commands).toEqual(["c1 duplicate", "c1 delete"]);
-    // A drag past the click threshold lands on the cell under the new top-left corner.
+    // A drag lands where it was dropped: the cell under the corner, and how far into it.
     fireEvent.pointerDown(chart, { button: 0, clientX: 10, clientY: 10 });
     fireEvent.pointerMove(window, { clientX: 10 + 64 * 2 + 5, clientY: 10 + 20 * 3 + 2 });
     fireEvent.pointerUp(window);
-    expect(changes[1]).toEqual(["c1", { at: at(5, 4), width: 300, height: 200 }]);
+    expect(changes[1]).toEqual([
+      "c1",
+      { at: at(5, 4), offset: { x: 5, y: 2 }, width: 300, height: 200 },
+    ]);
     fireEvent.keyDown(chart, { key: "Escape" });
     expect(chart.getAttribute("aria-selected")).toBe("false");
   });

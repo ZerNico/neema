@@ -132,8 +132,8 @@ browser workers and the Excel file tools); this page records the decisions behin
 
 - A chart is data in the document (`model/chart.ts`): its series by IDs and every option set,
   never its values; each replica draws it from the cells. Its text is literal or a cell it
-  follows. It sits on a cell by IDs, so it moves with inserts above it; dragging one snaps it to
-  the cell under its corner.
+  follows. It sits on a cell by IDs with a pixel offset into it, as Excel anchors one, so
+  it moves with inserts above it and stays where it was dropped.
 - `chartPatch` replaces each top-level option it names, merges axes and style one level down
   and replaces series whole. Two people changing different options both keep theirs, and undo
   is `invertChange` like any other change.

@@ -563,6 +563,7 @@ export default function SheetPanelBody({
       return {
         key: id,
         at: chart.at,
+        ...(chart.offset ? { offset: chart.offset } : {}),
         width: chart.size.width,
         height: chart.size.height,
         label: data.title ? `Chart: ${data.title}` : "Chart",
@@ -938,6 +939,7 @@ export default function SheetPanelBody({
                       id,
                       patch: {
                         at: change.at,
+                        offset: change.offset.x || change.offset.y ? change.offset : null,
                         size: {
                           width: Math.min(CHART_LIMITS.width.max, change.width),
                           height: Math.min(CHART_LIMITS.height.max, change.height),

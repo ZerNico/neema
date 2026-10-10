@@ -38,6 +38,8 @@ import {
 export interface FileChart {
   readonly sheet: string;
   readonly at: string;
+  /** Where its corner sits inside that cell, in pixels. */
+  readonly offset?: { readonly x: number; readonly y: number };
   readonly width: number;
   readonly height: number;
   readonly kind:
@@ -369,6 +371,14 @@ export function readFileChart(sheet: string, item: DrawingItem): FileChart | nul
   const place = {
     sheet,
     at: cellRef(from.row, from.col),
+    ...(from.colOff || from.rowOff
+      ? {
+          offset: {
+            x: Math.min(2000, Math.max(0, Math.round(from.colOff / EMU_PER_PIXEL))),
+            y: Math.min(2000, Math.max(0, Math.round(from.rowOff / EMU_PER_PIXEL))),
+          },
+        }
+      : {}),
     width: Math.round(Math.min(2000, Math.max(160, width))),
     height: Math.round(Math.min(1600, Math.max(120, height))),
   };

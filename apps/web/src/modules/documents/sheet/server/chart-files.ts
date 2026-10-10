@@ -80,6 +80,7 @@ export function fileChartOf(doc: SheetDoc, chart: Chart): FileChart | null {
   return {
     sheet: host.name,
     at: address(row, col),
+    ...(chart.offset ? { offset: chart.offset } : {}),
     width: chart.size.width,
     height: chart.size.height,
     kind: chart.kind,
@@ -178,6 +179,7 @@ export function chartOfFile(doc: SheetDoc, file: FileChart): Chart | null {
   return {
     sheet: host,
     at: { r: at.box.r1, c: at.box.c1 },
+    ...(file.offset ? { offset: file.offset } : {}),
     size: { width: file.width, height: file.height },
     kind: file.kind,
     ...(file.stack ? { stack: file.stack } : {}),

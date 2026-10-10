@@ -208,6 +208,8 @@ export function chartOperation(operation: ChartOperation, tools: ChartTools): Sh
       r: tools.ids(home, "rows")[at.row - 1]!,
       c: tools.ids(home, "columns")[at.column - 1]!,
     };
+    // Moved by the model, it sits on the cell's corner.
+    if (operation.kind === "editChart") patch.offset = null;
   }
 
   if (operation.kind === "editChart") {

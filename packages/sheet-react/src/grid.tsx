@@ -94,6 +94,8 @@ const corner = (at: { row: number; col: number }) => `${columnLetters(at.col + 1
 export interface GridOverlay {
   readonly key: string;
   readonly at: CellRef;
+  /** Where its corner sits inside that cell, in pixels. */
+  readonly offset?: { readonly x: number; readonly y: number };
   readonly width: number;
   readonly height: number;
   readonly content: ReactNode;
@@ -103,9 +105,10 @@ export interface GridOverlay {
   readonly min?: { readonly width: number; readonly height: number };
 }
 
-/** Where an overlay was moved or resized to: the cell under its top-left corner, and its size. */
+/** Where an overlay was moved or resized to: the cell under its top-left corner, how far into it, and its size. */
 export interface OverlayChange {
   readonly at: CellRef;
+  readonly offset: { readonly x: number; readonly y: number };
   readonly width: number;
   readonly height: number;
 }
@@ -1708,20 +1711,27 @@ export function SheetGrid({
             const col = colIndex.get(overlay.at.c);
             if (row === undefined || col === undefined) return [];
             const editable = !readOnly && onOverlayChange !== undefined;
-            // The cell under a point becomes the overlay's new anchor, as a chart moves with it.
-            const placeAt = (rowAt: number, colAt: number, width: number, height: number) =>
+            const offset = overlay.offset ?? { x: 0, y: 0 };
+            // The cell under its corner becomes its anchor, the rest an offset, as Excel keeps one.
+            const placeAt = (top: number, left: number, width: number, height: number) => {
+              const [rowAt, colAt] = [rows.indexAt(top), cols.indexAt(left)];
               onOverlayChange?.(overlay.key, {
                 at: { r: rows.ids[rowAt]!, c: cols.ids[colAt]! },
+                offset: {
+                  x: Math.round(Math.max(0, left - cols.starts[colAt]!)),
+                  y: Math.round(Math.max(0, top - rows.starts[rowAt]!)),
+                },
                 width,
                 height,
               });
+            };
             return [
               <OverlayFrame
                 key={overlay.key}
                 label={overlay.label}
                 place={{
-                  top: rows.starts[row]!,
-                  left: cols.starts[col]!,
+                  top: rows.starts[row]! + offset.y,
+                  left: cols.starts[col]! + offset.x,
                   width: overlay.width,
                   height: overlay.height,
                 }}
@@ -1735,20 +1745,25 @@ export function SheetGrid({
                 }}
                 onPlace={(place) =>
                   placeAt(
-                    rows.indexAt(Math.max(0, place.top)),
-                    cols.indexAt(Math.max(0, place.left)),
+                    Math.max(0, place.top),
+                    Math.max(0, place.left),
                     place.width,
                     place.height,
                   )
                 }
-                onNudge={(down, right) =>
-                  placeAt(
+                onNudge={(down, right) => {
+                  // A cell at a time, keeping how far into its cell it sits.
+                  const [rowAt, colAt] = [
                     Math.min(rows.ids.length - 1, Math.max(0, row + down)),
                     Math.min(cols.ids.length - 1, Math.max(0, col + right)),
+                  ];
+                  placeAt(
+                    rows.starts[rowAt]! + Math.min(offset.y, rows.size(rowAt)),
+                    cols.starts[colAt]! + Math.min(offset.x, cols.size(colAt)),
                     overlay.width,
                     overlay.height,
-                  )
-                }
+                  );
+                }}
                 onCommand={(command) => {
                   onOverlayCommand?.(overlay.key, command);
                   if (command === "delete") scroller.current?.focus({ preventScroll: true });

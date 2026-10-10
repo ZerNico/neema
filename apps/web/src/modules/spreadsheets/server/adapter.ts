@@ -5,7 +5,7 @@ import {
   type CellValue,
   type FormulaValue,
 } from "@office-kit/xlsx/cell";
-import { addChartAt, listChartsOnSheet } from "@office-kit/xlsx/drawing";
+import { addChartAt, listChartsOnSheet, makeOneCellAnchor } from "@office-kit/xlsx/drawing";
 import { fromArrayBuffer, loadWorkbook, workbookToBytes } from "@office-kit/xlsx/io";
 import {
   getCellAlignment,
@@ -403,12 +403,25 @@ const fileChartOf = (
 
 /** Places a file chart on its sheet, its ranges made absolute against the workbook. */
 function placeChart(workbook: Workbook, chart: FileChart) {
-  addChartAt(
+  const item = addChartAt(
     sheetOf(workbook, chart.sheet),
     chart.at,
     chartReference(chart, (ref) => absoluteRef(workbook, ref, chart.sheet)),
     { widthPx: chart.width, heightPx: chart.height },
   );
+  const corner = parseCell(chart.at);
+  // Excel keeps how far into its cell a chart's corner sits as offsets in EMUs.
+  if (chart.offset && corner)
+    item.anchor = makeOneCellAnchor({
+      from: {
+        col: corner.column - 1,
+        row: corner.row - 1,
+        colOff: Math.round(chart.offset.x * 9_525),
+        rowOff: Math.round(chart.offset.y * 9_525),
+      },
+      widthPx: chart.width,
+      heightPx: chart.height,
+    });
 }
 
 /** Applies one operation; a failure names it and nothing of the batch is saved. */

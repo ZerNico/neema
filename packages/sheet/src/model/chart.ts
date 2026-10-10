@@ -92,6 +92,8 @@ export interface Chart {
   readonly sheet: string;
   /** Anchored to a cell by IDs, so it moves with inserts and deletes above and before it. */
   readonly at: { readonly r: string; readonly c: string };
+  /** Where its corner sits inside that cell, in pixels, as Excel's anchor offsets. */
+  readonly offset?: { readonly x: number; readonly y: number };
   readonly size: { readonly width: number; readonly height: number };
   readonly kind: ChartKind;
   readonly stack?: ChartStack;
@@ -202,6 +204,11 @@ const CHECKS: Record<string, (value: unknown) => boolean> = {
   sheet: isId,
   at: (value) => isRecord(value) && isId(value.r) && isId(value.c),
   size: isSize,
+  offset: (value) =>
+    isRecord(value) &&
+    [value.x, value.y].every(
+      (each) => typeof each === "number" && Number.isFinite(each) && each >= 0 && each <= 2000,
+    ),
   kind: oneOf(...CHART_KINDS),
   stack: oneOf("none", "stacked", "percent"),
   title: isText,
