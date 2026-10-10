@@ -66,6 +66,9 @@ jobs:
       - name: Sheet package tests
         run: pnpm --filter @chat/sheet test
 
+      - name: Sheet grid tests
+        run: pnpm --filter @chat/sheet-react test
+
   integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -20,6 +20,7 @@
     "@chat/desktop-rpc": "workspace:*",
     "@chat/model-client": "workspace:*",
     "@chat/sheet": "workspace:*",
+    "@chat/sheet-react": "workspace:*",
     "@codemirror/lang-javascript": "6.2.5",
     "@codemirror/lang-markdown": "6.5.2",
     "@codemirror/language": "6.12.4",

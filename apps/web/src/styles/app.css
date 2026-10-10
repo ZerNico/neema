@@ -9,6 +9,8 @@
 
 /* Streamdown ships Tailwind utility classes in its dist */
 @source "../../node_modules/streamdown/dist/*.js";
+/* The sheet grid draws with the app's semantic token classes (see docs/internals/ui.md). */
+@source "../../../../packages/sheet-react/src";
 
 @custom-variant dark (&:is(.dark *));
 
