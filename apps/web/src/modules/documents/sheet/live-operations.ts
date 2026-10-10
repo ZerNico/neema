@@ -157,7 +157,20 @@ export const LIVE_SHEET_OPERATIONS = {
     fields: { ...setCells.fields, sheet },
   },
   clearRange: { ...SPREADSHEET_OPERATIONS.clearRange, fields: { sheet, range } },
-  setFormat: { ...setFormat, fields: { ...setFormat.fields, sheet, range } },
+  setFormat: {
+    ...setFormat,
+    fields: {
+      ...setFormat.fields,
+      sheet,
+      range,
+      link: {
+        type: "string",
+        max: 2000,
+        about:
+          'A web or mail address the cells open, e.g. "https://example.com"; "none" removes it.',
+      },
+    },
+  },
   setColumnWidth: {
     ...SPREADSHEET_OPERATIONS.setColumnWidth,
     fields: { ...SPREADSHEET_OPERATIONS.setColumnWidth.fields, sheet },

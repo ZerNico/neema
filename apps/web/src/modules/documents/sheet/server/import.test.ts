@@ -102,6 +102,38 @@ describe("importing into a live sheet", () => {
     expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 2)!.s!)).toEqual({ strike: true });
   });
 
+  it("keeps links through Excel and back, without the look Excel gives them", async () => {
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Docs", "Mail"]] },
+      { kind: "setFormat", sheet: "Sheet1", range: "A1", link: "https://example.com/docs" },
+      {
+        kind: "setFormat",
+        sheet: "Sheet1",
+        range: "B1",
+        link: "mailto:ana@example.com",
+        bold: true,
+      },
+    ]);
+    expect(() =>
+      build([{ kind: "setFormat", sheet: "Sheet1", range: "A1", link: "javascript:x" }]),
+    ).toThrow();
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 1)!.s!)).toEqual({
+      link: "https://example.com/docs",
+    });
+    expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 2)!.s!)).toEqual({
+      bold: true,
+      link: "mailto:ana@example.com",
+    });
+    expect(sheetView(imported.doc, calculateSheet(imported.doc, context)).xml).toContain(
+      'link="https://example.com/docs"',
+    );
+  });
+
   it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
     const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
     const imported = sheetFromWorkbook(

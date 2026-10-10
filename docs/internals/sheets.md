@@ -119,6 +119,15 @@ browser workers and the Excel file tools); this page records the decisions behin
   (`spreadsheets/server/file-conditional.ts`). Rule kinds a live sheet does not draw (icons,
   formulas, time and custom validation) are dropped on import and named as dropped.
 
+## Links
+
+- A cell's link is a property of its style, not of its content. It then moves with every copy,
+  fill, sort and paste of formats, survives Delete and retyping as Excel's hyperlinks do, and
+  undoes like any format. Clearing formats takes it off.
+- Only web and mail addresses are kept from the model, a paste or a file, and only those are
+  opened. In an Excel file a link is a hyperlink with the Hyperlink style's look, which an import
+  leaves out again so the grid draws it in the theme's own colour.
+
 ## Charts
 
 - A chart is data in the document (`model/chart.ts`): its series by IDs and every option set,

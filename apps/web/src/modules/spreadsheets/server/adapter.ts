@@ -64,6 +64,7 @@ import {
   setRowHeight,
   unmergeCells,
   type Worksheet,
+  makeHyperlink,
   makeSheetProperties,
 } from "@office-kit/xlsx/worksheet";
 import { SpreadsheetError } from "../errors.ts";
@@ -841,6 +842,14 @@ export interface FileFilter {
   }>;
 }
 
+/** Excel's Hyperlink style colour, which a linked cell takes unless it has its own. */
+const LINK_COLOR = "#0563C1";
+/** A link a file may carry: web and mail addresses only. */
+const fileLink = (text: unknown) =>
+  typeof text === "string" && /^(https?:\/\/|mailto:)/i.test(text) && text.length <= 2079
+    ? text
+    : null;
+
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
 function styleCell(workbook: Workbook, cell: Cell, style: Readonly<Record<string, unknown>>) {
   const text = (key: string) => (typeof style[key] === "string" ? (style[key] as string) : null);
@@ -894,7 +903,23 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
         const cell = getCell(sheet, row, column);
         if (cell && isFormulaValue(cell.value)) authored.add(cell);
       }
-      if (style) styleCell(workbook, ensureCell(sheet, row, column), style);
+      const link = fileLink(style?.link);
+      // A link is Excel's hyperlink on the cell, looking as Excel's Hyperlink style does.
+      // A target the file format refuses leaves the cell's text without its link.
+      if (link)
+        try {
+          sheet.hyperlinks.push(
+            makeHyperlink({ ref: `${columnLetters(column)}${row}`, target: link }),
+          );
+        } catch {
+          // Kept as text.
+        }
+      if (style)
+        styleCell(
+          workbook,
+          ensureCell(sheet, row, column),
+          link ? { ...style, underline: true, fontColor: style.fontColor ?? LINK_COLOR } : style,
+        );
     }
     for (const merge of each.merges) mergeCells(sheet, merge);
     for (const [column, width] of each.widths) setColumnWidth(sheet, column, width);
@@ -965,6 +990,12 @@ const DEFAULT_FONTS = new Set(["Calibri", "Aptos", "Aptos Narrow", "Arial"]);
 const rgbOf = (color: { rgb?: string } | undefined) =>
   color?.rgb && /^[0-9a-f]{8}$/i.test(color.rgb) ? `#${color.rgb.slice(2).toUpperCase()}` : null;
 
+/** A linked cell's style: its link, without the look Excel's Hyperlink style gave it. */
+function linkedStyle(style: Record<string, string | number | boolean> | undefined, link: string) {
+  const { underline: _, fontColor, ...rest } = style ?? {};
+  return { ...rest, ...(fontColor && fontColor !== LINK_COLOR ? { fontColor } : {}), link };
+}
+
 /** A cell's style as a live sheet stores it: only what its format operation knows. */
 function liveStyle(workbook: Workbook, cell: Cell) {
   const style: Record<string, string | number | boolean> = {};
@@ -1023,9 +1054,23 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
   const sheets = [...iterWorksheets(workbook)].map((sheet) => {
     const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
     let [rows, cols] = [0, 0];
+    // Hyperlinks by cell; one over a range links each of its cells.
+    const links = new Map<string, string>();
+    for (const hyperlink of sheet.hyperlinks) {
+      const link = fileLink(hyperlink.target);
+      const box = parseRange(hyperlink.ref);
+      if (!link || !box) {
+        dropped.add("links within the workbook or to files");
+        continue;
+      }
+      for (let row = box.top; row <= Math.min(box.bottom, box.top + 999); row++)
+        for (let col = box.left; col <= Math.min(box.right, box.left + 99); col++)
+          links.set(`${row}:${col}`, link);
+    }
     for (const cell of iterCells(sheet)) {
       const value = cell.value;
-      const style = liveStyle(workbook, cell);
+      const link = links.get(`${cell.row}:${cell.col}`);
+      const style = link ? linkedStyle(liveStyle(workbook, cell), link) : liveStyle(workbook, cell);
       let entry: LiveSheetImport["sheets"][number]["cells"][number] | null = null;
       if (isFormulaValue(value)) {
         if (value.t === "array" && value.ref && !isDynamic(workbook, sheet, cell)) {

@@ -46,6 +46,19 @@ class Refused extends Error {
     super(message);
   }
 }
+/** A link the model gives: none, or a web or mail address, never anything a click would run. */
+function linkOf(text: string): string | null {
+  if (text.trim() === "" || text.trim().toLowerCase() === "none") return null;
+  try {
+    const url = new URL(text.trim());
+    if (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:")
+      return url.href;
+  } catch {
+    // Read below as refused.
+  }
+  throw new Refused("invalid", `link: "${text.slice(0, 80)}" is not a web or mail address.`);
+}
+
 /** Writes in the private view carry this revision, so the guards count them as the call's own. */
 const WORKING = -1;
 
@@ -234,6 +247,7 @@ export function convertOperations(
         ] as const)
           if (operation[key] !== undefined) patch[key] = operation[key];
         if (operation.font !== undefined) patch.fontFamily = operation.font;
+        if (operation.link !== undefined) patch.link = linkOf(operation.link);
         if (operation.fill !== undefined)
           patch.fill = operation.fill === "none" ? null : operation.fill;
         if (operation.numberFormat !== undefined)
