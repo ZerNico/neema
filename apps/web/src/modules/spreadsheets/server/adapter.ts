@@ -1228,46 +1228,37 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
     const hiddenCols: number[] = [];
     for (let column = 1; column <= Math.max(cols, 26); column++)
       if (getColumnDimension(sheet, column)?.hidden) hiddenCols.push(column);
+    const refOf = (
+      range: (typeof sheet.conditionalFormatting)[number]["sqref"]["ranges"][number],
+    ) =>
+      boxRef({ top: range.minRow, left: range.minCol, bottom: range.maxRow, right: range.maxCol });
+    // A rule over several ranges comes in as one rule per range, which a live sheet draws alike.
     const conditional = sheet.conditionalFormatting
       .flatMap((format) =>
         format.rules
           .toSorted((a, b) => a.priority - b.priority)
           .flatMap((rule) => {
-            const range = format.sqref.ranges[0];
-            const read = range ? readConditional(rule, highlightStyles) : null;
-            if (!range || !read) {
+            const read = readConditional(rule, highlightStyles);
+            if (!format.sqref.ranges.length || !read) {
               dropped.add(
                 "conditional formats of kinds a live sheet does not draw (icon sets, formulas)",
               );
               return [];
             }
-            const ref = boxRef({
-              top: range.minRow,
-              left: range.minCol,
-              bottom: range.maxRow,
-              right: range.maxCol,
-            });
-            return [{ ref, rule: read, priority: rule.priority }];
+            return format.sqref.ranges.map((range) => ({
+              ref: refOf(range),
+              rule: read,
+              priority: rule.priority,
+            }));
           }),
       )
       .toSorted((a, b) => a.priority - b.priority)
       .map(({ ref, rule }) => ({ ref, rule }));
     const validations = listDataValidations(sheet).flatMap((validation) => {
-      const range = validation.sqref.ranges[0];
-      const read = range
-        ? readValidation(
-            validation,
-            boxRef({
-              top: range.minRow,
-              left: range.minCol,
-              bottom: range.maxRow,
-              right: range.maxCol,
-            }),
-          )
-        : null;
-      if (!read)
+      const read = validation.sqref.ranges.map((range) => readValidation(validation, refOf(range)));
+      if (!read.length || read.includes(null))
         dropped.add("data validation of kinds a live sheet does not check (times, formulas)");
-      return read ? [read] : [];
+      return read.filter((each) => each !== null);
     });
     const notes = listComments(sheet)
       .slice(0, NOTE_LIMITS.notes)

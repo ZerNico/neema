@@ -437,6 +437,32 @@ describe("importing into a live sheet", () => {
     expect(list[0]!.box).toEqual(box);
   });
 
+  it("keeps a rule over several ranges, as one rule per range", async () => {
+    const original = build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[1, 2, 3]] }]);
+    const spec = liveSheetExport(original);
+    const rule: ConditionalRule = { kind: "blank", style: { bold: true } };
+    const validation = { kind: "list", values: ["Yes", "No"] } as const;
+    const sheet = {
+      ...spec.sheets[0]!,
+      conditional: [{ ref: "A1:A2 C1:C2", rule }],
+      validations: [
+        { ref: "A4:A5 C4", rule: validation, onError: "stop" as const, allowBlank: true },
+      ],
+    };
+    const read = await importLiveSheet(await exportLiveSheet({ ...spec, sheets: [sheet] }));
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const { conditional, validations } = imported.doc.sheet.s1!;
+    expect(conditional?.map((each) => [each.box.c1, each.box.r2])).toEqual([
+      ["s1.c1", "s1.r2"],
+      ["s1.c3", "s1.r2"],
+    ]);
+    expect(validations?.map((each) => [each.box.c1, each.box.r2])).toEqual([
+      ["s1.c1", "s1.r5"],
+      ["s1.c3", "s1.r4"],
+    ]);
+  });
+
   it("keeps data validation through Excel and back, lists read from cells included", async () => {
     let original = build([
       { kind: "addSheet", name: "Lists" },
