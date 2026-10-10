@@ -5,6 +5,7 @@ import type { SheetValues } from "@chat/sheet/model/calc";
 import { copyFormula, parseFormula, renderFormula } from "@chat/sheet/model/formula";
 import { positions, type Axis, type Formula, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
+import { parseDelimited } from "@chat/sheet/delimited";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, cellStyle } from "./display.ts";
 import type { CellRef, SheetSelection } from "./grid.tsx";
@@ -252,35 +253,8 @@ export function copySelection(context: GridContext, cut = false): CopiedCells {
   };
 }
 
-/** Tab-separated text as rows of cells, quoted fields as spreadsheets write them. */
-export function parseTabular(text: string): string[][] {
-  const rows: string[][] = [[]];
-  let field = "";
-  let quoted = false;
-  for (let index = 0; index < text.length; index++) {
-    const character = text[index]!;
-    if (quoted) {
-      if (character === '"' && text[index + 1] === '"') {
-        field += '"';
-        index++;
-      } else if (character === '"') quoted = false;
-      else field += character;
-    } else if (character === '"' && field === "") quoted = true;
-    else if (character === "\t") {
-      rows.at(-1)!.push(field);
-      field = "";
-    } else if (character === "\n" || character === "\r") {
-      if (character === "\r" && text[index + 1] === "\n") index++;
-      rows.at(-1)!.push(field);
-      field = "";
-      rows.push([]);
-    } else field += character;
-  }
-  rows.at(-1)!.push(field);
-  // A copied range ends with a newline; that last empty row is not data.
-  if (rows.length > 1 && rows.at(-1)!.length === 1 && rows.at(-1)![0] === "") rows.pop();
-  return rows;
-}
+/** Tab-separated text as rows of cells, as spreadsheets put it on the clipboard. */
+export const parseTabular = (text: string) => parseDelimited(text, "\t");
 
 /**
  * Pastes at the selection's top-left. When the clipboard holds what this

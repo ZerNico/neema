@@ -5,6 +5,7 @@
   "exports": {
     "./a1": "./src/a1.ts",
     "./dates": "./src/dates.ts",
+    "./delimited": "./src/delimited.ts",
     "./locales": "./src/locales.ts",
     "./number-format": "./src/number-format.ts",
     "./value-parse": "./src/value-parse.ts",
