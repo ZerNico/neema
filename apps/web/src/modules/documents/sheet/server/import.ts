@@ -1,3 +1,4 @@
+import { DOCUMENT_LIMITS } from "../../schema.ts";
 import { parseCell, parseRange } from "@chat/sheet/a1";
 import { parseDelimited } from "@chat/sheet/delimited";
 import { DE_DE, EN_US } from "@chat/sheet/locales";
@@ -407,7 +408,15 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
       ];
     }),
   );
-  return { ok: true, doc, dropped: [...dropped], notes };
+  // A document holds so many comments; whole threads past that are left out, and named.
+  let room = DOCUMENT_LIMITS.comments;
+  const kept = notes.filter((note) => {
+    if (note.entries.length > room) return false;
+    room -= note.entries.length;
+    return true;
+  });
+  if (kept.length < notes.length) dropped.add(`notes past ${DOCUMENT_LIMITS.comments} comments`);
+  return { ok: true, doc, dropped: [...dropped], notes: kept };
 }
 
 /**

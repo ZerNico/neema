@@ -164,6 +164,23 @@ describe("importing into a live sheet", () => {
     expect(imported.notes).toHaveLength(1);
   });
 
+  it("keeps no more of a file's notes than a document holds comments", async () => {
+    const read = await importLiveSheet(
+      await exportLiveSheet(
+        liveSheetExport(build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[1]] }])),
+      ),
+    );
+    const note = (row: number) => ({
+      ref: `A${row}`,
+      entries: Array.from({ length: 3 }, () => ({ author: "", text: "Said" })),
+    });
+    const sheet = { ...read.sheets[0]!, notes: Array.from({ length: 400 }, (_, i) => note(i + 1)) };
+    const imported = sheetFromWorkbook({ ...read, sheets: [sheet] }, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(imported.notes).toHaveLength(333);
+    expect(imported.dropped).toEqual(["notes past 1000 comments"]);
+  });
+
   it("keeps underline, strikethrough and a font through Excel and back", async () => {
     const original = build([
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Title", "Old"]] },
