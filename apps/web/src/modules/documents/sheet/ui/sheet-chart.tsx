@@ -20,10 +20,13 @@ interface LegendItem {
  * for this reader only, as Excel's chart filter does.
  */
 export function SheetChart({
+  id,
   chart,
   data,
   locale,
 }: {
+  /** Finds the drawn chart for an image of it. */
+  id: string;
   chart: ChartSpec;
   data: ChartData;
   locale: SheetLocale;
@@ -85,10 +88,13 @@ export function SheetChart({
                 onClick={() => toggle(item.series)}
               >
                 <span
+                  data-export="swatch"
                   className="size-2 shrink-0 rounded-full"
                   style={{ backgroundColor: item.color }}
                 />
-                <span className="truncate">{item.label}</span>
+                <span data-export="text" className="truncate">
+                  {item.label}
+                </span>
               </button>
             </li>
           );
@@ -100,12 +106,21 @@ export function SheetChart({
   const plotHeight = Math.max(80, chart.size.height - 26 - titleHeight - legendHeight);
   const broken = data.series.some((series) => series.broken);
   return (
-    <figure className="bg-background border-border flex h-full flex-col gap-1 overflow-hidden rounded-md border p-3 shadow-sm">
+    <figure
+      data-chart-id={id}
+      className="bg-background border-border flex h-full flex-col gap-1 overflow-hidden rounded-md border p-3 shadow-sm"
+    >
       {data.title || data.subtitle ? (
         <figcaption className="flex flex-col">
-          {data.title ? <span className="truncate text-sm font-medium">{data.title}</span> : null}
+          {data.title ? (
+            <span data-export="text" className="truncate text-sm font-medium">
+              {data.title}
+            </span>
+          ) : null}
           {data.subtitle ? (
-            <span className="text-muted-foreground truncate text-xs">{data.subtitle}</span>
+            <span data-export="text" className="text-muted-foreground truncate text-xs">
+              {data.subtitle}
+            </span>
           ) : null}
         </figcaption>
       ) : null}

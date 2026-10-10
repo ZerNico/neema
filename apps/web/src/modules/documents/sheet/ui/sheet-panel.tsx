@@ -58,12 +58,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "~/ui/primitives/context-menu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
@@ -84,8 +78,10 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
-import { chartData } from "@chat/sheet/model/chart";
+import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
 import { SheetChart } from "./sheet-chart.tsx";
+import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
+import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
 function MenuItem({
   icon,
@@ -143,6 +139,9 @@ export default function SheetPanelBody({
   const [commenting, setCommenting] = useState(false);
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
+  // A chart selected instead of cells, and the chart open in the editor, by ID.
+  const [chartPicked, setChartPicked] = useState<string | null>(null);
+  const [chartEditing, setChartEditing] = useState<string | null>(null);
   const copied = useRef<CopiedCells | null>(null);
   const formulaBar = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
@@ -271,74 +270,58 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
+  if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const insertChart = (kind: ChartKind) => {
     const ops = chartFromSelection(context, kind);
-    if (!ops.length)
+    if (!ops.length) {
       toast("Select the cells to chart first", {
         description: "A header row and label column are picked up.",
       });
+      return;
+    }
     run(ops);
+    const added = ops.find((op) => op.op === "chartPut");
+    if (added && !readOnly) {
+      setChartPicked(added.id);
+      setChartEditing(added.id);
+    }
+  };
+  const chartAction = (id: string, action: ChartAction) => {
+    const chart = doc.charts[id];
+    if (!chart) return;
+    if (action === "edit") setChartEditing(id);
+    else if (action === "delete") {
+      run([{ op: "chartDelete", id }]);
+      setChartPicked(null);
+      if (chartEditing === id) setChartEditing(null);
+    } else if (action === "duplicate") {
+      const copy = sync!.mint();
+      run([duplicateChart(doc, chart, copy)]);
+      setChartPicked(copy);
+    } else void chartImage(id, chartData(doc, values, chart).title, action);
   };
   const overlays: GridOverlay[] = Object.entries(doc.charts)
     .filter(([, chart]) => chart.sheet === sheet)
-    .map(([id, chart]) => ({
-      key: `chart:${id}`,
-      at: chart.at,
-      width: chart.size.width,
-      height: chart.size.height,
-      content: (
-        <div className="group relative h-full">
-          <SheetChart chart={chart} data={chartData(doc, values, chart)} locale={locale} />
-          {readOnly ? null : (
-            <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label="Chart type"
-                      className="text-muted-foreground"
-                    />
-                  }
-                >
-                  <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-36">
-                  {CHART_KINDS.map((each) => (
-                    <DropdownMenuItem
-                      key={each.kind}
-                      disabled={each.kind === chart.kind}
-                      onClick={() =>
-                        run([
-                          {
-                            op: "chartPut",
-                            id,
-                            // A pie draws one series; the rest stay for another kind.
-                            chart: { ...chart, kind: each.kind },
-                          },
-                        ])
-                      }
-                    >
-                      {each.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Remove chart"
-                className="text-muted-foreground"
-                onClick={() => run([{ op: "chartDelete", id }])}
-              >
-                <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-              </Button>
+    .map(([id, chart]) => {
+      const data = chartData(doc, values, chart);
+      return {
+        key: id,
+        at: chart.at,
+        width: chart.size.width,
+        height: chart.size.height,
+        label: data.title ? `Chart: ${data.title}` : "Chart",
+        min: { width: CHART_LIMITS.width.min, height: CHART_LIMITS.height.min },
+        content: (
+          <div className="group relative h-full">
+            <SheetChart id={id} chart={chart} data={data} locale={locale} />
+            <div className="absolute top-2 right-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+              <ChartMenuButton readOnly={readOnly} onAction={(action) => chartAction(id, action)} />
             </div>
-          )}
-        </div>
-      ),
-    }));
+          </div>
+        ),
+      };
+    });
   const cellOf = (at: { r: string; c: string }) => [sheet, at.r, at.c, at.r, at.c];
   const sendToAssistant = async (
     thread: string,
@@ -575,110 +558,137 @@ export default function SheetPanelBody({
               }
               decorations={decorations}
               overlays={overlays}
+              selectedOverlay={pickedChart}
+              onOverlaySelect={setChartPicked}
+              onOverlayChange={(id, change) =>
+                run([
+                  {
+                    op: "chartPatch",
+                    id,
+                    patch: {
+                      at: change.at,
+                      size: {
+                        width: Math.min(CHART_LIMITS.width.max, change.width),
+                        height: Math.min(CHART_LIMITS.height.max, change.height),
+                      },
+                    },
+                  },
+                ])
+              }
+              onOverlayCommand={chartAction}
             />
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-56">
-          <MenuItem
-            icon={Scissor01Icon}
-            label="Cut"
-            disabled={readOnly}
-            onClick={() => {
-              copied.current = copySelection(context, true);
-              void navigator.clipboard?.writeText(copied.current.text);
-            }}
-          />
-          <MenuItem
-            icon={Copy01Icon}
-            label="Copy"
-            onClick={() => {
-              copied.current = copySelection(context, false);
-              void navigator.clipboard?.writeText(copied.current.text);
-            }}
-          />
-          <MenuItem
-            icon={ClipboardIcon}
-            label="Paste"
-            disabled={readOnly}
-            onClick={() => {
-              void navigator.clipboard?.readText().then(paste);
-            }}
-          />
-          <MenuItem
-            icon={CommentAdd01Icon}
-            label="Comment"
-            disabled={readOnly || !!shownThread}
-            onClick={() => setCommenting(true)}
-          />
-          <ContextMenuSeparator />
-          <MenuItem
-            icon={RowInsertIcon}
-            label="Insert rows above"
-            disabled={readOnly}
-            onClick={() => run(insertAtSelection(context, "rows", "before"))}
-          />
-          <MenuItem
-            icon={RowInsertIcon}
-            label="Insert rows below"
-            disabled={readOnly}
-            onClick={() => run(insertAtSelection(context, "rows", "after"))}
-          />
-          <MenuItem
-            icon={ColumnInsertIcon}
-            label="Insert columns left"
-            disabled={readOnly}
-            onClick={() => run(insertAtSelection(context, "columns", "before"))}
-          />
-          <MenuItem
-            icon={ColumnInsertIcon}
-            label="Insert columns right"
-            disabled={readOnly}
-            onClick={() => run(insertAtSelection(context, "columns", "after"))}
-          />
-          <MenuItem
-            icon={RowDeleteIcon}
-            label="Delete rows"
-            disabled={readOnly}
-            onClick={() => run(deleteAtSelection(context, "rows"))}
-          />
-          <MenuItem
-            icon={ColumnDeleteIcon}
-            label="Delete columns"
-            disabled={readOnly}
-            onClick={() => run(deleteAtSelection(context, "columns"))}
-          />
-          <ContextMenuSub>
-            <ContextMenuSubTrigger disabled={readOnly}>
-              <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
-              Insert chart
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="w-40">
-              {CHART_KINDS.map((each) => (
-                <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
-                  {each.label}
-                </ContextMenuItem>
-              ))}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-          <ContextMenuSeparator />
-          <MenuItem
-            icon={SortingAZ01Icon}
-            label="Sort A to Z"
-            disabled={readOnly}
-            onClick={() => run(sortSelection(context, false))}
-          />
-          <MenuItem
-            icon={SortingZA01Icon}
-            label="Sort Z to A"
-            disabled={readOnly}
-            onClick={() => run(sortSelection(context, true))}
-          />
-          <MenuItem
-            icon={Delete02Icon}
-            label="Clear contents"
-            disabled={readOnly}
-            onClick={() => run(clearSelection(context))}
-          />
+          {pickedChart ? (
+            <ChartContextItems
+              readOnly={readOnly}
+              onAction={(action) => chartAction(pickedChart, action)}
+            />
+          ) : (
+            <>
+              <MenuItem
+                icon={Scissor01Icon}
+                label="Cut"
+                disabled={readOnly}
+                onClick={() => {
+                  copied.current = copySelection(context, true);
+                  void navigator.clipboard?.writeText(copied.current.text);
+                }}
+              />
+              <MenuItem
+                icon={Copy01Icon}
+                label="Copy"
+                onClick={() => {
+                  copied.current = copySelection(context, false);
+                  void navigator.clipboard?.writeText(copied.current.text);
+                }}
+              />
+              <MenuItem
+                icon={ClipboardIcon}
+                label="Paste"
+                disabled={readOnly}
+                onClick={() => {
+                  void navigator.clipboard?.readText().then(paste);
+                }}
+              />
+              <MenuItem
+                icon={CommentAdd01Icon}
+                label="Comment"
+                disabled={readOnly || !!shownThread}
+                onClick={() => setCommenting(true)}
+              />
+              <ContextMenuSeparator />
+              <MenuItem
+                icon={RowInsertIcon}
+                label="Insert rows above"
+                disabled={readOnly}
+                onClick={() => run(insertAtSelection(context, "rows", "before"))}
+              />
+              <MenuItem
+                icon={RowInsertIcon}
+                label="Insert rows below"
+                disabled={readOnly}
+                onClick={() => run(insertAtSelection(context, "rows", "after"))}
+              />
+              <MenuItem
+                icon={ColumnInsertIcon}
+                label="Insert columns left"
+                disabled={readOnly}
+                onClick={() => run(insertAtSelection(context, "columns", "before"))}
+              />
+              <MenuItem
+                icon={ColumnInsertIcon}
+                label="Insert columns right"
+                disabled={readOnly}
+                onClick={() => run(insertAtSelection(context, "columns", "after"))}
+              />
+              <MenuItem
+                icon={RowDeleteIcon}
+                label="Delete rows"
+                disabled={readOnly}
+                onClick={() => run(deleteAtSelection(context, "rows"))}
+              />
+              <MenuItem
+                icon={ColumnDeleteIcon}
+                label="Delete columns"
+                disabled={readOnly}
+                onClick={() => run(deleteAtSelection(context, "columns"))}
+              />
+              <ContextMenuSub>
+                <ContextMenuSubTrigger disabled={readOnly}>
+                  <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
+                  Insert chart
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="w-40">
+                  {CHART_KINDS.map((each) => (
+                    <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
+                      {each.label}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+              <ContextMenuSeparator />
+              <MenuItem
+                icon={SortingAZ01Icon}
+                label="Sort A to Z"
+                disabled={readOnly}
+                onClick={() => run(sortSelection(context, false))}
+              />
+              <MenuItem
+                icon={SortingZA01Icon}
+                label="Sort Z to A"
+                disabled={readOnly}
+                onClick={() => run(sortSelection(context, true))}
+              />
+              <MenuItem
+                icon={Delete02Icon}
+                label="Clear contents"
+                disabled={readOnly}
+                onClick={() => run(clearSelection(context))}
+              />
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
       <div
