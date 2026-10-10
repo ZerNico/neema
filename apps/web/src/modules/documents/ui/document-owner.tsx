@@ -1,10 +1,12 @@
-import { File01Icon } from "@hugeicons/core-free-icons";
+import { File01Icon, Table01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
 import { projectMembersQuery } from "~/modules/projects/client/queries.ts";
 import {
   useCallback,
+  Suspense,
+  lazy,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -14,6 +16,9 @@ import {
   useRef,
 } from "react";
 import { useDocument } from "../client/use-document.ts";
+import { useSheet } from "../sheet/client/use-sheet.ts";
+import { SheetPanelActions } from "../sheet/ui/sheet-panel-actions.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
 import type { DocumentAsk, EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
@@ -50,6 +55,9 @@ interface DocumentOwnerProps {
   /** Moves focus to the chat's input, keeping the document's selection for the message. */
   onFocusComposer?: (() => void) | undefined;
 }
+// The grid and the formula engine load with the first open sheet, not the chat.
+const SheetPanelBody = lazy(() => import("../sheet/ui/sheet-panel.tsx"));
+
 interface Session {
   entry: DocumentPanelEntry;
   flush: () => Promise<boolean>;
@@ -157,9 +165,19 @@ function DocumentSession({
   const id = `document:${documentId}`;
   // Only the document open in the panel holds a live connection.
   const controller = useDocument(documentId, selected === id);
+  const isSheet = controller.document?.kind === "sheet";
+  const sheet = useSheet(documentId, selected === id && isSheet);
+  const unpersisted = useCallback(
+    () => controller.unpersisted() || sheet.unpersisted(),
+    [controller, sheet],
+  );
+  const flush = useCallback(async () => {
+    const [text, cells] = await Promise.all([controller.flush(), sheet.flush()]);
+    return text && cells;
+  }, [controller, sheet]);
   useBlocker({
-    shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
-    enableBeforeUnload: controller.unpersisted,
+    shouldBlockFn: async () => unpersisted() && !(await flush()),
+    enableBeforeUnload: unpersisted,
   });
   const { data: me } = useQuery(sessionUserQuery);
   const subtitle = documentSubtitle(controller, me?.id);
@@ -195,12 +213,24 @@ function DocumentSession({
       id,
       title: controller.document?.title ?? "Document",
       subtitle,
-      icon: File01Icon,
+      icon: isSheet ? Table01Icon : File01Icon,
       restorable: true,
-      actions: <DocumentPanelActions controller={controller} toolbarSlot={setToolbarSlot} />,
-      body: <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />,
+      actions: isSheet ? (
+        <SheetPanelActions document={controller.document} />
+      ) : (
+        <DocumentPanelActions controller={controller} toolbarSlot={setToolbarSlot} />
+      ),
+      body: isSheet ? (
+        <Suspense
+          fallback={<Spinner aria-label="Loading sheet" className="text-muted-foreground" />}
+        >
+          <SheetPanelBody controller={sheet} />
+        </Suspense>
+      ) : (
+        <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />
+      ),
     }),
-    [controller, hooks, id, subtitle, toolbarSlot],
+    [controller, hooks, id, isSheet, sheet, subtitle, toolbarSlot],
   );
   // The card opens the request this session last committed, not the one its
   // own render captured: a card published just before the connection landed
@@ -242,7 +272,6 @@ function DocumentSession({
     }),
     [available, controller, failed, id, panel, selected, subtitle],
   );
-  const flush = controller.flush;
   const selectedBlocks = controller.selectedBlocks;
   useEffect(() => {
     publish(documentId, { entry, flush, selectedBlocks });
@@ -250,7 +279,8 @@ function DocumentSession({
   useEffect(() => () => forget(documentId), [documentId, forget]);
   const gone =
     controller.status === "gone" ||
-    (controller.query.isSuccess && controller.query.data === null && !controller.unpersisted());
+    sheet.state?.status === "gone" ||
+    (controller.query.isSuccess && controller.query.data === null && !unpersisted());
   useEffect(() => {
     if (gone) onGone(documentId);
   }, [documentId, gone, onGone]);

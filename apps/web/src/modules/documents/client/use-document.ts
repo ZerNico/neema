@@ -143,9 +143,11 @@ export function useDocument(documentId: string, live: boolean) {
   const query = useQuery(documentQuery(documentId));
   const { data: user } = useQuery(sessionUserQuery);
   const [connections] = useState(() => new Connections());
+  // A sheet has a connection of its own (`useSheet`); its text feed would only say gone.
+  const text = query.data?.kind !== "sheet";
   useEffect(
-    () => (live ? connections.open(documentId) : undefined),
-    [connections, documentId, live],
+    () => (live && text ? connections.open(documentId) : undefined),
+    [connections, documentId, live, text],
   );
   useSyncExternalStore(
     connections.subscribe,
