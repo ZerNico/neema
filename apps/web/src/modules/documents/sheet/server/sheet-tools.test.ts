@@ -88,6 +88,10 @@ function fakeSheets() {
           commit(input.documentId, "a", [{ op: "anchor", thread, at: input.cell }], "model");
         return { outcome: "commented" as const, thread };
       }),
+    discard: (_userId, documentId) =>
+      Effect.sync(() => {
+        rows.delete(documentId);
+      }),
     change: (_userId, input, _guard, decide) =>
       Effect.gen(function* () {
         const row = rows.get(input.documentId)!;
@@ -387,5 +391,24 @@ describe("live sheet tools", () => {
       outcome: "created",
     });
     expect(fake.rows.get("sheet-1")!.doc.settings.locale).toBe("de-DE");
+  });
+
+  it("removes a sheet a streamed call made but never claimed", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    const text = JSON.stringify({
+      title: "Plan",
+      operations: [
+        { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["one"]] },
+        { kind: "setCells", sheet: "Sheet1", start: "A2", rows: [["two"]] },
+      ],
+    });
+    tools.live.start("call-1", "create_sheet");
+    const wrote = fake.nextWrite();
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(0, text.indexOf("A2") - 30)));
+    await wrote;
+    expect(fake.rows.has("sheet-1")).toBe(true);
+    await Effect.runPromise(tools.live.close);
+    expect(fake.rows.has("sheet-1")).toBe(false);
   });
 });

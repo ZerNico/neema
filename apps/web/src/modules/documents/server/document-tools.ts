@@ -291,7 +291,7 @@ const editSheetTool = Tool.make("edit_sheet", {
 
 export type SheetToolService = Pick<
   SheetService["Service"],
-  "create" | "read" | "change" | "assistantComment"
+  "create" | "read" | "change" | "assistantComment" | "discard"
 >;
 export type DocumentToolService = Pick<
   DocumentService["Service"],
@@ -1547,7 +1547,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           const document = state.document;
           if (state.name === "edit_sheet") return yield* undoPreview(state);
           if (!document || !input.liveGuard) return;
-          yield* service.discard(input.userId, document.id, input.liveGuard);
+          yield* input.sheets!.discard(input.userId, document.id, input.liveGuard);
           known = known.filter((each) => each.id !== document.id);
         }).pipe(Effect.catchCause(() => Effect.void)),
       { discard: true },
@@ -1684,7 +1684,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         const current = known.find((each) => each.id === made.id) ?? made;
         return { outcome: "created", ...reference(current) };
       }
-      yield* service
+      yield* input.sheets
         .discard(input.userId, preview.document.id, input.writeGuard)
         .pipe(Effect.catchCause(() => Effect.void));
       known = known.filter((each) => each.id !== preview.document!.id);

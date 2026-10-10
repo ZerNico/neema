@@ -211,6 +211,17 @@ export class SheetService extends Context.Service<
       doc?: SheetDoc,
       notes?: readonly ImportedNote[],
     ): Effect.Effect<EditableDocument, DocumentError | E, R>;
+    /**
+     * Removes a sheet under a guard, as a stopped answer takes back one it was
+     * making, and tells its open editors it is gone. With `ifRevision`, only a
+     * sheet nobody has changed since.
+     */
+    discard<E = never, R = never>(
+      userId: string,
+      documentId: string,
+      guard: DocumentWriteGuard<E, R>,
+      ifRevision?: number,
+    ): Effect.Effect<void, DocumentError | E, R>;
     /** The live document and what its volatile functions read. Null when not this person's. */
     read(
       userId: string,
@@ -1046,8 +1057,35 @@ export class SheetService extends Context.Service<
             );
       }).pipe(Effect.repeat(Schedule.spaced(IDLE)), Effect.forkScoped);
 
+      const discard = <E = never, R = never>(
+        userId: string,
+        documentId: string,
+        guard: DocumentWriteGuard<E, R>,
+        ifRevision?: number,
+      ) =>
+        exclusive(documentId)(
+          Effect.gen(function* () {
+            const removed = yield* transaction((tx) =>
+              Effect.gen(function* () {
+                yield* guard(tx);
+                const document = yield* documents.lock(tx, userId, documentId);
+                if (ifRevision !== undefined && document.revision !== ifRevision) return null;
+                yield* documents.remove(tx, documentId);
+                return document;
+              }),
+            );
+            if (!removed) return;
+            // Open editors hear it now, not at their next access check.
+            const entry = entries.get(documentId);
+            if (entry) yield* PubSub.publish(entry.frames, { type: "gone" });
+            yield* drop(documentId);
+            yield* documentChanged(userId, removed);
+          }),
+        );
+
       return SheetService.of({
         create,
+        discard,
         read: Effect.fn("SheetService.read")(function* (userId, documentId) {
           if (!(yield* policy.can(userId, "documents"))) return null;
           return yield* exclusive(documentId)(
