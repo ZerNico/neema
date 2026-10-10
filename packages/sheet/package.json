@@ -7,11 +7,18 @@
     "./dates": "./src/dates.ts",
     "./locales": "./src/locales.ts",
     "./number-format": "./src/number-format.ts",
-    "./value-parse": "./src/value-parse.ts"
+    "./value-parse": "./src/value-parse.ts",
+    "./engine/parse": "./src/engine/parse.ts",
+    "./engine/evaluate": "./src/engine/evaluate.ts",
+    "./engine/values": "./src/engine/values.ts",
+    "./engine/calculate": "./src/engine/calculate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "pnpm exec vitest run"
+  },
+  "dependencies": {
+    "@formulajs/formulajs": "4.6.1"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

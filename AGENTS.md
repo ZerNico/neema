@@ -319,9 +319,10 @@ All release candidates. Pin exactly; never float to `latest`.
   matched set; re-check the panel's tab dragging on a bump.
 - `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
   a bump.
-- `@office-kit/xlsx` (pre-1.0) and `@formulajs/formulajs` are pinned exact. Formulas are
-  calculated by our own engine on formula.js, not HyperFormula, which is GPL-3.0; keep
-  the calculation MIT unless that decision is revisited. See
+- `@office-kit/xlsx` (pre-1.0, in apps/web) and `@formulajs/formulajs` (the one dependency
+  of `packages/sheet`) are pinned exact. Formulas are calculated by our own engine on
+  formula.js, not HyperFormula, which is GPL-3.0; keep the calculation MIT unless that
+  decision is revisited. See
   [spreadsheets](docs/internals/spreadsheets.md).
 - `@office-kit/docx` (pre-1.0) is pinned exact. It has no decompression limits, so the
   adapter measures every part first; re-check that on a bump. See [word](docs/internals/word.md).

@@ -1,5 +1,5 @@
 import { columnIndex, columnLetters, MAX_COLUMN, MAX_ROW } from "@chat/sheet/a1";
-import { parseFormula, type Node } from "./engine/parse.ts";
+import { parseFormula, type Node } from "@chat/sheet/engine/parse";
 
 /**
  * Functions newer than Excel 2007 are stored with a namespace prefix. Without

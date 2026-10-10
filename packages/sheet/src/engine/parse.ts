@@ -1,4 +1,4 @@
-import { columnIndex, MAX_COLUMN, MAX_ROW, type CellBox } from "@chat/sheet/a1";
+import { columnIndex, MAX_COLUMN, MAX_ROW, type CellBox } from "../a1.ts";
 
 /**
  * A formula this engine does not evaluate: a construct it doesn't parse or a

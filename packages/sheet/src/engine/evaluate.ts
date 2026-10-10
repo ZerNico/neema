@@ -1,4 +1,4 @@
-import { columnLetters, type CellBox } from "@chat/sheet/a1";
+import { columnLetters, type CellBox } from "../a1.ts";
 import {
   errorIn,
   FUNCTIONS,

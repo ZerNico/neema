@@ -15,9 +15,9 @@ import {
   type CellStore,
   type FormulaIssue,
   type StoredFormula,
-} from "./engine/calculate.ts";
-import { XError, type Scalar } from "./engine/evaluate.ts";
-import type { TableShape } from "./engine/parse.ts";
+} from "@chat/sheet/engine/calculate";
+import { XError, type Scalar } from "@chat/sheet/engine/evaluate";
+import type { TableShape } from "@chat/sheet/engine/parse";
 
 export type { CalcReport, FormulaIssue };
 

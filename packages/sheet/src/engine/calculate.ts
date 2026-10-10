@@ -1,4 +1,4 @@
-import { boxRef, columnLetters, MAX_COLUMN, MAX_ROW, type CellBox } from "@chat/sheet/a1";
+import { boxRef, columnLetters, MAX_COLUMN, MAX_ROW, type CellBox } from "../a1.ts";
 import { evaluateFormula, Grid, XError, type Mode, type Scalar, type Scope } from "./evaluate.ts";
 import {
   calls,

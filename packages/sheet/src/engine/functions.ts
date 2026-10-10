@@ -1,7 +1,7 @@
 import * as library from "@formulajs/formulajs";
-import type { CellBox } from "@chat/sheet/a1";
-import { formatValue } from "@chat/sheet/number-format";
-import { clockOf, parseDateText, partsOf, serialOf, weekdayOf } from "@chat/sheet/dates";
+import type { CellBox } from "../a1.ts";
+import { formatValue } from "../number-format.ts";
+import { clockOf, parseDateText, partsOf, serialOf, weekdayOf } from "../dates.ts";
 import {
   Areas,
   CALC,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxRef, parseCell, type CellBox } from "@chat/sheet/a1";
+import { boxRef, parseCell, type CellBox } from "../a1.ts";
 import { calculate, type CellStore, type StoredFormula } from "./calculate.ts";
 import { XError, type Scalar } from "./evaluate.ts";
 

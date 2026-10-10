@@ -26,8 +26,10 @@ formula's cached value, so the model checks its own work (results and errors com
 the edit), previews show values, and any reader sees results. `calcPr fullCalcOnLoad` is
 always set, so Excel recalculates everything on open regardless.
 
-The engine is our own (`server/engine/`): a parser for Excel formula syntax, an evaluator,
-and dependency ordering in `server/calc.ts`. Aggregates, criteria (`SUMIF` and kin),
+The engine is our own, in `packages/sheet/src/engine/` so live sheets can run it in the
+browser too: a parser for Excel formula syntax, an evaluator, and dependency ordering in
+`calculate.ts` over any cell storage. The file tools hand it their workbook through the
+store in `server/calc.ts`. Aggregates, criteria (`SUMIF` and kin),
 lookups, dates, text parsing and formatting, information functions and the dynamic-array
 functions are ours; the long tail of maths, statistics and finance comes from
 `@formulajs/formulajs` (MIT), which never sees an error value or a range with text in it.
@@ -41,7 +43,7 @@ element and the result spills. A plain formula is a legacy one: a range where on
 belongs meets the formula's own row or column (implicit intersection), so `=A1:A3*10` in row
 2 is `A2*10`. Excel 365 still reads every unmarked formula that way, which is why the mark
 matters and why each function says, per argument, whether it takes a value, a reference or
-an array (`kinds` in `engine/functions.ts`).
+an array (`kinds` in the engine's `functions.ts`).
 
 - Formulas already in the file keep the semantics they were saved with. The file library
   drops `cm`, so `server/dynamic-arrays.ts` reads the marks from the raw parts on open and
