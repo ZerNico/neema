@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "d0be2e16-afdf-4702-9872-48b975b067d2",
+  "id": "99d1c0d9-5e30-4a0e-a221-7c1efb436843",
   "prevIds": [
     "71adbd86-27a3-405d-bc52-53a46ace7391"
   ],
@@ -3966,6 +3966,19 @@
     {
       "type": "text",
       "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "file_author",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "document_comments"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
       "notNull": true,
       "dimensions": 0,
       "default": null,
@@ -4283,6 +4296,19 @@
       "default": "now()",
       "generated": null,
       "identity": null,
+      "name": "committed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "documents"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
       "name": "created_at",
       "entityType": "columns",
       "schema": "public",
@@ -4323,6 +4349,19 @@
       "generated": null,
       "identity": null,
       "name": "client_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sheet_clients"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "user_id",
       "entityType": "columns",
       "schema": "public",
       "table": "sheet_clients"
@@ -13941,6 +13980,23 @@
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
       "name": "sheet_clients_document_id_documents_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "sheet_clients"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "user_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "user",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "sheet_clients_user_id_user_id_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "sheet_clients"

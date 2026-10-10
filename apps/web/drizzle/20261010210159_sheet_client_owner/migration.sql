@@ -1,2 +1,0 @@
-ALTER TABLE "sheet_clients" ADD COLUMN "user_id" text;--> statement-breakpoint
-ALTER TABLE "sheet_clients" ADD CONSTRAINT "sheet_clients_user_id_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE CASCADE;
