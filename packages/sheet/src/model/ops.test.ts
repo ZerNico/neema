@@ -164,7 +164,7 @@ describe("moving cells to another sheet", () => {
       },
       1,
     ).doc;
-    const formula = (text: string) => {
+    const read = (text: string) => {
       const parsed = parseFormula(text, { doc, sheet: "s1" });
       if (!("formula" in parsed)) throw new Error("needs growth");
       return parsed.formula;
@@ -180,8 +180,8 @@ describe("moving cells to another sheet", () => {
             sh: "s1",
             cells: [
               { r: "s1.r1", c: "s1.c1", v: 5 },
-              { r: "s1.r1", c: "s1.c2", f: formula("A1*2") },
-              { r: "s1.r1", c: "s1.c3", f: formula("D1+1") },
+              { r: "s1.r1", c: "s1.c2", f: read("A1*2") },
+              { r: "s1.r1", c: "s1.c3", f: read("D1+1") },
             ],
           },
         ],
