@@ -258,6 +258,9 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
   text replacement, measuring the package before the parser, structured previews.
+- `docs/internals/sheets.md`: live sheets. Rows, columns and sheets by stable ID, formulas held by
+  them, deletes as marks that move range endpoints inward, total deterministic apply, per-client
+  sequence numbers.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
   (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
   containment and previews.

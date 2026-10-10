@@ -11,7 +11,12 @@
     "./engine/parse": "./src/engine/parse.ts",
     "./engine/evaluate": "./src/engine/evaluate.ts",
     "./engine/values": "./src/engine/values.ts",
-    "./engine/calculate": "./src/engine/calculate.ts"
+    "./engine/calculate": "./src/engine/calculate.ts",
+    "./model": "./src/model/model.ts",
+    "./model/formula": "./src/model/formula.ts",
+    "./model/ops": "./src/model/ops.ts",
+    "./model/apply": "./src/model/apply.ts",
+    "./model/limits": "./src/model/limits.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -21,6 +26,7 @@
     "@formulajs/formulajs": "4.6.1"
   },
   "devDependencies": {
+    "fast-check": "4.10.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   }
