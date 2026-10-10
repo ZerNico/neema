@@ -2,6 +2,7 @@ import { columnLetters } from "@chat/sheet/a1";
 import { generalText } from "@chat/sheet/number-format";
 import { positions, type Box } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
+import type { Validation } from "@chat/sheet/model/validation";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import { enterCell, selectionBox, type GridContext } from "./commands.ts";
 import { cellStyle } from "./display.ts";
@@ -280,4 +281,29 @@ export function editConditional(
     [list[place], list[to]] = [list[to]!, list[place]!];
   }
   return [{ op: "conditional", sh: context.sheet, list }];
+}
+
+/**
+ * Data Validation set on the selection, or cleared from it with null. Rules
+ * lying wholly inside the selection are replaced; others stay, the new one
+ * winning where they overlap, as Excel keeps one rule per cell.
+ */
+export function setValidation(
+  context: GridContext,
+  validation: Omit<Validation, "id" | "box"> | null,
+): SheetOp[] {
+  const sheet = context.doc.sheet[context.sheet]!;
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  const box = selectionBox(context);
+  const inside = (area: Box) =>
+    (rows.at(area.r1) ?? 0) >= box.top &&
+    (rows.at(area.r2) ?? 0) <= box.bottom &&
+    (cols.at(area.c1) ?? 0) >= box.left &&
+    (cols.at(area.c2) ?? 0) <= box.right;
+  const kept = (sheet.validations ?? []).filter((each) => !inside(each.box));
+  const list = validation ? [...kept, { ...validation, id: context.mint(), box: box.area }] : kept;
+  return list.length === (sheet.validations ?? []).length && !validation
+    ? []
+    : [{ op: "validations", sh: context.sheet, list }];
 }

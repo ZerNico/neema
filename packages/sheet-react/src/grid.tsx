@@ -157,6 +157,9 @@ export interface SheetGridProps {
     readonly active: ReadonlySet<string>;
   } | null;
   readonly onFilterButton?: (col: string, button: HTMLElement) => void;
+  /** The active cell's list to pick from, as Data Validation gives it; null for none. */
+  readonly cellList?: readonly string[] | null;
+  readonly onPickFromList?: (value: string) => void;
   /** The selection dragged by its border this far; `copy` when Alt or Ctrl was held. */
   readonly onDragSelection?: (shift: { rows: number; cols: number }, copy: boolean) => void;
 }
@@ -229,6 +232,8 @@ export function SheetGrid({
   hiddenRows = NO_ROWS,
   filterButtons = null,
   onFilterButton,
+  cellList = null,
+  onPickFromList,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -545,6 +550,26 @@ export function SheetGrid({
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
+    // An open list takes the arrows, Enter and Escape; Alt+Down opens one, as in Excel.
+    if (showList && cellList) {
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+      if (step || event.key === "Enter" || event.key === "Escape" || event.key === "Tab") {
+        event.preventDefault();
+        if (step)
+          setListOpen({
+            at: listKey,
+            picked: Math.min(cellList.length - 1, Math.max(0, listOpen!.picked + step)),
+          });
+        else if (event.key === "Escape") setListOpen(null);
+        else pickFromList(cellList[listOpen!.picked]!);
+        return;
+      }
+    }
+    if (event.altKey && event.key === "ArrowDown" && cellList?.length && !readOnly) {
+      event.preventDefault();
+      setListOpen({ at: listKey, picked: 0 });
+      return;
+    }
     const command = event.metaKey || event.ctrlKey;
     // Find reads, so it works in a sheet that only reads.
     if (command && !event.altKey && event.key.toLowerCase() === "f" && onCommand) {
@@ -1089,6 +1114,70 @@ export function SheetGrid({
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
   };
+  // The active cell's list, open below it; the picked choice moves with the arrow keys.
+  const [listOpen, setListOpen] = useState<{ at: string; picked: number } | null>(null);
+  const listKey = selection ? `${selection.head.r}|${selection.head.c}` : "";
+  const showList = listOpen?.at === listKey && !!cellList?.length && !readOnly;
+  const pickFromList = (value: string) => {
+    setListOpen(null);
+    onPickFromList?.(value);
+    scroller.current?.focus({ preventScroll: true });
+  };
+  const cellListUi =
+    head && cellList?.length && !readOnly && !editing ? (
+      <>
+        <button
+          type="button"
+          aria-label="Choose from list"
+          aria-expanded={showList}
+          tabIndex={-1}
+          className="border-border bg-background text-muted-foreground absolute z-20 flex items-center justify-center rounded-sm border"
+          style={{
+            top: rows.starts[head.row]! + 1,
+            left: cols.starts[head.col + 1]! + 1,
+            width: 16,
+            height: rows.size(head.row) - 2,
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            setListOpen(showList ? null : { at: listKey, picked: 0 });
+          }}
+        >
+          <svg aria-hidden viewBox="0 0 10 10" className="size-2.5" fill="currentColor">
+            <path d="M2 3.5h6L5 7z" />
+          </svg>
+        </button>
+        {showList ? (
+          <ul
+            role="listbox"
+            aria-label="Choices"
+            className="bg-popover text-popover-foreground border-border absolute z-50 max-h-60 min-w-32 overflow-y-auto rounded-md border py-1 text-sm shadow-md"
+            style={{
+              top: rows.starts[head.row + 1]! + 2,
+              left: cols.starts[head.col]!,
+              width: Math.max(cols.size(head.col), 128),
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {cellList.map((choice, index) => (
+              <li
+                key={choice}
+                role="option"
+                aria-selected={index === listOpen!.picked}
+                className="aria-selected:bg-accent aria-selected:text-accent-foreground cursor-pointer truncate px-2 py-0.5"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  pickFromList(choice);
+                }}
+              >
+                {choice}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </>
+    ) : null;
   const fillHandle =
     box && onFill && !readOnly && !editing ? (
       <div
@@ -1517,6 +1606,7 @@ export function SheetGrid({
           {shiftPreview}
           {moveEdges}
           {fillHandle}
+          {cellListUi}
           {box && selectionAccessory && !editing ? (
             <div
               className="absolute z-20"
