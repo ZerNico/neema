@@ -49,6 +49,8 @@ describe("printing a sheet", () => {
     expect((html.match(/<tr>/g) ?? []).length).toBe(2);
     expect((html.match(/<col /g) ?? []).length).toBe(2);
     expect(printHtml({ doc: emptyDoc(), values, locale: EN_US }, "s1")).toBeNull();
+    // No page margin, so the browser adds no header or footer of its own.
+    expect(html).toContain("@page { margin: 0; }");
   });
 
   it("prints a merge as one cell over its shown rows and columns", () => {
