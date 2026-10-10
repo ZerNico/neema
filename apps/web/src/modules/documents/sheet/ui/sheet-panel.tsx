@@ -104,6 +104,16 @@ import { ChartEditor } from "./chart-editor/chart-editor.tsx";
 import { FillOptions, type FillChoice } from "./fill-options.tsx";
 import { SheetChart } from "./sheet-chart.tsx";
 import { SheetCommentsList } from "./sheet-comments.tsx";
+import { FilterMenu } from "./filter-menu.tsx";
+import { SortDialog } from "./sort-dialog.tsx";
+import {
+  filterChoices,
+  setFilterRule,
+  sortFilter,
+  sortSelectionBy,
+  toggleFilter,
+} from "@chat/sheet-react/filter-commands";
+import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
@@ -169,6 +179,9 @@ export default function SheetPanelBody({
   const [commenting, setCommenting] = useState(false);
   // A thread whose card was closed stays closed until the selection moves.
   const [dismissed, setDismissed] = useState<string | null>(null);
+  // A filter button's open menu, and whether the Sort dialog is open.
+  const [filterMenu, setFilterMenu] = useState<{ col: string; anchor: HTMLElement } | null>(null);
+  const [sorting, setSorting] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
   // What Find looks for, and which match is current; null while the bar is closed.
@@ -287,6 +300,7 @@ export default function SheetPanelBody({
     else if (command.kind === "toggle")
       run(formatSelection(context, { [command.property]: style[command.property] ? null : true }));
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
+    else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "undo") sync?.undo();
     else if (command.kind === "redo") sync?.redo();
     else run(clearSelection(context));
@@ -349,6 +363,8 @@ export default function SheetPanelBody({
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
   const cellName = (r: string, c: string) => `${columnLetters(cols.at(c)!)}${rows.at(r)}`;
+  const selectedBoxColumns = () =>
+    cols.ids.slice(cols.at(selectedBox.c1)! - 1, cols.at(selectedBox.c2)!);
   const editedChart = chartEditing ? doc.charts[chartEditing] : undefined;
   // The selection as a range by IDs, corners in order.
   const selectedBox = (() => {
@@ -364,6 +380,19 @@ export default function SheetPanelBody({
   const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const stats = selectionStats(context);
+  const sheetFilter = doc.sheet[sheet]!.filter;
+  const filterAt = sheetFilter ? filterSpan(doc, sheet, sheetFilter) : null;
+  const hiddenByFilter = filteredRows(doc, values, sheet);
+  // The Sort dialog's columns: the selection's, named by its first row's text.
+  const sortColumns = selectedBoxColumns().map((c) => ({
+    id: c,
+    letter: columnLetters(cols.at(c)!),
+    header: cellDisplay(
+      values.value(sheet, selectedBox.r1, c),
+      cellStyle(doc.sheet[sheet]!.cells[selectedBox.r1]?.[c]?.s),
+      locale,
+    ).text,
+  }));
   // In the active cell's format, as Excel's status bar shows them, else as General.
   const shownNumber = (value: number) =>
     style.numberFormat
@@ -377,6 +406,8 @@ export default function SheetPanelBody({
     else if (command.kind === "merge") run(mergeSelection(context, command.merge));
     else if (command.kind === "freeze") run(freezeAt(context, command.freeze));
     else if (command.kind === "clear") run(clearSelectionAs(context, command.what));
+    else if (command.kind === "filter") run(toggleFilter(context));
+    else if (command.kind === "sort") setSorting(true);
     else insertChart(command.chart);
   };
   const insertChart = (kind: ChartKind) => {
@@ -595,6 +626,7 @@ export default function SheetPanelBody({
               onRedo={() => sync?.redo()}
               onCommand={onToolbar}
               extra={commentButtons}
+              filtered={!!sheetFilter}
               preview={(code) => {
                 const value = values.value(sheet, head.r, head.c);
                 const shown = typeof value === "number" ? value : 1234.5;
@@ -716,6 +748,17 @@ export default function SheetPanelBody({
                 onEditingChange={setEditing}
                 onCommit={commit}
                 onCommitSelection={(text) => run(enterSelection(context, text))}
+                hiddenRows={hiddenByFilter}
+                filterButtons={
+                  filterAt
+                    ? {
+                        row: filterAt.header,
+                        cols: filterAt.columns,
+                        active: new Set(Object.keys(sheetFilter!.rules)),
+                      }
+                    : null
+                }
+                onFilterButton={(col, anchor) => setFilterMenu({ col, anchor })}
                 editSource={(at) => cellSource(doc, sheet, at.r, at.c, locale)}
                 onCommand={onCommand}
                 onCopy={(cut) => {
@@ -973,6 +1016,35 @@ export default function SheetPanelBody({
           />
         ) : null}
       </div>
+      {filterMenu && sheetFilter ? (
+        <FilterMenu
+          key={filterMenu.col}
+          anchor={filterMenu.anchor}
+          name={
+            (filterAt &&
+              cellDisplay(values.value(sheet, filterAt.header, filterMenu.col), {}, locale).text) ||
+            columnLetters(cols.at(filterMenu.col) ?? 1)
+          }
+          choices={filterChoices(context, filterMenu.col)}
+          rule={sheetFilter.rules[filterMenu.col]}
+          onApply={(rule) => run(setFilterRule(context, filterMenu.col, rule))}
+          onSort={(descending) => run(sortFilter(context, filterMenu.col, descending))}
+          onClose={() => setFilterMenu(null)}
+        />
+      ) : null}
+      {sorting && !readOnly ? (
+        <SortDialog
+          columns={sortColumns}
+          headersByDefault={
+            selectedBox.r1 !== selectedBox.r2 &&
+            sortColumns.every(
+              (column) => typeof values.value(sheet, selectedBox.r1, column.id) === "string",
+            )
+          }
+          onSort={(keys, headers) => run(sortSelectionBy(context, keys, headers))}
+          onClose={() => setSorting(false)}
+        />
+      ) : null}
       <Popover
         open={cardOpen && cardAnchor !== null}
         onOpenChange={(next) => {

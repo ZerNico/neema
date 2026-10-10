@@ -15,12 +15,14 @@ import {
   DecimalsArrowLeftIcon,
   DecimalsArrowRightIcon,
   EraserIcon,
+  FilterIcon,
   MergeIcon,
   PaintBucketIcon,
   PercentIcon,
   Redo02Icon,
   SigmaIcon,
   SnowflakeIcon,
+  SortingIcon,
   TextAlignCenterIcon,
   TextAlignLeftIcon,
   TextAlignRightIcon,
@@ -61,7 +63,9 @@ export type ToolbarCommand =
   | { readonly kind: "merge"; readonly merge: MergeKind }
   | { readonly kind: "freeze"; readonly freeze: FreezeKind }
   | { readonly kind: "clear"; readonly what: "formats" | "all" }
-  | { readonly kind: "chart"; readonly chart: ChartKind };
+  | { readonly kind: "chart"; readonly chart: ChartKind }
+  | { readonly kind: "filter" }
+  | { readonly kind: "sort" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -131,6 +135,7 @@ export function SheetToolbar({
   onCommand,
   preview,
   extra,
+  filtered = false,
 }: {
   style: CellStyle;
   canUndo: boolean;
@@ -143,6 +148,8 @@ export function SheetToolbar({
   preview: (code: string | null) => string;
   /** Drawn at the toolbar's end, also for a reader: the comment buttons. */
   extra?: ReactNode;
+  /** Whether the sheet has a filter, which the filter button shows pressed. */
+  filtered?: boolean;
 }) {
   if (readOnly)
     return extra ? (
@@ -334,6 +341,19 @@ export function SheetToolbar({
           ))}
         </DropdownMenuContent>
       </ToolbarMenu>
+      <Format
+        icon={FilterIcon}
+        label="Filter"
+        shortcut="⇧⌘L"
+        pressed={filtered}
+        onPress={() => onCommand({ kind: "filter" })}
+      />
+      <Action
+        icon={SortingIcon}
+        label="Sort range"
+        disabled={false}
+        onPress={() => onCommand({ kind: "sort" })}
+      />
       <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
         <DropdownMenuContent align="start" className="w-40">
           {CHART_KINDS.map((each) => (
