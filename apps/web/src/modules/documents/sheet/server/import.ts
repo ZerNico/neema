@@ -15,7 +15,8 @@ import {
 } from "@chat/sheet/model";
 import { parseTyped } from "@chat/sheet/value-parse";
 import type { Chart } from "@chat/sheet/model/chart";
-import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { FileFilter, LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
 import { chartOfFile } from "./chart-files.ts";
 
 export type Imported =
@@ -43,10 +44,43 @@ function grow(sheet: Sheet, id: string, rows: number, cols: number): Sheet {
 }
 
 /** Sizes by position as props by ID. */
-const sized = (entries: ReadonlyArray<readonly [number, number]>, axis: readonly string[]) =>
-  Object.fromEntries(
-    entries.flatMap(([at, size]) => (axis[at - 1] ? [[axis[at - 1]!, { size }]] : [])),
-  );
+/** Sizes and hidden flags by ID, from a file's positions. */
+const sized = (
+  entries: ReadonlyArray<readonly [number, number]>,
+  hidden: readonly number[] | undefined,
+  axis: readonly string[],
+) => {
+  const props: Record<string, { size?: number; hidden?: true }> = {};
+  for (const [at, size] of entries) if (axis[at - 1]) props[axis[at - 1]!] = { size };
+  for (const at of hidden ?? [])
+    if (axis[at - 1]) props[axis[at - 1]!] = { ...props[axis[at - 1]!], hidden: true };
+  return props;
+};
+
+/** A file's AutoFilter by IDs; a column keeping its listed values, and empty cells when it says so. */
+function filterOf(
+  file: FileFilter,
+  rows: readonly string[],
+  cols: readonly string[],
+): SheetFilter | null {
+  const box = parseRange(file.ref);
+  if (!box || !rows[box.bottom - 1] || !cols[box.right - 1]) return null;
+  const rules: Record<string, FilterRule> = {};
+  for (const column of file.columns) {
+    const id = cols[box.left - 1 + column.col];
+    if (!id || box.left + column.col > box.right) continue;
+    rules[id] = { values: [...column.values, ...(column.blank ? [""] : [])] };
+  }
+  return {
+    box: {
+      r1: rows[box.top - 1]!,
+      r2: rows[box.bottom - 1]!,
+      c1: cols[box.left - 1]!,
+      c2: cols[box.right - 1]!,
+    },
+    rules,
+  };
+}
 
 /**
  * A live sheet from a workbook read by position. Every sheet's grid exists
@@ -144,8 +178,11 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
         [id]: {
           ...sheet,
           cells,
-          colProps: sized(each.widths, cols),
-          rowProps: sized(each.heights, rows),
+          colProps: sized(each.widths, each.hiddenCols, cols),
+          rowProps: sized(each.heights, each.hiddenRows, rows),
+          ...(each.filter && filterOf(each.filter, rows, cols)
+            ? { filter: filterOf(each.filter, rows, cols)! }
+            : {}),
           merges,
           freeze: {
             row: frozen && frozen.row > 1 ? (rows[frozen.row - 2] ?? null) : null,

@@ -52,7 +52,10 @@ import {
   listComments,
   listDataValidations,
   listTables,
+  hideColumn,
+  hideRow,
   makeAutoFilter,
+  makeFilterColumn,
   mergeCells,
   setAutoFilter,
   setCell,
@@ -806,10 +809,24 @@ export interface LiveSheetExport {
     readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
     readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
     readonly freeze?: string;
+    readonly hiddenRows?: readonly number[];
+    readonly hiddenCols?: readonly number[];
+    readonly filter?: FileFilter;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
   readonly charts?: readonly FileChart[];
+}
+
+/** An AutoFilter as a file keeps one: its range, and the values each filtered column keeps. */
+export interface FileFilter {
+  readonly ref: string;
+  /** By column counted from the filter's first, 0-based; `blank` keeps empty cells too. */
+  readonly columns: ReadonlyArray<{
+    readonly col: number;
+    readonly values: readonly string[];
+    readonly blank: boolean;
+  }>;
 }
 
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
@@ -871,6 +888,18 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     for (const [column, width] of each.widths) setColumnWidth(sheet, column, width);
     for (const [row, height] of each.heights) setRowHeight(sheet, row, height);
     if (each.freeze) setFreezePanes(sheet, each.freeze);
+    for (const row of each.hiddenRows ?? []) hideRow(sheet, row);
+    for (const column of each.hiddenCols ?? []) hideColumn(sheet, column);
+    if (each.filter)
+      setAutoFilter(
+        sheet,
+        makeAutoFilter({
+          ref: each.filter.ref,
+          filterColumns: each.filter.columns.map((column) =>
+            makeFilterColumn({ colId: column.col, values: column.values, blank: column.blank }),
+          ),
+        }),
+      );
   }
   for (const name of spec.names) addDefinedName(workbook, name);
   for (const chart of spec.charts ?? []) placeChart(workbook, chart);
@@ -898,6 +927,9 @@ export interface LiveSheetImport {
     readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
     readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
     readonly freeze?: string;
+    readonly hiddenRows?: readonly number[];
+    readonly hiddenCols?: readonly number[];
+    readonly filter?: FileFilter;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -1017,7 +1049,30 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       else dropped.add("charts of kinds a live sheet does not draw");
     }
     if (listTables(sheet).length) dropped.add("table formatting (the data stays)");
-    if (getAutoFilter(sheet)) dropped.add("filters");
+    const autoFilter = getAutoFilter(sheet);
+    const filter: FileFilter | undefined = autoFilter
+      ? {
+          ref: autoFilter.ref,
+          columns: autoFilter.filterColumns.flatMap((column) =>
+            column.kind === "filters"
+              ? [{ col: column.colId, values: column.values, blank: !!column.blank }]
+              : [],
+          ),
+        }
+      : undefined;
+    // Rows Excel hid for its filter are the filter's to hide again, not hidden by hand.
+    const filterBox = filter?.columns.length ? parseRange(filter.ref) : null;
+    const hiddenRows: number[] = [];
+    // Empty rows may be hidden too: as far down as a new live sheet reaches.
+    for (let row = 1; row <= Math.max(rows, 1_000); row++)
+      if (
+        getRowDimension(sheet, row)?.hidden &&
+        !(filterBox && row > filterBox.top && row <= filterBox.bottom)
+      )
+        hiddenRows.push(row);
+    const hiddenCols: number[] = [];
+    for (let column = 1; column <= Math.max(cols, 26); column++)
+      if (getColumnDimension(sheet, column)?.hidden) hiddenCols.push(column);
     if (sheet.conditionalFormatting.length) dropped.add("conditional formatting");
     if (listDataValidations(sheet).length) dropped.add("data validation");
     if (listComments(sheet).length) dropped.add("cell notes");
@@ -1031,6 +1086,9 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       widths,
       heights,
       ...(freeze ? { freeze } : {}),
+      ...(hiddenRows.length ? { hiddenRows } : {}),
+      ...(hiddenCols.length ? { hiddenCols } : {}),
+      ...(filter ? { filter } : {}),
     };
   });
   return {

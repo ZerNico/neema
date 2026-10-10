@@ -99,6 +99,58 @@ describe("importing into a live sheet", () => {
     expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 2)!.s!)).toEqual({ strike: true });
   });
 
+  it("keeps hidden rows and columns and a filter through Excel and back", async () => {
+    let original = build([
+      {
+        kind: "setCells",
+        sheet: "Sheet1",
+        start: "A1",
+        rows: [
+          ["Region", "Total", "Note"],
+          ["North", 120, "a"],
+          ["South", 80, "b"],
+          ["North", 40, "c"],
+        ],
+      },
+    ]);
+    original = applyChange(
+      original,
+      {
+        clientId: "t",
+        seq: 9,
+        ops: [
+          { op: "hide", sh: "s1", axis: "columns", ids: ["s1.c3"], hidden: true },
+          { op: "hide", sh: "s1", axis: "rows", ids: ["s1.r6"], hidden: true },
+          {
+            op: "filter",
+            sh: "s1",
+            filter: {
+              box: { r1: "s1.r1", r2: "s1.r4", c1: "s1.c1", c2: "s1.c2" },
+              rules: { "s1.c2": { condition: { op: "greater", value: 50 } } },
+            },
+          },
+        ],
+      },
+      9,
+    ).doc;
+    const values = calculateSheet(original, context);
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original, values)));
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const sheet = imported.doc.sheet.s1!;
+    expect(sheet.colProps["s1.c3"]?.hidden).toBe(true);
+    // Row 4, which only the filter hid, is the filter's again, not hidden by hand.
+    expect([sheet.rowProps["s1.r6"]?.hidden, sheet.rowProps["s1.r4"]?.hidden]).toEqual([
+      true,
+      undefined,
+    ]);
+    expect(sheet.filter).toEqual({
+      box: { r1: "s1.r1", r2: "s1.r4", c1: "s1.c1", c2: "s1.c2" },
+      rules: { "s1.c2": { values: ["120", "80"] } },
+    });
+  });
+
   it("keeps a chart's options through Excel and back", async () => {
     const rows = [
       ["Month", "Revenue", "Costs"],

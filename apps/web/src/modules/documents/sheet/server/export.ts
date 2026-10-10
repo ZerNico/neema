@@ -1,7 +1,9 @@
 import { columnLetters } from "@chat/sheet/a1";
 import { renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
-import type { LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { FileFilter, LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { SheetValues } from "@chat/sheet/model/calc";
+import { filterSpan, filteredRows, shownText, type SheetFilter } from "@chat/sheet/model/filter";
 import { fileChartOf } from "./chart-files.ts";
 
 const address = (row: number, column: number) => `${columnLetters(column)}${row}`;
@@ -11,7 +13,49 @@ const address = (row: number, column: number) => `${columnLetters(column)}${row}
  * formulas as text, and text that would read as a formula escaped as
  * setCells escapes it.
  */
-export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
+/**
+ * A sheet's filter as Excel files keep one: a list of values per column. A
+ * condition, which the file cannot hold here, goes as the values that pass it.
+ */
+function fileFilterOf(
+  doc: SheetDoc,
+  sheet: string,
+  filter: SheetFilter,
+  values: SheetValues | undefined,
+): FileFilter | null {
+  const span = filterSpan(doc, sheet, filter);
+  if (!span) return null;
+  const rows = positions(doc.sheet[sheet]!.rows);
+  const cols = positions(doc.sheet[sheet]!.cols);
+  const [top, left] = [rows.at(span.header)!, cols.at(span.columns[0]!)!];
+  const [bottom, right] = [top + span.body.length, left + span.columns.length - 1];
+  const columns = Object.entries(filter.rules).flatMap(([column, rule]) => {
+    const index = span.columns.indexOf(column);
+    if (index === -1) return [];
+    let kept = rule.values ? [...rule.values] : null;
+    if (rule.condition && values) {
+      // Each value of the column's rows that this column's rule lets through.
+      const only = { ...filter, rules: { [column]: rule } };
+      const view = {
+        ...doc,
+        sheet: { ...doc.sheet, [sheet]: { ...doc.sheet[sheet]!, filter: only } },
+      };
+      const hidden = filteredRows(view, values, sheet);
+      kept = [
+        ...new Set(
+          span.body
+            .filter((r) => !hidden.has(r))
+            .map((r) => shownText(doc, values, sheet, r, column)),
+        ),
+      ];
+    }
+    if (!kept) return [];
+    return [{ col: index, values: kept.filter((each) => each !== ""), blank: kept.includes("") }];
+  });
+  return { ref: `${address(top, left)}:${address(bottom, right)}`, columns };
+}
+
+export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetExport {
   const ids = liveSheets(doc);
   return {
     sheets: ids.map((id) => {
@@ -61,6 +105,21 @@ export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
           const index = at(entry);
           return index !== undefined && each.size !== undefined ? [[index, each.size]] : [];
         });
+      const hiddenOf = (props: typeof sheet.rowProps, at: (id: string) => number | undefined) =>
+        Object.entries(props).flatMap(([entry, each]) => {
+          const index = at(entry);
+          return index !== undefined && each.hidden ? [index] : [];
+        });
+      // Excel does not filter on opening: the rows a filter hides go in hidden, as it saves them.
+      const filtered = values ? [...filteredRows(doc, values, id)] : [];
+      const hiddenRows = [
+        ...new Set([
+          ...hiddenOf(sheet.rowProps, rows.at),
+          ...filtered.flatMap((r) => rows.at(r) ?? []),
+        ]),
+      ].toSorted((a, b) => a - b);
+      const hiddenCols = hiddenOf(sheet.colProps, cols.at);
+      const filter = sheet.filter ? fileFilterOf(doc, id, sheet.filter, values) : null;
       const frozenRow = sheet.freeze.row ? (rows.at(sheet.freeze.row) ?? 0) : 0;
       const frozenCol = sheet.freeze.col ? (cols.at(sheet.freeze.col) ?? 0) : 0;
       return {
@@ -70,6 +129,9 @@ export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
         widths: sized(sheet.colProps, cols.at),
         heights: sized(sheet.rowProps, rows.at),
         ...(frozenRow || frozenCol ? { freeze: address(frozenRow + 1, frozenCol + 1) } : {}),
+        ...(hiddenRows.length ? { hiddenRows } : {}),
+        ...(hiddenCols.length ? { hiddenCols } : {}),
+        ...(filter ? { filter } : {}),
       };
     }),
     names: Object.values(doc.names).map((name) => ({

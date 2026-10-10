@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { calculateSheet } from "@chat/sheet/model/calc";
 import { Effect } from "effect";
 import { liveSheetExport } from "~/modules/documents/sheet/server/export.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
@@ -10,7 +11,12 @@ import { runtime } from "~/server/runtime.ts";
 /** A file name from a title: what a download keeps of it. */
 const fileName = (title: string) => {
   const printable = [...title].filter((character) => character.charCodeAt(0) >= 32).join("");
-  return `${printable.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 120) || "Sheet"}.xlsx`;
+  return `${
+    printable
+      .replace(/[\\/:*?"<>|]+/g, " ")
+      .trim()
+      .slice(0, 120) || "Sheet"
+  }.xlsx`;
 };
 
 /** A live sheet as an Excel workbook, its formulas calculated, for someone who may read it. */
@@ -31,7 +37,14 @@ export const Route = createFileRoute("/api/sheets/$documentId/export")({
         );
         try {
           const bytes = await sheets.run(
-            { kind: "exportLive", sheet: liveSheetExport(read.doc) },
+            {
+              kind: "exportLive",
+              // Values say which rows a filter hides, which Excel expects saved as hidden.
+              sheet: liveSheetExport(
+                read.doc,
+                calculateSheet(read.doc, { revision: read.revision, epoch: 0, ...read.moment }),
+              ),
+            },
             request.signal,
             { owner: session.user.id },
           );
