@@ -9,6 +9,7 @@ import {
   clearSelection,
   copySelection,
   deleteAtSelection,
+  dragSelection,
   enterCell,
   fillFromHandle,
   fillSelection,
@@ -197,5 +198,28 @@ describe("the fill handle", () => {
     })!;
     doc = apply(doc, result.ops);
     expect([shown(doc, 1, 2), shown(doc, 1, 8), shown(doc, 1, 31)]).toEqual(["Tue", "Mon", "Wed"]);
+  });
+});
+
+describe("dragging the selection by its border", () => {
+  it("moves cells so formulas that read them follow, or copies them with their formats", () => {
+    let doc = type(emptyDoc(), 1, 1, "5");
+    doc = type(doc, 1, 2, "=A1*2");
+    doc = type(doc, 2, 1, "12,5%");
+    const moved = dragSelection(context(doc, [1, 1], [2, 1]), { rows: 2, cols: 2 }, false)!;
+    const after = apply(doc, moved.ops);
+    expect(formulaAt(after, 1, 2)).toBe("C3*2");
+    expect(shown(after, 1, 2)).toBe(10);
+    expect(moved.selection).toEqual({ anchor: at(after, 3, 3), head: at(after, 4, 3) });
+    const copied = apply(
+      doc,
+      dragSelection(context(doc, [1, 1], [2, 2]), { rows: 0, cols: 3 }, true)!.ops,
+    );
+    expect(formulaAt(copied, 1, 5)).toBe("D1*2");
+    expect(shown(copied, 1, 1)).toBe(5);
+    const { r, c } = at(copied, 2, 4);
+    expect(copied.sheet.s1!.cells[r]![c]!.s).toBe(
+      doc.sheet.s1!.cells[at(doc, 2, 1).r]![at(doc, 2, 1).c]!.s,
+    );
   });
 });

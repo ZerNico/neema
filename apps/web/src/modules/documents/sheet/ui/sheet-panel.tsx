@@ -29,6 +29,7 @@ import {
   clearSelection,
   copySelection,
   deleteAtSelection,
+  dragSelection,
   enterCell,
   fillFromHandle,
   fillSelection,
@@ -591,6 +592,12 @@ export default function SheetPanelBody({
                   ])
                 }
                 onOverlayCommand={chartAction}
+                onDragSelection={(shift, copy) => {
+                  const result = dragSelection(context, shift, copy);
+                  if (!result || readOnly) return;
+                  run(result.ops);
+                  select(result.selection);
+                }}
                 onFill={(fill) => {
                   const result = fillFromHandle(context, fill);
                   if (!result || readOnly) return;

@@ -240,6 +240,36 @@ describe("the grid's fill handle", () => {
   });
 });
 
+describe("dragging the selection's border", () => {
+  it("reports the cells it moved by, and copying with Alt held", () => {
+    const drags: unknown[] = [];
+    render(
+      <SheetGrid
+        doc={emptyDoc()}
+        sheet="s1"
+        values={calculateSheet(emptyDoc(), { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(2, 2), head: at(3, 3) }}
+        onSelectionChange={() => {}}
+        label="Budget"
+        onCommit={() => {}}
+        onDragSelection={(shift, copy) => drags.push([shift, copy])}
+      />,
+    );
+    const edge = document.querySelector('[data-move-edge="top"]')!;
+    fireEvent.pointerDown(edge, { button: 0, clientX: 70, clientY: 20 });
+    fireEvent.pointerMove(window, { clientX: 70 + 64 * 2, clientY: 20 + 20 * 3 });
+    fireEvent.pointerUp(window, { altKey: true });
+    fireEvent.pointerDown(edge, { button: 0, clientX: 70, clientY: 20 });
+    fireEvent.pointerMove(window, { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(drags).toEqual([
+      [{ rows: 3, cols: 2 }, true],
+      [{ rows: -1, cols: -1 }, false],
+    ]);
+  });
+});
+
 describe("dragging an overlay's handles", () => {
   const place = { top: 100, left: 100, width: 200, height: 100 };
   const min = { width: 50, height: 50 };

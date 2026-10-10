@@ -123,6 +123,8 @@ export interface SheetGridProps {
   readonly onOverlayCommand?: (key: string, command: OverlayCommand) => void;
   /** Without this, the selection has no fill handle. */
   readonly onFill?: (fill: GridFill) => void;
+  /** The selection dragged by its border this far; `copy` when Alt or Ctrl was held. */
+  readonly onDragSelection?: (shift: { rows: number; cols: number }, copy: boolean) => void;
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
@@ -184,6 +186,7 @@ export function SheetGrid({
   onOverlayChange,
   onOverlayCommand,
   onFill,
+  onDragSelection,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -734,6 +737,78 @@ export function SheetGrid({
         })()
       : null;
 
+  const [shifting, setShifting] = useState<{ rows: number; cols: number } | null>(null);
+  /** The cell under a point on the page, by the main pane's coordinates. */
+  const cellUnder = (at: { clientX: number; clientY: number }) => {
+    const rect = content.current!.getBoundingClientRect();
+    return { row: rows.indexAt(at.clientY - rect.top), col: cols.indexAt(at.clientX - rect.left) };
+  };
+  /** Drags the selection by its border, a whole number of cells at a time. */
+  const startShift = (event: PointerEvent) => {
+    if (event.button !== 0 || !box) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const from = cellUnder(event);
+    const limits = { up: -box.top, left: -box.left };
+    let current: { rows: number; cols: number } | null = null;
+    const move = (next: globalThis.PointerEvent) => {
+      const at = cellUnder(next);
+      current = {
+        rows: Math.max(limits.up, at.row - from.row),
+        cols: Math.max(limits.left, at.col - from.col),
+      };
+      setShifting(current.rows || current.cols ? current : null);
+    };
+    const end = (last: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      setShifting(null);
+      if (current && (current.rows || current.cols) && last.type === "pointerup")
+        onDragSelection?.(current, last.altKey || last.ctrlKey || last.metaKey);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
+  // Thin strips on the selection's border that pick it up; the cells inside keep their clicks.
+  const moveEdges =
+    box && onDragSelection && !readOnly && !editing
+      ? (() => {
+          const [top, left] = [rows.starts[box.top]!, cols.starts[box.left]!];
+          const [bottom, right] = [rows.starts[box.bottom + 1]!, cols.starts[box.right + 1]!];
+          const edges = [
+            { key: "top", top: top - 3, left, width: right - left, height: 5 },
+            { key: "bottom", top: bottom - 2, left, width: right - left - 6, height: 5 },
+            { key: "left", top, left: left - 3, width: 5, height: bottom - top },
+            { key: "right", top, left: right - 2, width: 5, height: bottom - top - 6 },
+          ];
+          return edges.map(({ key: edge, ...place }) => (
+            <div
+              key={edge}
+              aria-hidden
+              data-move-edge={edge}
+              className="absolute z-20 cursor-move"
+              style={place}
+              onPointerDown={startShift}
+            />
+          ));
+        })()
+      : null;
+  const shiftPreview =
+    box && shifting ? (
+      <div
+        aria-hidden
+        className="border-primary pointer-events-none absolute z-10 border-2 border-dashed"
+        style={{
+          top: rows.starts[Math.min(rows.ids.length - 1, box.top + shifting.rows)],
+          left: cols.starts[Math.min(cols.ids.length - 1, box.left + shifting.cols)],
+          height: rows.starts[box.bottom + 1]! - rows.starts[box.top]!,
+          width: cols.starts[box.right + 1]! - cols.starts[box.left]!,
+        }}
+      />
+    ) : null;
+
   const selectionBox = box && (
     <div
       aria-hidden
@@ -967,6 +1042,8 @@ export function SheetGrid({
           {others}
           {selectionBox}
           {fillPreview}
+          {shiftPreview}
+          {moveEdges}
           {fillHandle}
           {overlays.flatMap((overlay) => {
             const row = rowIndex.get(overlay.at.r);

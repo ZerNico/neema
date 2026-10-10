@@ -347,6 +347,67 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
 }
 
 /**
+ * The selection dragged by its border `rows` down and `cols` right: moved, as
+ * a cut and paste would, or copied with its formats when Alt or Ctrl was held.
+ */
+export function dragSelection(
+  context: GridContext,
+  shift: { readonly rows: number; readonly cols: number },
+  copy: boolean,
+): { ops: SheetOp[]; selection: SheetSelection } | null {
+  const box = selectionBox(context);
+  const top = Math.max(1, box.top + shift.rows);
+  const left = Math.max(1, box.left + shift.cols);
+  if (top === box.top && left === box.left) return null;
+  const height = box.bottom - box.top;
+  const width = box.right - box.left;
+  const grow = grower(context);
+  grow.ensure(context.sheet, top + height, left + width);
+  const rows = positions(grow.doc.sheet[context.sheet]!.rows).ids;
+  const cols = positions(grow.doc.sheet[context.sheet]!.cols).ids;
+  const to = { r: rows[top - 1]!, c: cols[left - 1]! };
+  const selection = {
+    anchor: to,
+    head: { r: rows[top + height - 1]!, c: cols[left + width - 1]! },
+  };
+  if (!copy)
+    return {
+      ops: [...grow.ops, { op: "move", sh: context.sheet, box: box.area, to }],
+      selection,
+    };
+  const sheet = grow.doc.sheet[context.sheet]!;
+  const cells: CellWrite[] = [];
+  const formats: SheetOp[] = [];
+  box.rowIds.forEach((r, y) =>
+    box.colIds.forEach((c, x) => {
+      const cell = sheet.cells[r]?.[c];
+      const at = { r: rows[top - 1 + y]!, c: cols[left - 1 + x]! };
+      if (cell?.f) {
+        const moved = copyFormula(
+          cell.f,
+          { rows: top - box.top, cols: left - box.left },
+          { doc: grow.doc, sheet: context.sheet },
+        );
+        cells.push("formula" in moved ? { ...at, f: moved.formula } : { ...at, v: "#REF!" });
+      } else cells.push({ ...at, v: cell?.v ?? null });
+      const own = cell?.s ? (JSON.parse(cell.s) as Record<string, string | number | boolean>) : {};
+      const there = sheet.cells[at.r]?.[at.c]?.s;
+      const patch: Record<string, string | number | boolean | null> = { ...own };
+      for (const key of Object.keys(there ? (JSON.parse(there) as object) : {}))
+        if (!(key in own)) patch[key] = null;
+      if (Object.keys(patch).length)
+        formats.push({
+          op: "format",
+          sh: context.sheet,
+          area: { r1: at.r, r2: at.r, c1: at.c, c2: at.c },
+          patch,
+        });
+    }),
+  );
+  return { ops: [...grow.ops, { op: "set", sh: context.sheet, cells }, ...formats], selection };
+}
+
+/**
  * What a fill handle drag writes, and the selection grown to cover it. A
  * double-click fills down as far as the column beside the selection holds
  * values, the left one first, as Excel does.
