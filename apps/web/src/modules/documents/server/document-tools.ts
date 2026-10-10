@@ -200,7 +200,7 @@ const readTool = Tool.make("read_chat_document", {
 });
 const commentTool = Tool.make("comment_on_document", {
   description:
-    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short: a card holds about 40 characters a line. You never resolve a thread; the people in it do.",
+    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short and plain: a card holds about 40 characters a line and shows text as written, so no Markdown. You never resolve a thread; the people in it do.",
   parameters: Schema.Struct({
     documentId: Schema.optionalKey(transport(DocumentId)),
     thread: Schema.optionalKey(transport(CommentParams.fields.thread)),
