@@ -422,6 +422,8 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "4" });
     const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     expect(input.value).toBe("4");
+    // The caret follows the character typed to begin, so the next one lands after it.
+    expect([input.selectionStart, input.selectionEnd]).toEqual([1, 1]);
     fireEvent.change(input, { target: { value: "42" } });
     // Alt+Enter breaks the line at the caret instead of committing.
     input.setSelectionRange(1, 1);
@@ -435,6 +437,7 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "F2" });
     const editor = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     expect(editor.value).toBe("=A1*2");
+    expect(editor.selectionStart).toBe(5);
     // Editing an existing value, arrows move the caret; Escape drops the edit.
     fireEvent.keyDown(editor, { key: "ArrowLeft" });
     fireEvent.keyDown(editor, { key: "Escape" });

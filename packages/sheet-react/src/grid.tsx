@@ -1637,6 +1637,15 @@ export function SheetGrid({
     editing && rowIndex.has(editing.at.r) && colIndex.has(editing.at.c)
       ? rectOf({ anchor: editing.at, head: editing.at })
       : null;
+  // An edit begun shows its caret after what is there, as Excel's does; a focused textarea's
+  // caret would otherwise start before the character typed to begin it.
+  const editingCell = editing ? `${editing.at.r}|${editing.at.c}` : null;
+  const editorShown = !!editorRect;
+  useLayoutEffect(() => {
+    const input = editorInput.current;
+    if (!input || editingCell === null || !editorShown) return;
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, [editingCell, editorShown]);
   /** Which pane the cell being edited is drawn in, so its input sits over it. */
   const editingPane = (() => {
     if (!editing) return null;
