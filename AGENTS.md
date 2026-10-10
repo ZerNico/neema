@@ -116,7 +116,8 @@ edit the wrong thing.
 3. **Vitest projects are by extension.** `--project unit` is `src/**/*.test.ts`,
    `--project ui` is `src/**/*.test.tsx`, `--project integration` is
    `tests/integration/**`. Running a `.test.tsx` under `unit` prints "No test
-   files found" and exits green. That is not a pass.
+   files found" and exits green. That is not a pass. A package under `packages/`
+   runs its own `vitest.config.ts` (`pnpm --filter @chat/sheet test`), not `--project`.
 4. **pnpm settings live in `pnpm-workspace.yaml`.** A `pnpm` block left in
    `package.json` is silently ignored, and a patched dependency then simply does
    not apply while the build stays green. Verify a patch by grepping
