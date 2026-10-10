@@ -61,6 +61,9 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
+import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
+import { sheetLocale } from "@chat/sheet/locales";
+import { createProjectSheet } from "~/modules/documents/sheet/server/sheet-functions.ts";
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
 import { projectChatsQuery, projectQuery } from "../client/queries.ts";
@@ -470,8 +473,20 @@ function NewDocumentDialog({
   const id = useId();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<"text" | "sheet">("text");
   const save = useMutation({
-    mutationFn: () => createProjectDocument({ data: { projectId, title: title.trim() } }),
+    mutationFn: () =>
+      kind === "sheet"
+        ? createProjectSheet({
+            data: {
+              projectId,
+              title: title.trim(),
+              // A new sheet types and shows numbers as this person does, and NOW reads their clock.
+              locale: sheetLocale(navigator.language).id,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            },
+          })
+        : createProjectDocument({ data: { projectId, title: title.trim() } }),
     onSuccess: async (document) => {
       onCreated(document.id);
       await queryClient.invalidateQueries({ queryKey: ["projects", "documents", projectId] });
@@ -491,7 +506,9 @@ function NewDocumentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
-          <DialogDescription>A blank document everyone in the project can edit.</DialogDescription>
+          <DialogDescription>
+            A blank document or sheet everyone in the project can edit.
+          </DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -501,6 +518,29 @@ function NewDocumentDialog({
           }}
         >
           <FieldGroup>
+            <RadioGroup
+              value={kind}
+              onValueChange={(value) => setKind(value === "sheet" ? "sheet" : "text")}
+              aria-label="Kind of document"
+              className="grid-cols-2"
+            >
+              {(
+                [
+                  ["text", "Document", "Text to write and format"],
+                  ["sheet", "Sheet", "Rows and columns with formulas"],
+                ] as const
+              ).map(([value, name, about]) => (
+                <Field key={value} orientation="horizontal">
+                  <RadioGroupItem value={value} id={`${id}-${value}`} disabled={save.isPending} />
+                  <FieldLabel htmlFor={`${id}-${value}`}>
+                    <span className="flex flex-col gap-0.5">
+                      <span>{name}</span>
+                      <span className="text-muted-foreground text-xs font-normal">{about}</span>
+                    </span>
+                  </FieldLabel>
+                </Field>
+              ))}
+            </RadioGroup>
             <Field>
               <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
               <Input
@@ -508,7 +548,7 @@ function NewDocumentDialog({
                 value={title}
                 maxLength={200}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Launch checklist"
+                placeholder={kind === "sheet" ? "Budget" : "Launch checklist"}
                 disabled={save.isPending}
                 autoFocus
               />
@@ -520,7 +560,7 @@ function NewDocumentDialog({
               Cancel
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!title.trim()}>
-              Create document
+              {kind === "sheet" ? "Create sheet" : "Create document"}
             </PendingButton>
           </DialogFooter>
         </form>
