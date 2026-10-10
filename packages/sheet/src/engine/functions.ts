@@ -1625,3 +1625,19 @@ function toLine(args: Value[], call: Call, column: boolean): Value {
 
 /** The first error among the arguments a function would read, so formula.js never sees one. */
 export const errorIn = (args: readonly Value[]) => firstError(args.flatMap(flat));
+
+/** Every function a formula may call, by name, sorted: the engine's own and the library's. */
+export function functionNames(): readonly string[] {
+  const names = new Set(Object.keys(FUNCTIONS));
+  const walk = (node: unknown, prefix: string) => {
+    if (!node || (typeof node !== "object" && typeof node !== "function")) return;
+    for (const [key, child] of Object.entries(node)) {
+      if (!/^[A-Z][A-Z0-9]*$/.test(key)) continue;
+      const name = prefix ? `${prefix}.${key}` : key;
+      if (typeof child === "function") names.add(name);
+      walk(child, name);
+    }
+  };
+  walk(libraryTable, "");
+  return [...names].toSorted();
+}

@@ -13,6 +13,7 @@
     "./engine/evaluate": "./src/engine/evaluate.ts",
     "./engine/values": "./src/engine/values.ts",
     "./engine/calculate": "./src/engine/calculate.ts",
+    "./engine/functions": "./src/engine/functions.ts",
     "./model": "./src/model/model.ts",
     "./model/formula": "./src/model/formula.ts",
     "./model/ops": "./src/model/ops.ts",
