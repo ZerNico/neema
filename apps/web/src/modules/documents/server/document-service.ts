@@ -27,7 +27,6 @@ import {
   blockIdOf,
   ensureIds,
   findBlocks,
-  isBlock,
   plannedIds,
   withFreshIds,
 } from "../editor/block-ids.ts";
@@ -41,6 +40,7 @@ import {
   type TreeEdit,
 } from "../editor/tree-edit.ts";
 import { blockHash } from "../editor/tree.ts";
+import { overCap, summarize } from "../editor/summary.ts";
 import { presenceUser } from "../presence-user.ts";
 import { detachedThreads, quoteRange } from "../editor/comments.ts";
 import { squareTables } from "../editor/tables.ts";
@@ -48,7 +48,6 @@ import {
   documentSchema,
   parseMarkdown,
   replaceDifference,
-  toMarkdown,
   writeDifference,
 } from "../editor/markdown.ts";
 import {
@@ -137,12 +136,6 @@ const decode =
     Schema.decodeUnknownEffect(schema)(input, { onExcessProperty: "error" }).pipe(
       Effect.mapError(() => new DocumentRejected({ reason })),
     );
-const withinCap = (length: number) =>
-  length > DOCUMENT_LIMITS.chars
-    ? Effect.fail(
-        new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.chars} characters` }),
-      )
-    : Effect.void;
 /** Steps rebuilt from JSON and applied in order; any that does not fit the schema refuses all. */
 const applySteps = (doc: Node, json: ReadonlyArray<Record<string, unknown>>) =>
   Effect.try({
@@ -204,11 +197,6 @@ const lockProjectForEditing = (tx: DbTx, userId: string, projectId: string) =>
     if (!projectCan.edit(role))
       return yield* new DocumentRejected({ reason: "this project is read-only for you" });
   });
-const attributeChars = (attrs: Record<string, unknown>) => {
-  let total = 0;
-  for (const value of Object.values(attrs)) if (typeof value === "string") total += value.length;
-  return total;
-};
 /** A value the schema's attributes hold: anything else, an object above all, is a client's invention. */
 const plainValue = (value: unknown) =>
   value === null || ["string", "number", "boolean"].includes(typeof value);
@@ -238,31 +226,16 @@ const wellTyped = (node: Node) => {
       return true;
   }
 };
-/**
- * The size limits Markdown length cannot see, for every author: blocks that
- * write nothing (an empty paragraph, a planned section), and attribute text
- * (IDs, intents, links, comment threads) under a budget of its own. The
- * Markdown cap itself is the one the editor measures, so the two agree.
- */
-const withinTreeCap = (doc: Node, markdownChars = 0) => {
-  let blocks = 0;
-  let attributes = 0;
+/** Refuses a tree a client invented or one past the size limits, for every author. */
+const withinTreeCap = (doc: Node) => {
   let malformed = false;
   doc.descendants((node) => {
     malformed ||= !wellTyped(node);
-    if (isBlock(node)) blocks++;
-    attributes += attributeChars(node.attrs);
-    for (const mark of node.marks) attributes += attributeChars(mark.attrs);
-    return true;
+    return !malformed;
   });
   if (malformed) return Effect.fail(new DocumentRejected({ reason: "invalid document update" }));
-  if (blocks > DOCUMENT_LIMITS.blocks)
-    return Effect.fail(
-      new DocumentRejected({ reason: `document exceeds ${DOCUMENT_LIMITS.blocks} blocks` }),
-    );
-  if (attributes > DOCUMENT_LIMITS.chars)
-    return Effect.fail(new DocumentRejected({ reason: "document holds too much hidden data" }));
-  return withinCap(markdownChars);
+  const over = overCap(doc);
+  return over ? Effect.fail(new DocumentRejected({ reason: over })) : Effect.void;
 };
 /** The owned blocks of a live edit as one sibling range, or null if a person touched them. */
 const ownedRange = (doc: Node, live: LiveEdit) => {
@@ -641,8 +614,8 @@ export class DocumentService extends Context.Service<
         author: Author,
       ) =>
         Effect.gen(function* () {
-          const content = toMarkdown(doc);
-          yield* withinTreeCap(doc, content.length);
+          yield* withinTreeCap(doc);
+          const summary = summarize(doc);
           const now = yield* Clock.currentTimeMillis;
           const generation = author.origin === "model" ? yield* GenerationFence : null;
           const kept = steps.map((step) => ({
@@ -680,7 +653,7 @@ export class DocumentService extends Context.Service<
             );
           }
           const document = yield* documents.write(tx, author.userId, documentId, {
-            content,
+            ...summary,
             revision,
             lastEditedBy: author.origin,
             lastEditorUserId: author.userId,
@@ -802,8 +775,6 @@ export class DocumentService extends Context.Service<
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
           const doc = buildDocument(parsed.content, parsed.outline);
           // Stored as the editor will write it back, so the next read matches.
-          const content = toMarkdown(doc);
-          yield* withinCap(content.length);
           yield* withinTreeCap(doc);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
@@ -824,7 +795,7 @@ export class DocumentService extends Context.Service<
               else yield* lockProjectForEditing(tx, userId, owner.projectId);
               return yield* documents.create(tx, userId, owner, {
                 title: parsed.title,
-                content,
+                ...summarize(doc),
                 // Only a chat's document dies with the answer that made it.
                 createdByMessageId:
                   "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,
@@ -887,7 +858,7 @@ export class DocumentService extends Context.Service<
               if (input.ifRevision !== undefined && document.revision !== input.ifRevision)
                 return yield* new DocumentRejected({ reason: EDITED_MEANWHILE });
               const next = buildDocument(input.content, input.outline);
-              yield* withinCap(toMarkdown(next).length);
+              yield* withinTreeCap(next);
               return {
                 result: { document },
                 tr: ensureIds(replaceDifference(new Transform(doc), next)),

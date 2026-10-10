@@ -14,7 +14,6 @@ import {
   useRef,
 } from "react";
 import { useDocument } from "../client/use-document.ts";
-import { taskProgress } from "../task-items.ts";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
 import type { DocumentAsk, EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
@@ -235,9 +234,9 @@ function DocumentSession({
         : controller.error
           ? "Changes not saved yet"
           : subtitle,
-      tasks: available ? taskProgress(controller.content) : null,
+      tasks: controller.document?.tasks ?? null,
       inProject: available ? controller.document?.projectId != null : null,
-      chars: controller.content.length,
+      chars: controller.document?.chars ?? 0,
       expanded: selected === id,
       open: available ? () => panel.open(latestRequest.current) : null,
       retry: failed

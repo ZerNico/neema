@@ -368,7 +368,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     ...(document.canEdit ? {} : { readOnly: true as const }),
     revision: document.revision,
     lastEditedBy: document.lastEditedBy,
-    chars: document.content.length,
+    chars: document.chars,
   });
   const listing = (): Result => ({
     outcome: "listed",
@@ -1200,7 +1200,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   const othersXml = (current: EditableDocument | null) =>
     known
       .filter((document) => document.id !== current?.id)
-      .map((document) => `<document${header(document, { chars: document.content.length })}/>`)
+      .map((document) => `<document${header(document, { chars: document.chars })}/>`)
       .join("\n");
   const stage = (text: string, documentId: string, revision: number, blocks: SeenBlock[]) => {
     staged.set(text, { documentId, revision, blocks });

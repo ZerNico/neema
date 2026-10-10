@@ -165,7 +165,10 @@ export interface EditableDocument {
   projectId: string | null;
   createdByMessageId?: string | null;
   title: string;
-  content: string;
+  /** Characters of text, as the size cap counts them. */
+  chars: number;
+  /** Its task items, done and in all; null when it has none. */
+  tasks: { done: number; total: number } | null;
   revision: number;
   lastEditedBy: "user" | "model";
   lastEditorUserId?: string | null;

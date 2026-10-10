@@ -190,6 +190,10 @@ describe("loadConversationDetail", () => {
   });
 
   it("projects conversation document summaries without their source", async () => {
+    const privateSource = (text: string) => ({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+    });
     const userId = await run(makeUser());
     const thread = await run(seedThread(userId, "Document thread"));
     const firstId = uuidv7();
@@ -201,17 +205,15 @@ describe("loadConversationDetail", () => {
             id: secondId,
             conversationId: thread.conversationId,
             title: "Second",
-            content: "PRIVATE SECOND SOURCE",
             lastEditedBy: "model",
-            snapshot: { type: "doc", content: [] },
+            snapshot: privateSource("PRIVATE SECOND SOURCE"),
           },
           {
             id: firstId,
             conversationId: thread.conversationId,
             title: "First",
-            content: "PRIVATE FIRST SOURCE",
             lastEditedBy: "user",
-            snapshot: { type: "doc", content: [] },
+            snapshot: privateSource("PRIVATE FIRST SOURCE"),
           },
         ]),
       ),

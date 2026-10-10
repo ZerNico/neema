@@ -2,6 +2,7 @@ import type { Node } from "@tiptap/pm/model";
 import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { ensureIds } from "~/modules/documents/editor/block-ids.ts";
+import { summarize } from "~/modules/documents/editor/summary.ts";
 import {
   documentSchema,
   parseMarkdown,
@@ -15,6 +16,17 @@ import type {
   PushDocumentInput,
   PushDocumentResult,
 } from "~/modules/documents/schema.ts";
+
+/** A stored row as tests write it: Markdown in, the summary derived like the server's. */
+export type SeedDocument = Omit<EditableDocument, "chars" | "tasks"> & { content: string };
+
+const summaryOf = (doc: Node) => {
+  const { textLength, tasksDone, tasksTotal } = summarize(doc);
+  return {
+    chars: textLength,
+    tasks: tasksTotal ? { done: tasksDone, total: tasksTotal } : null,
+  };
+};
 
 /**
  * A signed-in device with nothing saved: the app sets the cache owner before
@@ -58,7 +70,7 @@ export function fakeDocumentServer() {
     }
     found.row = {
       ...found.row,
-      content: toMarkdown(found.doc),
+      ...summaryOf(found.doc),
       revision: found.steps.length,
       lastEditedBy: by,
     };
@@ -125,10 +137,11 @@ export function fakeDocumentServer() {
   return {
     EventSource: FakeEventSource,
     pushes,
-    seed(row: EditableDocument) {
+    seed({ content, ...row }: SeedDocument) {
+      const doc = ensureIds(new Transform(parseMarkdown(content))).doc;
       documents.set(row.id, {
-        doc: ensureIds(new Transform(parseMarkdown(row.content))).doc,
-        row: { ...row, revision: 0 },
+        doc,
+        row: { ...row, ...summaryOf(doc), revision: 0 },
         steps: [],
         feeds: new Set(),
       });

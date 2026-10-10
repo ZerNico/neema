@@ -54,6 +54,7 @@ import {
   CustomToolRuntime,
   type CustomToolRunResult,
 } from "~/modules/custom-tools/server/runtime.ts";
+import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
@@ -2055,11 +2056,18 @@ describe("conversation documents", () => {
         }),
       ),
     );
+  /** A chat's documents, each with its tree as Markdown, made on demand. */
   const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
     runtime.runPromise(
-      Effect.flatMap(DocumentService, (service) =>
-        service.list(seed.userId, { conversationId: seed.conversation.id }),
-      ),
+      Effect.gen(function* () {
+        const service = yield* DocumentService;
+        const listed = yield* service.list(seed.userId, { conversationId: seed.conversation.id });
+        return yield* Effect.forEach(listed, (document) =>
+          service
+            .read(seed.userId, document.id)
+            .pipe(Effect.map((read) => ({ ...document, content: toMarkdown(read!.doc) }))),
+        );
+      }),
     );
   // The tool-role messages of a prompt: what the continuation transcript feeds
   // back, as opposed to the trailing data, which carries the document on purpose.
@@ -2538,23 +2546,29 @@ describe("conversation documents", () => {
           ),
         ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
       };
+      // Every document of the chat or its project, private ones included, read from the tree.
       const stored = () =>
         runtime.runPromise(
-          Effect.flatMap(Db, (db) =>
-            db
-              .select({
-                id: documents.id,
-                projectId: documents.projectId,
-                content: documents.content,
-              })
+          Effect.gen(function* () {
+            const db = yield* Db;
+            const service = yield* DocumentService;
+            const rows = yield* db
+              .select({ id: documents.id, projectId: documents.projectId })
               .from(documents)
               .where(
                 or(
                   eq(documents.conversationId, seed.conversation.id),
                   eq(documents.projectId, projectId),
                 ),
-              ),
-          ),
+              );
+            return yield* Effect.forEach(rows, (row) =>
+              service
+                .read(seed.userId, row.id)
+                .pipe(
+                  Effect.map((read) => ({ ...row, content: read ? toMarkdown(read.doc) : "" })),
+                ),
+            );
+          }),
         );
       try {
         const sent = await send(seed);

@@ -12,6 +12,7 @@ import {
   projectMemories,
   user,
 } from "~/db/schema/index.ts";
+import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
@@ -74,6 +75,9 @@ const memory = <A, E>(body: (service: ProjectMemoryService["Service"]) => Effect
   run(Effect.flatMap(ProjectMemoryService, body));
 const docs = <A, E>(body: (service: DocumentService["Service"]) => Effect.Effect<A, E>) =>
   run(Effect.flatMap(DocumentService, body));
+/** The stored tree as Markdown, as one member may read it. */
+const markdownOf = (userId: string, documentId: string) =>
+  docs((s) => s.read(userId, documentId)).then((read) => toMarkdown(read!.doc));
 const newProject = (owner: string, name = "Launch") =>
   projects((s) => s.create(owner, { name, instructions: "Write in British English." }));
 const role = (userId: string, projectId: string) =>
@@ -354,15 +358,15 @@ describe("project documents", () => {
       ownerEditor.type((markdown) => `${markdown}\n- [ ] announce`),
       editorEditor.type((markdown) => `# Plan\n\n${markdown}`),
     ]);
-    const stored = await docs((s) => s.get(viewer, document.id));
-    expect(stored!.content).toBe("# Plan\n\n- [ ] ship\n- [ ] announce");
+    const stored = await markdownOf(viewer, document.id);
+    expect(stored).toBe("# Plan\n\n- [ ] ship\n- [ ] announce");
 
     const viewerEditor = (await openEditor(viewer, document.id))!;
-    expect(viewerEditor.markdown()).toBe(stored!.content);
+    expect(viewerEditor.markdown()).toBe(stored);
     await expect(viewerEditor.type((markdown) => `sneaky ${markdown}`)).rejects.toMatchObject({
       _tag: "DocumentRejected",
     });
-    expect((await docs((s) => s.get(owner, document.id)))!.content).toBe(stored!.content);
+    expect(await markdownOf(owner, document.id)).toBe(stored);
     // Every member hears of the change, not only the writer.
     expect(
       events.some(
@@ -384,7 +388,7 @@ describe("project documents", () => {
     expect(renamed.title).toBe("Launch plan");
     expect((await docs((s) => s.get(viewer, document.id)))!.title).toBe("Launch plan");
     // The text is untouched by a rename.
-    expect((await docs((s) => s.get(owner, document.id)))!.content).toBe(stored!.content);
+    expect(await markdownOf(owner, document.id)).toBe(stored);
 
     await expect(docs((s) => s.remove(viewer, document.id))).rejects.toMatchObject({
       _tag: "DocumentRejected",

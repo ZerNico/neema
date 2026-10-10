@@ -43,9 +43,9 @@ import {
   type ToolSource,
 } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
-import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
 import {
+  type SeedDocument,
   fakeDocumentServer,
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
@@ -2177,7 +2177,7 @@ describe("ChatView documents", () => {
   beforeEach(() => {
     for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
       rpc.mockReset();
-    const current: EditableDocument = {
+    const current: SeedDocument = {
       id: "document-1",
       conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       title: "Trip plan",

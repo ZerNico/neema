@@ -1,38 +1,49 @@
 import { EditorState } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
-import { documentSchema, toMarkdown } from "../../editor/markdown.ts";
+import { documentSchema } from "../../editor/markdown.ts";
+import { overCap } from "../../editor/summary.ts";
+import { DOCUMENT_LIMITS } from "../../schema.ts";
 import { capCheck } from "./size-cap.ts";
 
-// Large enough that the check measures at all.
-const text = "x".repeat(30_000);
+const near = "x".repeat(DOCUMENT_LIMITS.chars - 4);
 let state = EditorState.create({
   doc: documentSchema.node("doc", null, [
-    documentSchema.node("paragraph", null, [documentSchema.text(text)]),
+    documentSchema.node("paragraph", null, [documentSchema.text(near)]),
   ]),
 });
-const typing = (check: ReturnType<typeof capCheck>, typed: string) => {
-  const transaction = state.tr.insertText(typed, state.doc.content.size - 1);
+const apply = (
+  check: ReturnType<typeof capCheck>,
+  change: (s: EditorState) => EditorState["tr"],
+) => {
+  const transaction = change(state);
   const allowed = check(transaction, state.doc);
   if (allowed) state = state.apply(transaction);
   return allowed;
 };
 
 describe("size cap", () => {
-  it("measures only when growth could reach the cap, and refuses past it", () => {
+  it("measures what grows the tree, refuses past the limit, and lets shrinking through", () => {
     let measured = 0;
-    const measure = (doc: Parameters<typeof toMarkdown>[0]) => {
+    const check = capCheck((doc) => {
       measured++;
-      return toMarkdown(doc).length;
-    };
-    const check = capCheck(measure, text.length + 20);
-    expect(typing(check, "a")).toBe(true);
-    expect(measured).toBe(1);
-    // Four more characters fit within the bound, so nothing is serialized.
-    for (const letter of "bcd") expect(typing(check, letter)).toBe(true);
-    expect(measured).toBe(1);
-    // Near the cap every step is measured, and the one past it is refused.
-    expect(typing(check, "0123456789abcdefg")).toBe(false);
+      return overCap(doc) === null;
+    });
+    const end = () => state.doc.content.size - 1;
+    expect(apply(check, (s) => s.tr.insertText("abcd", end()))).toBe(true);
+    expect(apply(check, (s) => s.tr.insertText("e", end()))).toBe(false);
     expect(measured).toBe(2);
-    expect(toMarkdown(state.doc)).toBe(`${text}abcd`);
+    expect(apply(check, (s) => s.tr.delete(end() - 2, end()))).toBe(true);
+    expect(measured).toBe(2);
+    expect(state.doc.textContent).toBe(`${near}ab`);
+  });
+
+  it("counts blocks that hold no text", () => {
+    const empty = documentSchema.node("paragraph");
+    const doc = documentSchema.node(
+      "doc",
+      null,
+      Array.from({ length: 5_001 }, () => empty),
+    );
+    expect(overCap(doc)).toBe(`document exceeds ${DOCUMENT_LIMITS.blocks} blocks`);
   });
 });

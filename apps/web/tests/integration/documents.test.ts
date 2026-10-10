@@ -1,4 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
+import { Node } from "@tiptap/pm/model";
 import { eq } from "drizzle-orm";
 import {
   Cause,
@@ -24,7 +25,11 @@ import {
 } from "~/modules/documents/schema.ts";
 import { blockIdOf } from "~/modules/documents/editor/block-ids.ts";
 import { commentAnchors } from "~/modules/documents/editor/comments.ts";
-import { normalizeMarkdown } from "~/modules/documents/editor/markdown.ts";
+import {
+  documentSchema,
+  normalizeMarkdown,
+  toMarkdown,
+} from "~/modules/documents/editor/markdown.ts";
 import { blockView } from "~/modules/documents/editor/tree.ts";
 import { presenceUser } from "~/modules/documents/presence-user.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
@@ -132,6 +137,9 @@ const create = (userId: string, conversationId: string, content = CHECKLIST, tit
   service((s) => s.create(userId, { conversationId, title, content })).then((r) => r.document);
 const get = (userId: string, document: Pick<EditableDocument, "id">) =>
   service((s) => s.get(userId, document.id));
+/** The stored tree as Markdown, made on demand like Copy and the model's view. */
+const markdownOf = (userId: string, document: Pick<EditableDocument, "id">) =>
+  service((s) => s.read(userId, document.id)).then((read) => toMarkdown(read!.doc));
 const edit = (userId: string, document: EditableDocument, patch: { old: string; new: string }) =>
   service((s) =>
     s.apply(userId, {
@@ -190,10 +198,10 @@ describe("model patches", () => {
         outline: ["Rollback plan"],
       }),
     );
+    expect(await markdownOf(owner, created.document)).toBe(CHECKLIST);
     expect(created.document).toMatchObject({
       conversationId,
       title: "Release",
-      content: CHECKLIST,
       revision: 0,
       lastEditedBy: "model",
     });
@@ -202,7 +210,7 @@ describe("model patches", () => {
 
     const updated = await edit(owner, created.document, { old: "tag build", new: "tag build v2" });
     expect(updated).toMatchObject({ outcome: "updated", document: { revision: 1 } });
-    expect(updated.document.content).toContain("- [ ] tag build v2\n");
+    expect(await markdownOf(owner, created.document)).toContain("- [ ] tag build v2\n");
     expect(await edit(owner, created.document, { old: "deploy", new: "x" })).toMatchObject({
       outcome: "no_match",
     });
@@ -235,7 +243,7 @@ describe("model patches", () => {
     );
     expect(filled.outcome).toBe("updated");
     expect(filled.document.revision).toBeGreaterThan(2);
-    expect(filled.document.content).toMatch(/## Rollback\n\nRevert the tag\.$/);
+    expect(await markdownOf(owner, filled.document)).toMatch(/## Rollback\n\nRevert the tag\.$/);
   });
 
   it("refuses to replace a block a person changed after the model was shown it", async () => {
@@ -258,7 +266,7 @@ describe("model patches", () => {
       );
     expect(await replaceBlock(ids[1]!)).toMatchObject({ outcome: "conflict" });
     expect(await replaceBlock(ids[0]!)).toMatchObject({ outcome: "updated" });
-    expect((await get(owner, created))!.content).toContain("- [x] write notes");
+    expect(await markdownOf(owner, created)).toContain("- [x] write notes");
   });
 
   it("interrupts a fenced write once the generation is superseded", async () => {
@@ -337,8 +345,9 @@ describe("person and model writing together", () => {
       expect(await editor.push()).toEqual({ revision: 2, conflict: false });
       const stored = await get(owner, created);
       expect(stored).toMatchObject({ revision: 2, lastEditedBy: "user", lastEditorUserId: owner });
-      expect(editor.markdown()).toBe(stored!.content);
-      expect(stored!.content.split("\n")).toEqual([
+      const text = await markdownOf(owner, created);
+      expect(editor.markdown()).toBe(text);
+      expect(text.split("\n")).toEqual([
         "# Release",
         "",
         "- [ ] write the notes",
@@ -367,7 +376,7 @@ describe("person and model writing together", () => {
       expect(await editor.type((markdown) => tick(markdown, "- [ ] ship"))).toEqual({
         revision: 1,
       });
-      expect((await get(owner, created))!.content).toContain("- [x] ship");
+      expect(await markdownOf(owner, created)).toContain("- [x] ship");
     } finally {
       await client.query("rollback");
       await client.end();
@@ -399,13 +408,13 @@ describe("person and model writing together", () => {
       .slice(2)
       .flatMap((frame) => (frame.type === "steps" ? frame.clientIds : []));
     expect(new Set(senders)).toEqual(new Set([first.clientId, second.clientId]));
-    const stored = await get(owner, created);
+    const text = await markdownOf(owner, created);
     await first.catchUp();
-    expect(first.markdown()).toBe(stored!.content);
-    expect(second.markdown()).toBe(stored!.content);
-    expect(stored!.content).toContain("- [x] write notes");
-    expect(stored!.content).toContain("- [x] ship");
-    expect(stored!.revision).toBe(2);
+    expect(first.markdown()).toBe(text);
+    expect(second.markdown()).toBe(text);
+    expect(text).toContain("- [x] write notes");
+    expect(text).toContain("- [x] ship");
+    expect((await get(owner, created))!.revision).toBe(2);
   });
 
   it("relays a cursor to the same person's other editor, and takes it away when it closes", async () => {
@@ -570,7 +579,7 @@ describe("person and model writing together", () => {
     const after = await rebuilt();
     if (after.type !== "reset") throw new Error("expected reset");
     expect(after.revision).toBe(base + 2_001);
-    expect((await get(owner, created))!.content).toMatch(/^yx{2000}0\n\n1/);
+    expect(toMarkdown(Node.fromJSON(documentSchema, after.doc))).toMatch(/^yx{2000}0\n\n1/);
   });
 });
 
@@ -716,7 +725,7 @@ describe("ownership, limits and sync", () => {
         }),
       ),
     ).rejects.toMatchObject({ _tag: "DocumentRejected" });
-    expect((await get(owner, created))!.content).toBe("# Plan\n\nShip it");
+    expect(await markdownOf(owner, created)).toBe("# Plan\n\nShip it");
   });
 
   it("labels a relayed cursor with who is signed in, whatever the client claims", async () => {
@@ -779,7 +788,7 @@ describe("ownership, limits and sync", () => {
       _tag: "DocumentRejected",
       reason: expect.stringContaining("blocks"),
     });
-    expect((await get(owner, created))!.content).toBe("small");
+    expect(await markdownOf(owner, created)).toBe("small");
   });
 
   it("publishes exactly one event per successful write and survives a bus failure", async () => {
@@ -970,7 +979,7 @@ describe("comments", () => {
         }),
       );
     expect(await rewrite(false)).toMatchObject({ outcome: "anchors_affected" });
-    expect((await get(owner, created))!.content).toContain("Some prose in the middle");
+    expect(await markdownOf(owner, created)).toContain("Some prose in the middle");
     expect(await rewrite(true)).toMatchObject({ outcome: "updated" });
     const read = await service((s) => s.read(owner, created.id));
     expect(commentAnchors(read!.doc).has(thread)).toBe(false);

@@ -159,10 +159,6 @@ export function useDocument(documentId: string, live: boolean) {
   }, [sync, user]);
 
   const editor = sync?.editor ?? null;
-  // The stored Markdown, which follows typing within a second. Reading the
-  // live tree as Markdown would load the editor's schema with every chat.
-  const content = query.data?.content ?? "";
-
   /** Persist everything typed so far, including editors that just closed. */
   const flush = useCallback(async () => {
     const results = await Promise.all([...connections.all].map((each) => each.flush()));
@@ -206,7 +202,6 @@ export function useDocument(documentId: string, live: boolean) {
     documentId,
     query,
     document: query.data ?? null,
-    content,
     sync: editor ? { editor } : null,
     status: sync?.status ?? null,
     error: sync?.error ?? null,

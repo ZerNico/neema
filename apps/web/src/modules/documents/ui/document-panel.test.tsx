@@ -3,10 +3,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type SeedDocument,
   fakeDocumentServer,
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
-import type { EditableDocument } from "../schema.ts";
 import { getDocument, pushDocument, renameDocument } from "../server/document-functions.ts";
 import { DocumentOwner } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
@@ -33,7 +33,7 @@ vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => false }));
 
 let server: ReturnType<typeof fakeDocumentServer>;
 let panel: DetailPanelApi;
-const fresh = (): EditableDocument => ({
+const fresh = (): SeedDocument => ({
   id: "document-1",
   conversationId: "conversation",
   createdByMessageId: "m-answer",
@@ -160,7 +160,7 @@ describe("document panel", () => {
 
   it("renames from the panel's menu for an editor, and offers no rename to a viewer", async () => {
     vi.mocked(renameDocument).mockImplementation(async ({ data }) => ({
-      ...fresh(),
+      ...server.row("document-1")!,
       title: data.title,
     }));
     await fixture();

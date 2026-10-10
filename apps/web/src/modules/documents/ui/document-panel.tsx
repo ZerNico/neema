@@ -34,29 +34,16 @@ const CommentsPopover = lazy(() =>
   import("./comments-popover.tsx").then((module) => ({ default: module.CommentsPopover })),
 );
 
-/**
- * What is on screen, not the stored copy a second behind it: an open
- * connection's tree is read as Markdown, loading the schema only then.
- */
-const copyMarkdown = async (controller: Controller) => {
-  const sync = controller.sync;
-  const text = sync
-    ? (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc)
-    : controller.content;
-  await navigator.clipboard.writeText(text);
-};
+/** Markdown of what is on screen, made only when asked; the schema loads then. */
+const markdownOf = async (sync: NonNullable<Controller["sync"]>) =>
+  (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc);
 const exportAs = async (controller: Controller, format: "pdf" | "markdown") => {
+  const sync = controller.sync;
+  if (!sync) return;
   const title = controller.document?.title ?? "Document";
   const { printDocument, downloadMarkdown } = await import("./export.ts");
-  const sync = controller.sync;
-  if (format === "pdf") {
-    if (sync) printDocument(sync.editor, title);
-    return;
-  }
-  const text = sync
-    ? (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc)
-    : controller.content;
-  downloadMarkdown(text, title);
+  if (format === "pdf") printDocument(sync.editor, title);
+  else downloadMarkdown(await markdownOf(sync), title);
 };
 
 export function DocumentPanelActions({
@@ -121,7 +108,10 @@ export function DocumentPanelActions({
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               Export as PDF
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => void exportAs(controller, "markdown")}>
+            <DropdownMenuItem
+              disabled={!controller.sync}
+              onClick={() => void exportAs(controller, "markdown")}
+            >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               Export as Markdown
             </DropdownMenuItem>
@@ -138,11 +128,16 @@ export function DocumentPanelActions({
                 variant="ghost"
                 aria-label="Copy document"
                 className="text-muted-foreground"
+                disabled={!controller.sync}
                 onClick={() => {
-                  void copyMarkdown(controller).then(() => {
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 1_500);
-                  });
+                  const sync = controller.sync;
+                  if (!sync) return;
+                  void markdownOf(sync)
+                    .then((text) => navigator.clipboard.writeText(text))
+                    .then(() => {
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1_500);
+                    });
                 }}
               />
             }

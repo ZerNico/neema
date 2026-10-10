@@ -4,12 +4,7 @@ import { Effect, Schema } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { describe, expect, it } from "vitest";
 import { blockIdOf, ensureIds } from "../editor/block-ids.ts";
-import {
-  documentSchema,
-  parseMarkdown,
-  replaceDifference,
-  toMarkdown,
-} from "../editor/markdown.ts";
+import { documentSchema, parseMarkdown, replaceDifference } from "../editor/markdown.ts";
 import { applyTreeEdit } from "../editor/tree-edit.ts";
 import type { EditableDocument } from "../schema.ts";
 import { FOCUS_CHARS, prepareDocumentTools, type DocumentToolService } from "./document-tools.ts";
@@ -28,7 +23,7 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
   const rows = new Map<string, { document: EditableDocument; doc: Node }>();
   let nextDocument = 0;
   const put = (document: EditableDocument, doc: Node) => {
-    const next = { ...document, content: toMarkdown(doc) };
+    const next = { ...document, chars: doc.textContent.length };
     rows.set(next.id, { document: next, doc });
     return next;
   };
@@ -46,7 +41,8 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
         conversationId: CONVERSATION,
         projectId: null,
         title: row.title,
-        content: "",
+        chars: 0,
+        tasks: null,
         revision: 0,
         lastEditedBy: "model",
         canEdit: true,
@@ -79,7 +75,8 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
             projectId: input.projectId ?? null,
             canEdit: true,
             title: input.title,
-            content: "",
+            chars: 0,
+            tasks: null,
             revision: 0,
             lastEditedBy: "model",
             createdAt: stamp,

@@ -22,8 +22,9 @@ type ProseMirrorJson = Record<string, unknown>;
  * server. `snapshot` holds the tree as of `snapshot_revision` and
  * `document_steps` every step after it; `revision` is the number of steps
  * applied, which is the collab version every editor rebases against.
- * `content` is the tree as Markdown, rewritten in the transaction that stores
- * each batch, so cards, search and Copy never parse the tree.
+ * `text_length`, `tasks_done` and `tasks_total` are what cards and lists show
+ * of it, derived from the tree in the transaction that stores each batch, so
+ * a list never rebuilds a tree. Markdown is made only where it is wanted.
  *
  * A document belongs to exactly one conversation or one project. A chat's
  * document records the answer that produced it (`created_by_message_id`), and
@@ -44,7 +45,9 @@ export const documents = pgTable(
       onDelete: "cascade",
     }),
     title: text().notNull(),
-    content: text().notNull(),
+    textLength: integer("text_length").notNull().default(0),
+    tasksDone: integer("tasks_done").notNull().default(0),
+    tasksTotal: integer("tasks_total").notNull().default(0),
     revision: integer().notNull().default(0),
     lastEditedBy: text("last_edited_by").$type<"user" | "model">().notNull(),
     lastEditorUserId: text("last_editor_user_id").references(() => user.id, {

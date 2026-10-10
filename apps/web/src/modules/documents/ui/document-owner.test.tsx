@@ -3,10 +3,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createRef, useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type SeedDocument,
   fakeDocumentServer,
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
-import type { EditableDocument } from "../schema.ts";
 import { getDocument, pushDocument } from "../server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
@@ -40,7 +40,7 @@ vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => false }));
 
 let server: ReturnType<typeof fakeDocumentServer>;
 let panel: DetailPanelApi;
-const fresh = (): EditableDocument => ({
+const fresh = (): SeedDocument => ({
   id: "document-1",
   conversationId: "conversation",
   createdByMessageId: "m-answer",
