@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EN_US } from "@chat/sheet/locales";
+import { DE_DE, EN_US } from "@chat/sheet/locales";
 import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet } from "@chat/sheet/model/calc";
 import { renderFormula } from "@chat/sheet/model/formula";
@@ -18,6 +18,7 @@ import {
   mergeSelection,
   selectionStats,
   shiftDecimals,
+  shortcutFormat,
 } from "./format-commands.ts";
 
 let revision = 0;
@@ -138,5 +139,12 @@ describe("the Home tab's commands", () => {
     ).toEqual(["blank s1.r5:s1.r5", "bar s1.r1:s1.r1", "bar s1.r3:s1.r3"]);
     doc = apply(doc, clearConditional(context(doc, [2, 1]), "sheet"));
     expect(doc.sheet.s1!.conditional).toBeUndefined();
+  });
+
+  it("writes Excel's shortcut number formats in the sheet's locale", () => {
+    expect(shortcutFormat("currency", EN_US)).toBe("$#,##0.00");
+    expect(shortcutFormat("currency", DE_DE)).toBe("#,##0.00 [$€-407]");
+    expect(shortcutFormat("general", DE_DE)).toBeNull();
+    expect(shortcutFormat("percent", EN_US)).toBe("0%");
   });
 });

@@ -7,7 +7,13 @@ import { calculateSheet } from "@chat/sheet/model/calc";
 import { parseFormula } from "@chat/sheet/model/formula";
 import { NEW_SHEET, emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp } from "@chat/sheet/model/ops";
-import { SheetGrid, type CellEditing, type OverlayChange, type SheetSelection } from "./grid.tsx";
+import {
+  SheetGrid,
+  type CellEditing,
+  type GridCommand,
+  type OverlayChange,
+  type SheetSelection,
+} from "./grid.tsx";
 import { dragPlace } from "./overlay-place.ts";
 
 afterEach(cleanup);
@@ -27,6 +33,7 @@ const set = (doc: SheetDoc, row: number, col: number, content: string | number):
 };
 
 const events: string[] = [];
+const sent: GridCommand[] = [];
 function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale }) {
   const [selection, setSelection] = useState<SheetSelection | null>({
     anchor: at(1, 1),
@@ -52,7 +59,10 @@ function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale 
         onEditingChange={setEditing}
         onCommit={(cell, text) => events.push(`commit ${cell.r}/${cell.c} ${text}`)}
         editSource={() => "=A1*2"}
-        onCommand={(command) => events.push(command.kind)}
+        onCommand={(command) => {
+          events.push(command.kind);
+          sent.push(command);
+        }}
         onCopy={(cut) => ({ text: cut ? "cut" : "copied" })}
         onPaste={(clip) => events.push(`paste${clip.values ? " values" : ""} ${clip.text}`)}
       />
@@ -461,6 +471,55 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: ";", ctrlKey: true });
     const stamped = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
     expect(stamped.value).toMatch(/^\d{1,2}\/\d{1,2}\/\d{4}$/);
+  });
+
+  it("knows Excel's shortcuts for formats, hiding, sheets, sums and the cell above", () => {
+    sent.length = 0;
+    const doc = apply(emptyDoc(), { op: "set", sh: "s1", cells: [set(emptyDoc(), 1, 1, 12.5)] });
+    render(<Harness doc={doc} />);
+    const grid = screen.getByRole("grid");
+    const press = (key: string, extra: Record<string, unknown> = {}) =>
+      fireEvent.keyDown(grid, { key, ctrlKey: true, ...extra });
+    press("$", { shiftKey: true, code: "Digit4" });
+    press("&", { shiftKey: true, code: "Digit7" });
+    press("9", { code: "Digit9" });
+    press(")", { shiftKey: true, code: "Digit0" });
+    press("PageDown", { code: "PageDown" });
+    fireEvent.keyDown(grid, { key: "F11", shiftKey: true });
+    fireEvent.keyDown(grid, { key: "F2", shiftKey: true });
+    fireEvent.keyDown(grid, { key: "≠", altKey: true, code: "Equal" });
+    // Ctrl+Minus deletes only whole rows or columns: for a cell it does nothing.
+    press("-", { code: "Minus" });
+    expect(sent).toEqual([
+      { kind: "numberFormat", format: "currency" },
+      { kind: "borders", border: "outer" },
+      { kind: "hide", axis: "rows", hidden: true },
+      { kind: "hide", axis: "columns", hidden: false },
+      { kind: "sheet", step: 1 },
+      { kind: "newSheet" },
+      { kind: "comment" },
+      { kind: "autosum" },
+    ]);
+    // With the whole row selected, Ctrl+Minus deletes it.
+    fireEvent.keyDown(grid, { key: " ", shiftKey: true });
+    press("-", { code: "Minus" });
+    expect(sent.at(-1)).toEqual({ kind: "delete", axis: "rows" });
+    // Ctrl+' starts typing the formula above, Ctrl+Shift+" the value it shows.
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    press("'", { code: "Quote" });
+    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
+    expect(input.value).toBe("=A1*2");
+    fireEvent.keyDown(input, { key: "Escape" });
+    press('"', { shiftKey: true, code: "Quote" });
+    expect(
+      (screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement).value,
+    ).toBe("12.5");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Cell content" }), { key: "Escape" });
+    // Backspace empties the cell to type afresh; Escape leaves it as it was.
+    fireEvent.keyDown(grid, { key: "Backspace" });
+    expect(
+      (screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement).value,
+    ).toBe("");
   });
 
   it("completes functions, points at cells for references, and cycles $ with F4", () => {

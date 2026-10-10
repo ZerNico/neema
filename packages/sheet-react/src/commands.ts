@@ -4,7 +4,14 @@ import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import { renderFormula } from "@chat/sheet/model/formula";
-import { positions, type Axis, type Formula, type SheetDoc } from "@chat/sheet/model";
+import {
+  NEW_SHEET,
+  liveSheets,
+  positions,
+  type Axis,
+  type Formula,
+  type SheetDoc,
+} from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
 export type { ChartKind };
 import { parseDelimited, writeDelimited } from "@chat/sheet/delimited";
@@ -714,4 +721,23 @@ export function chartFromSelection(context: GridContext, kind: ChartKind): Sheet
       },
     },
   ];
+}
+
+/** A name for a new sheet that no live sheet has: Sheet2, Sheet3 and on. */
+const nextSheetName = (names: readonly string[]) => {
+  const taken = new Set(names.map((name) => name.toLowerCase()));
+  for (let n = names.length + 1; ; n++) if (!taken.has(`sheet${n}`)) return `Sheet${n}`;
+};
+
+/** A new empty sheet after the last, named as Excel names the next one. */
+export function newSheet(doc: SheetDoc, id: string): SheetOp {
+  const sheets = liveSheets(doc);
+  return {
+    op: "sheetAdd",
+    id,
+    name: nextSheetName(sheets.map((each) => doc.sheet[each]!.name)),
+    after: sheets.at(-1) ?? null,
+    rows: Array.from({ length: NEW_SHEET.rows }, (_, n) => `${id}.r${n + 1}`),
+    cols: Array.from({ length: NEW_SHEET.cols }, (_, n) => `${id}.c${n + 1}`),
+  };
 }

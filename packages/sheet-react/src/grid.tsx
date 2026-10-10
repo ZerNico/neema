@@ -1,3 +1,4 @@
+import type { NumberFormatKind } from "./format-commands.ts";
 import { cellStyle } from "@chat/sheet/model/style";
 import {
   useCallback,
@@ -78,7 +79,27 @@ export type GridCommand =
         | "print";
     }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
-  | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
+  | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" }
+  /** Excel's Ctrl+Shift number formats; the app writes each in the sheet's locale. */
+  | { readonly kind: "numberFormat"; readonly format: NumberFormatKind }
+  | { readonly kind: "borders"; readonly border: "outer" | "none" }
+  | { readonly kind: "autosum" }
+  | { readonly kind: "hide"; readonly axis: Axis; readonly hidden: boolean }
+  /** Whole rows or columns selected, as Ctrl+Shift+Plus and Ctrl+Minus act on them. */
+  | { readonly kind: "insert" | "delete"; readonly axis: Axis }
+  | { readonly kind: "comment" }
+  | { readonly kind: "sheet"; readonly step: 1 | -1 }
+  | { readonly kind: "newSheet" };
+/** Excel's Ctrl+Shift number formats, by the character each key types. */
+const FORMAT_KEYS: Readonly<Record<string, NumberFormatKind>> = {
+  "~": "general",
+  "!": "number",
+  $: "currency",
+  "%": "percent",
+  "#": "date",
+  "@": "time",
+  "^": "scientific",
+};
 /** Someone else's selection, drawn in their colour. */
 export interface GridDecoration {
   readonly key: string;
@@ -658,6 +679,35 @@ export function SheetGrid({
     return [row, col] as const;
   };
 
+  /**
+   * Excel's Ctrl and Ctrl+Shift shortcuts for formats, borders, hiding,
+   * inserting and deleting; null for any other key.
+   */
+  const shortcutOf = (event: KeyboardEvent): GridCommand | null => {
+    const format = event.shiftKey ? FORMAT_KEYS[event.key] : undefined;
+    if (format) return { kind: "numberFormat", format };
+    if (event.shiftKey && event.key === "&") return { kind: "borders", border: "outer" };
+    if (event.shiftKey && event.key === "_") return { kind: "borders", border: "none" };
+    // Ctrl+9 hides rows and Ctrl+0 columns; with Shift they show again.
+    if (event.code === "Digit9" || event.code === "Digit0")
+      return {
+        kind: "hide",
+        axis: event.code === "Digit9" ? "rows" : "columns",
+        hidden: !event.shiftKey,
+      };
+    if (event.key === "-" || event.key === "+" || (event.shiftKey && event.key === "=")) {
+      // Only whole rows or columns: for cells, Excel asks which way to shift them.
+      if (!box) return null;
+      const axis: Axis | null =
+        box.left === 0 && box.right === cols.ids.length - 1
+          ? "rows"
+          : box.top === 0 && box.bottom === rows.ids.length - 1
+            ? "columns"
+            : null;
+      return axis ? { kind: event.key === "-" ? "delete" : "insert", axis } : null;
+    }
+    return null;
+  };
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
     // An open list takes the arrows, Enter and Escape; Alt+Down opens one, as in Excel.
@@ -693,6 +743,33 @@ export function SheetGrid({
       onCommand({ kind: "print" });
       return;
     }
+    // Ctrl+PageUp and PageDown move between sheets; Shift+F11 adds one.
+    if (
+      onCommand &&
+      command &&
+      !event.shiftKey &&
+      (event.key === "PageUp" || event.key === "PageDown")
+    ) {
+      event.preventDefault();
+      onCommand({ kind: "sheet", step: event.key === "PageUp" ? -1 : 1 });
+      return;
+    }
+    if (writable && event.shiftKey && event.key === "F11") {
+      event.preventDefault();
+      onCommand?.({ kind: "newSheet" });
+      return;
+    }
+    if (onCommand && event.shiftKey && !command && event.key === "F2") {
+      event.preventDefault();
+      onCommand({ kind: "comment" });
+      return;
+    }
+    // Ctrl+Backspace brings the active cell back into view.
+    if (command && event.key === "Backspace") {
+      event.preventDefault();
+      reveal(head.row, head.col);
+      return;
+    }
     // The paste event cannot tell which keys made it, so Cmd+Shift+V is noted for it.
     pasteValues.current = command && event.shiftKey && event.key.toLowerCase() === "v";
     if (writable && command && !event.altKey) {
@@ -725,15 +802,39 @@ export function SheetGrid({
                             event.key === "5"
                             ? { kind: "toggle", property: "strike" }
                             : null;
-      if (found) {
+      const more = found ?? shortcutOf(event);
+      if (more) {
         event.preventDefault();
-        onCommand?.(found);
+        onCommand?.(more);
+        return;
+      }
+      // Ctrl+' copies the formula above as typed, Ctrl+Shift+" the value it shows.
+      if ((event.key === "'" || event.key === '"') && head.row > 0) {
+        event.preventDefault();
+        const above = { r: rows.ids[head.row - 1]!, c: cols.ids[head.col]! };
+        beginEdit(
+          event.key === "'"
+            ? (editSource?.(above) ?? "")
+            : cellDisplay(values.value(sheet, above.r, above.c), {}, locale).text,
+        );
         return;
       }
     }
-    if (writable && (event.key === "Delete" || event.key === "Backspace")) {
+    // Alt+= sums, as Excel's AutoSum.
+    if (writable && event.altKey && !command && event.code === "Equal") {
+      event.preventDefault();
+      onCommand?.({ kind: "autosum" });
+      return;
+    }
+    if (writable && event.key === "Delete") {
       event.preventDefault();
       onCommand?.({ kind: "clear" });
+      return;
+    }
+    // Backspace empties the cell to type afresh, as Excel's does; Escape keeps what was there.
+    if (writable && event.key === "Backspace") {
+      event.preventDefault();
+      beginEdit("");
       return;
     }
     if (writable && event.key === "F2") {
@@ -793,13 +894,15 @@ export function SheetGrid({
       return;
     }
     const page = Math.max(1, Math.floor(viewport.height / 20) - 1);
+    // Alt+PageUp and PageDown move a screen across.
+    const pageAcross = Math.max(1, Math.floor(viewport.width / 64) - 1);
     const moves: Record<string, [number, number]> = {
       ArrowUp: [-1, 0],
       ArrowDown: [1, 0],
       ArrowLeft: [0, -1],
       ArrowRight: [0, 1],
-      PageUp: [-page, 0],
-      PageDown: [page, 0],
+      PageUp: event.altKey ? [0, -pageAcross] : [-page, 0],
+      PageDown: event.altKey ? [0, pageAcross] : [page, 0],
       Enter: [event.shiftKey ? -1 : 1, 0],
       Tab: [0, event.shiftKey ? -1 : 1],
     };

@@ -41,6 +41,7 @@ import {
   fillSelection,
   formatSelection,
   insertAtSelection,
+  newSheet,
   pasteAtSelection,
   selectionBox,
   eachRange,
@@ -125,6 +126,7 @@ import {
   freezeAt,
   mergeSelection,
   selectionStats,
+  shortcutFormat,
 } from "@chat/sheet-react/format-commands";
 import { formatValue, generalText } from "@chat/sheet/number-format";
 import { CHART_KINDS } from "./chart-kinds.ts";
@@ -404,23 +406,69 @@ export default function SheetPanelBody({
     const at = { r: matches[next]!.r, c: matches[next]!.c };
     select({ anchor: at, head: at });
   };
+  /** Shows another sheet, starting afresh on it. */
+  const pickSheet = (id: string) => {
+    setChosen(id);
+    setSelection(null);
+    setEditing(null);
+  };
+  // Every kind is named: a shortcut the panel does not handle must not fall through to clearing.
   const onCommand = (command: GridCommand) => {
-    if (command.kind === "find") setFinding({ query: finding?.query ?? "", index: 0 });
-    else if (command.kind === "toggle")
-      run(
-        eachRange(context, (each) =>
-          formatSelection(each, { [command.property]: style[command.property] ? null : true }),
-        ),
-      );
-    else if (command.kind === "fill") run(fillSelection(context, command.direction));
-    else if (command.kind === "filter") run(toggleFilter(context));
-    else if (command.kind === "link") setLinking(true);
-    else if (command.kind === "print") printSheet(sheet);
-    else if (command.kind === "group") run(groupSelection(context, outlineAxis(context)));
-    else if (command.kind === "ungroup") run(ungroupSelection(context, outlineAxis(context)));
-    else if (command.kind === "undo") sync?.undo();
-    else if (command.kind === "redo") sync?.redo();
-    else run(eachRange(context, clearSelection));
+    switch (command.kind) {
+      case "find":
+        return setFinding({ query: finding?.query ?? "", index: 0 });
+      case "toggle":
+        return run(
+          eachRange(context, (each) =>
+            formatSelection(each, { [command.property]: style[command.property] ? null : true }),
+          ),
+        );
+      case "fill":
+        return run(fillSelection(context, command.direction));
+      case "filter":
+        return run(toggleFilter(context));
+      case "link":
+        return setLinking(true);
+      case "print":
+        return printSheet(sheet);
+      case "group":
+        return run(groupSelection(context, outlineAxis(context)));
+      case "ungroup":
+        return run(ungroupSelection(context, outlineAxis(context)));
+      case "undo":
+        return sync?.undo();
+      case "redo":
+        return sync?.redo();
+      case "clear":
+        return run(eachRange(context, clearSelection));
+      case "numberFormat":
+        return run(
+          eachRange(context, (each) =>
+            formatSelection(each, { numberFormat: shortcutFormat(command.format, locale) }),
+          ),
+        );
+      case "borders":
+        return run(eachRange(context, (each) => borderSelection(each, command.border)));
+      case "autosum":
+        return run(autoSum(context, "SUM"));
+      case "hide":
+        return run(hideAtSelection(context, command.axis, command.hidden));
+      case "insert":
+        return run(insertAtSelection(context, command.axis, "before"));
+      case "delete":
+        return run(deleteAtSelection(context, command.axis));
+      case "comment":
+        return readOnly ? undefined : setCommenting(true);
+      case "sheet": {
+        const next = sheets[sheets.indexOf(sheet) + command.step];
+        return next ? pickSheet(next) : undefined;
+      }
+      case "newSheet": {
+        const id = sync!.mint();
+        run([newSheet(doc, id)]);
+        return pickSheet(id);
+      }
+    }
   };
   /** Prints a sheet through a frame of its own, so the page around it stays out of the print. */
   const printSheet = (id: string) => {
@@ -1606,11 +1654,7 @@ export default function SheetPanelBody({
           readOnly={readOnly}
           mint={() => sync!.mint()}
           run={run}
-          onPick={(id) => {
-            setChosen(id);
-            setSelection(null);
-            setEditing(null);
-          }}
+          onPick={pickSheet}
           onPrint={printSheet}
           onDownload={(id) => {
             const csv = sheetCsv({ doc, values, locale }, id);

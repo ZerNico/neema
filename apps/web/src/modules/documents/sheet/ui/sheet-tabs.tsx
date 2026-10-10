@@ -14,7 +14,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { NEW_SHEET, liveSheets, type SheetDoc } from "@chat/sheet/model";
+import { liveSheets, type SheetDoc } from "@chat/sheet/model";
+import { newSheet } from "@chat/sheet-react/commands";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -38,12 +39,6 @@ const MODIFIERS = [
     element: (operation) => operation.source?.element?.closest("[role=tablist]") ?? null,
   }),
 ];
-
-/** A name for a new sheet that no live sheet has: Sheet2, Sheet3 and on. */
-const nextSheetName = (names: readonly string[]) => {
-  const taken = new Set(names.map((name) => name.toLowerCase()));
-  for (let n = names.length + 1; ; n++) if (!taken.has(`sheet${n}`)) return `Sheet${n}`;
-};
 
 /** The op moving a sheet to a place among the others, as `sheetMove` names the one before it. */
 function moveSheetTo(doc: SheetDoc, id: string, index: number): SheetOp | null {
@@ -150,16 +145,7 @@ export function SheetTabs({
                   className="text-muted-foreground"
                   onClick={() => {
                     const id = mint();
-                    run([
-                      {
-                        op: "sheetAdd",
-                        id,
-                        name: nextSheetName(sheets.map((each) => doc.sheet[each]!.name)),
-                        after: sheets.at(-1) ?? null,
-                        rows: Array.from({ length: NEW_SHEET.rows }, (_, n) => `${id}.r${n + 1}`),
-                        cols: Array.from({ length: NEW_SHEET.cols }, (_, n) => `${id}.c${n + 1}`),
-                      },
-                    ]);
+                    run([newSheet(doc, id)]);
                     onPick(id);
                   }}
                 />

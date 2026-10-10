@@ -1,3 +1,4 @@
+import type { SheetLocale } from "@chat/sheet/locales";
 import { columnLetters } from "@chat/sheet/a1";
 import { generalText } from "@chat/sheet/number-format";
 import { positions, type Box } from "@chat/sheet/model";
@@ -302,4 +303,39 @@ export function setValidation(
   if (!validation && unchanged(kept, before)) return [];
   const list = validation ? [...kept, { ...validation, id: context.mint(), box: box.area }] : kept;
   return [{ op: "validations", sh: context.sheet, list }];
+}
+
+/** Excel's Ctrl+Shift number formats, by what each is called. */
+export type NumberFormatKind =
+  | "general"
+  | "number"
+  | "currency"
+  | "percent"
+  | "date"
+  | "time"
+  | "scientific";
+
+/**
+ * The number format each of Excel's Ctrl+Shift shortcuts writes, in the
+ * sheet's locale: its own currency, written as typing an amount writes it.
+ */
+export function shortcutFormat(kind: NumberFormatKind, locale: SheetLocale): string | null {
+  const { symbol, before, lcid } = locale.currency;
+  const tag = symbol === "$" ? "$" : `[$${symbol}-${lcid}]`;
+  switch (kind) {
+    case "general":
+      return null;
+    case "number":
+      return "#,##0.00";
+    case "currency":
+      return before ? `${tag}#,##0.00` : `#,##0.00 ${tag}`;
+    case "percent":
+      return "0%";
+    case "date":
+      return "d-mmm-yy";
+    case "time":
+      return "h:mm AM/PM";
+    case "scientific":
+      return "0.00E+00";
+  }
 }
