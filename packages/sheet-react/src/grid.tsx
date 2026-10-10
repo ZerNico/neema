@@ -131,7 +131,8 @@ export interface SheetGridProps {
   readonly onCommand?: (command: GridCommand) => void;
   /** The text a copy or cut puts on the clipboard, or null for nothing. */
   readonly onCopy?: (cut: boolean) => string | null;
-  readonly onPaste?: (text: string) => void;
+  /** A paste: the clipboard's text and HTML, and whether Cmd+Shift+V asked for values only. */
+  readonly onPaste?: (clip: { text: string; html: string | null; values: boolean }) => void;
   /** A row or column dragged to a new size, in pixels. */
   readonly onResize?: (axis: Axis, id: string, px: number) => void;
   readonly decorations?: readonly GridDecoration[];
@@ -393,6 +394,7 @@ export function SheetGrid({
   /** Whether the edit is pointing at cells rather than moving between them, as Excel's point mode. */
   const pointMode = () => !!editing && (pointing !== null || pointable(editing.text, caret));
   const pointDrag = useRef<{ row: number; col: number } | null>(null);
+  const pasteValues = useRef(false);
   /** Ends an edit, writing it, then moves on as Enter or Tab would. */
   const commit = (rowStep: number, colStep: number) => {
     if (!editing || ended.current === editing) return;
@@ -577,6 +579,8 @@ export function SheetGrid({
       onCommand({ kind: "find" });
       return;
     }
+    // The paste event cannot tell which keys made it, so Cmd+Shift+V is noted for it.
+    pasteValues.current = command && event.shiftKey && event.key.toLowerCase() === "v";
     if (writable && command && !event.altKey) {
       const lower = event.key.toLowerCase();
       const found: GridCommand | null =
@@ -1532,7 +1536,13 @@ export function SheetGrid({
       onPaste={(event) => {
         if (editing || !onPaste || !writable) return;
         event.preventDefault();
-        onPaste(event.clipboardData.getData("text/plain"));
+        const valuesOnly = pasteValues.current;
+        pasteValues.current = false;
+        onPaste({
+          text: event.clipboardData.getData("text/plain"),
+          html: event.clipboardData.getData("text/html") || null,
+          values: valuesOnly,
+        });
       }}
       className="bg-background focus-visible:ring-ring relative h-full w-full overflow-auto outline-none focus-visible:ring-2"
     >

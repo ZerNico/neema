@@ -224,6 +224,8 @@ export function copyFormula(
   formula: Formula,
   shift: { readonly rows: number; readonly cols: number },
   at: FormulaAt,
+  /** The source cell's position when pasting transposed: a relative reference's offset swaps axes. */
+  transposedFrom?: { readonly row: number; readonly col: number },
 ): { formula: Formula } | { grow: Growth[] } {
   const grow: Growth[] = [];
   const parts = formula.parts.map((part): Formula["parts"][number] => {
@@ -239,8 +241,22 @@ export function copyFormula(
     const sheetId = part.sheet ?? at.sheet;
     let off = false;
     const move = (corner: RefCorner, row: number, col: number): RefCorner => {
-      const nextRow = corner.row === null || corner.rowAbs ? row : row + shift.rows;
-      const nextCol = corner.col === null || corner.colAbs ? col : col + shift.cols;
+      const swapped =
+        transposedFrom &&
+        corner.row !== null &&
+        corner.col !== null &&
+        !corner.rowAbs &&
+        !corner.colAbs;
+      const nextRow = swapped
+        ? transposedFrom.row + shift.rows + col - transposedFrom.col
+        : corner.row === null || corner.rowAbs
+          ? row
+          : row + shift.rows;
+      const nextCol = swapped
+        ? transposedFrom.col + shift.cols + row - transposedFrom.row
+        : corner.col === null || corner.colAbs
+          ? col
+          : col + shift.cols;
       if (nextRow < 1 || nextRow > MAX_ROW || nextCol < 1 || nextCol > MAX_COLUMN) off = true;
       if (corner.row !== null && nextRow > rows.ids.length)
         grow.push({ sheet: sheetId, rows: nextRow, cols: 0 });

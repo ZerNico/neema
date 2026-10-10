@@ -265,13 +265,21 @@ export function sortSelection(context: GridContext, descending: boolean): SheetO
   ]);
 }
 
+/** A copied cell: what it holds, what it showed, and its style key. */
+export interface CopiedCell {
+  readonly v?: Scalar;
+  readonly f?: Formula;
+  /** Its value when copied, which Paste Values writes. */
+  readonly value: Scalar;
+  readonly s?: string;
+}
 /** What copying the selection gives: tab-separated shown text, and the cells to paste here. */
 export interface CopiedCells {
   readonly text: string;
   readonly sheet: string;
   readonly top: number;
   readonly left: number;
-  readonly cells: ReadonlyArray<ReadonlyArray<{ v?: Scalar; f?: Formula }>>;
+  readonly cells: ReadonlyArray<ReadonlyArray<CopiedCell>>;
   /** Cut moves the cells when pasted, instead of copying them. */
   readonly cut: { readonly area: { r1: string; r2: string; c1: string; c2: string } } | null;
 }
@@ -279,9 +287,14 @@ export function copySelection(context: GridContext, cut = false): CopiedCells {
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
   const cells = box.rowIds.map((r) =>
-    box.colIds.map((c) => {
+    box.colIds.map((c): CopiedCell => {
       const cell = sheet.cells[r]?.[c];
-      return cell?.f ? { f: cell.f } : { v: cell?.v ?? null };
+      const value = context.values.value(context.sheet, r, c);
+      return {
+        ...(cell?.f ? { f: cell.f } : { v: cell?.v ?? null }),
+        value,
+        ...(cell?.s ? { s: cell.s } : {}),
+      };
     }),
   );
   const text = box.rowIds
@@ -311,19 +324,42 @@ export function copySelection(context: GridContext, cut = false): CopiedCells {
 /** Tab-separated text as rows of cells, as spreadsheets put it on the clipboard. */
 export const parseTabular = (text: string) => parseDelimited(text, "\t");
 
+/** A cell from another program: text typed in as if entered, and the style it carried. */
+export interface ForeignCell {
+  readonly raw: string;
+  readonly style?: StylePatch;
+}
+/** What a paste writes, as Excel's Paste Special: everything, values, formulas or formats. */
+export type PastePart = "all" | "values" | "formulas" | "formats";
+
+/** The patch giving a cell exactly a style: its keys, and the others it had removed. */
+function replaceStyle(wanted: StylePatch, had: string | undefined): StylePatch | null {
+  const patch: Record<string, string | number | boolean | null> = { ...wanted };
+  for (const key of Object.keys(cellStyle(had))) if (!(key in wanted)) patch[key] = null;
+  return Object.keys(patch).length ? patch : null;
+}
+
 /**
  * Pastes at the selection's top-left. When the clipboard holds what this
- * sheet copied, its formulas shift as a copy does, or a cut moves; anything
- * else is typed in cell by cell, as text from another program is.
+ * sheet copied, its formulas shift as a copy does, or a cut moves, and its
+ * formats come along; anything else is typed in cell by cell, with the
+ * styles `foreign` read from the clipboard's HTML. Transposing swaps rows
+ * and columns.
  */
 export function pasteAtSelection(
   context: GridContext,
   text: string,
   copied: CopiedCells | null,
+  options: {
+    readonly part?: PastePart;
+    readonly transpose?: boolean;
+    readonly foreign?: ReadonlyArray<ReadonlyArray<ForeignCell>> | null;
+  } = {},
 ): SheetOp[] {
+  const { part = "all", transpose = false } = options;
   const box = selectionBox(context);
   const own = copied && copied.text === text ? copied : null;
-  if (own?.cut)
+  if (own?.cut && part === "all" && !transpose)
     return [
       {
         op: "move",
@@ -332,44 +368,85 @@ export function pasteAtSelection(
         to: { sh: context.sheet, r: context.selection.anchor.r, c: context.selection.anchor.c },
       },
     ];
-  const grid = own ? own.cells : parseTabular(text).map((row) => row.map((raw) => ({ raw })));
+  const read: ReadonlyArray<ReadonlyArray<CopiedCell | ForeignCell>> = own
+    ? own.cells
+    : (options.foreign ?? parseTabular(text).map((row) => row.map((raw) => ({ raw }))));
+  const grid = transpose
+    ? Array.from({ length: Math.max(...read.map((row) => row.length)) }, (_, x) =>
+        read.map((row) => row[x] ?? { raw: "" }),
+      )
+    : read;
   const height = grid.length;
   const width = Math.max(...grid.map((row) => row.length));
   const grow = grower(context);
   grow.ensure(context.sheet, box.top + height - 1, box.left + width - 1);
-  const rows = positions(grow.doc.sheet[context.sheet]!.rows).ids;
-  const cols = positions(grow.doc.sheet[context.sheet]!.cols).ids;
+  const target = grow.doc.sheet[context.sheet]!;
+  const rows = positions(target.rows).ids;
+  const cols = positions(target.cols).ids;
   const cells: CellWrite[] = [];
-  const formats: SheetOp[] = [];
+  const typedFormats: SheetOp[] = [];
+  const styles: SheetOp[] = [];
   grid.forEach((row, y) =>
     row.forEach((item, x) => {
       const at = { r: rows[box.top - 1 + y]!, c: cols[box.left - 1 + x]! };
+      const area = { r1: at.r, r2: at.r, c1: at.c, c2: at.c };
+      if (part === "all" || part === "formats") {
+        const wanted =
+          "raw" in item
+            ? options.foreign
+              ? (item.style ?? {})
+              : null
+            : item.s
+              ? (JSON.parse(item.s) as StylePatch)
+              : {};
+        const patch = wanted && replaceStyle(wanted, target.cells[at.r]?.[at.c]?.s);
+        if (patch) styles.push({ op: "format", sh: context.sheet, area, patch });
+      }
+      if (part === "formats") return;
       if ("raw" in item) {
         const typed = enterCell({ ...context, doc: grow.doc }, at, item.raw);
         for (const op of typed)
           if (op.op === "set") cells.push(...op.cells);
-          else if (op.op === "format") formats.push(op);
+          else if (op.op === "format") typedFormats.push(op);
           else grow.ops.push(op);
         return;
       }
-      if (item.f) {
-        const shift = { rows: box.top - own!.top, cols: box.left - own!.left };
-        const result = copyFormula(item.f, shift, { doc: grow.doc, sheet: own!.sheet });
-        // On another sheet, its references are read there, as the text Excel would paste.
-        const f = !("formula" in result)
-          ? null
-          : own!.sheet === context.sheet
-            ? result.formula
-            : typedFormula(
-                renderFormula(result.formula, { doc: grow.doc, sheet: own!.sheet }),
-                context.sheet,
-                grow,
-              );
-        cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
-      } else cells.push({ ...at, v: item.v instanceof XError ? item.v.code : (item.v ?? null) });
+      if (part === "values" || !item.f) {
+        const value = part === "values" ? item.value : (item.v ?? null);
+        cells.push({ ...at, v: value instanceof XError ? value.code : value });
+        return;
+      }
+      // Each formula moves by as far as its own cell did; transposed, its references turn too.
+      const [fromRow, fromCol] = transpose ? [x, y] : [y, x];
+      const shift = {
+        rows: box.top + y - (own!.top + fromRow),
+        cols: box.left + x - (own!.left + fromCol),
+      };
+      const result = copyFormula(
+        item.f,
+        shift,
+        { doc: grow.doc, sheet: own!.sheet },
+        transpose ? { row: own!.top + fromRow, col: own!.left + fromCol } : undefined,
+      );
+      // On another sheet, its references are read there, as the text Excel would paste.
+      const f = !("formula" in result)
+        ? null
+        : own!.sheet === context.sheet
+          ? result.formula
+          : typedFormula(
+              renderFormula(result.formula, { doc: grow.doc, sheet: own!.sheet }),
+              context.sheet,
+              grow,
+            );
+      cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
     }),
   );
-  return [...grow.ops, { op: "set", sh: context.sheet, cells }, ...formats];
+  return [
+    ...grow.ops,
+    ...(cells.length ? [{ op: "set" as const, sh: context.sheet, cells }] : []),
+    ...typedFormats,
+    ...styles,
+  ];
 }
 
 /** Fills the selection from its first row down, or its first column right, as Ctrl+D and Ctrl+R do. */

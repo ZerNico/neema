@@ -41,6 +41,7 @@ import {
   formatSelection,
   insertAtSelection,
   pasteAtSelection,
+  type PastePart,
   sortSelection,
   type CopiedCells,
   type GridContext,
@@ -148,6 +149,17 @@ function MenuItem({
     </ContextMenuItem>
   );
 }
+
+/** Excel's Paste Special choices, as the cell menu offers them. */
+const PASTE_SPECIAL: ReadonlyArray<{
+  label: string;
+  options: { part?: PastePart; transpose?: boolean };
+}> = [
+  { label: "Values only", options: { part: "values" } },
+  { label: "Formulas only", options: { part: "formulas" } },
+  { label: "Formats only", options: { part: "formats" } },
+  { label: "Transposed", options: { transpose: true } },
+];
 
 const sameSelection = (a: SheetSelection, b: SheetSelection) =>
   a.anchor.r === b.anchor.r &&
@@ -349,11 +361,33 @@ export default function SheetPanelBody({
     else if (command.kind === "redo") sync?.redo();
     else run(clearSelection(context));
   };
-  const paste = (text: string) => {
+  const paste = (
+    clip: { text: string; html: string | null },
+    options: { part?: PastePart; transpose?: boolean } = {},
+  ) => {
     const from = copied.current;
-    run(pasteAtSelection(context, text, from));
+    run(pasteAtSelection(context, clip.text, from, options));
     // A cut moves once; pasting it again copies what now stands there.
-    if (from?.cut && from.text === text) copied.current = null;
+    if (from?.cut && from.text === clip.text && !options.part && !options.transpose)
+      copied.current = null;
+  };
+  /** The clipboard for the menu's pastes, with its HTML where the browser lets that be read. */
+  const pasteFromMenu = (options: { part?: PastePart; transpose?: boolean } = {}) => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) return;
+    void clipboard
+      .read()
+      .then(async (items) => {
+        const item = items.find((each) => each.types.includes("text/plain"));
+        if (!item) return;
+        const text = await (await item.getType("text/plain")).text();
+        const html = item.types.includes("text/html")
+          ? await (await item.getType("text/html")).text()
+          : null;
+        paste({ text, html }, options);
+      })
+      .catch(() => clipboard.readText().then((text) => paste({ text, html: null }, options)))
+      .catch(() => toast.error("The browser didn’t allow reading the clipboard"));
   };
   const decorations: GridDecoration[] = [
     // A corner mark on each open thread's cell.
@@ -846,7 +880,7 @@ export default function SheetPanelBody({
                   copied.current = copySelection(context, cut);
                   return copied.current.text;
                 }}
-                onPaste={paste}
+                onPaste={(clip) => paste(clip, clip.values ? { part: "values" } : {})}
                 onResize={(axis, id, px) =>
                   run([
                     {
@@ -973,10 +1007,24 @@ export default function SheetPanelBody({
                   icon={ClipboardIcon}
                   label="Paste"
                   disabled={readOnly}
-                  onClick={() => {
-                    void navigator.clipboard?.readText().then(paste);
-                  }}
+                  onClick={() => pasteFromMenu()}
                 />
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger disabled={readOnly}>
+                    <HugeiconsIcon icon={ClipboardIcon} strokeWidth={2} />
+                    Paste special
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-44">
+                    {PASTE_SPECIAL.map((each) => (
+                      <MenuItem
+                        key={each.label}
+                        icon={ClipboardIcon}
+                        label={each.label}
+                        onClick={() => pasteFromMenu(each.options)}
+                      />
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
                 <MenuItem
                   icon={CommentAdd01Icon}
                   label="Comment"

@@ -8,6 +8,7 @@ import type { SheetOp } from "@chat/sheet/model/ops";
 import {
   clearSelection,
   copySelection,
+  formatSelection,
   deleteAtSelection,
   dragOverwrites,
   dragSelection,
@@ -124,6 +125,49 @@ describe("the clipboard", () => {
     expect([shown(doc, 1, 1), shown(doc, 5, 3)]).toEqual([null, 3]);
     // A formula reading the cut cell follows it.
     expect(formulaAt(doc, 1, 2)).toBe("C5+1");
+  });
+
+  it("pastes formats with its own copy, and pastes values, formulas, formats or transposed", () => {
+    let doc = type(emptyDoc(), 1, 1, "3");
+    doc = type(doc, 1, 2, "=A1+1");
+    doc = apply(doc, formatSelection(context(doc, [1, 1]), { bold: true }));
+    doc = apply(doc, formatSelection(context(doc, [4, 1]), { italic: true }));
+    const style = (row: number, col: number) => {
+      const { r, c } = at(doc, row, col);
+      return doc.sheet.s1!.cells[r]?.[c]?.s;
+    };
+    const copied = copySelection(context(doc, [1, 1], [1, 2]));
+    doc = apply(doc, pasteAtSelection(context(doc, [4, 1]), copied.text, copied));
+    // The target takes the source's style exactly: bold in, its own italic out.
+    expect([style(4, 1), style(4, 2)]).toEqual(['{"bold":true}', undefined]);
+    doc = apply(
+      doc,
+      pasteAtSelection(context(doc, [5, 1]), copied.text, copied, { part: "values" }),
+    );
+    expect([shown(doc, 5, 2), formulaAt(doc, 5, 2), style(5, 1)]).toEqual([
+      4,
+      undefined,
+      undefined,
+    ]);
+    doc = apply(
+      doc,
+      pasteAtSelection(context(doc, [6, 1]), copied.text, copied, { part: "formulas" }),
+    );
+    expect([formulaAt(doc, 6, 2), style(6, 1)]).toEqual(["A6+1", undefined]);
+    doc = apply(
+      doc,
+      pasteAtSelection(context(doc, [7, 3]), copied.text, copied, { part: "formats" }),
+    );
+    expect([shown(doc, 7, 3), style(7, 3)]).toEqual([null, '{"bold":true}']);
+    doc = apply(
+      doc,
+      pasteAtSelection(context(doc, [9, 1]), copied.text, copied, { transpose: true }),
+    );
+    expect([shown(doc, 9, 1), formulaAt(doc, 10, 1)]).toEqual([3, "A9+1"]);
+    // A cut pasted as values copies instead of moving.
+    const cut = copySelection(context(doc, [1, 1]), true);
+    doc = apply(doc, pasteAtSelection(context(doc, [12, 1]), cut.text, cut, { part: "values" }));
+    expect([shown(doc, 1, 1), shown(doc, 12, 1)]).toEqual([3, 3]);
   });
 
   it("types in text from elsewhere, quoted fields included", () => {

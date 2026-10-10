@@ -54,7 +54,7 @@ function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale 
         editSource={() => "=A1*2"}
         onCommand={(command) => events.push(command.kind)}
         onCopy={(cut) => (cut ? "cut" : "copied")}
-        onPaste={(text) => events.push(`paste ${text}`)}
+        onPaste={(clip) => events.push(`paste${clip.values ? " values" : ""} ${clip.text}`)}
       />
     </div>
   );
@@ -284,6 +284,14 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "z", metaKey: true, shiftKey: true });
     fireEvent.keyDown(grid, { key: "d", ctrlKey: true });
     expect(events.slice(1)).toEqual(["clear", "undo", "redo", "fill"]);
+    const clip = (text: string) => ({
+      clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") },
+    });
+    fireEvent.paste(grid, clip("a"));
+    // Cmd+Shift+V pastes values only, as in Google Sheets.
+    fireEvent.keyDown(grid, { key: "V", metaKey: true, shiftKey: true });
+    fireEvent.paste(grid, clip("b"));
+    expect(events.slice(5)).toEqual(["paste a", "paste values b"]);
   });
 
   it("completes functions, points at cells for references, and cycles $ with F4", () => {
