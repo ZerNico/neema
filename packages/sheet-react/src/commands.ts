@@ -1,9 +1,9 @@
+import { draft, type Draft } from "@chat/sheet/model/draft";
 import { cellStyle, restyle } from "@chat/sheet/model/style";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
-import { applyChange } from "@chat/sheet/model/apply";
 import type { SheetValues } from "@chat/sheet/model/calc";
-import { copyFormula, parseFormula, renderFormula } from "@chat/sheet/model/formula";
+import { renderFormula } from "@chat/sheet/model/formula";
 import { positions, type Axis, type Formula, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
 export type { ChartKind };
@@ -61,67 +61,6 @@ export function eachRange(
   return rangesOf(context).flatMap((selection) => command({ ...context, selection }));
 }
 
-/** Grows a working copy of the document by rows or columns at the end, minting their IDs. */
-function grower(context: Pick<GridContext, "doc" | "mint">) {
-  let doc = context.doc;
-  const ops: SheetOp[] = [];
-  return {
-    get doc() {
-      return doc;
-    },
-    ops,
-    ensure(sheet: string, rows: number, cols: number) {
-      for (const [axis, wanted] of [
-        ["rows", rows],
-        ["columns", cols],
-      ] as const) {
-        const entries = axis === "rows" ? doc.sheet[sheet]!.rows : doc.sheet[sheet]!.cols;
-        const have = positions(entries).ids.length;
-        if (wanted <= have) continue;
-        const op: SheetOp = {
-          op: "insert",
-          sh: sheet,
-          axis,
-          ids: Array.from({ length: wanted - have }, context.mint),
-          after: entries.at(-1)?.id ?? null,
-        };
-        ops.push(op);
-        doc = applyChange(doc, { clientId: "local", seq: 0, ops: [op] }, 0).doc;
-      }
-    },
-  };
-}
-
-/** A typed formula in its stored form, the grid grown first when it reaches past it. */
-function typedFormula(
-  text: string,
-  sheet: string,
-  grow: ReturnType<typeof grower>,
-): Formula | null {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const parsed = parseFormula(text, { doc: grow.doc, sheet });
-    if ("formula" in parsed) return parsed.formula;
-    for (const each of parsed.grow) grow.ensure(each.sheet, each.rows, each.cols);
-  }
-  return null;
-}
-
-/** A formula copied by `shift`, the grid grown first where its references reach past it. */
-function copiedFormula(
-  formula: Formula,
-  shift: { readonly rows: number; readonly cols: number },
-  sheet: string,
-  grow: ReturnType<typeof grower>,
-  transposedFrom?: { readonly row: number; readonly col: number },
-): Formula | null {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const copied = copyFormula(formula, shift, { doc: grow.doc, sheet }, transposedFrom);
-    if ("formula" in copied) return copied.formula;
-    for (const each of copied.grow) grow.ensure(each.sheet, each.rows, each.cols);
-  }
-  return null;
-}
-
 /**
  * What typing `raw` into a cell writes. A leading "=" makes a formula, an
  * apostrophe keeps text as typed, and a number typed as a percentage, a
@@ -138,7 +77,7 @@ function typedLink(text: string): string | null {
 }
 
 export function enterCell(context: GridContext, at: CellRef, raw: string): SheetOp[] {
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   const ops = typeInto(context.sheet, at, raw, grow, context.locale);
   return [...grow.ops, ...ops];
 }
@@ -148,13 +87,13 @@ function typeInto(
   sheet: string,
   at: CellRef,
   raw: string,
-  grow: ReturnType<typeof grower>,
+  grow: Draft,
   locale: GridContext["locale"],
 ): SheetOp[] {
   const context = { sheet, locale };
   const cell = grow.doc.sheet[sheet]!.cells[at.r]?.[at.c];
   if (raw.startsWith("=") && raw.length > 1) {
-    const f = typedFormula(raw.slice(1), context.sheet, grow);
+    const f = grow.formula(raw.slice(1), context.sheet);
     // A formula the grid cannot hold stays what was typed, as text.
     const write: CellWrite = f ? { ...at, f } : { ...at, v: raw };
     return [{ op: "set", sh: context.sheet, cells: [write] }];
@@ -183,7 +122,7 @@ function typeInto(
  */
 export function enterSelection(context: GridContext, raw: string): SheetOp[] {
   const head = context.selection.head;
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   const typed = typeInto(context.sheet, head, raw, grow, context.locale);
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
@@ -198,7 +137,7 @@ export function enterSelection(context: GridContext, raw: string): SheetOp[] {
       box.colIds.map((c, x): CellWrite => {
         if (!typedCell.f) return { r, c, v: typedCell.v ?? null };
         const shift = { rows: box.top + y - headRow, cols: box.left + x - headCol };
-        const f = copiedFormula(typedCell.f, shift, context.sheet, grow);
+        const f = grow.copy(typedCell.f, shift, context.sheet);
         return f ? { r, c, f } : { r, c, v: "#REF!" };
       }),
     );
@@ -481,7 +420,7 @@ export function pasteAtSelection(
     : read;
   const height = grid.length;
   const width = Math.max(...grid.map((row) => row.length));
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   grow.ensure(context.sheet, box.top + height - 1, box.left + width - 1);
   const target = grow.doc.sheet[context.sheet]!;
   const rows = positions(target.rows).ids;
@@ -521,21 +460,19 @@ export function pasteAtSelection(
         rows: box.top + y - (own!.top + fromRow),
         cols: box.left + x - (own!.left + fromCol),
       };
-      const pasted = copiedFormula(
+      const pasted = grow.copy(
         item.f,
         shift,
         own!.sheet,
-        grow,
         transpose ? { row: own!.top + fromRow, col: own!.left + fromCol } : undefined,
       );
       // On another sheet, its references are read there, as the text Excel would paste.
       const f =
         !pasted || own!.sheet === context.sheet
           ? pasted
-          : typedFormula(
+          : grow.formula(
               renderFormula(pasted, { doc: grow.doc, sheet: own!.sheet }),
               context.sheet,
-              grow,
             );
       cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
     }),
@@ -555,7 +492,7 @@ export function pasteAtSelection(
 export function fillSelection(context: GridContext, direction: "down" | "right"): SheetOp[] {
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   const cells: CellWrite[] = [];
   const formats: SheetOp[] = [];
   const sources = direction === "down" ? box.colIds : box.rowIds;
@@ -581,7 +518,7 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
       }
       const shift =
         direction === "down" ? { rows: index + 1, cols: 0 } : { rows: 0, cols: index + 1 };
-      const f = copiedFormula(cell.f, shift, context.sheet, grow);
+      const f = grow.copy(cell.f, shift, context.sheet);
       cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
     }
   }
@@ -629,7 +566,7 @@ export function dragSelection(
   if (top === box.top && left === box.left) return null;
   const height = box.bottom - box.top;
   const width = box.right - box.left;
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   grow.ensure(context.sheet, top + height, left + width);
   const rows = positions(grow.doc.sheet[context.sheet]!.rows).ids;
   const cols = positions(grow.doc.sheet[context.sheet]!.cols).ids;
@@ -652,7 +589,7 @@ export function dragSelection(
       const at = { r: rows[top - 1 + y]!, c: cols[left - 1 + x]! };
       if (cell?.f) {
         const by = { rows: top - box.top, cols: left - box.left };
-        const f = copiedFormula(cell.f, by, context.sheet, grow);
+        const f = grow.copy(cell.f, by, context.sheet);
         cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
       } else cells.push({ ...at, v: cell?.v ?? null });
       const patch = restyle(sheet.cells[at.r]?.[at.c]?.s, cellStyle(cell?.s));
@@ -711,7 +648,7 @@ export function fillFromHandle(
     };
   }
   if (count < 1) return null;
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   if (fill.direction === "down") grow.ensure(context.sheet, box.bottom + count, box.right);
   if (fill.direction === "right") grow.ensure(context.sheet, box.bottom, box.right + count);
   const ops = fillSeries(
@@ -723,7 +660,7 @@ export function fillFromHandle(
     fill.mode,
     context.locale,
     part,
-    (formula, shift) => copiedFormula(formula, shift, context.sheet, grow),
+    (formula, shift) => grow.copy(formula, shift, context.sheet),
   );
   if (!ops.length) return null;
   const grown = grow.doc.sheet[context.sheet]!;
@@ -757,7 +694,7 @@ export function chartFromSelection(context: GridContext, kind: ChartKind): Sheet
   const source = readSource(context.doc, context.values, context.sheet, box.area);
   const series = seriesFrom(context.doc, source, kind, context.values);
   if (!series.length) return [];
-  const grow = grower(context);
+  const grow = draft(context.doc, context.mint);
   grow.ensure(context.sheet, box.top, box.right + 2);
   const cols = positions(grow.doc.sheet[context.sheet]!.cols).ids;
   return [

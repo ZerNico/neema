@@ -1,8 +1,8 @@
+import { draft } from "@chat/sheet/model/draft";
 import { columnIndex, columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
 import type { Scalar } from "@chat/sheet/engine/evaluate";
-import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet, type CalcContext } from "@chat/sheet/model/calc";
-import { copyFormula, parseFormula, quoteSheet, renderFormula } from "@chat/sheet/model/formula";
+import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { LIVE_LIMITS } from "@chat/sheet/model/limits";
 import {
   NEW_SHEET,
@@ -61,9 +61,6 @@ function linkOf(text: string): string | null {
   throw new Refused("invalid", `link: "${text.slice(0, 80)}" is not a web or mail address.`);
 }
 
-/** Writes in the private view carry this revision, so the guards count them as the call's own. */
-const WORKING = -1;
-
 /** Excel's sort order: numbers, text, logicals, errors, then blanks. */
 const rank = (value: Scalar) =>
   value === null || value === ""
@@ -101,46 +98,27 @@ export function convertOperations(
   input: ConvertInput,
   operations: readonly LiveSheetOperation[],
 ): Converted {
-  let view = input.doc;
-  const out: SheetOp[] = [];
-  const emit = (...ops: SheetOp[]) => {
-    out.push(...ops);
-    view = applyChange(view, { clientId: "convert", seq: 1, ops }, WORKING).doc;
-  };
+  const plan = draft(input.doc, input.mint);
+  const emit = plan.push;
 
   const sheetId = (name: string) => {
-    const id = sheetNamed(view, name);
+    const id = sheetNamed(plan.doc, name);
     if (id) return id;
-    const names = liveSheets(view).map((each) => view.sheet[each]!.name);
+    const names = liveSheets(plan.doc).map((each) => plan.doc.sheet[each]!.name);
     throw new Refused("not_found", `No sheet named ${name}. Sheets: ${names.join(", ")}.`);
   };
   const ids = (sh: string, axis: Axis) =>
-    positions(axis === "rows" ? view.sheet[sh]!.rows : view.sheet[sh]!.cols).ids;
+    positions(axis === "rows" ? plan.doc.sheet[sh]!.rows : plan.doc.sheet[sh]!.cols).ids;
   /** Grows a sheet's grid to at least this many rows and columns. */
   const ensure = (sh: string, rows: number, cols: number) => {
-    for (const [axis, wanted, limit] of [
-      ["rows", rows, LIVE_LIMITS.rows],
-      ["columns", cols, LIVE_LIMITS.cols],
-    ] as const) {
-      const have = ids(sh, axis).length;
-      if (wanted <= have) continue;
-      const entries = axis === "rows" ? view.sheet[sh]!.rows : view.sheet[sh]!.cols;
-      if (entries.length + wanted - have > limit)
-        throw new Refused("invalid", `A live sheet holds at most ${limit} ${axis}.`);
-      emit({
-        op: "insert",
-        sh,
-        axis,
-        ids: Array.from({ length: wanted - have }, input.mint),
-        after: entries.at(-1)?.id ?? null,
-      });
-    }
+    const over = plan.ensure(sh, rows, cols);
+    if (over) throw new Refused("invalid", over);
   };
   const label = (sh: string, r: string, c: string) =>
-    `${quoteSheet(view.sheet[sh]!.name)}!${columnLetters(positions(view.sheet[sh]!.cols).at(c) ?? 0)}${positions(view.sheet[sh]!.rows).at(r) ?? 0}`;
+    `${quoteSheet(plan.doc.sheet[sh]!.name)}!${columnLetters(positions(plan.doc.sheet[sh]!.cols).at(c) ?? 0)}${positions(plan.doc.sheet[sh]!.rows).at(r) ?? 0}`;
   const changedSince = (cell: Cell | undefined) =>
     !!cell && cell.w > input.seen && !input.own.has(cell.w);
-  /** Refuses touching cells someone else changed since the model's view. */
+  /** Refuses touching cells someone else changed since the model's plan.doc. */
   const conflictMessage = (sh: string, r: string, c: string) =>
     `${label(sh, r, c)} changed since your view of the sheet. Nothing was applied; the view now shows it, so check it and send the call again.`;
   const guard = (
@@ -148,7 +126,7 @@ export function convertOperations(
     rows: ReadonlySet<string> | null,
     cols: ReadonlySet<string> | null,
   ) => {
-    for (const [r, row] of Object.entries(view.sheet[sh]!.cells)) {
+    for (const [r, row] of Object.entries(plan.doc.sheet[sh]!.cells)) {
       if (rows && !rows.has(r)) continue;
       for (const [c, cell] of Object.entries(row))
         if ((!cols || cols.has(c)) && changedSince(cell))
@@ -169,24 +147,18 @@ export function convertOperations(
     };
   };
   const formula = (text: string, sh: string): Formula => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const parsed = parseFormula(text, { doc: view, sheet: sh });
-      if ("formula" in parsed) return parsed.formula;
-      for (const growth of parsed.grow) ensure(growth.sheet, growth.rows, growth.cols);
-    }
+    const parsed = plan.formula(text, sh);
+    if (parsed) return parsed;
     throw new Refused("invalid", `=${text.slice(0, 80)} reaches past what a live sheet holds.`);
   };
   /** A formula copied by a distance, its references then read on the target sheet. */
   const copied = (f: Formula, from: string, to: string, shift: { rows: number; cols: number }) => {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = copyFormula(f, shift, { doc: view, sheet: from });
-      if ("formula" in result)
-        return from === to
-          ? result.formula
-          : formula(renderFormula(result.formula, { doc: view, sheet: from }), to);
-      for (const growth of result.grow) ensure(growth.sheet, growth.rows, growth.cols);
-    }
-    throw new Refused("invalid", "A copied formula reaches past what a live sheet holds.");
+    const result = plan.copy(f, shift, from);
+    if (!result)
+      throw new Refused("invalid", "A copied formula reaches past what a live sheet holds.");
+    return from === to
+      ? result
+      : formula(renderFormula(result, { doc: plan.doc, sheet: from }), to);
   };
   const write = (r: string, c: string, value: CellInput, sh: string): CellWrite => {
     if (typeof value === "string" && value.startsWith("="))
@@ -220,7 +192,7 @@ export function convertOperations(
         );
         // Exactly the cells written: rows of different lengths leave the rest of their box alone.
         for (const { r, c } of targets) {
-          const cell = view.sheet[sh]!.cells[r]?.[c];
+          const cell = plan.doc.sheet[sh]!.cells[r]?.[c];
           if (cell && changedSince(cell)) throw new Refused("conflict", conflictMessage(sh, r, c));
         }
         // A formula may grow the grid, so writes are built before any is emitted.
@@ -335,7 +307,7 @@ export function convertOperations(
         );
         if (axis === "rows") ensure(sh, picked.first - 1, 0);
         else ensure(sh, 0, picked.first - 1);
-        const entries = axis === "rows" ? view.sheet[sh]!.rows : view.sheet[sh]!.cols;
+        const entries = axis === "rows" ? plan.doc.sheet[sh]!.rows : plan.doc.sheet[sh]!.cols;
         const count = picked.last - picked.first + 1;
         const limit = axis === "rows" ? LIVE_LIMITS.rows : LIVE_LIMITS.cols;
         if (entries.length + count > limit)
@@ -417,7 +389,7 @@ export function convertOperations(
               col,
               fromRow,
               fromCol,
-              cell: view.sheet[sh]!.cells[sourceRows[fromRow - 1]!]?.[sourceCols[fromCol - 1]!],
+              cell: plan.doc.sheet[sh]!.cells[sourceRows[fromRow - 1]!]?.[sourceCols[fromCol - 1]!],
             });
           }
         const targetRows = ids(destination, "rows");
@@ -453,7 +425,7 @@ export function convertOperations(
         const sorted = operation.header ? rows.slice(1) : rows;
         if (sorted.length < 2) return;
         guard(sh, new Set(sorted), new Set(cols));
-        const values = calculateSheet(view, input.context);
+        const values = calculateSheet(plan.doc, input.context);
         const byId = ids(sh, "columns")[by - 1]!;
         const keyed = sorted.map((r, index) => {
           return { r, index, value: values.value(sh, r, byId) };
@@ -470,14 +442,14 @@ export function convertOperations(
         return;
       }
       case "addSheet": {
-        if (sheetNamed(view, operation.name))
+        if (sheetNamed(plan.doc, operation.name))
           throw new Refused("invalid", `A sheet named ${operation.name} exists already.`);
         const id = input.mint();
         emit({
           op: "sheetAdd",
           id,
           name: operation.name,
-          after: liveSheets(view).at(-1) ?? null,
+          after: liveSheets(plan.doc).at(-1) ?? null,
           rows: Array.from({ length: NEW_SHEET.rows }, (_, index) => `${id}.r${index + 1}`),
           cols: Array.from({ length: NEW_SHEET.cols }, (_, index) => `${id}.c${index + 1}`),
         });
@@ -485,7 +457,7 @@ export function convertOperations(
       }
       case "renameSheet": {
         const sh = sheetId(operation.sheet);
-        const other = sheetNamed(view, operation.name);
+        const other = sheetNamed(plan.doc, operation.name);
         if (other && other !== sh)
           throw new Refused("invalid", `A sheet named ${operation.name} exists already.`);
         emit({ op: "sheetRename", id: sh, name: operation.name });
@@ -502,7 +474,7 @@ export function convertOperations(
         const chosen = picked.ids();
         const [from, to] = [chosen[0]!, chosen.at(-1)!];
         const key = axis === "rows" ? "rows" : "cols";
-        const list = view.sheet[sh]!.outline?.[key] ?? [];
+        const list = plan.doc.sheet[sh]!.outline?.[key] ?? [];
         const at = list.findIndex((each) => each.from === from && each.to === to);
         const shaped = (collapsed: boolean | undefined) => ({
           from,
@@ -535,7 +507,7 @@ export function convertOperations(
       }
       case "moveSheet": {
         const sh = sheetId(operation.sheet);
-        const others = liveSheets(view).filter((each) => each !== sh);
+        const others = liveSheets(plan.doc).filter((each) => each !== sh);
         emit({
           op: "sheetMove",
           id: sh,
@@ -546,7 +518,7 @@ export function convertOperations(
       }
       case "deleteSheet": {
         const sh = sheetId(operation.sheet);
-        if (liveSheets(view).length === 1)
+        if (liveSheets(plan.doc).length === 1)
           throw new Refused("invalid", "A sheet document keeps at least one sheet.");
         guard(sh, null, null);
         emit({ op: "sheetDelete", id: sh });
@@ -556,7 +528,7 @@ export function convertOperations(
       case "editChart": {
         emit(
           chartOperation(operation, {
-            view: () => view,
+            view: () => plan.doc,
             sheetId,
             ids,
             ensure,
@@ -571,7 +543,7 @@ export function convertOperations(
       }
       case "setFilter": {
         const sh = sheetId(operation.sheet);
-        const existing = view.sheet[sh]!.filter;
+        const existing = plan.doc.sheet[sh]!.filter;
         let box = existing?.box;
         if (operation.range) {
           const { ids: whole } = area(sh, operation.range);
@@ -586,7 +558,7 @@ export function convertOperations(
         if (operation.column) {
           const letters = operation.column.split(":")[0]!;
           const column = ids(sh, "columns")[columnIndex(letters.toUpperCase()) - 1];
-          const inside = positions(view.sheet[sh]!.cols);
+          const inside = positions(plan.doc.sheet[sh]!.cols);
           const at = column ? inside.at(column) : undefined;
           if (!column || at === undefined || at < inside.at(box.c1)! || at > inside.at(box.c2)!)
             throw new Refused("invalid", `Column ${letters} is outside the filter's range.`);
@@ -687,7 +659,7 @@ export function convertOperations(
                                 | [string, string, string],
                             }
                           : { kind: "bar", color: operation.color ?? "#638EC6" };
-        const list = view.sheet[sh]!.conditional ?? [];
+        const list = plan.doc.sheet[sh]!.conditional ?? [];
         emit({
           op: "conditional",
           sh,
@@ -700,7 +672,7 @@ export function convertOperations(
       }
       case "clearConditionalFormats": {
         const sh = sheetId(operation.sheet);
-        const list = view.sheet[sh]!.conditional ?? [];
+        const list = plan.doc.sheet[sh]!.conditional ?? [];
         if (!operation.range) {
           emit({ op: "conditional", sh, list: [] });
           return;
@@ -710,7 +682,7 @@ export function convertOperations(
         emit({
           op: "conditional",
           sh,
-          list: withoutBounds(view.sheet[sh]!, list, box, input.mint),
+          list: withoutBounds(plan.doc.sheet[sh]!, list, box, input.mint),
         });
         return;
       }
@@ -768,8 +740,8 @@ export function convertOperations(
         }
         // Other rules give up these cells, as Excel keeps one rule per cell.
         const kept = withoutBounds(
-          view.sheet[sh]!,
-          view.sheet[sh]!.validations ?? [],
+          plan.doc.sheet[sh]!,
+          plan.doc.sheet[sh]!.validations ?? [],
           box,
           input.mint,
         );
@@ -797,7 +769,7 @@ export function convertOperations(
           return;
         }
         const { box } = area(sh, operation.range);
-        const sheet = view.sheet[sh]!;
+        const sheet = plan.doc.sheet[sh]!;
         emit({
           op: "validations",
           sh,
@@ -810,7 +782,7 @@ export function convertOperations(
         return;
       }
       case "removeChart": {
-        if (!view.charts[operation.chart])
+        if (!plan.doc.charts[operation.chart])
           throw new Refused(
             "not_found",
             `No chart ${operation.chart}; the view lists them in <charts>.`,
@@ -821,7 +793,7 @@ export function convertOperations(
       case "defineName": {
         const sh = sheetId(operation.sheet);
         const box = parseRange(operation.range)!;
-        const text = `${quoteSheet(view.sheet[sh]!.name)}!${corner(box.top, box.left)}${
+        const text = `${quoteSheet(plan.doc.sheet[sh]!.name)}!${corner(box.top, box.left)}${
           box.bottom === box.top && box.right === box.left
             ? ""
             : `:${corner(box.bottom, box.right)}`
@@ -839,5 +811,5 @@ export function convertOperations(
       return { ok: false, outcome: error.outcome, message: error.message };
     throw error;
   }
-  return { ok: true, ops: out, doc: view };
+  return { ok: true, ops: plan.ops, doc: plan.doc };
 }
