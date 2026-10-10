@@ -167,8 +167,34 @@ function styleOf(declarations: ReadonlyMap<string, string>): StylePatch {
   return style;
 }
 
+/**
+ * CSS declarations split at their semicolons, but not those inside quotes or
+ * escaped: Excel's number formats carry their own, `"0.00\;[Red]-0.00"`.
+ */
+const declarationsOf = (text: string) => {
+  const parts: string[] = [];
+  let [current, quote] = ["", ""];
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]!;
+    if (char === "\\") {
+      current += char + (text[index + 1] ?? "");
+      index++;
+    } else if (quote) {
+      if (char === quote) quote = "";
+      current += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+    } else if (char === ";") {
+      parts.push(current);
+      current = "";
+    } else current += char;
+  }
+  return [...parts, current];
+};
+
 const parseDeclarations = (text: string, into: Map<string, string>) => {
-  for (const part of text.split(";")) {
+  for (const part of declarationsOf(text)) {
     const colon = part.indexOf(":");
     if (colon > 0) into.set(part.slice(0, colon).trim().toLowerCase(), part.slice(colon + 1));
   }

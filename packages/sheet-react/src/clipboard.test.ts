@@ -74,6 +74,14 @@ describe("HTML on the clipboard", () => {
     });
   });
 
+  it("keeps a number format's own semicolons, quoted in the style", () => {
+    const html = `<table><tr><td style='mso-number-format:"0\\.00\\;\\[Red\\]\\-0\\.00"; font-weight:700' x:num="-3">-3.00</td></tr></table>`;
+    expect(readHtmlTable(html)![0]![0]!.style).toEqual({
+      numberFormat: "0.00;[Red]-0.00",
+      bold: true,
+    });
+  });
+
   it("reads Google Sheets' inline styles and values, leaving out its defaults", () => {
     const read = readHtmlTable(SHEETS)!;
     expect(read).toEqual([
