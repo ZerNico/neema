@@ -142,6 +142,19 @@ describe("document connection", () => {
     }
   });
 
+  it("restores another tab's unsent typing though this tab's cache loaded before it", async () => {
+    // This tab's cache loads first, while nothing is saved yet.
+    const thisTab = deviceCache<OutboxEntry>({ namespace: "document-outbox", maxBytes: 1 << 24 });
+    await thisTab.warm();
+    const first = await connect(offline);
+    first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");
+    reload(first);
+    await outbox.flush();
+    // The lock is free by now: this tab owns the entry at once.
+    const second = await connect(online, thisTab);
+    expect(markdown(second)).toBe("Please Keep this\n\nRemove me");
+  });
+
   it("rebases what was typed offline over what others wrote meanwhile", async () => {
     const first = await connect(offline);
     first.editor!.commands.insertContentAt(at(first, "Keep"), "Please ");

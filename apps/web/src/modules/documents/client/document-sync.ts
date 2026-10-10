@@ -13,7 +13,7 @@ import type {
 } from "../schema.ts";
 import { commentsKey, commentsPlugin } from "./comments-plugin.ts";
 import { codeHighlightPlugin } from "./code-highlight-plugin.ts";
-import type { OutboxStore } from "./outbox.ts";
+import type { OutboxEntry, OutboxStore } from "./outbox.ts";
 import { presencePlugin, showCarets, type RemoteCaret } from "./presence.ts";
 
 export type DocumentSyncStatus = "connecting" | "live" | "offline" | "gone";
@@ -68,7 +68,7 @@ const unconfirmedOf = (plugin: Plugin | null, state: EditorState): Rebaseable[] 
 /** The text a step would have written, for a person to place by hand. */
 const insertedText = (step: Step) =>
   step instanceof ReplaceStep || step instanceof ReplaceAroundStep
-    ? step.slice.content.textBetween(0, step.slice.content.size, "\n\n", " ").trim()
+    ? step.slice.content.textBetween(0, step.slice.content.size, "\n\n", " ")
     : "";
 /**
  * What a saved entry's steps changed in its document, as text: the stretch
@@ -202,6 +202,8 @@ export class DocumentSync {
   #comments: ReadonlyArray<DocumentComment> = [];
   /** Only the tab that owns the device's outbox entry for this document reads or writes it. */
   #ownsOutbox = false;
+  /** An entry taken over before this tab had an editor to read it with; null for none. */
+  #awaitingEditor: OutboxEntry | null | undefined = undefined;
   #release: () => void = () => undefined;
   readonly #released = new Promise<void>((resolve) => {
     this.#release = resolve;
@@ -210,10 +212,11 @@ export class DocumentSync {
   constructor(private readonly options: DocumentSyncOptions) {
     this.#clientId = randomClient();
     void claimOutbox(options.documentId, this.#released, () => void this.#takeOver()).then(
-      (owned) => {
+      async (owned) => {
+        // From storage, not this tab's copy: another tab may have written since it loaded.
+        const saved = owned ? await options.outbox.reload(options.documentId) : undefined;
         if (this.#destroyed) return;
         this.#ownsOutbox = owned;
-        const saved = owned ? options.outbox.get(options.documentId) : undefined;
         if (saved) {
           this.#clientId = saved.clientId;
           this.#restore(saved);
@@ -312,6 +315,14 @@ export class DocumentSync {
     // Read from storage: this tab's copy is from before the old owner wrote.
     const left = await this.options.outbox.reload(this.options.documentId);
     if (this.#destroyed) return;
+    // Its text needs the schema; until the first frame builds the editor, the
+    // entry waits, and this tab writes nothing over it.
+    if (this.#editor) this.#adopt(left);
+    else this.#awaitingEditor = left ?? null;
+  }
+  /** Owns the outbox from here on, keeping what the last owner left as recovered text. */
+  #adopt(left: OutboxEntry | null | undefined) {
+    this.#awaitingEditor = undefined;
     this.#ownsOutbox = true;
     const schema = this.#editor?.schema;
     if (left && left.clientId !== this.#clientId && schema) {
@@ -379,6 +390,7 @@ export class DocumentSync {
       },
     });
     this.#confirmed = this.#editor.state.doc;
+    if (this.#awaitingEditor !== undefined) this.#adopt(this.#awaitingEditor);
   }
 
   /** Reopens on what this device saved: its base document, then its unsent steps on top. */
