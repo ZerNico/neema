@@ -21,6 +21,7 @@ import {
   axisLayout,
   columnPx,
   rowPx,
+  textWidth,
   visibleRange,
   type AxisLayout,
 } from "./layout.ts";
@@ -694,7 +695,11 @@ export function SheetGrid({
         const value = values.value(sheet, r, cols.ids[col]!);
         const style = cellStyle(sheetCells[r]?.[cols.ids[col]!]?.s);
         if (typeof value === "string" && !style.wrap && (style.horizontal ?? "left") === "left") {
+          // Only as far as the text needs: text that fits keeps its cell's borders.
+          const needed =
+            textWidth(value, style.fontSize ? (style.fontSize * 4) / 3 : 14, style.bold) + 8;
           while (
+            cols.starts[overflowTo + 1]! - cols.starts[col]! < needed &&
             overflowTo + 1 <= colRange.last &&
             !merges.covered.has(key(row, overflowTo + 1)) &&
             !merges.spans.has(key(row, overflowTo + 1)) &&

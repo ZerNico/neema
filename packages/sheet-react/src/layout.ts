@@ -58,3 +58,26 @@ export function visibleRange(layout: AxisLayout, from: number, length: number, o
     last: Math.min(layout.ids.length - 1, layout.indexAt(from + length) + overscan),
   };
 }
+
+let measurer: OffscreenCanvasRenderingContext2D | null | undefined;
+const widths = new Map<string, number>();
+/**
+ * How wide text draws in a cell, in pixels: measured on a canvas where there
+ * is one, else estimated at an average character's width.
+ */
+export function textWidth(text: string, fontPx = 14, bold = false): number {
+  const key = `${fontPx}|${bold ? 1 : 0}|${text}`;
+  const known = widths.get(key);
+  if (known !== undefined) return known;
+  measurer ??=
+    typeof OffscreenCanvas === "undefined" ? null : new OffscreenCanvas(1, 1).getContext("2d");
+  let width = text.length * fontPx * 0.55;
+  if (measurer) {
+    measurer.font = `${bold ? 600 : 400} ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
+    width = measurer.measureText(text).width;
+  }
+  // A long sheet measures the same few thousand texts again and again.
+  if (widths.size > 5_000) widths.clear();
+  widths.set(key, width);
+  return width;
+}
