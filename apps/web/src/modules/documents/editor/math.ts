@@ -1,4 +1,4 @@
-import type { MarkdownTokenizer } from "@tiptap/core";
+import type { JSONContent, MarkdownTokenizer } from "@tiptap/core";
 import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
 
 /**
@@ -21,16 +21,31 @@ const inlineLatex = (src: string) => {
 };
 
 /**
- * Text a person typed, escaped wherever a dollar would open math on the next
- * read: written back by the model, "$x$ off" must not become a formula.
+ * Every dollar in text a person typed, escaped as upstream escapes `*` and
+ * `_`: a pair split by formatting ("$**x**$") would otherwise come back as a
+ * formula, and one text node cannot see its neighbours.
  */
 export const escapeMathDollars = (text: string) =>
-  text.replace(/(\\*)\$/g, (whole, backslashes: string, offset: number) =>
-    // Upstream has escaped every backslash, so an odd run before the dollar escapes it.
-    backslashes.length % 2 === 0 && inlineLatex(text.slice(offset + backslashes.length))
-      ? `${backslashes}\\$`
-      : whole,
+  // Upstream has escaped every backslash, so an odd run before a dollar escapes it.
+  text.replace(/(\\*)\$/g, (whole, backslashes: string) =>
+    backslashes.length % 2 === 0 ? `${backslashes}\\$` : whole,
   );
+
+/**
+ * A formula a digit follows is written `$$x$$`: the closing `$` of `$x$2`
+ * reads as a price. Marked on the JSON before writing, since a node's writer
+ * sees only what comes before it.
+ */
+export const markMathBeforeDigits = (node: JSONContent): JSONContent => {
+  if (!node.content) return node;
+  const content = node.content.map((child, index) => {
+    const next = node.content![index + 1];
+    return child.type === "inlineMath" && next?.type === "text" && /^\d/.test(next.text ?? "")
+      ? { ...child, attrs: { ...child.attrs, beforeDigit: true } }
+      : markMathBeforeDigits(child);
+  });
+  return { ...node, content };
+};
 
 const inlineTokenizer: MarkdownTokenizer = {
   name: "inlineMath",
@@ -56,14 +71,15 @@ const blockTokenizer: MarkdownTokenizer = {
   },
 };
 
-/** One line of LaTeX inside text; Markdown `$…$`. */
+/** One line of LaTeX inside text; Markdown `$…$`, or `$$…$$` before a digit. */
 export const DocumentInlineMath = InlineMath.extend({
   markdownTokenizer: inlineTokenizer,
   renderMarkdown: (node) => {
     const latex = String(node.attrs?.latex ?? "")
       .replace(/\s+/g, " ")
       .trim();
-    return latex ? `$${latex}$` : "";
+    const fence = node.attrs?.beforeDigit ? "$$" : "$";
+    return latex ? `${fence}${latex}${fence}` : "";
   },
 });
 

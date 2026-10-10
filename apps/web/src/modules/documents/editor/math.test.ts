@@ -45,13 +45,41 @@ describe("math in document Markdown", () => {
     expect(shape("$$N_j = x$$")).toEqual(["blockMath:N_j = x"]);
   });
 
-  it("escapes a typed dollar that would open math, so the text stays text", () => {
+  it("escapes every typed dollar, so the text stays text", () => {
     const typed = documentSchema.node("doc", null, [
       documentSchema.node("paragraph", null, [documentSchema.text("Use $x$ here, from $5 to $10")]),
     ]);
     const markdown = toMarkdown(typed);
-    expect(markdown).toBe("Use \\$x$ here, from $5 to $10");
+    expect(markdown).toBe("Use \\$x\\$ here, from \\$5 to \\$10");
     expect(shape(markdown)).toEqual(["text:Use $x$ here, from $5 to $10"]);
+  });
+
+  it("keeps a typed dollar pair split by formatting as text", () => {
+    const bold = documentSchema.marks.bold!.create();
+    const typed = documentSchema.node("doc", null, [
+      documentSchema.node("paragraph", null, [
+        documentSchema.text("$"),
+        documentSchema.text("x", [bold]),
+        documentSchema.text("$"),
+      ]),
+    ]);
+    const markdown = toMarkdown(typed);
+    expect(markdown).toBe("\\$**x**\\$");
+    expect(shape(markdown)).toEqual(["text:$", "text:x", "text:$"]);
+  });
+
+  it("writes a formula a digit follows so it reads back as one", () => {
+    const doc = documentSchema.node("doc", null, [
+      documentSchema.node("paragraph", null, [
+        documentSchema.text("a "),
+        documentSchema.node("inlineMath", { latex: "x" }),
+        documentSchema.text("2"),
+      ]),
+    ]);
+    const markdown = toMarkdown(doc);
+    expect(markdown).toBe("a $$x$$2");
+    expect(shape(markdown)).toEqual(["text:a ", "inlineMath:x", "text:2"]);
+    expect(normalizeMarkdown("a $$x$$2")).toBe("a $$x$$2");
   });
 
   it("keeps dollars in code as written", () => {
