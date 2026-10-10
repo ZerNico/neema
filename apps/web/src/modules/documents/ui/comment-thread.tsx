@@ -238,6 +238,7 @@ export function CommentThread({
   actions,
   expanded,
   onQuoteClick,
+  label,
 }: {
   root: DocumentComment;
   replies: DocumentComment[];
@@ -247,13 +248,16 @@ export function CommentThread({
   /** Shows the reply box; a list shows it only for the thread being read. */
   expanded: boolean;
   onQuoteClick?: (() => void) | undefined;
+  /** What the thread is about as it stands now, where that can change (a sheet's cell); else its quote. */
+  label?: string | undefined;
 }) {
   const all = [root, ...replies];
+  const about = label ?? root.quote ?? "";
   const waiting = all.some((each) => each.toAssistant && !each.answered);
   const quote = (
     <span className="line-clamp-2 text-left">
       {anchored ? null : <span className="font-medium">Text removed · </span>}
-      {shorten(root.quote ?? "", 160)}
+      {shorten(about, 160)}
     </span>
   );
   return (
@@ -307,9 +311,7 @@ export function CommentThread({
         <CommentInput
           placeholder="Reply"
           canAsk={actions.canAsk}
-          onSubmit={(body, toAssistant) =>
-            actions.reply(root.id, root.quote ?? "", body, toAssistant)
-          }
+          onSubmit={(body, toAssistant) => actions.reply(root.id, about, body, toAssistant)}
         />
       ) : null}
     </div>

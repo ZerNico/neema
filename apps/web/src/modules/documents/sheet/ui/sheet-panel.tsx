@@ -800,6 +800,19 @@ export default function SheetPanelBody({
               (error: unknown) => toastError("Couldn’t delete the comment.", error),
             ),
         };
+  /** A thread's cells as they read now: where they are and what the first one shows. */
+  const cellsLabel = (box: { r1: string; r2: string; c1: string; c2: string }) => {
+    const shown = cellDisplay(
+      values.value(sheet, box.r1, box.c1),
+      cellStyle(doc.sheet[sheet]!.cells[box.r1]?.[box.c1]?.s),
+      locale,
+    ).text;
+    const where =
+      box.r1 !== box.r2 || box.c1 !== box.c2
+        ? `${cellName(box.r1, box.c1)}:${cellName(box.r2, box.c2)}`
+        : cellName(box.r1, box.c1);
+    return `${where}${shown ? ` · ${shown}` : ""}`.slice(0, 500);
+  };
   const startThread = async (body: string, toAssistant: boolean) => {
     const threadId = uuidv7();
     // The selection, as Excel and Sheets comment on a range; its first cell's text for the quote.
@@ -811,15 +824,8 @@ export default function SheetPanelBody({
       c: box.c1,
       ...(range ? { r2: box.r2, c2: box.c2 } : {}),
     };
-    const shown = cellDisplay(
-      values.value(sheet, box.r1, box.c1),
-      cellStyle(doc.sheet[sheet]!.cells[box.r1]?.[box.c1]?.s),
-      locale,
-    ).text;
-    const where = range
-      ? `${cellName(box.r1, box.c1)}:${cellName(box.r2, box.c2)}`
-      : cellName(box.r1, box.c1);
-    const quote = `${where}${shown ? ` · ${shown}` : ""}`.slice(0, 500);
+    // The quote keeps what the cells showed when the thread began, for a thread whose cells go.
+    const quote = cellsLabel(box);
     try {
       await commentOnDocument({
         data: {
@@ -1581,6 +1587,14 @@ export default function SheetPanelBody({
               me={me}
               actions={threadActions(shownThread.at)}
               expanded
+              // The cells as they are now: a thread follows its cells, and their values change.
+              // A gone far corner leaves the first cell, as the thread's place does.
+              label={cellsLabel({
+                r1: rows.ids[shownThread.box.top - 1]!,
+                c1: cols.ids[shownThread.box.left - 1]!,
+                r2: rows.ids[shownThread.box.bottom - 1]!,
+                c2: cols.ids[shownThread.box.right - 1]!,
+              })}
             />
           ) : null}
         </PopoverContent>

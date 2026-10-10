@@ -192,12 +192,13 @@ describe("an open sheet", () => {
     expect(screen.getByText("B3")).toBeTruthy();
   });
 
-  it("shows the thread on the selected cell", () => {
-    const doc = apply(emptyDoc(), {
-      op: "anchor",
-      thread: "t1",
-      at: { sh: "s1", r: "s1.r1", c: "s1.c1" },
-    });
+  it("shows the thread on the selected cell, naming the cell as it reads now", () => {
+    const doc = apply(
+      emptyDoc(),
+      { op: "anchor", thread: "t1", at: { sh: "s1", r: "s1.r1", c: "s1.c1" } },
+      // Changed since the thread began, when the cell read 90.
+      { op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c1", v: 120 }] },
+    );
     const root = {
       id: "t1",
       threadId: "t1",
@@ -207,7 +208,7 @@ describe("an open sheet", () => {
       body: "Check this total",
       createdAt: new Date(0).toISOString(),
       resolvedAt: null,
-      quote: "A1",
+      quote: "A1 · 90",
       toAssistant: false,
       answered: false,
     };
@@ -215,6 +216,7 @@ describe("an open sheet", () => {
       <SheetPanelBody controller={controllerOf(doc, [root])} canEdit={false} toolbarSlot={null} />,
     );
     expect(screen.getByText("Check this total")).toBeTruthy();
+    expect(screen.getByText("A1 · 120")).toBeTruthy();
   });
 
   it("opens a thread on a range from any of its cells, and lists every thread", async () => {
