@@ -379,6 +379,8 @@ describe("the sheet grid", () => {
     // The pane's copy is only for the eye; the grid's own cell is the one named.
     expect(copies.filter((each) => each.closest("[aria-hidden]"))).toHaveLength(1);
     expect(screen.getAllByText("Body")).toHaveLength(1);
+    // Its own layer, so its outlines stay under the row numbers when scrolled sideways.
+    expect(copies.find((each) => each.closest("[aria-hidden]"))!.closest(".isolate")).toBeTruthy();
   });
 
   it("selects a chart over the cells, moves it a cell at a time and snaps a drag to a cell", () => {

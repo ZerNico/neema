@@ -1541,7 +1541,8 @@ export function SheetGrid({
   ) => (
     <div
       aria-hidden={editingPane !== name || undefined}
-      className="bg-background absolute overflow-hidden"
+      // Its own stacking layer: outlines inside stay under the headers, as in the content.
+      className="bg-background absolute isolate overflow-hidden"
       style={{
         top: name === "left" ? 0 : HEADER_ROW_PX,
         left: HEADER_COLUMN_PX,
