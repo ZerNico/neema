@@ -220,6 +220,8 @@ export function convertOperations(
         for (const key of [
           "bold",
           "italic",
+          "underline",
+          "strike",
           "fontSize",
           "fontColor",
           "horizontal",
@@ -227,6 +229,7 @@ export function convertOperations(
           "wrap",
         ] as const)
           if (operation[key] !== undefined) patch[key] = operation[key];
+        if (operation.font !== undefined) patch.fontFamily = operation.font;
         if (operation.fill !== undefined)
           patch.fill = operation.fill === "none" ? null : operation.fill;
         if (operation.numberFormat !== undefined)

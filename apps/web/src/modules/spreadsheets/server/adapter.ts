@@ -478,6 +478,11 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
         const font = {
           ...(operation.bold === undefined ? {} : { bold: operation.bold }),
           ...(operation.italic === undefined ? {} : { italic: operation.italic }),
+          ...(operation.underline === undefined
+            ? {}
+            : { underline: operation.underline ? ("single" as const) : undefined }),
+          ...(operation.strike === undefined ? {} : { strike: operation.strike }),
+          ...(operation.font ? { name: operation.font } : {}),
           ...(operation.fontSize === undefined ? {} : { size: operation.fontSize }),
           ...(operation.fontColor ? { color: { rgb: `FF${operation.fontColor.slice(1)}` } } : {}),
         };
@@ -813,6 +818,9 @@ function styleCell(workbook: Workbook, cell: Cell, style: Readonly<Record<string
   const font = {
     ...(style.bold === true ? { bold: true } : {}),
     ...(style.italic === true ? { italic: true } : {}),
+    ...(style.underline === true ? { underline: "single" as const } : {}),
+    ...(style.strike === true ? { strike: true } : {}),
+    ...(text("fontFamily") ? { name: text("fontFamily")! } : {}),
     ...(typeof style.fontSize === "number" ? { size: style.fontSize } : {}),
     ...(text("fontColor") ? { color: { rgb: `FF${text("fontColor")!.slice(1)}` } } : {}),
   };
@@ -897,6 +905,8 @@ export interface LiveSheetImport {
   readonly dropped: readonly string[];
 }
 
+/** Fonts Excel and its readers start a workbook with; a cell in one keeps no font of its own. */
+const DEFAULT_FONTS = new Set(["Calibri", "Aptos", "Aptos Narrow", "Arial"]);
 const rgbOf = (color: { rgb?: string } | undefined) =>
   color?.rgb && /^[0-9a-f]{8}$/i.test(color.rgb) ? `#${color.rgb.slice(2).toUpperCase()}` : null;
 
@@ -906,6 +916,10 @@ function liveStyle(workbook: Workbook, cell: Cell) {
   const font = getCellFont(workbook, cell);
   if (font.bold) style.bold = true;
   if (font.italic) style.italic = true;
+  if (font.underline) style.underline = true;
+  if (font.strike) style.strike = true;
+  // The workbook's default font is the sheet's own; only another is kept.
+  if (font.name && !DEFAULT_FONTS.has(font.name)) style.fontFamily = font.name;
   if (font.size && font.size !== 11) style.fontSize = font.size;
   const fontColor = rgbOf(font.color);
   if (fontColor && fontColor !== "#000000") style.fontColor = fontColor;

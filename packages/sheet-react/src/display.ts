@@ -9,6 +9,10 @@ import { formatValue, generalText } from "@chat/sheet/number-format";
 export interface CellStyle {
   readonly bold?: boolean;
   readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strike?: boolean;
+  /** A font by name; absent, the sheet's own. */
+  readonly fontFamily?: string;
   readonly fontSize?: number;
   readonly fontColor?: string;
   readonly fill?: string;
@@ -58,6 +62,14 @@ export function cellCss(style: CellStyle): CSSProperties {
   return {
     ...(style.bold ? { fontWeight: 600 } : {}),
     ...(style.italic ? { fontStyle: "italic" } : {}),
+    ...(style.underline || style.strike
+      ? {
+          textDecorationLine: [style.underline && "underline", style.strike && "line-through"]
+            .filter(Boolean)
+            .join(" "),
+        }
+      : {}),
+    ...(style.fontFamily ? { fontFamily: `"${style.fontFamily}", ui-sans-serif, sans-serif` } : {}),
     ...(style.fontSize ? { fontSize: `${(style.fontSize * 4) / 3}px` } : {}),
     ...(style.fontColor ? { color: style.fontColor } : {}),
     ...(style.fill ? { backgroundColor: style.fill } : {}),

@@ -81,6 +81,24 @@ describe("importing into a live sheet", () => {
     expect(read.dropped).toEqual([]);
   });
 
+  it("keeps underline, strikethrough and a font through Excel and back", async () => {
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Title", "Old"]] },
+      { kind: "setFormat", sheet: "Sheet1", range: "A1", underline: true, font: "Georgia" },
+      { kind: "setFormat", sheet: "Sheet1", range: "B1", strike: true },
+    ]);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 1)!.s!)).toEqual({
+      underline: true,
+      fontFamily: "Georgia",
+    });
+    expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 2)!.s!)).toEqual({ strike: true });
+  });
+
   it("keeps a chart's options through Excel and back", async () => {
     const rows = [
       ["Month", "Revenue", "Costs"],
