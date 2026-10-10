@@ -1696,7 +1696,8 @@ export function SheetGrid({
           lineHeight: `${16 * zoom}px`,
           width: Math.max(
             editorRect.width,
-            (Math.max(...editing.text.split("\n").map((line) => line.length)) + 2) * 8 * zoom,
+            // The text's own width, measured: thin characters take less room than wide ones.
+            (Math.max(...editing.text.split("\n").map((line) => textWidth(line))) + 16) * zoom,
           ),
           height: Math.max(editorRect.height, editing.text.split("\n").length * 16 * zoom + 4),
         }}
