@@ -2279,7 +2279,7 @@ describe("ChatView documents", () => {
     renderView(null, { toolCalls: [documentReference(), editRow] });
 
     // The compact row for the edit opens the same document as the card.
-    const update = await screen.findByRole("button", { name: /Updated Trip plan/ });
+    const update = await screen.findByRole("button", { name: /Edited Trip plan/ });
     fireEvent.click(update);
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",

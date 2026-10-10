@@ -1,6 +1,7 @@
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkStep } from "./assistant-body.ts";
+import { documentRunLabel } from "./document-activity-label.ts";
 
 /** The calls behind a step, for timing, failures and what is running. */
 export const stepActivities = (step: WorkStep): ToolActivity[] => {
@@ -9,6 +10,7 @@ export const stepActivities = (step: WorkStep): ToolActivity[] => {
     case "skill":
     case "knowledge":
     case "browser":
+    case "document":
       return step.activities;
     case "working-file":
       return step.steps;
@@ -46,6 +48,8 @@ export function stepLabel(step: WorkStep): string {
       return "Using the browser";
     case "compaction":
       return "Summarizing earlier messages";
+    case "document":
+      return documentRunLabel(step.activities, step.named ?? false);
     case "working-file": {
       const noun = officeNoun(step);
       return noun ? `Working on the ${noun}` : "Publishing the file";

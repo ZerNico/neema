@@ -3,6 +3,7 @@ import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
   DesktopToolActivity,
+  DocumentToolActivity,
   OfficeActivity,
   ToolActivity,
   ToolFileActivity,
@@ -56,6 +57,7 @@ export type AssistantBodyPart =
   /** A run of browser calls, one row like the web's: the steps and pages behind it. */
   | { kind: "browser"; key: string; activities: DesktopToolActivity[] }
   | WorkingFilePart
+  | DocumentPart
   | {
       kind: "tool";
       key: string;
@@ -63,6 +65,27 @@ export type AssistantBodyPart =
     }
   | { kind: "compaction"; key: string; activity: CompactionActivity }
   | { kind: "steer"; key: string; steer: AssistantSteer };
+
+/**
+ * One document's run of reads and edits, one step of the work rather than a
+ * row per call. A document the answer created is a card of its own instead.
+ */
+export interface DocumentPart {
+  kind: "document";
+  key: string;
+  documentId?: string;
+  activities: DocumentToolActivity[];
+  /** The answer touched more than one document, so rows say which. */
+  named?: boolean;
+}
+
+/** A call that made a document: drawn as its card, which is what the person receives. */
+export const isDocumentCard = (activity: DocumentToolActivity) =>
+  activity.name === "create_document" &&
+  // A creation someone typed into as it streamed still made the document.
+  (activity.result?.outcome === "created" || activity.result?.outcome === "conflict");
+
+const creating = (call: DocumentToolActivity) => call.name === "create_document";
 
 /**
  * One working file's run of calls: deck or workbook steps and the publish that
@@ -111,13 +134,18 @@ const isWorkStep = (part: WorkStep) =>
   part.kind === "knowledge" ||
   part.kind === "browser" ||
   part.kind === "working-file" ||
+  part.kind === "document" ||
   part.kind === "compaction" ||
   (part.kind === "tool" && WORK_FAMILIES.has(part.activity.family));
 
+/** A file or a created document: what the person receives from the work. */
+const isDeliverable = (part: AssistantBodyPart) =>
+  part.kind === "file" || (part.kind === "tool" && part.activity.family === "document");
+
 /**
  * Adjacent work steps become one work part; everything else passes through. A
- * file delivered in the middle of a run waits until the run ends, so the
- * deliverable sits right after the work that made it instead of splitting it.
+ * file or document delivered in the middle of a run waits until the run ends,
+ * so it sits right after the work that made it instead of splitting it.
  */
 const groupWork = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[] => {
   const grouped: AssistantBodyPart[] = [];
@@ -131,7 +159,7 @@ const groupWork = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[]
     if (part.kind !== "work" && isWorkStep(part)) {
       if (last?.kind === "work") last.steps.push(part);
       else grouped.push({ kind: "work", key: `work-${part.key}`, steps: [part] });
-    } else if (part.kind === "file" && last?.kind === "work") held.push(part);
+    } else if (isDeliverable(part) && last?.kind === "work") held.push(part);
     else {
       release();
       grouped.push(part);
@@ -139,6 +167,17 @@ const groupWork = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBodyPart[]
   }
   release();
   return grouped;
+};
+
+/** Rows name their document only when the answer touched more than one. */
+const nameDocuments = (parts: AssistantBodyPart[], tools: ReadonlyArray<ToolActivity>) => {
+  const documents = new Set(
+    tools.flatMap((call) =>
+      call.family === "document" && call.result?.documentId ? [call.result.documentId] : [],
+    ),
+  );
+  if (documents.size > 1) for (const part of parts) if (part.kind === "document") part.named = true;
+  return parts;
 };
 
 /** Marks where each draft sits, then gives every delivered file a part of its own. */
@@ -315,6 +354,27 @@ export function projectAssistantBody({
           key: `knowledge-${item.activity.callId}`,
           activities: [item.activity],
         });
+    } else if (item.activity.family === "document" && !isDocumentCard(item.activity)) {
+      const call = item.activity;
+      const last = parts.at(-1);
+      const id = call.result?.documentId;
+      // Like a draft's steps: a call joins the run before it unless it names
+      // another document, and a creation, running or failed, joins nothing.
+      if (
+        last?.kind === "document" &&
+        !creating(call) &&
+        !creating(last.activities[0]!) &&
+        (!id || !last.documentId || id === last.documentId)
+      ) {
+        last.activities.push(call);
+        if (!last.documentId && id) last.documentId = id;
+      } else
+        parts.push({
+          kind: "document",
+          key: `document-${call.callId}`,
+          ...(id ? { documentId: id } : {}),
+          activities: [call],
+        });
     } else if (isOfficeActivity(item.activity) || item.activity.family === "tool-file") {
       const step = item.activity;
       const last = parts.at(-1);
@@ -362,7 +422,7 @@ export function projectAssistantBody({
   if (!chronological) {
     for (const item of activities) appendActivity(item);
     appendText(0, content.length, streaming);
-    return { chronological, parts: groupWork(placeWorkingFiles(parts)) };
+    return { chronological, parts: groupWork(placeWorkingFiles(nameDocuments(parts, tools))) };
   }
 
   // A ```ui block is one widget: an activity anchored inside it shows after
@@ -382,5 +442,5 @@ export function projectAssistantBody({
     cursor = offset;
   }
   appendText(cursor, content.length, streaming);
-  return { chronological, parts: groupWork(placeWorkingFiles(parts)) };
+  return { chronological, parts: groupWork(placeWorkingFiles(nameDocuments(parts, tools))) };
 }

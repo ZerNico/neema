@@ -98,6 +98,45 @@ describe("MessageBubble chronological body", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(1);
   });
 
+  it("shows a created document's card, then its fill as one work line", () => {
+    const call = (
+      callId: string,
+      name: "create_document" | "edit_document",
+      callIndex: number,
+      outcome: "created" | "updated" | "conflict",
+    ): ToolActivity => ({
+      family: "document",
+      name,
+      callId,
+      status: "complete",
+      textOffset: 0,
+      turnIndex: callIndex,
+      callIndex: 0,
+      result: { outcome, documentId: "doc-1", title: "A very long thesis title" },
+    });
+    render(
+      <MessageBubble
+        message={{
+          ...base,
+          content: "Filled it.",
+          toolActivities: [
+            call("create", "create_document", 0, "created"),
+            call("fill-1", "edit_document", 1, "updated"),
+            call("fill-2", "edit_document", 2, "conflict"),
+            call("fill-3", "edit_document", 3, "updated"),
+          ],
+        }}
+      />,
+    );
+    // One line for the three edits, without repeating the title the card shows.
+    const header = screen.getByRole("button", { name: "Edited the document" });
+    const card = screen.getByText("A very long thesis title");
+    expect(card.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/Couldn’t update/)).toBeNull();
+    fireEvent.click(header);
+    expect(screen.getAllByText("Edited the document")).toHaveLength(2);
+  });
+
   const edit: ToolActivity = {
     family: "presentation",
     name: "edit_presentation",

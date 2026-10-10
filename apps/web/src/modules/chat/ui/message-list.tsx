@@ -77,7 +77,7 @@ import { activityRowClassName } from "./activity-row.ts";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
-import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { DocumentActivityBlock, DocumentRunRow } from "./document-activity-block.tsx";
 import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
 import { NotifyActivityRow } from "./notify-activity-row.tsx";
 import { MapActivityRow } from "./map-activity-row.tsx";
@@ -818,6 +818,7 @@ const AssistantBody = memo(function AssistantBody({
         />
       );
     }
+    if (part.kind === "document") return <DocumentRunRow key={part.key} part={part} />;
     if (part.kind === "working-file")
       return (
         <WorkingFileActivityBlock

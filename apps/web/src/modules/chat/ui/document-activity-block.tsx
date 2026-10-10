@@ -12,7 +12,8 @@ import {
   activityCardInteractiveClassName,
   activityRowClassName,
 } from "./activity-row.ts";
-import { documentActivityLabel } from "./document-activity-label.ts";
+import { type DocumentPart, isDocumentCard } from "./assistant-body.ts";
+import { documentRunLabel, documentRunSucceeded } from "./document-activity-label.ts";
 
 export function DocumentWidget({ documentId, title }: { documentId: string; title?: string }) {
   const { owned, gone, entry } = useDocumentPanel(documentId);
@@ -76,27 +77,21 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   );
 }
 
-/** One line for a call that touched a document the full card already shows. */
-function DocumentActivityRow({
-  activity,
-  documentId,
-}: {
-  activity: DocumentToolActivity;
-  documentId: string | undefined;
-}) {
-  const { entry } = useDocumentPanel(documentId ?? "");
-  const failed = activity.status === "error" || !activity.result?.outcome;
+/** One line for a run of reads and edits on a document, opening it when it is here. */
+export function DocumentRunRow({ part }: { part: DocumentPart }) {
+  const { entry } = useDocumentPanel(part.documentId ?? "");
+  const running = part.activities.some((call) => call.status === "running");
   const face = (
     <ActivityFace
       icon={File01Icon}
-      label={documentActivityLabel(activity)}
+      label={documentRunLabel(part.activities, part.named ?? false)}
       // The error was written for the model ("use a larger anchor"); the label says it in reader words.
-      status={activity.status === "running" ? "running" : failed ? "failed" : "done"}
+      status={running ? "running" : documentRunSucceeded(part.activities) ? "done" : "failed"}
     />
   );
   // The row names a document that is open one click away, so it opens it rather
   // than making the person hunt for the card that created it.
-  if (documentId && entry?.open)
+  if (part.documentId && entry?.open)
     return (
       <button
         type="button"
@@ -110,18 +105,25 @@ function DocumentActivityRow({
   return <div className={cn(activityRowClassName, "mb-2")}>{face}</div>;
 }
 
+/** A created document's card; any other call, alone, as a run of one. */
 export function DocumentActivityBlock({ activity }: { activity: DocumentToolActivity }) {
   const reference = activity.result?.documentId;
-  // A creation someone typed into as it streamed still made the document.
-  const create =
-    activity.name === "create_document" &&
-    (activity.result?.outcome === "created" || activity.result?.outcome === "conflict");
-  if (reference && create)
+  if (reference && isDocumentCard(activity))
     return (
       <DocumentWidget
         documentId={reference}
         {...(activity.result?.title ? { title: activity.result.title } : {})}
       />
     );
-  return <DocumentActivityRow activity={activity} documentId={reference} />;
+  return (
+    <DocumentRunRow
+      part={{
+        kind: "document",
+        key: activity.callId,
+        ...(reference ? { documentId: reference } : {}),
+        activities: [activity],
+        named: true,
+      }}
+    />
+  );
 }
