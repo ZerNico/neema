@@ -59,6 +59,8 @@ export interface PushSheetResult {
   acked: number;
   refused: ReadonlyArray<{ seq: number; reason: string }>;
 }
+/** What a push answers: the result, or why the server will never take these changes. */
+export type PushSheetAnswer = PushSheetResult | { rejected: string };
 
 /** What volatile functions read at a revision: the moment as a serial, and a seed. */
 export interface SheetMoment {

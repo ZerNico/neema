@@ -58,8 +58,10 @@ browser workers and the Excel file tools); this page records the decisions behin
 - Each client's last applied sequence number is kept in `sheet_clients`, apart from the steps,
   so folding the log never makes an old change look new. A push applies only the run that
   follows it; a resend is acknowledged, a gap waits. A change the server will not keep (over a
-  limit, an unknown locale or time zone) still uses its number and comes back as refused, so the
-  client drops it rather than resending forever. A reset frame carries the client's last number,
+  limit, an unknown locale or time zone) still uses its number and comes back as refused; the
+  tab drops it at once, since the feed will never bring it. A push refused whole (a change that
+  does not parse, a sheet now read-only) is answered, not thrown, so it is not retried: the tab
+  drops that client's unsent changes and numbers its next one where they began. A reset frame carries the client's last number,
   telling it which of its pending changes are already in.
 - Steps are folded past 2,000 and 30 days, or sooner once they pass 32 MB. Tombstones are never
   folded, so a change from before the snapshot still finds its IDs; an editor based there gets

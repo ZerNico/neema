@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
-import type { PushSheetInput, PushSheetResult, SheetFrame } from "../schema.ts";
+import type { PushSheetAnswer, PushSheetInput, SheetFrame } from "../schema.ts";
 import { SheetSync, type SheetFeedSource, type SheetOutbox } from "./sheet-sync.ts";
 
 const moment = { now: 45_000, seed: 1 };
@@ -20,7 +20,7 @@ function connection(outbox?: SheetOutbox) {
     close: () => {},
   };
   const pushes: PushSheetInput[] = [];
-  let answer: (input: PushSheetInput) => PushSheetResult = (input) => ({
+  let answer: (input: PushSheetInput) => PushSheetAnswer = (input) => ({
     revision: 0,
     acked: Math.max(
       0,
@@ -86,18 +86,32 @@ describe("a sheet's connection", () => {
       moment,
     });
     expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("mine");
-    // A refused edit, acknowledged but never in the feed, goes once the feed passes it.
+    // A refused edit will never be in the feed, so it goes as soon as the answer says so.
     answerWith(() => ({ revision: 2, acked: 2, refused: [{ seq: 2, reason: "no" }] }));
     sync.dispatch([write("s1.r2", "s1.c1", "refused")]);
     await vi.runAllTimersAsync();
-    expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBe("refused");
-    feed({
-      type: "changes",
-      changes: [{ clientId: "them", seq: 1, ops: [write("s1.r3", "s1.c1", "theirs")] }],
-      revision: 2,
-      moment,
-    });
     expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBeUndefined();
+    expect(sync.getState().refused).toBe("Some changes weren’t kept: no.");
+  });
+
+  it("drops changes the server rejects instead of sending them forever", async () => {
+    const { sync, pushes, feed, answerWith } = connection();
+    answerWith(() => ({ rejected: "this document is read-only for you" }));
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    sync.dispatch([write("s1.r1", "s1.c1", "one")]);
+    sync.dispatch([write("s1.r2", "s1.c1", "two")]);
+    await vi.runAllTimersAsync();
+    expect(pushes).toHaveLength(1);
+    expect(sync.getState()).toMatchObject({
+      pending: 0,
+      refused: "Some changes weren’t kept: this document is read-only for you.",
+    });
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBeUndefined();
+    // The next edit takes the number the dropped ones began at, so the server has no gap to wait on.
+    answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
+    sync.dispatch([write("s1.r3", "s1.c1", "three")]);
+    await vi.runAllTimersAsync();
+    expect(JSON.parse(pushes[1]!.changes![0]!)).toMatchObject({ seq: 1 });
   });
 
   it("replays unsent edits over what others did meanwhile", async () => {

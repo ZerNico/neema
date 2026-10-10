@@ -4,8 +4,8 @@ import type { SheetDoc } from "@chat/sheet/model";
 import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
 import { SHEET_TRANSPORT } from "../schema.ts";
 import type {
+  PushSheetAnswer,
   PushSheetInput,
-  PushSheetResult,
   SheetCursor,
   SheetFrame,
   SheetMoment,
@@ -33,7 +33,7 @@ export interface SheetOutbox {
 }
 export interface SheetSyncOptions {
   documentId: string;
-  push: (input: PushSheetInput) => Promise<PushSheetResult>;
+  push: (input: PushSheetInput) => Promise<PushSheetAnswer>;
   /** Replaceable in tests; the browser's EventSource otherwise. */
   connect?: (url: string) => SheetFeedSource;
   /** Replaceable in tests; a fresh random one otherwise. */
@@ -236,11 +236,17 @@ export class SheetSync {
     this.#view = view;
     this.#notify();
   }
-  /** Lets acknowledged changes go; ones the feed has yet to bring land until `revision`. */
-  #acknowledge(clientId: string, seq: number, revision = 0) {
+  /**
+   * Lets acknowledged changes go; ones the feed has yet to bring land until
+   * `revision`. A refused one will never be in the feed, so it goes at once.
+   */
+  #acknowledge(clientId: string, seq: number, revision = 0, refused = new Set<number>()) {
     const before = this.#pending.length;
     const done = (change: SheetChange) => change.clientId === clientId && change.seq <= seq;
-    const landed = revision > this.#revision ? this.#pending.filter(done) : [];
+    const landed =
+      revision > this.#revision
+        ? this.#pending.filter((change) => done(change) && !refused.has(change.seq))
+        : [];
     this.#landing = [
       ...this.#landing.filter((each) => !done(each.change)),
       ...landed.map((change) => ({ change, revision })),
@@ -250,6 +256,21 @@ export class SheetSync {
     if (before !== this.#pending.length)
       this.options.outbox?.forget(this.options.documentId, clientId, seq);
   }
+  /**
+   * Drops a client's unsent changes the server will never take. Later ones
+   * would wait behind the gap forever, so they go too, and this tab numbers
+   * its next change where the dropped ones began.
+   */
+  #reject(clientId: string, reason: string) {
+    const dropped = this.#pending.filter((change) => change.clientId === clientId);
+    if (!dropped.length) return;
+    this.#pending = this.#pending.filter((change) => change.clientId !== clientId);
+    const seqs = dropped.map((change) => change.seq);
+    this.options.outbox?.forget(this.options.documentId, clientId, Math.max(...seqs));
+    if (clientId === this.clientId) this.#seq = Math.min(...seqs) - 1;
+    this.#refused = `Some changes weren’t kept: ${reason}.`;
+  }
+
   #schedule(delay: number) {
     if (this.#timer || this.#destroyed) return;
     this.#timer = setTimeout(() => {
@@ -280,9 +301,13 @@ export class SheetSync {
       .then(
         (result) => {
           this.#failures = 0;
-          this.#acknowledge(clientId, result.acked, result.revision);
-          if (result.refused.length)
-            this.#refused = `Some changes weren’t kept: ${result.refused[0]!.reason}.`;
+          if ("rejected" in result) this.#reject(clientId, result.rejected);
+          else {
+            const refused = new Set(result.refused.map((each) => each.seq));
+            this.#acknowledge(clientId, result.acked, result.revision, refused);
+            if (result.refused.length)
+              this.#refused = `Some changes weren’t kept: ${result.refused[0]!.reason}.`;
+          }
           this.#rebuild();
         },
         () => {

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
-import { CreateSheetInput, PushSheetInput } from "../schema.ts";
+import { CreateSheetInput, PushSheetInput, type PushSheetAnswer } from "../schema.ts";
 import { SheetService } from "./sheet-service.ts";
 
 const CreateProjectSheetInput = Schema.Struct({
@@ -41,8 +41,9 @@ export const pushSheet = createServerFn({ method: "POST" })
         Effect.catchTag("DocumentNotAvailable", () =>
           Effect.die(new Response("Not found", { status: 404 })),
         ),
+        // Answered, not thrown: a client retries a failed push, and this one would fail forever.
         Effect.catchTag("DocumentRejected", (error) =>
-          Effect.die(new Response(error.reason, { status: 400 })),
+          Effect.succeed<PushSheetAnswer>({ rejected: error.reason }),
         ),
       ),
     ),
