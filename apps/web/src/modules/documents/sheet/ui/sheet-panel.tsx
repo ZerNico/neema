@@ -20,7 +20,7 @@ import {
   ViewOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
-import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
@@ -281,9 +281,17 @@ export default function SheetPanelBody({
   } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
   const formulaBar = useRef<HTMLTextAreaElement>(null);
+  // A sheet chosen from the keyboard keeps the keyboard: its grid takes focus once drawn.
+  const focusGrid = useRef(false);
   const picturePicker = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
   const sheet = chosen && sheets.includes(chosen) ? chosen : (sheets[0] ?? null);
+  useEffect(() => {
+    // Run for each sheet shown: the grid is drawn anew for it.
+    if (!focusGrid.current || !sheet) return;
+    focusGrid.current = false;
+    gridHost?.querySelector<HTMLElement>("[role=grid]")?.focus({ preventScroll: true });
+  }, [sheet, gridHost]);
   const revision = state?.revision ?? 0;
   const moment = state?.moment ?? null;
   const calcContext = useMemo(
@@ -460,11 +468,14 @@ export default function SheetPanelBody({
         return readOnly ? undefined : setCommenting(true);
       case "sheet": {
         const next = sheets[sheets.indexOf(sheet) + command.step];
-        return next ? pickSheet(next) : undefined;
+        if (!next) return undefined;
+        focusGrid.current = true;
+        return pickSheet(next);
       }
       case "newSheet": {
         const id = sync!.mint();
         run([newSheet(doc, id)]);
+        focusGrid.current = true;
         return pickSheet(id);
       }
     }
