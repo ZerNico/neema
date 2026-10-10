@@ -46,6 +46,14 @@ export interface CellEditing {
   readonly mode: "type" | "edit";
 }
 /** What the keyboard asks of the sheet; the app decides what each writes. */
+/** A drag of the fill handle: how many cells past the selection, which way, Ctrl held or not. */
+export interface GridFill {
+  readonly direction: "down" | "up" | "right" | "left";
+  /** Cells to fill, or `"auto"` for a double-click: down as far as the data beside it runs. */
+  readonly count: number | "auto";
+  readonly mode: "auto" | "alternate";
+}
+
 export type GridCommand =
   | { readonly kind: "clear" | "undo" | "redo" | "find" }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
@@ -113,6 +121,8 @@ export interface SheetGridProps {
   /** Without this, overlays can be selected but not moved, resized or deleted. */
   readonly onOverlayChange?: (key: string, change: OverlayChange) => void;
   readonly onOverlayCommand?: (key: string, command: OverlayCommand) => void;
+  /** Without this, the selection has no fill handle. */
+  readonly onFill?: (fill: GridFill) => void;
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
@@ -173,6 +183,7 @@ export function SheetGrid({
   onOverlaySelect,
   onOverlayChange,
   onOverlayCommand,
+  onFill,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -637,6 +648,92 @@ export function SheetGrid({
   const rowHeaders: ReactNode[] = [];
   for (let row = visibleRows.first; row <= visibleRows.last; row++) rowHeaders.push(rowHeader(row));
 
+  const [filling, setFilling] = useState<{
+    direction: GridFill["direction"];
+    count: number;
+  } | null>(null);
+  /** Drags the fill handle: the cell under the pointer, past whichever edge it is furthest beyond. */
+  const startFill = (event: PointerEvent) => {
+    if (event.button !== 0 || !box) return;
+    event.stopPropagation();
+    event.preventDefault();
+    const from = box;
+    let current: { direction: GridFill["direction"]; count: number } | null = null;
+    const move = (next: globalThis.PointerEvent) => {
+      const rect = content.current?.getBoundingClientRect();
+      if (!rect) return;
+      const row = rows.indexAt(next.clientY - rect.top);
+      const col = cols.indexAt(next.clientX - rect.left);
+      const reaches = [
+        ["down", row - from.bottom],
+        ["up", from.top - row],
+        ["right", col - from.right],
+        ["left", from.left - col],
+      ] as const;
+      const [direction, count] = reaches.reduce((best, each) => (each[1] > best[1] ? each : best));
+      current = count > 0 ? { direction, count } : null;
+      setFilling(current);
+    };
+    const end = (last: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      setFilling(null);
+      if (current && last.type === "pointerup")
+        onFill?.({ ...current, mode: last.ctrlKey || last.altKey ? "alternate" : "auto" });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
+  const fillHandle =
+    box && onFill && !readOnly && !editing ? (
+      <div
+        role="button"
+        aria-label="Fill"
+        tabIndex={-1}
+        data-fill-handle=""
+        className="border-background bg-primary absolute z-20 size-2 cursor-crosshair border"
+        style={{
+          top: rows.starts[box.bottom + 1]! - 4,
+          left: cols.starts[box.right + 1]! - 4,
+        }}
+        onPointerDown={startFill}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onFill({ direction: "down", count: "auto", mode: "auto" });
+        }}
+      />
+    ) : null;
+  // The cells a fill handle drag would write, outlined while it is dragged.
+  const fillPreview =
+    box && filling
+      ? (() => {
+          const [top, bottom, left, right] =
+            filling.direction === "down"
+              ? [box.bottom + 1, box.bottom + filling.count, box.left, box.right]
+              : filling.direction === "up"
+                ? [box.top - filling.count, box.top - 1, box.left, box.right]
+                : filling.direction === "right"
+                  ? [box.top, box.bottom, box.right + 1, box.right + filling.count]
+                  : [box.top, box.bottom, box.left - filling.count, box.left - 1];
+          const [t, b] = [Math.max(0, top), Math.min(rows.ids.length - 1, bottom)];
+          const [l, r] = [Math.max(0, left), Math.min(cols.ids.length - 1, right)];
+          return (
+            <div
+              aria-hidden
+              className="border-primary pointer-events-none absolute z-10 border-2 border-dashed"
+              style={{
+                top: rows.starts[t],
+                left: cols.starts[l],
+                height: rows.starts[b + 1]! - rows.starts[t]!,
+                width: cols.starts[r + 1]! - cols.starts[l]!,
+              }}
+            />
+          );
+        })()
+      : null;
+
   const selectionBox = box && (
     <div
       aria-hidden
@@ -869,6 +966,8 @@ export function SheetGrid({
           {cells}
           {others}
           {selectionBox}
+          {fillPreview}
+          {fillHandle}
           {overlays.flatMap((overlay) => {
             const row = rowIndex.get(overlay.at.r);
             const col = colIndex.get(overlay.at.c);

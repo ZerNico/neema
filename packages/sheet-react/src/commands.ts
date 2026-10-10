@@ -10,7 +10,8 @@ import { parseDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, cellStyle } from "./display.ts";
-import type { CellRef, SheetSelection } from "./grid.tsx";
+import { fillSeries } from "@chat/sheet/model/fill";
+import type { CellRef, GridFill, SheetSelection } from "./grid.tsx";
 
 /** What a command reads: the sheet as shown, where the selection is, and a source of new IDs. */
 export interface GridContext {
@@ -343,6 +344,65 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
     });
   });
   return cells.length ? [{ op: "set", sh: context.sheet, cells }] : [];
+}
+
+/**
+ * What a fill handle drag writes, and the selection grown to cover it. A
+ * double-click fills down as far as the column beside the selection holds
+ * values, the left one first, as Excel does.
+ */
+export function fillFromHandle(
+  context: GridContext,
+  fill: GridFill,
+): { ops: SheetOp[]; selection: SheetSelection } | null {
+  const box = selectionBox(context);
+  const sheet = context.doc.sheet[context.sheet]!;
+  const rows = positions(sheet.rows).ids;
+  const cols = positions(sheet.cols).ids;
+  let count = fill.count;
+  if (count === "auto") {
+    const filled = (col: number) => {
+      const c = cols[col - 1];
+      if (!c) return 0;
+      let row = box.bottom + 1;
+      while (row <= rows.length && context.values.value(context.sheet, rows[row - 1]!, c) !== null)
+        row++;
+      return row - box.bottom - 1;
+    };
+    count = filled(box.left - 1) || filled(box.right + 1);
+  }
+  if (count < 1) return null;
+  const grow = grower(context);
+  if (fill.direction === "down") grow.ensure(context.sheet, box.bottom + count, box.right);
+  if (fill.direction === "right") grow.ensure(context.sheet, box.bottom, box.right + count);
+  const ops = fillSeries(
+    grow.doc,
+    context.sheet,
+    box.area,
+    fill.direction,
+    count,
+    fill.mode,
+    context.locale,
+  );
+  if (!ops.length) return null;
+  const grown = grow.doc.sheet[context.sheet]!;
+  const allRows = positions(grown.rows).ids;
+  const allCols = positions(grown.cols).ids;
+  const [top, bottom, left, right] =
+    fill.direction === "down"
+      ? [box.top, box.bottom + count, box.left, box.right]
+      : fill.direction === "up"
+        ? [Math.max(1, box.top - count), box.bottom, box.left, box.right]
+        : fill.direction === "right"
+          ? [box.top, box.bottom, box.left, box.right + count]
+          : [box.top, box.bottom, Math.max(1, box.left - count), box.right];
+  return {
+    ops: [...grow.ops, ...ops],
+    selection: {
+      anchor: { r: allRows[top - 1]!, c: allCols[left - 1]! },
+      head: { r: allRows[bottom - 1]!, c: allCols[right - 1]! },
+    },
+  };
 }
 
 /**

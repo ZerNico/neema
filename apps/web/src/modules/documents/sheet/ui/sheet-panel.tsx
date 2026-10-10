@@ -30,6 +30,7 @@ import {
   copySelection,
   deleteAtSelection,
   enterCell,
+  fillFromHandle,
   fillSelection,
   formatSelection,
   insertAtSelection,
@@ -590,6 +591,12 @@ export default function SheetPanelBody({
                   ])
                 }
                 onOverlayCommand={chartAction}
+                onFill={(fill) => {
+                  const result = fillFromHandle(context, fill);
+                  if (!result || readOnly) return;
+                  run(result.ops);
+                  select(result.selection);
+                }}
               />
             </div>
           </ContextMenuTrigger>

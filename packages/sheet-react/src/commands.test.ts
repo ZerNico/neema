@@ -10,6 +10,7 @@ import {
   copySelection,
   deleteAtSelection,
   enterCell,
+  fillFromHandle,
   fillSelection,
   insertAtSelection,
   parseTabular,
@@ -168,5 +169,33 @@ describe("charting the selection", () => {
       chart: { series: [{ values: { c1: at(doc, 1, 2).c } }] },
     });
     expect(chartFromSelection(context(doc, [1, 1]), "line")).toEqual([]);
+  });
+});
+
+describe("the fill handle", () => {
+  it("fills down beside the data on a double-click, past the grid if it must, and selects it all", () => {
+    let doc = emptyDoc();
+    for (let row = 1; row <= 40; row++) doc = type(doc, row, 1, String(row));
+    doc = type(doc, 1, 2, "=A1*2");
+    const result = fillFromHandle(context(doc, [1, 2]), {
+      direction: "down",
+      count: "auto",
+      mode: "auto",
+    })!;
+    doc = apply(doc, result.ops);
+    expect(formulaAt(doc, 40, 2)).toBe("A40*2");
+    expect(shown(doc, 41, 2)).toBeNull();
+    expect(result.selection).toEqual({ anchor: at(doc, 1, 2), head: at(doc, 40, 2) });
+  });
+
+  it("counts on a dragged series and grows the grid for it", () => {
+    let doc = type(emptyDoc(), 1, 1, "Mon");
+    const result = fillFromHandle(context(doc, [1, 1]), {
+      direction: "right",
+      count: 30,
+      mode: "auto",
+    })!;
+    doc = apply(doc, result.ops);
+    expect([shown(doc, 1, 2), shown(doc, 1, 8), shown(doc, 1, 31)]).toEqual(["Tue", "Mon", "Wed"]);
   });
 });

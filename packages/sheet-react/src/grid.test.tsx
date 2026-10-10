@@ -211,6 +211,35 @@ describe("the sheet grid", () => {
   });
 });
 
+describe("the grid's fill handle", () => {
+  it("reports how far a drag went past the selection, and a double-click", () => {
+    const fills: unknown[] = [];
+    render(
+      <SheetGrid
+        doc={emptyDoc()}
+        sheet="s1"
+        values={calculateSheet(emptyDoc(), { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(1, 1), head: at(2, 1) }}
+        onSelectionChange={() => {}}
+        label="Budget"
+        onCommit={() => {}}
+        onFill={(fill) => fills.push(fill)}
+      />,
+    );
+    const handle = document.querySelector("[data-fill-handle]")!;
+    fireEvent.pointerDown(handle, { button: 0, clientX: 60, clientY: 40 });
+    // jsdom lays nothing out, so the content box sits at 0,0: row 6 is 100 to 120 px down.
+    fireEvent.pointerMove(window, { clientX: 30, clientY: 110 });
+    fireEvent.pointerUp(window, { ctrlKey: true });
+    fireEvent.doubleClick(handle);
+    expect(fills).toEqual([
+      { direction: "down", count: 4, mode: "alternate" },
+      { direction: "down", count: "auto", mode: "auto" },
+    ]);
+  });
+});
+
 describe("dragging an overlay's handles", () => {
   const place = { top: 100, left: 100, width: 200, height: 100 };
   const min = { width: 50, height: 50 };
