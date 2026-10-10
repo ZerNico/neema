@@ -259,6 +259,19 @@ export const LIVE_SHEET_OPERATIONS = {
     required: ["sheet", "position"],
     change: ["moved", "sheet"],
   },
+  group: {
+    about:
+      "Group rows or columns into an outline people can collapse, as Excel's Group; groups nest up to 7 deep. Give rows or columns. A group already on that span changes instead.",
+    fields: {
+      sheet,
+      rows: { ...rows, about: 'The rows to group, e.g. "2:9".' },
+      columns: { ...columns, about: 'The columns to group, e.g. "B:D".' },
+      collapsed: { type: "boolean", about: "Collapse the group (true) or expand it (false)." },
+      remove: { type: "boolean", about: "Ungroup that span instead." },
+    },
+    required: ["sheet"],
+    change: ["grouped", "range"],
+  },
   colorSheet: {
     about: "Colour a sheet's tab, or take its colour off.",
     fields: { sheet, color: { type: "color", about: "The tab's colour; leave out for none." } },

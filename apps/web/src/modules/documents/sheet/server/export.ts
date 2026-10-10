@@ -1,6 +1,7 @@
 import { columnLetters } from "@chat/sheet/a1";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
-import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
+import { liveSheets, positions, type Sheet, type SheetDoc } from "@chat/sheet/model";
+import { placeGroups } from "@chat/sheet/model/outline";
 import type { FileFilter, LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
 import type { DocumentComment } from "../../schema.ts";
 import type { SheetValues } from "@chat/sheet/model/calc";
@@ -8,6 +9,28 @@ import { filterSpan, filteredRows, shownText, type SheetFilter } from "@chat/she
 import { fileChartOf } from "./chart-files.ts";
 
 const address = (row: number, column: number) => `${columnLetters(column)}${row}`;
+
+/** Groups by position with their levels, as a file's outline lists them. */
+const fileGroups = (groups: ReturnType<typeof placeGroups>) =>
+  groups.map((each) => ({
+    from: each.start,
+    to: each.end,
+    level: each.level,
+    ...(each.group.collapsed ? { collapsed: true as const } : {}),
+  }));
+/** A sheet's groups as the outline its file keeps. */
+function outlineOf(sheet: Sheet) {
+  const rows = fileGroups(placeGroups(sheet.rows, sheet.outline?.rows));
+  const cols = fileGroups(placeGroups(sheet.cols, sheet.outline?.cols));
+  return rows.length || cols.length
+    ? {
+        outline: {
+          ...(rows.length ? { rows } : {}),
+          ...(cols.length ? { cols } : {}),
+        },
+      }
+    : {};
+}
 
 /** The name a note carries for who wrote a comment. */
 const authorOf = (comment: DocumentComment) =>
@@ -213,6 +236,7 @@ export function liveSheetExport(
         ...(conditional.length ? { conditional } : {}),
         ...(validations.length ? { validations } : {}),
         ...(sheet.color ? { color: sheet.color } : {}),
+        ...outlineOf(sheet),
         ...notesOf(id),
       };
     }),

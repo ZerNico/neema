@@ -20,6 +20,7 @@ import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import type { ValidationRule } from "@chat/sheet/model/validation";
+import { OUTLINE_LIMITS } from "@chat/sheet/model/outline";
 import { parseDateText } from "@chat/sheet/dates";
 import { chartOperation } from "./convert-chart.ts";
 
@@ -484,6 +485,44 @@ export function convertOperations(
         if (other && other !== sh)
           throw new Refused("invalid", `A sheet named ${operation.name} exists already.`);
         emit({ op: "sheetRename", id: sh, name: operation.name });
+        return;
+      }
+      case "group": {
+        const sh = sheetId(operation.sheet);
+        if ((operation.rows === undefined) === (operation.columns === undefined))
+          throw new Refused("invalid", "Give rows or columns to group, not both.");
+        const axis = operation.rows !== undefined ? "rows" : "columns";
+        const picked = axisIds(sh, axis, (operation.rows ?? operation.columns)!);
+        if (axis === "rows") ensure(sh, picked.last, 0);
+        else ensure(sh, 0, picked.last);
+        const chosen = picked.ids();
+        const [from, to] = [chosen[0]!, chosen.at(-1)!];
+        const key = axis === "rows" ? "rows" : "cols";
+        const list = view.sheet[sh]!.outline?.[key] ?? [];
+        const at = list.findIndex((each) => each.from === from && each.to === to);
+        const shaped = (collapsed: boolean | undefined) => ({
+          from,
+          to,
+          ...(collapsed ? { collapsed: true as const } : {}),
+        });
+        if (operation.remove) {
+          if (at === -1) throw new Refused("not_found", "No group on that span to remove.");
+          emit({ op: "outline", sh, axis, list: list.filter((_, index) => index !== at) });
+          return;
+        }
+        if (at === -1 && list.length >= OUTLINE_LIMITS.groups)
+          throw new Refused("invalid", `At most ${OUTLINE_LIMITS.groups} groups on an axis.`);
+        emit({
+          op: "outline",
+          sh,
+          axis,
+          list:
+            at === -1
+              ? [...list, shaped(operation.collapsed)]
+              : list.map((each, index) =>
+                  index === at ? shaped(operation.collapsed ?? each.collapsed) : each,
+                ),
+        });
         return;
       }
       case "colorSheet": {

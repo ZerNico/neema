@@ -92,6 +92,7 @@ import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart
 import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
 import { readValidation, writeValidations, type FileValidation } from "./file-validation.ts";
 import { NOTE_LIMITS, readNote, writeNotes, type FileNote } from "./file-notes.ts";
+import { readGroups, writeOutline, type FileGroup, type FileOutline } from "./file-outline.ts";
 import {
   fileHighlightStyles,
   readConditional,
@@ -841,6 +842,8 @@ export interface LiveSheetExport {
     readonly color?: string;
     /** Cell notes, each a comment thread. */
     readonly notes?: readonly FileNote[];
+    /** Grouped rows and columns. */
+    readonly outline?: FileOutline;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
@@ -944,6 +947,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
     if (each.validations?.length) writeValidations(sheet, each.validations);
     if (each.notes?.length) writeNotes(sheet, each.notes);
+    if (each.outline) writeOutline(sheet, each.outline);
     if (each.color)
       sheet.sheetProperties = makeSheetProperties({
         ...sheet.sheetProperties,
@@ -997,6 +1001,8 @@ export interface LiveSheetImport {
     readonly color?: string;
     /** Cell notes, each a comment thread. */
     readonly notes?: readonly FileNote[];
+    /** Grouped rows and columns. */
+    readonly outline?: FileOutline;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -1008,6 +1014,10 @@ export interface LiveSheetImport {
 const DEFAULT_FONTS = new Set(["Calibri", "Aptos", "Aptos Narrow", "Arial"]);
 const rgbOf = (color: { rgb?: string } | undefined) =>
   color?.rgb && /^[0-9a-f]{8}$/i.test(color.rgb) ? `#${color.rgb.slice(2).toUpperCase()}` : null;
+
+/** Whether a collapsed group folds a row or column away. */
+const folded = (groups: readonly FileGroup[], index: number) =>
+  groups.some((group) => group.collapsed && index >= group.from && index <= group.to);
 
 /** A linked cell's style: its link, without the look Excel's Hyperlink style gave it. */
 function linkedStyle(style: Record<string, string | number | boolean> | undefined, link: string) {
@@ -1158,6 +1168,17 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
         !(filterBox && row > filterBox.top && row <= filterBox.bottom)
       )
         hiddenRows.push(row);
+    // Groups from each row's and column's outline level; a collapsed one's rows are its, not hidden.
+    const rowGroups = readGroups(
+      Math.max(rows, 1_000),
+      (row) => getRowDimension(sheet, row)?.outlineLevel ?? 0,
+      (row) => getRowDimension(sheet, row)?.hidden === true,
+    );
+    const colGroups = readGroups(
+      Math.max(cols, 26),
+      (column) => getColumnDimension(sheet, column)?.outlineLevel ?? 0,
+      (column) => getColumnDimension(sheet, column)?.hidden === true,
+    );
     const tabColor = rgbOf(sheet.sheetProperties?.tabColor);
     const hiddenCols: number[] = [];
     for (let column = 1; column <= Math.max(cols, 26); column++)
@@ -1216,12 +1237,24 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       widths,
       heights,
       ...(freeze ? { freeze } : {}),
-      ...(hiddenRows.length ? { hiddenRows } : {}),
-      ...(hiddenCols.length ? { hiddenCols } : {}),
+      ...(hiddenRows.some((row) => !folded(rowGroups, row))
+        ? { hiddenRows: hiddenRows.filter((row) => !folded(rowGroups, row)) }
+        : {}),
+      ...(hiddenCols.some((column) => !folded(colGroups, column))
+        ? { hiddenCols: hiddenCols.filter((column) => !folded(colGroups, column)) }
+        : {}),
       ...(filter ? { filter } : {}),
       ...(conditional.length ? { conditional } : {}),
       ...(validations.length ? { validations } : {}),
       ...(tabColor ? { color: tabColor } : {}),
+      ...(rowGroups.length || colGroups.length
+        ? {
+            outline: {
+              ...(rowGroups.length ? { rows: rowGroups } : {}),
+              ...(colGroups.length ? { cols: colGroups } : {}),
+            },
+          }
+        : {}),
       ...(notes.length ? { notes } : {}),
     };
   });

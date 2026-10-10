@@ -7,6 +7,7 @@ import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, sheetNamed, type Box, type SheetDoc } from "@chat/sheet/model";
 import type { ChartText } from "@chat/sheet/model/chart";
 import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
+import { placeGroups } from "@chat/sheet/model/outline";
 import { formatValue } from "@chat/sheet/number-format";
 
 /** Above this the focused sheet is sent as a window of rows. */
@@ -202,6 +203,18 @@ export function sheetView(
       : [];
   });
   if (merges.length) lines.push(`<merges>${merges.join(" ")}</merges>`);
+  // The focused sheet's grouped rows and columns, so the model knows what a collapse hides.
+  const focused = doc.sheet[sheet]!;
+  const grouped = [
+    ...placeGroups(focused.rows, focused.outline?.rows).map(
+      (each) => `${each.start}:${each.end}${each.group.collapsed ? " collapsed" : ""}`,
+    ),
+    ...placeGroups(focused.cols, focused.outline?.cols).map(
+      (each) =>
+        `${columnLetters(each.start)}:${columnLetters(each.end)}${each.group.collapsed ? " collapsed" : ""}`,
+    ),
+  ];
+  if (grouped.length) lines.push(`<groups>${grouped.join(", ")}</groups>`);
   // The focused sheet's conditional formats, first taking priority.
   const conditional = (doc.sheet[sheet]!.conditional ?? []).flatMap((format) => {
     const [rowsAt, colsAt] = [positions(doc.sheet[sheet]!.rows), positions(doc.sheet[sheet]!.cols)];

@@ -181,6 +181,32 @@ describe("importing into a live sheet", () => {
     ]);
   });
 
+  it("keeps grouped rows and columns through Excel and back, collapsed ones folded", async () => {
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["a"], ["b"], ["c"], ["d"]] },
+      { kind: "group", sheet: "Sheet1", rows: "2:9" },
+      { kind: "group", sheet: "Sheet1", rows: "3:4", collapsed: true },
+      { kind: "group", sheet: "Sheet1", columns: "B:D" },
+    ]);
+    expect(() => build([{ kind: "group", sheet: "Sheet1", rows: "2", columns: "B" }])).toThrow();
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const sheet = imported.doc.sheet.s1!;
+    expect(sheet.outline).toEqual({
+      rows: [
+        { from: "s1.r2", to: "s1.r9" },
+        { from: "s1.r3", to: "s1.r4", collapsed: true },
+      ],
+      cols: [{ from: "s1.c2", to: "s1.c4" }],
+    });
+    // A collapsed group's rows are the group's to show, not hidden by hand.
+    expect(sheet.rowProps["s1.r3"]?.hidden).toBeUndefined();
+    expect(sheetView(imported.doc, calculateSheet(imported.doc, context)).xml).toContain(
+      "<groups>2:9, 3:4 collapsed, B:D</groups>",
+    );
+  });
+
   it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
     const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
     const imported = sheetFromWorkbook(

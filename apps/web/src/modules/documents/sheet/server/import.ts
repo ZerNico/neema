@@ -18,6 +18,7 @@ import { parseTyped } from "@chat/sheet/value-parse";
 import type { Chart } from "@chat/sheet/model/chart";
 import type { FileFilter, LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import type { FileNote } from "~/modules/spreadsheets/server/file-notes.ts";
+import type { FileGroup } from "~/modules/spreadsheets/server/file-outline.ts";
 import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
 import type { Validation } from "@chat/sheet/model/validation";
 import { chartOfFile } from "./chart-files.ts";
@@ -30,6 +31,20 @@ export interface ImportedNote {
 export type Imported =
   | { ok: true; doc: SheetDoc; dropped: string[]; notes: ImportedNote[] }
   | { ok: false; reason: string };
+
+/** A file's groups by position as a live sheet keeps them, by IDs; ones past the grid are left out. */
+const groupsOf = (groups: readonly FileGroup[], ids: readonly string[]) =>
+  groups.flatMap((group) =>
+    ids[group.from - 1] && ids[group.to - 1]
+      ? [
+          {
+            from: ids[group.from - 1]!,
+            to: ids[group.to - 1]!,
+            ...(group.collapsed ? { collapsed: true as const } : {}),
+          },
+        ]
+      : [],
+  );
 
 /** Appends rows or columns to a sheet being built until it has `rows` and `cols`. */
 function grow(sheet: Sheet, id: string, rows: number, cols: number): Sheet {
@@ -212,6 +227,14 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
           ...sheet,
           cells,
           ...(each.color ? { color: each.color } : {}),
+          ...(each.outline
+            ? {
+                outline: {
+                  ...(each.outline.rows?.length ? { rows: groupsOf(each.outline.rows, rows) } : {}),
+                  ...(each.outline.cols?.length ? { cols: groupsOf(each.outline.cols, cols) } : {}),
+                },
+              }
+            : {}),
           colProps: sized(each.widths, each.hiddenCols, cols),
           rowProps: sized(each.heights, each.hiddenRows, rows),
           ...(each.validations?.length
