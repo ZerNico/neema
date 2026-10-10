@@ -2,6 +2,7 @@ import {
   BubbleChatIcon,
   Delete02Icon,
   File01Icon,
+  FileSpreadsheetIcon,
   FileAddIcon,
   Folder01Icon,
   MoreHorizontalIcon,
@@ -406,7 +407,11 @@ function ProjectDocumentRow({
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" />
+        <HugeiconsIcon
+          icon={document.kind === "sheet" ? FileSpreadsheetIcon : File01Icon}
+          strokeWidth={2}
+          className="size-4"
+        />
       </div>
       <button
         type="button"

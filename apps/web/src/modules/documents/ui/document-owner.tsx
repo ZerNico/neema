@@ -1,4 +1,4 @@
-import { File01Icon, Table01Icon } from "@hugeicons/core-free-icons";
+import { File01Icon, FileSpreadsheetIcon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
@@ -213,7 +213,7 @@ function DocumentSession({
       id,
       title: controller.document?.title ?? "Document",
       subtitle,
-      icon: isSheet ? Table01Icon : File01Icon,
+      icon: isSheet ? FileSpreadsheetIcon : File01Icon,
       restorable: true,
       actions: isSheet ? (
         <SheetPanelActions document={controller.document} toolbarSlot={setToolbarSlot} />
@@ -268,6 +268,7 @@ function DocumentSession({
           ? "Changes not saved yet"
           : subtitle,
       inProject: available ? controller.document?.projectId != null : null,
+      sheet: available ? isSheet : null,
       expanded: selected === id,
       open: available ? () => panel.open(latestRequest.current) : null,
       retry: failed
@@ -276,7 +277,7 @@ function DocumentSession({
           }
         : null,
     }),
-    [available, controller, failed, id, panel, selected, subtitle],
+    [available, controller, failed, id, isSheet, panel, selected, subtitle],
   );
   const textSelection = controller.selectedBlocks;
   const sheetSelection = sheet.selected;
