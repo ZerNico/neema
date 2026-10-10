@@ -81,11 +81,15 @@ function fakeSheets() {
   return { sheets, service, rows, personWrites };
 }
 
-const prepare = (fake: ReturnType<typeof fakeSheets>) =>
+const prepare = (
+  fake: ReturnType<typeof fakeSheets>,
+  open?: { documentId: string; selected: string[] },
+) =>
   Effect.runPromise(
     prepareDocumentTools({
       service: fake.service as DocumentToolService,
       sheets: fake.sheets,
+      ...(open ? { openDocumentId: open.documentId, selectedBlocks: open.selected } : {}),
       generationId: "g1",
       userId: "user",
       conversationId: "conv-1",
@@ -183,5 +187,17 @@ describe("live sheet tools", () => {
     const view = send(tools);
     expect(view).toContain('range="A20:A22"');
     expect(view).toContain("21| A21 21");
+  });
+
+  it("names the cells the person has selected, in A1", async () => {
+    const fake = fakeSheets();
+    await Effect.runPromise(
+      fake.sheets.create("user", { conversationId: "conv-1", title: "Plan" }),
+    );
+    const tools = await prepare(fake, {
+      documentId: "sheet-1",
+      selected: ["s1", "s1.r3", "s1.c2", "s1.r2", "s1.c1"],
+    });
+    expect(send(tools)).toContain('selected="Sheet1!A2:B3"');
   });
 });

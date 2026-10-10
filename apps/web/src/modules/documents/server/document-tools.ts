@@ -17,7 +17,9 @@ import { DOCUMENT_POLICY, projectDocumentPolicy } from "./document-prompt.ts";
 import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./document-service.ts";
 import { readPartialObject, type PartialField } from "./partial-json.ts";
 import { calculateSheet, type SheetValues } from "@chat/sheet/model/calc";
-import type { SheetDoc } from "@chat/sheet/model";
+import { positions, type SheetDoc } from "@chat/sheet/model";
+import { columnLetters } from "@chat/sheet/a1";
+import { quoteSheet } from "@chat/sheet/model/formula";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import { advertisedParameter } from "~/modules/tools/server/toolset.ts";
 import {
@@ -417,6 +419,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   const trees = new Map<string, Node>();
   const threads = new Map<string, ReadonlyArray<DocumentComment>>();
   let selected = new Set(input.selectedBlocks ?? []);
+  // A sheet's selection arrives as its sheet, anchor and head IDs, in that order.
+  let selectedCells = input.selectedBlocks ?? [];
   // Live sheets: the document and its moment as last read, where the model is
   // reading, and the revisions this answer wrote, which are never someone else's.
   const sheetStates = new Map<string, { doc: SheetDoc; revision: number; moment: SheetMoment }>();
@@ -1463,11 +1467,34 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   // A sheet is calculated for its view; the same revision and window give the same text.
   const sheetRenders = new Map<string, { xml: string; body: string; next: SheetWindow | null }>();
   /** The focused sheet's view as it is now: its cells calculated, one window of them. */
+  /** The person's selection on a sheet as A1, when the message came from it. */
+  const sheetSelection = (document: EditableDocument, doc: SheetDoc) => {
+    if (document.id !== input.openDocumentId || selectedCells.length !== 5) return null;
+    const [sheet, anchorRow, anchorCol, headRow, headCol] = selectedCells as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+    const data = doc.sheet[sheet];
+    if (!data || doc.sheets.find((entry) => entry.id === sheet)?.dead) return null;
+    const rows = positions(data.rows);
+    const cols = positions(data.cols);
+    const corners = [rows.at(anchorRow), cols.at(anchorCol), rows.at(headRow), cols.at(headCol)];
+    if (corners.some((each) => each === undefined)) return null;
+    const [r1, c1, r2, c2] = corners as [number, number, number, number];
+    const from = `${columnLetters(Math.min(c1, c2))}${Math.min(r1, r2)}`;
+    const to = `${columnLetters(Math.max(c1, c2))}${Math.max(r1, r2)}`;
+    return { sheet: data.name, range: from === to ? from : `${from}:${to}` };
+  };
   const renderSheet = (document: EditableDocument) => {
     const state = sheetStates.get(document.id);
     if (!state) return null;
-    const window = sheetWindows.get(document.id);
-    const key = `${document.id}:${state.revision}:${document.revision}:${document.title}:${editedSinceYourLastWrite(document)}:${JSON.stringify(window ?? {})}`;
+    const picked = sheetSelection(document, state.doc);
+    // Without a window of its own, the view opens on the sheet the person has selected in.
+    const window = sheetWindows.get(document.id) ?? (picked ? { sheet: picked.sheet } : undefined);
+    const key = `${document.id}:${state.revision}:${document.revision}:${document.title}:${editedSinceYourLastWrite(document)}:${JSON.stringify(window ?? {})}:${JSON.stringify(picked)}`;
     const cached = sheetRenders.get(key);
     if (cached) return cached;
     const values: SheetValues = calculateSheet(state.doc, {
@@ -1479,9 +1506,11 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const note = view.next
       ? `\n<note>Window ends here. Call read_chat_document with ${JSON.stringify({ documentId: document.id, ...view.next })} to continue.</note>`
       : "";
+    const selection = picked ? `${quoteSheet(picked.sheet)}!${picked.range}` : null;
     const rendered = {
-      xml: `<document${header(document, { focused: true })}>\n${view.xml}${note}\n</document>`,
-      body: view.xml,
+      xml: `<document${header(document, { focused: true, ...(selection ? { selected: selection } : {}) })}>\n${view.xml}${note}\n</document>`,
+      // The selection is part of what was shown: a new one sends the view again.
+      body: `${selection ?? ""}\n${view.xml}`,
       next: view.next,
     };
     sheetRenders.clear();
@@ -1589,6 +1618,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       if (openDocumentId && known.some((document) => document.id === openDocumentId))
         focusedId = openDocumentId;
       selected = new Set(selectedBlocks ?? []);
+      selectedCells = selectedBlocks ?? [];
     },
     /**
      * Records what a provider request actually carried as what the model has

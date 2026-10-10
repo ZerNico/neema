@@ -45,6 +45,13 @@ class SheetConnections {
     for (const listener of this.#listeners) listener();
   };
   getState = (): SheetState | null => this.current?.getState() ?? null;
+  /** The selection a message names: the sheet, then its anchor's and head's row and column IDs. */
+  selected = () => {
+    const cursor = this.current?.cursor();
+    return cursor
+      ? [cursor.sheet, cursor.anchor.r, cursor.anchor.c, cursor.head.r, cursor.head.c]
+      : [];
+  };
   open(documentId: string) {
     const sync = new SheetSync({
       documentId,
@@ -86,6 +93,13 @@ export function useSheet(documentId: string, live: boolean) {
     () => [...connections.all].some((each) => each.pending()),
     [connections],
   );
-  return { documentId, sync: connections.current, state, flush, unpersisted };
+  return {
+    documentId,
+    sync: connections.current,
+    state,
+    flush,
+    unpersisted,
+    selected: connections.selected,
+  };
 }
 export type SheetController = ReturnType<typeof useSheet>;

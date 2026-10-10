@@ -179,6 +179,8 @@ export class SheetSync {
   }
 
   pending = () => this.#pending.length > 0;
+  /** Where this tab's selection is, as last set. */
+  cursor = () => this.#cursor;
 
   /** Sends everything unsent; true once the server has it all. */
   async flush(): Promise<boolean> {

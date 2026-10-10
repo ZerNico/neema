@@ -30,6 +30,7 @@ const controllerOf = (doc: SheetDoc): SheetController => {
     state,
     flush: async () => true,
     unpersisted: () => false,
+    selected: () => [],
   };
 };
 
@@ -95,6 +96,7 @@ describe("an open sheet", () => {
             state,
             flush: async () => true,
             unpersisted: () => false,
+            selected: () => [],
           }}
           canEdit
           toolbarSlot={null}

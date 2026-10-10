@@ -276,7 +276,12 @@ function DocumentSession({
     }),
     [available, controller, failed, id, panel, selected, subtitle],
   );
-  const selectedBlocks = controller.selectedBlocks;
+  const textSelection = controller.selectedBlocks;
+  const sheetSelection = sheet.selected;
+  const selectedBlocks = useCallback(
+    () => (isSheet ? sheetSelection() : textSelection()),
+    [isSheet, sheetSelection, textSelection],
+  );
   useEffect(() => {
     publish(documentId, { entry, flush, selectedBlocks });
   }, [documentId, entry, flush, selectedBlocks, publish]);
