@@ -16,14 +16,19 @@ import { serialOf } from "@chat/sheet/dates";
 import { formatValue } from "@chat/sheet/number-format";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
-import { positions, type Axis, type AxisEntry, type SheetDoc } from "@chat/sheet/model";
+import type { Axis, SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
-import { outlineDepth, placeGroups, type PlacedGroup } from "@chat/sheet/model/outline";
+import {
+  collapsedOf,
+  outlineDepth,
+  placeGroups,
+  type PlacedGroup,
+} from "@chat/sheet/model/outline";
 import { cellCss, cellDisplay, safeLink } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
   HEADER_ROW_PX,
-  axisLayout,
+  drawnLayout,
   columnPx,
   rowPx,
   textWidth,
@@ -204,16 +209,6 @@ function stampText(kind: "date" | "time", locale: SheetLocale) {
 const FALLBACK = { width: 960, height: 640 };
 /** The outline gutter's width per level. */
 const OUTLINE_STEP = 14;
-/** The IDs collapsed groups hide on an axis. */
-function hiddenBy(entries: readonly AxisEntry[], placed: readonly PlacedGroup[]) {
-  const hidden = new Set<string>();
-  if (!placed.some((each) => each.group.collapsed)) return hidden;
-  const { ids } = positions(entries);
-  for (const each of placed)
-    if (each.group.collapsed)
-      for (let at = each.start; at <= each.end; at++) hidden.add(ids[at - 1]!);
-  return hidden;
-}
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
@@ -299,23 +294,26 @@ export function SheetGrid({
     () => placeGroups(data.cols, data.outline?.cols),
     [data.cols, data.outline?.cols],
   );
-  const rows = useMemo(() => {
-    const measure = (props: Parameters<typeof rowPx>[0]) => rowPx(props) * zoom;
-    const collapsed = hiddenBy(data.rows, rowGroups);
-    if (!hiddenRows.size && !collapsed.size) return axisLayout(data.rows, data.rowProps, measure);
-    // Rows a filter or a collapsed group hides measure as hidden ones do, without being stored so.
-    const props = { ...data.rowProps };
-    for (const id of [...hiddenRows, ...collapsed]) props[id] = { ...props[id], hidden: true };
-    return axisLayout(data.rows, props, measure);
-  }, [data.rows, data.rowProps, hiddenRows, rowGroups, zoom]);
-  const cols = useMemo(() => {
-    const measure = (props: Parameters<typeof columnPx>[0]) => columnPx(props) * zoom;
-    const collapsed = hiddenBy(data.cols, colGroups);
-    if (!collapsed.size) return axisLayout(data.cols, data.colProps, measure);
-    const props = { ...data.colProps };
-    for (const id of collapsed) props[id] = { ...props[id], hidden: true };
-    return axisLayout(data.cols, props, measure);
-  }, [data.cols, data.colProps, colGroups, zoom]);
+  const rows = useMemo(
+    () =>
+      drawnLayout(
+        data.rows,
+        data.rowProps,
+        [...hiddenRows, ...collapsedOf(data.rows, rowGroups)],
+        (props) => rowPx(props) * zoom,
+      ),
+    [data.rows, data.rowProps, hiddenRows, rowGroups, zoom],
+  );
+  const cols = useMemo(
+    () =>
+      drawnLayout(
+        data.cols,
+        data.colProps,
+        collapsedOf(data.cols, colGroups),
+        (props) => columnPx(props) * zoom,
+      ),
+    [data.cols, data.colProps, colGroups, zoom],
+  );
   // The outline gutters beside and above the headers: a step per level, and one for the buttons.
   const rowGutter = rowGroups.length ? (outlineDepth(rowGroups) + 1) * OUTLINE_STEP : 0;
   const colGutter = colGroups.length ? (outlineDepth(colGroups) + 1) * OUTLINE_STEP : 0;

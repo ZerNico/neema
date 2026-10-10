@@ -85,13 +85,20 @@ export const outlineDepth = (placed: readonly PlacedGroup[]) =>
 /** The IDs collapsed groups hide on one axis of a sheet. */
 export function collapsedIds(doc: SheetDoc, sheet: string, axis: "rows" | "columns"): Set<string> {
   const data = doc.sheet[sheet];
-  const hidden = new Set<string>();
-  if (!data) return hidden;
+  if (!data) return new Set();
   const entries = axis === "rows" ? data.rows : data.cols;
-  const groups = axis === "rows" ? data.outline?.rows : data.outline?.cols;
-  if (!groups?.some((each) => each.collapsed)) return hidden;
+  return collapsedOf(
+    entries,
+    placeGroups(entries, axis === "rows" ? data.outline?.rows : data.outline?.cols),
+  );
+}
+
+/** The IDs already placed groups hide, for a caller that has placed them. */
+export function collapsedOf(entries: readonly AxisEntry[], placed: readonly PlacedGroup[]) {
+  const hidden = new Set<string>();
+  if (!placed.some((each) => each.group.collapsed)) return hidden;
   const { ids } = positions(entries);
-  for (const each of placeGroups(entries, groups))
+  for (const each of placed)
     if (each.group.collapsed)
       for (let at = each.start; at <= each.end; at++) hidden.add(ids[at - 1]!);
   return hidden;

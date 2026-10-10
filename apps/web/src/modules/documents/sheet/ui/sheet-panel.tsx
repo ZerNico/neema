@@ -51,7 +51,7 @@ import {
   type GridContext,
 } from "@chat/sheet-react/commands";
 import { cellDisplay, cellSource, safeLink } from "@chat/sheet-react/display";
-import { axisLayout, columnPx, rowPx } from "@chat/sheet-react/layout";
+import { columnPx, drawnLayout, rowPx } from "@chat/sheet-react/layout";
 import {
   SheetGrid,
   type CellEditing,
@@ -846,21 +846,17 @@ export default function SheetPanelBody({
         right: cols.at(selectedBox.c2)!,
       }
     : (shownThread?.box ?? null);
-  // Measured as the grid draws: at this zoom, rows a filter hides taking no space.
-  const shownRowProps = { ...doc.sheet[sheet]!.rowProps };
-  for (const id of [...hiddenByFilter, ...collapsedIds(doc, sheet, "rows")])
-    shownRowProps[id] = { ...shownRowProps[id], hidden: true };
-  const shownColProps = { ...doc.sheet[sheet]!.colProps };
-  for (const id of collapsedIds(doc, sheet, "columns"))
-    shownColProps[id] = { ...shownColProps[id], hidden: true };
-  const shownRowLayout = axisLayout(
+  // Measured as the grid draws: at this zoom, rows a filter or a group hides taking no space.
+  const shownRowLayout = drawnLayout(
     doc.sheet[sheet]!.rows,
-    shownRowProps,
+    doc.sheet[sheet]!.rowProps,
+    [...hiddenByFilter, ...collapsedIds(doc, sheet, "rows")],
     (props) => rowPx(props) * zoom,
   );
-  const colLayout = axisLayout(
+  const colLayout = drawnLayout(
     doc.sheet[sheet]!.cols,
-    shownColProps,
+    doc.sheet[sheet]!.colProps,
+    collapsedIds(doc, sheet, "columns"),
     (props) => columnPx(props) * zoom,
   );
   /** The card's anchor: the cells' box on the page, read when placed, so it follows scrolling. */

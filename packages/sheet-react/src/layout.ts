@@ -50,6 +50,24 @@ export function axisLayout(
   };
 }
 
+/**
+ * An axis as the grid draws it: IDs a filter or a collapsed group hides
+ * measure as hidden ones do, without being stored so.
+ */
+export function drawnLayout(
+  entries: readonly AxisEntry[],
+  props: Readonly<Record<string, AxisProps>>,
+  hidden: Iterable<string>,
+  measure: (props: AxisProps | undefined) => number,
+): AxisLayout {
+  let shown = props;
+  for (const id of hidden) {
+    if (shown === props) shown = { ...props };
+    (shown as Record<string, AxisProps>)[id] = { ...props[id], hidden: true };
+  }
+  return axisLayout(entries, shown, measure);
+}
+
 /** The entries a viewport shows, with a few beyond each edge so scrolling never shows a gap. */
 export function visibleRange(layout: AxisLayout, from: number, length: number, overscan = 4) {
   if (!layout.ids.length) return { first: 0, last: -1 };
