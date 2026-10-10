@@ -1,8 +1,9 @@
+import { placeBox } from "./box.ts";
 import { XError, type Scalar } from "../engine/values.ts";
 import { sheetLocale } from "../locales.ts";
 import { formatValue, generalText } from "../number-format.ts";
 import type { SheetValues } from "./calc.ts";
-import { positions, type Box, type SheetDoc } from "./model.ts";
+import type { Box, SheetDoc } from "./model.ts";
 import { isBox, isColor, isId, isRecord } from "./check.ts";
 
 /**
@@ -287,21 +288,11 @@ function reader(doc: SheetDoc, values: SheetValues) {
   };
   /** A box's cells in reading order: down a column or along a row, as a series reads them. */
   const cells = (sheet: string, box: Box, limit: number = CHART_LIMITS.points) => {
-    const data = doc.sheet[sheet];
-    if (!data) return null;
-    const rows = positions(data.rows);
-    const cols = positions(data.cols);
-    const [top, bottom, left, right] = [
-      rows.at(box.r1),
-      rows.at(box.r2),
-      cols.at(box.c1),
-      cols.at(box.c2),
-    ];
-    if (!top || !bottom || !left || !right) return null;
+    const placed = placeBox(doc.sheet[sheet], box);
+    if (!placed) return null;
     const out: Array<{ value: Scalar; text: string; format: string | undefined }> = [];
-    for (let row = Math.min(top, bottom); row <= Math.max(top, bottom); row++)
-      for (let col = Math.min(left, right); col <= Math.max(left, right); col++) {
-        const [r, c] = [rows.ids[row - 1]!, cols.ids[col - 1]!];
+    for (const r of placed.rows)
+      for (const c of placed.cols) {
         const value = values.value(sheet, r, c);
         const format = formatOf(sheet, r, c);
         out.push({ value, text: shown(value, format), format });
@@ -384,25 +375,6 @@ export function chartData(doc: SheetDoc, values: SheetValues, chart: Chart): Cha
 
 // ---- making series from a range, as Excel reads one
 
-/** A range by IDs as row and column IDs in order; null when an end is gone. */
-function span(doc: SheetDoc, sheet: string, box: Box) {
-  const data = doc.sheet[sheet];
-  if (!data) return null;
-  const rows = positions(data.rows);
-  const cols = positions(data.cols);
-  const [top, bottom, left, right] = [
-    rows.at(box.r1),
-    rows.at(box.r2),
-    cols.at(box.c1),
-    cols.at(box.c2),
-  ];
-  if (!top || !bottom || !left || !right) return null;
-  return {
-    rows: rows.ids.slice(Math.min(top, bottom) - 1, Math.max(top, bottom)),
-    cols: cols.ids.slice(Math.min(left, right) - 1, Math.max(left, right)),
-  };
-}
-
 const DATE_FORMAT = /[dmy]/i;
 /** Text, or a date: a cell that labels a point rather than measures one. */
 const isLabel = (value: Scalar, format: string | undefined) =>
@@ -420,7 +392,7 @@ export function readSource(
   sheet: string,
   box: Box,
 ): ChartSource {
-  const ids = span(doc, sheet, box);
+  const ids = placeBox(doc.sheet[sheet], box);
   if (!ids) return { sheet, box, headers: false, labels: false, byRow: false };
   const formatOf = (r: string, c: string) => {
     const key = doc.sheet[sheet]?.cells[r]?.[c]?.s;
@@ -457,7 +429,7 @@ export function seriesFrom(
   kind: ChartKind,
   values?: SheetValues,
 ): ChartSeries[] {
-  const ids = span(doc, source.sheet, source.box);
+  const ids = placeBox(doc.sheet[source.sheet], source.box);
   if (!ids) return [];
   const [rows, cols] = source.byRow ? [ids.cols, ids.rows] : [ids.rows, ids.cols];
   // Read as columns: `rows` run along a series, `cols` are one series each.

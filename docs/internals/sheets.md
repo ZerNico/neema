@@ -118,7 +118,7 @@ browser workers and the Excel file tools); this page records the decisions behin
   breaks a rule, are worked out from the values at draw time like a filter's rows, so neither
   is ever stale on a replica.
 - Setting or clearing validation over cells takes them from every other rule, which keeps the
-  rest of its cells as up to four rules around them (`withoutArea`), so a cell has one rule, as
+  rest of its cells as up to four rules around them (`withoutBounds`), so a cell has one rule, as
   in Excel. The grid and the model share that one function.
 - Validation guards typing in the grid only. A paste, a fill or the model may write anything,
   which is Excel's behaviour too; Circle Invalid Data shows what slipped through. A list read

@@ -10,7 +10,6 @@ import {
   isValidationList,
   listChoices,
   validationAt,
-  withoutArea,
   type Validation,
 } from "./validation.ts";
 
@@ -74,39 +73,5 @@ describe("data validation", () => {
     expect(isValidationList([{ ...amount, onError: "explode" }])).toBe(false);
     expect(isValidationList([{ ...status, rule: { kind: "list" } }])).toBe(false);
     expect(apply(ruled, ...invertChange(doc, ruled)).sheet.s1!.validations).toBeUndefined();
-  });
-
-  it("is cleared from exactly the cells chosen, the rest of a rule kept around them", () => {
-    const rule: Validation = {
-      id: "v",
-      box: { r1: id("r", 1), r2: id("r", 3), c1: id("c", 1), c2: id("c", 3) },
-      rule: { kind: "list", values: ["Yes"] },
-      onError: "stop",
-      allowBlank: true,
-    };
-    const sheet = apply(doc, { op: "validations", sh: "s1", list: [rule] });
-    let minted = 0;
-    const kept = withoutArea(
-      sheet,
-      "s1",
-      { top: 2, bottom: 2, left: 2, right: 2 },
-      () => `n${++minted}`,
-    );
-    const corners = (each: Validation) =>
-      `${each.box.r1}:${each.box.c1}-${each.box.r2}:${each.box.c2}`;
-    expect(kept.map(corners)).toEqual([
-      "s1.r1:s1.c1-s1.r1:s1.c3",
-      "s1.r3:s1.c1-s1.r3:s1.c3",
-      "s1.r2:s1.c1-s1.r2:s1.c1",
-      "s1.r2:s1.c3-s1.r2:s1.c3",
-    ]);
-    expect(kept.map((each) => each.id)).toEqual(["v", "n1", "n2", "n3"]);
-    // A rule wholly inside goes; one apart is untouched.
-    expect(withoutArea(sheet, "s1", { top: 1, bottom: 5, left: 1, right: 5 }, () => "x")).toEqual(
-      [],
-    );
-    expect(withoutArea(sheet, "s1", { top: 9, bottom: 9, left: 9, right: 9 }, () => "x")).toEqual([
-      rule,
-    ]);
   });
 });

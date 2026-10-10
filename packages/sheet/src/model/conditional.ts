@@ -1,6 +1,7 @@
+import { placeBox } from "./box.ts";
 import type { SheetValues } from "./calc.ts";
 import { shownText } from "./filter.ts";
-import { positions, type Box, type SheetDoc } from "./model.ts";
+import type { Box, SheetDoc } from "./model.ts";
 import { isColor, isId, isRecord } from "./check.ts";
 
 /**
@@ -164,25 +165,17 @@ export function conditionalLooks(
   const looks = new Map<string, CellLook>();
   const data = doc.sheet[sheet];
   if (!data?.conditional?.length) return looks;
-  const rows = positions(data.rows);
-  const cols = positions(data.cols);
   const add = (r: string, c: string, look: CellLook) => {
     const key = `${r}|${c}`;
     // The earlier rule's property stands.
     looks.set(key, { ...look, ...looks.get(key) });
   };
   for (const { box, rule } of data.conditional) {
-    const [top, bottom, left, right] = [
-      rows.at(box.r1),
-      rows.at(box.r2),
-      cols.at(box.c1),
-      cols.at(box.c2),
-    ];
-    if (top === undefined || bottom === undefined || left === undefined || right === undefined)
-      continue;
+    const placed = placeBox(data, box);
+    if (!placed) continue;
     const cells: Array<{ r: string; c: string; value: unknown; shown: string }> = [];
-    for (const r of rows.ids.slice(top - 1, bottom))
-      for (const c of cols.ids.slice(left - 1, right))
+    for (const r of placed.rows)
+      for (const c of placed.cols)
         cells.push({
           r,
           c,

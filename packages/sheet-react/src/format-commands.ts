@@ -2,7 +2,8 @@ import { columnLetters } from "@chat/sheet/a1";
 import { generalText } from "@chat/sheet/number-format";
 import { positions, type Box } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
-import { withoutArea, type Validation } from "@chat/sheet/model/validation";
+import type { Validation } from "@chat/sheet/model/validation";
+import { withoutBounds } from "@chat/sheet/model/box";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import { enterCell, rangesOf, selectionBox, type GridContext } from "./commands.ts";
 import { cellStyle } from "./display.ts";
@@ -250,6 +251,10 @@ export function addConditional(context: GridContext, rule: ConditionalRule): She
   ];
 }
 
+/** Whether a rule list came back as it went in: `withoutBounds` keeps untouched rules as they are. */
+const unchanged = <T>(next: readonly T[], before: readonly T[]) =>
+  next.length === before.length && next.every((each, index) => each === before[index]);
+
 /** Clear Rules: those over the selected cells, or every one on the sheet. */
 export function clearConditional(context: GridContext, scope: "selection" | "sheet"): SheetOp[] {
   const list = context.doc.sheet[context.sheet]!.conditional ?? [];
@@ -301,8 +306,9 @@ export function setValidation(
 ): SheetOp[] {
   const before = context.doc.sheet[context.sheet]!.validations ?? [];
   const box = selectionBox(context);
-  const kept = withoutArea(context.doc, context.sheet, box, context.mint);
-  if (!validation && JSON.stringify(kept) === JSON.stringify(before)) return [];
+  const sheet = context.doc.sheet[context.sheet]!;
+  const kept = withoutBounds(sheet, before, box, context.mint);
+  if (!validation && unchanged(kept, before)) return [];
   const list = validation ? [...kept, { ...validation, id: context.mint(), box: box.area }] : kept;
   return [{ op: "validations", sh: context.sheet, list }];
 }

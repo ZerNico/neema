@@ -1,8 +1,9 @@
+import { placeBox } from "./box.ts";
 import { XError } from "../engine/values.ts";
 import { sheetLocale } from "../locales.ts";
 import { formatValue, generalText } from "../number-format.ts";
 import type { SheetValues } from "./calc.ts";
-import { positions, type Box, type SheetDoc } from "./model.ts";
+import type { Box, SheetDoc } from "./model.ts";
 import { isId, isRecord } from "./check.ts";
 
 /**
@@ -67,23 +68,9 @@ export function isSheetFilter(value: unknown): value is SheetFilter {
 
 /** A filter's rows and columns by position, its header row first; null once its cells are gone. */
 export function filterSpan(doc: SheetDoc, sheet: string, filter: SheetFilter) {
-  const data = doc.sheet[sheet];
-  if (!data) return null;
-  const rows = positions(data.rows);
-  const cols = positions(data.cols);
-  const [top, bottom, left, right] = [
-    rows.at(filter.box.r1),
-    rows.at(filter.box.r2),
-    cols.at(filter.box.c1),
-    cols.at(filter.box.c2),
-  ];
-  if (top === undefined || bottom === undefined || left === undefined || right === undefined)
-    return null;
-  return {
-    header: rows.ids[top - 1]!,
-    body: rows.ids.slice(top, bottom),
-    columns: cols.ids.slice(left - 1, right),
-  };
+  const placed = placeBox(doc.sheet[sheet], filter.box);
+  if (!placed) return null;
+  return { header: placed.rows[0]!, body: placed.rows.slice(1), columns: placed.cols };
 }
 
 /** What a cell shows, as a filter's value list names it. */

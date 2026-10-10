@@ -19,7 +19,8 @@ import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
-import { withoutArea, type ValidationRule } from "@chat/sheet/model/validation";
+import type { ValidationRule } from "@chat/sheet/model/validation";
+import { withoutBounds } from "@chat/sheet/model/box";
 import { OUTLINE_LIMITS } from "@chat/sheet/model/outline";
 import { parseDateText } from "@chat/sheet/dates";
 import { chartOperation } from "./convert-chart.ts";
@@ -767,7 +768,12 @@ export function convertOperations(
           };
         }
         // Other rules give up these cells, as Excel keeps one rule per cell.
-        const kept = withoutArea(view, sh, box, input.mint);
+        const kept = withoutBounds(
+          view.sheet[sh]!,
+          view.sheet[sh]!.validations ?? [],
+          box,
+          input.mint,
+        );
         emit({
           op: "validations",
           sh,
@@ -792,7 +798,12 @@ export function convertOperations(
           return;
         }
         const { box } = area(sh, operation.range);
-        emit({ op: "validations", sh, list: withoutArea(view, sh, box, input.mint) });
+        const sheet = view.sheet[sh]!;
+        emit({
+          op: "validations",
+          sh,
+          list: withoutBounds(sheet, sheet.validations ?? [], box, input.mint),
+        });
         return;
       }
       case "removeFilter": {
