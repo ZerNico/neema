@@ -158,4 +158,52 @@ describe("an open sheet", () => {
     );
     expect(screen.getByText("Check this total")).toBeTruthy();
   });
+
+  it("draws a sheet's charts over its cells", () => {
+    const box = { r1: "s1.r1", r2: "s1.r2", c1: "s1.c2", c2: "s1.c2" };
+    const doc = apply(
+      emptyDoc(),
+      {
+        op: "set",
+        sh: "s1",
+        cells: [
+          { r: "s1.r1", c: "s1.c1", v: "Jan" },
+          { r: "s1.r2", c: "s1.c1", v: "Feb" },
+          { r: "s1.r1", c: "s1.c2", v: 10 },
+          { r: "s1.r2", c: "s1.c2", v: 30 },
+        ],
+      },
+      {
+        op: "chartPut",
+        id: "c1",
+        chart: {
+          sheet: "s1",
+          kind: "column",
+          title: "Sales by month",
+          at: { r: "s1.r4", c: "s1.c1" },
+          size: { width: 400, height: 240 },
+          series: [
+            { name: "Sales", values: box, categories: { ...box, c1: "s1.c1", c2: "s1.c1" } },
+          ],
+        },
+      },
+      {
+        op: "chartPut",
+        id: "c2",
+        chart: {
+          sheet: "s1",
+          kind: "pie",
+          title: "Share",
+          at: { r: "s1.r20", c: "s1.c1" },
+          size: { width: 300, height: 200 },
+          series: [{ values: box, categories: { ...box, c1: "s1.c1", c2: "s1.c1" } }],
+        },
+      },
+    );
+    render(<SheetPanelBody controller={controllerOf(doc)} canEdit={false} toolbarSlot={null} />);
+    expect(screen.getByText("Sales by month")).toBeTruthy();
+    const pie = screen.getByRole("img", { name: "Share" });
+    expect(pie.querySelectorAll("path")).toHaveLength(2);
+    expect(screen.getAllByText("Feb").length).toBeGreaterThan(1);
+  });
 });

@@ -57,6 +57,15 @@ export interface GridDecoration {
   readonly marker?: boolean;
 }
 
+/** Something drawn over the cells from a cell's top-left corner, such as a chart. */
+export interface GridOverlay {
+  readonly key: string;
+  readonly at: CellRef;
+  readonly width: number;
+  readonly height: number;
+  readonly content: ReactNode;
+}
+
 export interface SheetGridProps {
   readonly doc: SheetDoc;
   /** The sheet shown, by ID. */
@@ -82,12 +91,14 @@ export interface SheetGridProps {
   /** A row or column dragged to a new size, in pixels. */
   readonly onResize?: (axis: Axis, id: string, px: number) => void;
   readonly decorations?: readonly GridDecoration[];
+  readonly overlays?: readonly GridOverlay[];
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
 const FALLBACK = { width: 960, height: 640 };
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
+const NO_OVERLAYS: readonly GridOverlay[] = [];
 
 /** Row and column indexes of every merged range, and the cells each hides. */
 function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols: AxisLayout) {
@@ -135,6 +146,7 @@ export function SheetGrid({
   onPaste,
   onResize,
   decorations = NO_DECORATIONS,
+  overlays = NO_OVERLAYS,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -830,6 +842,27 @@ export function SheetGrid({
           {cells}
           {others}
           {selectionBox}
+          {overlays.flatMap((overlay) => {
+            const row = rowIndex.get(overlay.at.r);
+            const col = colIndex.get(overlay.at.c);
+            if (row === undefined || col === undefined) return [];
+            return [
+              <div
+                key={overlay.key}
+                className="absolute z-20"
+                style={{
+                  top: rows.starts[row],
+                  left: cols.starts[col],
+                  width: overlay.width,
+                  height: overlay.height,
+                }}
+                // Clicks on what it draws are its own, not a cell's.
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                {overlay.content}
+              </div>,
+            ];
+          })}
           {editingPane === "main" ? editor : null}
           {resizing ? (
             <div

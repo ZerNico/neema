@@ -41,6 +41,7 @@ import {
   type CellEditing,
   type GridCommand,
   type GridDecoration,
+  type GridOverlay,
   type SheetSelection,
 } from "@chat/sheet-react/grid";
 import { Button } from "~/ui/primitives/button";
@@ -69,6 +70,8 @@ import type { AskTarget } from "../../ui/rich-editor/editor-hooks.ts";
 import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
+import { chartData } from "./chart-data.ts";
+import { SheetChart } from "./sheet-chart.tsx";
 
 function MenuItem({
   icon,
@@ -254,6 +257,30 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const overlays: GridOverlay[] = Object.entries(doc.charts)
+    .filter(([, chart]) => chart.sheet === sheet)
+    .map(([id, chart]) => ({
+      key: `chart:${id}`,
+      at: chart.at,
+      width: chart.size.width,
+      height: chart.size.height,
+      content: (
+        <div className="group relative h-full">
+          <SheetChart chart={chart} data={chartData(doc, values, chart)} />
+          {readOnly ? null : (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Remove chart"
+              className="text-muted-foreground absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              onClick={() => run([{ op: "chartDelete", id }])}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+            </Button>
+          )}
+        </div>
+      ),
+    }));
   const cellOf = (at: { r: string; c: string }) => [sheet, at.r, at.c, at.r, at.c];
   const sendToAssistant = async (
     thread: string,
@@ -488,6 +515,7 @@ export default function SheetPanelBody({
                 ])
               }
               decorations={decorations}
+              overlays={overlays}
             />
           </div>
         </ContextMenuTrigger>

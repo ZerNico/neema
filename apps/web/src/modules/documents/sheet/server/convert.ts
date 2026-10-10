@@ -505,13 +505,15 @@ export function convertOperations(
           ensure(on, box.bottom, box.right);
           const rows = ids(on, "rows");
           const cols = ids(on, "columns");
-          const area = {
-            r1: rows[box.top - 1]!,
-            r2: rows[box.bottom - 1]!,
-            c1: cols[box.left - 1]!,
-            c2: cols[box.right - 1]!,
+          return {
+            sheet: on,
+            box: {
+              r1: rows[box.top - 1]!,
+              r2: rows[box.bottom - 1]!,
+              c1: cols[box.left - 1]!,
+              c2: cols[box.right - 1]!,
+            },
           };
-          return { sheet: on, box: area };
         };
         const categories = operation.categories
           ? reference(operation.categories, "categories")
