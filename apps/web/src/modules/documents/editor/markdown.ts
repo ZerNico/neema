@@ -5,6 +5,7 @@ import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
 import { plainChips } from "./chips.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
+import { escapeMathDollars } from "./math.ts";
 
 export const documentSchema = getSchema(documentExtensions);
 const manager = new MarkdownManager({ extensions: documentExtensions });
@@ -28,16 +29,22 @@ Reflect.set(
   manager,
   "encodeTextForMarkdown",
   function (this: unknown, ...args: Parameters<EncodeText>) {
-    return upstreamEncode
-      .apply(this, args)
-      .replace(/&(?:amp|lt|gt|quot|#39);/g, (entity, offset: number, all: string) => {
+    const marks = (args[1] as { marks?: { type: string }[] } | null)?.marks ?? [];
+    const parent = (args[2] as { type?: string } | null)?.type;
+    const code = parent === "codeBlock" || marks.some((mark) => mark.type === "code");
+    const encoded = upstreamEncode.apply(this, args);
+    // Code is verbatim; anywhere else a dollar must not open math on the next read.
+    return (code ? encoded : escapeMathDollars(encoded)).replace(
+      /&(?:amp|lt|gt|quot|#39);/g,
+      (entity, offset: number, all: string) => {
         const character = ENTITIES[entity]!;
         const after = all.slice(offset + entity.length);
         if (character === "<" && /^[A-Za-z/!?]/.test(after)) return "\\<";
         if (character === "&" && /^#?\w+;/.test(after)) return "\\&";
         if (character === ">" && offset === 0) return "\\>";
         return character;
-      });
+      },
+    );
   },
 );
 

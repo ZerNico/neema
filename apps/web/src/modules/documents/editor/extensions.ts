@@ -14,6 +14,7 @@ import { Markdown } from "@tiptap/markdown";
 import { StarterKit } from "@tiptap/starter-kit";
 import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
 import { DateChip, PersonMention } from "./chips.ts";
+import { DocumentBlockMath, DocumentInlineMath } from "./math.ts";
 import { CommentMark } from "./comments.ts";
 import { Pending } from "./pending.ts";
 import { isRemoteChange } from "./remote.ts";
@@ -146,6 +147,8 @@ export const documentExtensions: AnyExtension[] = [
   TableHeader,
   TableCell,
   Pending,
+  DocumentInlineMath,
+  DocumentBlockMath,
   DateChip,
   PersonMention,
   CommentMark,

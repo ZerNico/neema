@@ -17,6 +17,7 @@ export const BLOCK_TYPES = [
   "taskItem",
   "table",
   "horizontalRule",
+  "blockMath",
   "pending",
 ] as const;
 const blockTypes = new Set<string>(BLOCK_TYPES);

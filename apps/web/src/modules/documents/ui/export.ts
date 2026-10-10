@@ -1,4 +1,5 @@
 import type { Editor } from "@tiptap/core";
+import { renderToString } from "katex";
 
 const escapeHtml = (text: string) =>
   text.replace(
@@ -46,6 +47,7 @@ a { color: inherit; }
 [data-pending] { display: none; }
 figure.diagram { margin: 0 0 9pt; text-align: center; break-inside: avoid; white-space: normal; }
 figure.diagram svg { max-width: 100%; height: auto; }
+.formula { margin: 0 0 9pt; text-align: center; break-inside: avoid; }
 `;
 
 /**
@@ -78,6 +80,16 @@ export const printDocument = (editor: Editor, title: string) => {
           month: "short",
           year: "numeric",
         });
+    }
+    // Formulas print as MathML, which the browser draws without KaTeX's stylesheet.
+    for (const formula of page.querySelectorAll<HTMLElement>("[data-latex]")) {
+      const display = formula.dataset.type === "block-math";
+      formula.innerHTML = renderToString(formula.dataset.latex ?? "", {
+        displayMode: display,
+        output: "mathml",
+        throwOnError: false,
+      });
+      if (display) formula.className = "formula";
     }
     // Diagrams print as the editor drew them, matched to their source.
     const drawn = new Map<string, string>();

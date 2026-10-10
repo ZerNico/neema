@@ -137,6 +137,13 @@ describe("block view", () => {
     expect(view.seen.map((block) => block.id)).toContain("b5");
   });
 
+  it("shows a formula as LaTeX: inline in its text, a display one as a block of its own", () => {
+    const doc = withIds("Weight $w_i < 1$ each.\n\n$$\nN = \\sum w_i\n$$");
+    expect(blockView(doc, { budget: 1_000 }).xml).toBe(
+      '<p id="b1">Weight $w_i &lt; 1$ each.</p>\n<math id="b2">N = \\sum w_i</math>',
+    );
+  });
+
   it("shows a planned section and writes no Markdown for it", () => {
     const doc = documentSchema.node("doc", null, [
       documentSchema.node("heading", { level: 1, id: "t" }, [documentSchema.text("Brief")]),

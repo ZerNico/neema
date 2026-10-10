@@ -3,6 +3,8 @@ import {
   Calendar03Icon,
   CheckListIcon,
   CodeSquareIcon,
+  FunctionIcon,
+  FunctionOfXIcon,
   Heading01Icon,
   Heading02Icon,
   Heading03Icon,
@@ -88,6 +90,25 @@ export const SLASH_ITEMS: SlashItem[] = [
     icon: CodeSquareIcon,
     keywords: "pre snippet",
     run: (e, r) => blocks(e, r).toggleCodeBlock().run(),
+  },
+  {
+    title: "Formula",
+    icon: FunctionIcon,
+    keywords: "math equation latex katex",
+    // Empty, it opens for its LaTeX; left empty, it goes again.
+    run: (e, r) =>
+      blocks(e, r)
+        .insertContent({ type: "blockMath", attrs: { latex: "" } })
+        .run(),
+  },
+  {
+    title: "Inline formula",
+    icon: FunctionOfXIcon,
+    keywords: "math equation latex katex",
+    run: (e, r) =>
+      blocks(e, r)
+        .insertContent({ type: "inlineMath", attrs: { latex: "" } })
+        .run(),
   },
   {
     title: "Table",

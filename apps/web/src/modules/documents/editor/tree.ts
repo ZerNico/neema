@@ -65,6 +65,7 @@ const TAGS: Record<string, string> = {
   taskItem: "task",
   table: "table",
   horizontalRule: "hr",
+  blockMath: "math",
   pending: "pending",
 };
 
@@ -98,6 +99,8 @@ const render = (node: Node, seen: SeenBlock[]): string => {
       return `${head()}>\n${escapeText(toModelMarkdown(node.type.schema.node("doc", null, [node])))}\n</${tag}>`;
     case "horizontalRule":
       return `${head()}/>`;
+    case "blockMath":
+      return `${head()}>${escapeText(String(node.attrs.latex ?? ""))}</${tag}>`;
     case "pending":
       return `${head({ intent: node.attrs.intent as string })}/>`;
     case "listItem":

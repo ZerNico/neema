@@ -111,6 +111,36 @@ describe("document editor", () => {
     expect(sync.markdown()).toBe("- [ ] **Ship it** today");
   });
 
+  it("draws a formula with KaTeX and edits its LaTeX from the field it opens", async () => {
+    const sync = await replica("Weight $w_i$ here");
+    mount(sync);
+    const editor = await editorOf();
+    const surface = screen.getByRole("textbox", { name: "Document" });
+    await waitFor(() => expect(surface.querySelector(".katex")).not.toBeNull());
+    expect(screen.queryByRole("textbox", { name: "LaTeX" })).toBeNull();
+
+    // Selecting the formula, as a click does, opens its LaTeX.
+    act(() => {
+      editor.commands.setNodeSelection(8);
+    });
+    const field = await screen.findByRole("textbox", { name: "LaTeX" });
+    expect(field).toHaveValue("w_i");
+    fireEvent.change(field, { target: { value: "w_j^2" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "LaTeX" })).toBeNull());
+    expect(sync.markdown()).toBe("Weight $w_j^2$ here");
+
+    // Emptied, the formula goes.
+    act(() => {
+      editor.commands.setNodeSelection(8);
+    });
+    fireEvent.change(await screen.findByRole("textbox", { name: "LaTeX" }), {
+      target: { value: " " },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "LaTeX" }), { key: "Enter" });
+    await waitFor(() => expect(sync.markdown()).toBe("Weight  here"));
+  });
+
   it("ticks a task from its checkbox", async () => {
     const sync = await replica("- [ ] write notes\n- [ ] ship");
     mount(sync);
