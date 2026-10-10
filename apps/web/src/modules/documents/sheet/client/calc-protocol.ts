@@ -1,5 +1,5 @@
 import { XError, type Scalar } from "@chat/sheet/engine/values";
-import { calculateSheet, type CalcContext } from "@chat/sheet/model/calc";
+import { calculateSheet, type CalcContext, type SheetValues } from "@chat/sheet/model/calc";
 import type { SheetDoc } from "@chat/sheet/model";
 
 export interface CalcRequest {
@@ -42,4 +42,47 @@ export function calculateForWire(request: CalcRequest): CalcResult {
               results.push([cellKey(sheet, sr, sc), toWire(values.value(sheet, sr, sc))]);
       }
   return { generation: request.generation, results, spills };
+}
+
+const EMPTY_REPORT = { formulas: 0, errors: [], errorCount: 0, unsupported: [] };
+
+/**
+ * Values as the page reads them while a calculation may lag the document: a
+ * typed value at once, a formula's last result until the new one. A spilled
+ * value lasts only while its formula is there, so clearing it empties the
+ * spill at once rather than when the worker answers.
+ */
+export function valuesOf(
+  doc: SheetDoc,
+  context: CalcContext,
+  result: CalcResult | null,
+): SheetValues {
+  const results = new Map<string, Scalar>(
+    (result?.results ?? []).map(([key, value]) => [key, fromWire(value)]),
+  );
+  const spills = new Map(
+    (result?.spills ?? []).map(([key, rows, cols]) => [key, { rows: [...rows], cols: [...cols] }]),
+  );
+  const spilledFrom = new Map<string, readonly [string, string, string]>();
+  for (const [key, area] of spills) {
+    const [sheet, r, c] = key.split("\u0000") as [string, string, string];
+    for (const row of area.rows)
+      for (const col of area.cols) spilledFrom.set(cellKey(sheet, row, col), [sheet, r, c]);
+  }
+  return {
+    context,
+    report: EMPTY_REPORT,
+    value: (sheet, r, c) => {
+      const cell = doc.sheet[sheet]?.cells[r]?.[c];
+      const key = cellKey(sheet, r, c);
+      if (cell?.f) return results.get(key) ?? null;
+      if (cell && cell.v !== undefined) return cell.v;
+      const from = spilledFrom.get(key);
+      return from && doc.sheet[from[0]]?.cells[from[1]]?.[from[2]]?.f
+        ? (results.get(key) ?? null)
+        : null;
+    },
+    spill: (sheet, r, c) =>
+      doc.sheet[sheet]?.cells[r]?.[c]?.f ? (spills.get(cellKey(sheet, r, c)) ?? null) : null,
+  };
 }

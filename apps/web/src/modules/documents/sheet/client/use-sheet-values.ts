@@ -1,37 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Scalar } from "@chat/sheet/engine/values";
 import type { CalcContext, SheetValues } from "@chat/sheet/model/calc";
 import type { SheetDoc } from "@chat/sheet/model";
-import {
-  calculateForWire,
-  cellKey,
-  fromWire,
-  type CalcRequest,
-  type CalcResult,
-} from "./calc-protocol.ts";
-
-const EMPTY_REPORT = { formulas: 0, errors: [], errorCount: 0, unsupported: [] };
-
-/** Values as the page reads them: a typed value at once, a formula's once calculated. */
-function valuesOf(doc: SheetDoc, context: CalcContext, result: CalcResult | null): SheetValues {
-  const results = new Map<string, Scalar>(
-    (result?.results ?? []).map(([key, value]) => [key, fromWire(value)]),
-  );
-  const spills = new Map(
-    (result?.spills ?? []).map(([key, rows, cols]) => [key, { rows: [...rows], cols: [...cols] }]),
-  );
-  return {
-    context,
-    report: EMPTY_REPORT,
-    value: (sheet, r, c) => {
-      const cell = doc.sheet[sheet]?.cells[r]?.[c];
-      // What someone typed shows straight away; a formula keeps its last result until the new one.
-      if (cell && !cell.f && cell.v !== undefined) return cell.v;
-      return results.get(cellKey(sheet, r, c)) ?? null;
-    },
-    spill: (sheet, r, c) => spills.get(cellKey(sheet, r, c)) ?? null,
-  };
-}
+import { calculateForWire, valuesOf, type CalcRequest, type CalcResult } from "./calc-protocol.ts";
 
 /**
  * A sheet's values, calculated in a worker so typing never waits on a big
