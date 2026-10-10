@@ -10,6 +10,7 @@ import {
   Download04Icon,
   PaintBucketIcon,
   PencilEdit02Icon,
+  PrinterIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -65,6 +66,7 @@ export function SheetTabs({
   run,
   onPick,
   onDownload,
+  onPrint,
 }: {
   doc: SheetDoc;
   current: string;
@@ -74,6 +76,7 @@ export function SheetTabs({
   onPick: (id: string) => void;
   /** Saves a sheet as CSV. */
   onDownload: (id: string) => void;
+  onPrint: (id: string) => void;
 }) {
   const sheets = liveSheets(doc);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -131,6 +134,7 @@ export function SheetTabs({
               onColor={(color) => run([{ op: "sheetColor", id, color }])}
               onMove={(to) => move(id, to)}
               onDownload={() => onDownload(id)}
+              onPrint={() => onPrint(id)}
               onDelete={() => run([{ op: "sheetDelete", id }])}
             />
           ),
@@ -185,6 +189,7 @@ function SheetTab({
   onColor,
   onMove,
   onDownload,
+  onPrint,
   onDelete,
 }: {
   id: string;
@@ -200,6 +205,7 @@ function SheetTab({
   onColor: (color: string | null) => void;
   onMove: (index: number) => void;
   onDownload: () => void;
+  onPrint: () => void;
   onDelete: () => void;
 }) {
   const { ref } = useSortable({ id, index, disabled: readOnly });
@@ -258,6 +264,10 @@ function SheetTab({
         <ContextMenuItem onClick={onDownload}>
           <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
           Download as CSV
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onPrint}>
+          <HugeiconsIcon icon={PrinterIcon} strokeWidth={2} />
+          Print
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" disabled={readOnly || only} onClick={onDelete}>

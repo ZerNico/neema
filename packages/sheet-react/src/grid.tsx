@@ -87,7 +87,16 @@ export interface GridFill {
 
 export type GridCommand =
   | {
-      readonly kind: "clear" | "undo" | "redo" | "find" | "filter" | "link" | "group" | "ungroup";
+      readonly kind:
+        | "clear"
+        | "undo"
+        | "redo"
+        | "find"
+        | "filter"
+        | "link"
+        | "group"
+        | "ungroup"
+        | "print";
     }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
   | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
@@ -687,6 +696,12 @@ export function SheetGrid({
     if (command && !event.altKey && event.key.toLowerCase() === "f" && onCommand) {
       event.preventDefault();
       onCommand({ kind: "find" });
+      return;
+    }
+    // Print, the sheet rather than the page around it.
+    if (command && !event.altKey && event.key.toLowerCase() === "p" && onCommand) {
+      event.preventDefault();
+      onCommand({ kind: "print" });
       return;
     }
     // The paste event cannot tell which keys made it, so Cmd+Shift+V is noted for it.

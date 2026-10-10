@@ -94,6 +94,7 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { printHtml } from "@chat/sheet-react/print";
 import { collapsedIds } from "@chat/sheet/model/outline";
 import {
   groupSelection,
@@ -396,11 +397,31 @@ export default function SheetPanelBody({
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
     else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "link") setLinking(true);
+    else if (command.kind === "print") printSheet(sheet);
     else if (command.kind === "group") run(groupSelection(context, outlineAxis(context)));
     else if (command.kind === "ungroup") run(ungroupSelection(context, outlineAxis(context)));
     else if (command.kind === "undo") sync?.undo();
     else if (command.kind === "redo") sync?.redo();
     else run(eachRange(context, clearSelection));
+  };
+  /** Prints a sheet through a frame of its own, so the page around it stays out of the print. */
+  const printSheet = (id: string) => {
+    const html = printHtml({ doc, values, locale }, id);
+    if (!html) {
+      toast("Nothing to print on this sheet");
+      return;
+    }
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    Object.assign(frame.style, { position: "fixed", width: "0", height: "0", border: "0" });
+    frame.addEventListener("load", () => {
+      const printing = frame.contentWindow;
+      if (!printing) return;
+      printing.addEventListener("afterprint", () => frame.remove());
+      printing.print();
+    });
+    frame.srcdoc = html;
+    document.body.append(frame);
   };
   const onOutline: NonNullable<SheetGridProps["onOutline"]> = (axis, action) =>
     run(
@@ -1382,6 +1403,7 @@ export default function SheetPanelBody({
             setSelection(null);
             setEditing(null);
           }}
+          onPrint={printSheet}
           onDownload={(id) => {
             const csv = sheetCsv({ doc, values, locale }, id);
             const link = document.createElement("a");

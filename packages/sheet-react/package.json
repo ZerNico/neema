@@ -10,7 +10,8 @@
     "./format-commands": "./src/format-commands.ts",
     "./filter-commands": "./src/filter-commands.ts",
     "./outline-commands": "./src/outline-commands.ts",
-    "./clipboard": "./src/clipboard.ts"
+    "./clipboard": "./src/clipboard.ts",
+    "./print": "./src/print.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

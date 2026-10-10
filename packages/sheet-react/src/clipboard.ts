@@ -13,50 +13,57 @@ const escapeHtml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const escapeAttribute = (text: string) => escapeHtml(text).replaceAll('"', "&quot;");
 
+/**
+ * One cell as an HTML table cell, its style inline as Excel and Google
+ * Sheets read it. `aligned` writes the alignment a cell has without one
+ * (numbers right), for a page drawn by itself, as a print is.
+ */
+export function cellHtml(
+  context: Pick<GridContext, "doc" | "sheet" | "values" | "locale">,
+  r: string,
+  c: string,
+  aligned = false,
+) {
+  const sheet = context.doc.sheet[context.sheet]!;
+  const style = cellStyle(sheet.cells[r]?.[c]?.s);
+  const value = context.values.value(context.sheet, r, c);
+  const shown = cellDisplay(value, style, context.locale);
+  const css = [
+    style.bold && "font-weight:bold",
+    style.italic && "font-style:italic",
+    (style.underline || style.strike) &&
+      `text-decoration:${[style.underline && "underline", style.strike && "line-through"].filter(Boolean).join(" ")}`,
+    style.fontFamily && `font-family:${style.fontFamily}`,
+    style.fontSize && `font-size:${style.fontSize}pt`,
+    (shown.color ?? style.fontColor) && `color:${shown.color ?? style.fontColor}`,
+    style.fill && `background-color:${style.fill}`,
+    (aligned || style.horizontal) && `text-align:${style.horizontal ?? shown.align}`,
+    style.vertical && `vertical-align:${style.vertical === "center" ? "middle" : style.vertical}`,
+    style.wrap && "white-space:normal",
+    style.borderTop && "border-top:1px solid #000000",
+    style.borderBottom && "border-bottom:1px solid #000000",
+    style.borderLeft && "border-left:1px solid #000000",
+    style.borderRight && "border-right:1px solid #000000",
+    style.numberFormat && `mso-number-format:'${style.numberFormat.replaceAll("'", "\\'")}'`,
+  ].filter(Boolean);
+  const number =
+    typeof value === "number"
+      ? ` x:num="${value}" data-sheets-value="${escapeAttribute(JSON.stringify({ 1: 3, 3: value }))}"`
+      : "";
+  const text = value instanceof XError ? value.code : shown.text;
+  // Excel reads a break kept inside its cell from this mark.
+  const content = escapeHtml(text).replaceAll("\n", '<br style="mso-data-placement:same-cell;">');
+  const link = safeLink(style.link);
+  const linked = link ? `<a href="${escapeAttribute(link)}">${content}</a>` : content;
+  return `<td${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${linked}</td>`;
+}
+
 /** The selection as an HTML table, each cell's style inline. */
 export function selectionHtml(context: GridContext): string {
   const box = selectionBox(context);
-  const sheet = context.doc.sheet[context.sheet]!;
-  const rows = box.rowIds.map((r) => {
-    const cells = box.colIds.map((c) => {
-      const style = cellStyle(sheet.cells[r]?.[c]?.s);
-      const value = context.values.value(context.sheet, r, c);
-      const shown = cellDisplay(value, style, context.locale);
-      const css = [
-        style.bold && "font-weight:bold",
-        style.italic && "font-style:italic",
-        (style.underline || style.strike) &&
-          `text-decoration:${[style.underline && "underline", style.strike && "line-through"].filter(Boolean).join(" ")}`,
-        style.fontFamily && `font-family:${style.fontFamily}`,
-        style.fontSize && `font-size:${style.fontSize}pt`,
-        (shown.color ?? style.fontColor) && `color:${shown.color ?? style.fontColor}`,
-        style.fill && `background-color:${style.fill}`,
-        style.horizontal && `text-align:${style.horizontal}`,
-        style.vertical &&
-          `vertical-align:${style.vertical === "center" ? "middle" : style.vertical}`,
-        style.wrap && "white-space:normal",
-        style.borderTop && "border-top:1px solid #000000",
-        style.borderBottom && "border-bottom:1px solid #000000",
-        style.borderLeft && "border-left:1px solid #000000",
-        style.borderRight && "border-right:1px solid #000000",
-        style.numberFormat && `mso-number-format:'${style.numberFormat.replaceAll("'", "\\'")}'`,
-      ].filter(Boolean);
-      const number =
-        typeof value === "number"
-          ? ` x:num="${value}" data-sheets-value="${escapeAttribute(JSON.stringify({ 1: 3, 3: value }))}"`
-          : "";
-      const text = value instanceof XError ? value.code : shown.text;
-      // Excel reads a break kept inside its cell from this mark.
-      const content = escapeHtml(text).replaceAll(
-        "\n",
-        '<br style="mso-data-placement:same-cell;">',
-      );
-      const link = safeLink(style.link);
-      const linked = link ? `<a href="${escapeAttribute(link)}">${content}</a>` : content;
-      return `<td${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${linked}</td>`;
-    });
-    return `<tr>${cells.join("")}</tr>`;
-  });
+  const rows = box.rowIds.map(
+    (r) => `<tr>${box.colIds.map((c) => cellHtml(context, r, c)).join("")}</tr>`,
+  );
   return `<meta charset="utf-8"><table><tbody>${rows.join("")}</tbody></table>`;
 }
 

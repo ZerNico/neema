@@ -32,6 +32,7 @@ describe("the sheet tabs", () => {
         run={(ops) => ran.push(...ops)}
         onPick={() => {}}
         onDownload={(id) => downloaded.push(id)}
+        onPrint={(id) => downloaded.push(`print ${id}`)}
       />,
     );
     const data = screen.getByRole("tab", { name: "Data" });
@@ -46,11 +47,13 @@ describe("the sheet tabs", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Move left" }));
     fireEvent.contextMenu(screen.getByRole("tab", { name: "Data" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Download as CSV" }));
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Data" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Print" }));
     fireEvent.click(screen.getByRole("button", { name: "Add sheet" }));
     expect(ran).toEqual([
       { op: "sheetMove", id: "s2", after: null },
       expect.objectContaining({ op: "sheetAdd", id: "s3", name: "Sheet3", after: "s2" }),
     ]);
-    expect(downloaded).toEqual(["s2"]);
+    expect(downloaded).toEqual(["s2", "print s2"]);
   });
 });
