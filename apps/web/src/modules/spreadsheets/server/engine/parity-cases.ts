@@ -493,6 +493,48 @@ const features = [
   "WEEKNUM(DATE(2025,1,1),21)",
 ];
 
+/** Number format codes through TEXT: the reading live sheets also show cells with. */
+const formats = [
+  'TEXT(0.00001234,"General")',
+  'TEXT(0.0001234,"General")',
+  'TEXT(0.000001,"General")',
+  'TEXT(1/3,"General")',
+  'TEXT(-1/7,"General")',
+  'TEXT(12345678901,"General")',
+  'TEXT(123456789012,"General")',
+  'TEXT(1234567,"0.0,,")',
+  'TEXT(1234567,"0,")',
+  'TEXT(1.25,"# ?/?")',
+  'TEXT(2.14159,"# ??/??")',
+  'TEXT(0.3,"# ?/8")',
+  'TEXT(2,"# ?/?")',
+  'TEXT(2.5,"?/?")',
+  'TEXT(0.333,"# ?/?")',
+  'TEXT(150,"[>100]""big"";""small""")',
+  'TEXT(50,"[>100]""big"";""small""")',
+  'TEXT(-5,"0;[Red]0")',
+  'TEXT(0,"0.00;-0.00;""zero""")',
+  'TEXT(1.5,"[h]:mm")',
+  'TEXT(0.25+1.5/86400,"hh:mm:ss.0")',
+  'TEXT(0.75,"h:mm a/p")',
+  'TEXT("abc","0;0;0;""x""@")',
+  'TEXT(1.005,"0.00")',
+  'TEXT(-0.4,"0")',
+  'TEXT(2.5,"0")',
+  'TEXT(0.5,"#.##")',
+  'TEXT(12.5,".00")',
+  'TEXT(123456789,"000-00-0000")',
+  'TEXT(12345,"##0.0E+0")',
+  'TEXT(0.000123,"0.00E+00")',
+  'TEXT(1.5,"0.??")',
+  'TEXT(45292,"mmmmm")',
+  'TEXT(45292,"d-mmm-yy")',
+  'TEXT(45292.75,"yyyy-mm-dd hh:mm:ss")',
+  'TEXT(1234.5,"#,##0.00 [$€-407]")',
+  "FIXED(-1234.567,-2)",
+  "DOLLAR(-0.5)",
+];
+
 /** Every case, by group, in fixture order. */
 export const PARITY_CASES: ReadonlyArray<{ readonly group: string; readonly formula: string }> =
   Object.entries({
@@ -508,4 +550,5 @@ export const PARITY_CASES: ReadonlyArray<{ readonly group: string; readonly form
     references,
     arrays,
     features,
+    formats,
   }).flatMap(([group, formulas]) => formulas.map((formula) => ({ group, formula })));

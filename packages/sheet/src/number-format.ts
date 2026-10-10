@@ -353,19 +353,18 @@ function scientific(tokens: readonly Token[], value: number, locale: SheetLocale
   return `${plainNumber(mantissa, base, locale)}E${sign}${exponent}${literals.join("")}`;
 }
 
-/** The closest fraction with a denominator below `limit`, by continued fractions. */
+/**
+ * The last continued-fraction convergent with a denominator below `limit`.
+ * Excel stops there rather than searching the fractions between, so 0.14159
+ * over two digits is 1/7, though 14/99 is closer.
+ */
 function closest(value: number, limit: number): [number, number] {
   let [h0, h1, k0, k1] = [0, 1, 1, 0];
   let x = value;
   for (let step = 0; step < 64; step++) {
     const a = Math.floor(x);
     const [h2, k2] = [a * h1 + h0, a * k1 + k0];
-    if (k2 > limit) {
-      // The best semiconvergent under the limit, if it beats the last convergent.
-      const t = Math.floor((limit - k0) / k1);
-      const [hs, ks] = [t * h1 + h0, t * k1 + k0];
-      return Math.abs(value - hs / ks) < Math.abs(value - h1 / k1) ? [hs, ks] : [h1, k1];
-    }
+    if (k2 > limit) break;
     [h0, h1, k0, k1] = [h1, h2, k1, k2];
     if (Math.abs(x - a) < 1e-12) break;
     x = 1 / (x - a);
@@ -411,12 +410,22 @@ function fractionNumber(tokens: readonly Token[], value: number, locale: SheetLo
   return `${headText}${top}/${bottom}${after.map((token) => (token.t === "lit" ? token.s : "")).join("")}`;
 }
 
+/** How many significant digits a number shows, at fifteen at most. */
+const significant = (number: number) =>
+  number === 0
+    ? 0
+    : Number(number.toPrecision(15)).toExponential().split("e")[0]!.replace(/[.-]/g, "").length;
+
 /** Excel's General: about eleven characters, switching to scientific form for very large or small numbers. */
 export function generalText(value: number, locale: SheetLocale = EN_US): string {
   if (value === 0) return "0";
   const magnitude = Math.abs(value);
   const sign = value < 0 ? "-" : "";
-  if (magnitude >= 1e11 || magnitude < 1e-5) {
+  // Decimal form when it shows as many significant digits as scientific
+  // form would (six at most): 0.000001 stays, 0.0000001234 does not.
+  const decimal = magnitude < 1 ? roundAt(magnitude, 9) : magnitude;
+  const small = magnitude < 1 && significant(decimal) < Math.min(significant(magnitude), 6);
+  if (magnitude >= 1e11 || small) {
     let power = Math.floor(Math.log10(magnitude));
     let base = roundAt(magnitude / 10 ** power, 5);
     if (base >= 10) {
@@ -556,7 +565,8 @@ function numberSection(section: Section, value: number, signed: boolean, locale:
       : tokens.some((token) => token.t === "slash")
         ? fractionNumber(tokens, value, locale)
         : plainNumber(tokens, value, locale);
-  return `${signed ? "-" : ""}${body}`;
+  // A negative number shown as nothing but zeros takes no sign: -0.4 in "0" is "0".
+  return `${signed && /[1-9]/.test(body) ? "-" : ""}${body}`;
 }
 
 function textSection(section: Section, text: string) {

@@ -32,7 +32,7 @@ describe("number formats", () => {
     expect(show(1.005, "0.00")).toBe("1.01");
     expect(show(2.5, "0")).toBe("3");
     expect(show(-2.5, "0")).toBe("-3");
-    expect(show(-0.4, "0")).toBe("-0");
+    expect(show(-0.4, "0")).toBe("0");
   });
 
   it("picks the section for the sign, a condition or text, and its colour", () => {
@@ -63,7 +63,7 @@ describe("number formats", () => {
     expect(show(2.5, "?/?")).toBe("5/2");
     expect(show(0.3, "# ?/8")).toBe(" 2/8");
     expect(show(2, "# ?/?")).toBe("2    ");
-    expect(show(2.14159, "# ??/??")).toBe("2 14/99");
+    expect(show(2.14159, "# ??/??")).toBe("2  1/7 ");
   });
 
   it("writes dates and times, minutes beside hours and elapsed time", () => {
@@ -85,7 +85,8 @@ describe("number formats", () => {
     expect(generalText(-0.5)).toBe("-0.5");
     expect(generalText(1234.5)).toBe("1234.5");
     expect(generalText(123456789012)).toBe("1.23457E+11");
-    expect(generalText(0.000001234)).toBe("1.234E-06");
+    expect(generalText(0.000001)).toBe("0.000001");
+    expect(generalText(0.0000001234)).toBe("1.234E-07");
     expect(show(1234.5, "")).toBe("1234.5");
   });
 
