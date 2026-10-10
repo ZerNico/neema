@@ -23,7 +23,7 @@ import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "rea
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
-import { liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
+import { NEW_SHEET, liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import {
   chartFromSelection,
@@ -41,6 +41,7 @@ import {
   formatSelection,
   insertAtSelection,
   pasteAtSelection,
+  selectionBox,
   eachRange,
   sheetCsv,
   type PastePart,
@@ -94,6 +95,8 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { PivotDialog, type PivotDraft } from "./pivot-dialog.tsx";
+import { pivotFormula } from "./pivot.ts";
 import { printHtml } from "@chat/sheet-react/print";
 import { collapsedIds } from "@chat/sheet/model/outline";
 import {
@@ -243,6 +246,7 @@ export default function SheetPanelBody({
   // The Data Validation dialog, and whether cells breaking their rules are circled.
   const [validating, setValidating] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [pivoting, setPivoting] = useState(false);
   const [circling, setCircling] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
@@ -581,13 +585,50 @@ export default function SheetPanelBody({
     else if (command.kind === "validation") setValidating(true);
     else if (command.kind === "circles") setCircling(!circling);
     else if (command.kind === "link") setLinking(true);
-    else if (command.kind === "outline")
+    else if (command.kind === "pivot") {
+      const box = selectionBox(context);
+      if (box.bottom - box.top < 1 || box.right === box.left)
+        toast("Select the data to summarise first", {
+          description: "Its first row names the columns.",
+        });
+      else setPivoting(true);
+    } else if (command.kind === "outline")
       run(
         command.group
           ? groupSelection(context, command.axis)
           : ungroupSelection(context, command.axis),
       );
     else insertChart(command.chart);
+  };
+  /** A pivot table as its formula: on a sheet of its own, or two columns right of the data. */
+  const insertPivot = (draft: PivotDraft) => {
+    const box = selectionBox(context);
+    const formula = pivotFormula(doc.sheet[sheet]!.name, box, draft);
+    const beside = cols.ids[box.right + 1];
+    if (draft.place === "beside" && beside) {
+      run(enterCell(context, { r: rows.ids[box.top - 1]!, c: beside }, formula));
+      return;
+    }
+    const id = sync!.mint();
+    const added: SheetOp = {
+      op: "sheetAdd",
+      id,
+      name: "Pivot",
+      after: sheet,
+      rows: Array.from({ length: NEW_SHEET.rows }, (_, n) => `${id}.r${n + 1}`),
+      cols: Array.from({ length: NEW_SHEET.cols }, (_, n) => `${id}.c${n + 1}`),
+    };
+    const withSheet = applyChange(doc, { clientId: "pivot", seq: 0, ops: [added] }, 0).doc;
+    run([
+      added,
+      ...enterCell(
+        { ...context, doc: withSheet, sheet: id },
+        { r: `${id}.r1`, c: `${id}.c1` },
+        formula,
+      ),
+    ]);
+    setChosen(id);
+    setSelection(null);
   };
   const insertChart = (kind: ChartKind) => {
     const ops = chartFromSelection(context, kind);
@@ -1288,6 +1329,20 @@ export default function SheetPanelBody({
           onApply={(rule) => run(setFilterRule(context, filterMenu.col, rule))}
           onSort={(descending) => run(sortFilter(context, filterMenu.col, descending))}
           onClose={() => setFilterMenu(null)}
+        />
+      ) : null}
+      {pivoting && !readOnly ? (
+        <PivotDialog
+          fields={selectedBoxColumns().map(
+            (c) =>
+              cellDisplay(
+                values.value(sheet, selectedBox.r1, c),
+                cellStyle(doc.sheet[sheet]!.cells[selectedBox.r1]?.[c]?.s),
+                locale,
+              ).text || `Column ${columnLetters(cols.at(c)!)}`,
+          )}
+          onApply={insertPivot}
+          onClose={() => setPivoting(false)}
         />
       ) : null}
       {linking && !readOnly ? (
