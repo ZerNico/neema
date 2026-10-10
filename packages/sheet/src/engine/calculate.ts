@@ -60,6 +60,8 @@ export interface CellStore {
   setUncalculated(formula: StoredFormula, dynamic: boolean): void;
   /** Stores 0 for a formula on or behind a cycle, as Excel shows it. */
   setCircular(formula: StoredFormula): void;
+  /** Time and chance for a formula's NOW, TODAY and RAND; without it they are not calculated. */
+  volatile?(formula: StoredFormula): Scope["volatile"];
 }
 
 export interface CalcLimits {
@@ -394,54 +396,58 @@ function pass(store: CellStore, limits: CalcLimits) {
       nested -= 1;
     }
   };
-  const scopeFor = (formula: Formula): Scope => ({
-    sheet: formula.stored.sheet,
-    row: formula.stored.row,
-    column: formula.stored.column,
-    cell: (name, row, column) => {
-      const sheet = sheetNamed(name);
-      if (!sheet) return new XError("#REF!");
-      // Only references computed at run time (INDIRECT, OFFSET) can reach a formula not yet done.
-      demand(ids.get(cellKey(sheet, row, column)));
-      for (const at of areasByColumn.get(sheet)?.get(column) ?? []) {
-        const area = areas[at]!;
-        if (state[area.id] === 0 && inside(area.box, row, column)) demand(area.id);
-      }
-      return store.value(sheet, row, column);
-    },
-    clip: (name, box) => {
-      const sheet = sheetNamed(name);
-      if (!sheet) return null;
-      const extent = extentOf(sheet);
-      const clipped = {
-        top: box.top,
-        left: box.left,
-        bottom: Math.min(box.bottom, extent.rows),
-        right: Math.min(box.right, extent.columns),
-      };
-      return clipped.bottom < clipped.top || clipped.right < clipped.left ? null : clipped;
-    },
-    name: (name) => nameFor(formula.stored.sheet, name),
-    sheets: (first, last) => between(first, last),
-    isFormula: (name, row, column) => {
-      const sheet = sheetNamed(name);
-      return !!sheet && store.isFormula(sheet, row, column);
-    },
-    spill: (name, row, column) => {
-      const sheet = sheetNamed(name);
-      if (!sheet) return null;
-      // A spill reference reads the formula's current extent, so it waits for the formula.
-      demand(ids.get(cellKey(sheet, row, column)));
-      return store.arrayArea(sheet, row, column);
-    },
-    parse: (text) => {
-      try {
-        return parseFormula(text, contextFor(formula.stored.sheet));
-      } catch {
-        return null;
-      }
-    },
-  });
+  const scopeFor = (formula: Formula): Scope => {
+    const volatile = store.volatile?.(formula.stored);
+    return {
+      ...(volatile ? { volatile } : {}),
+      sheet: formula.stored.sheet,
+      row: formula.stored.row,
+      column: formula.stored.column,
+      cell: (name, row, column) => {
+        const sheet = sheetNamed(name);
+        if (!sheet) return new XError("#REF!");
+        // Only references computed at run time (INDIRECT, OFFSET) can reach a formula not yet done.
+        demand(ids.get(cellKey(sheet, row, column)));
+        for (const at of areasByColumn.get(sheet)?.get(column) ?? []) {
+          const area = areas[at]!;
+          if (state[area.id] === 0 && inside(area.box, row, column)) demand(area.id);
+        }
+        return store.value(sheet, row, column);
+      },
+      clip: (name, box) => {
+        const sheet = sheetNamed(name);
+        if (!sheet) return null;
+        const extent = extentOf(sheet);
+        const clipped = {
+          top: box.top,
+          left: box.left,
+          bottom: Math.min(box.bottom, extent.rows),
+          right: Math.min(box.right, extent.columns),
+        };
+        return clipped.bottom < clipped.top || clipped.right < clipped.left ? null : clipped;
+      },
+      name: (name) => nameFor(formula.stored.sheet, name),
+      sheets: (first, last) => between(first, last),
+      isFormula: (name, row, column) => {
+        const sheet = sheetNamed(name);
+        return !!sheet && store.isFormula(sheet, row, column);
+      },
+      spill: (name, row, column) => {
+        const sheet = sheetNamed(name);
+        if (!sheet) return null;
+        // A spill reference reads the formula's current extent, so it waits for the formula.
+        demand(ids.get(cellKey(sheet, row, column)));
+        return store.arrayArea(sheet, row, column);
+      },
+      parse: (text) => {
+        try {
+          return parseFormula(text, contextFor(formula.stored.sheet));
+        } catch {
+          return null;
+        }
+      },
+    };
+  };
 
   const errors: FormulaIssue[] = [];
   let errorCount = 0;

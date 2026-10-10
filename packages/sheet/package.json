@@ -16,7 +16,8 @@
     "./model/formula": "./src/model/formula.ts",
     "./model/ops": "./src/model/ops.ts",
     "./model/apply": "./src/model/apply.ts",
-    "./model/limits": "./src/model/limits.ts"
+    "./model/limits": "./src/model/limits.ts",
+    "./model/calc": "./src/model/calc.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

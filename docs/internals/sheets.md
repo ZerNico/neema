@@ -48,6 +48,22 @@ browser workers and the Excel file tools); this page records the decisions behin
 - Styles are stored as a canonical key (properties in a fixed order), so replicas agree on
   the key without sharing a table.
 
+## Calculating
+
+- Values are never stored: every replica calculates them from the document and a
+  `CalcContext` (`model/calc.ts`): the revision, an epoch, the moment and a seed. The moment is
+  the revision's commit time in the sheet's time zone, given by the server, so `NOW` and
+  `TODAY` change with each edit, as Excel's volatile functions recalculate, and no replica
+  needs time-zone data. Chance is a seeded stream per random call, keyed by the seed, the
+  cell's IDs and the call's place in the formula, so replicas draw the same numbers, two
+  `RAND()`s in one formula differ, and an insert above a cell does not change its draws.
+- Formulas reach the engine as text rendered at current positions. Every formula written
+  live follows Excel 365, spilling; results and spilled values sit beside the document and
+  only a spill's own values are ever cleared, so a typed value always blocks a spill. A
+  formula the engine cannot read shows `#NAME?`.
+- Without a context (the Excel file tools) `NOW`, `TODAY` and the `RAND` functions stay
+  uncalculated and keep the file's value, for Excel to compute on open.
+
 ## Tests that hold it
 
 `model/property.test.ts` checks formulas against Excel's own bookkeeping after random inserts
