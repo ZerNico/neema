@@ -20,6 +20,7 @@ import {
   insertAtSelection,
   parseTabular,
   pasteAtSelection,
+  sheetCsv,
   sortSelection,
   chartFromSelection,
   type GridContext,
@@ -189,6 +190,16 @@ describe("the clipboard", () => {
       pasteAtSelection(context(emptyDoc(), [1, 1]), "x\t=1+1\n7%", null),
     );
     expect([shown(doc, 1, 1), shown(doc, 1, 2), shown(doc, 2, 1)]).toEqual(["x", 2, 0.07]);
+  });
+});
+
+describe("CSV", () => {
+  it("writes each cell's shown text over the used range, quoting what needs it", () => {
+    let doc = type(emptyDoc(), 1, 1, "Name, first");
+    doc = type(doc, 1, 3, "0.5");
+    doc = type(doc, 2, 2, 'Say "hi"');
+    doc = apply(doc, formatSelection(context(doc, [1, 3]), { numberFormat: "0%" }));
+    expect(sheetCsv(context(doc, [1, 1]), "s1")).toBe('"Name, first",,50%\r\n,"Say ""hi""",\r\n');
   });
 });
 

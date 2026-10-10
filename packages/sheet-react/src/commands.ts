@@ -6,7 +6,7 @@ import { copyFormula, parseFormula, renderFormula } from "@chat/sheet/model/form
 import { positions, type Axis, type Formula, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
 export type { ChartKind };
-import { parseDelimited } from "@chat/sheet/delimited";
+import { parseDelimited, writeDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, cellStyle } from "./display.ts";
@@ -318,6 +318,35 @@ export function copySelection(context: GridContext, cut = false): CopiedCells {
     cells,
     cut: cut ? { area: box.area } : null,
   };
+}
+
+/**
+ * A sheet as CSV, as Excel saves one: each cell's shown text over the range
+ * holding values, hidden rows and columns included.
+ */
+export function sheetCsv(
+  context: Pick<GridContext, "doc" | "values" | "locale">,
+  sheetId: string,
+): string {
+  const sheet = context.doc.sheet[sheetId]!;
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  let [bottom, right] = [0, 0];
+  for (const [r, row] of Object.entries(sheet.cells))
+    for (const c of Object.keys(row))
+      if (context.values.value(sheetId, r, c) !== null) {
+        bottom = Math.max(bottom, rows.at(r) ?? 0);
+        right = Math.max(right, cols.at(c) ?? 0);
+      }
+  const grid = rows.ids.slice(0, bottom).map((r) =>
+    cols.ids.slice(0, right).map((c) => {
+      const value = context.values.value(sheetId, r, c);
+      return value instanceof XError
+        ? value.code
+        : cellDisplay(value, cellStyle(sheet.cells[r]?.[c]?.s), context.locale).text;
+    }),
+  );
+  return writeDelimited(grid, ",");
 }
 
 /** Tab-separated text as rows of cells, as spreadsheets put it on the clipboard. */

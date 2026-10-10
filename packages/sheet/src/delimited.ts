@@ -27,3 +27,10 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
   if (rows.length > 1 && rows.at(-1)!.length === 1 && rows.at(-1)![0] === "") rows.pop();
   return rows;
 }
+
+/** Rows of cells as delimited text, quoting fields as RFC 4180 does, rows ending in CRLF. */
+export function writeDelimited(rows: readonly (readonly string[])[], delimiter: string): string {
+  const field = (text: string) =>
+    text.includes(delimiter) || /["\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  return rows.map((row) => `${row.map(field).join(delimiter)}\r\n`).join("");
+}
