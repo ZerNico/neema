@@ -1,4 +1,5 @@
 import { isChart, isChartPatch, type ChartPatch } from "./chart.ts";
+import { isSheetFilter, type SheetFilter } from "./filter.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -89,6 +90,8 @@ export type SheetOp =
   | { readonly op: "chartPut"; readonly id: string; readonly chart: Chart }
   | { readonly op: "chartPatch"; readonly id: string; readonly patch: ChartPatch }
   | { readonly op: "chartDelete"; readonly id: string }
+  /** A sheet's whole AutoFilter set, or taken off with null. */
+  | { readonly op: "filter"; readonly sh: string; readonly filter: SheetFilter | null }
   | {
       readonly op: "anchor";
       readonly thread: string;
@@ -144,6 +147,7 @@ const OP_NAMES = new Set([
   "anchor",
   "move",
   "sort",
+  "filter",
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -289,6 +293,8 @@ function validOp(op: Record<string, unknown>): boolean {
       );
     case "sort":
       return isId(op.sh) && isId(op.c1) && isId(op.c2) && isIds(op.rows) && isIds(op.order);
+    case "filter":
+      return isId(op.sh) && (op.filter === null || isSheetFilter(op.filter));
     default:
       return false;
   }

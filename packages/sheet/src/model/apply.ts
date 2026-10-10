@@ -272,6 +272,12 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       if (!sheet) return drop(doc, dropped, "frozen panes on a sheet that is gone");
       return withSheet(doc, op.sh, { ...sheet, freeze: { row: op.row, col: op.col } });
     }
+    case "filter": {
+      const sheet = sheetOf(op.sh);
+      if (!sheet) return drop(doc, dropped, "a filter on a sheet that is gone");
+      const { filter: _old, ...rest } = sheet;
+      return withSheet(doc, op.sh, op.filter ? { ...rest, filter: op.filter } : rest);
+    }
     case "sheetAdd": {
       if (doc.sheet[op.id]) return drop(doc, dropped, "a sheet that already exists");
       const at = op.after === null ? 0 : (positions(doc.sheets).raw(op.after) ?? -1) + 1;

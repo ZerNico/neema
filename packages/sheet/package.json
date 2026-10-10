@@ -22,7 +22,8 @@
     "./model/calc": "./src/model/calc.ts",
     "./model/invert": "./src/model/invert.ts",
     "./model/chart": "./src/model/chart.ts",
-    "./model/fill": "./src/model/fill.ts"
+    "./model/fill": "./src/model/fill.ts",
+    "./model/filter": "./src/model/filter.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
