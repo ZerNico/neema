@@ -244,6 +244,50 @@ describe("importing into a live sheet", () => {
     ]);
   });
 
+  it("keeps a picture through Excel and back, where it sat and at its size", async () => {
+    const src =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const original = applyChange(
+      build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["x"]] }]),
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          {
+            op: "imagePut",
+            id: "p1",
+            image: {
+              sheet: "s1",
+              at: { r: "s1.r3", c: "s1.c2" },
+              offset: { x: 12, y: 4 },
+              size: { width: 160, height: 90 },
+              src,
+              alt: "Logo",
+            },
+          },
+        ],
+      },
+      2,
+    ).doc;
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(Object.values(imported.doc.images ?? {})).toEqual([
+      {
+        sheet: "s1",
+        at: { r: "s1.r3", c: "s1.c2" },
+        offset: { x: 12, y: 4 },
+        size: { width: 160, height: 90 },
+        src,
+        alt: "Logo",
+      },
+    ]);
+    expect(sheetView(imported.doc, calculateSheet(imported.doc, context)).xml).toContain(
+      '<picture at="B3" size="160x90" alt="Logo"/>',
+    );
+  });
+
   it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
     const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
     const imported = sheetFromWorkbook(

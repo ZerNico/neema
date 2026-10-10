@@ -248,5 +248,22 @@ export function liveSheetExport(
       const file = fileChartOf(doc, chart);
       return file ? [file] : [];
     }),
+    images: Object.values(doc.images ?? {}).flatMap((image) => {
+      const host = doc.sheet[image.sheet];
+      if (!host || !ids.includes(image.sheet)) return [];
+      const [row, col] = [positions(host.rows).at(image.at.r), positions(host.cols).at(image.at.c)];
+      if (row === undefined || col === undefined) return [];
+      return [
+        {
+          sheet: host.name,
+          at: address(row, col),
+          ...(image.offset ? { offset: image.offset } : {}),
+          width: image.size.width,
+          height: image.size.height,
+          src: image.src,
+          ...(image.alt ? { alt: image.alt } : {}),
+        },
+      ];
+    }),
   };
 }

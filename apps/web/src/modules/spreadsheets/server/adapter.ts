@@ -5,7 +5,12 @@ import {
   type CellValue,
   type FormulaValue,
 } from "@office-kit/xlsx/cell";
-import { addChartAt, listChartsOnSheet, makeOneCellAnchor } from "@office-kit/xlsx/drawing";
+import {
+  addChartAt,
+  listChartsOnSheet,
+  listImagesOnSheet,
+  makeOneCellAnchor,
+} from "@office-kit/xlsx/drawing";
 import { fromArrayBuffer, loadWorkbook, workbookToBytes } from "@office-kit/xlsx/io";
 import {
   getCellAlignment,
@@ -92,6 +97,7 @@ import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart
 import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
 import { readValidation, writeValidations, type FileValidation } from "./file-validation.ts";
 import { NOTE_LIMITS, readNote, writeNotes, type FileNote } from "./file-notes.ts";
+import { readImage, writeImage, type FileImage } from "./file-images.ts";
 import { readGroups, writeOutline, type FileGroup, type FileOutline } from "./file-outline.ts";
 import {
   fileHighlightStyles,
@@ -848,6 +854,7 @@ export interface LiveSheetExport {
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
   readonly charts?: readonly FileChart[];
+  readonly images?: readonly FileImage[];
 }
 
 /** An AutoFilter as a file keeps one: its range, and the values each filtered column keeps. */
@@ -968,6 +975,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
   }
   for (const name of spec.names) addDefinedName(workbook, name);
   for (const chart of spec.charts ?? []) placeChart(workbook, chart);
+  for (const image of spec.images ?? []) writeImage(sheetOf(workbook, image.sheet), image);
   recalculate(workbook, { authored });
   return save(workbook);
 }
@@ -1006,6 +1014,7 @@ export interface LiveSheetImport {
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
+  readonly images: readonly FileImage[];
   /** What a live sheet does not keep, in words, for the model to tell the person. */
   readonly dropped: readonly string[];
 }
@@ -1079,6 +1088,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
   unshareFormulas(workbook);
   const dropped = new Set<string>();
   const charts: FileChart[] = [];
+  const images: FileImage[] = [];
   const highlightStyles = fileHighlightStyles(bytes);
   const sheets = [...iterWorksheets(workbook)].map((sheet) => {
     const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
@@ -1145,6 +1155,11 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       const chart = readFileChart(sheet.title, item);
       if (chart) charts.push(chart);
       else dropped.add("charts of kinds a live sheet does not draw");
+    }
+    for (const item of listImagesOnSheet(sheet)) {
+      const image = readImage(sheet.title, item);
+      if (image) images.push(image);
+      else dropped.add("pictures too large or of kinds a live sheet does not show");
     }
     if (listTables(sheet).length) dropped.add("table formatting (the data stays)");
     const autoFilter = getAutoFilter(sheet);
@@ -1264,6 +1279,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       .filter((name) => !name.name.startsWith("_xlnm."))
       .map((name) => ({ name: name.name, value: name.value })),
     charts,
+    images,
     dropped: [...dropped],
   };
 }

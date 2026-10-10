@@ -215,6 +215,19 @@ export function sheetView(
     ),
   ];
   if (grouped.length) lines.push(`<groups>${grouped.join(", ")}</groups>`);
+  // The focused sheet's pictures, so the model knows what sits over its cells.
+  const pictures = Object.values(doc.images ?? {}).flatMap((image) => {
+    const [row, col] = [
+      positions(focused.rows).at(image.at.r),
+      positions(focused.cols).at(image.at.c),
+    ];
+    if (image.sheet !== sheet || row === undefined || col === undefined) return [];
+    const alt = image.alt ? ` alt="${escapeAttribute(image.alt)}"` : "";
+    return [
+      `<picture at="${address(row, col)}" size="${image.size.width}x${image.size.height}"${alt}/>`,
+    ];
+  });
+  if (pictures.length) lines.push(`<pictures>\n${pictures.join("\n")}\n</pictures>`);
   // The focused sheet's conditional formats, first taking priority.
   const conditional = (doc.sheet[sheet]!.conditional ?? []).flatMap((format) => {
     const [rowsAt, colsAt] = [positions(doc.sheet[sheet]!.rows), positions(doc.sheet[sheet]!.cols)];

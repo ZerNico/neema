@@ -119,6 +119,13 @@ browser workers and the Excel file tools); this page records the decisions behin
   (`spreadsheets/server/file-conditional.ts`). Rule kinds a live sheet does not draw (icons,
   formulas, time and custom validation) are dropped on import and named as dropped.
 
+## Pictures
+
+- A picture's bytes are in the document, a data URL downscaled on the device first, not an
+  attachment. It so has the document's access, undo, copies and live sync, and needs no owner
+  kind of its own; the document's byte limit bounds them. SVG is refused, as it can carry
+  script, and a file's pictures too large to keep are named as dropped.
+
 ## Pivot tables
 
 - A pivot table is a `GROUPBY` or `PIVOTBY` formula, as Excel 365 writes one, not a separate

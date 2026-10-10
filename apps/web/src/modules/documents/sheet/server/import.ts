@@ -23,6 +23,7 @@ import { toEngineFormula } from "~/modules/spreadsheets/server/formulas.ts";
 import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
 import type { Validation } from "@chat/sheet/model/validation";
 import { chartOfFile } from "./chart-files.ts";
+import { IMAGE_LIMITS, type SheetImage } from "@chat/sheet/model/image";
 
 /** A file's note, as the comment thread it becomes on the cells it was on. */
 export interface ImportedNote {
@@ -313,7 +314,26 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
     const chart = chartOfFile(doc, file);
     if (chart) charts[`chart${index + 1}`] = chart;
   }
-  doc = { ...doc, charts };
+  const images: Record<string, SheetImage> = {};
+  for (const [index, file] of read.images.slice(0, IMAGE_LIMITS.images).entries()) {
+    const sheet = ids[read.sheets.findIndex((each) => each.name === file.sheet)];
+    const corner = parseCell(file.at);
+    if (!sheet || !corner) continue;
+    const [r, c] = [
+      positions(doc.sheet[sheet]!.rows).ids[corner.row - 1],
+      positions(doc.sheet[sheet]!.cols).ids[corner.column - 1],
+    ];
+    if (!r || !c) continue;
+    images[`picture${index + 1}`] = {
+      sheet,
+      at: { r, c },
+      ...(file.offset ? { offset: file.offset } : {}),
+      size: { width: file.width, height: file.height },
+      src: file.src,
+      ...(file.alt ? { alt: file.alt } : {}),
+    };
+  }
+  doc = { ...doc, charts, ...(Object.keys(images).length ? { images } : {}) };
   const over = overLimits(doc);
   if (over) return { ok: false, reason: over };
   const notes = read.sheets.flatMap((each, index) =>
@@ -383,6 +403,7 @@ export function readCsv(text: string, name: string): LiveSheetImport {
     ],
     names: [],
     charts: [],
+    images: [],
     dropped: [],
   };
 }
