@@ -212,43 +212,57 @@ const rank = (value: Scalar) =>
           : 4;
 const blank = (value: Scalar) => value === null || value === "";
 
+/** Two values in sort order; `fixed` marks a blank, which goes last whichever way. */
+const compare = (a: Scalar, b: Scalar) => {
+  if (blank(a) !== blank(b)) return { order: blank(a) ? 1 : -1, fixed: true };
+  let order = rank(a) - rank(b);
+  if (!order && typeof a === "number" && typeof b === "number") order = a - b;
+  if (!order && typeof a === "string" && typeof b === "string")
+    order = a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+  if (!order && typeof a === "boolean" && typeof b === "boolean") order = Number(a) - Number(b);
+  return { order, fixed: false };
+};
+
+/** One column to sort by, and which way. */
+export interface SortKey {
+  readonly column: string;
+  readonly descending: boolean;
+}
+
 /**
- * Sorts the selected rows by the active cell's column, by calculated value.
- * A selection of one cell sorts nothing; the order is worked out once here
- * and travels with the change.
+ * Rows reordered by several columns in turn, as Excel's Sort dialog does:
+ * numbers, then text, then true/false, errors after, blanks last whichever
+ * way. The order is worked out once here and travels with the change.
  */
+export function sortRows(
+  context: Pick<GridContext, "sheet" | "values">,
+  rows: readonly string[],
+  columns: { readonly c1: string; readonly c2: string },
+  keys: readonly SortKey[],
+): SheetOp[] {
+  if (rows.length < 2 || !keys.length) return [];
+  const value = (r: string, c: string) => context.values.value(context.sheet, r, c);
+  const order = rows
+    .map((r, index) => ({ r, index }))
+    .toSorted((a, b) => {
+      for (const key of keys) {
+        const { order: found, fixed } = compare(value(a.r, key.column), value(b.r, key.column));
+        // Blanks go last either way, as in Excel.
+        if (found) return fixed || !key.descending ? found : -found;
+      }
+      return a.index - b.index;
+    })
+    .map((each) => each.r);
+  if (order.every((r, index) => r === rows[index])) return [];
+  return [{ op: "sort", sh: context.sheet, ...columns, rows, order }];
+}
+
+/** Sorts the selected rows by the active cell's column, as the A to Z buttons do. */
 export function sortSelection(context: GridContext, descending: boolean): SheetOp[] {
   const box = selectionBox(context);
-  if (box.rowIds.length < 2) return [];
-  const by = context.selection.head.c;
-  const keyed = box.rowIds.map((r, index) => ({
-    r,
-    index,
-    value: context.values.value(context.sheet, r, by),
-  }));
-  keyed.sort((a, b) => {
-    if (blank(a.value) !== blank(b.value)) return blank(a.value) ? 1 : -1;
-    let order = rank(a.value) - rank(b.value);
-    if (!order && typeof a.value === "number" && typeof b.value === "number")
-      order = a.value - b.value;
-    if (!order && typeof a.value === "string" && typeof b.value === "string")
-      order = a.value.localeCompare(b.value, undefined, { sensitivity: "base" });
-    if (!order && typeof a.value === "boolean" && typeof b.value === "boolean")
-      order = Number(a.value) - Number(b.value);
-    return (descending ? -order : order) || a.index - b.index;
-  });
-  const order = keyed.map((each) => each.r);
-  if (order.every((r, index) => r === box.rowIds[index])) return [];
-  return [
-    {
-      op: "sort",
-      sh: context.sheet,
-      c1: box.colIds[0]!,
-      c2: box.colIds.at(-1)!,
-      rows: box.rowIds,
-      order,
-    },
-  ];
+  return sortRows(context, box.rowIds, { c1: box.colIds[0]!, c2: box.colIds.at(-1)! }, [
+    { column: context.selection.head.c, descending },
+  ]);
 }
 
 /** What copying the selection gives: tab-separated shown text, and the cells to paste here. */
