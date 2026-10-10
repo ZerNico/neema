@@ -66,8 +66,23 @@ function cellsUndo(sh: string, before: Sheet, after: Sheet, now: Sheet | undefin
   return [...(writes.length ? [{ op: "set" as const, sh, cells: writes }] : []), ...styles];
 }
 
-/** Whether two plain values hold the same, as stored documents compare. */
-const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+/** A plain value with every object's keys in order, so stored copies compare alike. */
+const ordered = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(ordered)
+    : value !== null && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .toSorted()
+            .map((key) => [key, ordered((value as Record<string, unknown>)[key])]),
+        )
+      : value;
+/**
+ * Whether two plain values hold the same, whatever order their keys came in:
+ * a document read back from storage may list them otherwise.
+ */
+const same = (a: unknown, b: unknown) =>
+  a === b || JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
 
 /**
  * A list kept by item, as it goes back: items the change added leave, items

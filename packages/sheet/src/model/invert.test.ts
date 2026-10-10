@@ -199,6 +199,40 @@ describe("undoing a change", () => {
     expect(undone.charts.ch).toEqual({ ...doc.charts.ch, title: { text: "Theirs" } });
   });
 
+  it("reads a document stored with its keys in another order as unchanged", () => {
+    const chart: SheetOp = {
+      op: "chartPut",
+      id: "ch",
+      chart: {
+        sheet: "s1",
+        at: { r: "s1.r1", c: "s1.c5" },
+        size: { width: 400, height: 300 },
+        kind: "column",
+        series: [{ values: { r1: "s1.r2", r2: "s1.r5", c1: "s1.c2", c2: "s1.c2" } }],
+      },
+    };
+    const doc = apply(emptyDoc(), [chart]);
+    const after = apply(doc, [
+      { op: "chartPatch", id: "ch", patch: { at: { r: "s1.r3", c: "s1.c6" } } },
+    ]);
+    // As a database may hand it back: the same chart, its keys reversed.
+    const reverse = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(reverse)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .toReversed()
+                .map(([key, each]) => [key, reverse(each)]),
+            )
+          : value;
+    const stored = { ...after, charts: reverse(after.charts) as SheetDoc["charts"] };
+    expect(apply(stored, invertChange(doc, after, stored)).charts.ch!.at).toEqual({
+      r: "s1.r1",
+      c: "s1.c5",
+    });
+  });
+
   it("undoes several steps without the edits someone made between them", () => {
     const set = (r: string, v: string): SheetOp => ({
       op: "set",
