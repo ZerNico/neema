@@ -71,7 +71,7 @@ function RichEditor({
       {/* Room above the first line for another person's cursor label. */}
       <div
         ref={setScroller}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-7 pb-4"
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-7 pb-4"
       >
         <EditorContextMenu editor={editor}>
           <EditorContent editor={editor} className="flex grow flex-col" />
@@ -91,7 +91,9 @@ function RichEditor({
         <>
           <DocumentBubbleMenu editor={editor} scroller={scroller} />
           <AskPopover editor={editor} />
-          {discussion ? <CommentCard editor={editor} discussion={discussion} canEdit /> : null}
+          {discussion ? (
+            <CommentCard editor={editor} discussion={discussion} canEdit container={scroller} />
+          ) : null}
         </>
       )}
     </div>

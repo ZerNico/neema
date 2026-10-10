@@ -37,8 +37,11 @@ export function CommentCard({
   editor,
   discussion,
   canEdit,
+  container,
 }: {
   editor: Editor;
+  /** The editor's scroller, which the card scrolls and is clipped with. */
+  container: HTMLElement | null;
   discussion: DocumentDiscussion;
   canEdit: boolean;
 }) {
@@ -72,11 +75,12 @@ export function CommentCard({
       }}
     >
       {/* A thread opens without taking focus, which would scroll the page to it; a new comment's field takes it.
-          Its text scrolled out of the editor, the card goes with it rather than staying over the toolbar. */}
+          Drawn inside the editor's scroller, it scrolls with its text and passes under the toolbar like the page. */}
       <PopoverContent
         anchor={anchor}
+        container={container}
         align="start"
-        className="w-80 [[data-anchor-hidden]_&]:invisible"
+        className="w-80"
         initialFocus={compose !== null}
       >
         {compose && actions ? (
