@@ -34,10 +34,12 @@ export function readNote(note: LegacyComment): FileNote | null {
           .slice(0, NOTE_LIMITS.text),
       }))
       .filter((each) => each.text);
-    return entries.length ? { ref: note.ref, entries } : null;
+    if (entries.length) return { ref: note.ref, entries };
+    // Laid out some other way: kept whole rather than lost.
   }
-  // Excel starts a note's text with its author's name, which the note keeps apart.
-  const body = (author && text.startsWith(`${author}:`) ? text.slice(author.length + 1) : text)
+  // Excel puts its author's name on a line of its own above a note's text; text that merely
+  // begins with the name is the note's own.
+  const body = (author && text.startsWith(`${author}:\n`) ? text.slice(author.length + 2) : text)
     .trim()
     .slice(0, NOTE_LIMITS.text);
   return body ? { ref: note.ref, entries: [{ author, text: body }] } : null;

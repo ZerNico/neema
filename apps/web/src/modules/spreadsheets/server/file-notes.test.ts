@@ -7,6 +7,18 @@ describe("notes in Excel files", () => {
       readNote({ ref: "B2", author: "Jane Doe", text: "Jane Doe:\nCheck this figure" }),
     ).toEqual({ ref: "B2", entries: [{ author: "Jane Doe", text: "Check this figure" }] });
     expect(readNote({ ref: "B2", author: "", text: "  " })).toBeNull();
+    // Our own notes carry no such line, so a name at the start of the text is the text's.
+    expect(readNote({ ref: "B2", author: "Jane", text: "Jane: call Bob" })).toMatchObject({
+      entries: [{ author: "Jane", text: "Jane: call Bob" }],
+    });
+  });
+
+  it("keeps a threaded comment's text whole when its parts cannot be told apart", () => {
+    const text = "[Threaded comment]\n\nSee row 4";
+    expect(readNote({ ref: "B2", author: "tc={1}", text })).toEqual({
+      ref: "B2",
+      entries: [{ author: "", text }],
+    });
   });
 
   it("reads a threaded comment's note form back as its comment and replies", () => {
