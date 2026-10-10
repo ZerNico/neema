@@ -166,7 +166,7 @@ function DocumentSession({
   // Only the document open in the panel holds a live connection.
   const controller = useDocument(documentId, selected === id);
   const isSheet = controller.document?.kind === "sheet";
-  const sheet = useSheet(documentId, selected === id && isSheet);
+  const { controller: sheet, state: sheetState } = useSheet(documentId, selected === id && isSheet);
   const unpersisted = useCallback(
     () => controller.unpersisted() || sheet.unpersisted(),
     [controller, sheet],
@@ -290,7 +290,7 @@ function DocumentSession({
   useEffect(() => () => forget(documentId), [documentId, forget]);
   const gone =
     controller.status === "gone" ||
-    sheet.state?.status === "gone" ||
+    sheetState?.status === "gone" ||
     (controller.query.isSuccess && controller.query.data === null && !unpersisted());
   useEffect(() => {
     if (gone) onGone(documentId);

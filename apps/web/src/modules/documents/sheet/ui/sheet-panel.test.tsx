@@ -1,5 +1,4 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useSyncExternalStore } from "react";
 import { describe, expect, it } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
 import { parseFormula } from "@chat/sheet/model/formula";
@@ -26,8 +25,9 @@ const controllerOf = (doc: SheetDoc, comments: SheetState["comments"] = []): She
   };
   return {
     documentId: "sheet-1",
-    sync: null,
-    state,
+    subscribe: () => () => {},
+    getState: () => state,
+    sync: () => null,
     flush: async () => true,
     unpersisted: () => false,
     selected: () => [],
@@ -87,13 +87,13 @@ describe("an open sheet", () => {
       }),
     );
     function Live() {
-      const state = useSyncExternalStore(sync.subscribe, sync.getState);
       return (
         <SheetPanelBody
           controller={{
             documentId: "sheet-1",
-            sync,
-            state,
+            subscribe: sync.subscribe,
+            getState: sync.getState,
+            sync: () => sync,
             flush: async () => true,
             unpersisted: () => false,
             selected: () => [],
@@ -284,13 +284,13 @@ describe("an open sheet", () => {
     const slot = document.createElement("div");
     document.body.append(slot);
     function Live() {
-      const state = useSyncExternalStore(sync.subscribe, sync.getState);
       return (
         <SheetPanelBody
           controller={{
             documentId: "sheet-1",
-            sync,
-            state,
+            subscribe: sync.subscribe,
+            getState: sync.getState,
+            sync: () => sync,
             flush: async () => true,
             unpersisted: () => false,
             selected: () => [],
@@ -349,13 +349,13 @@ describe("an open sheet", () => {
       }),
     );
     function Live() {
-      const state = useSyncExternalStore(sync.subscribe, sync.getState);
       return (
         <SheetPanelBody
           controller={{
             documentId: "sheet-1",
-            sync,
-            state,
+            subscribe: sync.subscribe,
+            getState: sync.getState,
+            sync: () => sync,
             flush: async () => true,
             unpersisted: () => false,
             selected: () => [],

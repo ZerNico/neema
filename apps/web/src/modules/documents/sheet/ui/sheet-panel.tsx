@@ -19,7 +19,7 @@ import {
   ViewOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
-import { useContext, useMemo, useRef, useState } from "react";
+import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
@@ -210,7 +210,12 @@ export default function SheetPanelBody({
   /** Sends a comment to the assistant as a chat message about its cell. */
   ask?: ((request: string, target: AskTarget) => Promise<boolean>) | null;
 }) {
-  const { state, sync } = controller;
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
+  const sync = controller.sync();
   const doc = state?.doc ?? null;
   const [chosen, setChosen] = useState<string | null>(null);
   const [selection, setSelection] = useState<SheetSelection | null>(null);

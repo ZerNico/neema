@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SheetChange } from "@chat/sheet/model/ops";
 import { deviceCache } from "~/modules/cache/client/device-cache.ts";
 import { pushSheet } from "../server/sheet-functions.ts";
@@ -45,6 +45,8 @@ class SheetConnections {
     for (const listener of this.#listeners) listener();
   };
   getState = (): SheetState | null => this.current?.getState() ?? null;
+  /** The open connection, or null while none is. */
+  sync = () => this.current;
   /** The selection a message names: the sheet, then its anchor's and head's row and column IDs. */
   selected = () => {
     const cursor = this.current?.cursor();
@@ -75,6 +77,22 @@ class SheetConnections {
 }
 
 /**
+ * What the sheet's body works with. Stable across edits: the body reads the
+ * state from the store itself, so an edit and the body's own state changes
+ * render together rather than a render apart.
+ */
+export interface SheetController {
+  readonly documentId: string;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly getState: () => SheetState | null;
+  /** The open connection, or null while none is. */
+  readonly sync: () => SheetSync | null;
+  readonly flush: () => Promise<boolean>;
+  readonly unpersisted: () => boolean;
+  readonly selected: () => string[];
+}
+
+/**
  * One controller per sheet, mounted beside its document's; only an open
  * sheet holds a connection, and one closing stays until its edits are sent.
  */
@@ -93,13 +111,17 @@ export function useSheet(documentId: string, live: boolean) {
     () => [...connections.all].some((each) => each.pending()),
     [connections],
   );
-  return {
-    documentId,
-    sync: connections.current,
-    state,
-    flush,
-    unpersisted,
-    selected: connections.selected,
-  };
+  const controller = useMemo<SheetController>(
+    () => ({
+      documentId,
+      subscribe: connections.subscribe,
+      getState: connections.getState,
+      sync: connections.sync,
+      flush,
+      unpersisted,
+      selected: connections.selected,
+    }),
+    [connections, documentId, flush, unpersisted],
+  );
+  return { controller, state };
 }
-export type SheetController = ReturnType<typeof useSheet>;
