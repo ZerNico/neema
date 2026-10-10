@@ -2,7 +2,7 @@ import * as library from "@formulajs/formulajs";
 import { addWorksheet, createWorkbook } from "@office-kit/xlsx/workbook";
 import { setCell } from "@office-kit/xlsx/worksheet";
 import { getCellDisplayText, setCellNumberFormat } from "@office-kit/xlsx/styles";
-import type { CellBox } from "../../operations.ts";
+import type { CellBox } from "@chat/sheet/a1";
 import { clockOf, parseDateText, partsOf, serialOf, weekdayOf } from "./dates.ts";
 import {
   Areas,

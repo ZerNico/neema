@@ -1,4 +1,4 @@
-import { columnIndex, columnLetters, MAX_COLUMN, MAX_ROW } from "../operations.ts";
+import { columnIndex, columnLetters, MAX_COLUMN, MAX_ROW } from "@chat/sheet/a1";
 import { parseFormula, type Node } from "./engine/parse.ts";
 
 /**

@@ -75,10 +75,9 @@ import {
   columnLetters,
   parseCell,
   parseRange,
-  parseSpreadsheetOperations,
   type CellBox,
-  type SpreadsheetOperation,
-} from "../operations.ts";
+} from "@chat/sheet/a1";
+import { parseSpreadsheetOperations, type SpreadsheetOperation } from "../operations.ts";
 import { recalculate, type CalcReport, type FormulaIssue } from "./calc.ts";
 import {
   isDynamic,

@@ -2,7 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Unzipped } from "fflate";
 import { isFormulaValue, type Cell } from "@office-kit/xlsx/cell";
 import { iterWorksheets, type Workbook } from "@office-kit/xlsx/workbook";
 import { getCell, type Worksheet } from "@office-kit/xlsx/worksheet";
-import { columnIndex, columnLetters } from "../operations.ts";
+import { columnIndex, columnLetters } from "@chat/sheet/a1";
 
 /**
  * Excel 365 marks a formula that may spill with cell metadata (`cm`) naming

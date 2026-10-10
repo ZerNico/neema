@@ -13,7 +13,7 @@ import {
   MAX_ROW,
   parseRange,
   type CellBox,
-} from "../operations.ts";
+} from "@chat/sheet/a1";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
 import { isDynamic, markDynamic } from "./dynamic-arrays.ts";
 import {

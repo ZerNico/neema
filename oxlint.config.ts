@@ -96,6 +96,17 @@ export default defineConfig({
       rules: { "shadcn/no-restyle": "off" },
     },
     {
+      // Sheet values must format and parse the same in every browser and on
+      // the server, so the package uses its own locale tables, never Intl.
+      files: ["packages/sheet/**"],
+      rules: {
+        "no-restricted-globals": [
+          "error",
+          { name: "Intl", message: "Use the sheet's own locale tables: Intl differs per runtime." },
+        ],
+      },
+    },
+    {
       files: ["apps/web/src/ui/detail-panel.test.tsx"],
       rules: { "shadcn/no-unknown-classes": ["error", { allow: ["test-panel-class"] }] },
     },

@@ -10,9 +10,9 @@ import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/tool
 import { SpreadsheetRead } from "../activity.ts";
 import { SpreadsheetError } from "../errors.ts";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
+import { parseRange } from "@chat/sheet/a1";
 import {
   describeSpreadsheetChanges,
-  parseRange,
   parseSpreadsheetOperations,
   spreadsheetOperationsJsonSchema,
 } from "../operations.ts";
