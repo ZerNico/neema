@@ -1639,5 +1639,7 @@ export function functionNames(): readonly string[] {
     }
   };
   walk(libraryTable, "");
+  // Evaluated as special forms rather than from this table.
+  for (const name of ["LET", "GROUPBY", "PIVOTBY"]) names.add(name);
   return [...names].toSorted();
 }

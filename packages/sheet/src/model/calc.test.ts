@@ -74,6 +74,61 @@ describe("calculating a live sheet", () => {
     expect(values.spill("s1", at(doc, "A1").r, at(doc, "A1").c)?.rows).toHaveLength(3);
   });
 
+  it("groups and pivots rows with GROUPBY and PIVOTBY, as Excel's pivot formulas", () => {
+    const data = {
+      A1: "Region",
+      B1: "Product",
+      C1: "Sales",
+      A2: "North",
+      B2: "Tea",
+      C2: 10,
+      A3: "south",
+      B3: "Tea",
+      C3: 5,
+      A4: "North",
+      B4: "Coffee",
+      C4: 20,
+      A5: "South",
+      B5: "Coffee",
+      C5: 7,
+      A6: "North",
+      B6: "Tea",
+      C6: 1,
+    };
+    const doc = typed(emptyDoc(), {
+      ...data,
+      E1: "=GROUPBY(A1:A6, C1:C6, SUM)",
+      E10: "=PIVOTBY(A2:A6, B2:B6, C2:C6, SUM, 0, 1, -2)",
+      E20: "=GROUPBY(A2:A6, C2:C6, PERCENTOF, 0, 0)",
+    });
+    const values = calculateSheet(doc, context);
+    const read = (top: number, left: string, rows: number, cols: number) =>
+      Array.from({ length: rows }, (_row, y) =>
+        Array.from({ length: cols }, (_column, x) => {
+          const address = `${String.fromCharCode(left.charCodeAt(0) + x)}${top + y}`;
+          return values.value("s1", at(doc, address).r, at(doc, address).c);
+        }),
+      );
+    // Headers guessed from text above numbers; text grouped without case; a grand total below.
+    expect(read(1, "E", 4, 2)).toEqual([
+      ["Region", "Sales"],
+      ["North", 31],
+      ["south", 12],
+      ["Total", 43],
+    ]);
+    // Rows sorted by the result's second column (Coffee), descending; totals both ways.
+    expect(read(10, "E", 4, 4)).toEqual([
+      [null, "Coffee", "Tea", "Total"],
+      ["North", 20, 11, 31],
+      ["south", 7, 5, 12],
+      ["Total", 27, 16, 43],
+    ]);
+    expect(read(20, "E", 2, 2)).toEqual([
+      ["North", 31 / 43],
+      ["south", 12 / 43],
+    ]);
+  });
+
   it("takes time and chance from the context, so every replica agrees", () => {
     const doc = typed(emptyDoc(), {
       A1: "=NOW()",

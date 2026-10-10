@@ -12,6 +12,7 @@ import {
   type Fn,
 } from "./functions.ts";
 import { Unsupported, type Node } from "./parse.ts";
+import { groupBy, isAggregate, pivotBy } from "./pivot.ts";
 import {
   Areas,
   compare,
@@ -301,6 +302,9 @@ class Evaluation {
         const choice = args[Math.trunc(index)];
         return index >= 1 && choice ? this.branch(args, Math.trunc(index), mode, 0) : VALUE;
       }
+      case "GROUPBY":
+      case "PIVOTBY":
+        return this.pivot(name, args);
       case "LET": {
         if (args.length < 3 || args.length % 2 === 0) return VALUE;
         const frame = new Map<string, Value>();
@@ -330,6 +334,78 @@ class Evaluation {
       default:
         return undefined;
     }
+  }
+
+  /**
+   * GROUPBY and PIVOTBY. Their function is passed by name, Excel's eta form;
+   * one given as a LAMBDA is beyond this engine, so the cell keeps its value.
+   */
+  private pivot(name: "GROUPBY" | "PIVOTBY", args: readonly Node[]): Value {
+    const crossed = name === "PIVOTBY";
+    const fnNode = args[crossed ? 3 : 2];
+    const fn = fnNode?.t === "name" ? fnNode.name.replace(/^_xleta\./i, "").toUpperCase() : null;
+    if (!fn || !isAggregate(fn)) throw new Unsupported(name);
+    const present = (at: number) => args[at] !== undefined && args[at]!.t !== "missing";
+    const grid = (at: number): Grid | XError => {
+      const value = this.evaluate(args[at] ?? { t: "missing" }, "array");
+      if (value instanceof Areas) return VALUE;
+      if (value instanceof XError) return value;
+      return value instanceof Grid ? value : new Grid([[value]]);
+    };
+    const numbers = (at: number, fallback: readonly number[]): readonly number[] | XError => {
+      if (!present(at)) return fallback;
+      const read = grid(at);
+      if (read instanceof XError) return read;
+      const list: number[] = [];
+      for (const each of read.rows.flat()) {
+        const number = toNumber(each);
+        if (number instanceof XError) return number;
+        list.push(Math.trunc(number));
+      }
+      return list;
+    };
+    const [rowsAt, colsAt, valuesAt] = crossed ? [0, 1, 2] : [0, -1, 1];
+    const rowFields = grid(rowsAt);
+    const colFields = crossed ? grid(colsAt) : null;
+    const values = grid(valuesAt);
+    if (rowFields instanceof XError) return rowFields;
+    if (colFields instanceof XError) return colFields;
+    if (values instanceof XError) return values;
+    const option = crossed
+      ? { headers: 4, rowTotals: 5, rowSort: 6, colTotals: 7, colSort: 8, filter: 9 }
+      : { headers: 3, rowTotals: 4, rowSort: 5, colTotals: -1, colSort: -1, filter: 6 };
+    const headers = numbers(option.headers, []);
+    const rowTotals = numbers(option.rowTotals, [1]);
+    const rowSort = numbers(option.rowSort, []);
+    const colTotals = crossed ? numbers(option.colTotals, [1]) : [0];
+    const colSort = crossed ? numbers(option.colSort, []) : [];
+    if (headers instanceof XError) return headers;
+    if (rowTotals instanceof XError) return rowTotals;
+    if (rowSort instanceof XError) return rowSort;
+    if (colTotals instanceof XError) return colTotals;
+    if (colSort instanceof XError) return colSort;
+    let filter: boolean[] | null = null;
+    if (present(option.filter)) {
+      const read = grid(option.filter);
+      if (read instanceof XError) return read;
+      filter = [];
+      for (const each of read.rows.flat()) {
+        const truth = toBoolean(each);
+        if (truth instanceof XError) return truth;
+        filter.push(truth);
+      }
+    }
+    const options = {
+      headers: headers[0] ?? null,
+      rowTotals: rowTotals[0] ?? 1,
+      rowSort,
+      colTotals: colTotals[0] ?? 1,
+      colSort,
+      filter,
+    };
+    return colFields
+      ? pivotBy(rowFields, colFields, values, fn, options)
+      : groupBy(rowFields, values, fn, options);
   }
 
   /** NOW, TODAY and the RAND functions, from the scope's time and chance. */

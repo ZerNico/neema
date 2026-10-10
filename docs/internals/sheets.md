@@ -119,6 +119,14 @@ browser workers and the Excel file tools); this page records the decisions behin
   (`spreadsheets/server/file-conditional.ts`). Rule kinds a live sheet does not draw (icons,
   formulas, time and custom validation) are dropped on import and named as dropped.
 
+## Pivot tables
+
+- A pivot table is a `GROUPBY` or `PIVOTBY` formula, as Excel 365 writes one, not a separate
+  object with its own cache. It recalculates with its data like any formula, every replica
+  agrees on it, and a download keeps it as the formula Excel reads.
+- Their function argument is a bare aggregate name, Excel's eta form, stored in files as
+  `_xleta.SUM`. One given as a `LAMBDA` is beyond the engine, so that cell keeps its value.
+
 ## Links
 
 - A cell's link is a property of its style, not of its content. It then moves with every copy,

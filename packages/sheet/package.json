@@ -14,6 +14,7 @@
     "./engine/values": "./src/engine/values.ts",
     "./engine/calculate": "./src/engine/calculate.ts",
     "./engine/functions": "./src/engine/functions.ts",
+    "./engine/pivot": "./src/engine/pivot.ts",
     "./model": "./src/model/model.ts",
     "./model/formula": "./src/model/formula.ts",
     "./model/ops": "./src/model/ops.ts",
