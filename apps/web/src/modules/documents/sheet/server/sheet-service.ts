@@ -73,6 +73,8 @@ interface Entry {
   committedAt: number;
   /** Each client's last sequence number, as far as this entry has read or written it. */
   readonly acked: Map<string, number>;
+  /** Who writes under each client, as far as this entry has read or written it. */
+  readonly owners: Map<string, string | null>;
   readonly presence: Map<string, SheetPresence>;
   comments: DocumentComment[];
   readonly frames: PubSub.PubSub<SheetFrame>;
@@ -347,6 +349,7 @@ export class SheetService extends Context.Service<
             revision: state.document.revision,
             committedAt: state.committedAt.getTime(),
             acked: new Map(),
+            owners: new Map(),
             presence: new Map(),
             comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<SheetFrame>(),
@@ -378,6 +381,27 @@ export class SheetService extends Context.Service<
             )
             .pipe(Effect.orDie);
           return row?.lastSeq ?? 0;
+        });
+
+      /** Who writes under a client: null for none yet, or a client written before owners were kept. */
+      const ownerOf = (
+        tx: Pick<DbTx, "select">,
+        documentId: string,
+        entry: Entry,
+        clientId: string,
+      ) =>
+        Effect.gen(function* () {
+          if (entry.owners.has(clientId)) return entry.owners.get(clientId)!;
+          const [row] = yield* tx
+            .select({ userId: sheetClients.userId })
+            .from(sheetClients)
+            .where(
+              and(eq(sheetClients.documentId, documentId), eq(sheetClients.clientId, clientId)),
+            )
+            .pipe(Effect.orDie);
+          const owner = row?.userId ?? null;
+          entry.owners.set(clientId, owner);
+          return owner;
         });
 
       const documentChangedSoon = (userId: string, documentId: string, entry: Entry) =>
@@ -423,10 +447,19 @@ export class SheetService extends Context.Service<
           if (last)
             yield* tx
               .insert(sheetClients)
-              .values({ documentId, clientId: last.clientId, lastSeq: last.seq })
+              .values({
+                documentId,
+                clientId: last.clientId,
+                userId: author.userId,
+                lastSeq: last.seq,
+              })
               .onConflictDoUpdate({
                 target: [sheetClients.documentId, sheetClients.clientId],
-                set: { lastSeq: last.seq, updatedAt: sql`now()` },
+                set: {
+                  lastSeq: last.seq,
+                  userId: sql`coalesce(${sheetClients.userId}, excluded.user_id)`,
+                  updatedAt: sql`now()`,
+                },
               })
               .pipe(Effect.orDie);
           const acked = last ? { clientId: last.clientId, seq: last.seq } : null;
@@ -671,6 +704,11 @@ export class SheetService extends Context.Service<
               return yield* new DocumentRejected({
                 reason: "this document is read-only for you",
               });
+            const owner = yield* ownerOf(tx, parsed.documentId, entry, parsed.clientId);
+            if (owner !== null && owner !== userId)
+              return yield* new DocumentRejected({
+                reason: "a change under another person's editor",
+              });
             const last = yield* lastSeq(tx, parsed.documentId, entry, parsed.clientId);
             // A resend is acknowledged, not applied again; a gap waits for what is missing.
             const next: SheetChange[] = [];
@@ -690,6 +728,8 @@ export class SheetService extends Context.Service<
             return { stored, result: { acked: stored.acked!.seq, refused: stored.refused } };
           }),
         );
+        if (written.owners.get(parsed.clientId) === null)
+          written.owners.set(parsed.clientId, userId);
         yield* documentChangedSoon(userId, parsed.documentId, written);
         return { revision: written.revision, ...result } satisfies PushSheetResult;
       });

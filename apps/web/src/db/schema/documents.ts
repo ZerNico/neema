@@ -107,6 +107,8 @@ export const sheetClients = pgTable(
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     clientId: text("client_id").notNull(),
+    /** Who first wrote under this client; no one else may, or they could skip its changes. */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     lastSeq: integer("last_seq").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

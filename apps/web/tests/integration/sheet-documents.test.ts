@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { positions, type SheetDoc } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
-import { conversations, user } from "~/db/schema/index.ts";
+import { conversations, projectMembers, projects, user } from "~/db/schema/index.ts";
 import type { SheetFrame } from "~/modules/documents/sheet/schema.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
@@ -251,6 +251,38 @@ describe("live sheets", () => {
     expect(pushed).toEqual({ revision: 4, acked: 3, refused: [] });
     const after = (await readDoc(owner, document.id)).doc;
     expect([1, 2, 3, 4].map((row) => valueAt(after, row, 1))).toEqual([1, 2, 3, 4]);
+  });
+
+  it("refuses a change under another person's editor on a shared sheet", async () => {
+    const [owner, member, projectId] = [uuidv7(), uuidv7(), uuidv7()];
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.insert(user).values([
+          { id: owner, name: "Owner", email: `${owner}@t.io` },
+          { id: member, name: "Member", email: `${member}@t.io` },
+        ]);
+        yield* db.insert(projects).values({ id: projectId, userId: owner, name: "Shared" });
+        yield* db.insert(projectMembers).values({ projectId, userId: member, role: "editor" });
+      }),
+    );
+    const document = await sheets((s) => s.create(owner, { projectId, title: "Shared" }));
+    const { doc } = await readDoc(owner, document.id);
+    const push = (by: string, seq: number) =>
+      sheets((s) =>
+        s.push(
+          by,
+          stringified({
+            documentId: document.id,
+            clientId: "owners-tab",
+            changes: [{ clientId: "owners-tab", seq, ops: [setValue(doc, seq, 1, seq)] }],
+          }),
+        ),
+      );
+    await expect(push(owner, 1)).resolves.toMatchObject({ acked: 1 });
+    // Taking the next number would make the owner's own next change look like a resend.
+    await expect(push(member, 2)).rejects.toThrow();
+    await expect(push(owner, 2)).resolves.toMatchObject({ acked: 2 });
   });
 
   it("numbers a server-made change in its client's own sequence", async () => {
