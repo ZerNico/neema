@@ -755,4 +755,15 @@ describe("importing into a live sheet", () => {
     if (!eu.ok) throw new Error(eu.reason);
     expect(valueOf(eu.doc, "Kosten", 2, 2)).toBe(1.5);
   });
+
+  it("tells the separator by what lies outside quotes, a header's line breaks included", () => {
+    // Quoted commas outnumber the semicolons, and the first header holds a line break.
+    const eu = sheetFromCsv('"Name,\nfirst, last";Betrag\nTee;1,5\n', "Kosten", settings);
+    if (!eu.ok) throw new Error(eu.reason);
+    expect(valueOf(eu.doc, "Kosten", 1, 1)).toBe("Name,\nfirst, last");
+    expect(valueOf(eu.doc, "Kosten", 2, 2)).toBe(1.5);
+    const tabs = sheetFromCsv("Item\tAmount, net\nTea\t4\n", "Costs", settings);
+    if (!tabs.ok) throw new Error(tabs.reason);
+    expect(valueOf(tabs.doc, "Costs", 1, 2)).toBe("Amount, net");
+  });
 });

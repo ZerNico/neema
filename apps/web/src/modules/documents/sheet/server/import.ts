@@ -424,13 +424,29 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
  * means European CSV, with decimal commas. Each field is read as if typed, a
  * leading "=" making a formula, as Excel opens one.
  */
+/**
+ * The separator a delimited file uses, judged from its first record by the
+ * separators outside quotes: a quoted field may hold the others, and a line
+ * break. A semicolon file is a European one, its numbers read so too.
+ */
+function delimiterOf(text: string): "," | ";" | "\t" {
+  const counts = { ",": 0, ";": 0, "\t": 0 };
+  let quoted = false;
+  for (const char of text) {
+    if (char === '"') quoted = !quoted;
+    else if (!quoted && (char === "\n" || char === "\r")) break;
+    else if (!quoted && char in counts) counts[char as keyof typeof counts] += 1;
+  }
+  // Text rarely holds a tab, so tabs win a tie.
+  if (counts["\t"] > 0 && counts["\t"] >= Math.max(counts[","], counts[";"])) return "\t";
+  return counts[";"] > counts[","] ? ";" : ",";
+}
+
 export function readCsv(text: string, name: string): LiveSheetImport {
-  const firstLine = text.slice(0, text.search(/\r?\n/) === -1 ? undefined : text.search(/\r?\n/));
-  const semicolons = (firstLine.match(/;/g) ?? []).length;
-  const commas = (firstLine.match(/,/g) ?? []).length;
-  const european = semicolons > commas;
-  const rows = parseDelimited(text.replace(/^﻿/, ""), european ? ";" : ",");
-  const locale = european ? DE_DE : EN_US;
+  const body = text.replace(/^﻿/, "");
+  const delimiter = delimiterOf(body);
+  const rows = parseDelimited(body, delimiter);
+  const locale = delimiter === ";" ? DE_DE : EN_US;
   const width = Math.max(...rows.map((row) => row.length));
   return {
     sheets: [
