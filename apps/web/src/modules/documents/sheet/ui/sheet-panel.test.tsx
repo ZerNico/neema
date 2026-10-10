@@ -179,11 +179,15 @@ describe("an open sheet", () => {
         chart: {
           sheet: "s1",
           kind: "column",
-          title: "Sales by month",
+          title: { text: "Sales by month" },
           at: { r: "s1.r4", c: "s1.c1" },
           size: { width: 400, height: 240 },
           series: [
-            { name: "Sales", values: box, categories: { ...box, c1: "s1.c1", c2: "s1.c1" } },
+            {
+              name: { text: "Sales" },
+              values: box,
+              categories: { ...box, c1: "s1.c1", c2: "s1.c1" },
+            },
           ],
         },
       },
@@ -193,7 +197,8 @@ describe("an open sheet", () => {
         chart: {
           sheet: "s1",
           kind: "pie",
-          title: "Share",
+          title: { text: "Share" },
+          legend: "right",
           at: { r: "s1.r20", c: "s1.c1" },
           size: { width: 300, height: 200 },
           series: [{ values: box, categories: { ...box, c1: "s1.c1", c2: "s1.c1" } }],
@@ -265,7 +270,7 @@ describe("an open sheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Insert chart" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Column chart" }));
     expect(Object.values(sync.getState().doc!.charts)).toMatchObject([
-      { kind: "column", series: [{ name: "Sales" }] },
+      { kind: "column", series: [{ name: { cell: { r: "s1.r1", c: "s1.c2" } } }] },
     ]);
     sync.destroy();
     slot.remove();

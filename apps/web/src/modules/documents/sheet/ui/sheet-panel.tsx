@@ -84,7 +84,7 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
-import { chartData } from "./chart-data.ts";
+import { chartData } from "@chat/sheet/model/chart";
 import { SheetChart } from "./sheet-chart.tsx";
 
 function MenuItem({
@@ -288,7 +288,7 @@ export default function SheetPanelBody({
       height: chart.size.height,
       content: (
         <div className="group relative h-full">
-          <SheetChart chart={chart} data={chartData(doc, values, chart)} />
+          <SheetChart chart={chart} data={chartData(doc, values, chart)} locale={locale} />
           {readOnly ? null : (
             <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
               <DropdownMenu>

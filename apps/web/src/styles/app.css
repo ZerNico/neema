@@ -102,11 +102,17 @@
      cycle. Slot 4 is magenta, not the amber a 4-colour palette reaches for
      first: amber sits ~6 ΔE from slot 2 under deuteranopia, and slot 4 stacks
      directly on slot 2. Magenta holds the trio's own 13.7 ΔE floor in normal,
-     deuteranopic, protanopic and tritanopic simulation. */
+     deuteranopic, protanopic and tritanopic simulation. Slots 5 to 8 are
+     for sheet charts with more series than that; past four, a legend's order
+     tells series apart as much as their hue. */
   --chart-1: #2a78d6;
   --chart-2: #eb6834;
   --chart-3: #1baf7a;
   --chart-4: #cc2f9e;
+  --chart-5: #7b5cd6;
+  --chart-6: #b08414;
+  --chart-7: #0f7f8a;
+  --chart-8: #6b7280;
 }
 
 .dark {
@@ -144,6 +150,10 @@
   --chart-2: #d95926;
   --chart-3: #199e70;
   --chart-4: #e874bd;
+  --chart-5: #9d84ec;
+  --chart-6: #d1a338;
+  --chart-7: #2fa7b3;
+  --chart-8: #9ca3af;
 }
 
 /* @tanstack/charts reads its palette from --ts-chart-N. */
@@ -152,6 +162,10 @@
   --ts-chart-2: var(--chart-2);
   --ts-chart-3: var(--chart-3);
   --ts-chart-4: var(--chart-4);
+  --ts-chart-5: var(--chart-5);
+  --ts-chart-6: var(--chart-6);
+  --ts-chart-7: var(--chart-7);
+  --ts-chart-8: var(--chart-8);
 }
 
 /* Window chrome is optional and independent of authenticated route lifetime. */
