@@ -143,6 +143,31 @@ describe("the sheet grid", () => {
     expect(events.slice(1)).toEqual(["clear", "undo", "redo", "fill"]);
   });
 
+  it("completes functions, points at cells for references, and cycles $ with F4", () => {
+    events.length = 0;
+    render(<Harness doc={emptyDoc()} />);
+    const grid = screen.getByRole("grid");
+    fireEvent.keyDown(grid, { key: "=" });
+    const input = screen.getByRole("textbox", { name: "Cell content" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "=su", selectionStart: 3 } });
+    expect(screen.getByRole("listbox", { name: "Functions" }).textContent).toContain("SUMIF");
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("=SUM(");
+    expect(screen.getByText("number1")).toBeTruthy();
+    // Arrows now point at cells instead of ending the edit, starting from the edited one.
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.value).toBe("=SUM(A3");
+    // A click on a cell replaces the reference pointing wrote, and keeps the edit going.
+    const content = grid.firstElementChild!.lastElementChild!;
+    fireEvent.pointerDown(content, { clientX: 70, clientY: 45, button: 0 });
+    fireEvent.pointerUp(content);
+    expect(input.value).toBe("=SUM(B3");
+    fireEvent.keyDown(input, { key: "F4" });
+    expect(input.value).toBe("=SUM($B$3");
+    expect(events).toEqual([]);
+  });
+
   it("draws frozen rows again in a pane of their own, over the scrolling cells", () => {
     let doc = emptyDoc();
     doc = apply(

@@ -26,6 +26,16 @@ import {
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
 import { OverlayFrame } from "./overlay.tsx";
+import {
+  REF_COLORS,
+  acceptCompletion,
+  completionFor,
+  formulaRefs,
+  insertRef,
+  pointable,
+  toggleAbsolute,
+} from "./formula-edit.ts";
+import { FormulaPopup } from "./formula-popup.tsx";
 
 export type { OverlayCommand } from "./overlay-place.ts";
 
@@ -68,6 +78,9 @@ export interface GridDecoration {
   /** A corner mark on the cell instead of an outline, as a comment has. */
   readonly marker?: boolean;
 }
+
+/** A cell by its row and column indexes, as A1. */
+const corner = (at: { row: number; col: number }) => `${columnLetters(at.col + 1)}${at.row + 1}`;
 
 /** Something drawn over the cells from a cell's top-left corner, such as a chart. */
 export interface GridOverlay {
@@ -301,10 +314,53 @@ export function SheetGrid({
   };
   // The edit just ended: focus leaving its input afterwards must not end it again.
   const ended = useRef<CellEditing | null>(null);
+  const editorInput = useRef<HTMLInputElement>(null);
+  // Where the caret is in the formula being typed, for completions, hints and pointing.
+  const [caret, setCaret] = useState(0);
+  // The function the arrow keys have picked among the completions offered.
+  const [picked, setPicked] = useState(0);
+  /** The reference pointing wrote last, which another click or arrow replaces, and its cells. */
+  const [pointing, setPointing] = useState<{
+    start: number;
+    end: number;
+    anchor: { row: number; col: number };
+    head: { row: number; col: number };
+  } | null>(null);
+  // A caret to put back once a rewritten formula is in the input.
+  const caretAfter = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const input = editorInput.current;
+    if (input && caretAfter.current !== null) {
+      input.setSelectionRange(caretAfter.current, caretAfter.current);
+      caretAfter.current = null;
+    }
+  });
+  /** Rewrites the formula being typed and where its caret goes. */
+  const rewrite = (text: string, at: number) => {
+    if (!editing) return;
+    caretAfter.current = at;
+    setCaret(at);
+    onEditingChange?.({ ...editing, text });
+  };
+  /** Writes a reference to these cells at the caret, or over the one pointed at before. */
+  const point = (from: { row: number; col: number }, headAt: { row: number; col: number }) => {
+    if (!editing) return;
+    const ref =
+      from.row === headAt.row && from.col === headAt.col
+        ? corner(from)
+        : `${corner({ row: Math.min(from.row, headAt.row), col: Math.min(from.col, headAt.col) })}:${corner({ row: Math.max(from.row, headAt.row), col: Math.max(from.col, headAt.col) })}`;
+    const written = insertRef(editing.text, caret, ref, pointing);
+    setPointing({ ...written.pointed, anchor: from, head: headAt });
+    rewrite(written.text, written.caret);
+  };
+  /** Whether the edit is pointing at cells rather than moving between them, as Excel's point mode. */
+  const pointMode = () => !!editing && (pointing !== null || pointable(editing.text, caret));
+  const pointDrag = useRef<{ row: number; col: number } | null>(null);
   /** Ends an edit, writing it, then moves on as Enter or Tab would. */
   const commit = (rowStep: number, colStep: number) => {
     if (!editing || ended.current === editing) return;
     ended.current = editing;
+    setPointing(null);
     onCommit!(editing.at, editing.text);
     onEditingChange!(null);
     const row = rowIndex.get(editing.at.r);
@@ -321,6 +377,7 @@ export function SheetGrid({
   };
   const cancel = () => {
     ended.current = editing;
+    setPointing(null);
     onEditingChange?.(null);
     scroller.current?.focus({ preventScroll: true });
   };
@@ -332,6 +389,43 @@ export function SheetGrid({
       ArrowLeft: [0, -1],
       ArrowRight: [0, 1],
     };
+    const offered = editing ? completionFor(editing.text, caret) : null;
+    if (offered && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      setPicked(
+        (current) => current + (event.key === "ArrowDown" ? 1 : offered.matches.length - 1),
+      );
+      return;
+    }
+    if (offered && editing && (event.key === "Tab" || event.key === "Enter")) {
+      event.preventDefault();
+      const name = offered.matches[picked % offered.matches.length]!;
+      const accepted = acceptCompletion(editing.text, caret, offered.start, name);
+      setPicked(0);
+      rewrite(accepted.text, accepted.caret);
+      return;
+    }
+    if (event.key === "F4" && editing) {
+      event.preventDefault();
+      const toggled = toggleAbsolute(editing.text, event.currentTarget.selectionStart ?? caret);
+      if (toggled) rewrite(toggled.text, toggled.caret);
+      return;
+    }
+    // Arrows in a formula waiting for a reference point at cells, starting from the edited one.
+    if (editing?.mode === "type" && arrows[event.key] && pointMode() && !event.shiftKey) {
+      event.preventDefault();
+      const [down, right] = arrows[event.key]!;
+      const from = pointing?.head ?? {
+        row: rowIndex.get(editing.at.r) ?? 0,
+        col: colIndex.get(editing.at.c) ?? 0,
+      };
+      const next = {
+        row: Math.min(rows.ids.length - 1, Math.max(0, from.row + down)),
+        col: Math.min(cols.ids.length - 1, Math.max(0, from.col + right)),
+      };
+      point(next, next);
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       commit(event.shiftKey ? -1 : 1, 0);
@@ -448,6 +542,15 @@ export function SheetGrid({
       return;
     }
     if (event.button !== 0) return;
+    // A click while a formula waits for a reference writes the cell's, keeping the edit going.
+    if (editing && pointMode()) {
+      event.preventDefault();
+      const anchorAt = event.shiftKey && pointing ? pointing.anchor : at;
+      pointDrag.current = anchorAt;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      point(anchorAt, at);
+      return;
+    }
     if (editing) commit(0, 0);
     dragging.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -455,12 +558,19 @@ export function SheetGrid({
     scroller.current?.focus({ preventScroll: true });
   };
   const onPointerMove = (event: PointerEvent) => {
+    if (pointDrag.current && pointing) {
+      const at = cellAt(event);
+      if (at.row !== pointing.head.row || at.col !== pointing.head.col)
+        point(pointDrag.current, at);
+      return;
+    }
     if (!dragging.current) return;
     const at = cellAt(event);
     if (head && (at.row !== head.row || at.col !== head.col)) select(at.row, at.col, true);
   };
   const stopDragging = () => {
     dragging.current = false;
+    pointDrag.current = null;
   };
 
   // A header edge dragged: the size follows the pointer, and is reported once let go.
@@ -892,10 +1002,21 @@ export function SheetGrid({
   const editor =
     editing && editorRect ? (
       <input
+        ref={editorInput}
         aria-label="Cell content"
         autoFocus
         value={editing.text}
-        onChange={(event) => onEditingChange?.({ ...editing, text: event.target.value })}
+        onChange={(event) => {
+          // Typing ends pointing: the next reference is written at the caret.
+          setPointing(null);
+          setPicked(0);
+          setCaret(event.target.selectionStart ?? event.target.value.length);
+          onEditingChange?.({ ...editing, text: event.target.value });
+        }}
+        onSelect={(event) => {
+          // A select reported before a rewritten formula reaches the input has the old caret.
+          if (caretAfter.current === null) setCaret(event.currentTarget.selectionStart ?? 0);
+        }}
         onKeyDown={onEditorKeyDown}
         onBlur={(event) => {
           // Focus moving to the formula bar keeps the edit going there.
@@ -912,6 +1033,50 @@ export function SheetGrid({
         }}
       />
     ) : null;
+  const formulaPopup =
+    editing && editorRect && editing.text.startsWith("=") ? (
+      <FormulaPopup
+        text={editing.text}
+        caret={caret}
+        picked={picked}
+        onPick={(name) => {
+          const offered = completionFor(editing.text, caret);
+          if (!offered) return;
+          const accepted = acceptCompletion(editing.text, caret, offered.start, name);
+          setPicked(0);
+          rewrite(accepted.text, accepted.caret);
+        }}
+        style={{ top: editorRect.top + editorRect.height + 2, left: editorRect.left }}
+      />
+    ) : null;
+  // The cells each reference of a formula being typed reads, outlined in its colour.
+  const sheetName = data.name.toLowerCase();
+  const refOutlines = editing?.text.startsWith("=")
+    ? formulaRefs(editing.text).flatMap((ref, index) => {
+        if (ref.sheet !== null && ref.sheet.toLowerCase() !== sheetName) return [];
+        const [top, bottom] =
+          ref.top === null ? [0, rows.ids.length - 1] : [ref.top - 1, ref.bottom! - 1];
+        const [left, right] =
+          ref.left === null ? [0, cols.ids.length - 1] : [ref.left - 1, ref.right! - 1];
+        if (bottom >= rows.ids.length || right >= cols.ids.length) return [];
+        const color = REF_COLORS[index % REF_COLORS.length]!;
+        return [
+          <div
+            key={`ref-${ref.start}`}
+            aria-hidden
+            className="pointer-events-none absolute z-10 border-2"
+            style={{
+              top: rows.starts[top],
+              left: cols.starts[left],
+              height: rows.starts[bottom + 1]! - rows.starts[top]!,
+              width: cols.starts[right + 1]! - cols.starts[left]!,
+              borderColor: color,
+              backgroundColor: `color-mix(in oklab, ${color} 10%, transparent)`,
+            }}
+          />,
+        ];
+      })
+    : null;
 
   const handlers = {
     onPointerDown,
@@ -947,6 +1112,7 @@ export function SheetGrid({
       {others}
       {selectionBox}
       {editingPane === name ? editor : null}
+      {editingPane === name ? formulaPopup : null}
     </div>
   );
 
@@ -1100,7 +1266,9 @@ export function SheetGrid({
               </OverlayFrame>,
             ];
           })}
+          {refOutlines}
           {editingPane === "main" ? editor : null}
+          {editingPane === "main" ? formulaPopup : null}
           {resizing ? (
             <div
               aria-hidden
