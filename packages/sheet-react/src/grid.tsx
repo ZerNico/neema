@@ -460,6 +460,68 @@ export function SheetGrid({
     }
   };
 
+  const onSheet = (r: number, c: number) =>
+    r >= 0 && r < rows.ids.length && c >= 0 && c < cols.ids.length;
+  const filledAt = (row: number, col: number) =>
+    values.value(sheet, rows.ids[row]!, cols.ids[col]!) !== null;
+  /**
+   * Where Ctrl+Arrow lands, as in Excel: the end of the run of filled cells it
+   * starts in, else the next filled cell, else the sheet's edge.
+   */
+  const dataEdge = (row: number, col: number, down: number, right: number) => {
+    let [r, c] = [row, col];
+    if (!onSheet(r + down, c + right)) return [r, c] as const;
+    if (filledAt(r, c) && filledAt(r + down, c + right)) {
+      while (onSheet(r + down, c + right) && filledAt(r + down, c + right))
+        [r, c] = [r + down, c + right];
+      return [r, c] as const;
+    }
+    [r, c] = [r + down, c + right];
+    while (onSheet(r + down, c + right) && !filledAt(r, c)) [r, c] = [r + down, c + right];
+    return [r, c] as const;
+  };
+  /** The block of filled cells around a cell, as Ctrl+A first selects: grown while a neighbour holds something. */
+  const regionAround = (row: number, col: number) => {
+    let [top, bottom, left, right] = [row, row, col, col];
+    for (let grew = true; grew;) {
+      grew = false;
+      const any = (r1: number, r2: number, c1: number, c2: number) => {
+        for (let r = Math.max(0, r1); r <= Math.min(rows.ids.length - 1, r2); r++)
+          for (let c = Math.max(0, c1); c <= Math.min(cols.ids.length - 1, c2); c++)
+            if (filledAt(r, c)) return true;
+        return false;
+      };
+      if (top > 0 && any(top - 1, top - 1, left - 1, right + 1)) [top, grew] = [top - 1, true];
+      if (bottom < rows.ids.length - 1 && any(bottom + 1, bottom + 1, left - 1, right + 1))
+        [bottom, grew] = [bottom + 1, true];
+      if (left > 0 && any(top, bottom, left - 1, left - 1)) [left, grew] = [left - 1, true];
+      if (right < cols.ids.length - 1 && any(top, bottom, right + 1, right + 1))
+        [right, grew] = [right + 1, true];
+    }
+    return { top, bottom, left, right };
+  };
+  /** Selects a rectangle by indexes, the head at its far corner. */
+  const selectBox = (from: { row: number; col: number }, to: { row: number; col: number }) =>
+    onSelectionChange({
+      anchor: { r: rows.ids[from.row]!, c: cols.ids[from.col]! },
+      head: { r: rows.ids[to.row]!, c: cols.ids[to.col]! },
+    });
+  /** The last row and column anything is written in, where Ctrl+End goes. */
+  const usedEnd = () => {
+    let [row, col] = [0, 0];
+    for (const [r, cells] of Object.entries(data.cells)) {
+      const at = rowIndex.get(r);
+      if (at === undefined) continue;
+      for (const c of Object.keys(cells)) {
+        const across = colIndex.get(c);
+        if (across === undefined) continue;
+        row = Math.max(row, at);
+        col = Math.max(col, across);
+      }
+    }
+    return [row, col] as const;
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
     const command = event.metaKey || event.ctrlKey;
@@ -501,6 +563,33 @@ export function SheetGrid({
       beginEdit(null);
       return;
     }
+    const lastRow = rows.ids.length - 1;
+    const lastCol = cols.ids.length - 1;
+    if (command && !event.altKey && event.key.toLowerCase() === "a" && box) {
+      // First the block of data around the cell, then, pressed again, the whole sheet.
+      event.preventDefault();
+      const region = regionAround(head.row, head.col);
+      const already =
+        box.top === region.top &&
+        box.bottom === region.bottom &&
+        box.left === region.left &&
+        box.right === region.right;
+      if (already || (region.top === region.bottom && region.left === region.right))
+        selectBox({ row: lastRow, col: lastCol }, { row: 0, col: 0 });
+      else
+        selectBox({ row: region.bottom, col: region.right }, { row: region.top, col: region.left });
+      return;
+    }
+    if (event.key === " " && box && (event.shiftKey || event.ctrlKey) && !event.metaKey) {
+      // Shift+Space selects the selection's rows, Ctrl+Space its columns.
+      event.preventDefault();
+      if (event.shiftKey && !event.ctrlKey)
+        selectBox({ row: box.bottom, col: lastCol }, { row: box.top, col: 0 });
+      else if (event.ctrlKey && !event.shiftKey)
+        selectBox({ row: lastRow, col: box.right }, { row: 0, col: box.left });
+      else selectBox({ row: lastRow, col: lastCol }, { row: 0, col: 0 });
+      return;
+    }
     // A printable key starts typing a fresh value, as in Excel.
     if (writable && event.key.length === 1 && !command && !event.altKey) {
       event.preventDefault();
@@ -520,13 +609,13 @@ export function SheetGrid({
     };
     let target: [number, number] | null = null;
     const move = moves[event.key];
-    if (move) {
-      const jump = event.metaKey || event.ctrlKey;
-      target = [
-        jump && move[0] ? (move[0] < 0 ? 0 : rows.ids.length - 1) : head.row + move[0],
-        jump && move[1] ? (move[1] < 0 ? 0 : cols.ids.length - 1) : head.col + move[1],
-      ];
-    } else if (event.key === "Home") target = [event.ctrlKey || event.metaKey ? 0 : head.row, 0];
+    const jump = event.metaKey || event.ctrlKey;
+    if (move && jump && event.key.startsWith("Arrow")) {
+      // From the selection's moving end, so Ctrl+Shift+Arrow keeps extending.
+      target = [...dataEdge(head.row, head.col, Math.sign(move[0]), Math.sign(move[1]))];
+    } else if (move) target = [head.row + move[0], head.col + move[1]];
+    else if (event.key === "Home") target = [jump ? 0 : head.row, 0];
+    else if (event.key === "End" && jump) target = [...usedEnd()];
     if (!target) return;
     event.preventDefault();
     const row = Math.min(rows.ids.length - 1, Math.max(0, target[0]));
@@ -761,6 +850,40 @@ export function SheetGrid({
   };
   const cells = paneCells(visibleRows, visibleCols, true);
 
+  /**
+   * A header pressed: its whole column (or row) selected, Shift extending
+   * from the selection's anchor, and a drag along the headers taking more.
+   */
+  const startHeaderSelect = (event: PointerEvent, axis: Axis, index: number) => {
+    if (event.button !== 0 || !rows.ids.length || !cols.ids.length) return;
+    event.preventDefault();
+    if (editing) commit(0, 0);
+    if (selectedOverlay !== null) onOverlaySelect?.(null);
+    const columns = axis === "columns";
+    const anchorIndex = event.shiftKey && anchor ? (columns ? anchor.col : anchor.row) : index;
+    const span = (to: number) =>
+      // The active cell stays at the top (or left), so the sheet does not scroll to the end.
+      columns
+        ? selectBox({ row: rows.ids.length - 1, col: anchorIndex }, { row: 0, col: to })
+        : selectBox({ row: anchorIndex, col: cols.ids.length - 1 }, { row: to, col: 0 });
+    span(index);
+    scroller.current?.focus({ preventScroll: true });
+    const move = (next: globalThis.PointerEvent) => {
+      const rect = content.current?.getBoundingClientRect();
+      if (!rect) return;
+      span(
+        columns ? cols.indexAt(next.clientX - rect.left) : rows.indexAt(next.clientY - rect.top),
+      );
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
   const columnHeader = (col: number) => {
     const inSelection = box && col >= box.left && col <= box.right;
     return (
@@ -773,6 +896,7 @@ export function SheetGrid({
           width: cols.size(col),
           height: HEADER_ROW_PX,
         }}
+        onPointerDown={(event) => startHeaderSelect(event, "columns", col)}
       >
         {columnLetters(col + 1)}
         {resizeHandle("columns", col)}
@@ -788,6 +912,7 @@ export function SheetGrid({
         role="rowheader"
         className={`border-border text-muted-foreground absolute left-0 flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
         style={{ top: offset + rows.starts[row]!, height: rows.size(row), width: HEADER_COLUMN_PX }}
+        onPointerDown={(event) => startHeaderSelect(event, "rows", row)}
       >
         {row + 1}
         {resizeHandle("rows", row)}
@@ -1212,8 +1337,18 @@ export function SheetGrid({
             style={{ width: HEADER_COLUMN_PX + frozenWidth, height: HEADER_ROW_PX + frozenHeight }}
           >
             <div
+              role="button"
+              aria-label="Select all"
               className="border-border bg-muted absolute top-0 left-0 border-r border-b"
               style={{ width: HEADER_COLUMN_PX, height: HEADER_ROW_PX }}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || !rows.ids.length || !cols.ids.length) return;
+                event.preventDefault();
+                selectBox(
+                  { row: rows.ids.length - 1, col: cols.ids.length - 1 },
+                  { row: 0, col: 0 },
+                );
+              }}
             />
             {Array.from({ length: frozenCols }, (_, col) => columnHeader(col))}
             {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, HEADER_ROW_PX))}

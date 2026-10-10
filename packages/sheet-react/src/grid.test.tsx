@@ -5,12 +5,13 @@ import { DE_DE, EN_US, type SheetLocale } from "@chat/sheet/locales";
 import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet } from "@chat/sheet/model/calc";
 import { parseFormula } from "@chat/sheet/model/formula";
-import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
+import { NEW_SHEET, emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp } from "@chat/sheet/model/ops";
 import { SheetGrid, type CellEditing, type OverlayChange, type SheetSelection } from "./grid.tsx";
 import { dragPlace } from "./overlay-place.ts";
 
 afterEach(cleanup);
+const [NEW_ROWS, NEW_COLS] = [NEW_SHEET.rows, NEW_SHEET.cols];
 
 const apply = (doc: SheetDoc, ...ops: SheetOp[]) =>
   applyChange(doc, { clientId: "t", seq: 1, ops }, 1).doc;
@@ -139,6 +140,41 @@ describe("the sheet grid", () => {
     expect(grid.getAttribute("aria-activedescendant")).toBe(
       document.querySelector('[aria-selected="true"]')!.id,
     );
+  });
+
+  it("jumps to the data's edges, selects its block, and whole rows and columns", () => {
+    let doc = emptyDoc();
+    doc = apply(doc, {
+      op: "set",
+      sh: "s1",
+      cells: [1, 2, 3, 4, 7].map((row) => set(doc, row, 1, row)).concat(set(doc, 1, 2, "x")),
+    });
+    render(<Harness doc={doc} />);
+    const grid = screen.getByRole("grid");
+    const shown = () => screen.getByTestId("selection").textContent;
+    // From A1 down: the run's end, then the next filled cell, then the sheet's last row.
+    fireEvent.keyDown(grid, { key: "ArrowDown", ctrlKey: true });
+    expect(shown()).toBe("s1.r4/s1.c1-s1.r4/s1.c1");
+    fireEvent.keyDown(grid, { key: "ArrowDown", metaKey: true });
+    expect(shown()).toBe("s1.r7/s1.c1-s1.r7/s1.c1");
+    fireEvent.keyDown(grid, { key: "ArrowUp", ctrlKey: true, shiftKey: true });
+    expect(shown()).toBe("s1.r7/s1.c1-s1.r4/s1.c1");
+    fireEvent.keyDown(grid, { key: "ArrowUp", ctrlKey: true });
+    fireEvent.keyDown(grid, { key: "a", metaKey: true });
+    expect(shown()).toBe("s1.r4/s1.c2-s1.r1/s1.c1");
+    fireEvent.keyDown(grid, { key: "a", metaKey: true });
+    expect(shown()).toBe(`s1.r${NEW_ROWS}/s1.c${NEW_COLS}-s1.r1/s1.c1`);
+    fireEvent.keyDown(grid, { key: " ", ctrlKey: true });
+    fireEvent.pointerDown(screen.getByRole("columnheader", { name: "C" }), { button: 0 });
+    fireEvent.pointerUp(window);
+    expect(shown()).toBe(`s1.r${NEW_ROWS}/s1.c3-s1.r1/s1.c3`);
+    fireEvent.pointerDown(screen.getByRole("rowheader", { name: "2" }), { button: 0 });
+    fireEvent.pointerDown(screen.getByRole("rowheader", { name: "4" }), {
+      button: 0,
+      shiftKey: true,
+    });
+    fireEvent.pointerUp(window);
+    expect(shown()).toBe(`s1.r2/s1.c${NEW_COLS}-s1.r4/s1.c1`);
   });
 
   it("types a fresh value, edits the formula behind one, and sends commands up", () => {
