@@ -74,7 +74,8 @@ function RichEditor({
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-7 pb-4"
       >
         <EditorContextMenu editor={editor}>
-          <EditorContent editor={editor} className="flex grow flex-col" />
+          {/* A wide panel centres the text at a readable line length. */}
+          <EditorContent editor={editor} className="mx-auto flex w-full max-w-3xl grow flex-col" />
         </EditorContextMenu>
         {/* Room past the end, so the last lines can be read and written mid-panel. */}
         <div
