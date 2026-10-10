@@ -43,6 +43,7 @@ export const Route = createFileRoute("/api/sheets/$documentId/export")({
               sheet: liveSheetExport(
                 read.doc,
                 calculateSheet(read.doc, { revision: read.revision, epoch: 0, ...read.moment }),
+                read.comments,
               ),
             },
             request.signal,

@@ -41,7 +41,7 @@ import { convertOperations } from "../sheet/server/convert.ts";
 import { momentAt } from "../sheet/server/moment.ts";
 import type { SheetService } from "../sheet/server/sheet-service.ts";
 import { sheetView, type SheetWindow } from "../sheet/server/sheet-view.ts";
-import { sheetFromWorkbook } from "../sheet/server/import.ts";
+import { sheetFromWorkbook, type ImportedNote } from "../sheet/server/import.ts";
 import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 
 /** Above this the focused document is sent as a window of blocks, not whole. */
@@ -1580,7 +1580,12 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     if (!decoded.ok)
       return { outcome: "invalid", message: `Provide a title, and operations. ${decoded.issue}` };
     const { scope: requested, locale, operations, fromFile } = decoded.value;
-    let imported: { doc: SheetDoc; dropped: string[]; name: string } | null = null;
+    let imported: {
+      doc: SheetDoc;
+      dropped: string[];
+      notes: ImportedNote[];
+      name: string;
+    } | null = null;
     if (fromFile !== undefined) {
       if (!input.readSheetFile)
         return { outcome: "unavailable", message: "Files cannot be read in this chat." };
@@ -1596,7 +1601,12 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           outcome: "invalid",
           message: `${file.success.name} cannot be a live sheet: ${built.reason}. Work on it with the spreadsheet tools instead.`,
         };
-      imported = { doc: built.doc, dropped: built.dropped, name: file.success.name };
+      imported = {
+        doc: built.doc,
+        dropped: built.dropped,
+        notes: built.notes,
+        name: file.success.name,
+      };
     }
     const title =
       decoded.value.title ??
@@ -1659,6 +1669,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             },
         input.writeGuard,
         imported?.doc,
+        imported?.notes,
       )
       .pipe(
         Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),

@@ -12,6 +12,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { presenceUser } from "../../presence-user.ts";
 import { uuidv7 } from "uuidv7";
+import type { ImportedNote } from "./import.ts";
 import {
   CommentInput,
   DeleteCommentInput,
@@ -200,12 +201,13 @@ const decode =
 export class SheetService extends Context.Service<
   SheetService,
   {
-    /** A new sheet: one empty tab, or `doc`, built from a file, when given. */
+    /** A new sheet: one empty tab, or `doc`, built from a file, with that file's notes as threads. */
     create<E = never, R = never>(
       userId: string,
       input: CreateSheetInput,
       guard?: DocumentWriteGuard<E, R>,
       doc?: SheetDoc,
+      notes?: readonly ImportedNote[],
     ): Effect.Effect<EditableDocument, DocumentError | E, R>;
     /** The live document and what its volatile functions read. Null when not this person's. */
     read(
@@ -551,6 +553,7 @@ export class SheetService extends Context.Service<
         input: CreateSheetInput,
         guard?: DocumentWriteGuard<E, R>,
         from?: SheetDoc,
+        notes: readonly ImportedNote[] = [],
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateSheetInput, "invalid sheet")(input);
@@ -566,9 +569,20 @@ export class SheetService extends Context.Service<
           const locale = SHEET_LOCALES.find((each) => each.id === parsed.locale)?.id ?? "en-US";
           const timeZone =
             parsed.timeZone && validTimeZone(parsed.timeZone) ? parsed.timeZone : "UTC";
-          const doc = from
+          // Each note a thread of its own, anchored where it was.
+          const threads = notes.map((note) => ({ id: uuidv7(), note }));
+          const base = from
             ? { ...from, settings: { locale, timeZone } }
             : emptyDoc("Sheet1", { locale, timeZone });
+          const doc = threads.length
+            ? {
+                ...base,
+                anchors: {
+                  ...base.anchors,
+                  ...Object.fromEntries(threads.map(({ id, note }) => [id, note.cell])),
+                },
+              }
+            : base;
           const document = yield* transaction((tx) =>
             Effect.gen(function* () {
               if (guard) yield* guard(tx);
@@ -576,7 +590,7 @@ export class SheetService extends Context.Service<
               if ("conversationId" in owner)
                 yield* documents.lockConversation(tx, userId, owner.conversationId);
               else yield* lockProjectForEditing(tx, userId, owner.projectId);
-              return yield* documents.create(tx, userId, owner, {
+              const created = yield* documents.create(tx, userId, owner, {
                 title: parsed.title,
                 kind: "sheet",
                 createdByMessageId:
@@ -584,6 +598,19 @@ export class SheetService extends Context.Service<
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: { ...doc },
               });
+              // IDs from uuidv7 keep each thread's comments in order under one timestamp.
+              for (const { id, note } of threads)
+                for (const [index, entry] of note.entries.entries())
+                  yield* documents.addComment(tx, {
+                    id: index ? uuidv7() : id,
+                    documentId: created.id,
+                    threadId: id,
+                    userId: null,
+                    origin: "file",
+                    fileAuthor: entry.author || null,
+                    body: entry.text,
+                  });
+              return created;
             }),
           );
           yield* documentChanged(userId, document);

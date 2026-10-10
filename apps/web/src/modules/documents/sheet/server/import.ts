@@ -9,6 +9,7 @@ import {
   emptySheet,
   positions,
   type Cell,
+  type CellAnchor,
   type Sheet,
   type SheetDoc,
   type SheetSettings,
@@ -16,12 +17,18 @@ import {
 import { parseTyped } from "@chat/sheet/value-parse";
 import type { Chart } from "@chat/sheet/model/chart";
 import type { FileFilter, LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { FileNote } from "~/modules/spreadsheets/server/file-notes.ts";
 import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
 import type { Validation } from "@chat/sheet/model/validation";
 import { chartOfFile } from "./chart-files.ts";
 
+/** A file's note, as the comment thread it becomes on the cells it was on. */
+export interface ImportedNote {
+  readonly cell: CellAnchor;
+  readonly entries: FileNote["entries"];
+}
 export type Imported =
-  | { ok: true; doc: SheetDoc; dropped: string[] }
+  | { ok: true; doc: SheetDoc; dropped: string[]; notes: ImportedNote[] }
   | { ok: false; reason: string };
 
 /** Appends rows or columns to a sheet being built until it has `rows` and `cols`. */
@@ -283,7 +290,27 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
   doc = { ...doc, charts };
   const over = overLimits(doc);
   if (over) return { ok: false, reason: over };
-  return { ok: true, doc, dropped: [...read.dropped] };
+  const notes = read.sheets.flatMap((each, index) =>
+    (each.notes ?? []).flatMap((note): ImportedNote[] => {
+      const sh = ids[index]!;
+      const box = parseRange(note.ref);
+      const [rows, cols] = [positions(doc.sheet[sh]!.rows).ids, positions(doc.sheet[sh]!.cols).ids];
+      if (!box || !rows[box.bottom - 1] || !cols[box.right - 1]) return [];
+      const range = box.top !== box.bottom || box.left !== box.right;
+      return [
+        {
+          cell: {
+            sh,
+            r: rows[box.top - 1]!,
+            c: cols[box.left - 1]!,
+            ...(range ? { r2: rows[box.bottom - 1]!, c2: cols[box.right - 1]! } : {}),
+          },
+          entries: note.entries,
+        },
+      ];
+    }),
+  );
+  return { ok: true, doc, dropped: [...read.dropped], notes };
 }
 
 /**

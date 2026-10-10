@@ -91,6 +91,7 @@ import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from ".
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
 import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
 import { readValidation, writeValidations, type FileValidation } from "./file-validation.ts";
+import { NOTE_LIMITS, readNote, writeNotes, type FileNote } from "./file-notes.ts";
 import {
   fileHighlightStyles,
   readConditional,
@@ -838,6 +839,8 @@ export interface LiveSheetExport {
     readonly validations?: readonly FileValidation[];
     /** The tab's colour, as #RRGGBB. */
     readonly color?: string;
+    /** Cell notes, each a comment thread. */
+    readonly notes?: readonly FileNote[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
@@ -940,6 +943,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     if (each.freeze) setFreezePanes(sheet, each.freeze);
     if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
     if (each.validations?.length) writeValidations(sheet, each.validations);
+    if (each.notes?.length) writeNotes(sheet, each.notes);
     if (each.color)
       sheet.sheetProperties = makeSheetProperties({
         ...sheet.sheetProperties,
@@ -991,6 +995,8 @@ export interface LiveSheetImport {
     readonly validations?: readonly FileValidation[];
     /** The tab's colour, as #RRGGBB. */
     readonly color?: string;
+    /** Cell notes, each a comment thread. */
+    readonly notes?: readonly FileNote[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -1197,7 +1203,9 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
         dropped.add("data validation of kinds a live sheet does not check (times, formulas)");
       return read ? [read] : [];
     });
-    if (listComments(sheet).length) dropped.add("cell notes");
+    const notes = listComments(sheet)
+      .slice(0, NOTE_LIMITS.notes)
+      .flatMap((note) => readNote(note) ?? []);
     const freeze = getFreezePanes(sheet);
     return {
       name: sheet.title,
@@ -1214,6 +1222,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       ...(conditional.length ? { conditional } : {}),
       ...(validations.length ? { validations } : {}),
       ...(tabColor ? { color: tabColor } : {}),
+      ...(notes.length ? { notes } : {}),
     };
   });
   return {

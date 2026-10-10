@@ -314,4 +314,43 @@ describe("live sheets", () => {
     expect(read.comments.filter((each) => each.threadId === thread)).toHaveLength(2);
     expect(read.comments.find((each) => each.id === thread)?.resolvedAt).not.toBeNull();
   });
+
+  it("keeps a file's notes as threads under the names the file gave, which an editor may delete", async () => {
+    const owner = uuidv7();
+    const conversationId = uuidv7();
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.insert(user).values({ id: owner, name: "Importer", email: `${owner}@t.io` });
+        yield* db.insert(conversations).values({ id: conversationId, userId: owner });
+      }),
+    );
+    const cell = { sh: "s1", r: "s1.r2", c: "s1.c2" };
+    const document = await sheets((s) =>
+      s.create(owner, { conversationId, title: "Imported" }, undefined, undefined, [
+        {
+          cell,
+          entries: [
+            { author: "Jane Doe", text: "Check this" },
+            { author: "", text: "Checked" },
+          ],
+        },
+      ]),
+    );
+    const read = await readDoc(owner, document.id);
+    const [root, reply] = read.comments;
+    expect(read.doc.anchors[root!.id]).toEqual(cell);
+    expect([root, reply]).toMatchObject([
+      {
+        threadId: root!.id,
+        author: null,
+        byAssistant: false,
+        fromFile: { name: "Jane Doe" },
+        body: "Check this",
+      },
+      { threadId: root!.id, fromFile: { name: "" }, body: "Checked" },
+    ]);
+    await sheets((s) => s.deleteComment(owner, { documentId: document.id, commentId: root!.id }));
+    expect((await readDoc(owner, document.id)).comments).toEqual([]);
+  });
 });

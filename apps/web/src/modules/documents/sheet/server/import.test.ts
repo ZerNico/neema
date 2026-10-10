@@ -134,6 +134,53 @@ describe("importing into a live sheet", () => {
     );
   });
 
+  it("writes open comment threads as notes, and reads notes back as threads", async () => {
+    const doc = applyChange(
+      build([{ kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Total", 5]] }]),
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          { op: "anchor", thread: "t1", at: { sh: "s1", r: "s1.r1", c: "s1.c2" } },
+          { op: "anchor", thread: "t2", at: { sh: "s1", r: "s1.r1", c: "s1.c1" } },
+        ],
+      },
+      2,
+    ).doc;
+    const comment = (id: string, threadId: string, body: string, extra = {}) => ({
+      id,
+      threadId,
+      author: { id: "u1", name: "Ana" },
+      byAssistant: false,
+      fromFile: null,
+      body,
+      createdAt: "2026-10-10T00:00:00.000Z",
+      resolvedAt: null,
+      quote: null,
+      toAssistant: false,
+      answered: false,
+      ...extra,
+    });
+    const comments = [
+      comment("t1", "t1", "Is this right?"),
+      comment("r1", "t1", "Yes.", { author: null, byAssistant: true }),
+      comment("t2", "t2", "Done", { resolvedAt: "2026-10-10T01:00:00.000Z" }),
+    ];
+    const read = await importLiveSheet(
+      await exportLiveSheet(liveSheetExport(doc, undefined, comments)),
+    );
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    // The resolved thread stays behind. A note has no replies, so the open one's are in its text.
+    expect(imported.notes).toEqual([
+      {
+        cell: { sh: "s1", r: "s1.r1", c: "s1.c2" },
+        entries: [{ author: "Ana", text: "Is this right?\n\nAssistant: Yes." }],
+      },
+    ]);
+  });
+
   it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
     const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
     const imported = sheetFromWorkbook(

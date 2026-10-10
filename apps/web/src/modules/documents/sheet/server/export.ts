@@ -2,17 +2,17 @@ import { columnLetters } from "@chat/sheet/a1";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
 import type { FileFilter, LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
+import type { DocumentComment } from "../../schema.ts";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import { filterSpan, filteredRows, shownText, type SheetFilter } from "@chat/sheet/model/filter";
 import { fileChartOf } from "./chart-files.ts";
 
 const address = (row: number, column: number) => `${columnLetters(column)}${row}`;
 
-/**
- * A live sheet as the workbook built from it: positions instead of IDs,
- * formulas as text, and text that would read as a formula escaped as
- * setCells escapes it.
- */
+/** The name a note carries for who wrote a comment. */
+const authorOf = (comment: DocumentComment) =>
+  comment.byAssistant ? "Assistant" : (comment.fromFile?.name ?? comment.author?.name ?? "");
+
 /**
  * A sheet's filter as Excel files keep one: a list of values per column. A
  * condition, which the file cannot hold here, goes as the values that pass it.
@@ -55,8 +55,39 @@ function fileFilterOf(
   return { ref: `${address(top, left)}:${address(bottom, right)}`, columns };
 }
 
-export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetExport {
+/**
+ * A live sheet as the workbook built from it: positions instead of IDs,
+ * formulas as text, and text that would read as a formula escaped as
+ * setCells escapes it.
+ */
+export function liveSheetExport(
+  doc: SheetDoc,
+  values?: SheetValues,
+  comments: readonly DocumentComment[] = [],
+): LiveSheetExport {
   const ids = liveSheets(doc);
+  // Open threads, each a note on its first cell; Excel keeps no resolved ones.
+  const threads = comments.filter(
+    (each) => each.id === each.threadId && !each.resolvedAt && doc.anchors[each.id],
+  );
+  const notesOf = (sheet: string) => {
+    const rows = positions(doc.sheet[sheet]!.rows);
+    const cols = positions(doc.sheet[sheet]!.cols);
+    const notes = threads.flatMap((thread) => {
+      const anchor = doc.anchors[thread.id]!;
+      const [row, col] = [rows.at(anchor.r), cols.at(anchor.c)];
+      if (anchor.sh !== sheet || row === undefined || col === undefined) return [];
+      return [
+        {
+          ref: address(row, col),
+          entries: comments
+            .filter((each) => each.threadId === thread.id)
+            .map((each) => ({ author: authorOf(each), text: each.body })),
+        },
+      ];
+    });
+    return notes.length ? { notes } : {};
+  };
   return {
     sheets: ids.map((id) => {
       const sheet = doc.sheet[id]!;
@@ -182,6 +213,7 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
         ...(conditional.length ? { conditional } : {}),
         ...(validations.length ? { validations } : {}),
         ...(sheet.color ? { color: sheet.color } : {}),
+        ...notesOf(id),
       };
     }),
     names: Object.values(doc.names).map((name) => ({
