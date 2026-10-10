@@ -13,6 +13,7 @@ import {
   decimalsSelection,
   freezeAt,
   mergeSelection,
+  selectionStats,
   shiftDecimals,
 } from "./format-commands.ts";
 
@@ -95,5 +96,22 @@ describe("the Home tab's commands", () => {
     expect(styleAt(centred, 1, 1).horizontal).toBe("center");
     const frozen = apply(emptyDoc(), freezeAt(context(emptyDoc(), [3, 2]), "selection"));
     expect(frozen.sheet.s1!.freeze).toEqual({ row: "s1.r2", col: "s1.c1" });
+  });
+
+  it("sums, averages and counts a selection for the status bar", () => {
+    let doc = emptyDoc();
+    for (const [row, value] of [
+      [1, "Label"],
+      [2, "10"],
+      [3, "20"],
+    ] as const)
+      doc = type(doc, row, 1, value);
+    expect(selectionStats(context(doc, [1, 1], [4, 1]))).toEqual({
+      count: 3,
+      numbers: 2,
+      sum: 30,
+      average: 15,
+    });
+    expect(selectionStats(context(doc, [1, 1]))).toBeNull();
   });
 });

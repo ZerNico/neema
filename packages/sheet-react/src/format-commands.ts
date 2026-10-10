@@ -203,3 +203,28 @@ export function freezeAt(context: GridContext, kind: FreezeKind): SheetOp[] {
 export function clearSelectionAs(context: GridContext, what: "formats" | "all"): SheetOp[] {
   return [{ op: "clear", sh: context.sheet, area: selectionBox(context).area, what }];
 }
+
+/**
+ * What Excel's status bar says of a selection of more than one cell: how
+ * many hold anything, and the sum and average of its numbers. Null for one
+ * cell, as there it says nothing.
+ */
+export function selectionStats(context: GridContext, limit = 200_000) {
+  const box = selectionBox(context);
+  if (box.rowIds.length * box.colIds.length < 2) return null;
+  let [count, numbers, sum] = [0, 0, 0];
+  let seen = 0;
+  for (const r of box.rowIds)
+    for (const c of box.colIds) {
+      // A whole sheet selected is counted only as far as is quick.
+      if (++seen > limit) return { count, numbers, sum, average: numbers ? sum / numbers : null };
+      const value = context.values.value(context.sheet, r, c);
+      if (value === null || value === "") continue;
+      count++;
+      if (typeof value === "number") {
+        numbers++;
+        sum += value;
+      }
+    }
+  return { count, numbers, sum, average: numbers ? sum / numbers : null };
+}
