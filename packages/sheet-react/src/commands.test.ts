@@ -11,6 +11,7 @@ import {
   deleteAtSelection,
   dragSelection,
   enterCell,
+  enterSelection,
   fillFromHandle,
   fillSelection,
   insertAtSelection,
@@ -234,5 +235,24 @@ describe("dragging the selection by its border", () => {
     expect(copied.sheet.s1!.cells[r]![c]!.s).toBe(
       doc.sheet.s1!.cells[at(doc, 2, 1).r]![at(doc, 2, 1).c]!.s,
     );
+  });
+});
+
+describe("Ctrl+Enter", () => {
+  it("writes what was typed into every selected cell, a formula shifted to each", () => {
+    let doc = emptyDoc();
+    for (let row = 1; row <= 3; row++) doc = type(doc, row, 1, String(row * 10));
+    // The active cell is the selection's head, where the edit was typed.
+    doc = apply(doc, enterSelection(context(doc, [3, 2], [1, 2]), "=A1*2"));
+    expect([formulaAt(doc, 1, 2), formulaAt(doc, 3, 2), shown(doc, 3, 2)]).toEqual([
+      "A1*2",
+      "A3*2",
+      60,
+    ]);
+    doc = apply(doc, enterSelection(context(doc, [1, 3], [2, 4]), "5 %"));
+    expect([shown(doc, 2, 4), doc.sheet.s1!.cells[at(doc, 2, 4).r]![at(doc, 2, 4).c]!.s]).toEqual([
+      0.05,
+      '{"numberFormat":"0%"}',
+    ]);
   });
 });

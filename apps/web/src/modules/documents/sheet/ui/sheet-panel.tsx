@@ -31,6 +31,7 @@ import {
   deleteAtSelection,
   dragSelection,
   enterCell,
+  enterSelection,
   fillFromHandle,
   fillSelection,
   formatSelection,
@@ -565,6 +566,7 @@ export default function SheetPanelBody({
                 editing={editing}
                 onEditingChange={setEditing}
                 onCommit={commit}
+                onCommitSelection={(text) => run(enterSelection(context, text))}
                 editSource={(at) => cellSource(doc, sheet, at.r, at.c, locale)}
                 onCommand={onCommand}
                 onCopy={(cut) => {

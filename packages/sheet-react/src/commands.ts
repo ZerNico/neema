@@ -120,6 +120,34 @@ export function enterCell(context: GridContext, at: CellRef, raw: string): Sheet
   return ops;
 }
 
+/**
+ * What was typed, written into every selected cell as Ctrl+Enter does: a
+ * formula is read at the active cell and shifted to each other one.
+ */
+export function enterSelection(context: GridContext, raw: string): SheetOp[] {
+  const head = context.selection.head;
+  const typed = enterCell(context, head, raw);
+  const box = selectionBox(context);
+  const sheet = context.doc.sheet[context.sheet]!;
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  const [headRow, headCol] = [rows.at(head.r) ?? box.top, cols.at(head.c) ?? box.left];
+  return typed.flatMap((op): SheetOp[] => {
+    if (op.op === "format") return [{ ...op, area: box.area }];
+    if (op.op !== "set") return [op];
+    const written = op.cells[0]!;
+    const cells = box.rowIds.flatMap((r, y) =>
+      box.colIds.map((c, x): CellWrite => {
+        if (!written.f) return { r, c, v: written.v ?? null };
+        const shift = { rows: box.top + y - headRow, cols: box.left + x - headCol };
+        const moved = copyFormula(written.f, shift, { doc: context.doc, sheet: context.sheet });
+        return "formula" in moved ? { r, c, f: moved.formula } : { r, c, v: "#REF!" };
+      }),
+    );
+    return [{ ...op, cells }];
+  });
+}
+
 /** Empties the selected cells, keeping their formats, as Delete does. */
 export function clearSelection(context: GridContext): SheetOp[] {
   return [{ op: "clear", sh: context.sheet, area: selectionBox(context).area, what: "contents" }];

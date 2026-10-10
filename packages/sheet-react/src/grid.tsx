@@ -123,6 +123,8 @@ export interface SheetGridProps {
   readonly onEditingChange?: (editing: CellEditing | null) => void;
   /** A finished edit: what was typed into the cell. */
   readonly onCommit?: (at: CellRef, text: string) => void;
+  /** An edit finished with Ctrl+Enter: what was typed, for every selected cell. */
+  readonly onCommitSelection?: (text: string) => void;
   /** What editing a cell starts from: its formula or value as typed. */
   readonly editSource?: (at: CellRef) => string;
   readonly onCommand?: (command: GridCommand) => void;
@@ -194,6 +196,7 @@ export function SheetGrid({
   editing = null,
   onEditingChange,
   onCommit,
+  onCommitSelection,
   editSource,
   onCommand,
   onCopy,
@@ -434,7 +437,15 @@ export function SheetGrid({
       point(next, next);
       return;
     }
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && onCommitSelection && editing) {
+      // Ctrl+Enter fills the selection with what was typed, and the selection stays.
+      event.preventDefault();
+      ended.current = editing;
+      setPointing(null);
+      onCommitSelection(editing.text);
+      onEditingChange!(null);
+      scroller.current?.focus({ preventScroll: true });
+    } else if (event.key === "Enter") {
       event.preventDefault();
       commit(event.shiftKey ? -1 : 1, 0);
     } else if (event.key === "Tab") {
