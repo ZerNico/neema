@@ -14,8 +14,8 @@ const escapeHtml = (text: string) =>
  * A sheet as a page to print, as Excel prints its used range: the cells that
  * hold anything, as they show, at their widths, with light gridlines. Rows
  * and columns hidden, filtered out or collapsed are left out. Null when the
- * sheet is empty. The page has no margin of its own, the body keeps it, so
- * the browser prints no header or footer (its URL, title and date).
+ * sheet is empty. Page numbers sit in the page's margin, which keeps the
+ * browser from printing its own header and footer (URL, title and date).
  */
 export function printHtml(
   context: { doc: SheetDoc; values: SheetValues; locale: SheetLocale },
@@ -69,8 +69,8 @@ export function printHtml(
     .map((c) => `<col style="width:${columnPx(sheet.colProps[c])}px">`)
     .join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(sheet.name)}</title><style>
-@page { margin: 0; }
-body { margin: 0; padding: 12mm; font: 11pt Calibri, Aptos, Arial, sans-serif; color: #000; }
+@page { margin: 12mm; @bottom-right { content: counter(page) " / " counter(pages); font: 8pt Calibri, Aptos, Arial, sans-serif; color: #666; } }
+body { margin: 0; font: 11pt Calibri, Aptos, Arial, sans-serif; color: #000; }
 table { border-collapse: collapse; table-layout: fixed; }
 td { border: 1px solid #d4d4d4; padding: 1px 4px; white-space: pre; overflow: hidden; vertical-align: bottom; }
 tr { break-inside: avoid; }
