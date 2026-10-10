@@ -164,6 +164,21 @@ describe("document editor", () => {
     expect(sync.markdown()).toBe("Weight $w_k$ here");
   });
 
+  it("replaces a selection across blocks with the formula it becomes", async () => {
+    const sync = await replica("Area\n\ndef");
+    mount(sync);
+    const editor = await editorOf();
+    act(() => {
+      // From the end of "Area" into "def": the formula takes "de".
+      editor.commands.setTextSelection({ from: 5, to: 9 });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Formula" }));
+    const field = await screen.findByRole("textbox", { name: "LaTeX" });
+    await waitFor(() => expect(field).toHaveValue("de"));
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(sync.markdown()).toBe("Area$de$f"));
+  });
+
   it("inserts a formula from the toolbar, inline in text and on its own line when empty", async () => {
     const sync = await replica("Area is pi r^2\n\n");
     mount(sync);
