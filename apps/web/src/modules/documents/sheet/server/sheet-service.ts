@@ -335,7 +335,6 @@ export class SheetService extends Context.Service<
             return yield* new DocumentNotAvailable({ documentId });
           const snapshot = storedDoc(state.snapshot);
           const changes = yield* Effect.sync(() => state.steps.map(storedChange));
-          const last = state.steps.at(-1);
           const entry: Entry = {
             doc: replay(snapshot, state.snapshotRevision, changes),
             snapshot,
@@ -346,7 +345,7 @@ export class SheetService extends Context.Service<
               bytes: sizeOf(changes[index]!),
             })),
             revision: state.document.revision,
-            committedAt: last ? last.createdAt.getTime() : Date.parse(state.document.updatedAt),
+            committedAt: state.committedAt.getTime(),
             acked: new Map(),
             presence: new Map(),
             comments: yield* documents.comments(documentId),
@@ -472,6 +471,7 @@ export class SheetService extends Context.Service<
             revision: entry.revision + kept.length,
             lastEditedBy: author.origin,
             lastEditorUserId: author.userId,
+            committedAt: new Date(now),
           });
           return {
             document,

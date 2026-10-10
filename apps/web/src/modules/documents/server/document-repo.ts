@@ -22,7 +22,7 @@ import {
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
+  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId" | "committedAt">
 >;
 type Reader = Pick<DbTx, "select">;
 
@@ -51,7 +51,7 @@ const documentColumns = (userId: string) => ({
   updatedAt: documents.updatedAt,
   access: accessSql(userId),
 });
-type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
+type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision" | "committedAt"> & {
   access: ProjectRole | null;
 };
 const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
@@ -72,6 +72,8 @@ export interface StoredDocumentState {
   document: EditableDocument;
   snapshot: Record<string, unknown>;
   snapshotRevision: number;
+  /** When the document's current revision was committed. */
+  committedAt: Date;
   steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
@@ -252,13 +254,14 @@ export class DocumentRepo extends Context.Service<
                     ...documentColumns(userId),
                     snapshot: documents.snapshot,
                     snapshotRevision: documents.snapshotRevision,
+                    committedAt: documents.committedAt,
                   })
                   .from(documents)
                   .where(and(eq(documents.id, documentId), isNotNull(accessSql(userId))))
                   .for("share", { of: documents })
                   .pipe(Effect.orDie);
                 if (!row) return null;
-                const { snapshot, snapshotRevision, ...document } = row;
+                const { snapshot, snapshotRevision, committedAt, ...document } = row;
                 const steps = yield* tx
                   .select({
                     revision: documentSteps.revision,
@@ -276,7 +279,13 @@ export class DocumentRepo extends Context.Service<
                   )
                   .orderBy(asc(documentSteps.revision))
                   .pipe(Effect.orDie);
-                return { document: toDocument(document), snapshot, snapshotRevision, steps };
+                return {
+                  document: toDocument(document),
+                  snapshot,
+                  snapshotRevision,
+                  committedAt,
+                  steps,
+                };
               }),
             )
             .pipe(Effect.orDie);

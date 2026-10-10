@@ -52,6 +52,11 @@ export const documents = pgTable(
     }),
     snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
     snapshotRevision: integer("snapshot_revision").notNull().default(0),
+    /**
+     * When `revision` was committed. A sheet's NOW() reads it, so it must stay
+     * the same across restarts and compaction, unlike `updated_at`.
+     */
+    committedAt: timestamp("committed_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

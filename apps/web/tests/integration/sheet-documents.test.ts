@@ -209,6 +209,7 @@ describe("live sheets", () => {
         }),
       ),
     );
+    const { moment } = await readDoc(owner, document.id);
     const fresh = ManagedRuntime.make(appLayer);
     try {
       const feed = await fresh.runPromise(
@@ -218,7 +219,8 @@ describe("live sheets", () => {
       );
       const frame = Option.getOrThrow(await fresh.runPromise(Stream.runHead(feed!)));
       if (frame.type !== "reset") throw new Error("expected reset");
-      expect(frame).toMatchObject({ revision: 2, acked: 2 });
+      // Rebuilt elsewhere, the revision's NOW is the one it was committed with.
+      expect(frame).toMatchObject({ revision: 2, acked: 2, moment });
       expect([valueAt(frame.doc, 1, 1), valueAt(frame.doc, 2, 1)]).toEqual([1, 2]);
       // A write through the other process leaves this one's entry behind; it rebuilds and applies.
       await fresh.runPromise(
