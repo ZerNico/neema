@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { SHEET_LOCALES } from "@chat/sheet/locales";
 import { applyChange } from "@chat/sheet/model/apply";
 import { LIVE_LIMITS, overLimits } from "@chat/sheet/model/limits";
-import { emptyDoc, positions, type SheetDoc } from "@chat/sheet/model";
+import { emptyDoc, positions, type CellAnchor, type SheetDoc } from "@chat/sheet/model";
 import { parseChange, type SheetChange, type SheetOp } from "@chat/sheet/model/ops";
 import { sheetClients } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -174,13 +174,14 @@ const compactionPoint = (all: ReadonlyArray<Kept>, now: number) => {
 };
 
 /** A cell a thread can sit on: on a live sheet, in a live row and column. */
-const cellExists = (doc: SheetDoc, cell: { sh: string; r: string; c: string }) => {
+/** Whether a thread's cell, or both corners of its range, are live on a live sheet. */
+const cellExists = (doc: SheetDoc, cell: CellAnchor) => {
   const sheet = doc.sheet[cell.sh];
+  if (!sheet || !doc.sheets.some((entry) => entry.id === cell.sh && !entry.dead)) return false;
+  const [rows, cols] = [positions(sheet.rows), positions(sheet.cols)];
   return (
-    !!sheet &&
-    doc.sheets.some((entry) => entry.id === cell.sh && !entry.dead) &&
-    positions(sheet.rows).at(cell.r) !== undefined &&
-    positions(sheet.cols).at(cell.c) !== undefined
+    [cell.r, cell.r2 ?? cell.r].every((r) => rows.at(r) !== undefined) &&
+    [cell.c, cell.c2 ?? cell.c].every((c) => cols.at(c) !== undefined)
   );
 };
 /** The client a person's comment anchors are written as. */
@@ -247,7 +248,7 @@ export class SheetService extends Context.Service<
       input: {
         documentId: string;
         thread?: string | undefined;
-        cell?: { sh: string; r: string; c: string } | undefined;
+        cell?: CellAnchor | undefined;
         quote?: string | undefined;
         body: string;
       },
@@ -719,7 +720,7 @@ export class SheetService extends Context.Service<
         author: Author,
         clientId: string,
         thread: string,
-        cell: { sh: string; r: string; c: string },
+        cell: CellAnchor,
       ) =>
         Effect.gen(function* () {
           const seq = (yield* lastSeq(tx, documentId, entry, clientId)) + 1;
@@ -813,7 +814,7 @@ export class SheetService extends Context.Service<
         input: {
           documentId: string;
           thread?: string | undefined;
-          cell?: { sh: string; r: string; c: string } | undefined;
+          cell?: CellAnchor | undefined;
           quote?: string | undefined;
           body: string;
         },

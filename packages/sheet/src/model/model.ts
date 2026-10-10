@@ -104,9 +104,16 @@ export interface SheetDoc {
   readonly names: Readonly<Record<string, { readonly name: string; readonly f: Formula }>>;
   readonly charts: Readonly<Record<string, Chart>>;
   /** Comment threads' cells, by thread ID: several threads may share a cell. */
-  readonly anchors: Readonly<
-    Record<string, { readonly sh: string; readonly r: string; readonly c: string }>
-  >;
+  readonly anchors: Readonly<Record<string, CellAnchor>>;
+}
+
+/** Where a comment thread sits: a cell, or a range from it to `r2`/`c2`. */
+export interface CellAnchor {
+  readonly sh: string;
+  readonly r: string;
+  readonly c: string;
+  readonly r2?: string;
+  readonly c2?: string;
 }
 
 const live = (entries: readonly AxisEntry[]) => entries.filter((entry) => !entry.dead);

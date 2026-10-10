@@ -18,8 +18,14 @@ import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./documen
 import { readPartialArray, readPartialObject, type PartialField } from "./partial-json.ts";
 import { invertChange } from "@chat/sheet/model/invert";
 import { calculateSheet, type SheetValues } from "@chat/sheet/model/calc";
-import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
-import { columnLetters, parseCell } from "@chat/sheet/a1";
+import {
+  liveSheets,
+  positions,
+  sheetNamed,
+  type CellAnchor,
+  type SheetDoc,
+} from "@chat/sheet/model";
+import { boxRef, columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
 import { quoteSheet } from "@chat/sheet/model/formula";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import { advertisedParameter } from "~/modules/tools/server/toolset.ts";
@@ -244,7 +250,7 @@ const readTool = Tool.make("read_chat_document", {
 });
 const commentTool = Tool.make("comment_on_document", {
   description:
-    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content; on a live sheet, cell (e.g. Data!B3) and content instead. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short and plain: a card holds about 40 characters a line and shows text as written, so no Markdown. You never resolve a thread; the people in it do.",
+    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content; on a live sheet, cell (a cell or range, e.g. Data!B3 or Data!B3:D9) and content instead. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short and plain: a card holds about 40 characters a line and shows text as written, so no Markdown. You never resolve a thread; the people in it do.",
   parameters: Schema.Struct({
     documentId: Schema.optionalKey(transport(DocumentId)),
     cell: Schema.optionalKey(transport(CommentParams.fields.cell)),
@@ -1176,7 +1182,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       return { outcome: "invalid", ...reference(document), message: "Pass content." };
     yield* loadTree(document.id);
     const state = sheetStates.get(document.id);
-    let cell: { sh: string; r: string; c: string } | undefined;
+    let cell: CellAnchor | undefined;
     let quote: string | undefined;
     if (!value.thread) {
       if (!value.cell || !state)
@@ -1191,17 +1197,23 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         ? sheetNamed(state.doc, name)
         : (sheetNamed(state.doc, sheetWindows.get(document.id)?.sheet ?? "") ??
           liveSheets(state.doc)[0]);
-      const at = parseCell(bang === -1 ? value.cell : value.cell.slice(bang + 1));
+      const at = parseRange(bang === -1 ? value.cell : value.cell.slice(bang + 1));
       const rows = sheet ? positions(state.doc.sheet[sheet]!.rows).ids : [];
       const cols = sheet ? positions(state.doc.sheet[sheet]!.cols).ids : [];
-      if (!sheet || !at || !rows[at.row - 1] || !cols[at.column - 1])
+      if (!sheet || !at || !rows[at.bottom - 1] || !cols[at.right - 1])
         return {
           outcome: "not_found",
           ...reference(document),
           message: `No cell ${value.cell} in this sheet.`,
         };
-      cell = { sh: sheet, r: rows[at.row - 1]!, c: cols[at.column - 1]! };
-      quote = `${quoteSheet(state.doc.sheet[sheet]!.name)}!${columnLetters(at.column)}${at.row}`;
+      const range = at.top !== at.bottom || at.left !== at.right;
+      cell = {
+        sh: sheet,
+        r: rows[at.top - 1]!,
+        c: cols[at.left - 1]!,
+        ...(range ? { r2: rows[at.bottom - 1]!, c2: cols[at.right - 1]! } : {}),
+      };
+      quote = `${quoteSheet(state.doc.sheet[sheet]!.name)}!${boxRef(at)}`;
     }
     const result = yield* input.sheets
       .assistantComment(
@@ -1839,10 +1851,15 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const comments = threadsView(threads.get(document.id) ?? [], asking, (thread) => {
       const at = state.doc.anchors[thread];
       const sheet = at ? state.doc.sheet[at.sh] : undefined;
-      const row = sheet && at ? positions(sheet.rows).at(at.r) : undefined;
-      const col = sheet && at ? positions(sheet.cols).at(at.c) : undefined;
-      if (!sheet || row === undefined || col === undefined) return null;
-      return { cell: `${quoteSheet(sheet.name)}!${columnLetters(col)}${row}` };
+      if (!sheet || !at) return null;
+      const [rows, cols] = [positions(sheet.rows), positions(sheet.cols)];
+      const [top, left] = [rows.at(at.r), cols.at(at.c)];
+      // A range's far corner gone leaves its first cell.
+      const [bottom, right] = [rows.at(at.r2 ?? at.r) ?? top, cols.at(at.c2 ?? at.c) ?? left];
+      if (top === undefined || left === undefined) return null;
+      return {
+        cell: `${quoteSheet(sheet.name)}!${boxRef({ top, left, bottom: bottom!, right: right! })}`,
+      };
     });
     const note = view.next
       ? `\n<note>Window ends here. Call read_chat_document with ${JSON.stringify({ documentId: document.id, ...view.next })} to continue.</note>`

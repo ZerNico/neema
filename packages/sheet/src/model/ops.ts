@@ -1,5 +1,5 @@
 import { isChart, isChartPatch, type ChartPatch } from "./chart.ts";
-import type { Axis, Box, CellValue, Chart, Formula } from "./model.ts";
+import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
  * What changes a sheet document, addressed by IDs. Copying and filling are
@@ -92,7 +92,7 @@ export type SheetOp =
   | {
       readonly op: "anchor";
       readonly thread: string;
-      readonly at: { readonly sh: string; readonly r: string; readonly c: string } | null;
+      readonly at: CellAnchor | null;
     }
   | {
       readonly op: "move";
@@ -270,7 +270,13 @@ function validOp(op: Record<string, unknown>): boolean {
     case "anchor":
       return (
         isId(op.thread) &&
-        (op.at === null || (isRecord(op.at) && isId(op.at.sh) && isId(op.at.r) && isId(op.at.c)))
+        (op.at === null ||
+          (isRecord(op.at) &&
+            isId(op.at.sh) &&
+            isId(op.at.r) &&
+            isId(op.at.c) &&
+            (op.at.r2 === undefined || isId(op.at.r2)) &&
+            (op.at.c2 === undefined || isId(op.at.c2))))
       );
     case "move":
       return (
