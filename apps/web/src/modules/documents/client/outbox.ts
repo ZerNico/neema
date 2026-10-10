@@ -33,7 +33,7 @@ export interface OutboxStore {
  */
 export const outbox: OutboxStore = deviceCache<OutboxEntry>({
   namespace: "document-outbox",
+  // Unsent typing, not a cache: never evicted, whatever its size.
+  keep: true,
   maxBytes: 16 * 1024 * 1024,
-  // A document at its size cap, plus a long offline session's steps.
-  maxEntryBytes: 4 * 1024 * 1024,
 });

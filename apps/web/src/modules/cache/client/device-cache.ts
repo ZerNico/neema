@@ -27,6 +27,12 @@ export interface DeviceCacheOptions {
   readonly maxBytes: number;
   /** A value over this is not kept at all. Defaults to `maxBytes / 8`. */
   readonly maxEntryBytes?: number;
+  /**
+   * Data that is not a cache: nothing is evicted for the budget or refused
+   * for its size. Another tab may own an entry this one loaded, and losing
+   * it would lose work rather than a placeholder.
+   */
+  readonly keep?: boolean;
 }
 
 export interface DeviceCache<V> {
@@ -221,7 +227,7 @@ class NamespaceCache<V> implements DeviceCache<V> {
   set(key: string, value: V): void {
     const bytes = sizeOf(value);
     this.drop(key);
-    if (bytes > this.maxEntryBytes) {
+    if (bytes > this.maxEntryBytes && !this.options.keep) {
       this.mark(key, undefined);
       return;
     }
@@ -255,7 +261,7 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   private evict() {
-    if (this.bytes <= this.options.maxBytes) return;
+    if (this.options.keep || this.bytes <= this.options.maxBytes) return;
     const oldest = [...this.memory.entries()].toSorted((a, b) => a[1].at - b[1].at);
     for (const [key] of oldest) {
       if (this.bytes <= this.options.maxBytes) break;
