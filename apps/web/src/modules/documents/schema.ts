@@ -106,6 +106,14 @@ export const CommentInput = Schema.Struct({
   quote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DOCUMENT_LIMITS.quote))),
   /** Also sent to the assistant as a chat message. */
   toAssistant: Schema.optionalKey(Schema.Boolean),
+  /** A new thread's cell, on a sheet: its sheet, row and column IDs. */
+  cell: Schema.optionalKey(
+    Schema.Struct({
+      sh: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+      r: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+      c: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+    }),
+  ),
 });
 export type CommentInput = typeof CommentInput.Type;
 export const ResolveThreadInput = Schema.Struct({

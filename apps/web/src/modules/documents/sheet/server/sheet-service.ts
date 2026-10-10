@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { SHEET_LOCALES } from "@chat/sheet/locales";
 import { applyChange } from "@chat/sheet/model/apply";
 import { LIVE_LIMITS, overLimits } from "@chat/sheet/model/limits";
-import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
+import { emptyDoc, positions, type SheetDoc } from "@chat/sheet/model";
 import { parseChange, type SheetChange, type SheetOp } from "@chat/sheet/model/ops";
 import { sheetClients } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -11,18 +11,25 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { presenceUser } from "../../presence-user.ts";
+import { uuidv7 } from "uuidv7";
 import {
+  CommentInput,
+  DeleteCommentInput,
   DocumentNotAvailable,
   DocumentRejected,
+  ResolveThreadInput,
   type DocumentComment,
   type EditableDocument,
 } from "../../schema.ts";
 import { DocumentRepo, type StoredStep } from "../../server/document-repo.ts";
 import type { DocumentWriteGuard } from "../../server/document-service.ts";
 import {
+  commentDeletion,
   documentLocks,
   lockProjectForEditing,
   notifyDocumentChanged,
+  personComment,
+  threadResolution,
 } from "../../server/live-shared.ts";
 import {
   CreateSheetInput,
@@ -166,6 +173,19 @@ const compactionPoint = (all: ReadonlyArray<Kept>, now: number) => {
   return count;
 };
 
+/** A cell a thread can sit on: on a live sheet, in a live row and column. */
+const cellExists = (doc: SheetDoc, cell: { sh: string; r: string; c: string }) => {
+  const sheet = doc.sheet[cell.sh];
+  return (
+    !!sheet &&
+    doc.sheets.some((entry) => entry.id === cell.sh && !entry.dead) &&
+    positions(sheet.rows).at(cell.r) !== undefined &&
+    positions(sheet.cols).at(cell.c) !== undefined
+  );
+};
+/** The client a person's comment anchors are written as. */
+const personClient = (userId: string) => `p.${userId}`.slice(0, 64);
+
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
 
@@ -215,6 +235,27 @@ export class SheetService extends Context.Service<
     >;
     /** A person's sheet editor: changes in its sequence and/or its cursor. */
     push(userId: string, input: PushSheetInput): Effect.Effect<PushSheetResult, DocumentError>;
+    /** A person's comment: a reply, or a new thread on the cell it names. */
+    comment(userId: string, input: CommentInput): Effect.Effect<void, DocumentError>;
+    resolveThread(userId: string, input: ResolveThreadInput): Effect.Effect<void, DocumentError>;
+    deleteComment(userId: string, input: DeleteCommentInput): Effect.Effect<void, DocumentError>;
+    /** The assistant replying in a thread, or starting one on a cell, under its fence. */
+    assistantComment<E, R>(
+      userId: string,
+      input: {
+        documentId: string;
+        thread?: string | undefined;
+        cell?: { sh: string; r: string; c: string } | undefined;
+        quote?: string | undefined;
+        body: string;
+      },
+      guard: DocumentWriteGuard<E, R>,
+    ): Effect.Effect<
+      | { outcome: "commented"; thread: string }
+      | { outcome: "not_found" | "invalid"; message: string },
+      DocumentError | E,
+      R
+    >;
     /**
      * The live feed for one open sheet: the changes since `revision` (or the
      * whole document when that is too old or absent), then every later change
@@ -665,6 +706,175 @@ export class SheetService extends Context.Service<
           return result;
         });
 
+      /** Puts a new thread on its cell, as a change of the writer's own. */
+      const anchor = (
+        tx: DbTx,
+        documentId: string,
+        entry: Entry,
+        author: Author,
+        clientId: string,
+        thread: string,
+        cell: { sh: string; r: string; c: string },
+      ) =>
+        Effect.gen(function* () {
+          const seq = (yield* lastSeq(tx, documentId, entry, clientId)) + 1;
+          return yield* store(tx, documentId, entry, author, [
+            { clientId, seq, ops: [{ op: "anchor", thread, at: cell }] },
+          ]);
+        });
+      /**
+       * One change to a sheet's comments, by someone who may edit it, then
+       * every comment to every open editor.
+       */
+      const commentWrite = <A, E = never, R = never>(
+        userId: string,
+        documentId: string,
+        guard: DocumentWriteGuard<E, R> | undefined,
+        body: (
+          tx: DbTx,
+          entry: Entry,
+        ) => Effect.Effect<{ stored: Stored | null; result: A }, DocumentError, R>,
+      ) =>
+        Effect.gen(function* () {
+          const { result, entry } = yield* write(userId, documentId, guard, (tx, held, document) =>
+            Effect.gen(function* () {
+              if (!document.canEdit)
+                return yield* new DocumentRejected({
+                  reason: "this document is read-only for you",
+                });
+              const out = yield* body(tx, held);
+              const comments = yield* documents.comments(documentId, tx);
+              return { stored: out.stored, result: { value: out.result, comments } };
+            }),
+          );
+          entry.comments = result.comments;
+          yield* PubSub.publish(entry.frames, { type: "comments", comments: result.comments });
+          return result.value;
+        });
+
+      const comment = Effect.fn("SheetService.comment")(function* (
+        userId: string,
+        input: CommentInput,
+      ) {
+        const parsed = yield* decode(CommentInput, "invalid comment")(input);
+        yield* commentWrite(userId, parsed.documentId, undefined, (tx, entry) =>
+          Effect.gen(function* () {
+            const started = yield* personComment(documents, userId, parsed)(tx);
+            if (!started) return { stored: null, result: undefined };
+            if (!parsed.cell || !cellExists(entry.doc, parsed.cell))
+              return yield* new DocumentRejected({
+                reason: "a new thread on a sheet names its cell",
+              });
+            const stored = yield* anchor(
+              tx,
+              parsed.documentId,
+              entry,
+              { origin: "user", userId, generationId: null },
+              personClient(userId),
+              parsed.threadId,
+              parsed.cell,
+            );
+            return { stored, result: undefined };
+          }),
+        );
+      });
+      const resolveThread = Effect.fn("SheetService.resolveThread")(function* (
+        userId: string,
+        input: ResolveThreadInput,
+      ) {
+        const parsed = yield* decode(ResolveThreadInput, "invalid thread")(input);
+        yield* commentWrite(userId, parsed.documentId, undefined, (tx) =>
+          threadResolution(
+            documents,
+            parsed,
+          )(tx).pipe(Effect.as({ stored: null, result: undefined })),
+        );
+      });
+      const deleteComment = Effect.fn("SheetService.deleteComment")(function* (
+        userId: string,
+        input: DeleteCommentInput,
+      ) {
+        const parsed = yield* decode(DeleteCommentInput, "invalid comment")(input);
+        yield* commentWrite(userId, parsed.documentId, undefined, (tx) =>
+          commentDeletion(
+            documents,
+            userId,
+            parsed,
+          )(tx).pipe(Effect.as({ stored: null, result: undefined })),
+        );
+      });
+      const assistantComment = <E, R>(
+        userId: string,
+        input: {
+          documentId: string;
+          thread?: string | undefined;
+          cell?: { sh: string; r: string; c: string } | undefined;
+          quote?: string | undefined;
+          body: string;
+        },
+        guard: DocumentWriteGuard<E, R>,
+      ) =>
+        commentWrite<
+          | { outcome: "commented"; thread: string }
+          | { outcome: "not_found" | "invalid"; message: string },
+          E,
+          R
+        >(userId, input.documentId, guard, (tx, entry) =>
+          Effect.gen(function* () {
+            const current = yield* documents.comments(input.documentId, tx);
+            if (input.thread) {
+              if (!current.some((each) => each.id === input.thread && each.threadId === each.id))
+                return {
+                  stored: null,
+                  result: {
+                    outcome: "not_found" as const,
+                    message: "No thread with that id. Its id is on <thread> in the trailing data.",
+                  },
+                };
+              yield* documents.addComment(tx, {
+                id: uuidv7(),
+                documentId: input.documentId,
+                threadId: input.thread,
+                userId: null,
+                origin: "model",
+                body: input.body,
+              });
+              return {
+                stored: null,
+                result: { outcome: "commented" as const, thread: input.thread },
+              };
+            }
+            if (!input.cell || !cellExists(entry.doc, input.cell))
+              return {
+                stored: null,
+                result: {
+                  outcome: "invalid" as const,
+                  message: "A new comment on a sheet needs cell, as the view addresses it.",
+                },
+              };
+            const thread = uuidv7();
+            yield* documents.addComment(tx, {
+              id: thread,
+              documentId: input.documentId,
+              threadId: thread,
+              userId: null,
+              origin: "model",
+              body: input.body,
+              quote: input.quote ?? null,
+            });
+            const stored = yield* anchor(
+              tx,
+              input.documentId,
+              entry,
+              { origin: "model", userId, generationId: null },
+              `a.${input.documentId}`.slice(0, 64),
+              thread,
+              input.cell,
+            );
+            return { stored, result: { outcome: "commented" as const, thread } };
+          }),
+        );
+
       const subscribe = Effect.fn("SheetService.subscribe")(function* (
         userId: string,
         documentId: string,
@@ -782,6 +992,10 @@ export class SheetService extends Context.Service<
         change,
         push,
         subscribe,
+        comment,
+        resolveThread,
+        deleteComment,
+        assistantComment,
       });
     }),
   ).pipe(Layer.provide(DocumentRepo.layer));

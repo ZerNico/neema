@@ -276,4 +276,42 @@ describe("live sheets", () => {
       ],
     });
   });
+
+  it("puts a thread on a cell, keeps its replies and lets the assistant start one", async () => {
+    const { owner, document } = await createSheet();
+    const thread = uuidv7();
+    const cell = { sh: "s1", r: "s1.r2", c: "s1.c2" };
+    await sheets((s) =>
+      s.comment(owner, { documentId: document.id, threadId: thread, body: "Check this", cell }),
+    );
+    await sheets((s) =>
+      s.comment(owner, { documentId: document.id, threadId: thread, body: "Still wrong" }),
+    );
+    // A new thread must name a cell that exists.
+    await expect(
+      sheets((s) =>
+        s.comment(owner, { documentId: document.id, threadId: uuidv7(), body: "Where?" }),
+      ),
+    ).rejects.toThrow();
+    const assistant = await sheets((s) =>
+      s.assistantComment(
+        owner,
+        {
+          documentId: document.id,
+          cell: { sh: "s1", r: "s1.r1", c: "s1.c1" },
+          body: "Totals here",
+        },
+        () => Effect.void,
+      ),
+    );
+    expect(assistant).toMatchObject({ outcome: "commented" });
+    await sheets((s) =>
+      s.resolveThread(owner, { documentId: document.id, threadId: thread, resolved: true }),
+    );
+    const read = await readDoc(owner, document.id);
+    expect(read.doc.anchors[thread]).toEqual(cell);
+    expect(Object.keys(read.doc.anchors)).toHaveLength(2);
+    expect(read.comments.filter((each) => each.threadId === thread)).toHaveLength(2);
+    expect(read.comments.find((each) => each.id === thread)?.resolvedAt).not.toBeNull();
+  });
 });

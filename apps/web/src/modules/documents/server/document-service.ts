@@ -52,7 +52,14 @@ import {
   type PushDocumentResult,
 } from "../schema.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
-import { documentLocks, lockProjectForEditing, notifyDocumentChanged } from "./live-shared.ts";
+import {
+  commentDeletion,
+  documentLocks,
+  lockProjectForEditing,
+  notifyDocumentChanged,
+  personComment,
+  threadResolution,
+} from "./live-shared.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 /** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
@@ -1025,26 +1032,7 @@ export class DocumentService extends Context.Service<
       ) {
         const parsed = yield* decode(CommentInput, "invalid comment")(input);
         yield* commentWrite(userId, parsed.documentId, (tx) =>
-          Effect.gen(function* () {
-            const existing = yield* documents.comments(parsed.documentId, tx);
-            if (existing.length >= DOCUMENT_LIMITS.comments)
-              return yield* new DocumentRejected({ reason: "this document has too many comments" });
-            const thread = existing.find((each) => each.id === parsed.threadId);
-            if (thread && thread.threadId !== thread.id)
-              return yield* new DocumentRejected({ reason: "reply to a thread's first comment" });
-            // A new thread's ID is the client's; one taken elsewhere is refused, not a crash.
-            const added = yield* documents.addComment(tx, {
-              id: thread ? uuidv7() : parsed.threadId,
-              documentId: parsed.documentId,
-              threadId: parsed.threadId,
-              userId,
-              origin: "user",
-              body: parsed.body,
-              quote: thread ? null : (parsed.quote ?? null),
-              toAssistant: parsed.toAssistant ?? false,
-            });
-            if (!added) return yield* new DocumentRejected({ reason: "that thread ID is taken" });
-          }),
+          personComment(documents, userId, parsed)(tx).pipe(Effect.asVoid),
         );
       });
 
@@ -1053,17 +1041,7 @@ export class DocumentService extends Context.Service<
         input: ResolveThreadInput,
       ) {
         const parsed = yield* decode(ResolveThreadInput, "invalid thread")(input);
-        yield* commentWrite(userId, parsed.documentId, (tx) =>
-          documents
-            .resolveThread(tx, parsed.documentId, parsed.threadId, parsed.resolved)
-            .pipe(
-              Effect.flatMap((found) =>
-                found
-                  ? Effect.void
-                  : Effect.fail(new DocumentRejected({ reason: "no such thread" })),
-              ),
-            ),
-        );
+        yield* commentWrite(userId, parsed.documentId, threadResolution(documents, parsed));
       });
 
       const deleteComment = Effect.fn("DocumentService.deleteComment")(function* (
@@ -1071,19 +1049,7 @@ export class DocumentService extends Context.Service<
         input: DeleteCommentInput,
       ) {
         const parsed = yield* decode(DeleteCommentInput, "invalid comment")(input);
-        yield* commentWrite(userId, parsed.documentId, (tx) =>
-          documents
-            .deleteComment(tx, parsed.documentId, parsed.commentId, userId)
-            .pipe(
-              Effect.flatMap((found) =>
-                found
-                  ? Effect.void
-                  : Effect.fail(
-                      new DocumentRejected({ reason: "only your own or the assistant's comments" }),
-                    ),
-              ),
-            ),
-        );
+        yield* commentWrite(userId, parsed.documentId, commentDeletion(documents, userId, parsed));
       });
 
       /**
