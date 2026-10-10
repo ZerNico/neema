@@ -1,7 +1,7 @@
 import { applyChange } from "@chat/sheet/model/apply";
 import { invertChange } from "@chat/sheet/model/invert";
 import type { SheetDoc } from "@chat/sheet/model";
-import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
+import { parseChange, type SheetChange, type SheetOp } from "@chat/sheet/model/ops";
 import { SHEET_TRANSPORT } from "../schema.ts";
 import type {
   PushSheetAnswer,
@@ -170,6 +170,14 @@ export class SheetSync {
   #apply(ops: readonly SheetOp[]): Step | null {
     if (!this.#confirmed || !this.#view || !ops.length || this.#status === "gone") return null;
     const before = this.#view;
+    // Checked as the server checks it: one it would refuse whole is refused here, alone,
+    // rather than taking the edits sent beside it down too.
+    const checked = parseChange({ clientId: this.clientId, seq: this.#seq + 1, ops });
+    if (!checked.ok) {
+      this.#refused = `That change can’t be made: ${checked.error}.`;
+      this.#notify();
+      return null;
+    }
     const change = { clientId: this.clientId, seq: ++this.#seq, ops };
     this.#pending.push(change);
     this.options.outbox?.add(this.options.documentId, change);

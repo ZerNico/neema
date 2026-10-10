@@ -192,4 +192,25 @@ describe("a sheet's connection", () => {
     sync.dispatch([write("s1.r2", "s1.c1", "new")]);
     expect(saved.has("me:1")).toBe(true);
   });
+
+  it("refuses a change the server would refuse whole, sending it nowhere", async () => {
+    const { sync, pushes, feed } = connection();
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    sync.dispatch([
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c1" },
+        patch: { fontColor: "red" },
+      } as never,
+    ]);
+    await vi.runAllTimersAsync();
+    expect(pushes).toHaveLength(0);
+    expect(sync.getState()).toMatchObject({ pending: 0, canUndo: false });
+    expect(sync.getState().refused).toMatch(/^That change can’t be made: /);
+    // The next good edit goes, under the same numbers.
+    sync.dispatch([write("s1.r1", "s1.c1", "fine")]);
+    await vi.runAllTimersAsync();
+    expect(JSON.parse(pushes[0]!.changes![0]!)).toMatchObject({ seq: 1 });
+  });
 });
