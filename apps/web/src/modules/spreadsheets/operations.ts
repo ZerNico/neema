@@ -225,7 +225,9 @@ type ValueOf<F> = F extends { type: "integer" | "number" }
         ? ValueOf<I>[]
         : F extends { type: "object"; fields: infer Fs; required: readonly (infer R)[] }
           ? Shape<Fs, R>
-          : string;
+          : F extends { options: readonly (infer O)[] }
+            ? O
+            : string;
 type Shape<Fs, R> = { -readonly [K in keyof Fs & R]: ValueOf<Fs[K]> } & {
   -readonly [K in Exclude<keyof Fs, R>]?: ValueOf<Fs[K]>;
 };
