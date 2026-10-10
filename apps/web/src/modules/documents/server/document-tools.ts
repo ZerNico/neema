@@ -1372,6 +1372,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     if (!converted.ops.length) return { outcome: "unchanged", ...reference(written.document) };
     own.add(written.document.revision);
     ownRevisions.set(document.id, own);
+    if (preview) preview.revision = written.document.revision;
     yield* afterWrite(written.document);
     const skipped = [...new Set(written.dropped)];
     return {
@@ -1395,6 +1396,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     rowsApplied: number;
     /** The sheet before and after each write, to take them back if the call never lands. */
     steps: { before: SheetDoc; after: SheetDoc }[];
+    /** The revision its last write left, so a sheet it made goes only if nobody wrote in it since. */
+    revision: number | null;
     failed: boolean;
     flusher: Fiber.Fiber<void> | null;
   };
@@ -1451,6 +1454,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             input.writeGuard,
           );
           state.document = created;
+          state.revision = created.revision;
           yield* afterWrite(created);
         }
       }
@@ -1547,7 +1551,12 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           const document = state.document;
           if (state.name === "edit_sheet") return yield* undoPreview(state);
           if (!document || !input.liveGuard) return;
-          yield* input.sheets!.discard(input.userId, document.id, input.liveGuard);
+          yield* input.sheets!.discard(
+            input.userId,
+            document.id,
+            input.liveGuard,
+            state.revision ?? undefined,
+          );
           known = known.filter((each) => each.id !== document.id);
         }).pipe(Effect.catchCause(() => Effect.void)),
       { discard: true },
@@ -1685,7 +1694,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         return { outcome: "created", ...reference(current) };
       }
       yield* input.sheets
-        .discard(input.userId, preview.document.id, input.writeGuard)
+        .discard(input.userId, preview.document.id, input.writeGuard, preview.revision ?? undefined)
         .pipe(Effect.catchCause(() => Effect.void));
       known = known.filter((each) => each.id !== preview.document!.id);
     }
@@ -1998,6 +2007,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             applied: 0,
             rowsApplied: 0,
             steps: [],
+            revision: null,
             failed: false,
             flusher: null,
           });
