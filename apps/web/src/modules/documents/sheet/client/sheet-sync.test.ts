@@ -70,6 +70,36 @@ describe("a sheet's connection", () => {
     expect(sync.getState().pending).toBe(0);
   });
 
+  it("keeps showing an acknowledged edit until the feed brings it, never flashing back", async () => {
+    const { sync, feed, answerWith } = connection();
+    // The server has the edit at revision 1 before its feed says so.
+    answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    sync.dispatch([write("s1.r1", "s1.c1", "mine")]);
+    await vi.runAllTimersAsync();
+    expect(sync.getState().pending).toBe(0);
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("mine");
+    feed({
+      type: "changes",
+      changes: [{ clientId: "me", seq: 1, ops: [write("s1.r1", "s1.c1", "mine")] }],
+      revision: 1,
+      moment,
+    });
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("mine");
+    // A refused edit, acknowledged but never in the feed, goes once the feed passes it.
+    answerWith(() => ({ revision: 2, acked: 2, refused: [{ seq: 2, reason: "no" }] }));
+    sync.dispatch([write("s1.r2", "s1.c1", "refused")]);
+    await vi.runAllTimersAsync();
+    expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBe("refused");
+    feed({
+      type: "changes",
+      changes: [{ clientId: "them", seq: 1, ops: [write("s1.r3", "s1.c1", "theirs")] }],
+      revision: 2,
+      moment,
+    });
+    expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBeUndefined();
+  });
+
   it("replays unsent edits over what others did meanwhile", async () => {
     const { sync, feed, answerWith } = connection();
     // The push never comes back, as when the network is slow.

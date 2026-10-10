@@ -79,6 +79,12 @@ export class SheetSync {
   #revision = 0;
   #moment = NO_MOMENT;
   #pending: SheetChange[] = [];
+  /**
+   * Changes the server has acknowledged but the feed has not yet brought,
+   * with the revision the server had reached. Shown until the feed gets
+   * there, or an edit would vanish and come back between the two.
+   */
+  #landing: Array<{ readonly change: SheetChange; readonly revision: number }> = [];
   #seq = 0;
   #minted = 0;
   #view: SheetDoc | null = null;
@@ -218,20 +224,28 @@ export class SheetSync {
     this.#state = this.#snapshot();
     for (const listener of this.#listeners) listener();
   }
-  /** What the sheet shows: unsent changes replayed over what the server confirmed. */
+  /** What the sheet shows: landing and unsent changes replayed over what the server confirmed. */
   #rebuild() {
     let view = this.#confirmed;
     if (view)
-      for (const [index, change] of this.#pending.entries())
+      for (const [index, change] of [
+        ...this.#landing.map((each) => each.change),
+        ...this.#pending,
+      ].entries())
         view = applyChange(view, change, this.#revision + index + 1).doc;
     this.#view = view;
     this.#notify();
   }
-  #acknowledge(clientId: string, seq: number) {
+  /** Lets acknowledged changes go; ones the feed has yet to bring land until `revision`. */
+  #acknowledge(clientId: string, seq: number, revision = 0) {
     const before = this.#pending.length;
-    this.#pending = this.#pending.filter(
-      (change) => change.clientId !== clientId || change.seq > seq,
-    );
+    const done = (change: SheetChange) => change.clientId === clientId && change.seq <= seq;
+    const landed = revision > this.#revision ? this.#pending.filter(done) : [];
+    this.#landing = [
+      ...this.#landing.filter((each) => !done(each.change)),
+      ...landed.map((change) => ({ change, revision })),
+    ];
+    this.#pending = this.#pending.filter((change) => !done(change));
     if (clientId === this.clientId) this.#seq = Math.max(this.#seq, seq);
     if (before !== this.#pending.length) this.#persist();
   }
@@ -280,7 +294,7 @@ export class SheetSync {
       .then(
         (result) => {
           this.#failures = 0;
-          this.#acknowledge(clientId, result.acked);
+          this.#acknowledge(clientId, result.acked, result.revision);
           if (result.refused.length)
             this.#refused = `Some changes weren’t kept: ${result.refused[0]!.reason}.`;
           this.#rebuild();
@@ -344,6 +358,7 @@ export class SheetSync {
         this.#revision = frame.revision;
         this.#moment = frame.moment;
         if (frame.acked !== null) this.#acknowledge(this.clientId, frame.acked);
+        this.#landing = this.#landing.filter((each) => each.revision > frame.revision);
         this.#live();
         this.#rebuild();
         return;
@@ -364,6 +379,8 @@ export class SheetSync {
         }
         this.#confirmed = doc;
         this.#revision = Math.max(this.#revision, frame.revision);
+        // Past the revision it was acknowledged at, a change the feed never brought was refused.
+        this.#landing = this.#landing.filter((each) => each.revision > this.#revision);
         this.#moment = frame.moment;
         if (this.#status !== "live") this.#live();
         this.#rebuild();
