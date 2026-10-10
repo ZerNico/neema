@@ -12,7 +12,7 @@ import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart"
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, safeLink } from "./display.ts";
 import { fillSeries, type FillMode, type FillPart } from "@chat/sheet/model/fill";
-import type { CellRef, GridFill, SheetSelection } from "./grid.tsx";
+import type { CellRef, GridFill, SheetSelection } from "./selection.ts";
 
 /** What a command reads: the sheet as shown, where the selection is, and a source of new IDs. */
 export interface GridContext {
