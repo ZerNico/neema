@@ -267,6 +267,11 @@ describe("CSV", () => {
     doc = apply(doc, formatSelection(context(doc, [1, 3]), { numberFormat: "0%" }));
     expect(sheetCsv(context(doc, [1, 1]), "s1")).toBe('"Name, first",,50%\r\n,"Say ""hi""",\r\n');
   });
+
+  it("includes what a formula spills, past the cells holding anything", () => {
+    const doc = type(emptyDoc(), 1, 1, "=SEQUENCE(3,2)");
+    expect(sheetCsv(context(doc, [1, 1]), "s1")).toBe("1,2\r\n3,4\r\n5,6\r\n");
+  });
 });
 
 describe("charting the selection", () => {

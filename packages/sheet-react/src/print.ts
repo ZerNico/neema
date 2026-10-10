@@ -4,6 +4,7 @@ import { filteredRows } from "@chat/sheet/model/filter";
 import type { SheetLocale } from "@chat/sheet/locales";
 import { positions, type SheetDoc } from "@chat/sheet/model";
 import { cellHtml } from "./clipboard.ts";
+import { usedExtent } from "./commands.ts";
 import { columnPx } from "./layout.ts";
 
 const escapeHtml = (text: string) =>
@@ -22,13 +23,7 @@ export function printHtml(
   const sheet = context.doc.sheet[sheetId]!;
   const rows = positions(sheet.rows);
   const cols = positions(sheet.cols);
-  let [bottom, right] = [0, 0];
-  for (const [r, row] of Object.entries(sheet.cells))
-    for (const c of Object.keys(row))
-      if (context.values.value(sheetId, r, c) !== null) {
-        bottom = Math.max(bottom, rows.at(r) ?? 0);
-        right = Math.max(right, cols.at(c) ?? 0);
-      }
+  const { bottom, right } = usedExtent(context, sheetId);
   if (!bottom) return null;
   const skipRows = new Set([
     ...filteredRows(context.doc, context.values, sheetId),

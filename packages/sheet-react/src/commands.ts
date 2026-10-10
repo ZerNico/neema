@@ -349,6 +349,31 @@ export function copySelection(context: GridContext, cut = false): CopiedCells {
 }
 
 /**
+ * How far a sheet's values reach, as 1-based last row and column: every cell
+ * holding one, and every cell a formula spills into. Zero when none does.
+ */
+export function usedExtent(
+  context: Pick<GridContext, "doc" | "values">,
+  sheetId: string,
+): { bottom: number; right: number } {
+  const sheet = context.doc.sheet[sheetId]!;
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  let [bottom, right] = [0, 0];
+  const reach = (r: string, c: string) => {
+    bottom = Math.max(bottom, rows.at(r) ?? 0);
+    right = Math.max(right, cols.at(c) ?? 0);
+  };
+  for (const [r, row] of Object.entries(sheet.cells))
+    for (const [c, cell] of Object.entries(row)) {
+      if (context.values.value(sheetId, r, c) !== null) reach(r, c);
+      const spill = cell.f ? context.values.spill(sheetId, r, c) : null;
+      if (spill?.rows.length && spill.cols.length) reach(spill.rows.at(-1)!, spill.cols.at(-1)!);
+    }
+  return { bottom, right };
+}
+
+/**
  * A sheet as CSV, as Excel saves one: each cell's shown text over the range
  * holding values, hidden rows and columns included.
  */
@@ -359,13 +384,7 @@ export function sheetCsv(
   const sheet = context.doc.sheet[sheetId]!;
   const rows = positions(sheet.rows);
   const cols = positions(sheet.cols);
-  let [bottom, right] = [0, 0];
-  for (const [r, row] of Object.entries(sheet.cells))
-    for (const c of Object.keys(row))
-      if (context.values.value(sheetId, r, c) !== null) {
-        bottom = Math.max(bottom, rows.at(r) ?? 0);
-        right = Math.max(right, cols.at(c) ?? 0);
-      }
+  const { bottom, right } = usedExtent(context, sheetId);
   const grid = rows.ids.slice(0, bottom).map((r) =>
     cols.ids.slice(0, right).map((c) => {
       const value = context.values.value(sheetId, r, c);
