@@ -5,7 +5,9 @@ import type { SheetValues } from "@chat/sheet/model/calc";
 import { copyFormula, parseFormula, renderFormula } from "@chat/sheet/model/formula";
 import { positions, type Axis, type Formula, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
+export type { ChartKind };
 import { parseDelimited } from "@chat/sheet/delimited";
+import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, cellStyle } from "./display.ts";
 import type { CellRef, SheetSelection } from "./grid.tsx";
@@ -343,35 +345,15 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
   return cells.length ? [{ op: "set", sh: context.sheet, cells }] : [];
 }
 
-export type ChartKind = "column" | "bar" | "line" | "area" | "pie" | "scatter";
-
 /**
- * A chart of the selection, as Excel reads one: a first row of text names
- * the series, a first column of text labels the points, every other column
- * is a series. It is placed to the right of the data. A pie takes the first
- * series only.
+ * A chart of the selection, read as Excel reads a range (`readSource`) and
+ * placed to the right of it. Nothing to chart in one cell.
  */
 export function chartFromSelection(context: GridContext, kind: ChartKind): SheetOp[] {
   const box = selectionBox(context);
   if (box.rowIds.length < 2 && box.colIds.length < 2) return [];
-  const isText = (r: string, c: string) => {
-    const value = context.values.value(context.sheet, r, c);
-    return typeof value === "string" && value !== "";
-  };
-  const headed = box.rowIds.length > 1 && box.colIds.some((c) => isText(box.rowIds[0]!, c));
-  const rows = headed ? box.rowIds.slice(1) : box.rowIds;
-  const labelled = box.colIds.length > 1 && rows.some((r) => isText(r, box.colIds[0]!));
-  const seriesCols = labelled ? box.colIds.slice(1) : box.colIds;
-  const range = (c1: string, c2: string) => ({ r1: rows[0]!, r2: rows.at(-1)!, c1, c2 });
-  const categories = labelled ? range(box.colIds[0]!, box.colIds[0]!) : undefined;
-  const series = (kind === "pie" ? seriesCols.slice(0, 1) : seriesCols).map((c) => {
-    const name = headed ? context.values.value(context.sheet, box.rowIds[0]!, c) : null;
-    return {
-      ...(typeof name === "string" && name ? { name: name.slice(0, 100) } : {}),
-      values: range(c, c),
-      ...(categories ? { categories } : {}),
-    };
-  });
+  const source = readSource(context.doc, context.values, context.sheet, box.area);
+  const series = seriesFrom(context.doc, source, kind);
   if (!series.length) return [];
   const grow = grower(context);
   grow.ensure(context.sheet, box.top, box.right + 2);
@@ -386,7 +368,10 @@ export function chartFromSelection(context: GridContext, kind: ChartKind): Sheet
         kind,
         at: { r: box.rowIds[0]!, c: cols[box.right + 1]! },
         size: { width: 480, height: 300 },
+        // One series needs no legend; a pie's legend names its slices.
+        legend: series.length > 1 || kind === "pie" || kind === "doughnut" ? "bottom" : "none",
         series,
+        source,
       },
     },
   ];

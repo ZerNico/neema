@@ -19,7 +19,8 @@
     "./model/apply": "./src/model/apply.ts",
     "./model/limits": "./src/model/limits.ts",
     "./model/calc": "./src/model/calc.ts",
-    "./model/invert": "./src/model/invert.ts"
+    "./model/invert": "./src/model/invert.ts",
+    "./model/chart": "./src/model/chart.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

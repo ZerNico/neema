@@ -1,3 +1,4 @@
+import { isChart, isChartPatch, type ChartPatch } from "./chart.ts";
 import type { Axis, Box, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -86,6 +87,7 @@ export type SheetOp =
   | { readonly op: "name"; readonly name: string; readonly f: Formula | null }
   | { readonly op: "settings"; readonly locale?: string; readonly timeZone?: string }
   | { readonly op: "chartPut"; readonly id: string; readonly chart: Chart }
+  | { readonly op: "chartPatch"; readonly id: string; readonly patch: ChartPatch }
   | { readonly op: "chartDelete"; readonly id: string }
   | {
       readonly op: "anchor";
@@ -137,6 +139,7 @@ const OP_NAMES = new Set([
   "name",
   "settings",
   "chartPut",
+  "chartPatch",
   "chartDelete",
   "anchor",
   "move",
@@ -196,32 +199,6 @@ const isPatch = (value: unknown) =>
       typeof each === "string" ||
       (typeof each === "number" && Number.isFinite(each)),
   );
-const isChart = (value: unknown) => {
-  if (!isRecord(value)) return false;
-  const kinds = ["column", "bar", "line", "area", "pie", "scatter"];
-  return (
-    isId(value.sheet) &&
-    typeof value.kind === "string" &&
-    kinds.includes(value.kind) &&
-    isRecord(value.at) &&
-    isId(value.at.r) &&
-    isId(value.at.c) &&
-    isRecord(value.size) &&
-    typeof value.size.width === "number" &&
-    typeof value.size.height === "number" &&
-    Array.isArray(value.series) &&
-    value.series.length <= 12 &&
-    value.series.every(
-      (series) =>
-        isRecord(series) &&
-        (series.sheet === undefined || isId(series.sheet)) &&
-        (series.name === undefined ||
-          (typeof series.name === "string" && series.name.length <= 100)) &&
-        isBox(series.values) &&
-        (series.categories === undefined || isBox(series.categories)),
-    )
-  );
-};
 
 function validOp(op: Record<string, unknown>): boolean {
   switch (op.op) {
@@ -283,6 +260,8 @@ function validOp(op: Record<string, unknown>): boolean {
       return typeof op.name === "string" && (op.f === null || isFormula(op.f));
     case "chartPut":
       return isId(op.id) && isChart(op.chart);
+    case "chartPatch":
+      return isId(op.id) && isChartPatch(op.patch);
     case "settings":
       return (
         (op.locale === undefined || (typeof op.locale === "string" && op.locale.length <= 20)) &&

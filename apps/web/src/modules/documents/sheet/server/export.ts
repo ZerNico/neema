@@ -1,6 +1,7 @@
 import { columnLetters } from "@chat/sheet/a1";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
+import type { ChartText } from "@chat/sheet/model/chart";
 import type { LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
 
 const address = (row: number, column: number) => `${columnLetters(column)}${row}`;
@@ -10,6 +11,14 @@ const address = (row: number, column: number) => `${columnLetters(column)}${row}
  * formulas as text, and text that would read as a formula escaped as
  * setCells escapes it.
  */
+/** A chart's text as the file keeps it: as written, or what its cell holds now. */
+const textOf = (doc: SheetDoc, label: ChartText | undefined) => {
+  if (!label) return undefined;
+  if ("text" in label) return label.text;
+  const value = doc.sheet[label.cell.sh]?.cells[label.cell.r]?.[label.cell.c]?.v;
+  return value === undefined || value === null ? undefined : String(value);
+};
+
 export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
   const ids = liveSheets(doc);
   return {
@@ -92,7 +101,8 @@ export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
       const at = [positions(host.rows).at(chart.at.r), positions(host.cols).at(chart.at.c)];
       const series = chart.series.flatMap((each) => {
         const values = range(each.sheet ?? chart.sheet, each.values);
-        return values ? [{ values, ...(each.name ? { name: each.name } : {}) }] : [];
+        const name = textOf(doc, each.name);
+        return values ? [{ values, ...(name ? { name } : {}) }] : [];
       });
       const first = chart.series[0];
       const categories = first?.categories
@@ -104,7 +114,7 @@ export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
           sheet: host.name,
           type: chart.kind,
           at: address(at[0], at[1]),
-          ...(chart.title ? { title: chart.title } : {}),
+          ...(chart.title && textOf(doc, chart.title) ? { title: textOf(doc, chart.title)! } : {}),
           ...(categories ? { categories } : {}),
           series,
           width: chart.size.width,

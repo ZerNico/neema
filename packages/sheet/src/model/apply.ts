@@ -1,3 +1,4 @@
+import { patchChart } from "./chart.ts";
 import { copyFormula, type FormulaAt } from "./formula.ts";
 import {
   positions,
@@ -341,6 +342,11 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
     case "chartPut":
       if (!sheetOf(op.chart.sheet)) return drop(doc, dropped, "a chart on a sheet that is gone");
       return { ...doc, charts: { ...doc.charts, [op.id]: op.chart } };
+    case "chartPatch": {
+      const chart = doc.charts[op.id];
+      if (!chart) return drop(doc, dropped, "a chart that is gone");
+      return { ...doc, charts: { ...doc.charts, [op.id]: patchChart(chart, op.patch) } };
+    }
     case "chartDelete": {
       const charts = { ...doc.charts };
       delete charts[op.id];

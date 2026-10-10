@@ -151,17 +151,21 @@ describe("charting the selection", () => {
       chart: {
         kind: "column",
         at: at(doc, 1, 5),
+        // Names read from their header cells, so they follow edits there.
         series: [
           {
-            name: "Sales",
+            name: { cell: { sh: "s1", r: at(doc, 1, 2).r, c: at(doc, 1, 2).c } },
             values: { r1: at(doc, 2, 1).r, r2: at(doc, 3, 1).r, c1: at(doc, 1, 2).c },
           },
-          { name: "Costs", categories: { c1: at(doc, 1, 1).c } },
+          {
+            name: { cell: { sh: "s1", r: at(doc, 1, 3).r, c: at(doc, 1, 3).c } },
+            categories: { c1: at(doc, 1, 1).c },
+          },
         ],
       },
     });
     expect(chartFromSelection(context(doc, [1, 1], [3, 3]), "pie")[0]).toMatchObject({
-      chart: { series: [{ name: "Sales" }] },
+      chart: { series: [{ values: { c1: at(doc, 1, 2).c } }] },
     });
     expect(chartFromSelection(context(doc, [1, 1]), "line")).toEqual([]);
   });

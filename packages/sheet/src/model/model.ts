@@ -85,21 +85,8 @@ export interface Sheet {
   readonly freeze: { readonly row: string | null; readonly col: string | null };
 }
 
-export interface ChartSeries {
-  readonly name?: string;
-  /** The sheet its ranges are on; the chart's own when absent. */
-  readonly sheet?: string;
-  readonly values: Box;
-  readonly categories?: Box;
-}
-export interface Chart {
-  readonly sheet: string;
-  readonly kind: "column" | "bar" | "line" | "area" | "pie" | "scatter";
-  readonly title?: string;
-  readonly at: { readonly r: string; readonly c: string };
-  readonly size: { readonly width: number; readonly height: number };
-  readonly series: readonly ChartSeries[];
-}
+export type { Chart, ChartSeries } from "./chart.ts";
+import type { Chart } from "./chart.ts";
 
 /** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
 export interface SheetSettings {

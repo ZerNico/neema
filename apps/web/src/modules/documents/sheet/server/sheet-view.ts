@@ -4,6 +4,7 @@ import { sheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
+import type { ChartText } from "@chat/sheet/model/chart";
 import { formatValue } from "@chat/sheet/number-format";
 
 /** Above this the focused sheet is sent as a window of rows. */
@@ -206,6 +207,15 @@ export function sheetView(
     if (!top || !bottom || !left || !right) return null;
     return `${quoteSheet(data.name)}!${address(top, left)}:${address(bottom, right)}`;
   };
+  /** A chart's text as written, or the cell it reads, as a reference. */
+  const chartText = (label: ChartText | undefined) => {
+    if (!label) return null;
+    if ("text" in label) return label.text;
+    const data = doc.sheet[label.cell.sh];
+    const row = data ? positions(data.rows).at(label.cell.r) : undefined;
+    const col = data ? positions(data.cols).at(label.cell.c) : undefined;
+    return data && row && col ? `=${quoteSheet(data.name)}!${address(row, col)}` : "#REF!";
+  };
   const charts = Object.entries(doc.charts).flatMap(([id, chart]) => {
     const host = doc.sheet[chart.sheet];
     if (!host || !ids.includes(chart.sheet)) return [];
@@ -214,7 +224,8 @@ export function sheetView(
     const series = chart.series
       .map((each) => {
         const read = rangeText(each.sheet ?? chart.sheet, each.values);
-        return read ? `${read}${each.name ? ` (${each.name})` : ""}` : "#REF!";
+        const called = chartText(each.name);
+        return read ? `${read}${called ? ` (${called})` : ""}` : "#REF!";
       })
       .join("; ");
     const first = chart.series[0];
@@ -224,7 +235,7 @@ export function sheetView(
     return [
       `<chart id="${escapeAttribute(id)}" sheet="${escapeAttribute(host.name)}" type="${chart.kind}"${
         row && col ? ` at="${address(row, col)}"` : ""
-      }${chart.title ? ` title="${escapeAttribute(chart.title)}"` : ""}${
+      }${chart.title ? ` title="${escapeAttribute(chartText(chart.title)!)}"` : ""}${
         categories ? ` categories="${escapeAttribute(categories)}"` : ""
       } series="${escapeAttribute(series)}"/>`,
     ];

@@ -523,7 +523,7 @@ export function convertOperations(
           if (categories && categories.sheet !== values.sheet)
             throw new Refused("invalid", "A series and its categories are on one sheet.");
           return {
-            ...(each.name ? { name: each.name } : {}),
+            ...(each.name ? { name: { text: each.name } } : {}),
             ...(values.sheet === sh ? {} : { sheet: values.sheet }),
             values: values.box,
             ...(categories ? { categories: categories.box } : {}),
@@ -537,7 +537,7 @@ export function convertOperations(
           chart: {
             sheet: sh,
             kind: operation.type as "column" | "bar" | "line" | "area" | "pie" | "scatter",
-            ...(operation.title ? { title: operation.title } : {}),
+            ...(operation.title ? { title: { text: operation.title } } : {}),
             at: { r: rows[at.row - 1]!, c: cols[at.column - 1]! },
             size: { width: operation.width ?? 480, height: operation.height ?? 300 },
             series,
