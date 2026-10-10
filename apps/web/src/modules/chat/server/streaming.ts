@@ -449,6 +449,7 @@ export class StreamEngine extends Context.Service<
         drafts: yield* ScheduleDraftService,
       };
       const documentService = yield* DocumentService;
+      const sheetService = yield* SheetService;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
       const projectMemory = yield* ProjectMemoryService;
@@ -986,6 +987,9 @@ export class StreamEngine extends Context.Service<
           });
           const documents = yield* prepareDocumentTools({
             service: documentService,
+            sheets: sheetService,
+            generationId: fence?.generationId,
+            timeZone: input.timeZone,
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,
@@ -1557,7 +1561,9 @@ export class StreamEngine extends Context.Service<
               ? permissions.agentsCreate
               : family === "schedule-draft"
                 ? permissions.schedules
-                : offeredOffice.has(family),
+                : family === "sheet"
+                  ? permissions.documents
+                  : offeredOffice.has(family),
           );
           const unlockedFamilies = new Set<LazyToolFamily>();
           const unlockTool = (name: string) => {
