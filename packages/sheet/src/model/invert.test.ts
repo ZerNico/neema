@@ -85,6 +85,20 @@ describe("undoing a change", () => {
     doc = undone;
   });
 
+  it("unmerges only the merge it added, beside one over a deleted row", () => {
+    const merge = (r1: string, r2: string): SheetOp => ({
+      op: "merge",
+      sh: "s1",
+      box: { r1, r2, c1: "s1.c1", c2: "s1.c2" },
+    });
+    const doc = apply(emptyDoc(), [merge("s1.r2", "s1.r3")]);
+    const { undone } = roundTrip(doc, [
+      { op: "delete", sh: "s1", axis: "rows", ids: ["s1.r3"] },
+      merge("s1.r1", "s1.r2"),
+    ]);
+    expect(undone.sheet.s1!.merges).toEqual(doc.sheet.s1!.merges);
+  });
+
   it("leaves a cell someone else changed since", () => {
     const doc = emptyDoc();
     const mine = apply(doc, [

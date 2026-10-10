@@ -252,11 +252,16 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
         const otherCols = new Set(between(sheet.cols, other.c1, other.c2));
         return rows.some((r) => otherRows.has(r)) && cols.some((c) => otherCols.has(c));
       };
-      if (op.op === "unmerge")
+      // The merge itself when it is there, as undo names it; else every one the box touches.
+      if (op.op === "unmerge") {
+        const same = (other: Box) =>
+          other.r1 === box.r1 && other.r2 === box.r2 && other.c1 === box.c1 && other.c2 === box.c2;
+        const exact = sheet.merges.some(same);
         return withSheet(doc, op.sh, {
           ...sheet,
-          merges: sheet.merges.filter((other) => !overlaps(other)),
+          merges: sheet.merges.filter((other) => (exact ? !same(other) : !overlaps(other))),
         });
+      }
       // A merge over one already there loses, in server order, as Excel refuses overlapping merges.
       if (sheet.merges.some(overlaps)) return drop(doc, dropped, "a merge over another merge");
       return withSheet(doc, op.sh, { ...sheet, merges: [...sheet.merges, box] });
