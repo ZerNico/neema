@@ -19,6 +19,7 @@ import type { Chart } from "@chat/sheet/model/chart";
 import type { FileFilter, LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import type { FileNote } from "~/modules/spreadsheets/server/file-notes.ts";
 import type { FileGroup } from "~/modules/spreadsheets/server/file-outline.ts";
+import { toEngineFormula } from "~/modules/spreadsheets/server/formulas.ts";
 import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
 import type { Validation } from "@chat/sheet/model/validation";
 import { chartOfFile } from "./chart-files.ts";
@@ -134,7 +135,9 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
   if (read.sheets.some((each) => each.rows > LIVE_LIMITS.rows || each.cols > LIVE_LIMITS.cols))
     return { ok: false, reason: "a sheet larger than a live sheet holds" };
   /** A formula's stored form, the grids grown for what it reaches. */
-  const formulaOf = (text: string, sheet: string) => {
+  const formulaOf = (stored: string, sheet: string) => {
+    // As people read it: without the namespaces a file stores newer functions under.
+    const text = toEngineFormula(stored).slice(1);
     for (let attempt = 0; attempt < 2; attempt++) {
       const parsed = parseFormula(text, { doc, sheet });
       if ("formula" in parsed) return parsed.formula;

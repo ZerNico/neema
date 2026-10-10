@@ -207,6 +207,43 @@ describe("importing into a live sheet", () => {
     );
   });
 
+  it("keeps a GROUPBY pivot through Excel and back, calculating the same", async () => {
+    const original = build([
+      {
+        kind: "setCells",
+        sheet: "Sheet1",
+        start: "A1",
+        rows: [
+          ["Region", "Sales"],
+          ["North", 10],
+          ["South", 5],
+          ["North", 1],
+        ],
+      },
+      { kind: "setCells", sheet: "Sheet1", start: "D1", rows: [["=GROUPBY(A1:A4, B1:B4, SUM)"]] },
+    ]);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    const { r, c } = at(imported.doc, "Sheet1", 1, 4);
+    expect(
+      renderFormula(imported.doc.sheet.s1!.cells[r]![c]!.f!, { doc: imported.doc, sheet: "s1" }),
+    ).toBe("GROUPBY(A1:A4, B1:B4, SUM)");
+    const values = calculateSheet(imported.doc, context);
+    const shown = (row: number, col: number) => {
+      const cell = at(imported.doc, "Sheet1", row, col);
+      return values.value("s1", cell.r, cell.c);
+    };
+    expect([shown(2, 4), shown(2, 5), shown(4, 4), shown(4, 5)]).toEqual([
+      "North",
+      11,
+      "Total",
+      16,
+    ]);
+  });
+
   it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
     const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
     const imported = sheetFromWorkbook(
