@@ -149,7 +149,8 @@ export class DocumentRepo extends Context.Service<
         documentId: string;
         threadId: string;
         userId: string | null;
-        origin: "user" | "model";
+        origin: "user" | "model" | "file";
+        fileAuthor?: string | null;
         body: string;
         quote?: string | null;
         toAssistant?: boolean;
@@ -356,6 +357,7 @@ export class DocumentRepo extends Context.Service<
               origin: documentComments.origin,
               toAssistant: documentComments.toAssistant,
               quote: documentComments.quote,
+              fileAuthor: documentComments.fileAuthor,
               authorId: user.id,
               authorName: user.name,
             })
@@ -369,6 +371,7 @@ export class DocumentRepo extends Context.Service<
             threadId: row.threadId,
             author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
             byAssistant: row.origin === "model",
+            fromFile: row.origin === "file" ? { name: row.fileAuthor ?? "" } : null,
             body: row.body,
             createdAt: row.createdAt.toISOString(),
             resolvedAt: row.resolvedAt?.toISOString() ?? null,
@@ -413,8 +416,12 @@ export class DocumentRepo extends Context.Service<
                 and(
                   eq(documentComments.documentId, documentId),
                   eq(documentComments.id, commentId),
-                  // A person's own, or the assistant's, which has no hand to take its own back.
-                  or(eq(documentComments.userId, userId), eq(documentComments.origin, "model")),
+                  // A person's own, or the assistant's or a file's, which no one else can take back.
+                  or(
+                    eq(documentComments.userId, userId),
+                    eq(documentComments.origin, "model"),
+                    eq(documentComments.origin, "file"),
+                  ),
                 ),
               )
               .pipe(Effect.orDie);

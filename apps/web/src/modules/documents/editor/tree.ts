@@ -258,7 +258,11 @@ export const threadsView = (
       .map(
         (each) =>
           `<comment${attributes({
-            by: each.byAssistant ? "you" : (each.author?.name ?? "Someone"),
+            by: each.byAssistant
+              ? "you"
+              : each.fromFile
+                ? `${each.fromFile.name || "Someone"} (a note in the imported file)`
+                : (each.author?.name ?? "Someone"),
             to: each.toAssistant ? "you" : null,
             answered: each.toAssistant ? each.answered : null,
           })}>${escapeText(each.body.slice(0, COMMENT_CHARS))}</comment>`,

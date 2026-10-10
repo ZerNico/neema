@@ -70,6 +70,7 @@ function fakeSheets() {
           threadId: thread,
           author: null,
           byAssistant: true,
+          fromFile: null,
           body: input.body,
           createdAt: stamp,
           resolvedAt: null,

@@ -230,6 +230,7 @@ describe("comments shown to the model", () => {
     threadId,
     author: { id: "u1", name: "Ada" },
     byAssistant: false,
+    fromFile: null,
     body,
     createdAt: "2026-10-09T00:00:00.000Z",
     resolvedAt,

@@ -123,9 +123,12 @@ export const documentComments = pgTable(
       .references(() => documents.id, { onDelete: "cascade" }),
     /** The thread's first comment; that comment names itself. */
     threadId: text("thread_id").notNull(),
-    /** The person who wrote it; null for the assistant, or once the account is gone. */
+    /** The person who wrote it; null for the assistant, a file's note, or once the account is gone. */
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
-    origin: text().$type<"user" | "model">().notNull().default("user"),
+    /** A person, the assistant, or a note read from an imported file. */
+    origin: text().$type<"user" | "model" | "file">().notNull().default("user"),
+    /** A file's note only: the author name the file gave, never matched to an account. */
+    fileAuthor: text("file_author"),
     body: text().notNull(),
     /** Sent to the assistant as a chat message; answered once it replies after it. */
     toAssistant: boolean("to_assistant").notNull().default(false),

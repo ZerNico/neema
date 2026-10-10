@@ -136,6 +136,8 @@ export interface DocumentComment {
   /** Null for the assistant, or once the account is gone. */
   author: { id: string; name: string } | null;
   byAssistant: boolean;
+  /** A note read from an imported file: the author name it gave, empty when none. */
+  fromFile: { name: string } | null;
   body: string;
   createdAt: string;
   /** On a thread's first comment only. */
