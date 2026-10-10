@@ -17,7 +17,10 @@ import type {
 } from "~/modules/documents/schema.ts";
 
 /** A stored row as tests write it: the row, and its text as Markdown. */
-export type SeedDocument = EditableDocument & { content: string };
+export type SeedDocument = Omit<EditableDocument, "kind"> & {
+  content: string;
+  kind?: EditableDocument["kind"];
+};
 
 /**
  * A signed-in device with nothing saved: the app sets the cache owner before
@@ -131,7 +134,7 @@ export function fakeDocumentServer() {
       const doc = ensureIds(new Transform(parseMarkdown(content))).doc;
       documents.set(row.id, {
         doc,
-        row: { ...row, revision: 0 },
+        row: { kind: "text", ...row, revision: 0 },
         steps: [],
         feeds: new Set(),
       });

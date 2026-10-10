@@ -165,6 +165,8 @@ export interface EditableDocument {
   projectId: string | null;
   createdByMessageId?: string | null;
   title: string;
+  /** A text document or a live sheet. */
+  kind: "text" | "sheet";
   revision: number;
   lastEditedBy: "user" | "model";
   lastEditorUserId?: string | null;

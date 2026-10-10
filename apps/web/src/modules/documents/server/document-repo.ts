@@ -43,6 +43,7 @@ const documentColumns = (userId: string) => ({
   projectId: documents.projectId,
   createdByMessageId: documents.createdByMessageId,
   title: documents.title,
+  kind: documents.kind,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
   lastEditorUserId: documents.lastEditorUserId,
@@ -85,6 +86,7 @@ export class DocumentRepo extends Context.Service<
       owner: DocumentOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
+        kind?: "text" | "sheet";
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
@@ -210,6 +212,7 @@ export class DocumentRepo extends Context.Service<
                 ? { conversationId: owner.conversationId }
                 : { projectId: owner.projectId }),
               title: values.title,
+              kind: values.kind ?? "text",
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,

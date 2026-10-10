@@ -505,7 +505,9 @@ export class DocumentService extends Context.Service<
             return { entry: cached, document };
           }
           const state = yield* documents.loadState(userId, documentId);
-          if (!state) return yield* new DocumentNotAvailable({ documentId });
+          // A sheet's snapshot is not ProseMirror JSON: the sheet service owns it.
+          if (!state || state.document.kind !== "text")
+            return yield* new DocumentNotAvailable({ documentId });
           const snapshot = Node.fromJSON(documentSchema, state.snapshot);
           // Stored steps were checked when they arrived; one that no longer
           // applies means storage is corrupt, which is a defect.
