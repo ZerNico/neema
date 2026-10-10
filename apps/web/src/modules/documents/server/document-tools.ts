@@ -5,7 +5,7 @@ import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { blockIdOf, plannedIds } from "../editor/block-ids.ts";
 import { placement, type TreeEdit } from "../editor/tree-edit.ts";
-import { blockView, commentsView, type SeenBlock } from "../editor/tree.ts";
+import { blockView, commentsView, threadsView, type SeenBlock } from "../editor/tree.ts";
 import {
   DOCUMENT_LIMITS,
   DocumentTitle,
@@ -17,8 +17,8 @@ import { DOCUMENT_POLICY, projectDocumentPolicy } from "./document-prompt.ts";
 import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./document-service.ts";
 import { readPartialObject, type PartialField } from "./partial-json.ts";
 import { calculateSheet, type SheetValues } from "@chat/sheet/model/calc";
-import { positions, type SheetDoc } from "@chat/sheet/model";
-import { columnLetters } from "@chat/sheet/a1";
+import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
+import { columnLetters, parseCell } from "@chat/sheet/a1";
 import { quoteSheet } from "@chat/sheet/model/formula";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import { advertisedParameter } from "~/modules/tools/server/toolset.ts";
@@ -83,6 +83,7 @@ const ReadParams = Schema.Struct({
 });
 const CommentParams = Schema.Struct({
   documentId: Schema.optionalKey(DocumentId),
+  cell: Schema.optionalKey(Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(40))),
   thread: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128))),
   target: Schema.optionalKey(BlockId),
   quote: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
@@ -236,9 +237,10 @@ const readTool = Tool.make("read_chat_document", {
 });
 const commentTool = Tool.make("comment_on_document", {
   description:
-    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short and plain: a card holds about 40 characters a line and shows text as written, so no Markdown. You never resolve a thread; the people in it do.",
+    "Comment on a document the way a reviewer would, without changing its text. Reply in a thread: thread (its id from <thread> in the trailing data) and content. Start one: target (a block id), quote (3 to 8 words exactly as the reader sees them in that block) and content; on a live sheet, cell (e.g. Data!B3) and content instead. Use it to answer a comment sent to you, saying in a line or two what you changed or the answer, and to flag something for the person instead of rewriting it. Keep comments short and plain: a card holds about 40 characters a line and shows text as written, so no Markdown. You never resolve a thread; the people in it do.",
   parameters: Schema.Struct({
     documentId: Schema.optionalKey(transport(DocumentId)),
+    cell: Schema.optionalKey(transport(CommentParams.fields.cell)),
     thread: Schema.optionalKey(transport(CommentParams.fields.thread)),
     target: Schema.optionalKey(transport(BlockId)),
     quote: Schema.optionalKey(transport(CommentParams.fields.quote)),
@@ -273,7 +275,10 @@ const editSheetTool = Tool.make("edit_sheet", {
   success: Result,
 });
 
-export type SheetToolService = Pick<SheetService["Service"], "create" | "read" | "change">;
+export type SheetToolService = Pick<
+  SheetService["Service"],
+  "create" | "read" | "change" | "assistantComment"
+>;
 export type DocumentToolService = Pick<
   DocumentService["Service"],
   | "list"
@@ -1128,6 +1133,72 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       };
     return { outcome: "read", ...reference(document), ...(where ? { message: where } : {}) };
   });
+  /** A comment on a sheet: a reply in a thread, or a new one on a cell named as the view names it. */
+  const sheetComment = Effect.fn(function* (
+    document: EditableDocument,
+    value: typeof CommentParams.Type,
+  ): Effect.fn.Return<Result> {
+    if (!input.sheets) return { outcome: "unavailable", message: "Live sheets are unavailable." };
+    if (!document.canEdit)
+      return {
+        outcome: "invalid",
+        ...reference(document),
+        message: "This sheet is read-only for this person.",
+      };
+    if (!value.content)
+      return { outcome: "invalid", ...reference(document), message: "Pass content." };
+    yield* loadTree(document.id);
+    const state = sheetStates.get(document.id);
+    let cell: { sh: string; r: string; c: string } | undefined;
+    let quote: string | undefined;
+    if (!value.thread) {
+      if (!value.cell || !state)
+        return {
+          outcome: "invalid",
+          ...reference(document),
+          message: "A new comment on a sheet needs cell, such as Data!B3, and content.",
+        };
+      const bang = value.cell.lastIndexOf("!");
+      const name = bang === -1 ? null : value.cell.slice(0, bang).replace(/^'(.*)'$/, "$1");
+      const sheet = name
+        ? sheetNamed(state.doc, name)
+        : (sheetNamed(state.doc, sheetWindows.get(document.id)?.sheet ?? "") ??
+          liveSheets(state.doc)[0]);
+      const at = parseCell(bang === -1 ? value.cell : value.cell.slice(bang + 1));
+      const rows = sheet ? positions(state.doc.sheet[sheet]!.rows).ids : [];
+      const cols = sheet ? positions(state.doc.sheet[sheet]!.cols).ids : [];
+      if (!sheet || !at || !rows[at.row - 1] || !cols[at.column - 1])
+        return {
+          outcome: "not_found",
+          ...reference(document),
+          message: `No cell ${value.cell} in this sheet.`,
+        };
+      cell = { sh: sheet, r: rows[at.row - 1]!, c: cols[at.column - 1]! };
+      quote = `${quoteSheet(state.doc.sheet[sheet]!.name)}!${columnLetters(at.column)}${at.row}`;
+    }
+    const result = yield* input.sheets
+      .assistantComment(
+        input.userId,
+        { documentId: document.id, thread: value.thread, cell, quote, body: value.content },
+        input.writeGuard,
+      )
+      .pipe(
+        Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
+        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+      );
+    if (result === null) return unavailable;
+    if (typeof result === "string")
+      return {
+        outcome: "invalid",
+        ...reference(document),
+        message: `Comment rejected: ${result}.`,
+      };
+    yield* loadTree(document.id);
+    const current = known.find((each) => each.id === document.id) ?? document;
+    return result.outcome === "commented"
+      ? { outcome: "commented", ...reference(current), message: `Thread ${result.thread}.` }
+      : { outcome: result.outcome, ...reference(current), message: result.message };
+  });
   const comment = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
     const decoded = decode(CommentParams, raw);
     if (!decoded.ok) yield* rejected("comment_on_document", decoded.issue);
@@ -1139,12 +1210,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     const value = decoded.value;
     const document = resolve(value.documentId);
     if (!("id" in document)) return document;
-    if (document.kind === "sheet")
-      return {
-        outcome: "invalid",
-        ...reference(document),
-        message: "Comments on live sheets are not available yet; say it in your reply.",
-      };
+    if (document.kind === "sheet") return yield* sheetComment(document, value);
     if (!document.canEdit)
       return {
         outcome: "invalid",
@@ -1503,14 +1569,22 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       ...state.moment,
     });
     const view = sheetView(state.doc, values, window);
+    const comments = threadsView(threads.get(document.id) ?? [], asking, (thread) => {
+      const at = state.doc.anchors[thread];
+      const sheet = at ? state.doc.sheet[at.sh] : undefined;
+      const row = sheet && at ? positions(sheet.rows).at(at.r) : undefined;
+      const col = sheet && at ? positions(sheet.cols).at(at.c) : undefined;
+      if (!sheet || row === undefined || col === undefined) return null;
+      return { cell: `${quoteSheet(sheet.name)}!${columnLetters(col)}${row}` };
+    });
     const note = view.next
       ? `\n<note>Window ends here. Call read_chat_document with ${JSON.stringify({ documentId: document.id, ...view.next })} to continue.</note>`
       : "";
     const selection = picked ? `${quoteSheet(picked.sheet)}!${picked.range}` : null;
     const rendered = {
-      xml: `<document${header(document, { focused: true, ...(selection ? { selected: selection } : {}) })}>\n${view.xml}${note}\n</document>`,
+      xml: `<document${header(document, { focused: true, ...(selection ? { selected: selection } : {}) })}>\n${view.xml}${note}${comments ? `\n${comments}` : ""}\n</document>`,
       // The selection is part of what was shown: a new one sends the view again.
-      body: `${selection ?? ""}\n${view.xml}`,
+      body: `${selection ?? ""}\n${view.xml}\n${comments}`,
       next: view.next,
     };
     sheetRenders.clear();

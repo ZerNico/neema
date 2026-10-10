@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
-import type { EditableDocument } from "../../schema.ts";
+import type { DocumentComment, EditableDocument } from "../../schema.ts";
 import {
   prepareDocumentTools,
   type DocumentToolService,
@@ -16,6 +16,7 @@ const stamp = new Date(0).toISOString();
 function fakeSheets() {
   const rows = new Map<string, { document: EditableDocument; doc: SheetDoc }>();
   const seqs = new Map<string, number>();
+  const comments: DocumentComment[] = [];
   const commit = (documentId: string, clientId: string, ops: SheetOp[], by: "user" | "model") => {
     const row = rows.get(documentId)!;
     const revision = row.document.revision + 1;
@@ -56,9 +57,28 @@ function fakeSheets() {
               doc: row.doc,
               revision: row.document.revision,
               moment: { now: 45_000, seed: 1 },
-              comments: [],
+              comments: [...comments],
             }
           : null;
+      }),
+    assistantComment: (_userId, input) =>
+      Effect.sync(() => {
+        const thread = input.thread ?? `t${comments.length + 1}`;
+        comments.push({
+          id: input.thread ? `c${comments.length + 1}` : thread,
+          threadId: thread,
+          author: null,
+          byAssistant: true,
+          body: input.body,
+          createdAt: stamp,
+          resolvedAt: null,
+          quote: input.quote ?? null,
+          toAssistant: false,
+          answered: false,
+        });
+        if (!input.thread && input.cell)
+          commit(input.documentId, "a", [{ op: "anchor", thread, at: input.cell }], "model");
+        return { outcome: "commented" as const, thread };
       }),
     change: (_userId, input, _guard, decide) =>
       Effect.gen(function* () {
@@ -199,5 +219,18 @@ describe("live sheet tools", () => {
       selected: ["s1", "s1.r3", "s1.c2", "s1.r2", "s1.c1"],
     });
     expect(send(tools)).toContain('selected="Sheet1!A2:B3"');
+  });
+
+  it("comments on a cell and shows the thread there", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    await call(tools, "create_sheet", { title: "Plan" });
+    expect(
+      await call(tools, "comment_on_document", { cell: "B2", content: "Is this right?" }),
+    ).toMatchObject({ outcome: "commented" });
+    expect(send(tools)).toContain('<thread id="t1" cell="Sheet1!B2" quote="Sheet1!B2">');
+    expect(
+      await call(tools, "comment_on_document", { cell: "Nope!B2", content: "x" }),
+    ).toMatchObject({ outcome: "not_found" });
   });
 });
