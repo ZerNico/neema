@@ -52,6 +52,13 @@ export function OverlayFrame({
 }: OverlayFrameProps) {
   const frame = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  /**
+   * Where a finished drag left it, shown until the document places it anew:
+   * falling back to the old place for a frame flashed it there and, dragged
+   * past the sheet's edge, snapped the scroll back as the grid shrank.
+   */
+  const [landed, setLanded] = useState<{ from: string; place: OverlayPlace } | null>(null);
+  const placeKey = JSON.stringify(place);
   // A drag that moved must not end as a click on what lies under the pointer.
   const swallowClick = useRef(false);
 
@@ -59,6 +66,7 @@ export function OverlayFrame({
     // Any button selects it, so a right click opens the overlay's own menu, not a cell's.
     event.stopPropagation();
     onSelect();
+    setLanded(null);
     frame.current?.focus({ preventScroll: true });
     if (!editable || event.button !== 0) return;
     const [x, y] = [event.clientX, event.clientY];
@@ -76,7 +84,9 @@ export function OverlayFrame({
       setDrag(null);
       if (!current) return;
       swallowClick.current = true;
-      onPlace(dragPlace(place, current, min));
+      const next = dragPlace(place, current, min);
+      setLanded({ from: placeKey, place: next });
+      onPlace(next);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
@@ -102,7 +112,11 @@ export function OverlayFrame({
     else return;
     event.preventDefault();
   };
-  const shown = drag ? dragPlace(place, drag, min) : place;
+  const shown = drag
+    ? dragPlace(place, drag, min)
+    : landed?.from === placeKey
+      ? landed.place
+      : place;
   return (
     <div
       ref={frame}

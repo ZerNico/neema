@@ -617,6 +617,12 @@ describe("the sheet grid", () => {
       "c1",
       { at: at(5, 4), offset: { x: 5, y: 2 }, width: 300, height: 200 },
     ]);
+    // Until the document places it, it stays where it was dropped, never back where it began.
+    const before = chart.style.left;
+    fireEvent.pointerDown(chart, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 10 + 64 * 3, clientY: 10 });
+    fireEvent.pointerUp(window);
+    expect(chart.style.left).not.toBe(before);
     fireEvent.keyDown(chart, { key: "Escape" });
     expect(chart.getAttribute("aria-selected")).toBe("false");
   });
