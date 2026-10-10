@@ -245,7 +245,7 @@ describe("the model's conditional formats", () => {
     expect(doc.sheet.s1!.conditional).toBeUndefined();
   });
 
-  it("sets data validation, replacing rules inside its range, and shows it in the view", () => {
+  it("sets data validation over other rules' cells, clears it from exactly a range", () => {
     let doc = done(
       edit(emptyDoc(), [
         { kind: "addSheet", name: "Lists" },
@@ -293,8 +293,11 @@ describe("the model's conditional formats", () => {
     expect(
       edit(doc, [{ kind: "setValidation", sheet: "Sheet1", range: "A1", type: "list" }]),
     ).toMatchObject({ ok: false });
+    // Cleared from C5 alone: the date rule keeps the cells above and below it.
     doc = done(edit(doc, [{ kind: "clearValidation", sheet: "Sheet1", range: "C5" }]));
-    expect(doc.sheet.s1!.validations).toHaveLength(1);
+    expect(sheetView(doc, calculateSheet(doc, context)).xml).toMatch(
+      /range="C2:C4" type="date"[^]*range="C6:C9" type="date"/,
+    );
     doc = done(edit(doc, [{ kind: "clearValidation", sheet: "Sheet1" }]));
     expect(doc.sheet.s1!.validations ?? []).toEqual([]);
   });

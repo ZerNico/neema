@@ -94,6 +94,56 @@ export function isValidationList(value: unknown): value is readonly Validation[]
   );
 }
 
+/**
+ * A sheet's rules with an area taken out, as Excel clears validation from
+ * exactly the cells chosen: a rule partly over the area keeps the rest of its
+ * cells, as up to four rules around it. `area` is by position, 1-based.
+ */
+export function withoutArea(
+  doc: SheetDoc,
+  sheet: string,
+  area: {
+    readonly top: number;
+    readonly bottom: number;
+    readonly left: number;
+    readonly right: number;
+  },
+  mint: () => string,
+): Validation[] {
+  const data = doc.sheet[sheet]!;
+  const rows = positions(data.rows);
+  const cols = positions(data.cols);
+  return (data.validations ?? []).flatMap((rule) => {
+    const [top, bottom, left, right] = [
+      rows.at(rule.box.r1),
+      rows.at(rule.box.r2),
+      cols.at(rule.box.c1),
+      cols.at(rule.box.c2),
+    ];
+    if (top === undefined || bottom === undefined || left === undefined || right === undefined)
+      return [rule];
+    if (top > area.bottom || bottom < area.top || left > area.right || right < area.left)
+      return [rule];
+    const [middleTop, middleBottom] = [Math.max(top, area.top), Math.min(bottom, area.bottom)];
+    const pieces = [
+      top < area.top && { top, bottom: area.top - 1, left, right },
+      bottom > area.bottom && { top: area.bottom + 1, bottom, left, right },
+      left < area.left && { top: middleTop, bottom: middleBottom, left, right: area.left - 1 },
+      right > area.right && { top: middleTop, bottom: middleBottom, left: area.right + 1, right },
+    ].filter((piece) => piece !== false);
+    return pieces.map((piece, index) => ({
+      ...rule,
+      id: index ? mint() : rule.id,
+      box: {
+        r1: rows.ids[piece.top - 1]!,
+        r2: rows.ids[piece.bottom - 1]!,
+        c1: cols.ids[piece.left - 1]!,
+        c2: cols.ids[piece.right - 1]!,
+      },
+    }));
+  });
+}
+
 /** The validation over a cell, the last listed winning as Excel keeps one per cell. */
 export function validationAt(
   doc: SheetDoc,

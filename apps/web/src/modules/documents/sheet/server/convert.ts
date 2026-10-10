@@ -19,7 +19,7 @@ import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
-import type { ValidationRule } from "@chat/sheet/model/validation";
+import { withoutArea, type ValidationRule } from "@chat/sheet/model/validation";
 import { OUTLINE_LIMITS } from "@chat/sheet/model/outline";
 import { parseDateText } from "@chat/sheet/dates";
 import { chartOperation } from "./convert-chart.ts";
@@ -763,14 +763,8 @@ export function convertOperations(
                 : [low],
           };
         }
-        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
-        const kept = (view.sheet[sh]!.validations ?? []).filter(
-          (each) =>
-            (rows.at(each.box.r1) ?? 0) < box.top ||
-            (rows.at(each.box.r2) ?? 0) > box.bottom ||
-            (cols.at(each.box.c1) ?? 0) < box.left ||
-            (cols.at(each.box.c2) ?? 0) > box.right,
-        );
+        // Other rules give up these cells, as Excel keeps one rule per cell.
+        const kept = withoutArea(view, sh, box, input.mint);
         emit({
           op: "validations",
           sh,
@@ -790,19 +784,12 @@ export function convertOperations(
       }
       case "clearValidation": {
         const sh = sheetId(operation.sheet);
-        const list = view.sheet[sh]!.validations ?? [];
         if (!operation.range) {
           emit({ op: "validations", sh, list: [] });
           return;
         }
         const { box } = area(sh, operation.range);
-        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
-        const kept = list.filter((each) => {
-          const [top, bottom] = [rows.at(each.box.r1) ?? 0, rows.at(each.box.r2) ?? 0];
-          const [left, right] = [cols.at(each.box.c1) ?? 0, cols.at(each.box.c2) ?? 0];
-          return top > box.bottom || bottom < box.top || left > box.right || right < box.left;
-        });
-        emit({ op: "validations", sh, list: kept });
+        emit({ op: "validations", sh, list: withoutArea(view, sh, box, input.mint) });
         return;
       }
       case "removeFilter": {
