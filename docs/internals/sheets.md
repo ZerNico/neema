@@ -40,8 +40,8 @@ browser workers and the Excel file tools); this page records the decisions behin
   changes over what the server confirmed.
 - A change carries its client and a sequence number. The server applies exactly the next
   number from a client; an earlier one is a resend, acknowledged and not applied again, and a
-  later one would skip a change and is refused. Clients send in order, the next after the
-  last is acknowledged.
+  later one waits for the one it would skip. Clients send in order. A client belongs to the
+  person who first wrote under it, so nobody else can take its numbers.
 - Every content write records its revision on the cell (`w`, and `wf` for formats); a clear
   is a write and keeps the version, so a guard can tell a cell someone emptied from one that
   was always empty.
@@ -89,11 +89,14 @@ browser workers and the Excel file tools); this page records the decisions behin
   is undone write by write, newest first, so a person's edit made in between stays; a sheet an
   unclaimed call created is removed.
 - `fromFile` starts a sheet from an Excel file, read in a spreadsheet worker, or a CSV. What a
-  live sheet keeps: values, formulas (legacy arrays with their extent), styles the format
-  operation knows, sizes, merges, panes, names and charts of the kinds it draws. What it drops,
-  and the model is told: other chart kinds, tables' formatting, filters, conditional
-  formatting, validation and notes. A file over the live limits is refused and left to the
-  Excel tools.
+  live sheet keeps: values, formulas (legacy arrays with their extent, an array's cached
+  results left to it), styles the format operation knows, sizes, merges, panes, outline
+  groups, names (one local to a sheet read there), charts and pictures of the kinds it draws,
+  filters, conditional formats and validation of the kinds it checks, links and notes, and
+  every range of a rule over several. The grid grows to hold whatever is placed on it. What it
+  drops is named to the model: other chart and rule kinds, tables' formatting, links within
+  the workbook, clashing local names and notes past the document's comment limit. A file over
+  the live limits is refused and left to the Excel tools.
 - A download is built in the spreadsheet worker from the stored sheet, by position, charts
   included, and calculated there, so the file opens with every value.
 

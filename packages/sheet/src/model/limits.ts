@@ -2,9 +2,9 @@ import type { Sheet, SheetDoc } from "./model.ts";
 import { IMAGE_LIMITS } from "./image.ts";
 
 /**
- * How big a live sheet document may grow. The editor refuses a change that
- * would cross a limit and the server checks every change; both use this.
- * Each counter says what it counts.
+ * How big a live sheet document may grow. The server checks every change and
+ * refuses one that would cross a limit, which its tab then drops; an import
+ * is checked before it is stored. Each counter says what it counts.
  */
 export interface SheetLimits {
   /** Live sheets. */

@@ -176,7 +176,6 @@ const compactionPoint = (all: ReadonlyArray<Kept>, now: number) => {
   return count;
 };
 
-/** A cell a thread can sit on: on a live sheet, in a live row and column. */
 /** Whether a thread's cell, or both corners of its range, are live on a live sheet. */
 const cellExists = (doc: SheetDoc, cell: CellAnchor) => {
   const sheet = doc.sheet[cell.sh];
