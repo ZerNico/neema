@@ -87,11 +87,33 @@ browser workers and the Excel file tools); this page records the decisions behin
   `invertChange` and a sheet it created is removed.
 - `fromFile` starts a sheet from an Excel file, read in a spreadsheet worker, or a CSV. What a
   live sheet keeps: values, formulas (legacy arrays with their extent), styles the format
-  operation knows, sizes, merges, panes and names. What it drops, and the model is told:
-  charts, tables' formatting, filters, conditional formatting, validation and notes. A file
-  over the live limits is refused and left to the Excel tools.
+  operation knows, sizes, merges, panes, names and charts of the kinds it draws. What it drops,
+  and the model is told: other chart kinds, tables' formatting, filters, conditional
+  formatting, validation and notes. A file over the live limits is refused and left to the
+  Excel tools.
 - A download is built in the spreadsheet worker from the stored sheet, by position, charts
   included, and calculated there, so the file opens with every value.
+
+## Charts
+
+- A chart is data in the document (`model/chart.ts`): its series by IDs and every option set,
+  never its values; each replica draws it from the cells. Its text is literal or a cell it
+  follows. It sits on a cell by IDs, so it moves with inserts above it; dragging one snaps it to
+  the cell under its corner.
+- `chartPatch` replaces each top-level option it names, merges axes and style one level down
+  and replaces series whole. Two people changing different options both keep theirs, and undo
+  is `invertChange` like any other change.
+- A chart made from a range keeps that range and how it was read (header row, label column,
+  series along rows). A new kind, a changed range or a flipped toggle reads it again, keeping
+  each series' own options by place, so a pie keeps one series and columns get them all back.
+- The app compiles a chart for `@tanstack/charts` on every draw (`ui/chart-compile.ts`). That
+  library has no chart titles and puts legends only above or below, so both are the page's;
+  an image of a chart redraws them around the library's exported plot.
+- One mapping turns a chart into Excel's chart parts and back
+  (`spreadsheets/server/file-charts.ts`), for downloads, imports and the Excel tools alike.
+  Excel's legacy chart here holds one chart group with two axes, so a subtitle, the right axis
+  and series drawn as another kind are left out of the file. Waterfall and histogram are
+  Excel's newer chart types and keep only their data and title.
 
 ## Showing it
 
