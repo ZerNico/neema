@@ -43,7 +43,7 @@ export interface CellEditing {
 }
 /** What the keyboard asks of the sheet; the app decides what each writes. */
 export type GridCommand =
-  | { readonly kind: "clear" | "undo" | "redo" }
+  | { readonly kind: "clear" | "undo" | "redo" | "find" }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
   | { readonly kind: "toggle"; readonly property: "bold" | "italic" };
 /** Someone else's selection, drawn in their colour. */
@@ -51,7 +51,8 @@ export interface GridDecoration {
   readonly key: string;
   readonly selection: SheetSelection;
   readonly color: string;
-  readonly label: string;
+  /** A person's name beside their selection; none for a highlight such as a find match. */
+  readonly label?: string;
 }
 
 export interface SheetGridProps {
@@ -227,6 +228,13 @@ export function SheetGrid({
     [cols.starts, rows.starts, frozenRows, frozenCols, frozenHeight, frozenWidth],
   );
 
+  // A selection set from outside, as a find does, is scrolled into view like one moved by key.
+  const headRow = head?.row;
+  const headCol = head?.col;
+  useEffect(() => {
+    if (headRow !== undefined && headCol !== undefined) reveal(headRow, headCol);
+  }, [headRow, headCol, reveal]);
+
   const writable = !readOnly && !!onEditingChange && !!onCommit;
   const beginEdit = (text: string | null) => {
     if (!writable || !selection) return;
@@ -288,6 +296,12 @@ export function SheetGrid({
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
     const command = event.metaKey || event.ctrlKey;
+    // Find reads, so it works in a sheet that only reads.
+    if (command && !event.altKey && event.key.toLowerCase() === "f" && onCommand) {
+      event.preventDefault();
+      onCommand({ kind: "find" });
+      return;
+    }
     if (writable && command && !event.altKey) {
       const lower = event.key.toLowerCase();
       const found: GridCommand | null =
@@ -620,12 +634,14 @@ export function SheetGrid({
             className="pointer-events-none absolute z-10 border-2"
             style={{ ...rect, borderColor: decoration.color }}
           >
-            <span
-              className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] leading-4 whitespace-nowrap text-white"
-              style={{ backgroundColor: decoration.color }}
-            >
-              {decoration.label}
-            </span>
+            {decoration.label ? (
+              <span
+                className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] leading-4 whitespace-nowrap text-white"
+                style={{ backgroundColor: decoration.color }}
+              >
+                {decoration.label}
+              </span>
+            ) : null}
           </div>,
         ]
       : [];

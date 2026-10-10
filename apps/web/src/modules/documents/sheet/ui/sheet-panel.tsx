@@ -1,5 +1,8 @@
 import {
   Add01Icon,
+  ArrowDown01Icon,
+  ArrowUp01Icon,
+  Cancel01Icon,
   ClipboardIcon,
   ColumnDeleteIcon,
   ColumnInsertIcon,
@@ -31,7 +34,7 @@ import {
   type CopiedCells,
   type GridContext,
 } from "@chat/sheet-react/commands";
-import { cellSource, cellStyle } from "@chat/sheet-react/display";
+import { cellDisplay, cellSource, cellStyle } from "@chat/sheet-react/display";
 import {
   SheetGrid,
   type CellEditing,
@@ -101,6 +104,8 @@ export default function SheetPanelBody({
   const [selection, setSelection] = useState<SheetSelection | null>(null);
   const [editing, setEditing] = useState<CellEditing | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // What Find looks for, and which match is current; null while the bar is closed.
+  const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
   const formulaBar = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
@@ -150,8 +155,35 @@ export default function SheetPanelBody({
   const commit = (at: SheetSelection["head"], text: string) => {
     if (text !== cellSource(doc, sheet, at.r, at.c, locale)) run(enterCell(context, at, text));
   };
+  // Cells whose shown text or formula holds the query, in reading order.
+  const matches = (() => {
+    const query = finding?.query.trim().toLowerCase();
+    if (!query) return [];
+    const found: Array<{ r: string; c: string; row: number; col: number }> = [];
+    for (const [r, row] of Object.entries(doc.sheet[sheet]!.cells)) {
+      const rowAt = rows.at(r);
+      if (rowAt === undefined) continue;
+      for (const [c, cell] of Object.entries(row)) {
+        const colAt = cols.at(c);
+        if (colAt === undefined) continue;
+        const shown = cellDisplay(values.value(sheet, r, c), cellStyle(cell.s), locale).text;
+        const formula = cell.f ? cellSource(doc, sheet, r, c, locale) : "";
+        if (shown.toLowerCase().includes(query) || formula.toLowerCase().includes(query))
+          found.push({ r, c, row: rowAt, col: colAt });
+      }
+    }
+    return found.toSorted((a, b) => a.row - b.row || a.col - b.col);
+  })();
+  const goTo = (index: number) => {
+    if (!finding || !matches.length) return;
+    const next = ((index % matches.length) + matches.length) % matches.length;
+    setFinding({ ...finding, index: next });
+    const at = { r: matches[next]!.r, c: matches[next]!.c };
+    select({ anchor: at, head: at });
+  };
   const onCommand = (command: GridCommand) => {
-    if (command.kind === "toggle")
+    if (command.kind === "find") setFinding({ query: finding?.query ?? "", index: 0 });
+    else if (command.kind === "toggle")
       run(formatSelection(context, { [command.property]: style[command.property] ? null : true }));
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
     else if (command.kind === "undo") sync?.undo();
@@ -164,14 +196,22 @@ export default function SheetPanelBody({
     // A cut moves once; pasting it again copies what now stands there.
     if (from?.cut && from.text === text) copied.current = null;
   };
-  const decorations: GridDecoration[] = [...state.presence]
-    .filter(([, presence]) => presence.sheet === sheet)
-    .map(([clientId, presence]) => ({
-      key: clientId,
-      selection: { anchor: presence.anchor, head: presence.head },
-      color: presence.user.color,
-      label: presence.user.name,
-    }));
+  const decorations: GridDecoration[] = [
+    // Find's matches, a few hundred at most, outlined without a name.
+    ...matches.slice(0, 500).map((match) => ({
+      key: `find:${match.r}:${match.c}`,
+      selection: { anchor: match, head: match },
+      color: "var(--ring)",
+    })),
+    ...[...state.presence]
+      .filter(([, presence]) => presence.sheet === sheet)
+      .map(([clientId, presence]) => ({
+        key: clientId,
+        selection: { anchor: presence.anchor, head: presence.head },
+        color: presence.user.color,
+        label: presence.user.name,
+      })),
+  ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
   const barText =
     editing && editing.at.r === head.r && editing.at.c === head.c ? editing.text : source;
@@ -230,6 +270,61 @@ export default function SheetPanelBody({
           }}
         />
       </div>
+      {finding ? (
+        <div className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3">
+          <Input
+            autoFocus
+            aria-label="Find in sheet"
+            placeholder="Find in sheet"
+            value={finding.query}
+            // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the formula bar does.
+            className="h-7 border-0 text-xs shadow-none focus-visible:ring-0"
+            onChange={(event) => setFinding({ query: event.target.value, index: 0 })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                goTo(finding.index + (event.shiftKey ? -1 : 1));
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setFinding(null);
+              }
+            }}
+          />
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+            {finding.query.trim()
+              ? matches.length
+                ? `${Math.min(finding.index, matches.length - 1) + 1} of ${matches.length}`
+                : "No matches"
+              : ""}
+          </span>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Previous match"
+            disabled={!matches.length}
+            onClick={() => goTo(finding.index - 1)}
+          >
+            <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Next match"
+            disabled={!matches.length}
+            onClick={() => goTo(finding.index + 1)}
+          >
+            <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Close find"
+            onClick={() => setFinding(null)}
+          >
+            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+          </Button>
+        </div>
+      ) : null}
       <ContextMenu>
         <ContextMenuTrigger className="relative min-h-0 flex-1">
           <div className="absolute inset-0">

@@ -114,4 +114,24 @@ describe("an open sheet", () => {
     expect(document.querySelector('[aria-rowindex="1"][aria-colindex="1"]')!.textContent).toBe("");
     sync.destroy();
   });
+
+  it("finds cells by what they show or their formula, and moves to each", () => {
+    const doc = apply(emptyDoc(), {
+      op: "set",
+      sh: "s1",
+      cells: [
+        { r: "s1.r1", c: "s1.c1", v: "Rent" },
+        { r: "s1.r3", c: "s1.c2", v: "rent paid" },
+        { r: "s1.r2", c: "s1.c1", v: "Food" },
+      ],
+    });
+    render(<SheetPanelBody controller={controllerOf(doc)} canEdit={false} toolbarSlot={null} />);
+    fireEvent.keyDown(screen.getByRole("grid"), { key: "f", metaKey: true });
+    const find = screen.getByRole("textbox", { name: "Find in sheet" });
+    fireEvent.change(find, { target: { value: "rent" } });
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    fireEvent.keyDown(find, { key: "Enter" });
+    expect(screen.getByText("2 of 2")).toBeTruthy();
+    expect(screen.getByText("B3")).toBeTruthy();
+  });
 });
