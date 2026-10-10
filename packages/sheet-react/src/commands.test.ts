@@ -15,6 +15,7 @@ import {
   enterSelection,
   fillFromHandle,
   fillSelection,
+  hideAtSelection,
   insertAtSelection,
   parseTabular,
   pasteAtSelection,
@@ -257,5 +258,18 @@ describe("Ctrl+Enter", () => {
       0.05,
       '{"numberFormat":"0%"}',
     ]);
+  });
+});
+
+describe("hiding rows and columns", () => {
+  it("hides what is selected, and shows again only the hidden ones a selection spans", () => {
+    let doc = apply(emptyDoc(), hideAtSelection(context(emptyDoc(), [2, 2], [3, 2]), "rows", true));
+    expect(doc.sheet.s1!.rowProps["s1.r2"]?.hidden).toBe(true);
+    const unhide = hideAtSelection(context(doc, [1, 1], [4, 1]), "rows", false);
+    expect(unhide).toEqual([
+      { op: "hide", sh: "s1", axis: "rows", ids: ["s1.r2", "s1.r3"], hidden: false },
+    ]);
+    doc = apply(doc, unhide);
+    expect(doc.sheet.s1!.rowProps["s1.r2"]?.hidden).toBeUndefined();
   });
 });

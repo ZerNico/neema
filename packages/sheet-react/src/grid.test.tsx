@@ -177,6 +177,37 @@ describe("the sheet grid", () => {
     expect(shown()).toBe(`s1.r2/s1.c${NEW_COLS}-s1.r4/s1.c1`);
   });
 
+  it("steps over hidden rows, and fits a column to its widest text on a double-click", () => {
+    let doc = emptyDoc();
+    doc = apply(
+      doc,
+      { op: "set", sh: "s1", cells: [set(doc, 3, 1, "A long label to fit")] },
+      { op: "hide", sh: "s1", axis: "rows", ids: ["s1.r2"], hidden: true },
+    );
+    const sizes: unknown[] = [];
+    render(
+      <SheetGrid
+        doc={doc}
+        sheet="s1"
+        values={calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(1, 1), head: at(1, 1) }}
+        onSelectionChange={(next) => sizes.push(next.head)}
+        label="Budget"
+        onCommit={() => {}}
+        onEditingChange={() => {}}
+        onResize={(axis, id, px) => sizes.push([axis, id, px])}
+      />,
+    );
+    expect(screen.queryByRole("rowheader", { name: "2" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("grid"), { key: "ArrowDown" });
+    expect(sizes[0]).toEqual(at(3, 1));
+    const edge = screen.getByRole("columnheader", { name: "A" }).querySelector("[aria-hidden]")!;
+    fireEvent.doubleClick(edge);
+    expect(sizes[1]).toEqual(["columns", "s1.c1", expect.any(Number)]);
+    expect((sizes[1] as [string, string, number])[2]).toBeGreaterThan(64);
+  });
+
   it("types a fresh value, edits the formula behind one, and sends commands up", () => {
     events.length = 0;
     render(<Harness doc={emptyDoc()} />);

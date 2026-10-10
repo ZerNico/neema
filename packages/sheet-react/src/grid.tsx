@@ -618,8 +618,15 @@ export function SheetGrid({
     if (move && jump && event.key.startsWith("Arrow")) {
       // From the selection's moving end, so Ctrl+Shift+Arrow keeps extending.
       target = [...dataEdge(head.row, head.col, Math.sign(move[0]), Math.sign(move[1]))];
-    } else if (move) target = [head.row + move[0], head.col + move[1]];
-    else if (event.key === "Home") target = [jump ? 0 : head.row, 0];
+    } else if (move) {
+      // Hidden rows and columns are stepped over, as Excel's arrows do.
+      let [row, col] = [head.row + move[0], head.col + move[1]];
+      const [down, right] = [Math.sign(move[0]), Math.sign(move[1])];
+      if (down || right)
+        while (onSheet(row, col) && (!rows.size(row) || !cols.size(col)))
+          [row, col] = [row + down, col + right];
+      target = onSheet(row, col) ? [row, col] : [head.row, head.col];
+    } else if (event.key === "Home") target = [jump ? 0 : head.row, 0];
     else if (event.key === "End" && jump) target = [...usedEnd()];
     if (!target) return;
     event.preventDefault();
@@ -693,6 +700,30 @@ export function SheetGrid({
     start: number;
     size: number;
   } | null>(null);
+  /**
+   * What a double-click on a header's edge sizes it to, as Excel's AutoFit:
+   * a column as wide as its widest shown text, a row as tall as its largest
+   * font. Null when it holds nothing to fit.
+   */
+  const autofit = (axis: Axis, index: number): number | null => {
+    const id = (axis === "columns" ? cols : rows).ids[index]!;
+    let largest = 0;
+    for (const [r, row] of Object.entries(data.cells)) {
+      if (axis === "rows" && r !== id) continue;
+      for (const [c, cell] of Object.entries(row)) {
+        if (axis === "columns" && c !== id) continue;
+        const style = cellStyle(cell.s);
+        const fontPx = style.fontSize ? (style.fontSize * 4) / 3 : 14;
+        if (axis === "rows") {
+          largest = Math.max(largest, Math.ceil(fontPx * 1.4));
+          continue;
+        }
+        const shown = cellDisplay(values.value(sheet, r, c), style, locale).text;
+        if (shown) largest = Math.max(largest, textWidth(shown, fontPx, style.bold) + 10);
+      }
+    }
+    return largest ? Math.ceil(Math.max(axis === "columns" ? 24 : 20, largest)) : null;
+  };
   const resizeHandle = (axis: Axis, index: number) =>
     writable && onResize ? (
       <div
@@ -702,6 +733,11 @@ export function SheetGrid({
             ? "absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
             : "absolute -bottom-1 left-0 z-10 h-2 w-full cursor-row-resize"
         }
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          const size = autofit(axis, index);
+          if (size !== null) onResize(axis, (axis === "columns" ? cols : rows).ids[index]!, size);
+        }}
         onPointerDown={(event) => {
           event.stopPropagation();
           event.preventDefault();
@@ -891,6 +927,8 @@ export function SheetGrid({
   };
   const columnHeader = (col: number) => {
     const inSelection = box && col >= box.left && col <= box.right;
+    // A hidden column has no header; its neighbours meet where it was.
+    if (!cols.size(col)) return null;
     return (
       <div
         key={col}
@@ -911,6 +949,7 @@ export function SheetGrid({
   /** A row's header; `offset` places it in the corner, below the column headers. */
   const rowHeader = (row: number, offset = 0) => {
     const inSelection = box && row >= box.top && row <= box.bottom;
+    if (!rows.size(row)) return null;
     return (
       <div
         key={row}

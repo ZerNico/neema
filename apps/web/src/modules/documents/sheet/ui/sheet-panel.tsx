@@ -15,6 +15,8 @@ import {
   Scissor01Icon,
   SortingAZ01Icon,
   SortingZA01Icon,
+  ViewIcon,
+  ViewOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
 import { useContext, useMemo, useRef, useState } from "react";
@@ -32,6 +34,7 @@ import {
   dragOverwrites,
   dragSelection,
   enterCell,
+  hideAtSelection,
   enterSelection,
   fillFromHandle,
   fillSelection,
@@ -893,6 +896,34 @@ export default function SheetPanelBody({
                   disabled={readOnly}
                   onClick={() => run(deleteAtSelection(context, "columns"))}
                 />
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger disabled={readOnly}>
+                    <HugeiconsIcon icon={ViewOffIcon} strokeWidth={2} />
+                    Hide and unhide
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-44">
+                    <MenuItem
+                      icon={ViewOffIcon}
+                      label="Hide rows"
+                      onClick={() => run(hideAtSelection(context, "rows", true))}
+                    />
+                    <MenuItem
+                      icon={ViewOffIcon}
+                      label="Hide columns"
+                      onClick={() => run(hideAtSelection(context, "columns", true))}
+                    />
+                    <MenuItem
+                      icon={ViewIcon}
+                      label="Unhide rows"
+                      onClick={() => run(hideAtSelection(context, "rows", false))}
+                    />
+                    <MenuItem
+                      icon={ViewIcon}
+                      label="Unhide columns"
+                      onClick={() => run(hideAtSelection(context, "columns", false))}
+                    />
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
                 <ContextMenuSub>
                   <ContextMenuSubTrigger disabled={readOnly}>
                     <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />

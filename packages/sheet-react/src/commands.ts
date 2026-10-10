@@ -157,6 +157,16 @@ export function formatSelection(context: GridContext, patch: StylePatch): SheetO
   return [{ op: "format", sh: context.sheet, area: selectionBox(context).area, patch }];
 }
 
+/** Hides the selection's rows or columns, or shows again the hidden ones it spans. */
+export function hideAtSelection(context: GridContext, axis: Axis, hidden: boolean): SheetOp[] {
+  const box = selectionBox(context);
+  const ids = axis === "rows" ? box.rowIds : box.colIds;
+  const props = context.doc.sheet[context.sheet]![axis === "rows" ? "rowProps" : "colProps"];
+  // Showing again touches only what is hidden; hiding, everything selected.
+  const touched = hidden ? ids : ids.filter((id) => props[id]?.hidden);
+  return touched.length ? [{ op: "hide", sh: context.sheet, axis, ids: touched, hidden }] : [];
+}
+
 /** As many new rows or columns as are selected, before or after them. */
 export function insertAtSelection(
   context: GridContext,
