@@ -208,6 +208,30 @@ describe("the sheet grid", () => {
     expect((sizes[1] as [string, string, number])[2]).toBeGreaterThan(64);
   });
 
+  it("leaves out rows a filter hides, and draws its buttons on the header row", () => {
+    const opened: string[] = [];
+    render(
+      <SheetGrid
+        doc={emptyDoc()}
+        sheet="s1"
+        values={calculateSheet(emptyDoc(), { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+        locale={EN_US}
+        selection={{ anchor: at(1, 1), head: at(1, 1) }}
+        onSelectionChange={() => {}}
+        label="Budget"
+        hiddenRows={new Set(["s1.r3"])}
+        filterButtons={{ row: "s1.r1", cols: ["s1.c1", "s1.c2"], active: new Set(["s1.c2"]) }}
+        onFilterButton={(col) => opened.push(col)}
+      />,
+    );
+    expect(screen.queryByRole("rowheader", { name: "3" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Filter B" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter A" }));
+    expect(opened).toEqual(["s1.c1"]);
+  });
+
   it("types a fresh value, edits the formula behind one, and sends commands up", () => {
     events.length = 0;
     render(<Harness doc={emptyDoc()} />);

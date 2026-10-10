@@ -70,7 +70,7 @@ export interface GridFill {
 }
 
 export type GridCommand =
-  | { readonly kind: "clear" | "undo" | "redo" | "find" }
+  | { readonly kind: "clear" | "undo" | "redo" | "find" | "filter" }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
   | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
 /** Someone else's selection, drawn in their colour. */
@@ -145,6 +145,15 @@ export interface SheetGridProps {
   readonly onFill?: (fill: GridFill) => void;
   /** Drawn just past the selection's corner, as Excel's Auto Fill Options button after a fill. */
   readonly selectionAccessory?: ReactNode;
+  /** Rows out of view for now, such as those a filter hides, by ID. */
+  readonly hiddenRows?: ReadonlySet<string>;
+  /** A filter's header row and columns, which get its buttons; `active` ones have a rule. */
+  readonly filterButtons?: {
+    readonly row: string;
+    readonly cols: readonly string[];
+    readonly active: ReadonlySet<string>;
+  } | null;
+  readonly onFilterButton?: (col: string, button: HTMLElement) => void;
   /** The selection dragged by its border this far; `copy` when Alt or Ctrl was held. */
   readonly onDragSelection?: (shift: { rows: number; cols: number }, copy: boolean) => void;
 }
@@ -154,6 +163,7 @@ const FALLBACK = { width: 960, height: 640 };
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
+const NO_ROWS: ReadonlySet<string> = new Set();
 const OVERLAY_MIN = { width: 160, height: 120 };
 
 /** Row and column indexes of every merged range, and the cells each hides. */
@@ -211,16 +221,22 @@ export function SheetGrid({
   onFill,
   onDragSelection,
   selectionAccessory,
+  hiddenRows = NO_ROWS,
+  filterButtons = null,
+  onFilterButton,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ top: 0, left: 0, ...FALLBACK });
   const data = doc.sheet[sheet]!;
-  const rows = useMemo(
-    () => axisLayout(data.rows, data.rowProps, rowPx),
-    [data.rows, data.rowProps],
-  );
+  const rows = useMemo(() => {
+    if (!hiddenRows.size) return axisLayout(data.rows, data.rowProps, rowPx);
+    // Rows a filter hides measure as hidden ones do, without being stored as hidden.
+    const props = { ...data.rowProps };
+    for (const id of hiddenRows) props[id] = { ...props[id], hidden: true };
+    return axisLayout(data.rows, props, rowPx);
+  }, [data.rows, data.rowProps, hiddenRows]);
   const cols = useMemo(
     () => axisLayout(data.cols, data.colProps, columnPx),
     [data.cols, data.colProps],
@@ -534,24 +550,26 @@ export function SheetGrid({
     if (writable && command && !event.altKey) {
       const lower = event.key.toLowerCase();
       const found: GridCommand | null =
-        lower === "z"
-          ? { kind: event.shiftKey ? "redo" : "undo" }
-          : lower === "y"
-            ? { kind: "redo" }
-            : lower === "d"
-              ? { kind: "fill", direction: "down" }
-              : lower === "r"
-                ? { kind: "fill", direction: "right" }
-                : lower === "b"
-                  ? { kind: "toggle", property: "bold" }
-                  : lower === "i"
-                    ? { kind: "toggle", property: "italic" }
-                    : lower === "u"
-                      ? { kind: "toggle", property: "underline" }
-                      : // Ctrl+5 strikes through, as in Excel.
-                        event.key === "5"
-                        ? { kind: "toggle", property: "strike" }
-                        : null;
+        lower === "l" && event.shiftKey
+          ? { kind: "filter" }
+          : lower === "z"
+            ? { kind: event.shiftKey ? "redo" : "undo" }
+            : lower === "y"
+              ? { kind: "redo" }
+              : lower === "d"
+                ? { kind: "fill", direction: "down" }
+                : lower === "r"
+                  ? { kind: "fill", direction: "right" }
+                  : lower === "b"
+                    ? { kind: "toggle", property: "bold" }
+                    : lower === "i"
+                      ? { kind: "toggle", property: "italic" }
+                      : lower === "u"
+                        ? { kind: "toggle", property: "underline" }
+                        : // Ctrl+5 strikes through, as in Excel.
+                          event.key === "5"
+                          ? { kind: "toggle", property: "strike" }
+                          : null;
       if (found) {
         event.preventDefault();
         onCommand?.(found);
@@ -887,6 +905,37 @@ export function SheetGrid({
     // The active cell stays in the tree when scrolled away, so assistive tech still finds it.
     if (main && head && !drawn.has(key(head.row, head.col)) && rows.ids.length && cols.ids.length)
       draw(head.row, head.col, head.col);
+    // A filter's buttons, at the right of its header cells, as Excel draws them.
+    if (filterButtons) {
+      const row = rowIndex.get(filterButtons.row);
+      if (row !== undefined && row >= rowRange.first && row <= rowRange.last)
+        for (const c of filterButtons.cols) {
+          const col = colIndex.get(c);
+          if (col === undefined || col < colRange.first || col > colRange.last || !cols.size(col))
+            continue;
+          const active = filterButtons.active.has(c);
+          cells.push(
+            <button
+              key={`filter-${c}`}
+              type="button"
+              aria-label={`Filter ${columnLetters(col + 1)}`}
+              aria-pressed={active}
+              tabIndex={-1}
+              className={`border-border absolute z-[3] flex size-4 items-center justify-center rounded-sm border ${active ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground"}`}
+              style={{
+                top: rows.starts[row]! + (rows.size(row) - 16) / 2,
+                left: cols.starts[col + 1]! - 18,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => onFilterButton?.(c, event.currentTarget)}
+            >
+              <svg aria-hidden viewBox="0 0 10 10" className="size-2.5" fill="currentColor">
+                {active ? <path d="M1 2h8L6 5.5V9L4 8V5.5z" /> : <path d="M2 3.5h6L5 7z" />}
+              </svg>
+            </button>,
+          );
+        }
+    }
     return cells;
   };
   const cells = paneCells(visibleRows, visibleCols, true);
