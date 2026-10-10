@@ -374,6 +374,28 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
   return cells.length ? [{ op: "set", sh: context.sheet, cells }] : [];
 }
 
+/** Whether dropping the selection this far away would write over cells holding something. */
+export function dragOverwrites(
+  context: GridContext,
+  shift: { readonly rows: number; readonly cols: number },
+): boolean {
+  const box = selectionBox(context);
+  const sheet = context.doc.sheet[context.sheet]!;
+  const rows = positions(sheet.rows).ids;
+  const cols = positions(sheet.cols).ids;
+  const top = Math.max(1, box.top + shift.rows);
+  const left = Math.max(1, box.left + shift.cols);
+  for (let row = top; row <= top + box.bottom - box.top; row++)
+    for (let col = left; col <= left + box.right - box.left; col++) {
+      // The selection's own cells are moving away, so they are not overwritten.
+      if (row >= box.top && row <= box.bottom && col >= box.left && col <= box.right) continue;
+      const cell =
+        rows[row - 1] && cols[col - 1] ? sheet.cells[rows[row - 1]!]?.[cols[col - 1]!] : undefined;
+      if (cell?.f || (cell?.v !== undefined && cell.v !== null)) return true;
+    }
+  return false;
+}
+
 /**
  * The selection dragged by its border `rows` down and `cols` right: moved, as
  * a cut and paste would, or copied with its formats when Alt or Ctrl was held.

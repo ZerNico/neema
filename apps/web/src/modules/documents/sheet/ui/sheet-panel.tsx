@@ -17,7 +17,7 @@ import {
   SortingZA01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
+import { useContext, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
@@ -29,6 +29,7 @@ import {
   clearSelection,
   copySelection,
   deleteAtSelection,
+  dragOverwrites,
   dragSelection,
   enterCell,
   enterSelection,
@@ -68,6 +69,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { uuidv7 } from "uuidv7";
 import { toast } from "sonner";
+import { ConfirmContext } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { commentMessage } from "../../comment-message.ts";
 import {
@@ -154,6 +156,8 @@ export default function SheetPanelBody({
   // A chart selected instead of cells, and the chart open in the editor, by ID.
   const [chartPicked, setChartPicked] = useState<string | null>(null);
   const [chartEditing, setChartEditing] = useState<string | null>(null);
+  // Absent outside the app's provider, as in tests, where a drop then replaces without asking.
+  const confirm = useContext(ConfirmContext);
   /** The fill just made, which Auto Fill Options can redo another way while it stays selected. */
   const [lastFill, setLastFill] = useState<{
     source: SheetSelection;
@@ -609,9 +613,20 @@ export default function SheetPanelBody({
                   ])
                 }
                 onOverlayCommand={chartAction}
-                onDragSelection={(shift, copy) => {
+                onDragSelection={async (shift, copy) => {
                   const result = dragSelection(context, shift, copy);
                   if (!result || readOnly) return;
+                  // As Excel asks before a drop writes over cells that hold something.
+                  if (
+                    confirm &&
+                    dragOverwrites(context, shift) &&
+                    !(await confirm({
+                      title: "Replace the cells there?",
+                      description: "Some of the cells you are dropping onto already hold data.",
+                      confirmLabel: "Replace",
+                    }))
+                  )
+                    return;
                   run(result.ops);
                   select(result.selection);
                 }}

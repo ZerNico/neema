@@ -9,6 +9,7 @@ import {
   clearSelection,
   copySelection,
   deleteAtSelection,
+  dragOverwrites,
   dragSelection,
   enterCell,
   enterSelection,
@@ -220,6 +221,8 @@ describe("dragging the selection by its border", () => {
     let doc = type(emptyDoc(), 1, 1, "5");
     doc = type(doc, 1, 2, "=A1*2");
     doc = type(doc, 2, 1, "12,5%");
+    expect(dragOverwrites(context(doc, [1, 1], [2, 1]), { rows: 0, cols: 1 })).toBe(true);
+    expect(dragOverwrites(context(doc, [1, 1], [2, 1]), { rows: 1, cols: 0 })).toBe(false);
     const moved = dragSelection(context(doc, [1, 1], [2, 1]), { rows: 2, cols: 2 }, false)!;
     const after = apply(doc, moved.ops);
     expect(formulaAt(after, 1, 2)).toBe("C3*2");
