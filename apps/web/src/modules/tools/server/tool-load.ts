@@ -19,7 +19,7 @@ export const LAZY_FAMILY_TOOLS: Record<LazyToolFamily, ReadonlyArray<string>> = 
 const LAZY_FAMILY_SUMMARIES: Record<LazyToolFamily, string> = {
   presentation: "Create, inspect, edit and render PowerPoint decks (.pptx).",
   spreadsheet: "Create, inspect and edit Excel workbooks (.xlsx) with live formulas.",
-  word: "Create, inspect and edit Word documents (.docx), including templates.",
+  word: "Create, inspect and edit Word files (.docx), including templates, when the person asks for one or gives you one.",
   "agent-draft": "Draft a new saved agent or edit an existing one for the user to save.",
   "schedule-draft": "Draft a scheduled task that runs a prompt on a recurring schedule.",
 };
