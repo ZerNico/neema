@@ -28,6 +28,7 @@ export type StylePatch = { readonly [K in keyof CellStyle]?: CellStyle[K] | null
 
 // Style keys are canonical JSON shared by every cell with that style: read once each.
 const read = new Map<string, CellStyle>();
+const STYLES_KEPT = 5_000;
 /** The style a key holds; shared, so never changed in place. */
 export const cellStyle = (key: string | undefined): CellStyle => {
   if (!key) return {};
@@ -35,6 +36,8 @@ export const cellStyle = (key: string | undefined): CellStyle => {
   if (!style) {
     // Keys are written only by `styleKey`, from checked patches.
     style = Object.freeze(JSON.parse(key) as CellStyle);
+    // One process serves every document: the cache is bounded, not kept for its lifetime.
+    if (read.size >= STYLES_KEPT) read.clear();
     read.set(key, style);
   }
   return style;
