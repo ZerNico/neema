@@ -58,6 +58,7 @@ import {
   type SheetSelection,
 } from "@chat/sheet-react/grid";
 import { Button } from "~/ui/primitives/button";
+import { readHtmlTable, selectionHtml } from "@chat/sheet-react/clipboard";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -148,6 +149,24 @@ function MenuItem({
       {label}
     </ContextMenuItem>
   );
+}
+
+/** Text and HTML on the clipboard from a menu, text alone where the browser has no ClipboardItem. */
+function writeClipboard(text: string, html: string) {
+  const clipboard = navigator.clipboard;
+  if (!clipboard) return;
+  if (typeof ClipboardItem === "undefined") {
+    void clipboard.writeText(text);
+    return;
+  }
+  void clipboard
+    .write([
+      new ClipboardItem({
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
+      }),
+    ])
+    .catch(() => clipboard.writeText(text));
 }
 
 /** Excel's Paste Special choices, as the cell menu offers them. */
@@ -366,10 +385,15 @@ export default function SheetPanelBody({
     options: { part?: PastePart; transpose?: boolean } = {},
   ) => {
     const from = copied.current;
-    run(pasteAtSelection(context, clip.text, from, options));
+    const own = from?.text === clip.text;
+    run(
+      pasteAtSelection(context, clip.text, from, {
+        ...options,
+        foreign: !own && clip.html ? readHtmlTable(clip.html) : null,
+      }),
+    );
     // A cut moves once; pasting it again copies what now stands there.
-    if (from?.cut && from.text === clip.text && !options.part && !options.transpose)
-      copied.current = null;
+    if (from?.cut && own && !options.part && !options.transpose) copied.current = null;
   };
   /** The clipboard for the menu's pastes, with its HTML where the browser lets that be read. */
   const pasteFromMenu = (options: { part?: PastePart; transpose?: boolean } = {}) => {
@@ -878,7 +902,7 @@ export default function SheetPanelBody({
                 onCommand={onCommand}
                 onCopy={(cut) => {
                   copied.current = copySelection(context, cut);
-                  return copied.current.text;
+                  return { text: copied.current.text, html: selectionHtml(context) };
                 }}
                 onPaste={(clip) => paste(clip, clip.values ? { part: "values" } : {})}
                 onResize={(axis, id, px) =>
@@ -992,7 +1016,7 @@ export default function SheetPanelBody({
                   disabled={readOnly}
                   onClick={() => {
                     copied.current = copySelection(context, true);
-                    void navigator.clipboard?.writeText(copied.current.text);
+                    writeClipboard(copied.current.text, selectionHtml(context));
                   }}
                 />
                 <MenuItem
@@ -1000,7 +1024,7 @@ export default function SheetPanelBody({
                   label="Copy"
                   onClick={() => {
                     copied.current = copySelection(context, false);
-                    void navigator.clipboard?.writeText(copied.current.text);
+                    writeClipboard(copied.current.text, selectionHtml(context));
                   }}
                 />
                 <MenuItem

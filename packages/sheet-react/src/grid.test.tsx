@@ -53,7 +53,7 @@ function Harness({ doc, locale = EN_US }: { doc: SheetDoc; locale?: SheetLocale 
         onCommit={(cell, text) => events.push(`commit ${cell.r}/${cell.c} ${text}`)}
         editSource={() => "=A1*2"}
         onCommand={(command) => events.push(command.kind)}
-        onCopy={(cut) => (cut ? "cut" : "copied")}
+        onCopy={(cut) => ({ text: cut ? "cut" : "copied" })}
         onPaste={(clip) => events.push(`paste${clip.values ? " values" : ""} ${clip.text}`)}
       />
     </div>

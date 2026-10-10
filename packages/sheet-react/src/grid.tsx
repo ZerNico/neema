@@ -129,8 +129,8 @@ export interface SheetGridProps {
   /** What editing a cell starts from: its formula or value as typed. */
   readonly editSource?: (at: CellRef) => string;
   readonly onCommand?: (command: GridCommand) => void;
-  /** The text a copy or cut puts on the clipboard, or null for nothing. */
-  readonly onCopy?: (cut: boolean) => string | null;
+  /** What a copy or cut puts on the clipboard, as text and as HTML, or null for nothing. */
+  readonly onCopy?: (cut: boolean) => { text: string; html?: string } | null;
   /** A paste: the clipboard's text and HTML, and whether Cmd+Shift+V asked for values only. */
   readonly onPaste?: (clip: { text: string; html: string | null; values: boolean }) => void;
   /** A row or column dragged to a new size, in pixels. */
@@ -1521,17 +1521,19 @@ export function SheetGrid({
       }}
       onCopy={(event) => {
         if (editing || !onCopy) return;
-        const text = onCopy(false);
-        if (text === null) return;
+        const copied = onCopy(false);
+        if (copied === null) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", text);
+        event.clipboardData.setData("text/plain", copied.text);
+        if (copied.html) event.clipboardData.setData("text/html", copied.html);
       }}
       onCut={(event) => {
         if (editing || !onCopy || !writable) return;
-        const text = onCopy(true);
-        if (text === null) return;
+        const copied = onCopy(true);
+        if (copied === null) return;
         event.preventDefault();
-        event.clipboardData.setData("text/plain", text);
+        event.clipboardData.setData("text/plain", copied.text);
+        if (copied.html) event.clipboardData.setData("text/html", copied.html);
       }}
       onPaste={(event) => {
         if (editing || !onPaste || !writable) return;

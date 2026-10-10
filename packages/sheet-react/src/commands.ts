@@ -327,6 +327,8 @@ export const parseTabular = (text: string) => parseDelimited(text, "\t");
 /** A cell from another program: text typed in as if entered, and the style it carried. */
 export interface ForeignCell {
   readonly raw: string;
+  /** The number it holds, where its program marked one, written as it is. */
+  readonly value?: number;
   readonly style?: StylePatch;
 }
 /** What a paste writes, as Excel's Paste Special: everything, values, formulas or formats. */
@@ -403,6 +405,10 @@ export function pasteAtSelection(
         if (patch) styles.push({ op: "format", sh: context.sheet, area, patch });
       }
       if (part === "formats") return;
+      if ("raw" in item && item.value !== undefined) {
+        cells.push({ ...at, v: item.value });
+        return;
+      }
       if ("raw" in item) {
         const typed = enterCell({ ...context, doc: grow.doc }, at, item.raw);
         for (const op of typed)
