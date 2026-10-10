@@ -60,7 +60,11 @@ export interface CellEditing {
 /** A drag of the fill handle: how many cells past the selection, which way, Ctrl held or not. */
 export interface GridFill {
   readonly direction: "down" | "up" | "right" | "left";
-  /** Cells to fill, or `"auto"` for a double-click: down as far as the data beside it runs. */
+  /**
+   * Cells to fill, or `"auto"` for a double-click: down as far as the data
+   * beside it runs. Below zero, the handle was dragged back in: clear that
+   * many of the selection's last rows (down) or columns (right).
+   */
   readonly count: number | "auto";
   readonly mode: "auto" | "alternate";
 }
@@ -789,7 +793,13 @@ export function SheetGrid({
         ["left", from.left - col],
       ] as const;
       const [direction, count] = reaches.reduce((best, each) => (each[1] > best[1] ? each : best));
-      current = count > 0 ? { direction, count } : null;
+      // Back inside the selection, the handle marks its last rows or columns to clear.
+      const inside = row >= from.top && row <= from.bottom && col >= from.left && col <= from.right;
+      const shrink =
+        from.bottom - row >= from.right - col
+          ? { direction: "down" as const, count: row - from.bottom }
+          : { direction: "right" as const, count: col - from.right };
+      current = count > 0 ? { direction, count } : inside && shrink.count < 0 ? shrink : null;
       setFilling(current);
     };
     const end = (last: globalThis.PointerEvent) => {
@@ -828,19 +838,23 @@ export function SheetGrid({
     box && filling
       ? (() => {
           const [top, bottom, left, right] =
-            filling.direction === "down"
-              ? [box.bottom + 1, box.bottom + filling.count, box.left, box.right]
-              : filling.direction === "up"
-                ? [box.top - filling.count, box.top - 1, box.left, box.right]
-                : filling.direction === "right"
-                  ? [box.top, box.bottom, box.right + 1, box.right + filling.count]
-                  : [box.top, box.bottom, box.left - filling.count, box.left - 1];
+            filling.count < 0
+              ? filling.direction === "down"
+                ? [box.bottom + filling.count + 1, box.bottom, box.left, box.right]
+                : [box.top, box.bottom, box.right + filling.count + 1, box.right]
+              : filling.direction === "down"
+                ? [box.bottom + 1, box.bottom + filling.count, box.left, box.right]
+                : filling.direction === "up"
+                  ? [box.top - filling.count, box.top - 1, box.left, box.right]
+                  : filling.direction === "right"
+                    ? [box.top, box.bottom, box.right + 1, box.right + filling.count]
+                    : [box.top, box.bottom, box.left - filling.count, box.left - 1];
           const [t, b] = [Math.max(0, top), Math.min(rows.ids.length - 1, bottom)];
           const [l, r] = [Math.max(0, left), Math.min(cols.ids.length - 1, right)];
           return (
             <div
               aria-hidden
-              className="border-primary pointer-events-none absolute z-10 border-2 border-dashed"
+              className={`border-primary pointer-events-none absolute z-10 border-2 border-dashed ${filling.count < 0 ? "bg-muted/70" : ""}`}
               style={{
                 top: rows.starts[t],
                 left: cols.starts[l],

@@ -189,6 +189,19 @@ describe("the fill handle", () => {
     expect(result.selection).toEqual({ anchor: at(doc, 1, 2), head: at(doc, 40, 2) });
   });
 
+  it("clears the rows the handle is dragged back over, as Excel does", () => {
+    let doc = emptyDoc();
+    for (let row = 1; row <= 4; row++) doc = type(doc, row, 1, String(row));
+    const result = fillFromHandle(context(doc, [1, 1], [4, 1]), {
+      direction: "down",
+      count: -2,
+      mode: "auto",
+    })!;
+    doc = apply(doc, result.ops);
+    expect([1, 2, 3, 4].map((row) => shown(doc, row, 1))).toEqual([1, 2, null, null]);
+    expect(result.selection).toEqual({ anchor: at(doc, 1, 1), head: at(doc, 2, 1) });
+  });
+
   it("counts on a dragged series and grows the grid for it", () => {
     let doc = type(emptyDoc(), 1, 1, "Mon");
     const result = fillFromHandle(context(doc, [1, 1]), {

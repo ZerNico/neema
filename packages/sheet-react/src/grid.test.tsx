@@ -273,9 +273,14 @@ describe("the grid's fill handle", () => {
     fireEvent.pointerMove(window, { clientX: 30, clientY: 110 });
     fireEvent.pointerUp(window, { ctrlKey: true });
     fireEvent.doubleClick(handle);
+    // Back over the selection's own last row: that row is to be cleared.
+    fireEvent.pointerDown(handle, { button: 0, clientX: 60, clientY: 40 });
+    fireEvent.pointerMove(window, { clientX: 30, clientY: 10 });
+    fireEvent.pointerUp(window);
     expect(fills).toEqual([
       { direction: "down", count: 4, mode: "alternate" },
       { direction: "down", count: "auto", mode: "auto" },
+      { direction: "down", count: -1, mode: "auto" },
     ]);
   });
 });

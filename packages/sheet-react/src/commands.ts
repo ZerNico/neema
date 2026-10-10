@@ -432,6 +432,21 @@ export function fillFromHandle(
     };
     count = filled(box.left - 1) || filled(box.right + 1);
   }
+  if (count < 0) {
+    // Dragged back in: the last rows or columns are cleared, the rest stays selected.
+    const keep =
+      fill.direction === "down"
+        ? { r: box.rowIds[Math.max(0, box.rowIds.length + count - 1)]!, c: box.colIds.at(-1)! }
+        : { r: box.rowIds.at(-1)!, c: box.colIds[Math.max(0, box.colIds.length + count - 1)]! };
+    const cleared =
+      fill.direction === "down"
+        ? { ...box.area, r1: box.rowIds[box.rowIds.length + count]! }
+        : { ...box.area, c1: box.colIds[box.colIds.length + count]! };
+    return {
+      ops: [{ op: "clear", sh: context.sheet, area: cleared, what: "contents" }],
+      selection: { anchor: { r: box.area.r1, c: box.area.c1 }, head: keep },
+    };
+  }
   if (count < 1) return null;
   const grow = grower(context);
   if (fill.direction === "down") grow.ensure(context.sheet, box.bottom + count, box.right);
