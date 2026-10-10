@@ -30,24 +30,28 @@ export function RenameDocumentDialog({
 }) {
   const id = useId();
   const queryClient = useQueryClient();
-  const [title, setTitle] = useState(document.title);
+  // Null until the person types, so the field shows the title as it is now:
+  // the menu opens this by its prop, which never runs the open handler.
+  const [draft, setDraft] = useState<string | null>(null);
+  const title = draft ?? document.title;
   const save = useMutation({
     mutationFn: () => renameDocument({ data: { documentId: document.id, title: title.trim() } }),
     onSuccess: async (renamed) => {
       queryClient.setQueryData(["documents", document.id], renamed);
-      onOpenChange(false);
+      close();
     },
   });
+  const close = () => {
+    setDraft(null);
+    save.reset();
+    onOpenChange(false);
+  };
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && save.isPending) return;
-        if (next) {
-          setTitle(document.title);
-          save.reset();
-        }
-        onOpenChange(next);
+        if (next) onOpenChange(true);
+        else if (!save.isPending) close();
       }}
     >
       <DialogContent>
@@ -59,7 +63,7 @@ export function RenameDocumentDialog({
           onSubmit={(event) => {
             event.preventDefault();
             if (title.trim() && title.trim() !== document.title) save.mutate();
-            else onOpenChange(false);
+            else close();
           }}
         >
           <FieldGroup>
@@ -69,7 +73,7 @@ export function RenameDocumentDialog({
                 id={`${id}-title`}
                 value={title}
                 maxLength={DOCUMENT_LIMITS.title}
-                onChange={(event) => setTitle(event.target.value)}
+                onChange={(event) => setDraft(event.target.value)}
                 disabled={save.isPending}
                 autoFocus
                 onFocus={(event) => event.currentTarget.select()}
