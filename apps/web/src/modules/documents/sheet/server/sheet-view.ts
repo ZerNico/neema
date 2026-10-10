@@ -93,6 +93,7 @@ export function sheetView(
       frozenRow || frozenCol
         ? `frozen="${address((frozenRow ?? 0) + 1, (frozenCol ?? 0) + 1)}"`
         : "",
+      doc.sheet[id]!.color ? `color="${doc.sheet[id]!.color}"` : "",
       id === sheet ? "shown" : "",
     ].filter(Boolean);
     return `<tab ${attributes.join(" ")}/>`;

@@ -246,6 +246,12 @@ export const LIVE_SHEET_OPERATIONS = {
     required: ["sheet", "position"],
     change: ["moved", "sheet"],
   },
+  colorSheet: {
+    about: "Colour a sheet's tab, or take its colour off.",
+    fields: { sheet, color: { type: "color", about: "The tab's colour; leave out for none." } },
+    required: ["sheet"],
+    change: ["coloured", "sheet tab"],
+  },
   deleteSheet: { ...SPREADSHEET_OPERATIONS.deleteSheet, fields: { sheet } },
   defineName: {
     ...SPREADSHEET_OPERATIONS.defineName,

@@ -472,6 +472,10 @@ export function convertOperations(
         emit({ op: "sheetRename", id: sh, name: operation.name });
         return;
       }
+      case "colorSheet": {
+        emit({ op: "sheetColor", id: sheetId(operation.sheet), color: operation.color ?? null });
+        return;
+      }
       case "moveSheet": {
         const sh = sheetId(operation.sheet);
         const others = liveSheets(view).filter((each) => each !== sh);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet } from "@chat/sheet/model/calc";
 import { renderFormula } from "@chat/sheet/model/formula";
-import { emptyDoc, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
+import { emptyDoc, liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import type { Validation } from "@chat/sheet/model/validation";
 import { exportLiveSheet, importLiveSheet } from "~/modules/spreadsheets/server/adapter.ts";
@@ -10,6 +10,7 @@ import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
 import { liveSheetExport } from "./export.ts";
 import { sheetFromCsv, sheetFromWorkbook } from "./import.ts";
+import { sheetView } from "./sheet-view.ts";
 
 const settings = { locale: "en-US", timeZone: "UTC" };
 const context = { revision: 1, epoch: 0, now: 45_000, seed: 1 };
@@ -99,6 +100,19 @@ describe("importing into a live sheet", () => {
       fontFamily: "Georgia",
     });
     expect(JSON.parse(cellOf(imported.doc, "Sheet1", 1, 2)!.s!)).toEqual({ strike: true });
+  });
+
+  it("keeps a tab's colour through Excel and back, and shows it to the model", async () => {
+    const original = build([{ kind: "colorSheet", sheet: "Sheet1", color: "#c00000" }]);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(imported.doc.sheet[liveSheets(imported.doc)[0]!]!.color).toBe("#C00000");
+    expect(sheetView(imported.doc, calculateSheet(imported.doc, context)).xml).toContain(
+      'color="#C00000"',
+    );
   });
 
   it("keeps hidden rows and columns and a filter through Excel and back", async () => {

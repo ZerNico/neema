@@ -204,6 +204,7 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
         [id]: {
           ...sheet,
           cells,
+          ...(each.color ? { color: each.color } : {}),
           colProps: sized(each.widths, each.hiddenCols, cols),
           rowProps: sized(each.heights, each.hiddenRows, rows),
           ...(each.validations?.length

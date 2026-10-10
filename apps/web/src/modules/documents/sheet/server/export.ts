@@ -181,6 +181,7 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
         ...(filter ? { filter } : {}),
         ...(conditional.length ? { conditional } : {}),
         ...(validations.length ? { validations } : {}),
+        ...(sheet.color ? { color: sheet.color } : {}),
       };
     }),
     names: Object.values(doc.names).map((name) => ({

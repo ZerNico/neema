@@ -64,6 +64,7 @@ import {
   setRowHeight,
   unmergeCells,
   type Worksheet,
+  makeSheetProperties,
 } from "@office-kit/xlsx/worksheet";
 import { SpreadsheetError } from "../errors.ts";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
@@ -821,6 +822,8 @@ export interface LiveSheetExport {
     readonly filter?: FileFilter;
     readonly conditional?: readonly FileConditional[];
     readonly validations?: readonly FileValidation[];
+    /** The tab's colour, as #RRGGBB. */
+    readonly color?: string;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
@@ -899,6 +902,11 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     if (each.freeze) setFreezePanes(sheet, each.freeze);
     if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
     if (each.validations?.length) writeValidations(sheet, each.validations);
+    if (each.color)
+      sheet.sheetProperties = makeSheetProperties({
+        ...sheet.sheetProperties,
+        tabColor: { rgb: `FF${each.color.slice(1).toUpperCase()}` },
+      });
     for (const row of each.hiddenRows ?? []) hideRow(sheet, row);
     for (const column of each.hiddenCols ?? []) hideColumn(sheet, column);
     if (each.filter)
@@ -943,6 +951,8 @@ export interface LiveSheetImport {
     readonly filter?: FileFilter;
     readonly conditional?: readonly FileConditional[];
     readonly validations?: readonly FileValidation[];
+    /** The tab's colour, as #RRGGBB. */
+    readonly color?: string;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -1084,6 +1094,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
         !(filterBox && row > filterBox.top && row <= filterBox.bottom)
       )
         hiddenRows.push(row);
+    const tabColor = rgbOf(sheet.sheetProperties?.tabColor);
     const hiddenCols: number[] = [];
     for (let column = 1; column <= Math.max(cols, 26); column++)
       if (getColumnDimension(sheet, column)?.hidden) hiddenCols.push(column);
@@ -1144,6 +1155,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       ...(filter ? { filter } : {}),
       ...(conditional.length ? { conditional } : {}),
       ...(validations.length ? { validations } : {}),
+      ...(tabColor ? { color: tabColor } : {}),
     };
   });
   return {
