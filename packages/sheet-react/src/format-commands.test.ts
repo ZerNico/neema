@@ -118,7 +118,7 @@ describe("the Home tab's commands", () => {
     expect(selectionStats(context(doc, [1, 1]))).toBeNull();
   });
 
-  it("adds conditional rules after the others, reorders them, and clears those on the selection", () => {
+  it("adds conditional rules after the others, reorders them, and clears them from the selection", () => {
     let doc = apply(
       emptyDoc(),
       addConditional(context(emptyDoc(), [1, 1], [3, 1]), { kind: "bar", color: "#638EC6" }),
@@ -131,8 +131,11 @@ describe("the Home tab's commands", () => {
     expect([first!.rule.kind, second!.rule.kind]).toEqual(["bar", "blank"]);
     doc = apply(doc, editConditional(context(doc, [1, 1]), second!.id, "up"));
     expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank", "bar"]);
+    // Cleared from A2 alone, the bar keeps A1 and A3, as Excel trims a rule's cells.
     doc = apply(doc, clearConditional(context(doc, [2, 1]), "selection"));
-    expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank"]);
+    expect(
+      doc.sheet.s1!.conditional!.map((each) => `${each.rule.kind} ${each.box.r1}:${each.box.r2}`),
+    ).toEqual(["blank s1.r5:s1.r5", "bar s1.r1:s1.r1", "bar s1.r3:s1.r3"]);
     doc = apply(doc, clearConditional(context(doc, [2, 1]), "sheet"));
     expect(doc.sheet.s1!.conditional).toBeUndefined();
   });

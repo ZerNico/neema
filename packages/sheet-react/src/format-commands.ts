@@ -255,26 +255,17 @@ export function addConditional(context: GridContext, rule: ConditionalRule): She
 const unchanged = <T>(next: readonly T[], before: readonly T[]) =>
   next.length === before.length && next.every((each, index) => each === before[index]);
 
-/** Clear Rules: those over the selected cells, or every one on the sheet. */
+/**
+ * Clear Rules: from the selected cells, as Excel trims a rule partly over
+ * them to the rest of its cells, or every rule on the sheet.
+ */
 export function clearConditional(context: GridContext, scope: "selection" | "sheet"): SheetOp[] {
-  const list = context.doc.sheet[context.sheet]!.conditional ?? [];
+  const sheet = context.doc.sheet[context.sheet]!;
+  const list = sheet.conditional ?? [];
   if (!list.length) return [];
   if (scope === "sheet") return [{ op: "conditional", sh: context.sheet, list: [] }];
-  const sheet = context.doc.sheet[context.sheet]!;
-  const rows = positions(sheet.rows);
-  const cols = positions(sheet.cols);
-  const box = selectionBox(context);
-  const overlaps = (area: Box) => {
-    const [top, bottom, left, right] = [
-      rows.at(area.r1) ?? 0,
-      rows.at(area.r2) ?? 0,
-      cols.at(area.c1) ?? 0,
-      cols.at(area.c2) ?? 0,
-    ];
-    return top <= box.bottom && bottom >= box.top && left <= box.right && right >= box.left;
-  };
-  const kept = list.filter((each) => !overlaps(each.box));
-  return kept.length === list.length ? [] : [{ op: "conditional", sh: context.sheet, list: kept }];
+  const kept = withoutBounds(sheet, list, selectionBox(context), context.mint);
+  return unchanged(kept, list) ? [] : [{ op: "conditional", sh: context.sheet, list: kept }];
 }
 
 /** The sheet's rules after one is removed or moved up or down in priority, as Manage Rules does. */

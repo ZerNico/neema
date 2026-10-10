@@ -253,6 +253,11 @@ describe("the model's conditional formats", () => {
     ).toMatchObject({ ok: false });
     doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1", range: "B1" }]));
     expect(doc.sheet.s1!.conditional).toHaveLength(2);
+    // From A3 alone, each rule keeps A1:A2.
+    doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1", range: "A3" }]));
+    expect(sheetView(doc, calculateSheet(doc, context)).xml).toContain(
+      '<rule range="A1:A2" is="dataBar #638EC6"/>',
+    );
     doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1" }]));
     expect(doc.sheet.s1!.conditional).toBeUndefined();
   });

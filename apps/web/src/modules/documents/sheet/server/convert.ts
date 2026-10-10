@@ -705,14 +705,13 @@ export function convertOperations(
           emit({ op: "conditional", sh, list: [] });
           return;
         }
+        // From exactly these cells, as Excel trims a rule partly over them.
         const { box } = area(sh, operation.range);
-        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
-        const kept = list.filter((each) => {
-          const [top, bottom] = [rows.at(each.box.r1) ?? 0, rows.at(each.box.r2) ?? 0];
-          const [left, right] = [cols.at(each.box.c1) ?? 0, cols.at(each.box.c2) ?? 0];
-          return top > box.bottom || bottom < box.top || left > box.right || right < box.left;
+        emit({
+          op: "conditional",
+          sh,
+          list: withoutBounds(view.sheet[sh]!, list, box, input.mint),
         });
-        emit({ op: "conditional", sh, list: kept });
         return;
       }
       case "setValidation": {
