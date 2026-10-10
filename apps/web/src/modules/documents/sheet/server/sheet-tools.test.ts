@@ -120,6 +120,7 @@ const prepare = (
       conversationId: "conv-1",
       messageId: "message-1",
       writeGuard: () => Effect.void,
+      liveGuard: () => Effect.void,
     }),
   );
 type Tools = Awaited<ReturnType<typeof prepare>>;
@@ -251,5 +252,45 @@ describe("live sheet tools", () => {
       outcome: "invalid",
       message: "No file with that reference.",
     });
+  });
+
+  it("writes a streamed edit as it arrives, and the decoded call only what is left", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    await call(tools, "create_sheet", { title: "Plan" });
+    send(tools);
+    const operations = [
+      { kind: "insertRows", sheet: "Sheet1", rows: "1" },
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["a"], ["b"], ["c"]] },
+    ];
+    const text = JSON.stringify({ operations });
+    tools.live.start("call-1", "edit_sheet");
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(0, 90)));
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(90)));
+    expect(await call(tools, "edit_sheet", { operations })).toMatchObject({ outcome: "updated" });
+    const { doc } = fake.rows.get("sheet-1")!;
+    // Inserted once, by the preview; the call found nothing left to write.
+    expect(doc.sheet.s1!.rows).toHaveLength(1001);
+    const firstRows = doc.sheet.s1!.rows.slice(0, 3).map((row) => row.id);
+    expect(firstRows.map((r) => doc.sheet.s1!.cells[r]?.["s1.c1"]?.v)).toEqual(["a", "b", "c"]);
+  });
+
+  it("takes back a streamed edit no call claimed", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    await call(tools, "create_sheet", { title: "Plan" });
+    send(tools);
+    tools.live.start("call-1", "edit_sheet");
+    await Effect.runPromise(
+      tools.live.delta(
+        "call-1",
+        '{"operations":[{"kind":"setCells","sheet":"Sheet1","start":"B2","rows":[["half"],["writ',
+      ),
+    );
+    await Effect.runPromise(tools.live.close);
+    const { doc, document } = fake.rows.get("sheet-1")!;
+    // The row that had arrived was written, then taken back.
+    expect(document.revision).toBe(2);
+    expect(doc.sheet.s1!.cells["s1.r2"]?.["s1.c2"]?.v ?? null).toBeNull();
   });
 });

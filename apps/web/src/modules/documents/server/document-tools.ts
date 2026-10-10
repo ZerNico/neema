@@ -15,7 +15,8 @@ import {
 import { DocumentActivityResult } from "../tool-schema.ts";
 import { DOCUMENT_POLICY, projectDocumentPolicy } from "./document-prompt.ts";
 import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./document-service.ts";
-import { readPartialObject, type PartialField } from "./partial-json.ts";
+import { readPartialArray, readPartialObject, type PartialField } from "./partial-json.ts";
+import { invertChange } from "@chat/sheet/model/invert";
 import { calculateSheet, type SheetValues } from "@chat/sheet/model/calc";
 import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import { columnLetters, parseCell } from "@chat/sheet/a1";
@@ -311,6 +312,8 @@ export type DocumentToolService = Pick<
 const PACE = Duration.millis(30);
 const PACE_MIN_CHARS = 6;
 const PACE_SHARE = 5;
+/** A streamed sheet edit writes what has arrived at most this often. */
+const SHEET_PACE = Duration.millis(150);
 /** How long a decoded call waits for its preview to catch up before writing the rest at once. */
 const PACE_DRAIN = Duration.seconds(2);
 const reveal = (shown: string, target: string) => {
@@ -345,6 +348,19 @@ const quietly = (effect: Effect.Effect<unknown, unknown>, state: { failed: boole
           }).pipe(Effect.andThen(Effect.logWarning("live document edit stopped"))),
     ),
   );
+
+/** An operation less the rows a preview already wrote of it; null when nothing is left. */
+const remainderOf = (operation: unknown, rows: number): unknown => {
+  if (!rows) return operation;
+  if (typeof operation !== "object" || operation === null) return operation;
+  const { start, rows: values } = operation as { start?: unknown; rows?: unknown };
+  const at = typeof start === "string" ? parseCell(start) : null;
+  if (!at || !Array.isArray(values)) return operation;
+  const rest = values.slice(rows);
+  return rest.length
+    ? { ...operation, start: `${columnLetters(at.column)}${at.row + rows}`, rows: rest }
+    : null;
+};
 
 const reference = (document: EditableDocument) => ({
   documentId: document.id,
@@ -1268,6 +1284,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   const sheetEdit = Effect.fn(function* (
     document: EditableDocument,
     raw: unknown,
+    // A streamed edit's preview: written under the lighter fence, and what it changed kept for undoing.
+    preview?: SheetLive,
   ): Effect.fn.Return<Result> {
     if (!input.sheets) return { outcome: "unavailable", message: "Live sheets are unavailable." };
     if (!document.canEdit)
@@ -1294,7 +1312,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           clientId: sheetClient,
           generationId: input.generationId ?? null,
         },
-        input.writeGuard,
+        preview ? input.liveGuard : input.writeGuard,
         (doc, current) =>
           Effect.sync(() => {
             const converted = convertOperations(
@@ -1311,6 +1329,10 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
               },
               operations,
             );
+            if (preview && converted.ok) {
+              preview.before ??= doc;
+              preview.after = converted.doc;
+            }
             return { result: converted, ops: converted.ok ? converted.ops : null };
           }),
       )
@@ -1349,6 +1371,174 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       message: `${describeLiveSheetChanges(operations)}.${skipped.length ? ` Skipped ${skipped.join("; ")}.` : ""}`,
     };
   });
+  /**
+   * An edit_sheet or create_sheet call whose arguments are still arriving.
+   * Operations already complete, and the rows of a setCells still being
+   * written, go into the sheet as they arrive; the decoded call writes only
+   * what is left.
+   */
+  type SheetLive = {
+    name: "edit_sheet" | "create_sheet";
+    raw: string;
+    document: EditableDocument | null;
+    /** Operations written whole, then rows of the next one if it is a setCells. */
+    applied: number;
+    rowsApplied: number;
+    /** The sheet before the first write and after the last, to undo one never claimed. */
+    before: SheetDoc | null;
+    after: SheetDoc | null;
+    failed: boolean;
+    flusher: Fiber.Fiber<void> | null;
+  };
+  const sheetLive = new Map<string, SheetLive>();
+  /** The decoded call's operations less what its preview wrote. */
+  const remainingOf = (operations: unknown, preview: SheetLive | null): unknown => {
+    if (!preview || !Array.isArray(operations)) return operations;
+    const first = operations[preview.applied];
+    const rest = first === undefined ? null : remainderOf(first, preview.rowsApplied);
+    return [...(rest ? [rest] : []), ...operations.slice(preview.applied + 1)];
+  };
+  /** Writes what has arrived of a streamed sheet call since its last write. */
+  const sheetFlush = (state: SheetLive) =>
+    Effect.gen(function* () {
+      if (state.failed || !input.sheets || !input.liveGuard) return;
+      if (!state.document) {
+        const fields = fieldsOf(state.raw);
+        const keys = keysOf(state.raw);
+        // Nothing is written before the operations begin, so the fields before them have arrived.
+        if (!keys.includes("operations")) return;
+        if (state.name === "edit_sheet") {
+          const id = fields.get("documentId");
+          if (id && !id.complete) return;
+          const document = resolve(id?.value);
+          if (!("id" in document) || document.kind !== "sheet" || !document.canEdit) {
+            state.failed = true;
+            return;
+          }
+          state.document = document;
+        } else {
+          const title = fields.get("title");
+          const scope = fields.get("scope")?.value === "project" ? "project" : "chat";
+          const decodedTitle = title?.complete ? decode(DocumentTitle, title.value) : null;
+          // A file to start from, or a project the person cannot write to, waits for the call.
+          if (
+            !decodedTitle?.ok ||
+            keys.includes("fromFile") ||
+            (scope === "project" && !input.project?.canEdit)
+          ) {
+            state.failed = true;
+            return;
+          }
+          const locale = fields.get("locale");
+          const created = yield* input.sheets.create(
+            input.userId,
+            {
+              ...(scope === "project" && input.project
+                ? { projectId: input.project.id }
+                : { conversationId: input.conversationId, createdByMessageId: input.messageId }),
+              title: decodedTitle.value,
+              ...(locale?.complete ? { locale: locale.value } : {}),
+              ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+            },
+            input.writeGuard,
+          );
+          state.document = created;
+          yield* afterWrite(created);
+        }
+      }
+      const { complete, partial } = readPartialArray(state.raw, "operations");
+      const batch: unknown[] = [];
+      let applied = state.applied;
+      let rowsApplied = state.rowsApplied;
+      for (; applied < complete.length; applied++, rowsApplied = 0) {
+        const rest = remainderOf(complete[applied], rowsApplied);
+        if (rest) batch.push(rest);
+      }
+      if (partial !== null) {
+        const fields = readPartialObject(partial);
+        const [kind, sheet, start] = [fields.get("kind"), fields.get("sheet"), fields.get("start")];
+        if (kind?.complete && kind.value === "setCells" && sheet?.complete && start?.complete) {
+          const rows = readPartialArray(partial, "rows").complete;
+          if (rows.length > rowsApplied) {
+            const rest = remainderOf(
+              { kind: "setCells", sheet: sheet.value, start: start.value, rows },
+              rowsApplied,
+            );
+            if (rest) batch.push(rest);
+            rowsApplied = rows.length;
+          }
+        }
+      }
+      if (!batch.length) return;
+      const result = yield* sheetEdit(state.document, batch, state);
+      if (result.outcome !== "updated" && result.outcome !== "unchanged") {
+        state.failed = true;
+        return;
+      }
+      state.applied = applied;
+      state.rowsApplied = rowsApplied;
+    });
+  /** Writes what has arrived soon, unless a write is already waiting. */
+  const sheetSchedule = (state: SheetLive) =>
+    Effect.suspend(() => {
+      if (state.flusher || state.failed) return Effect.void;
+      return Effect.sleep(SHEET_PACE).pipe(
+        Effect.andThen(quietly(sheetFlush(state), state).pipe(liveLock.withPermits(1))),
+        Effect.catchCause(() => Effect.void),
+        Effect.asVoid,
+        Effect.ensuring(
+          Effect.sync(() => {
+            state.flusher = null;
+          }),
+        ),
+        Effect.forkDetach,
+        Effect.map((fiber) => {
+          state.flusher = fiber;
+        }),
+      );
+    });
+  /** The decoded call's own preview, once its last write has finished. */
+  const claimSheet = (name: SheetLive["name"], match: (state: SheetLive) => boolean) =>
+    Effect.gen(function* () {
+      const found = [...sheetLive].find(([, state]) => state.name === name && match(state));
+      if (!found) return null;
+      sheetLive.delete(found[0]);
+      if (found[1].flusher) yield* Fiber.await(found[1].flusher);
+      return found[1];
+    });
+  /** Undoes previews no call claimed: an edit is taken back, a sheet it created removed. */
+  const closeSheetLive = Effect.suspend(() => {
+    const open = [...sheetLive.values()];
+    sheetLive.clear();
+    return Effect.forEach(
+      open,
+      (state) =>
+        Effect.gen(function* () {
+          if (state.flusher) yield* Fiber.await(state.flusher);
+          const document = state.document;
+          if (!document || !input.liveGuard || !input.sheets) return;
+          if (state.name === "create_sheet") {
+            yield* service.discard(input.userId, document.id, input.liveGuard);
+            known = known.filter((each) => each.id !== document.id);
+            return;
+          }
+          const { before, after } = state;
+          if (!before || !after) return;
+          yield* input.sheets.change(
+            input.userId,
+            {
+              documentId: document.id,
+              clientId: sheetClient,
+              generationId: input.generationId ?? null,
+            },
+            input.liveGuard,
+            (doc) => Effect.succeed({ result: null, ops: invertChange(before, after, doc) }),
+          );
+        }).pipe(Effect.catchCause(() => Effect.void)),
+      { discard: true },
+    );
+  });
+
   const editSheet = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
     const decoded = decode(EditSheetParams, raw);
     if (!decoded.ok) yield* rejected("edit_sheet", decoded.issue);
@@ -1362,7 +1552,14 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         ...reference(document),
         message: "This is a text document; change it with edit_document.",
       };
-    return yield* sheetEdit(document, decoded.value.operations);
+    const preview = yield* claimSheet("edit_sheet", (state) => state.document?.id === document.id);
+    const remaining = remainingOf(decoded.value.operations, preview);
+    // Everything was written as it arrived.
+    if (preview && Array.isArray(remaining) && !remaining.length) {
+      const current = known.find((each) => each.id === document.id) ?? document;
+      return { outcome: "updated", ...reference(current) };
+    }
+    return yield* sheetEdit(document, remaining);
   });
   const createSheet = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
     if (!input.sheets) return { outcome: "unavailable", message: "Live sheets are unavailable." };
@@ -1408,6 +1605,36 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       ...(locale ? { locale } : {}),
       ...(input.timeZone ? { timeZone: input.timeZone } : {}),
     };
+    const preview = yield* claimSheet(
+      "create_sheet",
+      (state) => state.document?.title === title && !imported,
+    );
+    if (preview?.document) {
+      // Streamed in the chat but wanted in the project: it goes, and is made where asked.
+      if ((scope === "project") === Boolean(preview.document.projectId)) {
+        const made = known.find((each) => each.id === preview.document!.id) ?? preview.document;
+        const remaining = remainingOf(operations, preview);
+        if (!Array.isArray(remaining) || remaining.length) {
+          const filled = yield* sheetEdit(made, remaining);
+          if (filled.outcome !== "updated" && filled.outcome !== "unchanged")
+            return {
+              outcome: "created",
+              ...reference(made),
+              message:
+                `The sheet was created, but the rest of its operations were not applied: ${filled.message ?? filled.outcome}`.slice(
+                  0,
+                  600,
+                ),
+            };
+        }
+        const current = known.find((each) => each.id === made.id) ?? made;
+        return { outcome: "created", ...reference(current) };
+      }
+      yield* service
+        .discard(input.userId, preview.document.id, input.writeGuard)
+        .pipe(Effect.catchCause(() => Effect.void));
+      known = known.filter((each) => each.id !== preview.document!.id);
+    }
     const created = yield* input.sheets
       .create(
         input.userId,
@@ -1700,6 +1927,18 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     refresh,
     live: {
       start: (id: string, name: string) => {
+        if ((name === "edit_sheet" || name === "create_sheet") && input.sheets && input.liveGuard)
+          sheetLive.set(id, {
+            name,
+            raw: "",
+            document: null,
+            applied: 0,
+            rowsApplied: 0,
+            before: null,
+            after: null,
+            failed: false,
+            flusher: null,
+          });
         if (name === "edit_document" || name === "create_document")
           live.set(id, {
             name,
@@ -1714,13 +1953,21 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             revision: null,
           });
       },
-      delta: liveDelta,
-      close: closeLive,
+      delta: (id: string, delta: string) => {
+        const sheet = sheetLive.get(id);
+        if (!sheet) return liveDelta(id, delta);
+        sheet.raw += delta;
+        return sheetSchedule(sheet);
+      },
+      close: closeLive.pipe(Effect.andThen(closeSheetLive)),
       /**
        * Lets go of every preview as it stands, for an answer that was
        * stopped: what it wrote stays, and nothing more is typed out.
        */
-      abandon: Effect.sync(() => live.clear()).pipe(liveLock.withPermits(1)),
+      abandon: Effect.sync(() => {
+        live.clear();
+        sheetLive.clear();
+      }).pipe(liveLock.withPermits(1)),
     },
     /** A steered message's document focus and selection, for the next request. */
     focus: (
