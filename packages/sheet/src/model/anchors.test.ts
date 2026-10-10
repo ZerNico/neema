@@ -72,4 +72,44 @@ describe("threads on moving cells", () => {
     expect(sorted.anchors.one).toEqual({ sh: "s1", r: "s1.r2", c: "s1.c1" });
     expect(sorted.anchors.edge).toEqual(threads.anchors.edge);
   });
+
+  it("move a chart or picture off a deleted row to the next live one, and back on undo", () => {
+    const placed = apply(
+      emptyDoc(),
+      {
+        op: "chartPut",
+        id: "ch",
+        chart: {
+          sheet: "s1",
+          at: { r: "s1.r2", c: "s1.c2" },
+          size: { width: 400, height: 300 },
+          kind: "column",
+          series: [{ values: box(5, 1, 8, 1) }],
+        },
+      },
+      {
+        op: "imagePut",
+        id: "p1",
+        image: {
+          sheet: "s1",
+          at: { r: "s1.r2", c: "s1.c3" },
+          size: { width: 10, height: 10 },
+          src: "data:image/png;base64,AAAA",
+        },
+      },
+    );
+    const deleted = apply(placed, {
+      op: "delete",
+      sh: "s1",
+      axis: "rows",
+      ids: ["s1.r2", "s1.r3"],
+    });
+    expect(deleted.charts.ch!.at).toEqual({ r: "s1.r4", c: "s1.c2" });
+    expect(deleted.images!.p1!.at).toEqual({ r: "s1.r4", c: "s1.c3" });
+    const undone = apply(deleted, ...invertChange(placed, deleted));
+    expect([undone.charts.ch!.at, undone.images!.p1!.at]).toEqual([
+      placed.charts.ch!.at,
+      placed.images!.p1!.at,
+    ]);
+  });
 });

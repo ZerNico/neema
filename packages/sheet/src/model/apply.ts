@@ -604,7 +604,28 @@ function shrinkBoxes(
       ];
     }),
   );
-  return { ...out, charts };
+  // A chart or picture on a deleted row or column moves to the next live one, as Excel moves
+  // a shape whose cell goes; otherwise it would stay in the document and never be drawn.
+  const field = axis === "rows" ? "r" : "c";
+  const anchored = <
+    T extends { readonly sheet: string; readonly at: { readonly r: string; readonly c: string } },
+  >(
+    object: T,
+  ): T => {
+    if (object.sheet !== sheetId || !deleted.has(object.at[field])) return object;
+    const place = index.nearest(object.at[field], 1) ?? index.nearest(object.at[field], -1);
+    return place === undefined
+      ? object
+      : { ...object, at: { ...object.at, [field]: index.ids[place - 1]! } };
+  };
+  const images =
+    out.images &&
+    Object.fromEntries(Object.entries(out.images).map(([id, image]) => [id, anchored(image)]));
+  return {
+    ...out,
+    charts: Object.fromEntries(Object.entries(charts).map(([id, chart]) => [id, anchored(chart)])),
+    ...(images ? { images } : {}),
+  };
 }
 
 /** Cut and paste: contents move, and every reference wholly inside the moved cells follows them. */
