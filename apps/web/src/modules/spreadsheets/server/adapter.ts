@@ -88,6 +88,7 @@ import {
 import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from "./formulas.ts";
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
 import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
+import { readValidation, writeValidations, type FileValidation } from "./file-validation.ts";
 import {
   fileHighlightStyles,
   readConditional,
@@ -819,6 +820,7 @@ export interface LiveSheetExport {
     readonly hiddenCols?: readonly number[];
     readonly filter?: FileFilter;
     readonly conditional?: readonly FileConditional[];
+    readonly validations?: readonly FileValidation[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
@@ -896,6 +898,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     for (const [row, height] of each.heights) setRowHeight(sheet, row, height);
     if (each.freeze) setFreezePanes(sheet, each.freeze);
     if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
+    if (each.validations?.length) writeValidations(sheet, each.validations);
     for (const row of each.hiddenRows ?? []) hideRow(sheet, row);
     for (const column of each.hiddenCols ?? []) hideColumn(sheet, column);
     if (each.filter)
@@ -939,6 +942,7 @@ export interface LiveSheetImport {
     readonly hiddenCols?: readonly number[];
     readonly filter?: FileFilter;
     readonly conditional?: readonly FileConditional[];
+    readonly validations?: readonly FileValidation[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -1107,7 +1111,23 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       )
       .toSorted((a, b) => a.priority - b.priority)
       .map(({ ref, rule }) => ({ ref, rule }));
-    if (listDataValidations(sheet).length) dropped.add("data validation");
+    const validations = listDataValidations(sheet).flatMap((validation) => {
+      const range = validation.sqref.ranges[0];
+      const read = range
+        ? readValidation(
+            validation,
+            boxRef({
+              top: range.minRow,
+              left: range.minCol,
+              bottom: range.maxRow,
+              right: range.maxCol,
+            }),
+          )
+        : null;
+      if (!read)
+        dropped.add("data validation of kinds a live sheet does not check (times, formulas)");
+      return read ? [read] : [];
+    });
     if (listComments(sheet).length) dropped.add("cell notes");
     const freeze = getFreezePanes(sheet);
     return {
@@ -1123,6 +1143,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       ...(hiddenCols.length ? { hiddenCols } : {}),
       ...(filter ? { filter } : {}),
       ...(conditional.length ? { conditional } : {}),
+      ...(validations.length ? { validations } : {}),
     };
   });
   return {

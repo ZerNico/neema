@@ -1,5 +1,5 @@
 import { columnLetters } from "@chat/sheet/a1";
-import { renderFormula } from "@chat/sheet/model/formula";
+import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
 import type { FileFilter, LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
 import type { SheetValues } from "@chat/sheet/model/calc";
@@ -120,6 +120,42 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
       ].toSorted((a, b) => a - b);
       const hiddenCols = hiddenOf(sheet.colProps, cols.at);
       const filter = sheet.filter ? fileFilterOf(doc, id, sheet.filter, values) : null;
+      /** A range by IDs as A1, or null once its cells are gone. */
+      const refOf = (on: string, box: { r1: string; r2: string; c1: string; c2: string }) => {
+        const data = doc.sheet[on];
+        if (!data) return null;
+        const [r, c] = [positions(data.rows), positions(data.cols)];
+        const corners = [r.at(box.r1), c.at(box.c1), r.at(box.r2), c.at(box.c2)];
+        if (corners.some((each) => each === undefined)) return null;
+        const [top, left, bottom, right] = corners as [number, number, number, number];
+        return `${address(top, left)}:${address(bottom, right)}`;
+      };
+      const validations = (sheet.validations ?? []).flatMap((validation) => {
+        const ref = refOf(id, validation.box);
+        if (!ref) return [];
+        const { rule } = validation;
+        const source =
+          rule.kind === "list" && rule.source ? refOf(rule.source.sh, rule.source.box) : null;
+        if (rule.kind === "list" && rule.source && !source) return [];
+        return [
+          {
+            ref,
+            rule:
+              rule.kind === "list"
+                ? source
+                  ? {
+                      kind: "list" as const,
+                      // Absolute, as Excel writes a list's cells, named when on another sheet.
+                      source: `${rule.source!.sh === id ? "" : `${quoteSheet(doc.sheet[rule.source!.sh]!.name)}!`}${source.replace(/([A-Z]+)(\d+)/g, "$$$1$$$2")}`,
+                    }
+                  : { kind: "list" as const, values: rule.values ?? [] }
+                : rule,
+            onError: validation.onError,
+            allowBlank: validation.allowBlank,
+            ...(validation.message ? { message: validation.message } : {}),
+          },
+        ];
+      });
       const conditional = (sheet.conditional ?? []).flatMap((format) => {
         const corners = [
           rows.at(format.box.r1),
@@ -144,6 +180,7 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
         ...(hiddenCols.length ? { hiddenCols } : {}),
         ...(filter ? { filter } : {}),
         ...(conditional.length ? { conditional } : {}),
+        ...(validations.length ? { validations } : {}),
       };
     }),
     names: Object.values(doc.names).map((name) => ({

@@ -17,6 +17,7 @@ import { parseTyped } from "@chat/sheet/value-parse";
 import type { Chart } from "@chat/sheet/model/chart";
 import type { FileFilter, LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import type { FilterRule, SheetFilter } from "@chat/sheet/model/filter";
+import type { Validation } from "@chat/sheet/model/validation";
 import { chartOfFile } from "./chart-files.ts";
 
 export type Imported =
@@ -129,6 +130,31 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
     }
     return null;
   };
+  /** A list's cells, as `Sheet!$A$1:$A$9` text, by IDs on the imported sheets. */
+  const sourceOf = (text: string, home: string) => {
+    const bang = text.lastIndexOf("!");
+    const name =
+      bang === -1
+        ? null
+        : text
+            .slice(0, bang)
+            .replace(/^'(.*)'$/, "$1")
+            .replaceAll("''", "'");
+    const on = name === null ? home : ids[read.sheets.findIndex((each) => each.name === name)];
+    const box = parseRange((bang === -1 ? text : text.slice(bang + 1)).replaceAll("$", ""));
+    if (!on || !box) return null;
+    const [r, c] = [positions(doc.sheet[on]!.rows).ids, positions(doc.sheet[on]!.cols).ids];
+    if (!r[box.bottom - 1] || !c[box.right - 1]) return null;
+    return {
+      sh: on,
+      box: {
+        r1: r[box.top - 1]!,
+        r2: r[box.bottom - 1]!,
+        c1: c[box.left - 1]!,
+        c2: c[box.right - 1]!,
+      },
+    };
+  };
   // Formulas first, since one may grow a grid the cells are then written into.
   const formulas = read.sheets.map((each, index) =>
     each.cells.map((cell) =>
@@ -180,6 +206,36 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
           cells,
           colProps: sized(each.widths, each.hiddenCols, cols),
           rowProps: sized(each.heights, each.hiddenRows, rows),
+          ...(each.validations?.length
+            ? {
+                validations: each.validations.flatMap((validation, place) => {
+                  const box = parseRange(validation.ref);
+                  if (!box || !rows[box.bottom - 1] || !cols[box.right - 1]) return [];
+                  const { rule } = validation;
+                  let kept: Validation["rule"];
+                  if (rule.kind === "list" && "source" in rule) {
+                    const source = sourceOf(rule.source, id);
+                    if (!source) return [];
+                    kept = { kind: "list", source };
+                  } else kept = rule.kind === "list" ? { kind: "list", values: rule.values } : rule;
+                  return [
+                    {
+                      id: `dv${place + 1}`,
+                      box: {
+                        r1: rows[box.top - 1]!,
+                        r2: rows[box.bottom - 1]!,
+                        c1: cols[box.left - 1]!,
+                        c2: cols[box.right - 1]!,
+                      },
+                      rule: kept,
+                      onError: validation.onError,
+                      allowBlank: validation.allowBlank,
+                      ...(validation.message ? { message: validation.message } : {}),
+                    },
+                  ];
+                }),
+              }
+            : {}),
           ...(each.conditional?.length
             ? {
                 conditional: each.conditional.flatMap((format, place) => {

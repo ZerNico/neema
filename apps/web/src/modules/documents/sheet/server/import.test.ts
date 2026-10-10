@@ -4,6 +4,7 @@ import { calculateSheet } from "@chat/sheet/model/calc";
 import { renderFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import type { ConditionalRule } from "@chat/sheet/model/conditional";
+import type { Validation } from "@chat/sheet/model/validation";
 import { exportLiveSheet, importLiveSheet } from "~/modules/spreadsheets/server/adapter.ts";
 import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
@@ -191,6 +192,82 @@ describe("importing into a live sheet", () => {
     const list = imported.doc.sheet.s1!.conditional!;
     expect(list.map((each) => each.rule)).toEqual(rules);
     expect(list[0]!.box).toEqual(box);
+  });
+
+  it("keeps data validation through Excel and back, lists read from cells included", async () => {
+    let original = build([
+      { kind: "addSheet", name: "Lists" },
+      { kind: "setCells", sheet: "Lists", start: "A1", rows: [["Open"], ["Done"]] },
+    ]);
+    const box = (c: number) => ({ r1: "s1.r1", r2: "s1.r5", c1: `s1.c${c}`, c2: `s1.c${c}` });
+    const lists = sheetNamed(original, "Lists")!;
+    const listRows = positions(original.sheet[lists]!.rows).ids;
+    const listCols = positions(original.sheet[lists]!.cols).ids;
+    const validations: Validation[] = [
+      {
+        id: "a",
+        box: box(1),
+        rule: { kind: "list", values: ["Yes", "No"] },
+        onError: "stop",
+        allowBlank: true,
+      },
+      {
+        id: "b",
+        box: box(2),
+        rule: {
+          kind: "list",
+          source: {
+            sh: lists,
+            box: { r1: listRows[0]!, r2: listRows[1]!, c1: listCols[0]!, c2: listCols[0]! },
+          },
+        },
+        onError: "warning",
+        allowBlank: false,
+        message: "Pick a status",
+      },
+      {
+        id: "c",
+        box: box(3),
+        rule: { kind: "whole", test: "between", values: [1, 10] },
+        onError: "stop",
+        allowBlank: true,
+      },
+      {
+        id: "d",
+        box: box(4),
+        rule: { kind: "length", test: "lessOrEqual", values: [20] },
+        onError: "information",
+        allowBlank: true,
+      },
+    ];
+    original = applyChange(
+      original,
+      { clientId: "t", seq: 9, ops: [{ op: "validations", sh: "s1", list: validations }] },
+      9,
+    ).doc;
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const back = imported.doc.sheet.s1!.validations!;
+    // The list's cells, on the imported Lists sheet's own IDs.
+    const listsAgain = sheetNamed(imported.doc, "Lists")!;
+    const sourceAgain = {
+      sh: listsAgain,
+      box: {
+        r1: `${listsAgain}.r1`,
+        r2: `${listsAgain}.r2`,
+        c1: `${listsAgain}.c1`,
+        c2: `${listsAgain}.c1`,
+      },
+    };
+    expect(back.map(({ id: _id, ...rest }) => rest)).toEqual(
+      validations.map(({ id: _id, ...rest }) =>
+        rest.rule.kind === "list" && rest.rule.source
+          ? { ...rest, rule: { kind: "list", source: sourceAgain } }
+          : rest,
+      ),
+    );
   });
 
   it("keeps a chart's options through Excel and back", async () => {
