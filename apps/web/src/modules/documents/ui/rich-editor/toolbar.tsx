@@ -18,6 +18,7 @@ import {
   RowDeleteIcon,
   RowInsertIcon,
   SourceCodeIcon,
+  FunctionIcon,
   LayoutTable01Icon,
   TextBoldIcon,
   TextIcon,
@@ -48,6 +49,7 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Toggle } from "~/ui/primitives/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { LinkPopover } from "./link-popover.tsx";
+import { insertFormula } from "./math-item.ts";
 import { fittingControls } from "./fitting-controls.ts";
 
 type Chain = ReturnType<Editor["chain"]>;
@@ -300,6 +302,7 @@ const CONTROLS: Control[] = [
     command: (c) => c.toggleCodeBlock(),
   },
   { kind: "table", label: "Table", icon: LayoutTable01Icon },
+  { kind: "action", label: "Formula", icon: FunctionIcon, command: insertFormula },
   { kind: "action", label: "Divider", icon: MinusSignIcon, command: (c) => c.setHorizontalRule() },
 ];
 

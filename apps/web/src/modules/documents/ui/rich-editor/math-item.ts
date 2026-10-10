@@ -1,3 +1,5 @@
+import type { Editor } from "@tiptap/core";
+import { NodeSelection } from "@tiptap/pm/state";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { DocumentBlockMath, DocumentInlineMath } from "../../editor/math.ts";
 import { MathView } from "./math-view.tsx";
@@ -9,3 +11,22 @@ export const BrowserInlineMath = DocumentInlineMath.extend({
 export const BrowserBlockMath = DocumentBlockMath.extend({
   addNodeView: () => ReactNodeViewRenderer(MathView),
 });
+
+/**
+ * A formula at the cursor, selected so its LaTeX field opens: on its own
+ * line in an empty top-level paragraph, inside the text anywhere else. Text
+ * selected becomes its LaTeX.
+ */
+export const insertFormula = (chain: ReturnType<Editor["chain"]>) =>
+  chain.command(({ state, tr }) => {
+    const { $from, from, to } = state.selection;
+    const latex = state.doc.textBetween(from, to, " ").trim();
+    const alone =
+      $from.depth === 1 && $from.parent.type.name === "paragraph" && !$from.parent.content.size;
+    const node = state.schema.nodes[alone ? "blockMath" : "inlineMath"]!.create({ latex });
+    const at = alone ? $from.before() : from;
+    if (alone) tr.replaceWith($from.before(), $from.after(), node);
+    else tr.replaceSelectionWith(node);
+    tr.setSelection(NodeSelection.create(tr.doc, at));
+    return true;
+  });

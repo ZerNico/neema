@@ -141,6 +141,33 @@ describe("document editor", () => {
     await waitFor(() => expect(sync.markdown()).toBe("Weight  here"));
   });
 
+  it("inserts a formula from the toolbar, inline in text and on its own line when empty", async () => {
+    const sync = await replica("Area is pi r^2\n\n");
+    mount(sync);
+    const editor = await editorOf();
+    // Selected text becomes the LaTeX, and the field opens on it.
+    act(() => {
+      editor.commands.setTextSelection({ from: 9, to: 15 });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Formula" }));
+    const field = await screen.findByRole("textbox", { name: "LaTeX" });
+    expect(field).toHaveValue("pi r^2");
+    fireEvent.change(field, { target: { value: "\\pi r^2" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(sync.markdown()).toBe("Area is $\\pi r^2$"));
+
+    // In an empty paragraph it is a display formula.
+    act(() => {
+      editor.chain().focus("end").insertContent({ type: "paragraph" }).run();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Formula" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "LaTeX" }), {
+      target: { value: "E = mc^2" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "LaTeX" }), { key: "Enter" });
+    await waitFor(() => expect(sync.markdown()).toBe("Area is $\\pi r^2$\n\n$$\nE = mc^2\n$$"));
+  });
+
   it("ticks a task from its checkbox", async () => {
     const sync = await replica("- [ ] write notes\n- [ ] ship");
     mount(sync);

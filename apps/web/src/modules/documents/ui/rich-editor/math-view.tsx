@@ -21,8 +21,9 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [draft, setDraft] = useState<string | null>(latex === "" ? "" : null);
   // Opens as it becomes selected, not while it is: closing re-renders before
-  // the cursor has moved off it, and would open the field again.
-  const [wasSelected, setWasSelected] = useState(selected);
+  // the cursor has moved off it, and would open the field again. One created
+  // selected, as the toolbar inserts it, counts as becoming selected.
+  const [wasSelected, setWasSelected] = useState(false);
   if (selected !== wasSelected) {
     setWasSelected(selected);
     if (selected && editor.isEditable) setDraft(latex);
