@@ -1,4 +1,6 @@
 import { toastError } from "~/ui/error-toast.ts";
+import type { Transaction } from "@tiptap/pm/state";
+import { Mapping } from "@tiptap/pm/transform";
 import {
   AiChat02Icon,
   Calendar03Icon,
@@ -124,15 +126,24 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
           disabled={state.empty}
           onClick={() => {
             // Removed only once it is on the clipboard: a refused write must not
-            // lose the text. The selection follows edits meanwhile; if what it
-            // holds changed, nothing is removed.
+            // lose the text. The range cut follows every edit landing meanwhile,
+            // and goes only if it still holds what was copied.
             const text = selected();
+            const { from, to } = editor.state.selection;
+            const moved = new Mapping();
+            const follow = ({ transaction }: { transaction: Transaction }) =>
+              moved.appendMapping(transaction.mapping);
+            editor.on("transaction", follow);
             void navigator.clipboard
               .writeText(text)
               .then(() => {
-                if (selected() === text) run((chain) => chain.deleteSelection());
+                const range = { from: moved.map(from, 1), to: moved.map(to, -1) };
+                const still = editor.state.doc.textBetween(range.from, range.to, "\n\n", " ");
+                if (range.from < range.to && still === text)
+                  editor.chain().focus().deleteRange(range).run();
               })
-              .catch((error: unknown) => toastError("Couldn’t cut the selection.", error));
+              .catch((error: unknown) => toastError("Couldn’t cut the selection.", error))
+              .finally(() => editor.off("transaction", follow));
           }}
         />
         <Item
