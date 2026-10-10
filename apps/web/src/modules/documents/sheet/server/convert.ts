@@ -1,3 +1,4 @@
+import { rangeWide } from "@chat/sheet/model/conditional";
 import { draft } from "@chat/sheet/model/draft";
 import { columnIndex, columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
 import type { Scalar } from "@chat/sheet/engine/evaluate";
@@ -682,7 +683,7 @@ export function convertOperations(
         emit({
           op: "conditional",
           sh,
-          list: withoutBounds(plan.doc.sheet[sh]!, list, box, input.mint),
+          list: withoutBounds(plan.doc.sheet[sh]!, list, box, input.mint, rangeWide),
         });
         return;
       }

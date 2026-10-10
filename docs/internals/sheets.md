@@ -119,9 +119,10 @@ browser workers and the Excel file tools); this page records the decisions behin
   breaks a rule, are worked out from the values at draw time like a filter's rows, so neither
   is ever stale on a replica.
 - Setting or clearing validation over cells, and clearing conditional formats from them, takes
-  those cells from every rule, which keeps the rest of its cells as up to four rules around them
-  (`withoutBounds`), as Excel does; a cell so has one validation. The grid and the model share
-  that one function.
+  those cells from each rule, which keeps the rest as up to four rules around them
+  (`withoutBounds`), as Excel trims a rule's range; a cell so has one validation. A format judged
+  against its whole range (top ten, average, duplicates, scales, bars) would judge each piece on
+  its own, so it stays whole unless the cells cover it. The grid and the model share the function.
 - Validation guards typing in the grid only. A paste, a fill or the model may write anything,
   which is Excel's behaviour too; Circle Invalid Data shows what slipped through. A list read
   from cells keeps that range by IDs and its choices are the cells' shown text.

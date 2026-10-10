@@ -1,3 +1,4 @@
+import { rangeWide } from "@chat/sheet/model/conditional";
 import type { SheetLocale } from "@chat/sheet/locales";
 import { columnLetters } from "@chat/sheet/a1";
 import { generalText } from "@chat/sheet/number-format";
@@ -265,7 +266,7 @@ export function clearConditional(context: GridContext, scope: "selection" | "she
   const list = sheet.conditional ?? [];
   if (!list.length) return [];
   if (scope === "sheet") return [{ op: "conditional", sh: context.sheet, list: [] }];
-  const kept = withoutBounds(sheet, list, selectionBox(context), context.mint);
+  const kept = withoutBounds(sheet, list, selectionBox(context), context.mint, rangeWide);
   return unchanged(kept, list) ? [] : [{ op: "conditional", sh: context.sheet, list: kept }];
 }
 

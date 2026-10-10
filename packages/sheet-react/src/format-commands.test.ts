@@ -132,11 +132,25 @@ describe("the Home tab's commands", () => {
     expect([first!.rule.kind, second!.rule.kind]).toEqual(["bar", "blank"]);
     doc = apply(doc, editConditional(context(doc, [1, 1]), second!.id, "up"));
     expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank", "bar"]);
-    // Cleared from A2 alone, the bar keeps A1 and A3, as Excel trims a rule's cells.
+    // A bar is drawn against its whole range, so clearing part of it leaves it whole.
     doc = apply(doc, clearConditional(context(doc, [2, 1]), "selection"));
+    expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["blank", "bar"]);
+    // A rule judging each cell alone is trimmed to the cells left, as Excel trims one.
+    doc = apply(
+      doc,
+      addConditional(context(doc, [1, 3], [3, 3]), {
+        kind: "compare",
+        op: "greater",
+        values: [1],
+        style: { bold: true },
+      }),
+    );
+    doc = apply(doc, clearConditional(context(doc, [2, 3]), "selection"));
     expect(
-      doc.sheet.s1!.conditional!.map((each) => `${each.rule.kind} ${each.box.r1}:${each.box.r2}`),
-    ).toEqual(["blank s1.r5:s1.r5", "bar s1.r1:s1.r1", "bar s1.r3:s1.r3"]);
+      doc.sheet
+        .s1!.conditional!.filter((each) => each.rule.kind === "compare")
+        .map((each) => `${each.box.r1}:${each.box.r2}`),
+    ).toEqual(["s1.r1:s1.r1", "s1.r3:s1.r3"]);
     doc = apply(doc, clearConditional(context(doc, [2, 1]), "sheet"));
     expect(doc.sheet.s1!.conditional).toBeUndefined();
   });

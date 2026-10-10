@@ -72,17 +72,20 @@ export const holds = (bounds: Bounds, row: number, col: number) =>
 /**
  * Ranged items (rules) with an area taken out, as Excel clears rules from
  * exactly the cells chosen: one partly over the area keeps the rest of its
- * cells, as up to four items in its place, the first keeping its ID.
+ * cells, as up to four items in its place, the first keeping its ID. One
+ * that cannot be split (`whole`) stays as it is unless wholly inside.
  */
 export function withoutBounds<T extends { readonly id: string; readonly box: Box }>(
   sheet: Sheet,
   items: readonly T[],
   area: Bounds,
   mint: () => string,
+  whole: (item: T) => boolean = () => false,
 ): T[] {
   return items.flatMap((item) => {
     const bounds = boundsOf(sheet, item.box);
     if (!bounds || !overlaps(bounds, area)) return [item];
+    if (whole(item)) return contains(area, bounds) ? [] : [item];
     const { top, bottom, left, right } = bounds;
     const [middleTop, middleBottom] = [Math.max(top, area.top), Math.min(bottom, area.bottom)];
     const pieces = [

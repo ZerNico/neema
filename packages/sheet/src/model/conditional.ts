@@ -70,6 +70,14 @@ export interface CellLook extends ConditionalStyle {
   readonly bar?: { readonly fraction: number; readonly color: string };
 }
 
+/**
+ * Whether a format judges each cell against its whole range (top ten, above
+ * average, duplicates, a colour scale or bar): split, each piece would judge
+ * on its own, so clearing part of its cells leaves it whole.
+ */
+export const rangeWide = (format: ConditionalFormat) =>
+  format.rule.kind !== "compare" && format.rule.kind !== "text" && format.rule.kind !== "blank";
+
 export const CONDITIONAL_LIMITS = { rules: 100, text: 255 } as const;
 
 const isOperand = (value: unknown) =>
