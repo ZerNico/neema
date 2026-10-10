@@ -1,3 +1,4 @@
+import { rangeA1 } from "@chat/sheet/model/box";
 import { columnLetters, parseRange } from "@chat/sheet/a1";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import { partsOf } from "@chat/sheet/dates";
@@ -189,19 +190,9 @@ export function sheetView(
     formats.push(`${where.join(",")} ${styleText(key)}`);
   }
   if (formats.length) lines.push(`<formats>\n${formats.join("\n")}\n</formats>`);
-  const merges = doc.sheet[sheet]!.merges.flatMap((merge) => {
-    const rows = positions(doc.sheet[sheet]!.rows);
-    const cols = positions(doc.sheet[sheet]!.cols);
-    const [top, bottom, left, right] = [
-      rows.at(merge.r1),
-      rows.at(merge.r2),
-      cols.at(merge.c1),
-      cols.at(merge.c2),
-    ];
-    return top && bottom && left && right
-      ? [`${address(top, left)}:${address(bottom, right)}`]
-      : [];
-  });
+  const merges = doc.sheet[sheet]!.merges.flatMap(
+    (merge) => rangeA1(doc.sheet[sheet], merge) ?? [],
+  );
   if (merges.length) lines.push(`<merges>${merges.join(" ")}</merges>`);
   // The focused sheet's grouped rows and columns, so the model knows what a collapse hides.
   const focused = doc.sheet[sheet]!;
@@ -230,14 +221,8 @@ export function sheetView(
   if (pictures.length) lines.push(`<pictures>\n${pictures.join("\n")}\n</pictures>`);
   // The focused sheet's conditional formats, first taking priority.
   const conditional = (doc.sheet[sheet]!.conditional ?? []).flatMap((format) => {
-    const [rowsAt, colsAt] = [positions(doc.sheet[sheet]!.rows), positions(doc.sheet[sheet]!.cols)];
-    const [top, left, bottom, right] = [
-      rowsAt.at(format.box.r1),
-      colsAt.at(format.box.c1),
-      rowsAt.at(format.box.r2),
-      colsAt.at(format.box.c2),
-    ];
-    if (!top || !left || !bottom || !right) return [];
+    const range = rangeA1(doc.sheet[sheet], format.box);
+    if (!range) return [];
     const rule = format.rule;
     const style = "style" in rule ? rule.style : {};
     const said =
@@ -269,24 +254,13 @@ export function sheetView(
       style.italic && "italic",
     ].filter(Boolean);
     return [
-      `<rule range="${address(top, left)}:${address(bottom, right)}" is="${escapeAttribute(said)}"${looks.length ? ` ${looks.join(" ")}` : ""}/>`,
+      `<rule range="${range}" is="${escapeAttribute(said)}"${looks.length ? ` ${looks.join(" ")}` : ""}/>`,
     ];
   });
   if (conditional.length)
     lines.push(`<conditionalFormats>\n${conditional.join("\n")}\n</conditionalFormats>`);
   // The focused sheet's data validation, so the model writes what its cells accept.
-  const boxText = (sh: string, area: Box) => {
-    const [rowsAt, colsAt] = [positions(doc.sheet[sh]!.rows), positions(doc.sheet[sh]!.cols)];
-    const [top, left, bottom, right] = [
-      rowsAt.at(area.r1),
-      colsAt.at(area.c1),
-      rowsAt.at(area.r2),
-      colsAt.at(area.c2),
-    ];
-    return top && left && bottom && right
-      ? `${address(top, left)}:${address(bottom, right)}`
-      : null;
-  };
+  const boxText = (sh: string, area: Box) => rangeA1(doc.sheet[sh], area);
   const validations = (doc.sheet[sheet]!.validations ?? []).flatMap((validation) => {
     const range = boxText(sheet, validation.box);
     if (!range) return [];
@@ -335,19 +309,9 @@ export function sheetView(
     );
   }
   /** A range by IDs as A1, named with its sheet; null when its rows or columns are gone. */
-  const rangeText = (on: string, area: { r1: string; r2: string; c1: string; c2: string }) => {
-    const data = doc.sheet[on];
-    if (!data) return null;
-    const rows = positions(data.rows);
-    const cols = positions(data.cols);
-    const [top, bottom, left, right] = [
-      rows.at(area.r1),
-      rows.at(area.r2),
-      cols.at(area.c1),
-      cols.at(area.c2),
-    ];
-    if (!top || !bottom || !left || !right) return null;
-    return `${quoteSheet(data.name)}!${address(top, left)}:${address(bottom, right)}`;
+  const rangeText = (on: string, area: Box) => {
+    const ref = rangeA1(doc.sheet[on], area);
+    return ref ? `${quoteSheet(doc.sheet[on]!.name)}!${ref}` : null;
   };
   /** A chart's text as written, or the cell it reads, as a reference. */
   const chartText = (label: ChartText | undefined) => {

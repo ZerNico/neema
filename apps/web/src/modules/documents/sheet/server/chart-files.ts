@@ -1,3 +1,4 @@
+import { rangeA1 } from "@chat/sheet/model/box";
 import { parseRange } from "@chat/sheet/a1";
 import { quoteSheet } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type Box, type SheetDoc } from "@chat/sheet/model";
@@ -25,13 +26,8 @@ export const textOf = (doc: SheetDoc, label: ChartText | undefined, values?: She
 /** A range by IDs as A1 text naming its sheet; null once its rows or columns are gone. */
 function rangeOf(doc: SheetDoc, on: string, box: Box) {
   const data = doc.sheet[on];
-  if (!data || !liveSheets(doc).includes(on)) return null;
-  const rows = positions(data.rows);
-  const cols = positions(data.cols);
-  const corners = [rows.at(box.r1), cols.at(box.c1), rows.at(box.r2), cols.at(box.c2)];
-  if (corners.some((each) => each === undefined)) return null;
-  const [top, left, bottom, right] = corners as [number, number, number, number];
-  return `${quoteSheet(data.name)}!${address(top, left)}:${address(bottom, right)}`;
+  const ref = liveSheets(doc).includes(on) ? rangeA1(data, box) : null;
+  return ref ? `${quoteSheet(data!.name)}!${ref}` : null;
 }
 
 /**

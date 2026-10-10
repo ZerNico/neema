@@ -1,4 +1,5 @@
-import { boxRef, parseCell, parseRange } from "@chat/sheet/a1";
+import { rangeA1 } from "@chat/sheet/model/box";
+import { parseCell, parseRange } from "@chat/sheet/a1";
 import { liveSheets, positions, type Box, type SheetDoc } from "@chat/sheet/model";
 import type { CellAt, ChartText } from "@chat/sheet/model/chart";
 
@@ -8,20 +9,9 @@ const sheetRef = (name: string) =>
 
 /** A range by IDs as A1 text, naming its sheet when it is not `home`; `#REF!` once its cells are gone. */
 export function rangeText(doc: SheetDoc, home: string, sheet: string, box: Box): string {
-  const data = doc.sheet[sheet];
-  if (!data) return "#REF!";
-  const rows = positions(data.rows);
-  const cols = positions(data.cols);
-  const [top, bottom, left, right] = [
-    rows.at(box.r1),
-    rows.at(box.r2),
-    cols.at(box.c1),
-    cols.at(box.c2),
-  ];
-  if (top === undefined || bottom === undefined || left === undefined || right === undefined)
-    return "#REF!";
-  const ref = boxRef({ top, bottom, left, right });
-  return sheet === home ? ref : `${sheetRef(data.name)}!${ref}`;
+  const ref = rangeA1(doc.sheet[sheet], box);
+  if (!ref) return "#REF!";
+  return sheet === home ? ref : `${sheetRef(doc.sheet[sheet]!.name)}!${ref}`;
 }
 
 /** "B2:D9" or "Sheet2!B2:D9" to a range by IDs, or null when it names no live cells. */

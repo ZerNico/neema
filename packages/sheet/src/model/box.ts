@@ -1,3 +1,4 @@
+import { boxRef } from "../a1.ts";
 import { positions, type Box, type Sheet } from "./model.ts";
 
 /** A range by position: 1-based, inclusive, its corners in order. */
@@ -26,6 +27,12 @@ export function boundsOf(sheet: Sheet | undefined, box: Box): Bounds | null {
     left: Math.min(c1, c2),
     right: Math.max(c1, c2),
   };
+}
+
+/** A range by IDs as A1 text, "B2:D9" or "B2" for one cell; null as for `boundsOf`. */
+export function rangeA1(sheet: Sheet | undefined, box: Box): string | null {
+  const bounds = boundsOf(sheet, box);
+  return bounds ? boxRef(bounds) : null;
 }
 
 /** A range's live row and column IDs in order, with its bounds; null as for `boundsOf`. */
