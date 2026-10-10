@@ -6,7 +6,7 @@ import { renderFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, positions, type SheetDoc } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import { enterCell, type GridContext } from "./commands.ts";
-import { cellStyle } from "./display.ts";
+import { cellStyle } from "@chat/sheet/model/style";
 import {
   addConditional,
   autoSum,

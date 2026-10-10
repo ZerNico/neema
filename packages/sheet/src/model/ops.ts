@@ -4,7 +4,7 @@ import { isConditionalList, type ConditionalFormat } from "./conditional.ts";
 import { isValidationList, type Validation } from "./validation.ts";
 import { isOutlineList, type OutlineGroup } from "./outline.ts";
 import { isBox, isId, isIdList, isIdOrNull, isRecord } from "./check.ts";
-import { isStylePatch } from "./style.ts";
+import { isStylePatch, type StylePatch } from "./style.ts";
 import { LIVE_LIMITS } from "./limits.ts";
 import { LIVE_CALC } from "./calc.ts";
 import { isSheetImage, type SheetImage } from "./image.ts";
@@ -35,7 +35,7 @@ export interface CellWrite {
 }
 
 /** Style properties; null removes one. */
-export type StylePatch = Readonly<Record<string, string | number | boolean | null>>;
+export type { StylePatch } from "./style.ts";
 
 export type SheetOp =
   | { readonly op: "set"; readonly sh: string; readonly cells: readonly CellWrite[] }

@@ -1,3 +1,4 @@
+import { cellStyle } from "@chat/sheet/model/style";
 import {
   useCallback,
   useEffect,
@@ -18,7 +19,7 @@ import type { SheetValues } from "@chat/sheet/model/calc";
 import { positions, type Axis, type AxisEntry, type SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
 import { outlineDepth, placeGroups, type PlacedGroup } from "@chat/sheet/model/outline";
-import { cellCss, cellDisplay, cellStyle, safeLink } from "./display.ts";
+import { cellCss, cellDisplay, safeLink } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
   HEADER_ROW_PX,

@@ -1,3 +1,4 @@
+import { cellStyle } from "./style.ts";
 import { placeBox } from "./box.ts";
 import { XError, type Scalar } from "../engine/values.ts";
 import { sheetLocale } from "../locales.ts";
@@ -275,8 +276,7 @@ function reader(doc: SheetDoc, values: SheetValues) {
   const locale = sheetLocale(doc.settings.locale);
   const formatOf = (sheet: string, r: string, c: string) => {
     const key = doc.sheet[sheet]?.cells[r]?.[c]?.s;
-    const format = key ? (JSON.parse(key) as { numberFormat?: unknown }).numberFormat : undefined;
-    return typeof format === "string" ? format : undefined;
+    return cellStyle(key).numberFormat;
   };
   const shown = (value: Scalar, format: string | undefined) => {
     if (value === null) return "";
@@ -396,8 +396,7 @@ export function readSource(
   if (!ids) return { sheet, box, headers: false, labels: false, byRow: false };
   const formatOf = (r: string, c: string) => {
     const key = doc.sheet[sheet]?.cells[r]?.[c]?.s;
-    const format = key ? (JSON.parse(key) as { numberFormat?: unknown }).numberFormat : undefined;
-    return typeof format === "string" ? format : undefined;
+    return cellStyle(key).numberFormat;
   };
   const labelAt = (r: string, c: string) => isLabel(values.value(sheet, r, c), formatOf(r, c));
   const blank = (r: string, c: string) => values.value(sheet, r, c) === null;

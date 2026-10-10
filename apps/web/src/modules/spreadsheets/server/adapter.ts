@@ -1,3 +1,4 @@
+import type { CellStyle } from "@chat/sheet/model/style";
 import {
   isFormulaValue,
   makeFormula,
@@ -835,7 +836,7 @@ export interface LiveSheetExport {
       readonly input?: string | number | boolean;
       /** A legacy array formula's extent, from its cell. */
       readonly array?: { readonly rows: number; readonly cols: number };
-      readonly style?: Readonly<Record<string, string | number | boolean>>;
+      readonly style?: CellStyle;
     }>;
     readonly merges: readonly string[];
     readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
@@ -879,39 +880,36 @@ const fileLink = (text: unknown) =>
     : null;
 
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
-function styleCell(workbook: Workbook, cell: Cell, style: Readonly<Record<string, unknown>>) {
-  const text = (key: string) => (typeof style[key] === "string" ? (style[key] as string) : null);
+function styleCell(workbook: Workbook, cell: Cell, style: CellStyle) {
   const font = {
-    ...(style.bold === true ? { bold: true } : {}),
-    ...(style.italic === true ? { italic: true } : {}),
-    ...(style.underline === true ? { underline: "single" as const } : {}),
-    ...(style.strike === true ? { strike: true } : {}),
-    ...(text("fontFamily") ? { name: text("fontFamily")! } : {}),
-    ...(typeof style.fontSize === "number" ? { size: style.fontSize } : {}),
-    ...(text("fontColor") ? { color: { rgb: `FF${text("fontColor")!.slice(1)}` } } : {}),
+    ...(style.bold ? { bold: true } : {}),
+    ...(style.italic ? { italic: true } : {}),
+    ...(style.underline ? { underline: "single" as const } : {}),
+    ...(style.strike ? { strike: true } : {}),
+    ...(style.fontFamily ? { name: style.fontFamily } : {}),
+    ...(style.fontSize !== undefined ? { size: style.fontSize } : {}),
+    ...(style.fontColor ? { color: { rgb: `FF${style.fontColor.slice(1)}` } } : {}),
   };
   if (Object.keys(font).length) patchCellFont(workbook, cell, font);
-  if (text("fill"))
+  if (style.fill)
     setCellFill(
       workbook,
       cell,
-      makeFill({ patternType: "solid", fgColor: { rgb: `FF${text("fill")!.slice(1)}` } }),
+      makeFill({ patternType: "solid", fgColor: { rgb: `FF${style.fill.slice(1)}` } }),
     );
-  if (text("numberFormat")) setCellNumberFormat(workbook, cell, text("numberFormat")!);
-  const horizontal = text("horizontal");
-  const vertical = text("vertical");
-  if (horizontal || vertical || style.wrap === true)
+  if (style.numberFormat) setCellNumberFormat(workbook, cell, style.numberFormat);
+  if (style.horizontal || style.vertical || style.wrap)
     setCellAlignment(workbook, cell, {
-      ...(horizontal ? { horizontal: horizontal as "left" | "center" | "right" } : {}),
-      ...(vertical ? { vertical: vertical as "top" | "center" | "bottom" } : {}),
-      ...(style.wrap === true ? { wrapText: true } : {}),
+      ...(style.horizontal ? { horizontal: style.horizontal } : {}),
+      ...(style.vertical ? { vertical: style.vertical } : {}),
+      ...(style.wrap ? { wrapText: true } : {}),
     });
   const side = makeSide({ style: "thin" });
   const edges = {
-    ...(style.borderTop === true ? { top: side } : {}),
-    ...(style.borderBottom === true ? { bottom: side } : {}),
-    ...(style.borderLeft === true ? { left: side } : {}),
-    ...(style.borderRight === true ? { right: side } : {}),
+    ...(style.borderTop ? { top: side } : {}),
+    ...(style.borderBottom ? { bottom: side } : {}),
+    ...(style.borderLeft ? { left: side } : {}),
+    ...(style.borderRight ? { right: side } : {}),
   };
   if (Object.keys(edges).length) setCellBorder(workbook, cell, makeBorder(edges));
 }
@@ -1008,7 +1006,7 @@ export interface LiveSheetImport {
       readonly formula?: string;
       /** A legacy array formula's extent; a dynamic one spills by itself. */
       readonly array?: { readonly rows: number; readonly cols: number };
-      readonly style?: Readonly<Record<string, string | number | boolean>>;
+      readonly style?: CellStyle;
     }>;
     readonly merges: readonly string[];
     readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
@@ -1048,14 +1046,14 @@ const folded = (groups: readonly FileGroup[], index: number) =>
   groups.some((group) => group.collapsed && index >= group.from && index <= group.to);
 
 /** A linked cell's style: its link, without the look Excel's Hyperlink style gave it. */
-function linkedStyle(style: Record<string, string | number | boolean> | undefined, link: string) {
+function linkedStyle(style: CellStyle | undefined, link: string): CellStyle {
   const { underline: _, fontColor, ...rest } = style ?? {};
   return { ...rest, ...(fontColor && fontColor !== LINK_COLOR ? { fontColor } : {}), link };
 }
 
 /** A cell's style as a live sheet stores it: only what its format operation knows. */
-function liveStyle(workbook: Workbook, cell: Cell) {
-  const style: Record<string, string | number | boolean> = {};
+function liveStyle(workbook: Workbook, cell: Cell): CellStyle | undefined {
+  const style: { -readonly [K in keyof CellStyle]?: CellStyle[K] } = {};
   const font = getCellFont(workbook, cell);
   if (font.bold) style.bold = true;
   if (font.italic) style.italic = true;

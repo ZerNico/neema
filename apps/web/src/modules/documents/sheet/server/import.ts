@@ -2,7 +2,7 @@ import { DOCUMENT_LIMITS } from "../../schema.ts";
 import { parseCell, parseRange } from "@chat/sheet/a1";
 import { parseDelimited } from "@chat/sheet/delimited";
 import { DE_DE, EN_US } from "@chat/sheet/locales";
-import { styleKey } from "@chat/sheet/model/apply";
+import { styleKey } from "@chat/sheet/model/style";
 import { parseFormula, qualified } from "@chat/sheet/model/formula";
 import { LIVE_LIMITS, overLimits } from "@chat/sheet/model/limits";
 import {

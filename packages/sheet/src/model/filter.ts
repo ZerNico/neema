@@ -1,3 +1,4 @@
+import { cellStyle } from "./style.ts";
 import { placeBox } from "./box.ts";
 import { XError } from "../engine/values.ts";
 import { sheetLocale } from "../locales.ts";
@@ -81,7 +82,7 @@ export function shownText(doc: SheetDoc, values: SheetValues, sheet: string, r: 
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   const locale = sheetLocale(doc.settings.locale);
   const key = doc.sheet[sheet]?.cells[r]?.[c]?.s;
-  const format = key ? (JSON.parse(key) as { numberFormat?: unknown }).numberFormat : undefined;
+  const format = cellStyle(key).numberFormat;
   if (typeof format === "string") {
     const formatted = formatValue(value, format, locale);
     if (formatted) return formatted.text;

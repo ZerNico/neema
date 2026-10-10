@@ -6,7 +6,7 @@ import type { Validation } from "@chat/sheet/model/validation";
 import { withoutBounds } from "@chat/sheet/model/box";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import { enterCell, rangesOf, selectionBox, type GridContext } from "./commands.ts";
-import { cellStyle } from "./display.ts";
+import { cellStyle } from "@chat/sheet/model/style";
 
 /**
  * The Home tab's formatting commands, as operations on the selection:
@@ -172,7 +172,7 @@ export function mergeSelection(context: GridContext, kind: MergeKind): SheetOp[]
             op: "format" as const,
             sh: context.sheet,
             area: box.area,
-            patch: { horizontal: "center" },
+            patch: { horizontal: "center" as const },
           },
         ]
       : []),

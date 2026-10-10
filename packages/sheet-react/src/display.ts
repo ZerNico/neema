@@ -1,32 +1,10 @@
+import type { CellStyle } from "@chat/sheet/model/style";
 import type { CSSProperties } from "react";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
 import { renderFormula } from "@chat/sheet/model/formula";
 import type { SheetDoc } from "@chat/sheet/model";
 import { formatValue, generalText } from "@chat/sheet/number-format";
-
-/** A cell's style properties, as the `format` operation writes them. */
-export interface CellStyle {
-  readonly bold?: boolean;
-  readonly italic?: boolean;
-  readonly underline?: boolean;
-  readonly strike?: boolean;
-  /** A font by name; absent, the sheet's own. */
-  readonly fontFamily?: string;
-  readonly fontSize?: number;
-  readonly fontColor?: string;
-  readonly fill?: string;
-  readonly numberFormat?: string;
-  readonly horizontal?: "left" | "center" | "right";
-  readonly vertical?: "top" | "center" | "bottom";
-  readonly wrap?: boolean;
-  readonly borderTop?: boolean;
-  readonly borderBottom?: boolean;
-  readonly borderLeft?: boolean;
-  readonly borderRight?: boolean;
-  /** A web address the cell opens, as Excel's hyperlinks. */
-  readonly link?: string;
-}
 
 /** A link a cell may open: web and mail addresses only, never script. */
 export function safeLink(text: string | undefined): string | null {
@@ -40,18 +18,6 @@ export function safeLink(text: string | undefined): string | null {
     return null;
   }
 }
-
-// Style keys are canonical JSON shared by every cell with that style: parsed once each.
-const parsed = new Map<string, CellStyle>();
-export const cellStyle = (key: string | undefined): CellStyle => {
-  if (!key) return {};
-  let style = parsed.get(key);
-  if (!style) {
-    style = JSON.parse(key) as CellStyle;
-    parsed.set(key, style);
-  }
-  return style;
-};
 
 /** What a cell shows and where it sits: numbers right, text left, the rest centred, as Excel does. */
 export function cellDisplay(value: Scalar, style: CellStyle, locale: SheetLocale) {

@@ -1,3 +1,4 @@
+import { cellStyle } from "@chat/sheet/model/style";
 import {
   ChartColumnIcon,
   CommentAdd01Icon,
@@ -49,7 +50,7 @@ import {
   type CopiedCells,
   type GridContext,
 } from "@chat/sheet-react/commands";
-import { cellDisplay, cellSource, cellStyle, safeLink } from "@chat/sheet-react/display";
+import { cellDisplay, cellSource, safeLink } from "@chat/sheet-react/display";
 import { axisLayout, columnPx, rowPx } from "@chat/sheet-react/layout";
 import {
   SheetGrid,

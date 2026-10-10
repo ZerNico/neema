@@ -1,3 +1,4 @@
+import { cellStyle, restyle } from "@chat/sheet/model/style";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
 import { applyChange } from "@chat/sheet/model/apply";
@@ -9,7 +10,7 @@ export type { ChartKind };
 import { parseDelimited, writeDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
-import { cellDisplay, cellStyle, safeLink } from "./display.ts";
+import { cellDisplay, safeLink } from "./display.ts";
 import { fillSeries, type FillMode, type FillPart } from "@chat/sheet/model/fill";
 import type { CellRef, GridFill, SheetSelection } from "./grid.tsx";
 
@@ -441,13 +442,6 @@ export interface ForeignCell {
 /** What a paste writes, as Excel's Paste Special: everything, values, formulas or formats. */
 export type PastePart = "all" | "values" | "formulas" | "formats";
 
-/** The patch giving a cell exactly a style: its keys, and the others it had removed. */
-function replaceStyle(wanted: StylePatch, had: string | undefined): StylePatch | null {
-  const patch: Record<string, string | number | boolean | null> = { ...wanted };
-  for (const key of Object.keys(cellStyle(had))) if (!(key in wanted)) patch[key] = null;
-  return Object.keys(patch).length ? patch : null;
-}
-
 /**
  * Pastes at the selection's top-left. When the clipboard holds what this
  * sheet copied, its formulas shift as a copy does, or a cut moves, and its
@@ -501,14 +495,8 @@ export function pasteAtSelection(
       const area = { r1: at.r, r2: at.r, c1: at.c, c2: at.c };
       if (part === "all" || part === "formats") {
         const wanted =
-          "raw" in item
-            ? options.foreign
-              ? (item.style ?? {})
-              : null
-            : item.s
-              ? (JSON.parse(item.s) as StylePatch)
-              : {};
-        const patch = wanted && replaceStyle(wanted, target.cells[at.r]?.[at.c]?.s);
+          "raw" in item ? (options.foreign ? (item.style ?? {}) : null) : cellStyle(item.s);
+        const patch = wanted && restyle(target.cells[at.r]?.[at.c]?.s, wanted);
         if (patch) styles.push({ op: "format", sh: context.sheet, area, patch });
       }
       if (part === "formats") return;
@@ -576,10 +564,10 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
     const source =
       direction === "down" ? { r: box.rowIds[0]!, c: fixed } : { r: fixed, c: box.colIds[0]! };
     const cell = sheet.cells[source.r]?.[source.c];
-    const style = cell?.s ? (JSON.parse(cell.s) as StylePatch) : {};
+    const style = cellStyle(cell?.s);
     for (const [index, moving] of targets.entries()) {
       const at = direction === "down" ? { r: moving, c: fixed } : { r: fixed, c: moving };
-      const patch = replaceStyle(style, sheet.cells[at.r]?.[at.c]?.s);
+      const patch = restyle(sheet.cells[at.r]?.[at.c]?.s, style);
       if (patch)
         formats.push({
           op: "format",
@@ -667,12 +655,8 @@ export function dragSelection(
         const f = copiedFormula(cell.f, by, context.sheet, grow);
         cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
       } else cells.push({ ...at, v: cell?.v ?? null });
-      const own = cell?.s ? (JSON.parse(cell.s) as Record<string, string | number | boolean>) : {};
-      const there = sheet.cells[at.r]?.[at.c]?.s;
-      const patch: Record<string, string | number | boolean | null> = { ...own };
-      for (const key of Object.keys(there ? (JSON.parse(there) as object) : {}))
-        if (!(key in own)) patch[key] = null;
-      if (Object.keys(patch).length)
+      const patch = restyle(sheet.cells[at.r]?.[at.c]?.s, cellStyle(cell?.s));
+      if (patch)
         formats.push({
           op: "format",
           sh: context.sheet,

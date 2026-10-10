@@ -42,7 +42,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { ChartKind } from "@chat/sheet-react/commands";
-import type { CellStyle } from "@chat/sheet-react/display";
+import type { CellStyle } from "@chat/sheet/model/style";
 import type {
   AutoSumKind,
   BorderKind,

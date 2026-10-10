@@ -1,3 +1,4 @@
+import { cellStyle, patchStyle } from "./style.ts";
 import { patchChart } from "./chart.ts";
 import { LIVE_LIMITS } from "./limits.ts";
 import { copyFormula, qualified, type FormulaAt } from "./formula.ts";
@@ -14,7 +15,7 @@ import {
   type Sheet,
   type SheetDoc,
 } from "./model.ts";
-import type { Area, SheetChange, SheetOp, StylePatch } from "./ops.ts";
+import type { Area, SheetChange, SheetOp } from "./ops.ts";
 
 /**
  * Applies a change to a document. Total and deterministic: given the same
@@ -33,24 +34,6 @@ export function applyChange(
   return { doc: next, dropped };
 }
 
-/** A style key: the style's properties in a fixed order, so every replica writes the same key. */
-export const styleKey = (style: Readonly<Record<string, string | number | boolean>>) => {
-  const keys = Object.keys(style).toSorted();
-  return keys.length
-    ? JSON.stringify(Object.fromEntries(keys.map((key) => [key, style[key]])))
-    : undefined;
-};
-const styleOf = (key: string | undefined): Record<string, string | number | boolean> =>
-  key ? (JSON.parse(key) as Record<string, string | number | boolean>) : {};
-const patched = (key: string | undefined, patch: StylePatch) => {
-  const style = styleOf(key);
-  for (const [name, value] of Object.entries(patch)) {
-    if (value === null) delete style[name];
-    else style[name] = value;
-  }
-  return styleKey(style);
-};
-
 /** Whether an ID is a live entry, through the order list's cached index. */
 const alive = (entries: readonly AxisEntry[], id: string) =>
   positions(entries).at(id) !== undefined;
@@ -58,7 +41,7 @@ const alive = (entries: readonly AxisEntry[], id: string) =>
 /** The format a new cell takes from its column, then its row, as Excel's row and column formats. */
 const axisStyle = (sheet: Sheet, r: string, c: string) => {
   const [column, row] = [sheet.colProps[c]?.s, sheet.rowProps[r]?.s];
-  return row ? patched(column, styleOf(row)) : column;
+  return row ? patchStyle(column, cellStyle(row)) : column;
 };
 
 /** Live IDs from `a` to `b` in order, either way round; empty when either is not alive. */
@@ -189,7 +172,7 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
           writes.push([
             r,
             c,
-            compact<Cell>({ ...(old ?? { w: 0 }), s: patched(old?.s, op.patch), wf: revision }),
+            compact<Cell>({ ...(old ?? { w: 0 }), s: patchStyle(old?.s, op.patch), wf: revision }),
           ]);
           continue;
         }
@@ -206,7 +189,7 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
         const ids = op.area.r1 === null ? cols : rows;
         const props = { ...next[axis] } as Record<string, AxisProps>;
         for (const id of ids) {
-          const s = op.op === "format" ? patched(props[id]?.s, op.patch) : undefined;
+          const s = op.op === "format" ? patchStyle(props[id]?.s, op.patch) : undefined;
           props[id] = compact<AxisProps>({ ...props[id], s });
         }
         next = { ...next, [axis]: props };

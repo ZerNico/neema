@@ -1,8 +1,9 @@
+import { cellStyle } from "@chat/sheet/model/style";
 import { XError } from "@chat/sheet/engine/values";
 import { LIVE_LIMITS } from "@chat/sheet/model/limits";
 import type { StylePatch } from "@chat/sheet/model/ops";
 import { selectionBox, type ForeignCell, type GridContext } from "./commands.ts";
-import { cellDisplay, cellStyle, safeLink } from "./display.ts";
+import { cellDisplay, safeLink } from "./display.ts";
 
 /**
  * HTML on the clipboard, as Excel and Google Sheets exchange cells with

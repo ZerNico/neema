@@ -1,3 +1,4 @@
+import { cellStyle, restyle } from "./style.ts";
 import { partsOf, serialOf } from "../dates.ts";
 import { EN_US, type SheetLocale } from "../locales.ts";
 import { copyFormula } from "./formula.ts";
@@ -9,7 +10,7 @@ import {
   type Formula,
   type SheetDoc,
 } from "./model.ts";
-import type { CellWrite, SheetOp, StylePatch } from "./ops.ts";
+import type { CellWrite, SheetOp } from "./ops.ts";
 
 export type FillDirection = "down" | "up" | "right" | "left";
 /**
@@ -46,11 +47,7 @@ const isTime = (source: Source) =>
   !!source.format &&
   /[hs]/i.test(bareFormat(source.format)) &&
   !isDate(source);
-const formatOf = (cell: Cell | undefined) => {
-  if (!cell?.s) return undefined;
-  const style = JSON.parse(cell.s) as { numberFormat?: unknown };
-  return typeof style.numberFormat === "string" ? style.numberFormat : undefined;
-};
+const formatOf = (cell: Cell | undefined) => cellStyle(cell?.s).numberFormat;
 
 /** The least-squares line through values at 0, 1, 2…: Excel's linear trend. */
 function trend(values: readonly number[]) {
@@ -250,15 +247,6 @@ function continuation(
   };
 }
 
-/** The style a target takes from its source: the source's own, and what else the target had removed. */
-function stylePatch(source: Cell | undefined, target: Cell | undefined): StylePatch | null {
-  const from = source?.s ? (JSON.parse(source.s) as Record<string, string | number | boolean>) : {};
-  const to = target?.s ? (JSON.parse(target.s) as Record<string, unknown>) : {};
-  const patch: Record<string, string | number | boolean | null> = { ...from };
-  for (const key of Object.keys(to)) if (!(key in from)) patch[key] = null;
-  return Object.keys(patch).length ? patch : null;
-}
-
 /**
  * Fills `count` cells on from `source` in one direction, as dragging the
  * fill handle does: each row (or column) of the source continues on its
@@ -338,7 +326,9 @@ export function fillSeries(
       } else writes.push({ r: target.r, c: target.c, v: filled.v });
       // Formats repeat by place, as Excel copies them, whatever the values do.
       const patch =
-        part === "values" ? null : stylePatch(cells[((x % length) + length) % length], target.cell);
+        part === "values"
+          ? null
+          : restyle(target.cell?.s, cellStyle(cells[((x % length) + length) % length]?.s));
       if (patch)
         styles.push({
           op: "format",

@@ -1,3 +1,4 @@
+import { cellStyle } from "@chat/sheet/model/style";
 import { rangeA1 } from "@chat/sheet/model/box";
 import { columnLetters, parseRange } from "@chat/sheet/a1";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
@@ -37,7 +38,7 @@ const text = (value: Scalar) => {
 };
 /** A style key as reader-facing properties: `bold numberFormat="0%"`. */
 const styleText = (key: string) =>
-  Object.entries(JSON.parse(key) as Record<string, unknown>)
+  Object.entries(cellStyle(key))
     .map(([name, value]) => (value === true ? name : `${name}=${JSON.stringify(value)}`))
     .join(" ");
 const address = (row: number, col: number) => `${columnLetters(col)}${row}`;
@@ -143,8 +144,8 @@ export function sheetView(
         const value = values.value(sheet, r, c);
         if (!cell?.f && value === null) continue;
         let shown = text(value);
-        const format = key ? (JSON.parse(key) as { numberFormat?: unknown }).numberFormat : null;
-        if (typeof format === "string" && !(value instanceof XError)) {
+        const format = cellStyle(key ?? undefined).numberFormat;
+        if (format && !(value instanceof XError)) {
           const formatted = formatValue(value, format, locale)?.text;
           if (formatted !== undefined && formatted !== String(value))
             shown += ` (${JSON.stringify(formatted)})`;

@@ -20,6 +20,7 @@
     "./model/ops": "./src/model/ops.ts",
     "./model/apply": "./src/model/apply.ts",
     "./model/box": "./src/model/box.ts",
+    "./model/style": "./src/model/style.ts",
     "./model/limits": "./src/model/limits.ts",
     "./model/calc": "./src/model/calc.ts",
     "./model/invert": "./src/model/invert.ts",

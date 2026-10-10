@@ -1,3 +1,4 @@
+import { cellStyle } from "@chat/sheet/model/style";
 import { rangeA1 } from "@chat/sheet/model/box";
 import { columnLetters } from "@chat/sheet/a1";
 import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
@@ -129,9 +130,7 @@ export function liveSheetExport(
             : typeof cell.v === "string" && /^[='"]/.test(cell.v)
               ? `'${cell.v}`
               : (cell.v ?? undefined);
-          const style = cell.s
-            ? (JSON.parse(cell.s) as Record<string, string | number | boolean>)
-            : undefined;
+          const style = cell.s ? cellStyle(cell.s) : undefined;
           if (input === undefined && !style) continue;
           cells.push({
             row: rowAt,

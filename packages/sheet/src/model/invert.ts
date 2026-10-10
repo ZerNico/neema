@@ -1,23 +1,12 @@
+import { cellStyle, restyle } from "./style.ts";
 import { applyChange } from "./apply.ts";
 import { mergeFields, type ChartPatch } from "./chart.ts";
 import type { SheetImage } from "./image.ts";
 import type { AxisEntry, Cell, Chart, Sheet, SheetDoc } from "./model.ts";
-import type { CellWrite, SheetOp, StylePatch } from "./ops.ts";
+import type { CellWrite, SheetOp } from "./ops.ts";
 
 const content = (cell: Cell | undefined) =>
   JSON.stringify([cell?.v ?? null, cell?.f ?? null, cell?.array ?? null]);
-const styleOf = (key: string | undefined): Record<string, string | number | boolean> =>
-  key ? (JSON.parse(key) as Record<string, string | number | boolean>) : {};
-
-/** The patch that turns the style `now` into `wanted`. */
-function restoreStyle(now: string | undefined, wanted: string | undefined): StylePatch {
-  const [from, to] = [styleOf(now), styleOf(wanted)];
-  const patch: Record<string, string | number | boolean | null> = {};
-  for (const key of new Set([...Object.keys(from), ...Object.keys(to)]))
-    if (from[key] !== to[key]) patch[key] = to[key] ?? null;
-  return patch;
-}
-
 const status = (entries: readonly AxisEntry[]) =>
   new Map(entries.map((entry) => [entry.id, !entry.dead]));
 const previousLive = (entries: readonly AxisEntry[], id: string) => {
@@ -69,7 +58,7 @@ function cellsUndo(sh: string, before: Sheet, after: Sheet, now: Sheet | undefin
             : { r, c, v: was?.v ?? null },
         );
       if (was?.s !== is?.s && current?.s === is?.s) {
-        const patch = restoreStyle(is?.s, was?.s);
+        const patch = restyle(is?.s, cellStyle(was?.s)) ?? {};
         styles.push({ op: "format", sh, area: { r1: r, r2: r, c1: c, c2: c }, patch });
       }
     }
