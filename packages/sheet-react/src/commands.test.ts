@@ -15,6 +15,7 @@ import {
   parseTabular,
   pasteAtSelection,
   sortSelection,
+  chartFromSelection,
   type GridContext,
 } from "./commands.ts";
 
@@ -130,5 +131,38 @@ describe("the clipboard", () => {
       pasteAtSelection(context(emptyDoc(), [1, 1]), "x\t=1+1\n7%", null),
     );
     expect([shown(doc, 1, 1), shown(doc, 1, 2), shown(doc, 2, 1)]).toEqual(["x", 2, 0.07]);
+  });
+});
+
+describe("charting the selection", () => {
+  it("names series from the header row, labels points from the first column, and sits beside", () => {
+    let doc = emptyDoc();
+    for (const [row, cells] of [
+      [1, ["Month", "Sales", "Costs"]],
+      [2, ["Jan", "10", "4"]],
+      [3, ["Feb", "20", "6"]],
+    ] as const)
+      cells.forEach((raw, index) => {
+        doc = type(doc, row, index + 1, raw);
+      });
+    const [op] = chartFromSelection(context(doc, [1, 1], [3, 3]), "column");
+    expect(op).toMatchObject({
+      op: "chartPut",
+      chart: {
+        kind: "column",
+        at: at(doc, 1, 5),
+        series: [
+          {
+            name: "Sales",
+            values: { r1: at(doc, 2, 1).r, r2: at(doc, 3, 1).r, c1: at(doc, 1, 2).c },
+          },
+          { name: "Costs", categories: { c1: at(doc, 1, 1).c } },
+        ],
+      },
+    });
+    expect(chartFromSelection(context(doc, [1, 1], [3, 3]), "pie")[0]).toMatchObject({
+      chart: { series: [{ name: "Sales" }] },
+    });
+    expect(chartFromSelection(context(doc, [1, 1]), "line")).toEqual([]);
   });
 });

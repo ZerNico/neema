@@ -342,3 +342,52 @@ export function fillSelection(context: GridContext, direction: "down" | "right")
   });
   return cells.length ? [{ op: "set", sh: context.sheet, cells }] : [];
 }
+
+export type ChartKind = "column" | "bar" | "line" | "area" | "pie" | "scatter";
+
+/**
+ * A chart of the selection, as Excel reads one: a first row of text names
+ * the series, a first column of text labels the points, every other column
+ * is a series. It is placed to the right of the data. A pie takes the first
+ * series only.
+ */
+export function chartFromSelection(context: GridContext, kind: ChartKind): SheetOp[] {
+  const box = selectionBox(context);
+  if (box.rowIds.length < 2 && box.colIds.length < 2) return [];
+  const isText = (r: string, c: string) => {
+    const value = context.values.value(context.sheet, r, c);
+    return typeof value === "string" && value !== "";
+  };
+  const headed = box.rowIds.length > 1 && box.colIds.some((c) => isText(box.rowIds[0]!, c));
+  const rows = headed ? box.rowIds.slice(1) : box.rowIds;
+  const labelled = box.colIds.length > 1 && rows.some((r) => isText(r, box.colIds[0]!));
+  const seriesCols = labelled ? box.colIds.slice(1) : box.colIds;
+  const range = (c1: string, c2: string) => ({ r1: rows[0]!, r2: rows.at(-1)!, c1, c2 });
+  const categories = labelled ? range(box.colIds[0]!, box.colIds[0]!) : undefined;
+  const series = (kind === "pie" ? seriesCols.slice(0, 1) : seriesCols).map((c) => {
+    const name = headed ? context.values.value(context.sheet, box.rowIds[0]!, c) : null;
+    return {
+      ...(typeof name === "string" && name ? { name: name.slice(0, 100) } : {}),
+      values: range(c, c),
+      ...(categories ? { categories } : {}),
+    };
+  });
+  if (!series.length) return [];
+  const grow = grower(context);
+  grow.ensure(context.sheet, box.top, box.right + 2);
+  const cols = positions(grow.doc.sheet[context.sheet]!.cols).ids;
+  return [
+    ...grow.ops,
+    {
+      op: "chartPut",
+      id: context.mint(),
+      chart: {
+        sheet: context.sheet,
+        kind,
+        at: { r: box.rowIds[0]!, c: cols[box.right + 1]! },
+        size: { width: 480, height: 300 },
+        series,
+      },
+    },
+  ];
+}
