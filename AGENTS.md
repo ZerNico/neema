@@ -321,8 +321,8 @@ All release candidates. Pin exactly; never float to `latest`.
   apply the old patch there with `patch -p1`, then `pnpm patch-commit`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
-- `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
-  a bump.
+- `@tanstack/charts` is pinned exact (1.x, after an API that moved every pre-1.0
+  release); re-probe the analytics charts and sheet charts on a bump.
 - `@office-kit/xlsx` (pre-1.0, in apps/web) and `@formulajs/formulajs` (the one dependency
   of `packages/sheet`) are pinned exact. Formulas are calculated by our own engine on
   formula.js, not HyperFormula, which is GPL-3.0; keep the calculation MIT unless that

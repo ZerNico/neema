@@ -20,7 +20,7 @@ catalog:
 #     stay a matched pair (see CLAUDE.md).
 #   - rolldown (and its platform bindings): pinned through Vite whenever a build
 #     regression forces a specific version.
-#   - @tanstack/charts: pre-alpha, pinned exact, API moves between releases.
+#   - @tanstack/charts: pinned exact; its API moved between every release before 1.0.
 # Add a package here only when its pin is exact and deliberate.
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
