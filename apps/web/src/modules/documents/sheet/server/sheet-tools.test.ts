@@ -18,6 +18,12 @@ function fakeSheets() {
   const rows = new Map<string, { document: EditableDocument; doc: SheetDoc }>();
   const seqs = new Map<string, number>();
   const comments: DocumentComment[] = [];
+  let written: (() => void) | null = null;
+  /** Resolves once the model's next change is in, for a preview written in the background. */
+  const nextWrite = () =>
+    new Promise<void>((resolve) => {
+      written = resolve;
+    });
   const commit = (documentId: string, clientId: string, ops: SheetOp[], by: "user" | "model") => {
     const row = rows.get(documentId)!;
     const revision = row.document.revision + 1;
@@ -88,8 +94,9 @@ function fakeSheets() {
         const decided = yield* decide(row.doc, row.document);
         if (!decided.ops?.length)
           return { result: decided.result, document: row.document, refused: null, dropped: [] };
-        const written = commit(input.documentId, input.clientId, [...decided.ops], "model");
-        return { result: decided.result, ...written, refused: null };
+        const committed = commit(input.documentId, input.clientId, [...decided.ops], "model");
+        written?.();
+        return { result: decided.result, ...committed, refused: null };
       }).pipe(Effect.orDie),
   };
   // Only these two are reached for a sheet; the text service's writes never are.
@@ -100,7 +107,7 @@ function fakeSheets() {
   /** What a person's grid does: a change of their own. */
   const personWrites = (documentId: string, ops: SheetOp[]) =>
     commit(documentId, "person", ops, "user");
-  return { sheets, service, rows, personWrites };
+  return { sheets, service, rows, personWrites, nextWrite };
 }
 
 const prepare = (
@@ -293,5 +300,58 @@ describe("live sheet tools", () => {
     // The row that had arrived was written, then taken back.
     expect(document.revision).toBe(2);
     expect(doc.sheet.s1!.cells["s1.r2"]?.["s1.c2"]?.v ?? null).toBeNull();
+  });
+
+  it("takes back a streamed edit's writes, but not a person's edit between them", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    await call(tools, "create_sheet", { title: "Plan" });
+    send(tools);
+    const cell = (start: string, value: string) => ({
+      kind: "setCells",
+      sheet: "Sheet1",
+      start,
+      rows: [[value]],
+    });
+    const text = JSON.stringify({ operations: [cell("A1", "one"), cell("A3", "two")] });
+    const second = text.indexOf('{"kind"', 20);
+    tools.live.start("call-1", "edit_sheet");
+    let wrote = fake.nextWrite();
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(0, second + 2)));
+    await wrote;
+    fake.personWrites("sheet-1", [
+      { op: "set", sh: "s1", cells: [{ r: "s1.r5", c: "s1.c2", v: "person" }] },
+    ]);
+    wrote = fake.nextWrite();
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(second + 2, -2)));
+    await wrote;
+    await Effect.runPromise(tools.live.close);
+    const { cells } = fake.rows.get("sheet-1")!.doc.sheet.s1!;
+    expect([cells["s1.r1"]?.["s1.c1"]?.v ?? null, cells["s1.r3"]?.["s1.c1"]?.v ?? null]).toEqual([
+      null,
+      null,
+    ]);
+    expect(cells["s1.r5"]?.["s1.c2"]?.v).toBe("person");
+  });
+
+  it("takes back what a streamed edit wrote when its call is refused", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    await call(tools, "create_sheet", { title: "Plan" });
+    send(tools);
+    const operations = [
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["one"]] },
+      { kind: "setCells", sheet: "Nope", start: "A1", rows: [["two"]] },
+    ];
+    const text = JSON.stringify({ operations });
+    tools.live.start("call-1", "edit_sheet");
+    const wrote = fake.nextWrite();
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(0, text.indexOf("Nope"))));
+    await wrote;
+    expect(fake.rows.get("sheet-1")!.doc.sheet.s1!.cells["s1.r1"]?.["s1.c1"]?.v).toBe("one");
+    expect(await call(tools, "edit_sheet", { operations })).not.toMatchObject({
+      outcome: "updated",
+    });
+    expect(fake.rows.get("sheet-1")!.doc.sheet.s1!.cells["s1.r1"]?.["s1.c1"]?.v ?? null).toBeNull();
   });
 });

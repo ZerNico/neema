@@ -83,8 +83,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   as the sheet, anchor and head IDs in the field text uses for blocks.
 - While a call's arguments arrive, its finished operations, and the finished rows of a
   `setCells` still being written, go in under the lighter fence. The decoded call writes only
-  what is left, so nothing is applied twice; an edit no call claims is undone with
-  `invertChange` and a sheet it created is removed.
+  what is left, so nothing is applied twice. An edit no call claims, or whose call is refused,
+  is undone write by write, newest first, so a person's edit made in between stays; a sheet an
+  unclaimed call created is removed.
 - `fromFile` starts a sheet from an Excel file, read in a spreadsheet worker, or a CSV. What a
   live sheet keeps: values, formulas (legacy arrays with their extent), styles the format
   operation knows, sizes, merges, panes, names and charts of the kinds it draws. What it drops,

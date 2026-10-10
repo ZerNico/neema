@@ -2,7 +2,7 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { applyChange } from "./apply.ts";
 import { parseFormula, renderFormula } from "./formula.ts";
-import { invertChange } from "./invert.ts";
+import { invertChange, invertSteps } from "./invert.ts";
 import { emptyDoc, emptySheet, liveSheets, positions, type SheetDoc } from "./model.ts";
 import type { SheetOp } from "./ops.ts";
 
@@ -197,6 +197,29 @@ describe("undoing a change", () => {
     expect(undone.sheet.s1!.colProps["s1.c1"]?.size).toBe(200);
     expect(undone.sheet.s1!.conditional?.map((each) => each.id)).toEqual(["theirs"]);
     expect(undone.charts.ch).toEqual({ ...doc.charts.ch, title: { text: "Theirs" } });
+  });
+
+  it("undoes several steps without the edits someone made between them", () => {
+    const set = (r: string, v: string): SheetOp => ({
+      op: "set",
+      sh: "s1",
+      cells: [{ r, c: "s1.c1", v }],
+    });
+    const start = emptyDoc();
+    const first = apply(start, [set("s1.r1", "model")]);
+    const between = apply(first, [set("s1.r2", "person")]);
+    const second = apply(between, [set("s1.r3", "model")]);
+    const steps = [
+      { before: start, after: first },
+      { before: between, after: second },
+    ];
+    const undone = apply(second, invertSteps(steps, second));
+    const cells = undone.sheet.s1!.cells;
+    expect([cells["s1.r1"]?.["s1.c1"]?.v ?? null, cells["s1.r3"]?.["s1.c1"]?.v ?? null]).toEqual([
+      null,
+      null,
+    ]);
+    expect(cells["s1.r2"]?.["s1.c1"]?.v).toBe("person");
   });
 
   it("takes any change back to what the sheet showed before it", () => {

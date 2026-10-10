@@ -16,7 +16,7 @@ import { DocumentActivityResult } from "../tool-schema.ts";
 import { DOCUMENT_POLICY, projectDocumentPolicy } from "./document-prompt.ts";
 import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./document-service.ts";
 import { readPartialArray, readPartialObject, type PartialField } from "./partial-json.ts";
-import { invertChange } from "@chat/sheet/model/invert";
+import { invertSteps } from "@chat/sheet/model/invert";
 import { calculateSheet, type SheetValues } from "@chat/sheet/model/calc";
 import {
   liveSheets,
@@ -1341,10 +1341,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
               },
               operations,
             );
-            if (preview && converted.ok) {
-              preview.before ??= doc;
-              preview.after = converted.doc;
-            }
+            if (preview && converted.ok) preview.steps.push({ before: doc, after: converted.doc });
             return { result: converted, ops: converted.ok ? converted.ops : null };
           }),
       )
@@ -1396,9 +1393,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     /** Operations written whole, then rows of the next one if it is a setCells. */
     applied: number;
     rowsApplied: number;
-    /** The sheet before the first write and after the last, to undo one never claimed. */
-    before: SheetDoc | null;
-    after: SheetDoc | null;
+    /** The sheet before and after each write, to take them back if the call never lands. */
+    steps: { before: SheetDoc; after: SheetDoc }[];
     failed: boolean;
     flusher: Fiber.Fiber<void> | null;
   };
@@ -1518,6 +1514,27 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       if (found[1].flusher) yield* Fiber.await(found[1].flusher);
       return found[1];
     });
+  /**
+   * Takes back what a preview wrote, each write against what came after it,
+   * so a person's edit made while the arguments arrived stays.
+   */
+  const undoPreview = (state: SheetLive) =>
+    Effect.gen(function* () {
+      const document = state.document;
+      if (!document || !state.steps.length || !input.liveGuard || !input.sheets) return;
+      const steps = state.steps;
+      state.steps = [];
+      yield* input.sheets.change(
+        input.userId,
+        {
+          documentId: document.id,
+          clientId: sheetClient,
+          generationId: input.generationId ?? null,
+        },
+        input.liveGuard,
+        (doc) => Effect.succeed({ result: null, ops: invertSteps(steps, doc) }),
+      );
+    }).pipe(Effect.catchCause(() => Effect.void));
   /** Undoes previews no call claimed: an edit is taken back, a sheet it created removed. */
   const closeSheetLive = Effect.suspend(() => {
     const open = [...sheetLive.values()];
@@ -1528,24 +1545,10 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         Effect.gen(function* () {
           if (state.flusher) yield* Fiber.await(state.flusher);
           const document = state.document;
-          if (!document || !input.liveGuard || !input.sheets) return;
-          if (state.name === "create_sheet") {
-            yield* service.discard(input.userId, document.id, input.liveGuard);
-            known = known.filter((each) => each.id !== document.id);
-            return;
-          }
-          const { before, after } = state;
-          if (!before || !after) return;
-          yield* input.sheets.change(
-            input.userId,
-            {
-              documentId: document.id,
-              clientId: sheetClient,
-              generationId: input.generationId ?? null,
-            },
-            input.liveGuard,
-            (doc) => Effect.succeed({ result: null, ops: invertChange(before, after, doc) }),
-          );
+          if (state.name === "edit_sheet") return yield* undoPreview(state);
+          if (!document || !input.liveGuard) return;
+          yield* service.discard(input.userId, document.id, input.liveGuard);
+          known = known.filter((each) => each.id !== document.id);
         }).pipe(Effect.catchCause(() => Effect.void)),
       { discard: true },
     );
@@ -1571,7 +1574,13 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       const current = known.find((each) => each.id === document.id) ?? document;
       return { outcome: "updated", ...reference(current) };
     }
-    return yield* sheetEdit(document, remaining);
+    const result = yield* sheetEdit(document, remaining);
+    // One refused operation refuses the call, the part written as it arrived included.
+    if (preview && result.outcome !== "updated" && result.outcome !== "unchanged") {
+      yield* undoPreview(preview);
+      yield* loadTree(document.id);
+    }
+    return result;
   });
   const createSheet = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
     if (!input.sheets) return { outcome: "unavailable", message: "Live sheets are unavailable." };
@@ -1638,16 +1647,20 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         const remaining = remainingOf(operations, preview);
         if (!Array.isArray(remaining) || remaining.length) {
           const filled = yield* sheetEdit(made, remaining);
-          if (filled.outcome !== "updated" && filled.outcome !== "unchanged")
+          if (filled.outcome !== "updated" && filled.outcome !== "unchanged") {
+            yield* undoPreview(preview);
+            yield* loadTree(made.id);
+            const current = known.find((each) => each.id === made.id) ?? made;
             return {
               outcome: "created",
-              ...reference(made),
+              ...reference(current),
               message:
-                `The sheet was created, but the rest of its operations were not applied: ${filled.message ?? filled.outcome}`.slice(
+                `The sheet was created empty; its operations were not applied: ${filled.message ?? filled.outcome}`.slice(
                   0,
                   600,
                 ),
             };
+          }
         }
         const current = known.find((each) => each.id === made.id) ?? made;
         return { outcome: "created", ...reference(current) };
@@ -1962,8 +1975,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             document: null,
             applied: 0,
             rowsApplied: 0,
-            before: null,
-            after: null,
+            steps: [],
             failed: false,
             flusher: null,
           });

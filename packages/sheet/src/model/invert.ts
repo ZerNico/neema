@@ -1,3 +1,4 @@
+import { applyChange } from "./apply.ts";
 import { mergeFields, type ChartPatch } from "./chart.ts";
 import type { SheetImage } from "./image.ts";
 import type { AxisEntry, Cell, Chart, Sheet, SheetDoc } from "./model.ts";
@@ -274,4 +275,23 @@ export function invertChange(before: SheetDoc, after: SheetDoc, now: SheetDoc = 
   if (!same(before.settings, after.settings) && same(now.settings, after.settings))
     middle.push({ op: "settings", ...before.settings });
   return [...first, ...middle, ...last];
+}
+
+/**
+ * The operations undoing several steps, last first, each judged against what
+ * undoing the later ones leaves. Others' edits between the steps then stay,
+ * as they would not if the steps were undone as one.
+ */
+export function invertSteps(
+  steps: readonly { readonly before: SheetDoc; readonly after: SheetDoc }[],
+  now: SheetDoc,
+): SheetOp[] {
+  const ops: SheetOp[] = [];
+  let current = now;
+  for (const { before, after } of steps.toReversed()) {
+    const inverse = invertChange(before, after, current);
+    ops.push(...inverse);
+    current = applyChange(current, { clientId: "undo", seq: 0, ops: inverse }, 0).doc;
+  }
+  return ops;
 }
