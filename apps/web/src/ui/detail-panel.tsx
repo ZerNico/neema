@@ -663,7 +663,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
             id={ids.panel}
             {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
             className={cn(
-              "min-h-0 flex-1",
+              // Its own stacking context: a body's layers (a sheet's sticky headers) stay
+              // beneath the resize handle, which they would otherwise cover.
+              "isolate min-h-0 flex-1",
               // A filling body (a web page, drawn above the panel) leaves the
               // resize handle's strip uncovered, or nothing could grab it.
               request.fill ? cn("flex flex-col", !overlay && "pl-1.5") : "overflow-y-auto px-4",
