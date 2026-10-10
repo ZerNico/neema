@@ -141,4 +141,19 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "d", ctrlKey: true });
     expect(events.slice(1)).toEqual(["clear", "undo", "redo", "fill"]);
   });
+
+  it("draws frozen rows again in a pane of their own, over the scrolling cells", () => {
+    let doc = emptyDoc();
+    doc = apply(
+      doc,
+      { op: "set", sh: "s1", cells: [set(doc, 1, 1, "Header"), set(doc, 2, 1, "Body")] },
+      { op: "freeze", sh: "s1", row: "s1.r1", col: null },
+    );
+    render(<Harness doc={doc} />);
+    const copies = screen.getAllByText("Header");
+    expect(copies).toHaveLength(2);
+    // The pane's copy is only for the eye; the grid's own cell is the one named.
+    expect(copies.filter((each) => each.closest("[aria-hidden]"))).toHaveLength(1);
+    expect(screen.getAllByText("Body")).toHaveLength(1);
+  });
 });

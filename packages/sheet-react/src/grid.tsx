@@ -175,6 +175,11 @@ export function SheetGrid({
 
   const rowIndex = useMemo(() => new Map(rows.ids.map((id, index) => [id, index])), [rows]);
   const colIndex = useMemo(() => new Map(cols.ids.map((id, index) => [id, index])), [cols]);
+  // Frozen up to and including these: the rows and columns that stay while the rest scrolls.
+  const frozenRows = data.freeze.row ? (rowIndex.get(data.freeze.row) ?? -1) + 1 : 0;
+  const frozenCols = data.freeze.col ? (colIndex.get(data.freeze.col) ?? -1) + 1 : 0;
+  const frozenHeight = rows.starts[frozenRows] ?? 0;
+  const frozenWidth = cols.starts[frozenCols] ?? 0;
   const head = selection
     ? { row: rowIndex.get(selection.head.r) ?? 0, col: colIndex.get(selection.head.c) ?? 0 }
     : null;
@@ -207,14 +212,19 @@ export function SheetGrid({
       const width = element.clientWidth || FALLBACK.width;
       const [top, bottom] = [rows.starts[row]!, rows.starts[row + 1]!];
       const [left, right] = [cols.starts[col]!, cols.starts[col + 1]!];
-      if (top < element.scrollTop) element.scrollTop = top;
-      else if (bottom + HEADER_ROW_PX > element.scrollTop + height)
-        element.scrollTop = bottom + HEADER_ROW_PX - height;
-      if (left < element.scrollLeft) element.scrollLeft = left;
-      else if (right + HEADER_COLUMN_PX > element.scrollLeft + width)
-        element.scrollLeft = right + HEADER_COLUMN_PX - width;
+      // A frozen cell is always in view; the rest scrolls clear of the frozen panes.
+      if (row >= frozenRows) {
+        if (top - frozenHeight < element.scrollTop) element.scrollTop = top - frozenHeight;
+        else if (bottom + HEADER_ROW_PX > element.scrollTop + height)
+          element.scrollTop = bottom + HEADER_ROW_PX - height;
+      }
+      if (col >= frozenCols) {
+        if (left - frozenWidth < element.scrollLeft) element.scrollLeft = left - frozenWidth;
+        else if (right + HEADER_COLUMN_PX > element.scrollLeft + width)
+          element.scrollLeft = right + HEADER_COLUMN_PX - width;
+      }
     },
-    [cols.starts, rows.starts],
+    [cols.starts, rows.starts, frozenRows, frozenCols, frozenHeight, frozenWidth],
   );
 
   const writable = !readOnly && !!onEditingChange && !!onCommit;
@@ -346,8 +356,9 @@ export function SheetGrid({
   };
 
   const dragging = useRef(false);
+  // Every pane lies on the same coordinates as the content, so its own box locates a cell.
   const cellAt = (event: PointerEvent) => {
-    const rect = content.current!.getBoundingClientRect();
+    const rect = event.currentTarget.getBoundingClientRect();
     return {
       row: rows.indexAt(event.clientY - rect.top),
       col: cols.indexAt(event.clientX - rect.left),
@@ -432,123 +443,144 @@ export function SheetGrid({
 
   const visibleRows = visibleRange(rows, viewport.top, viewport.height);
   const visibleCols = visibleRange(cols, viewport.left, viewport.width);
-  const cells: ReactNode[] = [];
-  const drawn = new Set<string>();
   const sheetCells = data.cells;
-  const draw = (row: number, col: number, overflowTo: number) => {
-    const span = merges.spans.get(key(row, col));
-    const r = rows.ids[row]!;
-    const c = cols.ids[col]!;
-    const cell = sheetCells[r]?.[c];
-    const style = cellStyle(cell?.s);
-    const value = values.value(sheet, r, c);
-    const shown = cellDisplay(value, style, locale);
-    const bottom = span ? span.bottom : row;
-    const right = span ? span.right : overflowTo;
-    const active = head?.row === row && head.col === col;
-    drawn.add(key(row, col));
-    cells.push(
-      <div
-        key={key(row, col)}
-        id={active ? `${gridId}-active` : undefined}
-        role="gridcell"
-        aria-rowindex={row + 1}
-        aria-colindex={col + 1}
-        aria-selected={active || undefined}
-        className="border-border text-foreground absolute flex overflow-hidden border-r border-b px-1 text-sm leading-tight whitespace-pre"
-        style={{
-          top: rows.starts[row],
-          left: cols.starts[col],
-          height: rows.starts[bottom + 1]! - rows.starts[row]!,
-          width: cols.starts[right + 1]! - cols.starts[col]!,
-          alignItems:
-            style.vertical === "top"
-              ? "flex-start"
-              : style.vertical === "center"
-                ? "center"
-                : "flex-end",
-          justifyContent:
-            shown.align === "right"
-              ? "flex-end"
-              : shown.align === "center"
-                ? "center"
-                : "flex-start",
-          textAlign: shown.align,
-          zIndex: right > col || span ? 1 : undefined,
-          ...(right > col && !style.fill ? { backgroundColor: "var(--background)" } : {}),
-          ...cellCss(style),
-          ...(shown.color ? { color: shown.color } : {}),
-        }}
-      >
-        {shown.text}
-      </div>,
-    );
-  };
-  for (let row = visibleRows.first; row <= visibleRows.last; row++)
-    for (let col = visibleCols.first; col <= visibleCols.last; col++) {
-      if (drawn.has(key(row, col))) continue;
-      if (merges.covered.has(key(row, col))) continue;
-      // Text runs on over empty cells to its right, as in Excel, unless it wraps.
-      let overflowTo = col;
+  /**
+   * The cells of one pane: rows and columns in the given ranges. Only the
+   * scrolling pane's cells are named for assistive tech and keep the active
+   * cell mounted; the frozen panes repeat theirs over it.
+   */
+  const paneCells = (
+    rowRange: { first: number; last: number },
+    colRange: { first: number; last: number },
+    main: boolean,
+  ) => {
+    const cells: ReactNode[] = [];
+    const drawn = new Set<string>();
+    const draw = (row: number, col: number, overflowTo: number) => {
+      const span = merges.spans.get(key(row, col));
       const r = rows.ids[row]!;
-      const value = values.value(sheet, r, cols.ids[col]!);
-      const style = cellStyle(sheetCells[r]?.[cols.ids[col]!]?.s);
-      if (typeof value === "string" && !style.wrap && (style.horizontal ?? "left") === "left") {
-        while (
-          overflowTo + 1 <= visibleCols.last &&
-          !merges.covered.has(key(row, overflowTo + 1)) &&
-          !merges.spans.has(key(row, overflowTo + 1)) &&
-          values.value(sheet, r, cols.ids[overflowTo + 1]!) === null
-        )
-          overflowTo++;
-        for (let skip = col + 1; skip <= overflowTo; skip++) drawn.add(key(row, skip));
+      const c = cols.ids[col]!;
+      const cell = sheetCells[r]?.[c];
+      const style = cellStyle(cell?.s);
+      const value = values.value(sheet, r, c);
+      const shown = cellDisplay(value, style, locale);
+      const bottom = span ? span.bottom : row;
+      const right = span ? span.right : overflowTo;
+      const active = main && head?.row === row && head.col === col;
+      drawn.add(key(row, col));
+      cells.push(
+        <div
+          key={key(row, col)}
+          id={active ? `${gridId}-active` : undefined}
+          role={main ? "gridcell" : undefined}
+          aria-rowindex={main ? row + 1 : undefined}
+          aria-colindex={main ? col + 1 : undefined}
+          aria-selected={active || undefined}
+          className="border-border text-foreground absolute flex overflow-hidden border-r border-b px-1 text-sm leading-tight whitespace-pre"
+          style={{
+            top: rows.starts[row],
+            left: cols.starts[col],
+            height: rows.starts[bottom + 1]! - rows.starts[row]!,
+            width: cols.starts[right + 1]! - cols.starts[col]!,
+            alignItems:
+              style.vertical === "top"
+                ? "flex-start"
+                : style.vertical === "center"
+                  ? "center"
+                  : "flex-end",
+            justifyContent:
+              shown.align === "right"
+                ? "flex-end"
+                : shown.align === "center"
+                  ? "center"
+                  : "flex-start",
+            textAlign: shown.align,
+            zIndex: right > col || span ? 1 : undefined,
+            ...(right > col && !style.fill ? { backgroundColor: "var(--background)" } : {}),
+            ...cellCss(style),
+            ...(shown.color ? { color: shown.color } : {}),
+          }}
+        >
+          {shown.text}
+        </div>,
+      );
+    };
+    for (let row = rowRange.first; row <= rowRange.last; row++)
+      for (let col = colRange.first; col <= colRange.last; col++) {
+        if (drawn.has(key(row, col))) continue;
+        if (merges.covered.has(key(row, col))) continue;
+        // Text runs on over empty cells to its right, as in Excel, unless it wraps.
+        let overflowTo = col;
+        const r = rows.ids[row]!;
+        const value = values.value(sheet, r, cols.ids[col]!);
+        const style = cellStyle(sheetCells[r]?.[cols.ids[col]!]?.s);
+        if (typeof value === "string" && !style.wrap && (style.horizontal ?? "left") === "left") {
+          while (
+            overflowTo + 1 <= colRange.last &&
+            !merges.covered.has(key(row, overflowTo + 1)) &&
+            !merges.spans.has(key(row, overflowTo + 1)) &&
+            values.value(sheet, r, cols.ids[overflowTo + 1]!) === null
+          )
+            overflowTo++;
+          for (let skip = col + 1; skip <= overflowTo; skip++) drawn.add(key(row, skip));
+        }
+        draw(row, col, overflowTo);
       }
-      draw(row, col, overflowTo);
-    }
-  // Merges starting above or left of the window still show where they reach into it.
-  for (const span of merges.spans.values())
-    if (
-      !drawn.has(key(span.top, span.left)) &&
-      span.bottom >= visibleRows.first &&
-      span.top <= visibleRows.last &&
-      span.right >= visibleCols.first &&
-      span.left <= visibleCols.last
-    )
-      draw(span.top, span.left, span.left);
-  // The active cell stays in the tree when scrolled away, so assistive tech still finds it.
-  if (head && !drawn.has(key(head.row, head.col)) && rows.ids.length && cols.ids.length)
-    draw(head.row, head.col, head.col);
+    // Merges starting above or left of the pane still show where they reach into it.
+    for (const span of merges.spans.values())
+      if (
+        !drawn.has(key(span.top, span.left)) &&
+        span.bottom >= rowRange.first &&
+        span.top <= rowRange.last &&
+        span.right >= colRange.first &&
+        span.left <= colRange.last
+      )
+        draw(span.top, span.left, span.left);
+    // The active cell stays in the tree when scrolled away, so assistive tech still finds it.
+    if (main && head && !drawn.has(key(head.row, head.col)) && rows.ids.length && cols.ids.length)
+      draw(head.row, head.col, head.col);
+    return cells;
+  };
+  const cells = paneCells(visibleRows, visibleCols, true);
 
-  const columnHeaders: ReactNode[] = [];
-  for (let col = visibleCols.first; col <= visibleCols.last; col++) {
+  const columnHeader = (col: number) => {
     const inSelection = box && col >= box.left && col <= box.right;
-    columnHeaders.push(
+    return (
       <div
         key={col}
         role="columnheader"
-        className={`border-border text-muted-foreground absolute top-0 flex h-full items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
-        style={{ left: HEADER_COLUMN_PX + cols.starts[col]!, width: cols.size(col) }}
+        className={`border-border text-muted-foreground absolute top-0 flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+        style={{
+          left: HEADER_COLUMN_PX + cols.starts[col]!,
+          width: cols.size(col),
+          height: HEADER_ROW_PX,
+        }}
       >
         {columnLetters(col + 1)}
         {resizeHandle("columns", col)}
-      </div>,
+      </div>
     );
-  }
-  const rowHeaders: ReactNode[] = [];
-  for (let row = visibleRows.first; row <= visibleRows.last; row++) {
+  };
+  /** A row's header; `offset` places it in the corner, below the column headers. */
+  const rowHeader = (row: number, offset = 0) => {
     const inSelection = box && row >= box.top && row <= box.bottom;
-    rowHeaders.push(
+    return (
       <div
         key={row}
         role="rowheader"
-        className={`border-border text-muted-foreground absolute left-0 flex w-full items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
-        style={{ top: rows.starts[row], height: rows.size(row) }}
+        className={`border-border text-muted-foreground absolute left-0 flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+        style={{ top: offset + rows.starts[row]!, height: rows.size(row), width: HEADER_COLUMN_PX }}
       >
         {row + 1}
         {resizeHandle("rows", row)}
-      </div>,
+      </div>
     );
-  }
+  };
+  const columnHeaders: ReactNode[] = [];
+  for (let col = visibleCols.first; col <= visibleCols.last; col++)
+    columnHeaders.push(columnHeader(col));
+  const rowHeaders: ReactNode[] = [];
+  for (let row = visibleRows.first; row <= visibleRows.last; row++) rowHeaders.push(rowHeader(row));
 
   const selectionBox = box && (
     <div
@@ -602,6 +634,19 @@ export function SheetGrid({
     editing && rowIndex.has(editing.at.r) && colIndex.has(editing.at.c)
       ? rectOf({ anchor: editing.at, head: editing.at })
       : null;
+  /** Which pane the cell being edited is drawn in, so its input sits over it. */
+  const editingPane = (() => {
+    if (!editing) return null;
+    const row = rowIndex.get(editing.at.r) ?? 0;
+    const col = colIndex.get(editing.at.c) ?? 0;
+    return row < frozenRows
+      ? col < frozenCols
+        ? "corner"
+        : "top"
+      : col < frozenCols
+        ? "left"
+        : "main";
+  })();
   const editor =
     editing && editorRect ? (
       <input
@@ -625,6 +670,43 @@ export function SheetGrid({
         }}
       />
     ) : null;
+
+  const handlers = {
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: stopDragging,
+    onPointerCancel: stopDragging,
+  };
+  /** A frozen pane: its cells over the content's own, on the same coordinates, opaque. */
+  const pane = (
+    name: "corner" | "top" | "left",
+    rowRange: { first: number; last: number },
+    colRange: { first: number; last: number },
+  ) => (
+    <div
+      aria-hidden={editingPane !== name || undefined}
+      className="bg-background absolute overflow-hidden"
+      style={{
+        top: name === "left" ? 0 : HEADER_ROW_PX,
+        left: HEADER_COLUMN_PX,
+        width: name === "top" ? cols.total : frozenWidth,
+        height: name === "left" ? rows.total : frozenHeight,
+        // The line Excel draws where the frozen part ends.
+        boxShadow:
+          name === "top"
+            ? "0 1px 0 var(--border)"
+            : name === "left"
+              ? "1px 0 0 var(--border)"
+              : "1px 1px 0 var(--border)",
+      }}
+      {...handlers}
+    >
+      {paneCells(rowRange, colRange, false)}
+      {others}
+      {selectionBox}
+      {editingPane === name ? editor : null}
+    </div>
+  );
 
   return (
     <div
@@ -667,15 +749,38 @@ export function SheetGrid({
         className="relative"
         style={{ width: HEADER_COLUMN_PX + cols.total, height: HEADER_ROW_PX + rows.total }}
       >
-        <div className="sticky top-0 z-30" style={{ height: HEADER_ROW_PX }}>
+        <div className="sticky top-0 z-30" style={{ height: HEADER_ROW_PX + frozenHeight }}>
           <div
-            className="border-border bg-muted sticky left-0 z-10 border-r border-b"
-            style={{ width: HEADER_COLUMN_PX, height: HEADER_ROW_PX }}
-          />
+            className="sticky left-0 z-10"
+            style={{ width: HEADER_COLUMN_PX + frozenWidth, height: HEADER_ROW_PX + frozenHeight }}
+          >
+            <div
+              className="border-border bg-muted absolute top-0 left-0 border-r border-b"
+              style={{ width: HEADER_COLUMN_PX, height: HEADER_ROW_PX }}
+            />
+            {Array.from({ length: frozenCols }, (_, col) => columnHeader(col))}
+            {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, HEADER_ROW_PX))}
+            {frozenRows && frozenCols
+              ? pane(
+                  "corner",
+                  { first: 0, last: frozenRows - 1 },
+                  { first: 0, last: frozenCols - 1 },
+                )
+              : null}
+          </div>
           {columnHeaders}
+          {frozenRows ? pane("top", { first: 0, last: frozenRows - 1 }, visibleCols) : null}
         </div>
-        <div className="sticky left-0 z-20" style={{ width: HEADER_COLUMN_PX, height: rows.total }}>
+        <div
+          className="sticky left-0 z-20"
+          style={{
+            width: HEADER_COLUMN_PX + frozenWidth,
+            height: rows.total,
+            marginTop: -frozenHeight,
+          }}
+        >
           {rowHeaders}
+          {frozenCols ? pane("left", visibleRows, { first: 0, last: frozenCols - 1 }) : null}
         </div>
         <div
           ref={content}
@@ -694,7 +799,7 @@ export function SheetGrid({
           {cells}
           {others}
           {selectionBox}
-          {editor}
+          {editingPane === "main" ? editor : null}
           {resizing ? (
             <div
               aria-hidden
