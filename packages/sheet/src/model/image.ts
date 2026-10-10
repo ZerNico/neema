@@ -1,3 +1,4 @@
+import { isId, isRecord } from "./check.ts";
 /**
  * A picture laid over a sheet, as Excel's: anchored to a cell by IDs with an
  * offset into it, at a size. Its bytes are in the document as a data URL,
@@ -29,10 +30,6 @@ export const IMAGE_LIMITS = {
 
 const DATA_URL = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
 const isNumber = (value: unknown, min: number, max: number) =>
   typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 

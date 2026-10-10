@@ -1,6 +1,7 @@
 import type { SheetValues } from "./calc.ts";
 import { shownText } from "./filter.ts";
 import { positions, type Box, type SheetDoc } from "./model.ts";
+import { isColor, isId, isRecord } from "./check.ts";
 
 /**
  * Conditional formats, as Excel's Home tab makes them: rules over ranges that
@@ -70,11 +71,6 @@ export interface CellLook extends ConditionalStyle {
 
 export const CONDITIONAL_LIMITS = { rules: 100, text: 255 } as const;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
-const isColor = (value: unknown) => typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value);
 const isOperand = (value: unknown) =>
   (typeof value === "number" && Number.isFinite(value)) ||
   (typeof value === "string" && value.length <= CONDITIONAL_LIMITS.text);

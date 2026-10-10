@@ -1,4 +1,5 @@
 import { positions, type AxisEntry, type SheetDoc } from "./model.ts";
+import { isId } from "./check.ts";
 
 /**
  * Grouped rows or columns, as Excel's outline: a span by IDs that can be
@@ -19,9 +20,6 @@ export interface SheetOutline {
 /** Excel's deepest outline. */
 export const OUTLINE_LEVELS = 7;
 export const OUTLINE_LIMITS = { groups: 500 } as const;
-
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
 
 /** Whether a list of groups, as an operation carries one, is well formed. */
 export function isOutlineList(value: unknown): value is readonly OutlineGroup[] {

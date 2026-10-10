@@ -212,7 +212,8 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       const key = op.axis === "rows" ? "rows" : "cols";
       const entries = sheet[key];
       const known = new Set(entries.map((entry) => entry.id));
-      const ids = op.ids.filter((id) => !known.has(id));
+      // Each new ID once, and none a row or column already has.
+      const ids = [...new Set(op.ids)].filter((id) => !known.has(id));
       if (ids.length < op.ids.length) dropped.push("rows or columns that already exist");
       const at = op.after === null ? 0 : (positions(entries).raw(op.after) ?? -1) + 1;
       if (at === 0 && op.after !== null)
@@ -664,10 +665,13 @@ function sort(
   const sheet = alive(doc.sheets, op.sh) ? doc.sheet[op.sh] : undefined;
   if (!sheet) return drop(doc, dropped, "a sort on a sheet that is gone");
   const rowIndex = positions(sheet.rows);
+  // The same rows each once in the new order, checked in linear time.
+  const given = new Set(op.rows);
   const sameSet =
     op.rows.length === op.order.length &&
-    new Set(op.rows).size === op.rows.length &&
-    op.order.every((id) => op.rows.includes(id));
+    given.size === op.rows.length &&
+    new Set(op.order).size === op.order.length &&
+    op.order.every((id) => given.has(id));
   if (!sameSet || op.rows.some((id) => rowIndex.at(id) === undefined))
     return drop(doc, dropped, "a sort over rows that changed");
   const cols = between(sheet.cols, op.c1, op.c2);

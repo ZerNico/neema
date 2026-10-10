@@ -3,6 +3,7 @@ import { sheetLocale } from "../locales.ts";
 import { formatValue, generalText } from "../number-format.ts";
 import type { SheetValues } from "./calc.ts";
 import { positions, type Box, type SheetDoc } from "./model.ts";
+import { isBox, isColor, isId, isRecord } from "./check.ts";
 
 /**
  * A chart, kept as data: what it draws from, by IDs, and every option a
@@ -126,17 +127,10 @@ export const CHART_LIMITS = {
 
 // ---- validation, as the transport and the model's tools need it
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
-const isBox = (value: unknown) =>
-  isRecord(value) && isId(value.r1) && isId(value.r2) && isId(value.c1) && isId(value.c2);
 const isText = (value: unknown) =>
   isRecord(value) &&
   ((typeof value.text === "string" && value.text.length <= CHART_LIMITS.text) ||
     (isRecord(value.cell) && isId(value.cell.sh) && isId(value.cell.r) && isId(value.cell.c)));
-const isColor = (value: unknown) => typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value);
 const isFormat = (value: unknown) => typeof value === "string" && value.length <= 100;
 const isFinite = (value: unknown) => typeof value === "number" && Number.isFinite(value);
 const optional = (value: unknown, check: (each: unknown) => boolean) =>
@@ -226,7 +220,7 @@ const CHECKS: Record<string, (value: unknown) => boolean> = {
 export const isChart = (value: unknown) =>
   isRecord(value) &&
   ["sheet", "at", "size", "kind", "series"].every((key) => value[key] !== undefined) &&
-  Object.entries(value).every(([key, field]) => CHECKS[key]?.(field) ?? false);
+  Object.entries(value).every(([key, field]) => Object.hasOwn(CHECKS, key) && CHECKS[key]!(field));
 
 /** A patch's keys each as a chart holds them, or null to remove one; axes and style one level down. */
 export const isChartPatch = (value: unknown) =>
@@ -245,7 +239,7 @@ export const isChartPatch = (value: unknown) =>
         isStyle(Object.fromEntries(Object.entries(field).filter(([, each]) => each !== null)))
       );
     if (field === null) return !["sheet", "at", "size", "kind", "series"].includes(key);
-    return CHECKS[key]?.(field) ?? false;
+    return Object.hasOwn(CHECKS, key) && CHECKS[key]!(field);
   });
 
 /** A copy of `base` with each key of `changes` set, or removed where it is null. */

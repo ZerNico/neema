@@ -3,6 +3,10 @@ import { isSheetFilter, type SheetFilter } from "./filter.ts";
 import { isConditionalList, type ConditionalFormat } from "./conditional.ts";
 import { isValidationList, type Validation } from "./validation.ts";
 import { isOutlineList, type OutlineGroup } from "./outline.ts";
+import { isBox, isId, isIdList, isIdOrNull, isRecord } from "./check.ts";
+import { isStylePatch } from "./style.ts";
+import { LIVE_LIMITS } from "./limits.ts";
+import { LIVE_CALC } from "./calc.ts";
 import { isSheetImage, type SheetImage } from "./image.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
@@ -179,16 +183,23 @@ const OP_NAMES = new Set([
   "outline",
 ]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
-const isIdOrNull = (value: unknown) => value === null || isId(value);
-const isIds = (value: unknown) =>
-  Array.isArray(value) && value.length <= 100_000 && value.every(isId);
+/** Distinct row, column or sheet IDs, as many as a sheet may hold. */
+const isIds = (value: unknown) => isIdList(value, LIVE_LIMITS.rows);
 const isAxis = (value: unknown) => value === "rows" || value === "columns";
-const isBox = (value: unknown) =>
-  isRecord(value) && isId(value.r1) && isId(value.r2) && isId(value.c1) && isId(value.c2);
+/** A legacy array formula's extent: whole cells, no more than a spill may fill. */
+const isArrayExtent = (value: unknown) =>
+  isRecord(value) &&
+  Number.isInteger(value.rows) &&
+  Number.isInteger(value.cols) &&
+  (value.rows as number) >= 1 &&
+  (value.cols as number) >= 1 &&
+  (value.rows as number) * (value.cols as number) <= LIVE_CALC.spill;
+/** A sort's new order: the same rows, each once. */
+const isPermutation = (rows: unknown, order: unknown) => {
+  if (!isIds(rows) || !isIds(order) || rows.length !== order.length) return false;
+  const given = new Set(rows);
+  return order.every((id) => given.has(id));
+};
 const isArea = (value: unknown) =>
   isRecord(value) &&
   isIdOrNull(value.r1) &&
@@ -223,15 +234,6 @@ const isValue = (value: unknown) =>
   typeof value === "string" ||
   typeof value === "boolean" ||
   (typeof value === "number" && Number.isFinite(value));
-const isPatch = (value: unknown) =>
-  isRecord(value) &&
-  Object.values(value).every(
-    (each) =>
-      each === null ||
-      typeof each === "boolean" ||
-      typeof each === "string" ||
-      (typeof each === "number" && Number.isFinite(each)),
-  );
 
 function validOp(op: Record<string, unknown>): boolean {
   switch (op.op) {
@@ -245,7 +247,8 @@ function validOp(op: Record<string, unknown>): boolean {
             isId(cell.r) &&
             isId(cell.c) &&
             (cell.v === undefined || isValue(cell.v)) &&
-            (cell.f === undefined || isFormula(cell.f)),
+            (cell.f === undefined || isFormula(cell.f)) &&
+            (cell.array === undefined || (cell.f !== undefined && isArrayExtent(cell.array))),
         )
       );
     case "clear":
@@ -253,7 +256,7 @@ function validOp(op: Record<string, unknown>): boolean {
         isId(op.sh) && isArea(op.area) && ["contents", "formats", "all"].includes(op.what as string)
       );
     case "format":
-      return isId(op.sh) && isArea(op.area) && isPatch(op.patch);
+      return isId(op.sh) && isArea(op.area) && isStylePatch(op.patch);
     case "resize":
       return (
         isId(op.sh) &&
@@ -330,7 +333,7 @@ function validOp(op: Record<string, unknown>): boolean {
         (op.to.sh === undefined || isId(op.to.sh))
       );
     case "sort":
-      return isId(op.sh) && isId(op.c1) && isId(op.c2) && isIds(op.rows) && isIds(op.order);
+      return isId(op.sh) && isId(op.c1) && isId(op.c2) && isPermutation(op.rows, op.order);
     case "filter":
       return isId(op.sh) && (op.filter === null || isSheetFilter(op.filter));
     case "conditional":

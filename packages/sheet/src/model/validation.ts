@@ -2,6 +2,7 @@ import type { Scalar } from "../engine/values.ts";
 import type { SheetValues } from "./calc.ts";
 import { shownText } from "./filter.ts";
 import { positions, type Box, type SheetDoc } from "./model.ts";
+import { isBox, isId, isRecord } from "./check.ts";
 
 /**
  * Data validation, as Excel's Data tab sets it: what a range's cells may
@@ -46,13 +47,6 @@ export interface Validation {
 }
 
 export const VALIDATION_LIMITS = { rules: 200, values: 1_000, text: 255 } as const;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
-const isBox = (value: unknown) =>
-  isRecord(value) && [value.r1, value.r2, value.c1, value.c2].every(isId);
 
 function isRule(rule: unknown): boolean {
   if (!isRecord(rule)) return false;

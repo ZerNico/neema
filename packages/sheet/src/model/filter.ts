@@ -3,6 +3,7 @@ import { sheetLocale } from "../locales.ts";
 import { formatValue, generalText } from "../number-format.ts";
 import type { SheetValues } from "./calc.ts";
 import { positions, type Box, type SheetDoc } from "./model.ts";
+import { isId, isRecord } from "./check.ts";
 
 /**
  * A sheet's AutoFilter, as Excel keeps one: a range whose first row holds the
@@ -38,11 +39,6 @@ export interface FilterRule {
 }
 
 export const FILTER_LIMITS = { values: 10_000, text: 255 } as const;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isId = (value: unknown) =>
-  typeof value === "string" && value.length > 0 && value.length <= 64;
 
 /** Whether a filter, as an operation carries one, is well formed. */
 export function isSheetFilter(value: unknown): value is SheetFilter {
