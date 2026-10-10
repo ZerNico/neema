@@ -38,7 +38,8 @@ function plainNumber(
   return { value, grouped: whole !== (match[2] ?? "0"), places: match[4] ? 0 : fraction.length };
 }
 
-const decimals = (places: number) => (places > 0 ? `.${"0".repeat(Math.min(places, 10))}` : "");
+/** Typed numbers take Excel's built-in formats, which show no decimals or two. */
+const decimals = (places: number) => (places > 0 ? ".00" : "");
 
 /** Text in the locale's date order, ISO dates, and times with or without a meridiem. */
 function dateTime(text: string, locale: SheetLocale): { value: number; format: string } | null {
@@ -122,7 +123,7 @@ export function parseTyped(raw: string, locale: SheetLocale = EN_US): Typed {
     const number = plainNumber(body, locale);
     if (!number) continue;
     const before = at[2] !== undefined;
-    const amount = `#,##0${decimals(Math.max(number.places, symbol === "¥" ? 0 : 2))}`;
+    const amount = `#,##0${decimals(symbol === "¥" ? 0 : 2)}`;
     const tag =
       symbol === locale.currency.symbol ? `[$${symbol}-${locale.currency.lcid}]` : `[$${symbol}]`;
     const format = before

@@ -15,7 +15,12 @@ describe("typed entries", () => {
 
   it("reads percent and currency as a number with the format it implies", () => {
     expect(parseTyped("15%")).toEqual({ kind: "number", value: 0.15, format: "0%" });
-    expect(parseTyped("12.5%")).toEqual({ kind: "number", value: 0.125, format: "0.0%" });
+    expect(parseTyped("12.5%")).toEqual({ kind: "number", value: 0.125, format: "0.00%" });
+    expect(parseTyped("1,234.567")).toEqual({
+      kind: "number",
+      value: 1234.567,
+      format: "#,##0.00",
+    });
     expect(parseTyped("$1,234.5")).toEqual({ kind: "number", value: 1234.5, format: "$#,##0.00" });
     expect(parseTyped("-$5")).toEqual({ kind: "number", value: -5, format: "$#,##0.00" });
   });
@@ -62,7 +67,7 @@ describe("typed entries", () => {
     expect(parseTyped("1 234,5", FR_FR)).toEqual({
       kind: "number",
       value: 1234.5,
-      format: "#,##0.0",
+      format: "#,##0.00",
     });
   });
 
