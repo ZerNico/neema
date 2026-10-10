@@ -88,6 +88,57 @@ describe("undoing a change", () => {
     doc = undone;
   });
 
+  it("moves a filter's, a rule's and a chart's deleted endpoints inward, and back on undo", () => {
+    const box = { r1: "s1.r1", r2: "s1.r5", c1: "s1.c1", c2: "s1.c3" };
+    const doc = apply(emptyDoc(), [
+      { op: "filter", sh: "s1", filter: { box, rules: { "s1.c3": { values: ["x"] } } } },
+      {
+        op: "validations",
+        sh: "s1",
+        list: [
+          {
+            id: "v1",
+            box: { r1: "s1.r2", r2: "s1.r5", c1: "s1.c2", c2: "s1.c2" },
+            rule: {
+              kind: "list",
+              source: { sh: "s1", box: { r1: "s1.r1", r2: "s1.r5", c1: "s1.c1", c2: "s1.c1" } },
+            },
+            onError: "stop",
+            allowBlank: true,
+          },
+        ],
+      },
+      {
+        op: "chartPut",
+        id: "ch",
+        chart: {
+          sheet: "s1",
+          at: { r: "s1.r1", c: "s1.c5" },
+          size: { width: 400, height: 300 },
+          kind: "column",
+          series: [{ values: { r1: "s1.r2", r2: "s1.r5", c1: "s1.c2", c2: "s1.c2" } }],
+        },
+      },
+    ]);
+    const { after, undone } = roundTrip(doc, [
+      { op: "delete", sh: "s1", axis: "rows", ids: ["s1.r1", "s1.r5"] },
+      { op: "delete", sh: "s1", axis: "columns", ids: ["s1.c3"] },
+    ]);
+    const sheet = after.sheet.s1!;
+    expect(sheet.filter).toEqual({
+      box: { r1: "s1.r2", r2: "s1.r4", c1: "s1.c1", c2: "s1.c2" },
+      rules: {},
+    });
+    expect(sheet.validations![0]!.box).toMatchObject({ r1: "s1.r2", r2: "s1.r4" });
+    expect(sheet.validations![0]!.rule).toMatchObject({
+      source: { box: { r1: "s1.r2", r2: "s1.r4" } },
+    });
+    expect(after.charts.ch!.series[0]!.values).toMatchObject({ r1: "s1.r2", r2: "s1.r4" });
+    expect(undone.sheet.s1!.filter).toEqual(doc.sheet.s1!.filter);
+    expect(undone.charts.ch).toEqual(doc.charts.ch);
+    expect(undone.sheet.s1!.validations).toEqual(doc.sheet.s1!.validations);
+  });
+
   it("unmerges only the merge it added, beside one over a deleted row", () => {
     const merge = (r1: string, r2: string): SheetOp => ({
       op: "merge",

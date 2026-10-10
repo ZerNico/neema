@@ -237,7 +237,9 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
           : entry,
       );
       const next = withSheet(doc, op.sh, { ...sheet, [key]: entries });
-      return op.op === "delete" ? shrinkRanges(next, op.sh, op.axis, ids) : next;
+      return op.op === "delete"
+        ? shrinkBoxes(shrinkRanges(next, op.sh, op.axis, ids), op.sh, op.axis, ids)
+        : next;
     }
     case "merge":
     case "unmerge": {
@@ -448,6 +450,104 @@ function shrinkRanges(
     });
     return changed ? { parts } : formula;
   });
+}
+
+/**
+ * Moves the endpoints of every range a sheet keeps by IDs off rows or columns
+ * just deleted, as `shrinkRanges` does for formulas: a filter, validation,
+ * conditional formats, list sources and charts' series. One with nothing left
+ * keeps its dead endpoints, and draws or checks nothing.
+ */
+function shrinkBoxes(
+  doc: SheetDoc,
+  sheetId: string,
+  axis: "rows" | "columns",
+  deleted: ReadonlySet<string>,
+): SheetDoc {
+  const sheet = doc.sheet[sheetId]!;
+  const index = positions(axis === "rows" ? sheet.rows : sheet.cols);
+  const [first, second] = axis === "rows" ? (["r1", "r2"] as const) : (["c1", "c2"] as const);
+  const shrink = <B extends Box>(box: B): B => {
+    const [a, b] = [box[first], box[second]];
+    if (!deleted.has(a) && !deleted.has(b)) return box;
+    const start = deleted.has(a) ? index.nearest(a, 1) : index.at(a);
+    const end = deleted.has(b) ? index.nearest(b, -1) : index.at(b);
+    if (start === undefined || end === undefined || start > end) return box;
+    return { ...box, [first]: index.ids[start - 1]!, [second]: index.ids[end - 1]! };
+  };
+  const onSheet = <T extends { readonly sh: string; readonly box: Box }>(source: T): T =>
+    source.sh === sheetId ? { ...source, box: shrink(source.box) } : source;
+  const filter = sheet.filter && {
+    box: shrink(sheet.filter.box),
+    // A deleted column takes its rule with it.
+    rules:
+      axis === "columns"
+        ? Object.fromEntries(Object.entries(sheet.filter.rules).filter(([c]) => !deleted.has(c)))
+        : sheet.filter.rules,
+  };
+  const next: Sheet = {
+    ...sheet,
+    ...(filter ? { filter } : {}),
+    ...(sheet.conditional
+      ? { conditional: sheet.conditional.map((each) => ({ ...each, box: shrink(each.box) })) }
+      : {}),
+    ...(sheet.validations
+      ? {
+          validations: sheet.validations.map((each) => ({
+            ...each,
+            box: shrink(each.box),
+            ...(each.rule.kind === "list" && each.rule.source
+              ? { rule: { ...each.rule, source: onSheet(each.rule.source) } }
+              : {}),
+          })),
+        }
+      : {}),
+  };
+  // Lists on other sheets may read their choices from this one.
+  let out = withSheet(doc, sheetId, next);
+  for (const id of Object.keys(out.sheet)) {
+    if (id === sheetId) continue;
+    const other = out.sheet[id]!;
+    if (
+      !other.validations?.some(
+        (each) => each.rule.kind === "list" && each.rule.source?.sh === sheetId,
+      )
+    )
+      continue;
+    out = withSheet(out, id, {
+      ...other,
+      validations: other.validations.map((each) =>
+        each.rule.kind === "list" && each.rule.source
+          ? { ...each, rule: { ...each.rule, source: onSheet(each.rule.source) } }
+          : each,
+      ),
+    });
+  }
+  const charts = Object.fromEntries(
+    Object.entries(out.charts).map(([id, chart]) => {
+      const reads = (on: string | undefined) => (on ?? chart.sheet) === sheetId;
+      return [
+        id,
+        {
+          ...chart,
+          series: chart.series.map((each) =>
+            reads(each.sheet)
+              ? {
+                  ...each,
+                  values: shrink(each.values),
+                  ...(each.categories ? { categories: shrink(each.categories) } : {}),
+                  ...(each.sizes ? { sizes: shrink(each.sizes) } : {}),
+                }
+              : each,
+          ),
+          ...(chart.source && chart.source.sheet === sheetId
+            ? { source: { ...chart.source, box: shrink(chart.source.box) } }
+            : {}),
+        },
+      ];
+    }),
+  );
+  return { ...out, charts };
 }
 
 /** Cut and paste: contents move, and every reference wholly inside the moved cells follows them. */
