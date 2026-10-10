@@ -6,7 +6,8 @@
     "./grid": "./src/grid.tsx",
     "./layout": "./src/layout.ts",
     "./display": "./src/display.ts",
-    "./commands": "./src/commands.ts"
+    "./commands": "./src/commands.ts",
+    "./format-commands": "./src/format-commands.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
