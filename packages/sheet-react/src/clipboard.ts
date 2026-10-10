@@ -1,7 +1,7 @@
 import { XError } from "@chat/sheet/engine/values";
 import type { StylePatch } from "@chat/sheet/model/ops";
 import { selectionBox, type ForeignCell, type GridContext } from "./commands.ts";
-import { cellDisplay, cellStyle } from "./display.ts";
+import { cellDisplay, cellStyle, safeLink } from "./display.ts";
 
 /**
  * HTML on the clipboard, as Excel and Google Sheets exchange cells with
@@ -51,7 +51,9 @@ export function selectionHtml(context: GridContext): string {
         "\n",
         '<br style="mso-data-placement:same-cell;">',
       );
-      return `<td${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${content}</td>`;
+      const link = safeLink(style.link);
+      const linked = link ? `<a href="${escapeAttribute(link)}">${content}</a>` : content;
+      return `<td${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${linked}</td>`;
     });
     return `<tr>${cells.join("")}</tr>`;
   });
@@ -216,10 +218,11 @@ export function readHtmlTable(html: string): ForeignCell[][] | null {
         .replaceAll("\u00a0", " ")
         .replace(/^[ \n]+|[ \n]+$/g, "");
       const number = numberOf(td);
+      const link = safeLink(td.querySelector("a[href]")?.getAttribute("href") ?? undefined);
       row[x] = {
         raw: text,
         ...(number === null ? {} : { value: number }),
-        style: styleOf(declarations),
+        style: { ...styleOf(declarations), ...(link ? { link } : {}) },
       };
       const [across, down] = [
         Math.max(1, Number(td.getAttribute("colspan")) || 1),

@@ -9,7 +9,7 @@ export type { ChartKind };
 import { parseDelimited, writeDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
-import { cellDisplay, cellStyle } from "./display.ts";
+import { cellDisplay, cellStyle, safeLink } from "./display.ts";
 import { fillSeries, type FillMode, type FillPart } from "@chat/sheet/model/fill";
 import type { CellRef, GridFill, SheetSelection } from "./grid.tsx";
 
@@ -96,6 +96,16 @@ function typedFormula(
  * apostrophe keeps text as typed, and a number typed as a percentage, a
  * currency or a date also sets that format when the cell has none.
  */
+/** The link a typed address stands for: a web address, one starting www., or a mail address. */
+function typedLink(text: string): string | null {
+  if (/\s/.test(text) || text.length > 2000) return null;
+  if (/^https?:\/\/[^/]+\.\S+$/i.test(text) || /^https?:\/\/localhost\b/i.test(text))
+    return safeLink(text);
+  if (/^www\.[^.]+\.\S+$/i.test(text)) return safeLink(`https://${text}`);
+  if (/^[^@/:]+@[^@/:]+\.[a-z]{2,}$/i.test(text)) return safeLink(`mailto:${text}`);
+  return null;
+}
+
 export function enterCell(context: GridContext, at: CellRef, raw: string): SheetOp[] {
   const grow = grower(context);
   const cell = context.doc.sheet[context.sheet]!.cells[at.r]?.[at.c];
@@ -113,6 +123,10 @@ export function enterCell(context: GridContext, at: CellRef, raw: string): Sheet
   const area = { r1: at.r, r2: at.r, c1: at.c, c2: at.c };
   if (typed.kind === "number" && typed.format && !cellStyle(cell?.s).numberFormat)
     ops.push({ op: "format", sh: context.sheet, area, patch: { numberFormat: typed.format } });
+  // A web or mail address typed in becomes a link, as Excel's AutoCorrect makes one.
+  const link =
+    typeof value === "string" && !cellStyle(cell?.s).link ? typedLink(value.trim()) : null;
+  if (link) ops.push({ op: "format", sh: context.sheet, area, patch: { link } });
   // A line break typed in turns on wrapping, so it shows, as Excel does.
   if (typeof value === "string" && value.includes("\n") && !cellStyle(cell?.s).wrap)
     ops.push({ op: "format", sh: context.sheet, area, patch: { wrap: true } });

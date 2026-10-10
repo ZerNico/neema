@@ -1,6 +1,7 @@
 import {
   ChartColumnIcon,
   CommentAdd01Icon,
+  Link01Icon,
   ArrowDown01Icon,
   ArrowUp01Icon,
   Cancel01Icon,
@@ -46,7 +47,7 @@ import {
   type CopiedCells,
   type GridContext,
 } from "@chat/sheet-react/commands";
-import { cellDisplay, cellSource, cellStyle } from "@chat/sheet-react/display";
+import { cellDisplay, cellSource, cellStyle, safeLink } from "@chat/sheet-react/display";
 import { axisLayout, columnPx, rowPx } from "@chat/sheet-react/layout";
 import {
   SheetGrid,
@@ -91,6 +92,7 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { LinkChip, LinkDialog } from "./link-dialog.tsx";
 import {
   addConditional,
   autoSum,
@@ -222,6 +224,7 @@ export default function SheetPanelBody({
   const [sorting, setSorting] = useState(false);
   // The Data Validation dialog, and whether cells breaking their rules are circled.
   const [validating, setValidating] = useState(false);
+  const [linking, setLinking] = useState(false);
   const [circling, setCircling] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
@@ -370,6 +373,7 @@ export default function SheetPanelBody({
       run(formatSelection(context, { [command.property]: style[command.property] ? null : true }));
     else if (command.kind === "fill") run(fillSelection(context, command.direction));
     else if (command.kind === "filter") run(toggleFilter(context));
+    else if (command.kind === "link") setLinking(true);
     else if (command.kind === "undo") sync?.undo();
     else if (command.kind === "redo") sync?.redo();
     else run(clearSelection(context));
@@ -520,6 +524,7 @@ export default function SheetPanelBody({
     else if (command.kind === "sort") setSorting(true);
     else if (command.kind === "validation") setValidating(true);
     else if (command.kind === "circles") setCircling(!circling);
+    else if (command.kind === "link") setLinking(true);
     else insertChart(command.chart);
   };
   const insertChart = (kind: ChartKind) => {
@@ -975,6 +980,16 @@ export default function SheetPanelBody({
                       : null,
                   );
                 }}
+                activeAccessory={
+                  safeLink(style.link) && sameSelection(active, { anchor: head, head }) ? (
+                    <LinkChip
+                      link={safeLink(style.link)!}
+                      readOnly={readOnly}
+                      onEdit={() => setLinking(true)}
+                      onRemove={() => run(formatSelection(context, { link: null }))}
+                    />
+                  ) : null
+                }
                 selectionAccessory={
                   lastFill && !readOnly && sameSelection(lastFill.result, active) ? (
                     <FillOptions
@@ -1056,6 +1071,12 @@ export default function SheetPanelBody({
                   label="Comment"
                   disabled={readOnly}
                   onClick={() => setCommenting(true)}
+                />
+                <MenuItem
+                  icon={Link01Icon}
+                  label={style.link ? "Edit link" : "Insert link"}
+                  disabled={readOnly}
+                  onClick={() => setLinking(true)}
                 />
                 <ContextMenuSeparator />
                 <MenuItem
@@ -1185,6 +1206,22 @@ export default function SheetPanelBody({
           onApply={(rule) => run(setFilterRule(context, filterMenu.col, rule))}
           onSort={(descending) => run(sortFilter(context, filterMenu.col, descending))}
           onClose={() => setFilterMenu(null)}
+        />
+      ) : null}
+      {linking && !readOnly ? (
+        <LinkDialog
+          text={cellDisplay(values.value(sheet, head.r, head.c), style, locale).text}
+          link={style.link}
+          textEditable={!doc.sheet[sheet]!.cells[head.r]?.[head.c]?.f}
+          onApply={({ text, link }) =>
+            run([
+              ...(text === null
+                ? []
+                : [{ op: "set" as const, sh: sheet, cells: [{ ...head, v: text || null }] }]),
+              ...formatSelection(context, { link }),
+            ])
+          }
+          onClose={() => setLinking(false)}
         />
       ) : null}
       {validating && !readOnly ? (

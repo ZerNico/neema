@@ -17,7 +17,7 @@ import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
-import { cellCss, cellDisplay, cellStyle } from "./display.ts";
+import { cellCss, cellDisplay, cellStyle, safeLink } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
   HEADER_ROW_PX,
@@ -73,7 +73,7 @@ export interface GridFill {
 }
 
 export type GridCommand =
-  | { readonly kind: "clear" | "undo" | "redo" | "find" | "filter" }
+  | { readonly kind: "clear" | "undo" | "redo" | "find" | "filter" | "link" }
   | { readonly kind: "fill"; readonly direction: "down" | "right" }
   | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" };
 /** Someone else's selection, drawn in their colour. */
@@ -149,6 +149,8 @@ export interface SheetGridProps {
   readonly onFill?: (fill: GridFill) => void;
   /** Drawn just past the selection's corner, as Excel's Auto Fill Options button after a fill. */
   readonly selectionAccessory?: ReactNode;
+  /** Drawn under the active cell, as a link's chip is. */
+  readonly activeAccessory?: ReactNode;
   /** How conditional formats show cells, by `r|c`. */
   readonly looks?: ReadonlyMap<string, CellLook>;
   /** Rows out of view for now, such as those a filter hides, by ID. */
@@ -246,6 +248,7 @@ export function SheetGrid({
   onFill,
   onDragSelection,
   selectionAccessory,
+  activeAccessory,
   looks = NO_LOOKS,
   hiddenRows = NO_ROWS,
   filterButtons = null,
@@ -613,24 +616,26 @@ export function SheetGrid({
       const found: GridCommand | null =
         lower === "l" && event.shiftKey
           ? { kind: "filter" }
-          : lower === "z"
-            ? { kind: event.shiftKey ? "redo" : "undo" }
-            : lower === "y"
-              ? { kind: "redo" }
-              : lower === "d"
-                ? { kind: "fill", direction: "down" }
-                : lower === "r"
-                  ? { kind: "fill", direction: "right" }
-                  : lower === "b"
-                    ? { kind: "toggle", property: "bold" }
-                    : lower === "i"
-                      ? { kind: "toggle", property: "italic" }
-                      : lower === "u"
-                        ? { kind: "toggle", property: "underline" }
-                        : // Ctrl+5 strikes through, as in Excel.
-                          event.key === "5"
-                          ? { kind: "toggle", property: "strike" }
-                          : null;
+          : lower === "k"
+            ? { kind: "link" }
+            : lower === "z"
+              ? { kind: event.shiftKey ? "redo" : "undo" }
+              : lower === "y"
+                ? { kind: "redo" }
+                : lower === "d"
+                  ? { kind: "fill", direction: "down" }
+                  : lower === "r"
+                    ? { kind: "fill", direction: "right" }
+                    : lower === "b"
+                      ? { kind: "toggle", property: "bold" }
+                      : lower === "i"
+                        ? { kind: "toggle", property: "italic" }
+                        : lower === "u"
+                          ? { kind: "toggle", property: "underline" }
+                          : // Ctrl+5 strikes through, as in Excel.
+                            event.key === "5"
+                            ? { kind: "toggle", property: "strike" }
+                            : null;
       if (found) {
         event.preventDefault();
         onCommand?.(found);
@@ -757,6 +762,15 @@ export function SheetGrid({
       return;
     }
     if (editing) commit(0, 0);
+    // Cmd or Ctrl and a click opens a cell's link, as in Excel.
+    if (event.metaKey || event.ctrlKey) {
+      const link = safeLink(cellStyle(data.cells[rows.ids[at.row]!]?.[cols.ids[at.col]!]?.s).link);
+      if (link) {
+        event.preventDefault();
+        window.open(link, "_blank", "noopener,noreferrer");
+        return;
+      }
+    }
     dragging.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     select(at.row, at.col, event.shiftKey);
@@ -952,7 +966,15 @@ export function SheetGrid({
               }}
             />
           ) : null}
-          <span className="relative">{shown.text}</span>
+          <span
+            className={
+              own.link
+                ? `relative underline underline-offset-2${style.fontColor || shown.color ? "" : " text-primary"}`
+                : "relative"
+            }
+          >
+            {shown.text}
+          </span>
         </div>,
       );
     };
@@ -1659,6 +1681,15 @@ export function SheetGrid({
           {moveEdges}
           {fillHandle}
           {cellListUi}
+          {head && activeAccessory && !editing ? (
+            <div
+              className="absolute z-20"
+              style={{ top: rows.starts[head.row + 1]! + 4, left: cols.starts[head.col] }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {activeAccessory}
+            </div>
+          ) : null}
           {box && selectionAccessory && !editing ? (
             <div
               className="absolute z-20"

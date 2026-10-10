@@ -86,6 +86,11 @@ describe("HTML on the clipboard", () => {
       ],
     ]);
     expect(readHtmlTable("<p>no table</p>")).toBeNull();
+    // A script address is never taken for a link.
+    expect(
+      readHtmlTable('<table><tr><td><a href="javascript:alert(1)">x</a></td></tr></table>')![0]![0]!
+        .style,
+    ).toEqual({});
   });
 
   it("pastes another program's cells with their styles, numbers as numbers in any locale", () => {
@@ -110,14 +115,24 @@ describe("HTML on the clipboard", () => {
         ],
       },
     ]);
-    doc = apply(doc, formatSelection(context(doc, [1, 1]), { bold: true, fill: "#DDEBF7" }));
+    doc = apply(
+      doc,
+      formatSelection(context(doc, [1, 1]), {
+        bold: true,
+        fill: "#DDEBF7",
+        link: "https://example.com/a?b=1&c=2",
+      }),
+    );
     doc = apply(doc, formatSelection(context(doc, [1, 2]), { numberFormat: "0%" }));
     const html = selectionHtml(context(doc, [1, 1], [1, 2]));
     expect(html).toContain("A &amp; &lt;b&gt;");
     expect(html).toContain('x:num="0.5"');
     expect(readHtmlTable(html)).toEqual([
       [
-        { raw: "A & <b>", style: { bold: true, fill: "#DDEBF7" } },
+        {
+          raw: "A & <b>",
+          style: { bold: true, fill: "#DDEBF7", link: "https://example.com/a?b=1&c=2" },
+        },
         { raw: "50%", value: 0.5, style: { numberFormat: "0%" } },
       ],
     ]);

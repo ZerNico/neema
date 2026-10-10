@@ -180,6 +180,24 @@ describe("the clipboard", () => {
     });
   });
 
+  it("makes typed web and mail addresses links, and leaves other text alone", () => {
+    let doc = type(emptyDoc(), 1, 1, "www.example.com");
+    doc = type(doc, 2, 1, "ana@example.com");
+    doc = type(doc, 3, 1, "not a link.com");
+    doc = type(doc, 4, 1, "javascript:alert(1)");
+    const link = (row: number) => {
+      const { r, c } = at(doc, row, 1);
+      const s = doc.sheet.s1!.cells[r]?.[c]?.s;
+      return s ? (JSON.parse(s) as { link?: string }).link : undefined;
+    };
+    expect([link(1), link(2), link(3), link(4)]).toEqual([
+      "https://www.example.com/",
+      "mailto:ana@example.com",
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("types in text from elsewhere, quoted fields included", () => {
     expect(parseTabular('a\t"b\tc"\n"say ""hi"""\t2\n')).toEqual([
       ["a", "b\tc"],

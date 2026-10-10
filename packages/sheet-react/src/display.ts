@@ -24,6 +24,21 @@ export interface CellStyle {
   readonly borderBottom?: boolean;
   readonly borderLeft?: boolean;
   readonly borderRight?: boolean;
+  /** A web address the cell opens, as Excel's hyperlinks. */
+  readonly link?: string;
+}
+
+/** A link a cell may open: web and mail addresses only, never script. */
+export function safeLink(text: string | undefined): string | null {
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 // Style keys are canonical JSON shared by every cell with that style: parsed once each.

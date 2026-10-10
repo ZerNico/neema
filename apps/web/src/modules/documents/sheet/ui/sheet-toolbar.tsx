@@ -12,6 +12,7 @@ import {
   BorderRightIcon,
   BorderTopIcon,
   ChartColumnIcon,
+  Link01Icon,
   CheckListIcon,
   DecimalsArrowLeftIcon,
   DecimalsArrowRightIcon,
@@ -68,7 +69,8 @@ export type ToolbarCommand =
   | { readonly kind: "filter" }
   | { readonly kind: "sort" }
   | { readonly kind: "validation" }
-  | { readonly kind: "circles" };
+  | { readonly kind: "circles" }
+  | { readonly kind: "link" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -374,6 +376,13 @@ export function SheetToolbar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </ToolbarMenu>
+      <Action
+        icon={Link01Icon}
+        label="Insert link"
+        shortcut="⌘K"
+        disabled={false}
+        onPress={() => onCommand({ kind: "link" })}
+      />
       <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
         <DropdownMenuContent align="start" className="w-40">
           {CHART_KINDS.map((each) => (

@@ -142,6 +142,42 @@ describe("the sheet grid", () => {
     );
   });
 
+  it("draws a link underlined and opens it on Cmd+click, never a script address", () => {
+    let doc = emptyDoc();
+    doc = apply(
+      doc,
+      { op: "set", sh: "s1", cells: [set(doc, 1, 1, "Docs"), set(doc, 1, 2, "Bad")] },
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c1" },
+        patch: { link: "https://example.com/" },
+      },
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c2", c2: "s1.c2" },
+        patch: { link: "javascript:alert(1)" },
+      },
+    );
+    const opened: string[] = [];
+    const open = window.open;
+    window.open = (url) => {
+      opened.push(String(url));
+      return null;
+    };
+    try {
+      render(<Harness doc={doc} />);
+      expect(screen.getByText("Docs").className).toContain("underline");
+      const content = screen.getByRole("grid").firstElementChild!.lastElementChild!;
+      fireEvent.pointerDown(content, { clientX: 10, clientY: 5, button: 0, metaKey: true });
+      fireEvent.pointerDown(content, { clientX: 70, clientY: 5, button: 0, metaKey: true });
+      expect(opened).toEqual(["https://example.com/"]);
+    } finally {
+      window.open = open;
+    }
+  });
+
   it("jumps to the data's edges, selects its block, and whole rows and columns", () => {
     let doc = emptyDoc();
     doc = apply(doc, {
@@ -297,6 +333,8 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "V", metaKey: true, shiftKey: true });
     fireEvent.paste(grid, clip("b"));
     expect(events.slice(5)).toEqual(["paste a", "paste values b"]);
+    fireEvent.keyDown(grid, { key: "k", metaKey: true });
+    expect(events.at(-1)).toBe("link");
     // Ctrl+; starts typing today's date, as Excel does.
     fireEvent.keyDown(grid, { key: ";", ctrlKey: true });
     const stamped = screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement;
