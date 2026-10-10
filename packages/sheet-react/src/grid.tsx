@@ -684,6 +684,9 @@ export function SheetGrid({
    * inserting and deleting; null for any other key.
    */
   const shortcutOf = (event: KeyboardEvent): GridCommand | null => {
+    // Ctrl alone, as Excel for Mac has them too: Cmd with these keys zooms the page
+    // (Cmd+0, Cmd+Minus, Cmd+Plus) or takes a screenshot (Cmd+Shift+4).
+    if (!event.ctrlKey || event.metaKey) return null;
     const format = event.shiftKey ? FORMAT_KEYS[event.key] : undefined;
     if (format) return { kind: "numberFormat", format };
     if (event.shiftKey && event.key === "&") return { kind: "borders", border: "outer" };

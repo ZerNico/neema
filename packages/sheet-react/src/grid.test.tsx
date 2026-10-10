@@ -490,6 +490,9 @@ describe("the sheet grid", () => {
     fireEvent.keyDown(grid, { key: "≠", altKey: true, code: "Equal" });
     // Ctrl+Minus deletes only whole rows or columns: for a cell it does nothing.
     press("-", { code: "Minus" });
+    // Cmd+0 and Cmd+Minus are the page's zoom on a Mac: the sheet leaves them alone.
+    fireEvent.keyDown(grid, { key: "0", metaKey: true, code: "Digit0" });
+    fireEvent.keyDown(grid, { key: "-", metaKey: true, code: "Minus" });
     expect(sent).toEqual([
       { kind: "numberFormat", format: "currency" },
       { kind: "borders", border: "outer" },
