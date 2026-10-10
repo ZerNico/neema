@@ -1,6 +1,6 @@
 import { patchChart } from "./chart.ts";
 import { LIVE_LIMITS } from "./limits.ts";
-import { copyFormula, type FormulaAt } from "./formula.ts";
+import { copyFormula, qualified, type FormulaAt } from "./formula.ts";
 import {
   positions,
   type AxisEntry,
@@ -635,18 +635,7 @@ function move(
   // Moved to another sheet, a formula's references to its own sheet name it, so they still
   // mean the source's cells; those to the moved cells follow them below.
   const named = (cell: Cell): Cell =>
-    targetId === op.sh || !cell.f
-      ? cell
-      : {
-          ...cell,
-          f: {
-            parts: cell.f.parts.map((part) =>
-              typeof part !== "string" && part.k === "ref" && part.sheet === null
-                ? { ...part, sheet: op.sh }
-                : part,
-            ),
-          },
-        };
+    targetId === op.sh || !cell.f ? cell : { ...cell, f: qualified(cell.f, op.sh) };
   for (const r of rows)
     for (const c of cols) {
       const cell = cellAt(source, r, c);

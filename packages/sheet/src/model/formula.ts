@@ -215,6 +215,16 @@ function shiftArea(area: string, rows: number, cols: number): string | null {
 }
 
 /**
+ * A formula read on a sheet other than its own: each reference to "this
+ * sheet" names `sheet` instead, so it keeps meaning the same cells.
+ */
+export const qualified = (formula: Formula, sheet: string): Formula => ({
+  parts: formula.parts.map((part) =>
+    typeof part !== "string" && part.k === "ref" && part.sheet === null ? { ...part, sheet } : part,
+  ),
+});
+
+/**
  * The formula as it reads copied from one cell to another, as fill and paste
  * copy it: relative parts shift by the distance, absolute parts stay, and a
  * reference shifted off the grid becomes #REF!. Positions are the source

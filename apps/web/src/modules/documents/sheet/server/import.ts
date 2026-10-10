@@ -2,7 +2,7 @@ import { parseCell, parseRange } from "@chat/sheet/a1";
 import { parseDelimited } from "@chat/sheet/delimited";
 import { DE_DE, EN_US } from "@chat/sheet/locales";
 import { styleKey } from "@chat/sheet/model/apply";
-import { parseFormula } from "@chat/sheet/model/formula";
+import { parseFormula, qualified } from "@chat/sheet/model/formula";
 import { LIVE_LIMITS, overLimits } from "@chat/sheet/model/limits";
 import {
   NEW_SHEET,
@@ -314,10 +314,22 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
       },
     };
   }
+  // A live sheet's names are the workbook's. One local to a sheet joins them, read from its
+  // sheet, unless the name is taken: then it is dropped and named, never silently replaced.
   const names: Record<string, SheetDoc["names"][string]> = {};
-  for (const name of read.names.slice(0, LIVE_LIMITS.names)) {
-    const f = formulaOf(name.value, ids[0]!);
-    if (f) names[name.name.toLowerCase()] = { name: name.name, f };
+  const dropped = new Set(read.dropped);
+  const byScope = read.names.toSorted((a, b) => Number(!!a.sheet) - Number(!!b.sheet));
+  for (const name of byScope.slice(0, LIVE_LIMITS.names)) {
+    const home = name.sheet
+      ? ids[read.sheets.findIndex((each) => each.name === name.sheet)]
+      : ids[0];
+    const key = name.name.toLowerCase();
+    if (names[key] || !home) {
+      dropped.add("names local to one sheet that another name shares");
+      continue;
+    }
+    const f = formulaOf(name.value, home);
+    if (f) names[key] = { name: name.name, f: name.sheet ? qualified(f, home) : f };
   }
   doc = { ...doc, names };
   const charts: Record<string, Chart> = {};
@@ -367,7 +379,7 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
       ];
     }),
   );
-  return { ok: true, doc, dropped: [...read.dropped], notes };
+  return { ok: true, doc, dropped: [...dropped], notes };
 }
 
 /**

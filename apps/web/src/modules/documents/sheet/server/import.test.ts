@@ -127,6 +127,26 @@ describe("importing into a live sheet", () => {
     expect(valueOf(imported.doc, "Sheet1", 2, 2)).toBe(20);
   });
 
+  it("reads a name local to a sheet from that sheet, and names one that clashes", async () => {
+    const original = build([
+      { kind: "addSheet", name: "Rates" },
+      { kind: "setCells", sheet: "Rates", start: "A1", rows: [[0.2]] },
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[5]] },
+    ]);
+    const spec = liveSheetExport(original);
+    const read = await importLiveSheet(await exportLiveSheet(spec));
+    const local = (name: string, sheet: string) => ({ name, value: "$A$1", sheet });
+    const imported = sheetFromWorkbook(
+      { ...read, names: [local("Tax", "Rates"), local("Base", "Sheet1"), local("Tax", "Sheet1")] },
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    const { doc } = imported;
+    expect(renderFormula(doc.names.tax!.f, { doc, sheet: "s1" })).toBe("Rates!$A$1");
+    expect(renderFormula(doc.names.base!.f, { doc, sheet: "s1" })).toBe("Sheet1!$A$1");
+    expect(imported.dropped).toEqual(["names local to one sheet that another name shares"]);
+  });
+
   it("keeps underline, strikethrough and a font through Excel and back", async () => {
     const original = build([
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Title", "Old"]] },

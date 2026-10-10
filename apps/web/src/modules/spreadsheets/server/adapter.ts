@@ -1026,7 +1026,12 @@ export interface LiveSheetImport {
     /** Grouped rows and columns. */
     readonly outline?: FileOutline;
   }>;
-  readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /** Defined names; `sheet` is the sheet a name is local to, absent for the workbook's. */
+  readonly names: ReadonlyArray<{
+    readonly name: string;
+    readonly value: string;
+    readonly sheet?: string;
+  }>;
   readonly charts: readonly FileChart[];
   readonly images: readonly FileImage[];
   /** What a live sheet does not keep, in words, for the model to tell the person. */
@@ -1298,7 +1303,11 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
     sheets,
     names: workbook.definedNames
       .filter((name) => !name.name.startsWith("_xlnm."))
-      .map((name) => ({ name: name.name, value: name.value })),
+      .map((name) => {
+        const sheet =
+          name.scope === undefined ? undefined : workbook.sheets[name.scope]?.sheet.title;
+        return { name: name.name, value: name.value, ...(sheet ? { sheet } : {}) };
+      }),
     charts,
     images,
     dropped: [...dropped],
