@@ -24,6 +24,8 @@ export function cellHtml(
   r: string,
   c: string,
   aligned = false,
+  /** Rows and columns a merged cell covers, drawn as one. */
+  span?: { readonly rows: number; readonly cols: number },
 ) {
   const sheet = context.doc.sheet[context.sheet]!;
   const style = cellStyle(sheet.cells[r]?.[c]?.s);
@@ -56,7 +58,10 @@ export function cellHtml(
   const content = escapeHtml(text).replaceAll("\n", '<br style="mso-data-placement:same-cell;">');
   const link = safeLink(style.link);
   const linked = link ? `<a href="${escapeAttribute(link)}">${content}</a>` : content;
-  return `<td${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${linked}</td>`;
+  const spans = span
+    ? `${span.cols > 1 ? ` colspan="${span.cols}"` : ""}${span.rows > 1 ? ` rowspan="${span.rows}"` : ""}`
+    : "";
+  return `<td${spans}${css.length ? ` style="${escapeAttribute(css.join(";"))}"` : ""}${number}>${linked}</td>`;
 }
 
 /** The selection as an HTML table, each cell's style inline. */

@@ -50,4 +50,32 @@ describe("printing a sheet", () => {
     expect((html.match(/<col /g) ?? []).length).toBe(2);
     expect(printHtml({ doc: emptyDoc(), values, locale: EN_US }, "s1")).toBeNull();
   });
+
+  it("prints a merge as one cell over its shown rows and columns", () => {
+    const doc = applyChange(
+      emptyDoc(),
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: "Title" },
+              { r: "s1.r3", c: "s1.c4", v: "x" },
+            ],
+          },
+          { op: "merge", sh: "s1", box: { r1: "s1.r1", r2: "s1.r2", c1: "s1.c1", c2: "s1.c3" } },
+          { op: "hide", sh: "s1", axis: "columns", ids: ["s1.c2"], hidden: true },
+        ],
+      },
+      1,
+    ).doc;
+    const values = calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 });
+    const html = printHtml({ doc, values, locale: EN_US }, "s1")!;
+    expect(html).toMatch(/<td colspan="2" rowspan="2"[^>]*>Title<\/td>/);
+    // Shown columns A, C and D; the merge takes two of them over two rows, counted once.
+    expect(html.match(/<td/g)).toHaveLength(6);
+  });
 });
