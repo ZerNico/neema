@@ -1,7 +1,14 @@
 import { partsOf, serialOf } from "../dates.ts";
 import { EN_US, type SheetLocale } from "../locales.ts";
 import { copyFormula } from "./formula.ts";
-import { positions, type Box, type Cell, type CellValue, type SheetDoc } from "./model.ts";
+import {
+  positions,
+  type Box,
+  type Cell,
+  type CellValue,
+  type Formula,
+  type SheetDoc,
+} from "./model.ts";
 import type { CellWrite, SheetOp, StylePatch } from "./ops.ts";
 
 export type FillDirection = "down" | "up" | "right" | "left";
@@ -266,6 +273,14 @@ export function fillSeries(
   mode: FillMode = "auto",
   locale: SheetLocale = EN_US,
   part: FillPart = "all",
+  /** Copies a formula by a shift; the caller's may grow the grid first. Null writes #REF!. */
+  copy: (formula: Formula, shift: { rows: number; cols: number }) => Formula | null = (
+    formula,
+    shift,
+  ) => {
+    const copied = copyFormula(formula, shift, { doc, sheet });
+    return "formula" in copied ? copied.formula : null;
+  },
 ): SheetOp[] {
   const data = doc.sheet[sheet];
   if (!data || count < 1) return [];
@@ -311,14 +326,13 @@ export function fillSeries(
         // Formats alone leave the contents and take each place's style in turn.
       } else if (filled.kind === "formula") {
         const formula = cells[filled.from]!.f!;
-        const shifted = copyFormula(
+        const shifted = copy(
           formula,
           vertical ? { rows: filled.offset, cols: 0 } : { rows: 0, cols: filled.offset },
-          { doc, sheet },
         );
         writes.push(
-          "formula" in shifted
-            ? { r: target.r, c: target.c, f: shifted.formula }
+          shifted
+            ? { r: target.r, c: target.c, f: shifted }
             : { r: target.r, c: target.c, v: "#REF!" },
         );
       } else writes.push({ r: target.r, c: target.c, v: filled.v });

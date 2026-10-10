@@ -327,6 +327,17 @@ describe("the fill handle", () => {
     expect(result.selection).toEqual({ anchor: at(doc, 1, 2), head: at(doc, 40, 2) });
   });
 
+  it("grows the grid for a filled formula that reaches past it", () => {
+    let doc = type(emptyDoc(), 1, 1, "=B1");
+    const result = fillFromHandle(context(doc, [1, 1]), {
+      direction: "right",
+      count: 25,
+      mode: "auto",
+    })!;
+    doc = apply(doc, result.ops);
+    expect(formulaAt(doc, 1, 26)).toBe("AA1");
+  });
+
   it("clears the rows the handle is dragged back over, as Excel does", () => {
     let doc = emptyDoc();
     for (let row = 1; row <= 4; row++) doc = type(doc, row, 1, String(row));

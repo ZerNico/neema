@@ -739,6 +739,7 @@ export function fillFromHandle(
     fill.mode,
     context.locale,
     part,
+    (formula, shift) => copiedFormula(formula, shift, context.sheet, grow),
   );
   if (!ops.length) return null;
   const grown = grow.doc.sheet[context.sheet]!;
