@@ -12,6 +12,7 @@ import {
   BorderRightIcon,
   BorderTopIcon,
   ChartColumnIcon,
+  CheckListIcon,
   DecimalsArrowLeftIcon,
   DecimalsArrowRightIcon,
   EraserIcon,
@@ -65,7 +66,9 @@ export type ToolbarCommand =
   | { readonly kind: "clear"; readonly what: "formats" | "all" }
   | { readonly kind: "chart"; readonly chart: ChartKind }
   | { readonly kind: "filter" }
-  | { readonly kind: "sort" };
+  | { readonly kind: "sort" }
+  | { readonly kind: "validation" }
+  | { readonly kind: "circles" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -137,6 +140,7 @@ export function SheetToolbar({
   extra,
   conditional,
   filtered = false,
+  circling = false,
 }: {
   style: CellStyle;
   canUndo: boolean;
@@ -151,6 +155,8 @@ export function SheetToolbar({
   extra?: ReactNode;
   /** The conditional formatting menu, which keeps dialogs of its own. */
   conditional?: ReactNode;
+  /** Whether cells breaking their validation are circled. */
+  circling?: boolean;
   /** Whether the sheet has a filter, which the filter button shows pressed. */
   filtered?: boolean;
 }) {
@@ -358,6 +364,16 @@ export function SheetToolbar({
         disabled={false}
         onPress={() => onCommand({ kind: "sort" })}
       />
+      <ToolbarMenu label="Data validation" icon={CheckListIcon}>
+        <DropdownMenuContent align="start" className="w-48">
+          <DropdownMenuItem onClick={() => onCommand({ kind: "validation" })}>
+            Data validation…
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onCommand({ kind: "circles" })}>
+            {circling ? "Clear validation circles" : "Circle invalid data"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </ToolbarMenu>
       <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
         <DropdownMenuContent align="start" className="w-40">
           {CHART_KINDS.map((each) => (

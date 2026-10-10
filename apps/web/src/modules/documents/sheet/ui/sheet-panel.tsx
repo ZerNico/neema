@@ -94,6 +94,7 @@ import {
   borderSelection,
   clearConditional,
   editConditional,
+  setValidation,
   clearSelectionAs,
   decimalsSelection,
   freezeAt,
@@ -119,6 +120,13 @@ import {
 import { filterSpan, filteredRows } from "@chat/sheet/model/filter";
 import { conditionalLooks } from "@chat/sheet/model/conditional";
 import { ConditionalMenu } from "./conditional-menu.tsx";
+import { ValidationDialog } from "./validation-dialog.tsx";
+import { rangeText, readRange } from "./chart-editor/ranges.ts";
+import { allowed, invalidCells, listChoices, validationAt } from "@chat/sheet/model/validation";
+import { shownText } from "@chat/sheet/model/filter";
+import { applyChange } from "@chat/sheet/model/apply";
+import { calculateSheet } from "@chat/sheet/model/calc";
+import { parseTyped } from "@chat/sheet/value-parse";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
@@ -187,6 +195,9 @@ export default function SheetPanelBody({
   // A filter button's open menu, and whether the Sort dialog is open.
   const [filterMenu, setFilterMenu] = useState<{ col: string; anchor: HTMLElement } | null>(null);
   const [sorting, setSorting] = useState(false);
+  // The Data Validation dialog, and whether cells breaking their rules are circled.
+  const [validating, setValidating] = useState(false);
+  const [circling, setCircling] = useState(false);
   // The grid's box, which the comment card is placed against and follows the scrolling of.
   const [gridHost, setGridHost] = useState<HTMLDivElement | null>(null);
   // What Find looks for, and which match is current; null while the bar is closed.
@@ -271,8 +282,36 @@ export default function SheetPanelBody({
     setSelection(next);
     sync?.setCursor({ sheet, anchor: next.anchor, head: next.head });
   };
-  const commit = (at: SheetSelection["head"], text: string) => {
-    if (text !== cellSource(doc, sheet, at.r, at.c, locale)) run(enterCell(context, at, text));
+  /** Writes what was typed, unless the cell's validation refuses it, as Excel's Data Validation. */
+  const commit = async (at: SheetSelection["head"], text: string) => {
+    if (text === cellSource(doc, sheet, at.r, at.c, locale)) return;
+    const ops = enterCell(context, at, text);
+    const rule = validationAt(doc, sheet, at.r, at.c);
+    if (rule && calcContext) {
+      const after = applyChange(doc, { clientId: "check", seq: 0, ops }, 0).doc;
+      const checked = calculateSheet(after, calcContext);
+      const value = checked.value(sheet, at.r, at.c);
+      if (!allowed(after, checked, rule, value, shownText(after, checked, sheet, at.r, at.c))) {
+        const said = rule.message ?? "This value doesn’t match the rules for this cell.";
+        if (rule.onError === "stop") {
+          toast.error(said);
+          return;
+        }
+        if (
+          rule.onError === "warning" &&
+          confirm &&
+          !(await confirm({
+            title: "Keep this value?",
+            description: said,
+            confirmLabel: "Keep",
+            destructive: false,
+          }))
+        )
+          return;
+        if (rule.onError === "information") toast(said);
+      }
+    }
+    run(ops);
   };
   // Cells whose shown text or formula holds the query, in reading order.
   const matches = (() => {
@@ -351,6 +390,17 @@ export default function SheetPanelBody({
           },
         ]
       : []),
+    // Circle Invalid Data: each cell breaking its validation, outlined in red.
+    ...(circling
+      ? [...invalidCells(doc, values, sheet)].slice(0, 500).map((key) => {
+          const [r, c] = key.split("|") as [string, string];
+          return {
+            key: `invalid:${key}`,
+            selection: { anchor: { r, c }, head: { r, c } },
+            color: "var(--destructive)",
+          };
+        })
+      : []),
     // Find's matches, a few hundred at most, outlined without a name.
     ...matches.slice(0, 500).map((match) => ({
       key: `find:${match.r}:${match.c}`,
@@ -368,6 +418,8 @@ export default function SheetPanelBody({
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
   const cellName = (r: string, c: string) => `${columnLetters(cols.at(c)!)}${rows.at(r)}`;
+  const rangeName = (on: string, box: { r1: string; r2: string; c1: string; c2: string }) =>
+    rangeText(doc, sheet, on, box);
   const selectedBoxColumns = () =>
     cols.ids.slice(cols.at(selectedBox.c1)! - 1, cols.at(selectedBox.c2)!);
   const editedChart = chartEditing ? doc.charts[chartEditing] : undefined;
@@ -385,6 +437,7 @@ export default function SheetPanelBody({
   const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const stats = selectionStats(context);
+  const headRule = validationAt(doc, sheet, head.r, head.c);
   const sheetFilter = doc.sheet[sheet]!.filter;
   const filterAt = sheetFilter ? filterSpan(doc, sheet, sheetFilter) : null;
   const hiddenByFilter = filteredRows(doc, values, sheet);
@@ -413,6 +466,8 @@ export default function SheetPanelBody({
     else if (command.kind === "clear") run(clearSelectionAs(context, command.what));
     else if (command.kind === "filter") run(toggleFilter(context));
     else if (command.kind === "sort") setSorting(true);
+    else if (command.kind === "validation") setValidating(true);
+    else if (command.kind === "circles") setCircling(!circling);
     else insertChart(command.chart);
   };
   const insertChart = (kind: ChartKind) => {
@@ -647,6 +702,7 @@ export default function SheetPanelBody({
                 />
               }
               filtered={!!sheetFilter}
+              circling={circling}
               preview={(code) => {
                 const value = values.value(sheet, head.r, head.c);
                 const shown = typeof value === "number" ? value : 1234.5;
@@ -770,6 +826,10 @@ export default function SheetPanelBody({
                 onCommitSelection={(text) => run(enterSelection(context, text))}
                 hiddenRows={hiddenByFilter}
                 looks={conditionalLooks(doc, values, sheet)}
+                cellList={
+                  headRule?.rule.kind === "list" ? listChoices(doc, values, headRule.rule) : null
+                }
+                onPickFromList={(value) => void commit(head, value)}
                 filterButtons={
                   filterAt
                     ? {
@@ -1051,6 +1111,41 @@ export default function SheetPanelBody({
           onApply={(rule) => run(setFilterRule(context, filterMenu.col, rule))}
           onSort={(descending) => run(sortFilter(context, filterMenu.col, descending))}
           onClose={() => setFilterMenu(null)}
+        />
+      ) : null}
+      {validating && !readOnly ? (
+        <ValidationDialog
+          current={headRule}
+          currentRange={
+            headRule?.rule.kind === "list" && headRule.rule.source
+              ? rangeName(headRule.rule.source.sh, headRule.rule.source.box)
+              : null
+          }
+          readDate={(text) => {
+            const typed = parseTyped(text, locale);
+            return typed.kind === "number" ? typed.value : null;
+          }}
+          onApply={(draft) => {
+            if (!draft) {
+              run(setValidation(context, null));
+              return;
+            }
+            const { rule, ...rest } = draft;
+            if (rule.kind === "list" && "range" in rule) {
+              const read = readRange(doc, sheet, rule.range);
+              if (!read) {
+                toast.error(`${rule.range} isn’t a range on this sheet.`);
+                return;
+              }
+              run(
+                setValidation(context, {
+                  ...rest,
+                  rule: { kind: "list", source: { sh: read.sheet, box: read.box } },
+                }),
+              );
+            } else run(setValidation(context, { ...rest, rule }));
+          }}
+          onClose={() => setValidating(false)}
         />
       ) : null}
       {sorting && !readOnly ? (

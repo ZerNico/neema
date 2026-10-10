@@ -310,4 +310,76 @@ describe("an open sheet", () => {
     sync.destroy();
     slot.remove();
   });
+
+  it("refuses what a cell's validation does not allow, and picks from its list", async () => {
+    const listeners = new Map<string, (event: MessageEvent<string>) => void>();
+    const sync = new SheetSync({
+      documentId: "sheet-1",
+      clientId: "me",
+      connect: () => ({
+        addEventListener: (type, listener) => listeners.set(type, listener),
+        close: () => {},
+      }),
+      push: () => new Promise(() => {}),
+    });
+    const doc = apply(emptyDoc(), {
+      op: "validations",
+      sh: "s1",
+      list: [
+        {
+          id: "v1",
+          box: { r1: "s1.r1", r2: "s1.r9", c1: "s1.c1", c2: "s1.c1" },
+          rule: { kind: "list", values: ["Open", "Done"] },
+          onError: "stop",
+          allowBlank: true,
+        },
+      ],
+    });
+    listeners.get("reset")!(
+      new MessageEvent("reset", {
+        data: JSON.stringify({
+          type: "reset",
+          doc,
+          revision: 1,
+          moment: { now: 45_000, seed: 1 },
+          acked: null,
+        }),
+      }),
+    );
+    function Live() {
+      const state = useSyncExternalStore(sync.subscribe, sync.getState);
+      return (
+        <SheetPanelBody
+          controller={{
+            documentId: "sheet-1",
+            sync,
+            state,
+            flush: async () => true,
+            unpersisted: () => false,
+            selected: () => [],
+          }}
+          canEdit
+          toolbarSlot={null}
+        />
+      );
+    }
+    render(<Live />);
+    const grid = screen.getByRole("grid");
+    const cell = () => sync.getState().doc!.sheet.s1!.cells["s1.r1"]?.["s1.c1"]?.v;
+    fireEvent.keyDown(grid, { key: "M" });
+    const input = screen.getByRole("textbox", { name: "Cell content" });
+    fireEvent.change(input, { target: { value: "Maybe" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(cell()).toBeUndefined();
+    // Back on A1, the list opens with Alt+Down and Enter picks its first choice.
+    fireEvent.keyDown(grid, { key: "ArrowUp" });
+    fireEvent.keyDown(grid, { key: "ArrowDown", altKey: true });
+    expect(screen.getByRole("listbox", { name: "Choices" }).textContent).toBe("OpenDone");
+    fireEvent.keyDown(grid, { key: "ArrowDown" });
+    fireEvent.keyDown(grid, { key: "Enter" });
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(cell()).toBe("Done");
+    sync.destroy();
+  });
 });
