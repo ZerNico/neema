@@ -70,7 +70,7 @@ browser workers and the Excel file tools); this page records the decisions behin
 
 - `create_sheet` and `edit_sheet` load on request like the Office tools. An edit is a list of
   operations by sheet name and A1, the Excel tools' catalogue less filters, plus inserting,
-  deleting, filling, copying, sorting and moving sheets. They are converted in order
+  deleting, filling, copying, sorting, moving sheets and charts. They are converted in order
   (`server/convert.ts`), each against what the ones before it made, into one change; one refused
   operation refuses the call. The grid grows to hold what is written.
 - The guards trust only what a sent request showed (the revision a staged view carried) and the
@@ -78,19 +78,37 @@ browser workers and the Excel file tools); this page records the decisions behin
   write version is newer than both is a conflict. Bumping the seen revision on the model's own
   write would let it overwrite a person's edit it never saw.
 - The focused sheet's view (`server/sheet-view.ts`) is calculated on the server and sent whole
-  whenever it changes; the first view of an answer stays byte for byte, as for text. Sort orders
-  rows by calculated values once, and the change carries the order.
-- A download is built in the spreadsheet worker from the stored sheet, by position, and
-  calculated there, so the file opens with every value.
+  whenever it changes; the first view of an answer stays byte for byte, as for text. It lists
+  charts and open threads by cell, and names the person's selection, which a message carries
+  as the sheet, anchor and head IDs in the field text uses for blocks.
+- While a call's arguments arrive, its finished operations, and the finished rows of a
+  `setCells` still being written, go in under the lighter fence. The decoded call writes only
+  what is left, so nothing is applied twice; an edit no call claims is undone with
+  `invertChange` and a sheet it created is removed.
+- `fromFile` starts a sheet from an Excel file, read in a spreadsheet worker, or a CSV. What a
+  live sheet keeps: values, formulas (legacy arrays with their extent), styles the format
+  operation knows, sizes, merges, panes and names. What it drops, and the model is told:
+  charts, tables' formatting, filters, conditional formatting, validation and notes. A file
+  over the live limits is refused and left to the Excel tools.
+- A download is built in the spreadsheet worker from the stored sheet, by position, charts
+  included, and calculated there, so the file opens with every value.
 
 ## Showing it
 
-- `@chat/sheet-react` draws only the grid, from the document and the values; selection is by
-  IDs and reported up. The app draws the formula bar, tabs and menus. Scrolling is the
-  browser's, with sticky headers, and only the cells in view are drawn.
+- `@chat/sheet-react` draws only the grid, from the document and the values: cells in view,
+  frozen panes drawn again over the scrolling ones on the same coordinates, other people's
+  selections, comment marks and overlays such as charts. Selection, editing and commands are
+  reported up; the app draws the formula bar, toolbar, menus, tabs, threads and find bar, and
+  turns commands into operations (`commands.ts`, pure and tested without React).
 - A tab shows the server's document with its own unsent changes replayed on top
-  (`client/sheet-sync.ts`); a change of its own coming back through the feed, or an
-  acknowledgement, retires it. The panel calculates on the main thread for now.
+  (`client/sheet-sync.ts`); its own change coming back through the feed, or an acknowledgement,
+  retires it. Unsent changes are kept on the device by client. A tab sends any it finds under
+  the client that made them and makes its own edits under a new one, so two tabs resending the
+  same changes is harmless.
+- Undo walks the tab's own history: each step keeps the document before and after, and
+  `invertChange` takes it back except where someone else has changed a cell since.
+- Comment threads sit on cells through the document's anchors, written as a change of their
+  writer's own, so a thread follows its cell through inserts and sorts.
 
 ## Calculating
 
@@ -107,8 +125,14 @@ browser workers and the Excel file tools); this page records the decisions behin
   formula the engine cannot read shows `#NAME?`.
 - Without a context (the Excel file tools) `NOW`, `TODAY` and the `RAND` functions stay
   uncalculated and keep the file's value, for Excel to compute on open.
+- An open sheet calculates in a worker. Each request carries a generation and only the newest
+  is calculated; a typed value shows at once and a formula keeps its last result until the new
+  one. A full recalculation of 10,000 formulas, a 5,000-long chain among them, takes about
+  60 ms on an M-series Mac, so calculation stays whole rather than incremental.
 
 ## Tests that hold it
 
 `model/property.test.ts` checks formulas against Excel's own bookkeeping after random inserts
-and deletes, and three clients and a server converging through reordered and resent changes.
+and deletes, and three clients and a server converging through reordered and resent changes;
+`model/invert.test.ts` that undoing any change brings back what the sheet showed. Export and
+import are tested as a round trip through the Excel tools' own reader.
