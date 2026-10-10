@@ -207,6 +207,8 @@ function stampText(kind: "date" | "time", locale: SheetLocale) {
 }
 
 const FALLBACK = { width: 960, height: 640 };
+/** How far a reveal may scroll and still glide there. */
+const GLIDE_PX = 240;
 /** The outline gutter's width per level. */
 const OUTLINE_STEP = 14;
 const key = (row: number, col: number) => `${row}:${col}`;
@@ -391,15 +393,25 @@ export function SheetGrid({
       const [top, bottom] = [rows.starts[row]!, rows.starts[row + 1]!];
       const [left, right] = [cols.starts[col]!, cols.starts[col + 1]!];
       // A frozen cell is always in view; the rest scrolls clear of the frozen panes.
+      let [y, x] = [element.scrollTop, element.scrollLeft];
       if (row >= frozenRows) {
-        if (top - frozenHeight < element.scrollTop) element.scrollTop = top - frozenHeight;
-        else if (bottom + headerHeight > element.scrollTop + height)
-          element.scrollTop = bottom + headerHeight - height;
+        if (top - frozenHeight < y) y = top - frozenHeight;
+        else if (bottom + headerHeight > y + height) y = bottom + headerHeight - height;
       }
       if (col >= frozenCols) {
-        if (left - frozenWidth < element.scrollLeft) element.scrollLeft = left - frozenWidth;
-        else if (right + headerWidth > element.scrollLeft + width)
-          element.scrollLeft = right + headerWidth - width;
+        if (left - frozenWidth < x) x = left - frozenWidth;
+        else if (right + headerWidth > x + width) x = right + headerWidth - width;
+      }
+      if (y === element.scrollTop && x === element.scrollLeft) return;
+      // A step of a few cells glides, as Excel's does; a long jump (to the data's end, a find)
+      // lands at once rather than sweeping past everything between.
+      const near = Math.abs(y - element.scrollTop) + Math.abs(x - element.scrollLeft) <= GLIDE_PX;
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? true;
+      if (near && !still && typeof element.scrollTo === "function")
+        element.scrollTo({ top: y, left: x, behavior: "smooth" });
+      else {
+        element.scrollTop = y;
+        element.scrollLeft = x;
       }
     },
     [
