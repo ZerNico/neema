@@ -94,6 +94,17 @@ browser workers and the Excel file tools); this page records the decisions behin
 - A download is built in the spreadsheet worker from the stored sheet, by position, charts
   included, and calculated there, so the file opens with every value.
 
+## Filters
+
+- A sheet's AutoFilter is data in the document (`model/filter.ts`): a range by IDs and, per
+  column, the shown values to keep or a condition. The rows it hides are worked out from the
+  values whenever the sheet is drawn and never stored as hidden, so an edit that changes a
+  value shows or hides its row on every replica without a change of its own, and taking the
+  filter off cannot leave rows hidden.
+- Excel does not filter when it opens a file, so a download saves the rows a filter hides as
+  hidden rows, and a condition as the values that pass it. An import gives those rows back to
+  the filter instead of hiding them by hand.
+
 ## Charts
 
 - A chart is data in the document (`model/chart.ts`): its series by IDs and every option set,
