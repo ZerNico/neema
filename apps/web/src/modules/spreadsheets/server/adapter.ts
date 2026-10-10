@@ -1106,6 +1106,22 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
         for (let col = box.left; col <= Math.min(box.right, box.left + 99); col++)
           links.set(`${row}:${col}`, link);
     }
+    // An array formula's other cells hold its cached results, not values typed there; kept,
+    // they would block the formula's own spill.
+    const arrays = [...iterCells(sheet)].flatMap((cell) =>
+      isFormulaValue(cell.value) && cell.value.t === "array" && cell.value.ref
+        ? [parseRange(cell.value.ref)].filter((box) => box !== null)
+        : [],
+    );
+    const cached = (row: number, col: number) =>
+      arrays.some(
+        (box) =>
+          row >= box.top &&
+          row <= box.bottom &&
+          col >= box.left &&
+          col <= box.right &&
+          !(row === box.top && col === box.left),
+      );
     for (const cell of iterCells(sheet)) {
       const value = cell.value;
       const link = links.get(`${cell.row}:${cell.col}`);
@@ -1124,7 +1140,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
           };
         } else if (value.formula)
           entry = { row: cell.row, column: cell.col, formula: value.formula };
-      } else {
+      } else if (!cached(cell.row, cell.col)) {
         const scalar = scalarOf(value);
         if (scalar instanceof XError)
           entry = { row: cell.row, column: cell.col, value: scalar.code };

@@ -84,6 +84,20 @@ describe("importing into a live sheet", () => {
     expect(read.dropped).toEqual([]);
   });
 
+  it("reads a spill's cached results in a file as the formula's, not typed over it", async () => {
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["=SEQUENCE(3)"]] },
+    ]);
+    const values = calculateSheet(original, context);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original, values))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(cellOf(imported.doc, "Sheet1", 2, 1)).toBeUndefined();
+    expect(valueOf(imported.doc, "Sheet1", 3, 1)).toBe(3);
+  });
+
   it("keeps underline, strikethrough and a font through Excel and back", async () => {
     const original = build([
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Title", "Old"]] },
