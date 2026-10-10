@@ -579,6 +579,32 @@ describe("importing into a live sheet", () => {
     expect([column!.offset, line!.offset]).toEqual([{ x: 30, y: 7 }, undefined]);
   });
 
+  it("refuses a workbook too large before building any of its grids", () => {
+    const sheet = (rows: number) => ({
+      name: `S${rows}`,
+      rows,
+      cols: 1,
+      cells: [],
+      merges: [],
+      widths: [],
+      heights: [],
+    });
+    const read = (sheets: ReturnType<typeof sheet>[]) => ({
+      sheets,
+      names: [],
+      charts: [],
+      images: [],
+      dropped: [],
+    });
+    expect(sheetFromWorkbook(read([sheet(1_048_576)]), settings)).toMatchObject({ ok: false });
+    expect(
+      sheetFromWorkbook(
+        read(Array.from({ length: 50 }, (_, index) => ({ ...sheet(100_000), name: `S${index}` }))),
+        settings,
+      ),
+    ).toMatchObject({ ok: false, reason: "more rows across its sheets than a live sheet holds" });
+  });
+
   it("reads CSV in either convention, quoted fields and formulas included", () => {
     const us = sheetFromCsv(
       'Item,Amount\n"Tea, green",1234.5\nTotal,=SUM(B2:B2)\n',

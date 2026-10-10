@@ -1,4 +1,5 @@
 import { patchChart } from "./chart.ts";
+import { LIVE_LIMITS } from "./limits.ts";
 import { copyFormula, type FormulaAt } from "./formula.ts";
 import {
   positions,
@@ -49,8 +50,9 @@ const patched = (key: string | undefined, patch: StylePatch) => {
   return styleKey(style);
 };
 
+/** Whether an ID is a live entry, through the order list's cached index. */
 const alive = (entries: readonly AxisEntry[], id: string) =>
-  entries.some((entry) => entry.id === id && !entry.dead);
+  positions(entries).at(id) !== undefined;
 
 /** Live IDs from `a` to `b` in order, either way round; empty when either is not alive. */
 function between(entries: readonly AxisEntry[], a: string | null, b: string | null): string[] {
@@ -159,25 +161,36 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       const { rows, cols } = areaCells(sheet, op.area);
       if (!rows.length || !cols.length)
         return drop(doc, dropped, "a range whose rows or columns were deleted");
+      // A format makes a cell of every place it covers: past what a sheet holds, refused before any is made.
+      if (op.op === "format" && rows.length * cols.length > LIVE_LIMITS.cells)
+        return drop(doc, dropped, "a format over more cells than a sheet holds");
       const writes: [string, string, Cell | null][] = [];
       const touched = op.op === "format" || op.what !== "contents";
-      for (const r of rows)
-        for (const c of cols) {
-          const old = cellAt(sheet, r, c);
-          if (op.op === "format") {
-            writes.push([
-              r,
-              c,
-              compact<Cell>({ ...(old ?? { w: 0 }), s: patched(old?.s, op.patch), wf: revision }),
-            ]);
-            continue;
-          }
-          if (!old) continue;
-          if (op.what === "formats")
-            writes.push([r, c, compact<Cell>({ ...old, s: undefined, wf: revision })]);
-          else if (op.what === "contents") writes.push([r, c, cleared(old, revision)]);
-          else writes.push([r, c, { w: revision, wf: revision }]);
+      // Clearing touches only cells that exist, however large the range.
+      const covered = op.op === "clear" ? new Set(cols) : null;
+      const places: Iterable<readonly [string, string]> = covered
+        ? rows.flatMap((r) =>
+            Object.keys(sheet.cells[r] ?? {})
+              .filter((c) => covered.has(c))
+              .map((c) => [r, c] as const),
+          )
+        : rows.flatMap((r) => cols.map((c) => [r, c] as const));
+      for (const [r, c] of places) {
+        const old = cellAt(sheet, r, c);
+        if (op.op === "format") {
+          writes.push([
+            r,
+            c,
+            compact<Cell>({ ...(old ?? { w: 0 }), s: patched(old?.s, op.patch), wf: revision }),
+          ]);
+          continue;
         }
+        if (!old) continue;
+        if (op.what === "formats")
+          writes.push([r, c, compact<Cell>({ ...old, s: undefined, wf: revision })]);
+        else if (op.what === "contents") writes.push([r, c, cleared(old, revision)]);
+        else writes.push([r, c, { w: revision, wf: revision }]);
+      }
       let next = writeCells(sheet, writes);
       // A whole row or column carries its format for the cells that come later.
       if (touched && (op.area.r1 === null || op.area.c1 === null)) {

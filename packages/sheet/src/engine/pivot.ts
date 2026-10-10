@@ -1,4 +1,7 @@
-import { CALC, DIV0, Grid, VALUE, XError, compare, type Scalar } from "./values.ts";
+import { CALC, DIV0, Grid, SPILL, VALUE, XError, compare, type Scalar } from "./values.ts";
+
+/** The most cells a PIVOTBY makes, as many as a live sheet lets one formula spill into. */
+export const PIVOT_CELLS = 200_000;
 
 /**
  * Excel 365's GROUPBY and PIVOTBY: rows grouped by the values of some
@@ -220,6 +223,13 @@ export function groupBy(
   });
   const width = rowFields.width + values.width;
   const subtotals = Math.abs(options.rowTotals) >= 2 && rowFields.width > 1;
+  // Each first field's rows, gathered once, for its subtotal.
+  const byFirst = new Map<string, number[]>();
+  if (subtotals)
+    source.rows.forEach((key, at) => {
+      const first = keyOf([key[0] ?? null]);
+      byFirst.set(first, [...(byFirst.get(first) ?? []), at]);
+    });
   const detail = sortBy(
     distinct(source.rows).map((key) => [...key, ...summaryOf(byKey.get(keyOf(key))!)]),
     subtotals ? [1, ...options.rowSort] : options.rowSort,
@@ -234,9 +244,7 @@ export function groupBy(
       const first = detail[at]![0] ?? null;
       let end = at;
       while (end < detail.length && compare(detail[end]![0] ?? null, first) === 0) end++;
-      const members = source.rows.flatMap((key, index) =>
-        compare(key[0] ?? null, first) === 0 ? [index] : [],
-      );
+      const members = byFirst.get(keyOf([first])) ?? [];
       const subtotal = pad([first], rowFields.width).concat(summaryOf(members));
       body.push(
         ...(top ? [subtotal, ...detail.slice(at, end)] : [...detail.slice(at, end), subtotal]),
@@ -278,28 +286,60 @@ export function pivotBy(
     colKeys = sorted;
   }
   const valueCount = values.width;
-  const wholes = values.rows[0]!.map((_, column) =>
-    source.values.reduce(
-      (total, row) => total + (typeof row[column] === "number" ? (row[column] as number) : 0),
-      0,
-    ),
-  );
+  // Refused from its size before any crossing is worked out, as a spill too large would be.
+  if ((rowKeys.length + 2) * (rowFields.width + (colKeys.length + 1) * valueCount) > PIVOT_CELLS)
+    return SPILL;
+  // Every source row's place, gathered once: by its row key, its column key, and both.
+  const rowKeyAt = source.rows.map(keyOf);
+  const colKeyAt = source.cols!.map(keyOf);
+  const gather = (keyAt: (at: number) => string) => {
+    const groups = new Map<string, number[]>();
+    for (let at = 0; at < source.values.length; at++) {
+      const key = keyAt(at);
+      const members = groups.get(key);
+      if (members) members.push(at);
+      else groups.set(key, [at]);
+    }
+    return groups;
+  };
+  const byRow = gather((at) => rowKeyAt[at]!);
+  const byColumn = gather((at) => colKeyAt[at]!);
+  const byBoth = gather((at) => `${rowKeyAt[at]}\u0000${colKeyAt[at]}`);
+  const everyRow = source.values.map((_, at) => at);
+  // Each column's total, summed once, for PERCENTOF.
+  const wholes = new Map<string, number>();
+  const sumOf = (members: readonly number[], column: number) =>
+    members.reduce((total, at) => {
+      const value = source.values[at]![column];
+      return total + (typeof value === "number" ? value : 0);
+    }, 0);
   const cell = (
     rowKey: readonly Scalar[] | null,
     colKey: readonly Scalar[] | null,
     column: number,
   ) => {
-    const members: Scalar[] = [];
-    let whole = 0;
-    source.values.forEach((row, at) => {
-      const inColumn = !colKey || keyOf(source.cols![at]!) === keyOf(colKey);
-      if (inColumn && typeof row[column] === "number") whole += row[column] as number;
-      if (inColumn && (!rowKey || keyOf(source.rows[at]!) === keyOf(rowKey)))
-        members.push(row[column] ?? null);
-    });
+    const [row, col] = [rowKey && keyOf(rowKey), colKey && keyOf(colKey)];
+    const members =
+      (row !== null && col !== null
+        ? byBoth.get(`${row}\u0000${col}`)
+        : row !== null
+          ? byRow.get(row)
+          : col !== null
+            ? byColumn.get(col)
+            : everyRow) ?? [];
     if (!members.length) return null;
     // A share of the column's total, as PIVOTBY's PERCENTOF is by default; the grand total's of all.
-    return summarise(fn, members, colKey ? whole : wholes[column]!);
+    const wholeKey = `${col ?? ""}\u0000${column}`;
+    let whole = wholes.get(wholeKey);
+    if (whole === undefined) {
+      whole = sumOf(col !== null ? (byColumn.get(col) ?? []) : everyRow, column);
+      wholes.set(wholeKey, whole);
+    }
+    return summarise(
+      fn,
+      members.map((at) => source.values[at]![column] ?? null),
+      whole,
+    );
   };
   const across = [
     ...colKeys.flatMap((key) =>

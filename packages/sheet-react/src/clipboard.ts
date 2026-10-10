@@ -1,4 +1,5 @@
 import { XError } from "@chat/sheet/engine/values";
+import { LIVE_LIMITS } from "@chat/sheet/model/limits";
 import type { StylePatch } from "@chat/sheet/model/ops";
 import { selectionBox, type ForeignCell, type GridContext } from "./commands.ts";
 import { cellDisplay, cellStyle, safeLink } from "./display.ts";
@@ -195,7 +196,8 @@ export function readHtmlTable(html: string): ForeignCell[][] | null {
   const grid: ForeignCell[][] = [];
   // A merged cell covers places below it that later rows skip.
   const taken = new Set<string>();
-  [...table.querySelectorAll("tr")].forEach((tr, y) => {
+  let placed = 0;
+  for (const [y, tr] of [...table.querySelectorAll("tr")].entries()) {
     const row = (grid[y] ??= []);
     let x = 0;
     for (const td of tr.querySelectorAll("td, th")) {
@@ -231,10 +233,15 @@ export function readHtmlTable(html: string): ForeignCell[][] | null {
         ...(number === null ? {} : { value: number }),
         style: { ...styleOf(declarations), ...(link ? { link } : {}) },
       };
-      const [across, down] = [
-        Math.max(1, Number(td.getAttribute("colspan")) || 1),
-        Math.max(1, Number(td.getAttribute("rowspan")) || 1),
-      ];
+      // A span is whole cells within a sheet's bounds, whatever a page wrote.
+      const span = (name: string, most: number) => {
+        const read = Math.trunc(Number(td.getAttribute(name)));
+        return Number.isFinite(read) ? Math.min(most, Math.max(1, read)) : 1;
+      };
+      const [across, down] = [span("colspan", LIVE_LIMITS.cols), span("rowspan", LIVE_LIMITS.rows)];
+      // A paste larger than a sheet holds is refused before its places are made.
+      placed += across * down;
+      if (placed > LIVE_LIMITS.cells) return null;
       for (let dy = 0; dy < down; dy++)
         for (let dx = 0; dx < across; dx++)
           if (dx || dy) {
@@ -243,7 +250,7 @@ export function readHtmlTable(html: string): ForeignCell[][] | null {
           }
       x += across;
     }
-  });
+  }
   const width = Math.max(0, ...grid.map((row) => row.length));
   if (!width) return null;
   return grid.map((row) => Array.from({ length: width }, (_, x) => row[x] ?? { raw: "" }));

@@ -34,6 +34,9 @@ export type Imported =
   | { ok: true; doc: SheetDoc; dropped: string[]; notes: ImportedNote[] }
   | { ok: false; reason: string };
 
+/** Rows and columns across a workbook's sheets that an import builds at most. */
+const IMPORT_ENTRIES = 2 * LIVE_LIMITS.rows;
+
 /** A file's groups by position as a live sheet keeps them, by IDs; ones past the grid are left out. */
 const groupsOf = (groups: readonly FileGroup[], ids: readonly string[]) =>
   groups.flatMap((group) =>
@@ -116,6 +119,16 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
   if (!read.sheets.length) return { ok: false, reason: "the workbook has no sheets" };
   if (read.sheets.length > LIVE_LIMITS.sheets)
     return { ok: false, reason: `more than ${LIVE_LIMITS.sheets} sheets` };
+  // Sized before any grid is built, so a file naming a far cell costs nothing to refuse.
+  if (read.sheets.some((each) => each.rows > LIVE_LIMITS.rows || each.cols > LIVE_LIMITS.cols))
+    return { ok: false, reason: "a sheet larger than a live sheet holds" };
+  const entries = read.sheets.reduce(
+    (total, each) =>
+      total + Math.max(NEW_SHEET.rows, each.rows) + Math.max(NEW_SHEET.cols, each.cols),
+    0,
+  );
+  if (entries > IMPORT_ENTRIES)
+    return { ok: false, reason: "more rows across its sheets than a live sheet holds" };
   const ids = read.sheets.map((_, index) => `s${index + 1}`);
   let doc: SheetDoc = {
     settings,
@@ -133,8 +146,6 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
     charts: {},
     anchors: {},
   };
-  if (read.sheets.some((each) => each.rows > LIVE_LIMITS.rows || each.cols > LIVE_LIMITS.cols))
-    return { ok: false, reason: "a sheet larger than a live sheet holds" };
   /** A formula's stored form, the grids grown for what it reaches. */
   const formulaOf = (stored: string, sheet: string) => {
     // As people read it: without the namespaces a file stores newer functions under.

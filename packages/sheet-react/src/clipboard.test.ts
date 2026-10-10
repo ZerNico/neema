@@ -137,4 +137,18 @@ describe("HTML on the clipboard", () => {
       ],
     ]);
   });
+
+  it("bounds a pasted table's spans, refusing one larger than a sheet", () => {
+    expect(
+      readHtmlTable('<table><tr><td colspan="100000" rowspan="100000">x</td></tr></table>'),
+    ).toBeNull();
+    expect(
+      readHtmlTable('<table><tr><td rowspan="Infinity">x</td><td>y</td></tr></table>'),
+    ).toEqual([
+      [
+        { raw: "x", style: {} },
+        { raw: "y", style: {} },
+      ],
+    ]);
+  });
 });

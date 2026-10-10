@@ -72,3 +72,63 @@ describe("a change from the wire", () => {
     expect(accepts(format({ shadow: true }))).toBe(false);
   });
 });
+
+describe("applying formats and clears", () => {
+  const apply = (doc: ReturnType<typeof emptyDoc>, ops: unknown[], seq = 1) =>
+    applyChange(doc, { clientId: "c", seq, ops: ops as never }, seq);
+  const grown = applyChange(
+    emptyDoc(),
+    {
+      clientId: "c",
+      seq: 1,
+      ops: [
+        {
+          op: "insert",
+          sh: "s1",
+          axis: "columns",
+          ids: Array.from({ length: 300 }, (_, index) => `x${index}`),
+          after: null,
+        },
+      ],
+    },
+    1,
+  ).doc;
+
+  it("refuses a format over more cells than a sheet holds, before making any", () => {
+    const result = apply(grown, [
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: null, r2: null, c1: null, c2: null },
+        patch: { bold: true },
+      },
+    ]);
+    expect(result.dropped).toEqual(["a format over more cells than a sheet holds"]);
+    expect(Object.keys(result.doc.sheet.s1!.cells)).toHaveLength(0);
+  });
+
+  it("clears only the cells that exist", () => {
+    let doc = apply(emptyDoc(), [
+      { op: "set", sh: "s1", cells: [{ r: "s1.r2", c: "s1.c1", v: 1 }] },
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: null, r2: null, c1: "s1.c2", c2: "s1.c2" },
+        patch: { numberFormat: "0%" },
+      },
+    ]).doc;
+    const cleared = apply(
+      doc,
+      [
+        {
+          op: "clear",
+          sh: "s1",
+          area: { r1: null, r2: null, c1: null, c2: null },
+          what: "contents",
+        },
+      ],
+      2,
+    ).doc;
+    expect(cleared.sheet.s1!.cells["s1.r2"]?.["s1.c1"]?.v).toBeUndefined();
+  });
+});
