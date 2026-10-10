@@ -118,4 +118,83 @@ describe("filling as the fill handle does", () => {
       numberFormat: "0.00",
     });
   });
+
+  it("follows Microsoft's AutoFill examples", () => {
+    // 9:00 counts by the hour.
+    expect(run(sheetOf([0.375], false, "h:mm"), 1, 2)).toEqual([0.375, 0.4166666667, 0.4583333333]);
+    expect(run(sheetOf(["Qtr3"]), 1, 3)).toEqual(["Qtr3", "Qtr4", "Qtr1", "Qtr2"]);
+    expect(run(sheetOf(["Q4"]), 1, 1)).toEqual(["Q4", "Q1"]);
+    expect(run(sheetOf(["1st Period"]), 1, 3)).toEqual([
+      "1st Period",
+      "2nd Period",
+      "3rd Period",
+      "4th Period",
+    ]);
+    expect(run(sheetOf(["Product 1"]), 1, 1)).toEqual(["Product 1", "Product 2"]);
+    expect(run(sheetOf(["text1", "textA"]), 2, 4)).toEqual([
+      "text1",
+      "textA",
+      "text2",
+      "textA",
+      "text3",
+      "textA",
+    ]);
+    expect(run(sheetOf([2007, 2008]), 2, 2)).toEqual([2007, 2008, 2009, 2010]);
+    // Jan 31, Feb 28 2023: each month's last day.
+    expect(run(sheetOf([44_957, 44_985], false, "yyyy-mm-dd"), 2, 2)).toEqual([
+      44_957, 44_985, 45_016, 45_046,
+    ]);
+  });
+
+  it("keeps $ parts of references fixed and shifts the rest", () => {
+    const doc = sheetOf([1, 2, 3, "=$A$1+A$1+$A1+A1"]);
+    const source = { r1: id("r", 4), r2: id("r", 4), c1: id("c", 1), c2: id("c", 1) };
+    const down = apply(doc, ...fillSeries(doc, "s1", source, "down", 1));
+    expect(
+      renderFormula(down.sheet.s1!.cells[id("r", 5)]![id("c", 1)]!.f!, { doc: down, sheet: "s1" }),
+    ).toBe("$A$1+A$1+$A2+A2");
+    const right = apply(doc, ...fillSeries(doc, "s1", source, "right", 1));
+    expect(
+      renderFormula(right.sheet.s1!.cells[id("r", 4)]![id("c", 2)]!.f!, {
+        doc: right,
+        sheet: "s1",
+      }),
+    ).toBe("$A$1+B$1+$A1+B1");
+  });
+
+  it("fills formats alone, or contents alone, as Auto Fill Options offer", () => {
+    const doc = sheetOf([1, 2], false, "0.00");
+    const formats = apply(
+      doc,
+      ...fillSeries(
+        doc,
+        "s1",
+        { r1: id("r", 1), r2: id("r", 2), c1: id("c", 1), c2: id("c", 1) },
+        "down",
+        2,
+        "auto",
+        DE_DE,
+        "formats",
+      ),
+    );
+    expect(formats.sheet.s1!.cells[id("r", 3)]![id("c", 1)]).toMatchObject({
+      s: '{"numberFormat":"0.00"}',
+    });
+    expect(formats.sheet.s1!.cells[id("r", 3)]![id("c", 1)]!.v).toBeUndefined();
+    const values = apply(
+      doc,
+      ...fillSeries(
+        doc,
+        "s1",
+        { r1: id("r", 1), r2: id("r", 2), c1: id("c", 1), c2: id("c", 1) },
+        "down",
+        2,
+        "copy",
+        DE_DE,
+        "values",
+      ),
+    );
+    expect(values.sheet.s1!.cells[id("r", 4)]![id("c", 1)]).toMatchObject({ v: 2 });
+    expect(values.sheet.s1!.cells[id("r", 4)]![id("c", 1)]!.s).toBeUndefined();
+  });
 });
