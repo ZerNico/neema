@@ -17,13 +17,13 @@ type OwnField = {
   readonly type: "sheet" | "cell" | "range" | "columns" | "rowSpan" | "color" | "rows";
   readonly about: string;
 };
-type Definition = OfficeDefinition<OwnField>;
+export type Definition = OfficeDefinition<OwnField>;
 
-const sheet = {
+export const sheet = {
   type: "sheet",
   about: "Sheet name, exactly as inspect_spreadsheet lists it.",
 } as const;
-const range = {
+export const range = {
   type: "range",
   about: 'A cell or rectangle on the sheet, e.g. "B2" or "A1:D20".',
 } as const;
@@ -226,12 +226,11 @@ type ValueOf<F> = F extends { type: "integer" | "number" }
 type Shape<Fs, R> = { -readonly [K in keyof Fs & R]: ValueOf<Fs[K]> } & {
   -readonly [K in Exclude<keyof Fs, R>]?: ValueOf<Fs[K]>;
 };
-export type SpreadsheetOperation = {
-  [K in SpreadsheetOperationKind]: { kind: K } & Shape<
-    Catalog[K]["fields"],
-    Catalog[K]["required"][number]
-  >;
-}[SpreadsheetOperationKind];
+/** One operation of a catalog, typed from its table. */
+export type OperationOf<T extends Record<string, Definition>> = {
+  [K in keyof T & string]: { kind: K } & Shape<T[K]["fields"], T[K]["required"][number]>;
+}[keyof T & string];
+export type SpreadsheetOperation = OperationOf<Catalog>;
 
 const COLUMN = /^[A-Z]{1,3}$/;
 const ROW = /^[1-9]\d{0,6}$/;
@@ -266,17 +265,20 @@ const describe = (field: OwnField) => {
   }
 };
 
+const fail = (path: string, message: string): never => {
+  throw new SpreadsheetError("invalid_operation", `${path}: ${message}`);
+};
+
 function cellInput(raw: unknown, path: string): CellInput {
   if (raw === null || typeof raw === "boolean") return raw;
   if (typeof raw === "number")
-    return Number.isFinite(raw) ? raw : engine.fail(path, "not a finite number");
-  if (typeof raw !== "string")
-    return engine.fail(path, `expected a value; received ${received(raw)}`);
-  if (!xmlSafe(raw)) return engine.fail(path, "text contains control characters");
+    return Number.isFinite(raw) ? raw : fail(path, "not a finite number");
+  if (typeof raw !== "string") return fail(path, `expected a value; received ${received(raw)}`);
+  if (!xmlSafe(raw)) return fail(path, "text contains control characters");
   const limit = raw.startsWith("=")
     ? SPREADSHEET_LIMITS.formulaChars
     : SPREADSHEET_LIMITS.textChars;
-  if (raw.length > limit) return engine.fail(path, `longer than Excel's ${limit} characters`);
+  if (raw.length > limit) return fail(path, `longer than Excel's ${limit} characters`);
   return raw;
 }
 
@@ -285,7 +287,7 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
     case "sheet": {
       if (typeof raw !== "string") return wrong();
       const problem = sheetNameProblem(raw);
-      return problem ? engine.fail(path, problem) : raw;
+      return problem ? fail(path, problem) : raw;
     }
     case "cell":
       return typeof raw === "string" && parseCell(raw) ? raw.trim().toUpperCase() : wrong();
@@ -321,7 +323,7 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
       return rows.map((row, index) =>
         Array.isArray(row)
           ? row.map((item, column) => cellInput(item, `${path}[${index}][${column}]`))
-          : engine.fail(
+          : fail(
               `${path}[${index}]`,
               `expected a row (a list of values); received ${received(row)}`,
             ),
@@ -330,26 +332,32 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
   }
 }
 
-const engine = operationEngine({
-  operations: SPREADSHEET_OPERATIONS,
-  maxOperations: SPREADSHEET_LIMITS.operationsPerCall,
-  Error: SpreadsheetError,
-  own: {
-    describe,
-    value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
-    schema: (field) =>
-      field.type === "rows"
-        ? {
-            type: "array",
-            description: field.about,
-            items: {
+/** The engine for a table of spreadsheet operations: the Excel tools' or a live sheet's. */
+export const spreadsheetEngine = (
+  operations: Readonly<Record<string, Definition>>,
+  maxOperations: number,
+) =>
+  operationEngine({
+    operations,
+    maxOperations,
+    Error: SpreadsheetError,
+    own: {
+      describe,
+      value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
+      schema: (field) =>
+        field.type === "rows"
+          ? {
               type: "array",
-              items: { type: ["string", "number", "boolean", "null"] },
-            },
-          }
-        : { type: "string", description: field.about },
-  },
-});
+              description: field.about,
+              items: {
+                type: "array",
+                items: { type: ["string", "number", "boolean", "null"] },
+              },
+            }
+          : { type: "string", description: field.about },
+    },
+  });
+const engine = spreadsheetEngine(SPREADSHEET_OPERATIONS, SPREADSHEET_LIMITS.operationsPerCall);
 
 /** Validates a batch before any worker opens the workbook. */
 export function parseSpreadsheetOperations(input: unknown): SpreadsheetOperation[] {
@@ -360,25 +368,25 @@ export function parseSpreadsheetOperations(input: unknown): SpreadsheetOperation
       const rows = operation.rows as CellInput[][];
       const width = Math.max(...rows.map((row) => row.length));
       if (start.row + rows.length - 1 > MAX_ROW || start.column + width - 1 > MAX_COLUMN)
-        engine.fail(path, "the values run past the last row or column of a sheet");
+        fail(path, "the values run past the last row or column of a sheet");
       cells += rows.reduce((sum, row) => sum + row.length, 0);
     }
     if (
       kind === "setFormat" &&
       Object.keys(operation).every((key) => key === "sheet" || key === "range")
     )
-      engine.fail(path, "provide at least one property to change");
+      fail(path, "provide at least one property to change");
     if (
       kind === "addChart" &&
       operation.type === "pie" &&
       (operation.series as unknown[]).length !== 1
     )
-      engine.fail(path, "a pie chart takes exactly one series");
+      fail(path, "a pie chart takes exactly one series");
     if (kind === "defineName" && !/^[A-Za-z_\\][\w.]{0,99}$/.test(operation.name as string))
-      engine.fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
+      fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
   });
   if (cells > SPREADSHEET_LIMITS.cellsPerCall)
-    engine.fail(
+    fail(
       "operations",
       `at most ${SPREADSHEET_LIMITS.cellsPerCall} cells per call; received ${cells}. Split into smaller calls; no edits were applied`,
     );
