@@ -382,6 +382,16 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       if (!chart) return drop(doc, dropped, "a chart that is gone");
       return { ...doc, charts: { ...doc.charts, [op.id]: patchChart(chart, op.patch) } };
     }
+    case "imagePut":
+      if (!sheetOf(op.image.sheet)) return drop(doc, dropped, "a picture on a sheet that is gone");
+      return { ...doc, images: { ...doc.images, [op.id]: op.image } };
+    case "imageDelete": {
+      if (!doc.images?.[op.id]) return doc;
+      const { [op.id]: _gone, ...images } = doc.images;
+      if (Object.keys(images).length) return { ...doc, images };
+      const { images: _none, ...rest } = doc;
+      return rest;
+    }
     case "chartDelete": {
       const charts = { ...doc.charts };
       delete charts[op.id];

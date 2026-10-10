@@ -3,6 +3,7 @@ import { isSheetFilter, type SheetFilter } from "./filter.ts";
 import { isConditionalList, type ConditionalFormat } from "./conditional.ts";
 import { isValidationList, type Validation } from "./validation.ts";
 import { isOutlineList, type OutlineGroup } from "./outline.ts";
+import { isSheetImage, type SheetImage } from "./image.ts";
 import type { Axis, Box, CellAnchor, CellValue, Chart, Formula } from "./model.ts";
 
 /**
@@ -95,6 +96,8 @@ export type SheetOp =
   | { readonly op: "chartPut"; readonly id: string; readonly chart: Chart }
   | { readonly op: "chartPatch"; readonly id: string; readonly patch: ChartPatch }
   | { readonly op: "chartDelete"; readonly id: string }
+  | { readonly op: "imagePut"; readonly id: string; readonly image: SheetImage }
+  | { readonly op: "imageDelete"; readonly id: string }
   /** A sheet's whole AutoFilter set, or taken off with null. */
   | { readonly op: "filter"; readonly sh: string; readonly filter: SheetFilter | null }
   /** A sheet's whole list of data validations. */
@@ -165,6 +168,8 @@ const OP_NAMES = new Set([
   "chartPut",
   "chartPatch",
   "chartDelete",
+  "imagePut",
+  "imageDelete",
   "anchor",
   "move",
   "sort",
@@ -287,6 +292,10 @@ function validOp(op: Record<string, unknown>): boolean {
       );
     case "sheetDelete":
     case "sheetRevive":
+    case "imageDelete":
+      return isId(op.id);
+    case "imagePut":
+      return isId(op.id) && isSheetImage(op.image);
     case "chartDelete":
       return isId(op.id);
     case "name":

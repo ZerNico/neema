@@ -14,6 +14,7 @@ import {
   ChartColumnIcon,
   Link01Icon,
   Table02Icon,
+  ImageAdd01Icon,
   CheckListIcon,
   TextIndentMoreIcon,
   DecimalsArrowLeftIcon,
@@ -74,6 +75,7 @@ export type ToolbarCommand =
   | { readonly kind: "circles" }
   | { readonly kind: "link" }
   | { readonly kind: "pivot" }
+  | { readonly kind: "picture" }
   | { readonly kind: "outline"; readonly group: boolean; readonly axis: "rows" | "columns" };
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
@@ -410,6 +412,12 @@ export function SheetToolbar({
         shortcut="⌘K"
         disabled={false}
         onPress={() => onCommand({ kind: "link" })}
+      />
+      <Action
+        icon={ImageAdd01Icon}
+        label="Insert picture"
+        disabled={false}
+        onPress={() => onCommand({ kind: "picture" })}
       />
       <Action
         icon={Table02Icon}

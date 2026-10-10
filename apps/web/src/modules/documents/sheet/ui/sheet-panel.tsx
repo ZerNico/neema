@@ -58,6 +58,7 @@ import {
   type GridDecoration,
   type GridFill,
   type GridOverlay,
+  type OverlayCommand,
   type SheetGridProps,
   type SheetSelection,
 } from "@chat/sheet-react/grid";
@@ -95,6 +96,8 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { IMAGE_LIMITS } from "@chat/sheet/model/image";
+import { pictureOf } from "./picture.ts";
 import { PivotDialog, type PivotDraft } from "./pivot-dialog.tsx";
 import { pivotFormula } from "./pivot.ts";
 import { printHtml } from "@chat/sheet-react/print";
@@ -188,6 +191,9 @@ function writeClipboard(text: string, html: string) {
     .catch(() => clipboard.writeText(text));
 }
 
+/** The overlay key a picture is selected by, beside charts' IDs. */
+const IMAGE_KEY = "image:";
+
 /** Excel's Paste Special choices, as the cell menu offers them. */
 const PASTE_SPECIAL: ReadonlyArray<{
   label: string;
@@ -267,6 +273,7 @@ export default function SheetPanelBody({
   } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
   const formulaBar = useRef<HTMLTextAreaElement>(null);
+  const picturePicker = useRef<HTMLInputElement>(null);
   const sheets = useMemo(() => (doc ? liveSheets(doc) : []), [doc]);
   const sheet = chosen && sheets.includes(chosen) ? chosen : (sheets[0] ?? null);
   const revision = state?.revision ?? 0;
@@ -434,9 +441,14 @@ export default function SheetPanelBody({
         : showLevel(doc, sheet, axis, action.level),
     );
   const paste = (
-    clip: { text: string; html: string | null },
+    clip: { text: string; html: string | null; image?: File | null },
     options: { part?: PastePart; transpose?: boolean } = {},
   ) => {
+    // A picture alone is placed as one; beside cells, as Excel copies them, the cells win.
+    if (clip.image && !clip.text.trim() && !clip.html?.includes("<table")) {
+      void insertPicture(clip.image);
+      return;
+    }
     const from = copied.current;
     const own = from?.text === clip.text;
     run(
@@ -546,6 +558,12 @@ export default function SheetPanelBody({
     };
   })();
   const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
+  // Pictures share the overlay selection, by a key of their own.
+  const pickedImage =
+    chartPicked?.startsWith(IMAGE_KEY) &&
+    doc.images?.[chartPicked.slice(IMAGE_KEY.length)]?.sheet === sheet
+      ? chartPicked.slice(IMAGE_KEY.length)
+      : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const stats = selectionStats(context);
   const headRule = validationAt(doc, sheet, head.r, head.c);
@@ -585,6 +603,7 @@ export default function SheetPanelBody({
     else if (command.kind === "validation") setValidating(true);
     else if (command.kind === "circles") setCircling(!circling);
     else if (command.kind === "link") setLinking(true);
+    else if (command.kind === "picture") picturePicker.current?.click();
     else if (command.kind === "pivot") {
       const box = selectionBox(context);
       if (box.bottom - box.top < 1 || box.right === box.left)
@@ -659,6 +678,67 @@ export default function SheetPanelBody({
       setChartPicked(copy);
     } else void chartImage(id, chartData(doc, values, chart).title, action);
   };
+  /** A picture placed at the active cell, downscaled first; selected once placed. */
+  const insertPicture = async (file: Blob) => {
+    if (readOnly) return;
+    const picture = await pictureOf(file);
+    if (!picture) {
+      toast("That picture can’t be added", {
+        description: "Use a PNG, JPEG, GIF or WebP file.",
+      });
+      return;
+    }
+    if (Object.keys(doc.images ?? {}).length >= IMAGE_LIMITS.images) {
+      toast(`A sheet document holds at most ${IMAGE_LIMITS.images} pictures`);
+      return;
+    }
+    const id = sync!.mint();
+    run([
+      {
+        op: "imagePut",
+        id,
+        image: {
+          sheet,
+          at: head,
+          size: { width: picture.width, height: picture.height },
+          src: picture.src,
+        },
+      },
+    ]);
+    setChartPicked(`${IMAGE_KEY}${id}`);
+  };
+  const imageAction = (id: string, action: OverlayCommand) => {
+    const image = doc.images?.[id];
+    if (!image || readOnly) return;
+    if (action === "delete") {
+      run([{ op: "imageDelete", id }]);
+      setChartPicked(null);
+    } else if (action === "duplicate") {
+      const copy = sync!.mint();
+      const { x = 0, y = 0 } = image.offset ?? {};
+      run([{ op: "imagePut", id: copy, image: { ...image, offset: { x: x + 16, y: y + 16 } } }]);
+      setChartPicked(`${IMAGE_KEY}${copy}`);
+    }
+  };
+  const imageOverlays: GridOverlay[] = Object.entries(doc.images ?? {})
+    .filter(([, image]) => image.sheet === sheet)
+    .map(([id, image]) => ({
+      key: `${IMAGE_KEY}${id}`,
+      at: image.at,
+      ...(image.offset ? { offset: image.offset } : {}),
+      width: image.size.width,
+      height: image.size.height,
+      label: image.alt ? `Picture: ${image.alt}` : "Picture",
+      min: { width: IMAGE_LIMITS.width.min, height: IMAGE_LIMITS.height.min },
+      content: (
+        <img
+          src={image.src}
+          alt={image.alt ?? ""}
+          draggable={false}
+          className="pointer-events-none h-full w-full object-fill select-none"
+        />
+      ),
+    }));
   const overlays: GridOverlay[] = Object.entries(doc.charts)
     .filter(([, chart]) => chart.sheet === sheet)
     .map(([id, chart]) => {
@@ -1050,10 +1130,32 @@ export default function SheetPanelBody({
                   ])
                 }
                 decorations={decorations}
-                overlays={overlays}
-                selectedOverlay={pickedChart}
+                overlays={[...overlays, ...imageOverlays]}
+                selectedOverlay={pickedChart ?? (pickedImage ? `${IMAGE_KEY}${pickedImage}` : null)}
                 onOverlaySelect={setChartPicked}
-                onOverlayChange={(id, change) =>
+                onOverlayChange={(id, change) => {
+                  const image = id.startsWith(IMAGE_KEY)
+                    ? doc.images?.[id.slice(IMAGE_KEY.length)]
+                    : undefined;
+                  if (image) {
+                    const { offset: _old, ...rest } = image;
+                    run([
+                      {
+                        op: "imagePut",
+                        id: id.slice(IMAGE_KEY.length),
+                        image: {
+                          ...rest,
+                          at: change.at,
+                          ...(change.offset.x || change.offset.y ? { offset: change.offset } : {}),
+                          size: {
+                            width: Math.min(IMAGE_LIMITS.width.max, change.width),
+                            height: Math.min(IMAGE_LIMITS.height.max, change.height),
+                          },
+                        },
+                      },
+                    ]);
+                    return;
+                  }
                   run([
                     {
                       op: "chartPatch",
@@ -1067,9 +1169,13 @@ export default function SheetPanelBody({
                         },
                       },
                     },
-                  ])
+                  ]);
+                }}
+                onOverlayCommand={(id, command) =>
+                  id.startsWith(IMAGE_KEY)
+                    ? imageAction(id.slice(IMAGE_KEY.length), command)
+                    : chartAction(id, command)
                 }
-                onOverlayCommand={chartAction}
                 onDragSelection={async (shift, copy) => {
                   const result = dragSelection(context, shift, copy);
                   if (!result || readOnly) return;
@@ -1148,6 +1254,21 @@ export default function SheetPanelBody({
                 readOnly={readOnly}
                 onAction={(action) => chartAction(pickedChart, action)}
               />
+            ) : pickedImage ? (
+              <>
+                <MenuItem
+                  icon={Copy01Icon}
+                  label="Duplicate"
+                  disabled={readOnly}
+                  onClick={() => imageAction(pickedImage, "duplicate")}
+                />
+                <MenuItem
+                  icon={Delete02Icon}
+                  label="Delete picture"
+                  disabled={readOnly}
+                  onClick={() => imageAction(pickedImage, "delete")}
+                />
+              </>
             ) : (
               <>
                 <MenuItem
@@ -1331,6 +1452,18 @@ export default function SheetPanelBody({
           onClose={() => setFilterMenu(null)}
         />
       ) : null}
+      <input
+        ref={picturePicker}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        aria-label="Picture to insert"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void insertPicture(file);
+        }}
+      />
       {pivoting && !readOnly ? (
         <PivotDialog
           fields={selectedBoxColumns().map(

@@ -1,4 +1,5 @@
 import type { SheetDoc } from "./model.ts";
+import { IMAGE_LIMITS } from "./image.ts";
 
 /**
  * How big a live sheet document may grow. The editor refuses a change that
@@ -51,6 +52,8 @@ export function overLimits(doc: SheetDoc, limits: SheetLimits = LIVE_LIMITS): st
   const live = doc.sheets.filter((entry) => !entry.dead);
   if (live.length > limits.sheets) return `more than ${limits.sheets} sheets`;
   if (Object.keys(doc.charts).length > limits.charts) return `more than ${limits.charts} charts`;
+  if (Object.keys(doc.images ?? {}).length > IMAGE_LIMITS.images)
+    return `more than ${IMAGE_LIMITS.images} pictures`;
   if (Object.keys(doc.names).length > limits.names) return `more than ${limits.names} names`;
   let cells = 0;
   let formulas = 0;

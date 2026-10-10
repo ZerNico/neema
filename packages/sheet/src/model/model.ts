@@ -101,6 +101,7 @@ import type { SheetFilter } from "./filter.ts";
 import type { ConditionalFormat } from "./conditional.ts";
 import type { Validation } from "./validation.ts";
 import type { SheetOutline } from "./outline.ts";
+import type { SheetImage } from "./image.ts";
 
 /** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
 export interface SheetSettings {
@@ -119,6 +120,8 @@ export interface SheetDoc {
   readonly charts: Readonly<Record<string, Chart>>;
   /** Comment threads' cells, by thread ID: several threads may share a cell. */
   readonly anchors: Readonly<Record<string, CellAnchor>>;
+  /** Pictures laid over its sheets, by ID. */
+  readonly images?: Readonly<Record<string, SheetImage>>;
 }
 
 /** Where a comment thread sits: a cell, or a range from it to `r2`/`c2`. */

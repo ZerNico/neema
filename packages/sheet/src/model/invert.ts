@@ -155,6 +155,14 @@ export function invertChange(before: SheetDoc, after: SheetDoc, now: SheetDoc = 
     if (JSON.stringify(was) !== JSON.stringify(is))
       middle.push(was ? { op: "chartPut", id, chart: was } : { op: "chartDelete", id });
   }
+  for (const id of new Set([
+    ...Object.keys(before.images ?? {}),
+    ...Object.keys(after.images ?? {}),
+  ])) {
+    const [was, is] = [before.images?.[id], after.images?.[id]];
+    if (was !== is && JSON.stringify(was) !== JSON.stringify(is))
+      middle.push(was ? { op: "imagePut", id, image: was } : { op: "imageDelete", id });
+  }
   for (const thread of new Set([...Object.keys(before.anchors), ...Object.keys(after.anchors)])) {
     const [was, is] = [before.anchors[thread], after.anchors[thread]];
     if (JSON.stringify(was) !== JSON.stringify(is))

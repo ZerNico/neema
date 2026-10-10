@@ -27,7 +27,8 @@
     "./model/filter": "./src/model/filter.ts",
     "./model/conditional": "./src/model/conditional.ts",
     "./model/validation": "./src/model/validation.ts",
-    "./model/outline": "./src/model/outline.ts"
+    "./model/outline": "./src/model/outline.ts",
+    "./model/image": "./src/model/image.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

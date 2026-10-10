@@ -160,8 +160,13 @@ export interface SheetGridProps {
   readonly onCommand?: (command: GridCommand) => void;
   /** What a copy or cut puts on the clipboard, as text and as HTML, or null for nothing. */
   readonly onCopy?: (cut: boolean) => { text: string; html?: string } | null;
-  /** A paste: the clipboard's text and HTML, and whether Cmd+Shift+V asked for values only. */
-  readonly onPaste?: (clip: { text: string; html: string | null; values: boolean }) => void;
+  /** A paste: the clipboard's text, HTML and any picture, and whether Cmd+Shift+V asked for values only. */
+  readonly onPaste?: (clip: {
+    text: string;
+    html: string | null;
+    image: File | null;
+    values: boolean;
+  }) => void;
   /** A row or column dragged to a new size, in pixels. */
   readonly onResize?: (axis: Axis, id: string, px: number) => void;
   readonly decorations?: readonly GridDecoration[];
@@ -1841,6 +1846,9 @@ export function SheetGrid({
         onPaste({
           text: event.clipboardData.getData("text/plain"),
           html: event.clipboardData.getData("text/html") || null,
+          image:
+            [...(event.clipboardData.files ?? [])].find((file) => file.type.startsWith("image/")) ??
+            null,
           values: valuesOnly,
         });
       }}

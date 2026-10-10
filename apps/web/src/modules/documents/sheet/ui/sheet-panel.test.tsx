@@ -115,6 +115,63 @@ describe("an open sheet", () => {
     sync.destroy();
   });
 
+  it("lays a picture over the cells, and deletes it from the keyboard", () => {
+    const listeners = new Map<string, (event: MessageEvent<string>) => void>();
+    const sync = new SheetSync({
+      documentId: "sheet-1",
+      clientId: "me",
+      connect: () => ({
+        addEventListener: (type, listener) => listeners.set(type, listener),
+        close: () => {},
+      }),
+      push: () => new Promise(() => {}),
+    });
+    const doc = apply(emptyDoc(), {
+      op: "imagePut",
+      id: "p1",
+      image: {
+        sheet: "s1",
+        at: { r: "s1.r2", c: "s1.c2" },
+        size: { width: 120, height: 60 },
+        src: "data:image/png;base64,iVBORw0KGgo=",
+        alt: "Logo",
+      },
+    });
+    listeners.get("reset")!(
+      new MessageEvent("reset", {
+        data: JSON.stringify({
+          type: "reset",
+          doc,
+          revision: 1,
+          moment: { now: 45_000, seed: 1 },
+          acked: null,
+        }),
+      }),
+    );
+    render(
+      <SheetPanelBody
+        controller={{
+          documentId: "sheet-1",
+          subscribe: sync.subscribe,
+          getState: sync.getState,
+          sync: () => sync,
+          flush: async () => true,
+          unpersisted: () => false,
+          selected: () => [],
+        }}
+        canEdit
+        toolbarSlot={null}
+      />,
+    );
+    const picture = screen.getByRole("group", { name: "Picture: Logo" });
+    expect(picture.querySelector("img")?.getAttribute("alt")).toBe("Logo");
+    fireEvent.pointerDown(picture, { button: 0, clientX: 5, clientY: 5 });
+    fireEvent.pointerUp(window);
+    fireEvent.keyDown(picture, { key: "Delete" });
+    expect(screen.queryByRole("group", { name: "Picture: Logo" })).toBeNull();
+    sync.destroy();
+  });
+
   it("finds cells by what they show or their formula, and moves to each", () => {
     const doc = apply(emptyDoc(), {
       op: "set",
