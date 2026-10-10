@@ -79,6 +79,7 @@ import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
+import { ChartEditor } from "./chart-editor/chart-editor.tsx";
 import { SheetChart } from "./sheet-chart.tsx";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
@@ -270,6 +271,18 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const editedChart = chartEditing ? doc.charts[chartEditing] : undefined;
+  // The selection as a range by IDs, corners in order.
+  const selectedBox = (() => {
+    const [r1, r2] = [rows.at(active.anchor.r)!, rows.at(active.head.r)!];
+    const [c1, c2] = [cols.at(active.anchor.c)!, cols.at(active.head.c)!];
+    return {
+      r1: rows.ids[Math.min(r1, r2) - 1]!,
+      r2: rows.ids[Math.max(r1, r2) - 1]!,
+      c1: cols.ids[Math.min(c1, c2) - 1]!,
+      c2: cols.ids[Math.max(c1, c2) - 1]!,
+    };
+  })();
   const pickedChart = chartPicked && doc.charts[chartPicked]?.sheet === sheet ? chartPicked : null;
   if (pickedChart) decorations.push(...chartDecorations(doc.charts[pickedChart]!, sheet));
   const insertChart = (kind: ChartKind) => {
@@ -518,179 +531,193 @@ export default function SheetPanelBody({
           </Button>
         </div>
       ) : null}
-      <ContextMenu>
-        <ContextMenuTrigger className="relative min-h-0 flex-1">
-          <div className="absolute inset-0">
-            <SheetGrid
-              key={sheet}
-              doc={doc}
-              sheet={sheet}
-              values={values}
-              locale={locale}
-              selection={active}
-              onSelectionChange={select}
-              label={doc.sheet[sheet]!.name}
-              readOnly={readOnly}
-              editing={editing}
-              onEditingChange={setEditing}
-              onCommit={commit}
-              editSource={(at) => cellSource(doc, sheet, at.r, at.c, locale)}
-              onCommand={onCommand}
-              onCopy={(cut) => {
-                copied.current = copySelection(context, cut);
-                return copied.current.text;
-              }}
-              onPaste={paste}
-              onResize={(axis, id, px) =>
-                run([
-                  {
-                    op: "resize",
-                    sh: sheet,
-                    axis,
-                    ids: [id],
-                    // Stored as Excel keeps them: characters wide, points high.
-                    size:
-                      axis === "columns"
-                        ? Math.max(0, Math.round(((px - 5) / 7) * 100) / 100)
-                        : Math.round(((px * 3) / 4) * 100) / 100,
-                  },
-                ])
-              }
-              decorations={decorations}
-              overlays={overlays}
-              selectedOverlay={pickedChart}
-              onOverlaySelect={setChartPicked}
-              onOverlayChange={(id, change) =>
-                run([
-                  {
-                    op: "chartPatch",
-                    id,
-                    patch: {
-                      at: change.at,
-                      size: {
-                        width: Math.min(CHART_LIMITS.width.max, change.width),
-                        height: Math.min(CHART_LIMITS.height.max, change.height),
+      <div className="flex min-h-0 flex-1">
+        <ContextMenu>
+          <ContextMenuTrigger className="relative min-h-0 min-w-0 flex-1">
+            <div className="absolute inset-0">
+              <SheetGrid
+                key={sheet}
+                doc={doc}
+                sheet={sheet}
+                values={values}
+                locale={locale}
+                selection={active}
+                onSelectionChange={select}
+                label={doc.sheet[sheet]!.name}
+                readOnly={readOnly}
+                editing={editing}
+                onEditingChange={setEditing}
+                onCommit={commit}
+                editSource={(at) => cellSource(doc, sheet, at.r, at.c, locale)}
+                onCommand={onCommand}
+                onCopy={(cut) => {
+                  copied.current = copySelection(context, cut);
+                  return copied.current.text;
+                }}
+                onPaste={paste}
+                onResize={(axis, id, px) =>
+                  run([
+                    {
+                      op: "resize",
+                      sh: sheet,
+                      axis,
+                      ids: [id],
+                      // Stored as Excel keeps them: characters wide, points high.
+                      size:
+                        axis === "columns"
+                          ? Math.max(0, Math.round(((px - 5) / 7) * 100) / 100)
+                          : Math.round(((px * 3) / 4) * 100) / 100,
+                    },
+                  ])
+                }
+                decorations={decorations}
+                overlays={overlays}
+                selectedOverlay={pickedChart}
+                onOverlaySelect={setChartPicked}
+                onOverlayChange={(id, change) =>
+                  run([
+                    {
+                      op: "chartPatch",
+                      id,
+                      patch: {
+                        at: change.at,
+                        size: {
+                          width: Math.min(CHART_LIMITS.width.max, change.width),
+                          height: Math.min(CHART_LIMITS.height.max, change.height),
+                        },
                       },
                     },
-                  },
-                ])
-              }
-              onOverlayCommand={chartAction}
-            />
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent className="w-56">
-          {pickedChart ? (
-            <ChartContextItems
-              readOnly={readOnly}
-              onAction={(action) => chartAction(pickedChart, action)}
-            />
-          ) : (
-            <>
-              <MenuItem
-                icon={Scissor01Icon}
-                label="Cut"
-                disabled={readOnly}
-                onClick={() => {
-                  copied.current = copySelection(context, true);
-                  void navigator.clipboard?.writeText(copied.current.text);
-                }}
+                  ])
+                }
+                onOverlayCommand={chartAction}
               />
-              <MenuItem
-                icon={Copy01Icon}
-                label="Copy"
-                onClick={() => {
-                  copied.current = copySelection(context, false);
-                  void navigator.clipboard?.writeText(copied.current.text);
-                }}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-56">
+            {pickedChart ? (
+              <ChartContextItems
+                readOnly={readOnly}
+                onAction={(action) => chartAction(pickedChart, action)}
               />
-              <MenuItem
-                icon={ClipboardIcon}
-                label="Paste"
-                disabled={readOnly}
-                onClick={() => {
-                  void navigator.clipboard?.readText().then(paste);
-                }}
-              />
-              <MenuItem
-                icon={CommentAdd01Icon}
-                label="Comment"
-                disabled={readOnly || !!shownThread}
-                onClick={() => setCommenting(true)}
-              />
-              <ContextMenuSeparator />
-              <MenuItem
-                icon={RowInsertIcon}
-                label="Insert rows above"
-                disabled={readOnly}
-                onClick={() => run(insertAtSelection(context, "rows", "before"))}
-              />
-              <MenuItem
-                icon={RowInsertIcon}
-                label="Insert rows below"
-                disabled={readOnly}
-                onClick={() => run(insertAtSelection(context, "rows", "after"))}
-              />
-              <MenuItem
-                icon={ColumnInsertIcon}
-                label="Insert columns left"
-                disabled={readOnly}
-                onClick={() => run(insertAtSelection(context, "columns", "before"))}
-              />
-              <MenuItem
-                icon={ColumnInsertIcon}
-                label="Insert columns right"
-                disabled={readOnly}
-                onClick={() => run(insertAtSelection(context, "columns", "after"))}
-              />
-              <MenuItem
-                icon={RowDeleteIcon}
-                label="Delete rows"
-                disabled={readOnly}
-                onClick={() => run(deleteAtSelection(context, "rows"))}
-              />
-              <MenuItem
-                icon={ColumnDeleteIcon}
-                label="Delete columns"
-                disabled={readOnly}
-                onClick={() => run(deleteAtSelection(context, "columns"))}
-              />
-              <ContextMenuSub>
-                <ContextMenuSubTrigger disabled={readOnly}>
-                  <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
-                  Insert chart
-                </ContextMenuSubTrigger>
-                <ContextMenuSubContent className="w-40">
-                  {CHART_KINDS.map((each) => (
-                    <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
-                      {each.label}
-                    </ContextMenuItem>
-                  ))}
-                </ContextMenuSubContent>
-              </ContextMenuSub>
-              <ContextMenuSeparator />
-              <MenuItem
-                icon={SortingAZ01Icon}
-                label="Sort A to Z"
-                disabled={readOnly}
-                onClick={() => run(sortSelection(context, false))}
-              />
-              <MenuItem
-                icon={SortingZA01Icon}
-                label="Sort Z to A"
-                disabled={readOnly}
-                onClick={() => run(sortSelection(context, true))}
-              />
-              <MenuItem
-                icon={Delete02Icon}
-                label="Clear contents"
-                disabled={readOnly}
-                onClick={() => run(clearSelection(context))}
-              />
-            </>
-          )}
-        </ContextMenuContent>
-      </ContextMenu>
+            ) : (
+              <>
+                <MenuItem
+                  icon={Scissor01Icon}
+                  label="Cut"
+                  disabled={readOnly}
+                  onClick={() => {
+                    copied.current = copySelection(context, true);
+                    void navigator.clipboard?.writeText(copied.current.text);
+                  }}
+                />
+                <MenuItem
+                  icon={Copy01Icon}
+                  label="Copy"
+                  onClick={() => {
+                    copied.current = copySelection(context, false);
+                    void navigator.clipboard?.writeText(copied.current.text);
+                  }}
+                />
+                <MenuItem
+                  icon={ClipboardIcon}
+                  label="Paste"
+                  disabled={readOnly}
+                  onClick={() => {
+                    void navigator.clipboard?.readText().then(paste);
+                  }}
+                />
+                <MenuItem
+                  icon={CommentAdd01Icon}
+                  label="Comment"
+                  disabled={readOnly || !!shownThread}
+                  onClick={() => setCommenting(true)}
+                />
+                <ContextMenuSeparator />
+                <MenuItem
+                  icon={RowInsertIcon}
+                  label="Insert rows above"
+                  disabled={readOnly}
+                  onClick={() => run(insertAtSelection(context, "rows", "before"))}
+                />
+                <MenuItem
+                  icon={RowInsertIcon}
+                  label="Insert rows below"
+                  disabled={readOnly}
+                  onClick={() => run(insertAtSelection(context, "rows", "after"))}
+                />
+                <MenuItem
+                  icon={ColumnInsertIcon}
+                  label="Insert columns left"
+                  disabled={readOnly}
+                  onClick={() => run(insertAtSelection(context, "columns", "before"))}
+                />
+                <MenuItem
+                  icon={ColumnInsertIcon}
+                  label="Insert columns right"
+                  disabled={readOnly}
+                  onClick={() => run(insertAtSelection(context, "columns", "after"))}
+                />
+                <MenuItem
+                  icon={RowDeleteIcon}
+                  label="Delete rows"
+                  disabled={readOnly}
+                  onClick={() => run(deleteAtSelection(context, "rows"))}
+                />
+                <MenuItem
+                  icon={ColumnDeleteIcon}
+                  label="Delete columns"
+                  disabled={readOnly}
+                  onClick={() => run(deleteAtSelection(context, "columns"))}
+                />
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger disabled={readOnly}>
+                    <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
+                    Insert chart
+                  </ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-40">
+                    {CHART_KINDS.map((each) => (
+                      <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
+                        {each.label}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+                <ContextMenuSeparator />
+                <MenuItem
+                  icon={SortingAZ01Icon}
+                  label="Sort A to Z"
+                  disabled={readOnly}
+                  onClick={() => run(sortSelection(context, false))}
+                />
+                <MenuItem
+                  icon={SortingZA01Icon}
+                  label="Sort Z to A"
+                  disabled={readOnly}
+                  onClick={() => run(sortSelection(context, true))}
+                />
+                <MenuItem
+                  icon={Delete02Icon}
+                  label="Clear contents"
+                  disabled={readOnly}
+                  onClick={() => run(clearSelection(context))}
+                />
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+        {editedChart ? (
+          <ChartEditor
+            key={chartEditing}
+            doc={doc}
+            values={values}
+            chart={editedChart}
+            readOnly={readOnly}
+            selection={{ sheet, box: selectedBox }}
+            patch={(patch) => run([{ op: "chartPatch", id: chartEditing!, patch }])}
+            onClose={() => setChartEditing(null)}
+          />
+        ) : null}
+      </div>
       <div
         role="tablist"
         aria-label="Sheets"
