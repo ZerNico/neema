@@ -447,7 +447,8 @@ export function readCsv(text: string, name: string): LiveSheetImport {
   const delimiter = delimiterOf(body);
   const rows = parseDelimited(body, delimiter);
   const locale = delimiter === ";" ? DE_DE : EN_US;
-  const width = Math.max(...rows.map((row) => row.length));
+  // A loop, not a spread: a file of a few hundred thousand lines would overflow the stack.
+  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0);
   return {
     sheets: [
       {

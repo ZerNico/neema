@@ -9,7 +9,7 @@ import { exportLiveSheet, importLiveSheet } from "~/modules/spreadsheets/server/
 import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
 import { liveSheetExport } from "./export.ts";
-import { sheetFromCsv, sheetFromWorkbook } from "./import.ts";
+import { readCsv, sheetFromCsv, sheetFromWorkbook } from "./import.ts";
 import { sheetView } from "./sheet-view.ts";
 
 const settings = { locale: "en-US", timeZone: "UTC" };
@@ -754,6 +754,11 @@ describe("importing into a live sheet", () => {
     const eu = sheetFromCsv("Artikel;Betrag\nTee;1,5\n", "Kosten", settings);
     if (!eu.ok) throw new Error(eu.reason);
     expect(valueOf(eu.doc, "Kosten", 2, 2)).toBe(1.5);
+  });
+
+  it("reads a CSV of many lines without running out of stack", () => {
+    const text = "n\n" + "1\n".repeat(300_000);
+    expect(() => readCsv(text, "Long")).not.toThrow();
   });
 
   it("tells the separator by what lies outside quotes, a header's line breaks included", () => {

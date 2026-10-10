@@ -421,12 +421,14 @@ export function pasteAtSelection(
     ? own.cells
     : (options.foreign ?? parseTabular(text).map((row) => row.map((raw) => ({ raw }))));
   const grid = transpose
-    ? Array.from({ length: Math.max(...read.map((row) => row.length)) }, (_, x) =>
-        read.map((row) => row[x] ?? { raw: "" }),
+    ? Array.from(
+        { length: read.reduce((widest, row) => Math.max(widest, row.length), 0) },
+        (_, x) => read.map((row) => row[x] ?? { raw: "" }),
       )
     : read;
   const height = grid.length;
-  const width = Math.max(...grid.map((row) => row.length));
+  // A loop, not a spread: a long paste would overflow the stack.
+  const width = grid.reduce((widest, row) => Math.max(widest, row.length), 0);
   const grow = draft(context.doc, context.mint);
   grow.ensure(context.sheet, box.top + height - 1, box.left + width - 1);
   const target = grow.doc.sheet[context.sheet]!;
