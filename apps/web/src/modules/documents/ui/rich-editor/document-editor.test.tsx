@@ -317,13 +317,14 @@ describe("document editor", () => {
     const [first] = reachable;
     act(() => first!.focus());
     fireEvent.keyDown(first!, { key: "ArrowRight" });
-    // Focus follows the roving index once it has re-rendered.
+    // Focus follows the roving index once it has re-rendered; Undo and Redo
+    // come first and stay reachable while there is nothing to undo.
     await waitFor(() =>
-      expect(document.activeElement).toBe(within(toolbar).getByRole("button", { name: "Bold" })),
+      expect(document.activeElement).toBe(within(toolbar).getByRole("button", { name: "Undo" })),
     );
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
     await waitFor(() =>
-      expect(document.activeElement).toBe(within(toolbar).getByRole("button", { name: "Italic" })),
+      expect(document.activeElement).toBe(within(toolbar).getByRole("button", { name: "Redo" })),
     );
   });
 

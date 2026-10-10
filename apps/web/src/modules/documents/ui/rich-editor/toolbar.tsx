@@ -208,8 +208,24 @@ type Control =
     }
   | { kind: "link" | "table"; label: string; icon: Icon };
 
-/** In the order they give way: the last ones move into More first. */
+/** In the order they give way: the last ones move into More first, so undo and redo stay. */
 const CONTROLS: Control[] = [
+  {
+    kind: "action",
+    label: "Undo",
+    icon: Undo02Icon,
+    shortcut: "⌘Z",
+    enabled: "canUndo",
+    command: (c) => c.undo(),
+  },
+  {
+    kind: "action",
+    label: "Redo",
+    icon: Redo02Icon,
+    shortcut: "⌘⇧Z",
+    enabled: "canRedo",
+    command: (c) => c.redo(),
+  },
   {
     kind: "format",
     label: "Bold",
@@ -285,22 +301,6 @@ const CONTROLS: Control[] = [
   },
   { kind: "table", label: "Table", icon: LayoutTable01Icon },
   { kind: "action", label: "Divider", icon: MinusSignIcon, command: (c) => c.setHorizontalRule() },
-  {
-    kind: "action",
-    label: "Undo",
-    icon: Undo02Icon,
-    shortcut: "⌘Z",
-    enabled: "canUndo",
-    command: (c) => c.undo(),
-  },
-  {
-    kind: "action",
-    label: "Redo",
-    icon: Redo02Icon,
-    shortcut: "⌘⇧Z",
-    enabled: "canRedo",
-    command: (c) => c.redo(),
-  },
 ];
 
 /** How many controls fit beside the text style. */
