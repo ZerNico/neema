@@ -239,6 +239,12 @@ describe("applying changes", () => {
     expect(doc.sheet.s1!.merges).toHaveLength(1);
   });
 
+  it("changes the locale and time zone one at a time", () => {
+    let doc = apply(emptyDoc(), { op: "settings", locale: "de-DE" }).doc;
+    doc = apply(doc, { op: "settings", timeZone: "Europe/Berlin" }).doc;
+    expect(doc.settings).toEqual({ locale: "de-DE", timeZone: "Europe/Berlin" });
+  });
+
   it("gives a sheet named like another a name of its own", () => {
     const doc = apply(emptyDoc(), {
       op: "sheetAdd",

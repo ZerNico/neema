@@ -84,6 +84,7 @@ export type SheetOp =
   | { readonly op: "sheetMove"; readonly id: string; readonly after: string | null }
   | { readonly op: "sheetDelete" | "sheetRevive"; readonly id: string }
   | { readonly op: "name"; readonly name: string; readonly f: Formula | null }
+  | { readonly op: "settings"; readonly locale?: string; readonly timeZone?: string }
   | { readonly op: "chartPut"; readonly id: string; readonly chart: Chart }
   | { readonly op: "chartDelete"; readonly id: string }
   | {
@@ -134,6 +135,7 @@ const OP_NAMES = new Set([
   "sheetDelete",
   "sheetRevive",
   "name",
+  "settings",
   "chartPut",
   "chartDelete",
   "anchor",
@@ -278,6 +280,11 @@ function validOp(op: Record<string, unknown>): boolean {
       return typeof op.name === "string" && (op.f === null || isFormula(op.f));
     case "chartPut":
       return isId(op.id) && isChart(op.chart);
+    case "settings":
+      return (
+        (op.locale === undefined || (typeof op.locale === "string" && op.locale.length <= 20)) &&
+        (op.timeZone === undefined || (typeof op.timeZone === "string" && op.timeZone.length <= 64))
+      );
     case "anchor":
       return (
         isId(op.thread) &&

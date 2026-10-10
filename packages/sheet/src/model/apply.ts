@@ -325,6 +325,14 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       else names[key] = { name: op.name, f: op.f };
       return { ...doc, names };
     }
+    case "settings":
+      return {
+        ...doc,
+        settings: {
+          locale: op.locale ?? doc.settings.locale,
+          timeZone: op.timeZone ?? doc.settings.timeZone,
+        },
+      };
     case "chartPut":
       if (!sheetOf(op.chart.sheet)) return drop(doc, dropped, "a chart on a sheet that is gone");
       return { ...doc, charts: { ...doc.charts, [op.id]: op.chart } };

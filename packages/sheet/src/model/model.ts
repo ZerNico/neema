@@ -99,7 +99,16 @@ export interface Chart {
   readonly series: readonly ChartSeries[];
 }
 
+/** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
+export interface SheetSettings {
+  /** A locale id from `SHEET_LOCALES`, such as "de-DE". */
+  readonly locale: string;
+  /** An IANA time zone, such as "Europe/Berlin". */
+  readonly timeZone: string;
+}
+
 export interface SheetDoc {
+  readonly settings: SheetSettings;
   readonly sheets: readonly AxisEntry[];
   readonly sheet: Readonly<Record<string, Sheet>>;
   /** Defined names by lower-case name: the name as written and its formula. */
@@ -175,8 +184,12 @@ export function emptySheet(
 }
 
 /** A new document with one sheet. */
-export function emptyDoc(sheetName = "Sheet1"): SheetDoc {
+export function emptyDoc(
+  sheetName = "Sheet1",
+  settings: SheetSettings = { locale: "en-US", timeZone: "UTC" },
+): SheetDoc {
   return {
+    settings,
     sheets: [{ id: "s1" }],
     sheet: { s1: emptySheet(sheetName, "s1.") },
     names: {},
