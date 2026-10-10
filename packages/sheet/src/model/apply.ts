@@ -12,6 +12,7 @@ import {
   type Formula,
   type IdRef,
   type RefCorner,
+  type Positions,
   type Sheet,
   type SheetDoc,
 } from "./model.ts";
@@ -32,6 +33,24 @@ export function applyChange(
   let next = doc;
   for (const op of change.ops) next = applyOp(next, op, revision, dropped);
   return { doc: next, dropped };
+}
+
+/** A live row or column at or next to an ID, as a deleted one's place passes on. */
+const liveNear = (index: Positions, id: string) => {
+  const place = index.at(id) ?? index.nearest(id, 1) ?? index.nearest(id, -1);
+  return place === undefined ? undefined : index.ids[place - 1];
+};
+
+/**
+ * Where a chart or picture can sit: its cell, or, on a row or column deleted
+ * meanwhile, the next live one, as a delete moves it; null for IDs the sheet
+ * never had, which would leave it in the document but never drawn.
+ */
+function settled(sheet: Sheet, at: { readonly r: string; readonly c: string }) {
+  const [rows, cols] = [positions(sheet.rows), positions(sheet.cols)];
+  const [r, c] = [liveNear(rows, at.r), liveNear(cols, at.c)];
+  if (!r || !c) return null;
+  return r === at.r && c === at.c ? at : { r, c };
 }
 
 /** Whether an ID is a live entry, through the order list's cached index. */
@@ -379,22 +398,35 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
           timeZone: op.timeZone ?? doc.settings.timeZone,
         },
       };
-    case "chartPut":
-      if (!sheetOf(op.chart.sheet)) return drop(doc, dropped, "a chart on a sheet that is gone");
-      return { ...doc, charts: { ...doc.charts, [op.id]: op.chart } };
+    case "chartPut": {
+      const sheet = sheetOf(op.chart.sheet);
+      if (!sheet) return drop(doc, dropped, "a chart on a sheet that is gone");
+      const at = settled(sheet, op.chart.at);
+      if (!at) return drop(doc, dropped, "a chart on cells the sheet does not have");
+      return { ...doc, charts: { ...doc.charts, [op.id]: { ...op.chart, at } } };
+    }
     case "chartPatch": {
       const chart = doc.charts[op.id];
       if (!chart) return drop(doc, dropped, "a chart that is gone");
-      return { ...doc, charts: { ...doc.charts, [op.id]: patchChart(chart, op.patch) } };
+      const patched = patchChart(chart, op.patch);
+      const at = settled(doc.sheet[patched.sheet]!, patched.at);
+      if (!at) return drop(doc, dropped, "a chart moved to cells the sheet does not have");
+      return { ...doc, charts: { ...doc.charts, [op.id]: { ...patched, at } } };
     }
-    case "imagePut":
-      if (!sheetOf(op.image.sheet)) return drop(doc, dropped, "a picture on a sheet that is gone");
-      return { ...doc, images: { ...doc.images, [op.id]: op.image } };
+    case "imagePut": {
+      const sheet = sheetOf(op.image.sheet);
+      if (!sheet) return drop(doc, dropped, "a picture on a sheet that is gone");
+      const at = settled(sheet, op.image.at);
+      if (!at) return drop(doc, dropped, "a picture on cells the sheet does not have");
+      return { ...doc, images: { ...doc.images, [op.id]: { ...op.image, at } } };
+    }
     case "imagePlace": {
       const image = doc.images?.[op.id];
       if (!image) return drop(doc, dropped, "a picture that is gone");
+      const at = settled(doc.sheet[image.sheet]!, op.place.at);
+      if (!at) return drop(doc, dropped, "a picture moved to cells the sheet does not have");
       const { offset: _old, ...rest } = image;
-      return { ...doc, images: { ...doc.images, [op.id]: { ...rest, ...op.place } } };
+      return { ...doc, images: { ...doc.images, [op.id]: { ...rest, ...op.place, at } } };
     }
     case "imageDelete": {
       if (!doc.images?.[op.id]) return doc;

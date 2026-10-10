@@ -112,4 +112,23 @@ describe("threads on moving cells", () => {
       placed.images!.p1!.at,
     ]);
   });
+
+  it("place a picture put on a row deleted meanwhile on the next one, and never on unknown cells", () => {
+    const image = {
+      sheet: "s1",
+      at: { r: "s1.r2", c: "s1.c2" },
+      size: { width: 20, height: 20 },
+      src: "data:image/png;base64,AAAA",
+    };
+    // Someone deleted row 2 just before the picture arrived.
+    const deleted = apply(emptyDoc(), { op: "delete", sh: "s1", axis: "rows", ids: ["s1.r2"] });
+    const placed = apply(deleted, { op: "imagePut", id: "p1", image });
+    expect(placed.images!.p1!.at).toEqual({ r: "s1.r3", c: "s1.c2" });
+    const nowhere = apply(emptyDoc(), {
+      op: "imagePut",
+      id: "p1",
+      image: { ...image, at: { r: "zz.r1", c: "s1.c1" } },
+    });
+    expect(nowhere.images).toBeUndefined();
+  });
 });
