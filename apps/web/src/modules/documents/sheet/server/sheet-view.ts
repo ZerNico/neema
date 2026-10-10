@@ -216,29 +216,69 @@ export function sheetView(
     const col = data ? positions(data.cols).at(label.cell.c) : undefined;
     return data && row && col ? `=${quoteSheet(data.name)}!${address(row, col)}` : "#REF!";
   };
+  /** Attributes from the options set, in order; true is written bare, unset ones left out. */
+  const attributes = (
+    pairs: ReadonlyArray<readonly [string, string | number | boolean | null | undefined]>,
+  ) =>
+    pairs
+      .flatMap(([key, value]) =>
+        value === undefined || value === null || value === false
+          ? []
+          : [value === true ? key : `${key}="${escapeAttribute(String(value))}"`],
+      )
+      .join(" ");
   const charts = Object.entries(doc.charts).flatMap(([id, chart]) => {
     const host = doc.sheet[chart.sheet];
     if (!host || !ids.includes(chart.sheet)) return [];
     const row = positions(host.rows).at(chart.at.r);
     const col = positions(host.cols).at(chart.at.c);
-    const series = chart.series
-      .map((each) => {
-        const read = rangeText(each.sheet ?? chart.sheet, each.values);
-        const called = chartText(each.name);
-        return read ? `${read}${called ? ` (${called})` : ""}` : "#REF!";
-      })
-      .join("; ");
-    const first = chart.series[0];
-    const categories = first?.categories
-      ? rangeText(first.sheet ?? chart.sheet, first.categories)
-      : null;
-    return [
-      `<chart id="${escapeAttribute(id)}" sheet="${escapeAttribute(host.name)}" type="${chart.kind}"${
-        row && col ? ` at="${address(row, col)}"` : ""
-      }${chart.title ? ` title="${escapeAttribute(chartText(chart.title)!)}"` : ""}${
-        categories ? ` categories="${escapeAttribute(categories)}"` : ""
-      } series="${escapeAttribute(series)}"/>`,
-    ];
+    const head = attributes([
+      ["id", id],
+      ["sheet", host.name],
+      ["type", chart.kind],
+      ["at", row && col ? address(row, col) : null],
+      ["size", `${chart.size.width}x${chart.size.height}`],
+      ["range", chart.source ? (rangeText(chart.source.sheet, chart.source.box) ?? "#REF!") : null],
+      ["stack", chart.stack],
+      ["title", chartText(chart.title)],
+      ["subtitle", chartText(chart.subtitle)],
+      ["legend", chart.legend],
+      ["labels", chart.style?.labels?.show],
+      ["hole", chart.style?.hole],
+    ]);
+    const series = chart.series.map((each) => {
+      const on = each.sheet ?? chart.sheet;
+      return `  <series ${attributes([
+        ["values", rangeText(on, each.values) ?? "#REF!"],
+        ["name", chartText(each.name)],
+        ["categories", each.categories ? (rangeText(on, each.categories) ?? "#REF!") : null],
+        ["sizes", each.sizes ? (rangeText(on, each.sizes) ?? "#REF!") : null],
+        ["color", each.color],
+        ["as", each.kind],
+        ["axis", each.axis],
+        ["labels", each.labels?.show],
+        ["smooth", each.line?.smooth],
+        ["markers", each.line?.markers],
+        ["dashed", each.line?.dashed],
+        ["trendline", each.trendline],
+      ])}/>`;
+    });
+    const axes = (["x", "y", "y2"] as const).flatMap((key) => {
+      const axis = chart.axes?.[key];
+      if (!axis) return [];
+      const tag = key === "x" ? "xAxis" : key === "y" ? "yAxis" : "rightAxis";
+      return [
+        `  <${tag} ${attributes([
+          ["title", chartText(axis.title)],
+          ["min", axis.min],
+          ["max", axis.max],
+          ["format", axis.format],
+          ["log", axis.log],
+          ["gridlines", axis.gridlines],
+        ])}/>`,
+      ];
+    });
+    return [`<chart ${head}>\n${[...series, ...axes].join("\n")}\n</chart>`];
   });
   if (charts.length) lines.push(`<charts>\n${charts.join("\n")}\n</charts>`);
   const names = Object.values(doc.names).map(

@@ -85,7 +85,10 @@ describe("exporting a live sheet", () => {
       calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 }),
     );
     expect(view.xml).toMatch(
-      /<chart id="[^"]+" sheet="Sheet1" type="column" at="B2" title="Sales" categories="Data!A1:A2" series="Data!B1:B2 \(Sales\)"\/>/,
+      /<chart id="[^"]+" sheet="Sheet1" type="column" at="B2" [^>]*title="Sales"/,
+    );
+    expect(view.xml).toContain(
+      '<series values="Data!B1:B2" name="Sales" categories="Data!A1:A2"/>',
     );
     const read = await inspectSpreadsheet(await exportLiveSheet(liveSheetExport(doc)));
     expect(read.sheets.find((sheet) => sheet.name === "Sheet1")?.charts).toBe(1);

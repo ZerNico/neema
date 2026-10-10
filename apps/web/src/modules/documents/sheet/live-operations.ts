@@ -1,4 +1,5 @@
 import { MAX_COLUMN, MAX_ROW, parseCell, parseRange } from "@chat/sheet/a1";
+import { CHART_KINDS } from "@chat/sheet/model/chart";
 import { SpreadsheetError } from "~/modules/spreadsheets/errors.ts";
 import {
   SPREADSHEET_OPERATIONS,
@@ -22,6 +23,125 @@ const rows = {
 } as const;
 const columns = { type: "columns", about: 'A column or span, e.g. "B" or "B:D".' } as const;
 const { setCells, setFormat } = SPREADSHEET_OPERATIONS;
+
+const chartText = {
+  type: "string",
+  max: 200,
+  about: 'Text, or "=B1" to show that cell and follow it.',
+} as const;
+const chartRange = {
+  type: "string",
+  max: 100,
+  about: 'A range, e.g. "B2:B13" or "Data!B2:B13".',
+} as const;
+const axis = (about: string) =>
+  ({
+    type: "object",
+    about,
+    fields: {
+      title: chartText,
+      min: { type: "number", min: -1e15, max: 1e15, about: "Lowest value shown." },
+      max: { type: "number", min: -1e15, max: 1e15, about: "Highest value shown." },
+      format: {
+        type: "string",
+        max: 100,
+        about: 'Excel number format of its labels, e.g. "$#,##0" or "0%"; default the cells\' own.',
+      },
+      log: { type: "boolean", about: "Logarithmic scale." },
+      gridlines: { type: "boolean", about: "Draw gridlines." },
+    },
+    required: [],
+  }) as const;
+/** Chart options editChart can remove. */
+export const CLEARABLE = [
+  "title",
+  "subtitle",
+  "stack",
+  "legend",
+  "xAxis",
+  "yAxis",
+  "rightAxis",
+  "labels",
+  "hole",
+] as const;
+/** Every option a chart has, as addChart and editChart take them. */
+const CHART_OPTIONS = {
+  type: {
+    type: "string",
+    max: 10,
+    options: CHART_KINDS,
+    about:
+      "column, bar (horizontal), line, area, pie, doughnut, scatter (x then y), bubble (x, y, size), waterfall (a running total of +/- changes), histogram (counts of one series' values). Pie, doughnut, waterfall and histogram take one series.",
+  },
+  range: {
+    ...chartRange,
+    about:
+      'Data to chart, read as Excel reads a selection: a header row names the series, a text or date first column labels the points, e.g. "A1:D13".',
+  },
+  categories: { ...chartRange, about: "Point labels, or a scatter's x values, for series." },
+  series: {
+    type: "list",
+    min: 1,
+    max: 12,
+    about: "Data series, each its own options.",
+    of: {
+      type: "object",
+      about: "One series.",
+      fields: {
+        values: chartRange,
+        name: { ...chartText, about: 'Legend name: text, or "=B1" to follow a cell.' },
+        sizes: { ...chartRange, about: "A bubble chart's sizes." },
+        color: { type: "color", about: "Its colour; default the theme's next." },
+        as: {
+          type: "string",
+          max: 6,
+          options: ["column", "line", "area"],
+          about: "In a column, line or area chart, draw this series as another of those (a combo).",
+        },
+        axis: {
+          type: "string",
+          max: 5,
+          options: ["left", "right"],
+          about: "Measure it on the right axis, for a second scale.",
+        },
+        labels: { type: "boolean", about: "Show its values on the points." },
+        smooth: { type: "boolean", about: "A line drawn smooth." },
+        markers: { type: "boolean", about: "A line with a dot on each point." },
+        dashed: { type: "boolean", about: "A dashed line." },
+        trendline: { type: "boolean", about: "A scatter's linear trendline." },
+      },
+      required: ["values"],
+    },
+  },
+  stack: {
+    type: "string",
+    max: 7,
+    options: ["none", "stacked", "percent"],
+    about: "Column, bar or area: series side by side, stacked, or stacked to 100%.",
+  },
+  title: { ...chartText, about: 'Chart title: text, or "=A1" to follow a cell.' },
+  subtitle: chartText,
+  legend: {
+    type: "string",
+    max: 6,
+    options: ["none", "top", "bottom", "left", "right"],
+    about: "Where the legend goes.",
+  },
+  xAxis: axis(
+    "Horizontal axis. Only a scatter's, bubble's or bar chart's takes min, max, format and log.",
+  ),
+  yAxis: axis("Vertical (left) axis."),
+  rightAxis: axis('The right axis, for series with axis "right".'),
+  labels: { type: "boolean", about: "Data labels on every series, or percents on a pie's slices." },
+  hole: {
+    type: "number",
+    min: 0.1,
+    max: 0.9,
+    about: "A doughnut's hole, as a share of its radius.",
+  },
+  width: { type: "integer", min: 160, max: 2000, about: "Width in pixels (default 480)." },
+  height: { type: "integer", min: 120, max: 1600, about: "Height in pixels (default 300)." },
+} as const;
 
 /**
  * What the model may do to a live sheet: the Excel tools' edits that a live
@@ -130,13 +250,34 @@ export const LIVE_SHEET_OPERATIONS = {
     fields: { ...SPREADSHEET_OPERATIONS.defineName.fields, sheet, range },
   },
   addChart: {
-    ...SPREADSHEET_OPERATIONS.addChart,
     about:
-      "Add a chart drawn from cells, which follows them as they change. Categories label the points; each series is one line, bar set or pie. Ranges may name another sheet, e.g. Data!B2:B13.",
+      "Add a chart drawn from cells; it follows them as they change. Give range to read it as Excel reads a selection, or list series. Ranges may name another sheet, e.g. Data!B2:B13.",
     fields: {
-      ...SPREADSHEET_OPERATIONS.addChart.fields,
       sheet: { ...sheet, about: "Sheet the chart is placed on." },
+      at: { type: "cell", about: "Cell the chart's top-left corner sits on." },
+      ...CHART_OPTIONS,
     },
+    required: ["sheet", "at", "type"],
+    exclusive: [["range", "series"]],
+    change: ["added", "chart"],
+  },
+  editChart: {
+    about:
+      "Change a chart, by the id <charts> gives it. Only what is given changes; an axis given merges into the axis; series given replace them all.",
+    fields: {
+      chart: { type: "string", max: 64, about: "The chart's id." },
+      clear: {
+        type: "list",
+        min: 1,
+        max: 12,
+        about: "Options to remove, back to their default.",
+        of: { type: "string", max: 10, options: CLEARABLE, about: "An option." },
+      },
+      at: { type: "cell", about: "Move its top-left corner to this cell." },
+      ...CHART_OPTIONS,
+    },
+    required: ["chart"],
+    change: ["changed", "chart"],
   },
   removeChart: {
     about: "Remove a chart, by the id the view gives it in <charts>.",
@@ -148,6 +289,7 @@ export const LIVE_SHEET_OPERATIONS = {
 
 export type LiveSheetOperation = OperationOf<typeof LIVE_SHEET_OPERATIONS>;
 
+const ONE_SERIES = new Set(["pie", "doughnut", "waterfall", "histogram"]);
 const engine = spreadsheetEngine(LIVE_SHEET_OPERATIONS, LIVE_SHEET_CALL.operations);
 const fail = (path: string, message: string): never => {
   throw new SpreadsheetError("invalid_operation", `${path}: ${message}`);
@@ -175,11 +317,12 @@ export function parseLiveSheetOperations(input: unknown): LiveSheetOperation[] {
     )
       fail(path, "provide at least one property to change");
     if (
-      kind === "addChart" &&
-      operation.type === "pie" &&
-      (operation.series as unknown[]).length !== 1
+      (kind === "addChart" || kind === "editChart") &&
+      ONE_SERIES.has(operation.type as string) &&
+      Array.isArray(operation.series) &&
+      operation.series.length !== 1
     )
-      fail(path, "a pie chart takes exactly one series");
+      fail(path, `a ${operation.type as string} chart takes exactly one series`);
     if (kind === "defineName" && !/^[A-Za-z_\\][\w.]{0,99}$/.test(operation.name as string))
       fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
   });
