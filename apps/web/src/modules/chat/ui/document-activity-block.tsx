@@ -21,9 +21,7 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   // A project document is shared with every member; say so where it appears.
   const kind = entry?.inProject ? "Project document" : "Document";
   const status = entry
-    ? entry.tasks
-      ? `${kind} · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
-      : kind
+    ? kind
     : gone
       ? "Document deleted"
       : owned

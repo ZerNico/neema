@@ -76,9 +76,6 @@ export function DocumentOwner({
         return previous &&
           previous.title === session.entry.title &&
           previous.status === session.entry.status &&
-          previous.tasks?.done === session.entry.tasks?.done &&
-          previous.tasks?.total === session.entry.tasks?.total &&
-          previous.chars === session.entry.chars &&
           previous.expanded === session.entry.expanded &&
           !previous.open === !session.entry.open &&
           !previous.retry === !session.entry.retry
@@ -234,9 +231,7 @@ function DocumentSession({
         : controller.error
           ? "Changes not saved yet"
           : subtitle,
-      tasks: controller.document?.tasks ?? null,
       inProject: available ? controller.document?.projectId != null : null,
-      chars: controller.document?.chars ?? 0,
       expanded: selected === id,
       open: available ? () => panel.open(latestRequest.current) : null,
       retry: failed

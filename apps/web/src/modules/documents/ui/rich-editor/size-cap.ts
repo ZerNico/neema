@@ -2,7 +2,7 @@ import { Extension } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
 import { Plugin, type Transaction } from "@tiptap/pm/state";
 import { isRemoteChange } from "../../editor/remote.ts";
-import { overCap } from "../../editor/summary.ts";
+import { overCap } from "../../editor/limits.ts";
 
 /**
  * Decides whether a local change keeps the tree within the limits. One walk

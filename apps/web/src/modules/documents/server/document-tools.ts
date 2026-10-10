@@ -36,7 +36,6 @@ const DocumentSummary = Schema.Struct({
   readOnly: Schema.optionalKey(Schema.Literal(true)),
   revision: Schema.Int,
   lastEditedBy: Schema.Literals(["user", "model"]),
-  chars: Schema.Int,
 });
 const CreateParams = Schema.Struct({
   title: DocumentTitle,
@@ -212,7 +211,7 @@ const commentTool = Tool.make("comment_on_document", {
 });
 const listTool = Tool.make("list_chat_documents", {
   description:
-    "List every document in this chat with its id, title, revision, who edited it last and its size. Loads no content; use read_chat_document to focus one.",
+    "List every document in this chat with its id, title, revision, and who edited it last. Loads no content; use read_chat_document to focus one.",
   parameters: Tool.EmptyParams,
   success: Result,
 });
@@ -368,7 +367,6 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     ...(document.canEdit ? {} : { readOnly: true as const }),
     revision: document.revision,
     lastEditedBy: document.lastEditedBy,
-    chars: document.chars,
   });
   const listing = (): Result => ({
     outcome: "listed",
@@ -1200,7 +1198,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   const othersXml = (current: EditableDocument | null) =>
     known
       .filter((document) => document.id !== current?.id)
-      .map((document) => `<document${header(document, { chars: document.chars })}/>`)
+      .map((document) => `<document${header(document, {})}/>`)
       .join("\n");
   const stage = (text: string, documentId: string, revision: number, blocks: SeenBlock[]) => {
     staged.set(text, { documentId, revision, blocks });

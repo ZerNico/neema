@@ -22,16 +22,7 @@ import {
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<
-    DocumentRow,
-    | "title"
-    | "textLength"
-    | "tasksDone"
-    | "tasksTotal"
-    | "revision"
-    | "lastEditedBy"
-    | "lastEditorUserId"
-  >
+  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
 type Reader = Pick<DbTx, "select">;
 
@@ -52,9 +43,6 @@ const documentColumns = (userId: string) => ({
   projectId: documents.projectId,
   createdByMessageId: documents.createdByMessageId,
   title: documents.title,
-  textLength: documents.textLength,
-  tasksDone: documents.tasksDone,
-  tasksTotal: documents.tasksTotal,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
   lastEditorUserId: documents.lastEditorUserId,
@@ -65,16 +53,8 @@ const documentColumns = (userId: string) => ({
 type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
   access: ProjectRole | null;
 };
-const toDocument = ({
-  access,
-  textLength,
-  tasksDone,
-  tasksTotal,
-  ...row
-}: Selected): EditableDocument => ({
+const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
   ...row,
-  chars: textLength,
-  tasks: tasksTotal ? { done: tasksDone, total: tasksTotal } : null,
   canEdit: projectCan.edit(access),
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
@@ -103,10 +83,7 @@ export class DocumentRepo extends Context.Service<
       tx: DbTx,
       userId: string,
       owner: DocumentOwner,
-      values: Pick<
-        DocumentRow,
-        "title" | "textLength" | "tasksDone" | "tasksTotal" | "lastEditedBy" | "snapshot"
-      > & {
+      values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
       },
     ): Effect.Effect<EditableDocument>;
@@ -233,9 +210,6 @@ export class DocumentRepo extends Context.Service<
                 ? { conversationId: owner.conversationId }
                 : { projectId: owner.projectId }),
               title: values.title,
-              textLength: values.textLength,
-              tasksDone: values.tasksDone,
-              tasksTotal: values.tasksTotal,
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,

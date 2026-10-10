@@ -399,10 +399,7 @@ function ProjectDocumentRow({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
     onError: (error) => toastError("Could not delete the document.", error),
   });
-  const progress = entry?.tasks ? `${entry.tasks.done} of ${entry.tasks.total} tasks done` : null;
-  const detail = [progress, `Updated ${relativeAgeLabel(document.updatedAt)}`]
-    .filter(Boolean)
-    .join(" · ");
+  const detail = `Updated ${relativeAgeLabel(document.updatedAt)}`;
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">

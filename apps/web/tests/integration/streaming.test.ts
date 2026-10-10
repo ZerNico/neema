@@ -2102,7 +2102,7 @@ describe("conversation documents", () => {
     const lastBlock = text.slice(text.lastIndexOf("<documents>"));
     const others = [...lastBlock.matchAll(/<document ([^>]*?)\/>/g)].map((match) => {
       const header = attributes(match[1]!);
-      return { id: header.id, title: header.title, chars: Number(header.chars) };
+      return { id: header.id, title: header.title };
     });
     return {
       text,
@@ -3222,7 +3222,7 @@ describe("conversation documents", () => {
       await settle(sent.assistantMessageId);
       expect(trailing(prompts[0]!)).toMatchObject({
         focused: { id: first.document.id },
-        others: [{ id: second.document.id, title: "Second", chars: 3 }],
+        others: [{ id: second.document.id, title: "Second" }],
       });
       expect(trailing(prompts[0]!)!.text).toContain(">one</p>");
       expect(trailing(prompts[0]!)!.text).not.toContain(">two<");

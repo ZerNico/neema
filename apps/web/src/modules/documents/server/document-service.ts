@@ -40,7 +40,7 @@ import {
   type TreeEdit,
 } from "../editor/tree-edit.ts";
 import { blockHash } from "../editor/tree.ts";
-import { overCap, summarize } from "../editor/summary.ts";
+import { overCap } from "../editor/limits.ts";
 import { presenceUser } from "../presence-user.ts";
 import { detachedThreads, quoteRange } from "../editor/comments.ts";
 import { squareTables } from "../editor/tables.ts";
@@ -615,7 +615,6 @@ export class DocumentService extends Context.Service<
       ) =>
         Effect.gen(function* () {
           yield* withinTreeCap(doc);
-          const summary = summarize(doc);
           const now = yield* Clock.currentTimeMillis;
           const generation = author.origin === "model" ? yield* GenerationFence : null;
           const kept = steps.map((step) => ({
@@ -653,7 +652,6 @@ export class DocumentService extends Context.Service<
             );
           }
           const document = yield* documents.write(tx, author.userId, documentId, {
-            ...summary,
             revision,
             lastEditedBy: author.origin,
             lastEditorUserId: author.userId,
@@ -795,7 +793,6 @@ export class DocumentService extends Context.Service<
               else yield* lockProjectForEditing(tx, userId, owner.projectId);
               return yield* documents.create(tx, userId, owner, {
                 title: parsed.title,
-                ...summarize(doc),
                 // Only a chat's document dies with the answer that made it.
                 createdByMessageId:
                   "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,

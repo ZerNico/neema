@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "59c0ba81-c9c7-4e56-98f5-60828ba77b14",
+  "id": "71adbd86-27a3-405d-bc52-53a46ace7391",
   "prevIds": [
     "09612183-500b-4163-85fe-ebad475f141f"
   ],
@@ -4187,45 +4187,6 @@
       "generated": null,
       "identity": null,
       "name": "title",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
-      "type": "integer",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "0",
-      "generated": null,
-      "identity": null,
-      "name": "text_length",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
-      "type": "integer",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "0",
-      "generated": null,
-      "identity": null,
-      "name": "tasks_done",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
-      "type": "integer",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "0",
-      "generated": null,
-      "identity": null,
-      "name": "tasks_total",
       "entityType": "columns",
       "schema": "public",
       "table": "documents"

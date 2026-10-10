@@ -23,9 +23,8 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
   const rows = new Map<string, { document: EditableDocument; doc: Node }>();
   let nextDocument = 0;
   const put = (document: EditableDocument, doc: Node) => {
-    const next = { ...document, chars: doc.textContent.length };
-    rows.set(next.id, { document: next, doc });
-    return next;
+    rows.set(document.id, { document, doc });
+    return document;
   };
   const build = (content: string, outline: ReadonlyArray<string> = []) => {
     const parsed = parseMarkdown(content);
@@ -41,8 +40,6 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
         conversationId: CONVERSATION,
         projectId: null,
         title: row.title,
-        chars: 0,
-        tasks: null,
         revision: 0,
         lastEditedBy: "model",
         canEdit: true,
@@ -75,8 +72,6 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
             projectId: input.projectId ?? null,
             canEdit: true,
             title: input.title,
-            chars: 0,
-            tasks: null,
             revision: 0,
             lastEditedBy: "model",
             createdAt: stamp,

@@ -124,12 +124,12 @@ describe("document panel", () => {
       projectId: "project-1",
     });
     await fixture();
-    expect(await screen.findByText(/^Project document · 1 of 3 tasks done$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Project document$/)).toBeInTheDocument();
     expect(await screen.findByText(/^Project · Edited/)).toBeInTheDocument();
     cleanup();
     server.seed(fresh());
     await fixture();
-    expect(await screen.findByText(/^Document · 1 of 3 tasks done$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Document$/)).toBeInTheDocument();
   });
 
   it("stays editable and shows an assistant edit while the person types", async () => {

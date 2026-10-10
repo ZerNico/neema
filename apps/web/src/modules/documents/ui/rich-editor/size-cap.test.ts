@@ -1,7 +1,7 @@
 import { EditorState } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 import { documentSchema } from "../../editor/markdown.ts";
-import { overCap } from "../../editor/summary.ts";
+import { overCap } from "../../editor/limits.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 import { capCheck } from "./size-cap.ts";
 
