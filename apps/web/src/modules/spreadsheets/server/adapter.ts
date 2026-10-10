@@ -24,9 +24,12 @@ import {
   getCellFill,
   getCellFont,
   getCellNumberFormat,
+  makeBorder,
   makeFill,
+  makeSide,
   patchCellFont,
   setCellAlignment,
+  setCellBorder,
   setCellBorderAll,
   setCellFill,
   setCellNumberFormat,
@@ -813,6 +816,86 @@ export async function editSpreadsheet(bytes: Uint8Array, rawOperations: unknown)
     sheets: sheetNames(workbook),
     operations: operations.map((operation) => operation.kind),
   };
+}
+
+/** A live sheet as a workbook is built from it: every cell's input as setCells takes it, and its style. */
+export interface LiveSheetExport {
+  readonly sheets: ReadonlyArray<{
+    readonly name: string;
+    readonly cells: ReadonlyArray<{
+      readonly row: number;
+      readonly column: number;
+      readonly input?: string | number | boolean;
+      readonly style?: Readonly<Record<string, string | number | boolean>>;
+    }>;
+    readonly merges: readonly string[];
+    readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
+    readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
+    readonly freeze?: string;
+  }>;
+  readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+}
+
+/** A live sheet's style properties, as the `format` operation stores them, on one cell. */
+function styleCell(workbook: Workbook, cell: Cell, style: Readonly<Record<string, unknown>>) {
+  const text = (key: string) => (typeof style[key] === "string" ? (style[key] as string) : null);
+  const font = {
+    ...(style.bold === true ? { bold: true } : {}),
+    ...(style.italic === true ? { italic: true } : {}),
+    ...(typeof style.fontSize === "number" ? { size: style.fontSize } : {}),
+    ...(text("fontColor") ? { color: { rgb: `FF${text("fontColor")!.slice(1)}` } } : {}),
+  };
+  if (Object.keys(font).length) patchCellFont(workbook, cell, font);
+  if (text("fill"))
+    setCellFill(
+      workbook,
+      cell,
+      makeFill({ patternType: "solid", fgColor: { rgb: `FF${text("fill")!.slice(1)}` } }),
+    );
+  if (text("numberFormat")) setCellNumberFormat(workbook, cell, text("numberFormat")!);
+  const horizontal = text("horizontal");
+  const vertical = text("vertical");
+  if (horizontal || vertical || style.wrap === true)
+    setCellAlignment(workbook, cell, {
+      ...(horizontal ? { horizontal: horizontal as "left" | "center" | "right" } : {}),
+      ...(vertical ? { vertical: vertical as "top" | "center" | "bottom" } : {}),
+      ...(style.wrap === true ? { wrapText: true } : {}),
+    });
+  const side = makeSide({ style: "thin" });
+  const edges = {
+    ...(style.borderTop === true ? { top: side } : {}),
+    ...(style.borderBottom === true ? { bottom: side } : {}),
+    ...(style.borderLeft === true ? { left: side } : {}),
+    ...(style.borderRight === true ? { right: side } : {}),
+  };
+  if (Object.keys(edges).length) setCellBorder(workbook, cell, makeBorder(edges));
+}
+
+/**
+ * A workbook made from a live sheet. Its formulas are written as Excel 365
+ * reads them and calculated here, so the file opens with every value.
+ */
+export async function exportLiveSheet(spec: LiveSheetExport) {
+  const workbook = createWorkbook();
+  const authored = new Set<Cell>();
+  for (const each of spec.sheets) {
+    const sheet = addWorksheet(workbook, each.name);
+    for (const { row, column, input, style } of each.cells) {
+      if (input !== undefined) {
+        setCell(sheet, row, column, toCellValue(input));
+        const cell = getCell(sheet, row, column);
+        if (cell && isFormulaValue(cell.value)) authored.add(cell);
+      }
+      if (style) styleCell(workbook, ensureCell(sheet, row, column), style);
+    }
+    for (const merge of each.merges) mergeCells(sheet, merge);
+    for (const [column, width] of each.widths) setColumnWidth(sheet, column, width);
+    for (const [row, height] of each.heights) setRowHeight(sheet, row, height);
+    if (each.freeze) setFreezePanes(sheet, each.freeze);
+  }
+  for (const name of spec.names) addDefinedName(workbook, name);
+  recalculate(workbook, { authored });
+  return save(workbook);
 }
 
 export interface PreviewCell {

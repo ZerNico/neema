@@ -2,10 +2,12 @@ import { serveJobs } from "../../../server/job-worker.ts";
 import {
   createSpreadsheet,
   editSpreadsheet,
+  exportLiveSheet,
   inspectSpreadsheet,
   previewChart,
   previewSpreadsheet,
   type InspectScope,
+  type LiveSheetExport,
 } from "./adapter.ts";
 
 /** Everything a spreadsheet worker does; the runtime's request and result types come from here. */
@@ -15,6 +17,7 @@ export const spreadsheetJobs = {
     inspectSpreadsheet(request.bytes, request.scope),
   edit: (request: { readonly bytes: Uint8Array; readonly operations: unknown }) =>
     editSpreadsheet(request.bytes, request.operations),
+  exportLive: (request: { readonly sheet: LiveSheetExport }) => exportLiveSheet(request.sheet),
   preview: (request: { readonly bytes: Uint8Array; readonly sheet?: string }) =>
     previewSpreadsheet(request.bytes, request.sheet),
   chart: (request: {

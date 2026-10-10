@@ -1,4 +1,4 @@
-import { MoreVerticalIcon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
+import { Download04Icon, MoreVerticalIcon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { Button } from "~/ui/primitives/button";
@@ -6,6 +6,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
@@ -15,7 +16,7 @@ import { RenameDocumentDialog } from "../../ui/rename-document-dialog.tsx";
 /** A sheet's actions row: what a sheet can do as a whole. */
 export function SheetPanelActions({ document }: { document: EditableDocument | null }) {
   const [renaming, setRenaming] = useState(false);
-  if (!document?.canEdit) return null;
+  if (!document) return null;
   return (
     <div className="flex items-center justify-end gap-0.5">
       <DropdownMenu>
@@ -39,13 +40,29 @@ export function SheetPanelActions({ document }: { document: EditableDocument | n
           <TooltipContent>More</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem onClick={() => setRenaming(true)}>
-            <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-            Rename
+          {document.canEdit ? (
+            <>
+              <DropdownMenuItem onClick={() => setRenaming(true)}>
+                <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          {/* The server builds the file from the stored sheet and sends it as a download. */}
+          <DropdownMenuItem
+            onClick={() => {
+              window.location.assign(`/api/sheets/${encodeURIComponent(document.id)}/export`);
+            }}
+          >
+            <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+            Download as Excel
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+      {document.canEdit ? (
+        <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+      ) : null}
     </div>
   );
 }
