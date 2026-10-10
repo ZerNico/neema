@@ -180,6 +180,26 @@ export function sheetFromWorkbook(read: LiveSheetImport, settings: SheetSettings
           cells,
           colProps: sized(each.widths, each.hiddenCols, cols),
           rowProps: sized(each.heights, each.hiddenRows, rows),
+          ...(each.conditional?.length
+            ? {
+                conditional: each.conditional.flatMap((format, place) => {
+                  const box = parseRange(format.ref);
+                  if (!box || !rows[box.bottom - 1] || !cols[box.right - 1]) return [];
+                  return [
+                    {
+                      id: `cf${place + 1}`,
+                      box: {
+                        r1: rows[box.top - 1]!,
+                        r2: rows[box.bottom - 1]!,
+                        c1: cols[box.left - 1]!,
+                        c2: cols[box.right - 1]!,
+                      },
+                      rule: format.rule,
+                    },
+                  ];
+                }),
+              }
+            : {}),
           ...(each.filter && filterOf(each.filter, rows, cols)
             ? { filter: filterOf(each.filter, rows, cols)! }
             : {}),

@@ -120,6 +120,17 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
       ].toSorted((a, b) => a - b);
       const hiddenCols = hiddenOf(sheet.colProps, cols.at);
       const filter = sheet.filter ? fileFilterOf(doc, id, sheet.filter, values) : null;
+      const conditional = (sheet.conditional ?? []).flatMap((format) => {
+        const corners = [
+          rows.at(format.box.r1),
+          cols.at(format.box.c1),
+          rows.at(format.box.r2),
+          cols.at(format.box.c2),
+        ];
+        if (corners.some((each) => each === undefined)) return [];
+        const [top, left, bottom, right] = corners as [number, number, number, number];
+        return [{ ref: `${address(top, left)}:${address(bottom, right)}`, rule: format.rule }];
+      });
       const frozenRow = sheet.freeze.row ? (rows.at(sheet.freeze.row) ?? 0) : 0;
       const frozenCol = sheet.freeze.col ? (cols.at(sheet.freeze.col) ?? 0) : 0;
       return {
@@ -132,6 +143,7 @@ export function liveSheetExport(doc: SheetDoc, values?: SheetValues): LiveSheetE
         ...(hiddenRows.length ? { hiddenRows } : {}),
         ...(hiddenCols.length ? { hiddenCols } : {}),
         ...(filter ? { filter } : {}),
+        ...(conditional.length ? { conditional } : {}),
       };
     }),
     names: Object.values(doc.names).map((name) => ({

@@ -3,6 +3,7 @@ import { applyChange } from "@chat/sheet/model/apply";
 import { calculateSheet } from "@chat/sheet/model/calc";
 import { renderFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
+import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import { exportLiveSheet, importLiveSheet } from "~/modules/spreadsheets/server/adapter.ts";
 import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
@@ -149,6 +150,47 @@ describe("importing into a live sheet", () => {
       box: { r1: "s1.r1", r2: "s1.r4", c1: "s1.c1", c2: "s1.c2" },
       rules: { "s1.c2": { values: ["120", "80"] } },
     });
+  });
+
+  it("keeps every kind of conditional format through Excel and back", async () => {
+    let original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[10], [40], ["North"], [""]] },
+    ]);
+    const box = { r1: "s1.r1", r2: "s1.r4", c1: "s1.c1", c2: "s1.c1" };
+    const red = { fill: "#FFC7CE", fontColor: "#9C0006" };
+    const rules: ConditionalRule[] = [
+      { kind: "compare", op: "between", values: [5, 20], style: red },
+      { kind: "compare", op: "equal", values: ["North"], style: { bold: true } },
+      { kind: "text", op: "beginsWith", text: "No", style: { fontColor: "#006100" } },
+      { kind: "top", count: 10, percent: true, bottom: true, style: red },
+      { kind: "average", below: true, style: red },
+      { kind: "duplicate", unique: true, style: { fill: "#FFEB9C", italic: true } },
+      { kind: "blank", style: red },
+      { kind: "scale", colors: ["#F8696B", "#FFEB84", "#63BE7B"] },
+      { kind: "bar", color: "#638EC6" },
+    ];
+    original = applyChange(
+      original,
+      {
+        clientId: "t",
+        seq: 9,
+        ops: [
+          {
+            op: "conditional",
+            sh: "s1",
+            list: rules.map((rule, index) => ({ id: `r${index}`, box, rule })),
+          },
+        ],
+      },
+      9,
+    ).doc;
+    const read = await importLiveSheet(await exportLiveSheet(liveSheetExport(original)));
+    expect(read.dropped).toEqual([]);
+    const imported = sheetFromWorkbook(read, settings);
+    if (!imported.ok) throw new Error(imported.reason);
+    const list = imported.doc.sheet.s1!.conditional!;
+    expect(list.map((each) => each.rule)).toEqual(rules);
+    expect(list[0]!.box).toEqual(box);
   });
 
   it("keeps a chart's options through Excel and back", async () => {

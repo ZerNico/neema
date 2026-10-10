@@ -88,6 +88,12 @@ import {
 import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from "./formulas.ts";
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
 import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
+import {
+  fileHighlightStyles,
+  readConditional,
+  writeConditionals,
+  type FileConditional,
+} from "./file-conditional.ts";
 import { sheetChart, sheetCharts } from "./chart-parts.ts";
 import { OFFICE_THEME_XML } from "./office-theme.ts";
 import { strToU8 } from "fflate";
@@ -812,6 +818,7 @@ export interface LiveSheetExport {
     readonly hiddenRows?: readonly number[];
     readonly hiddenCols?: readonly number[];
     readonly filter?: FileFilter;
+    readonly conditional?: readonly FileConditional[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   /** Charts by sheet name and cell, their ranges as A1 text. */
@@ -888,6 +895,7 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     for (const [column, width] of each.widths) setColumnWidth(sheet, column, width);
     for (const [row, height] of each.heights) setRowHeight(sheet, row, height);
     if (each.freeze) setFreezePanes(sheet, each.freeze);
+    if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
     for (const row of each.hiddenRows ?? []) hideRow(sheet, row);
     for (const column of each.hiddenCols ?? []) hideColumn(sheet, column);
     if (each.filter)
@@ -930,6 +938,7 @@ export interface LiveSheetImport {
     readonly hiddenRows?: readonly number[];
     readonly hiddenCols?: readonly number[];
     readonly filter?: FileFilter;
+    readonly conditional?: readonly FileConditional[];
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly charts: readonly FileChart[];
@@ -996,6 +1005,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
   unshareFormulas(workbook);
   const dropped = new Set<string>();
   const charts: FileChart[] = [];
+  const highlightStyles = fileHighlightStyles(bytes);
   const sheets = [...iterWorksheets(workbook)].map((sheet) => {
     const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
     let [rows, cols] = [0, 0];
@@ -1073,7 +1083,30 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
     const hiddenCols: number[] = [];
     for (let column = 1; column <= Math.max(cols, 26); column++)
       if (getColumnDimension(sheet, column)?.hidden) hiddenCols.push(column);
-    if (sheet.conditionalFormatting.length) dropped.add("conditional formatting");
+    const conditional = sheet.conditionalFormatting
+      .flatMap((format) =>
+        format.rules
+          .toSorted((a, b) => a.priority - b.priority)
+          .flatMap((rule) => {
+            const range = format.sqref.ranges[0];
+            const read = range ? readConditional(rule, highlightStyles) : null;
+            if (!range || !read) {
+              dropped.add(
+                "conditional formats of kinds a live sheet does not draw (icon sets, formulas)",
+              );
+              return [];
+            }
+            const ref = boxRef({
+              top: range.minRow,
+              left: range.minCol,
+              bottom: range.maxRow,
+              right: range.maxCol,
+            });
+            return [{ ref, rule: read, priority: rule.priority }];
+          }),
+      )
+      .toSorted((a, b) => a.priority - b.priority)
+      .map(({ ref, rule }) => ({ ref, rule }));
     if (listDataValidations(sheet).length) dropped.add("data validation");
     if (listComments(sheet).length) dropped.add("cell notes");
     const freeze = getFreezePanes(sheet);
@@ -1089,6 +1122,7 @@ export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImpor
       ...(hiddenRows.length ? { hiddenRows } : {}),
       ...(hiddenCols.length ? { hiddenCols } : {}),
       ...(filter ? { filter } : {}),
+      ...(conditional.length ? { conditional } : {}),
     };
   });
   return {
