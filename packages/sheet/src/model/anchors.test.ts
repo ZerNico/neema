@@ -1,0 +1,75 @@
+import { describe, expect, it } from "vitest";
+import { applyChange } from "./apply.ts";
+import { invertChange } from "./invert.ts";
+import { emptyDoc, type SheetDoc } from "./model.ts";
+import type { SheetOp } from "./ops.ts";
+
+let revision = 0;
+const apply = (doc: SheetDoc, ...ops: SheetOp[]) =>
+  applyChange(doc, { clientId: "t", seq: ++revision, ops }, revision).doc;
+const box = (r1: number, c1: number, r2 = r1, c2 = c1) => ({
+  r1: `s1.r${r1}`,
+  r2: `s1.r${r2}`,
+  c1: `s1.c${c1}`,
+  c2: `s1.c${c2}`,
+});
+const threads = apply(
+  emptyDoc(),
+  { op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c1", v: "Tea" }] },
+  { op: "anchor", thread: "one", at: { sh: "s1", r: "s1.r1", c: "s1.c1" } },
+  // A range across the cut's edge: only part of it moves.
+  {
+    op: "anchor",
+    thread: "edge",
+    at: { sh: "s1", r: "s1.r1", c: "s1.c1", r2: "s1.r5", c2: "s1.c1" },
+  },
+  { op: "anchor", thread: "away", at: { sh: "s1", r: "s1.r9", c: "s1.c9" } },
+);
+
+describe("threads on moving cells", () => {
+  it("go with cut cells, leaving a range only partly cut, and come back on undo", () => {
+    const moved = apply(threads, {
+      op: "move",
+      sh: "s1",
+      box: box(1, 1, 2, 2),
+      to: { r: "s1.r4", c: "s1.c3" },
+    });
+    expect(moved.anchors.one).toEqual({ sh: "s1", r: "s1.r4", c: "s1.c3" });
+    expect(moved.anchors.edge).toEqual(threads.anchors.edge);
+    expect(moved.anchors.away).toBe(threads.anchors.away);
+    const undone = apply(moved, ...invertChange(threads, moved));
+    expect(undone.anchors).toEqual(threads.anchors);
+  });
+
+  it("go with cut cells to another sheet", () => {
+    const two = apply(threads, {
+      op: "sheetAdd",
+      id: "s2",
+      name: "Two",
+      after: "s1",
+      rows: ["q1", "q2"],
+      cols: ["k1", "k2"],
+    });
+    const moved = apply(two, {
+      op: "move",
+      sh: "s1",
+      box: box(1, 1),
+      to: { sh: "s2", r: "q2", c: "k2" },
+    });
+    expect(moved.anchors.one).toEqual({ sh: "s2", r: "q2", c: "k2" });
+  });
+
+  it("follow a row's contents through a sort, but not a range over several rows", () => {
+    const sorted = apply(threads, {
+      op: "sort",
+      sh: "s1",
+      c1: "s1.c1",
+      c2: "s1.c1",
+      rows: ["s1.r1", "s1.r2", "s1.r3"],
+      order: ["s1.r3", "s1.r1", "s1.r2"],
+    });
+    // Row 1's contents went to row 2.
+    expect(sorted.anchors.one).toEqual({ sh: "s1", r: "s1.r2", c: "s1.c1" });
+    expect(sorted.anchors.edge).toEqual(threads.anchors.edge);
+  });
+});

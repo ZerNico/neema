@@ -192,7 +192,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   field.
 - Comment threads sit on a cell, or a range from it to a far corner, through the document's
   anchors, written as a change of their writer's own, so a thread follows its cells through
-  inserts and sorts. A range whose far corner is deleted keeps its first cell.
+  inserts. Cutting cells and sorting rows move contents between IDs, so they carry the threads
+  on them in the same change, as Excel carries notes; a range only partly cut, or spanning
+  sorted rows, stays. A range whose far corner is deleted keeps its first cell.
 - An Excel file's notes come in as threads of a third origin, `file`, beside a person's and the
   assistant's. They keep the author's name as the file gave it and are never matched to an
   account: a name in a file proves nothing about who wrote it. Excel saves each threaded comment

@@ -7,6 +7,7 @@ import {
   type AxisProps,
   type Box,
   type Cell,
+  type CellAnchor,
   type Formula,
   type IdRef,
   type RefCorner,
@@ -648,6 +649,20 @@ function move(
   for (const r of toRows)
     for (const c of toCols) overwritten.push([r, c, cleared(cellAt(landed, r, c), revision)]);
   next = withSheet(next, targetId, writeCells(writeCells(landed, overwritten), moved));
+  // A thread on the cut cells goes with them, as Excel's notes do; a range only partly cut stays.
+  next = withAnchors(next, (at) =>
+    at.sh === op.sh &&
+    [at.r, at.r2 ?? at.r].every((r) => rowMap.has(r)) &&
+    [at.c, at.c2 ?? at.c].every((c) => colMap.has(c))
+      ? {
+          sh: targetId,
+          r: rowMap.get(at.r)!,
+          c: colMap.get(at.c)!,
+          ...(at.r2 ? { r2: rowMap.get(at.r2)! } : {}),
+          ...(at.c2 ? { c2: colMap.get(at.c2)! } : {}),
+        }
+      : at,
+  );
   // References wholly inside the cut cells follow them, wherever they are written.
   const inside = (corner: RefCorner) =>
     (corner.row === null || rowMap.has(corner.row)) &&
@@ -716,5 +731,33 @@ function sort(
       writes.push([to, c, { ...cell, ...(f ? { f } : {}), w: revision }]);
     }
   });
-  return withSheet(doc, op.sh, writeCells(sheet, writes));
+  // A thread on one row's sorted cells goes where its row's contents went.
+  const destination = new Map(op.order.map((from, index) => [from, op.rows[index]!]));
+  const sorted = new Set(cols);
+  const next = withSheet(doc, op.sh, writeCells(sheet, writes));
+  return withAnchors(next, (anchor) =>
+    anchor.sh === op.sh &&
+    destination.has(anchor.r) &&
+    (anchor.r2 === undefined || anchor.r2 === anchor.r) &&
+    [anchor.c, anchor.c2 ?? anchor.c].every((c) => sorted.has(c))
+      ? {
+          ...anchor,
+          r: destination.get(anchor.r)!,
+          ...(anchor.r2 ? { r2: destination.get(anchor.r)! } : {}),
+        }
+      : anchor,
+  );
+}
+
+/** The document with each thread's anchor mapped; unchanged anchors keep the object. */
+function withAnchors(doc: SheetDoc, map: (at: CellAnchor) => CellAnchor): SheetDoc {
+  let changed = false;
+  const anchors = Object.fromEntries(
+    Object.entries(doc.anchors).map(([thread, at]) => {
+      const next = map(at);
+      if (next !== at) changed = true;
+      return [thread, next];
+    }),
+  );
+  return changed ? { ...doc, anchors } : doc;
 }
