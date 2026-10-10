@@ -1651,7 +1651,7 @@ export function SheetGrid({
           >
             {decoration.label ? (
               <span
-                className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] leading-4 whitespace-nowrap text-white"
+                className="absolute -top-4 left-0 rounded-sm px-1 text-[10px] leading-4 whitespace-nowrap text-chart-foreground"
                 style={{ backgroundColor: decoration.color }}
               >
                 {decoration.label}

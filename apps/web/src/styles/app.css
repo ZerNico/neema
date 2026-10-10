@@ -51,6 +51,7 @@
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
+  --color-chart-foreground: var(--chart-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --text-2xs: 0.6875rem;
@@ -113,6 +114,8 @@
   --chart-6: #b08414;
   --chart-7: #0f7f8a;
   --chart-8: #6b7280;
+  /* Text on a chart colour, as a person's name on their cursor. */
+  --chart-foreground: oklch(0.985 0 0);
 }
 
 .dark {
@@ -154,6 +157,7 @@
   --chart-6: #d1a338;
   --chart-7: #2fa7b3;
   --chart-8: #9ca3af;
+  --chart-foreground: oklch(0.145 0 0);
 }
 
 /* @tanstack/charts reads its palette from --ts-chart-N. */
@@ -586,6 +590,6 @@ html[data-panel-resizing] webview {
     }
   }
   .remote-caret__label {
-    @apply absolute bottom-full left-0 rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-white select-none;
+    @apply absolute bottom-full left-0 rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-chart-foreground select-none;
   }
 }
