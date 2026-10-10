@@ -1,3 +1,4 @@
+import { ColorPicker } from "~/ui/color-picker";
 import { Toolbar } from "@base-ui/react/toolbar";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
@@ -8,8 +9,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
-// Pressing a toolbar control must not take focus from the grid or the cell being typed in.
-const keepFocus = (event: { preventDefault: () => void }) => event.preventDefault();
+// Pressing a toolbar control must not take focus from the grid or the cell being typed in;
+// a field in a menu, such as a colour's hex code, still takes it.
+const keepFocus = (event: { preventDefault: () => void; target: EventTarget }) => {
+  if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
+};
 
 /**
  * A toolbar button that opens a menu: an icon or a short label, a caret, and
@@ -182,15 +186,10 @@ export function ColorSwatches({
           />
         ))}
       </div>
-      <label className="text-muted-foreground flex items-center justify-between text-xs">
-        More colours
-        <input
-          type="color"
-          value={value ?? "#000000"}
-          className="size-7 cursor-pointer rounded-md border-0 bg-transparent"
-          onChange={(event) => onChange(event.target.value.toUpperCase())}
-        />
-      </label>
+      <div className="flex flex-col gap-2">
+        <span className="text-muted-foreground text-xs">More colours</span>
+        <ColorPicker value={value} onChange={onChange} />
+      </div>
     </div>
   );
 }

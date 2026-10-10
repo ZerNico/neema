@@ -1,3 +1,4 @@
+import { ColorPicker } from "~/ui/color-picker";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState, type ReactNode } from "react";
@@ -265,15 +266,10 @@ export function ColorField({
               />
             ))}
           </div>
-          <label className="text-muted-foreground flex items-center justify-between text-xs">
-            Custom
-            <input
-              type="color"
-              value={value ?? "#3B82F6"}
-              className="size-7 cursor-pointer rounded-md border-0 bg-transparent"
-              onChange={(event) => onChange(event.target.value.toUpperCase())}
-            />
-          </label>
+          <div className="flex flex-col gap-2">
+            <span className="text-muted-foreground text-xs">Custom</span>
+            <ColorPicker value={value} onChange={onChange} />
+          </div>
         </div>
       </PopoverContent>
     </Popover>
