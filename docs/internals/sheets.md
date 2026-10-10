@@ -129,8 +129,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   same changes is harmless.
 - Undo walks the tab's own history: each step keeps the document before and after, and
   `invertChange` takes it back except where someone else has changed a cell since.
-- Comment threads sit on cells through the document's anchors, written as a change of their
-  writer's own, so a thread follows its cell through inserts and sorts.
+- Comment threads sit on a cell, or a range from it to a far corner, through the document's
+  anchors, written as a change of their writer's own, so a thread follows its cells through
+  inserts and sorts. A range whose far corner is deleted keeps its first cell.
 
 ## Calculating
 
