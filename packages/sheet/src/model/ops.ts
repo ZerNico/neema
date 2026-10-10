@@ -214,6 +214,9 @@ const isChart = (value: unknown) => {
     value.series.every(
       (series) =>
         isRecord(series) &&
+        (series.sheet === undefined || isId(series.sheet)) &&
+        (series.name === undefined ||
+          (typeof series.name === "string" && series.name.length <= 100)) &&
         isBox(series.values) &&
         (series.categories === undefined || isBox(series.categories)),
     )

@@ -1,5 +1,5 @@
 import { columnLetters } from "@chat/sheet/a1";
-import { renderFormula } from "@chat/sheet/model/formula";
+import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type SheetDoc } from "@chat/sheet/model";
 import type { LiveSheetExport } from "~/modules/spreadsheets/server/adapter.ts";
 
@@ -75,5 +75,42 @@ export function liveSheetExport(doc: SheetDoc): LiveSheetExport {
       name: name.name,
       value: renderFormula(name.f, { doc, sheet: ids[0]! }),
     })),
+    charts: Object.values(doc.charts).flatMap((chart) => {
+      const host = doc.sheet[chart.sheet];
+      if (!host || !ids.includes(chart.sheet)) return [];
+      /** A range by IDs as Excel text on its sheet; null once its rows or columns are gone. */
+      const range = (on: string, box: { r1: string; r2: string; c1: string; c2: string }) => {
+        const data = doc.sheet[on];
+        if (!data || !ids.includes(on)) return null;
+        const rows = positions(data.rows);
+        const cols = positions(data.cols);
+        const corners = [rows.at(box.r1), cols.at(box.c1), rows.at(box.r2), cols.at(box.c2)];
+        if (corners.some((each) => each === undefined)) return null;
+        const [top, left, bottom, right] = corners as [number, number, number, number];
+        return `${quoteSheet(data.name)}!${address(top, left)}:${address(bottom, right)}`;
+      };
+      const at = [positions(host.rows).at(chart.at.r), positions(host.cols).at(chart.at.c)];
+      const series = chart.series.flatMap((each) => {
+        const values = range(each.sheet ?? chart.sheet, each.values);
+        return values ? [{ values, ...(each.name ? { name: each.name } : {}) }] : [];
+      });
+      const first = chart.series[0];
+      const categories = first?.categories
+        ? range(first.sheet ?? chart.sheet, first.categories)
+        : null;
+      if (!series.length || at[0] === undefined || at[1] === undefined) return [];
+      return [
+        {
+          sheet: host.name,
+          type: chart.kind,
+          at: address(at[0], at[1]),
+          ...(chart.title ? { title: chart.title } : {}),
+          ...(categories ? { categories } : {}),
+          series,
+          width: chart.size.width,
+          height: chart.size.height,
+        },
+      ];
+    }),
   };
 }

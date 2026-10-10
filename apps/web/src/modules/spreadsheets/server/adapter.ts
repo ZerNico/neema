@@ -839,6 +839,10 @@ export interface LiveSheetExport {
     readonly freeze?: string;
   }>;
   readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /** Charts as addChart takes them: ranges as A1 text, placed by sheet name and cell. */
+  readonly charts?: ReadonlyArray<
+    Omit<Extract<SpreadsheetOperation, { kind: "addChart" }>, "kind">
+  >;
 }
 
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
@@ -899,6 +903,15 @@ export async function exportLiveSheet(spec: LiveSheetExport) {
     if (each.freeze) setFreezePanes(sheet, each.freeze);
   }
   for (const name of spec.names) addDefinedName(workbook, name);
+  for (const chart of spec.charts ?? []) {
+    const operation = { kind: "addChart" as const, ...chart };
+    addChartAt(
+      sheetOf(workbook, chart.sheet),
+      chart.at,
+      { space: chartSpace(workbook, operation) },
+      { widthPx: chart.width ?? 480, heightPx: chart.height ?? 300 },
+    );
+  }
   recalculate(workbook, { authored });
   return save(workbook);
 }

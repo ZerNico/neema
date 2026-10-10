@@ -483,6 +483,75 @@ export function convertOperations(
         emit({ op: "sheetDelete", id: sh });
         return;
       }
+      case "addChart": {
+        const sh = sheetId(operation.sheet);
+        const at = parseCell(operation.at)!;
+        ensure(sh, at.row, at.column);
+        /** A range a chart reads, on its own sheet unless it names one, as IDs. */
+        const reference = (text: string, field: string) => {
+          const bang = text.lastIndexOf("!");
+          const on =
+            bang === -1
+              ? sh
+              : sheetId(
+                  text
+                    .slice(0, bang)
+                    .replace(/^'(.*)'$/, "$1")
+                    .replaceAll("''", "'"),
+                );
+          const box = parseRange(bang === -1 ? text : text.slice(bang + 1));
+          if (!box)
+            throw new Refused("invalid", `${field}: "${text}" is not a range like Data!B2:B13.`);
+          ensure(on, box.bottom, box.right);
+          const rows = ids(on, "rows");
+          const cols = ids(on, "columns");
+          const area = {
+            r1: rows[box.top - 1]!,
+            r2: rows[box.bottom - 1]!,
+            c1: cols[box.left - 1]!,
+            c2: cols[box.right - 1]!,
+          };
+          return { sheet: on, box: area };
+        };
+        const categories = operation.categories
+          ? reference(operation.categories, "categories")
+          : null;
+        const series = operation.series.map((each, index) => {
+          const values = reference(each.values, `series[${index}].values`);
+          if (categories && categories.sheet !== values.sheet)
+            throw new Refused("invalid", "A series and its categories are on one sheet.");
+          return {
+            ...(each.name ? { name: each.name } : {}),
+            ...(values.sheet === sh ? {} : { sheet: values.sheet }),
+            values: values.box,
+            ...(categories ? { categories: categories.box } : {}),
+          };
+        });
+        const rows = ids(sh, "rows");
+        const cols = ids(sh, "columns");
+        emit({
+          op: "chartPut",
+          id: input.mint(),
+          chart: {
+            sheet: sh,
+            kind: operation.type as "column" | "bar" | "line" | "area" | "pie" | "scatter",
+            ...(operation.title ? { title: operation.title } : {}),
+            at: { r: rows[at.row - 1]!, c: cols[at.column - 1]! },
+            size: { width: operation.width ?? 480, height: operation.height ?? 300 },
+            series,
+          },
+        });
+        return;
+      }
+      case "removeChart": {
+        if (!view.charts[operation.chart])
+          throw new Refused(
+            "not_found",
+            `No chart ${operation.chart}; the view lists them in <charts>.`,
+          );
+        emit({ op: "chartDelete", id: operation.chart });
+        return;
+      }
       case "defineName": {
         const sh = sheetId(operation.sheet);
         const box = parseRange(operation.range)!;

@@ -87,6 +87,8 @@ export interface Sheet {
 
 export interface ChartSeries {
   readonly name?: string;
+  /** The sheet its ranges are on; the chart's own when absent. */
+  readonly sheet?: string;
   readonly values: Box;
   readonly categories?: Box;
 }

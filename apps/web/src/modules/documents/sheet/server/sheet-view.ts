@@ -2,7 +2,7 @@ import { columnLetters, parseRange } from "@chat/sheet/a1";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import { sheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
-import { renderFormula } from "@chat/sheet/model/formula";
+import { quoteSheet, renderFormula } from "@chat/sheet/model/formula";
 import { liveSheets, positions, sheetNamed, type SheetDoc } from "@chat/sheet/model";
 import { formatValue } from "@chat/sheet/number-format";
 
@@ -191,6 +191,45 @@ export function sheetView(
       : [];
   });
   if (merges.length) lines.push(`<merges>${merges.join(" ")}</merges>`);
+  /** A range by IDs as A1, named with its sheet; null when its rows or columns are gone. */
+  const rangeText = (on: string, box: { r1: string; r2: string; c1: string; c2: string }) => {
+    const data = doc.sheet[on];
+    if (!data) return null;
+    const rows = positions(data.rows);
+    const cols = positions(data.cols);
+    const [top, bottom, left, right] = [
+      rows.at(box.r1),
+      rows.at(box.r2),
+      cols.at(box.c1),
+      cols.at(box.c2),
+    ];
+    if (!top || !bottom || !left || !right) return null;
+    return `${quoteSheet(data.name)}!${address(top, left)}:${address(bottom, right)}`;
+  };
+  const charts = Object.entries(doc.charts).flatMap(([id, chart]) => {
+    const host = doc.sheet[chart.sheet];
+    if (!host || !ids.includes(chart.sheet)) return [];
+    const row = positions(host.rows).at(chart.at.r);
+    const col = positions(host.cols).at(chart.at.c);
+    const series = chart.series
+      .map((each) => {
+        const values = rangeText(each.sheet ?? chart.sheet, each.values);
+        return values ? `${values}${each.name ? ` (${each.name})` : ""}` : "#REF!";
+      })
+      .join("; ");
+    const first = chart.series[0];
+    const categories = first?.categories
+      ? rangeText(first.sheet ?? chart.sheet, first.categories)
+      : null;
+    return [
+      `<chart id="${escapeAttribute(id)}" sheet="${escapeAttribute(host.name)}" type="${chart.kind}"${
+        row && col ? ` at="${address(row, col)}"` : ""
+      }${chart.title ? ` title="${escapeAttribute(chart.title)}"` : ""}${
+        categories ? ` categories="${escapeAttribute(categories)}"` : ""
+      } series="${escapeAttribute(series)}"/>`,
+    ];
+  });
+  if (charts.length) lines.push(`<charts>\n${charts.join("\n")}\n</charts>`);
   const names = Object.values(doc.names).map(
     (each) => `${each.name}=${renderFormula(each.f, { doc, sheet: ids[0]! })}`,
   );

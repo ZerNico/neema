@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
+import { calculateSheet } from "@chat/sheet/model/calc";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import { exportLiveSheet, inspectSpreadsheet } from "~/modules/spreadsheets/server/adapter.ts";
 import { parseLiveSheetOperations } from "../live-operations.ts";
 import { convertOperations } from "./convert.ts";
 import { liveSheetExport } from "./export.ts";
+import { sheetView } from "./sheet-view.ts";
 
 let minted = 0;
 const build = (operations: unknown[], doc: SheetDoc = emptyDoc()) => {
@@ -54,5 +56,38 @@ describe("exporting a live sheet", () => {
     // A typed "=" stays text; a dynamic array spills in the file as in the live sheet.
     expect(cells.A3).toMatchObject({ value: "=1+1 as text" });
     expect([cells.C3?.value, cells.C4?.value]).toEqual(["1", "2"]);
+  });
+
+  it("draws a chart from another sheet's cells in the view and the file", async () => {
+    const doc = build([
+      { kind: "addSheet", name: "Data" },
+      {
+        kind: "setCells",
+        sheet: "Data",
+        start: "A1",
+        rows: [
+          ["Jan", 10],
+          ["Feb", 20],
+        ],
+      },
+      {
+        kind: "addChart",
+        sheet: "Sheet1",
+        type: "column",
+        at: "B2",
+        title: "Sales",
+        categories: "Data!A1:A2",
+        series: [{ values: "Data!B1:B2", name: "Sales" }],
+      },
+    ]);
+    const view = sheetView(
+      doc,
+      calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 }),
+    );
+    expect(view.xml).toMatch(
+      /<chart id="[^"]+" sheet="Sheet1" type="column" at="B2" title="Sales" categories="Data!A1:A2" series="Data!B1:B2 \(Sales\)"\/>/,
+    );
+    const read = await inspectSpreadsheet(await exportLiveSheet(liveSheetExport(doc)));
+    expect(read.sheets.find((sheet) => sheet.name === "Sheet1")?.charts).toBe(1);
   });
 });

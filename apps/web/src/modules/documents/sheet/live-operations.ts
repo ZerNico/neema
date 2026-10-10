@@ -129,6 +129,21 @@ export const LIVE_SHEET_OPERATIONS = {
     ...SPREADSHEET_OPERATIONS.defineName,
     fields: { ...SPREADSHEET_OPERATIONS.defineName.fields, sheet, range },
   },
+  addChart: {
+    ...SPREADSHEET_OPERATIONS.addChart,
+    about:
+      "Add a chart drawn from cells, which follows them as they change. Categories label the points; each series is one line, bar set or pie. Ranges may name another sheet, e.g. Data!B2:B13.",
+    fields: {
+      ...SPREADSHEET_OPERATIONS.addChart.fields,
+      sheet: { ...sheet, about: "Sheet the chart is placed on." },
+    },
+  },
+  removeChart: {
+    about: "Remove a chart, by the id the view gives it in <charts>.",
+    fields: { chart: { type: "string", max: 64, about: "The chart's id." } },
+    required: ["chart"],
+    change: ["removed", "chart"],
+  },
 } as const satisfies Record<string, Definition>;
 
 export type LiveSheetOperation = OperationOf<typeof LIVE_SHEET_OPERATIONS>;
@@ -159,6 +174,12 @@ export function parseLiveSheetOperations(input: unknown): LiveSheetOperation[] {
       Object.keys(operation).every((key) => key === "sheet" || key === "range")
     )
       fail(path, "provide at least one property to change");
+    if (
+      kind === "addChart" &&
+      operation.type === "pie" &&
+      (operation.series as unknown[]).length !== 1
+    )
+      fail(path, "a pie chart takes exactly one series");
     if (kind === "defineName" && !/^[A-Za-z_\\][\w.]{0,99}$/.test(operation.name as string))
       fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
   });
