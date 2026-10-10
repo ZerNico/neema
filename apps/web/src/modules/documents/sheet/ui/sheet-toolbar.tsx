@@ -186,10 +186,13 @@ function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGr
   );
   const fitting = ends.findIndex((end, index) => index > 0 && end > room - MORE_PX);
   const shown = total <= room || fitting === -1 ? groups.length : fitting;
-  const more = groups.slice(shown);
+  // Even the first group cut short: More then holds it too, so nothing is out of reach.
+  const cut = total > room && (ends[0] ?? 0) > room - MORE_PX;
+  const more = groups.slice(cut ? 0 : shown);
   return (
     <div ref={setRow} className="flex min-w-0 items-center overflow-hidden">
-      <Toolbar.Root aria-label={label} className="flex shrink-0 items-center">
+      {/* The line clips before the More button does, so what did not fit stays reachable. */}
+      <Toolbar.Root aria-label={label} className="flex min-w-0 items-center overflow-hidden">
         {groups.slice(0, shown).map((group, index) => (
           <div
             key={group.id}
@@ -214,7 +217,7 @@ function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGr
                       size="icon-sm"
                       variant="ghost"
                       aria-label={`More ${label} tools`}
-                      className="text-muted-foreground"
+                      className="text-muted-foreground shrink-0"
                     />
                   }
                 />
