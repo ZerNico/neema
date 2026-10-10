@@ -212,3 +212,36 @@ describe("the model's filters", () => {
     expect(doc.sheet.s1!.filter).toBeUndefined();
   });
 });
+
+describe("the model's conditional formats", () => {
+  it("adds highlight rules, scales and bars, shows them in the view, and clears them", () => {
+    let doc = done(
+      edit(emptyDoc(), [
+        { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [[10], [40], [25]] },
+        {
+          kind: "addConditionalFormat",
+          sheet: "Sheet1",
+          range: "A1:A3",
+          type: "greater",
+          value: "20",
+        },
+        { kind: "addConditionalFormat", sheet: "Sheet1", range: "A1:A3", type: "dataBar" },
+      ]),
+    );
+    expect(doc.sheet.s1!.conditional!.map((each) => each.rule.kind)).toEqual(["compare", "bar"]);
+    const shown = sheetView(doc, calculateSheet(doc, context)).xml;
+    expect(shown).toContain(
+      '<rule range="A1:A3" is="greater 20" fill="#FFC7CE" fontColor="#9C0006"/>',
+    );
+    expect(shown).toContain('<rule range="A1:A3" is="dataBar #638EC6"/>');
+    expect(
+      edit(doc, [
+        { kind: "addConditionalFormat", sheet: "Sheet1", range: "A1", type: "between", value: "1" },
+      ]),
+    ).toMatchObject({ ok: false });
+    doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1", range: "B1" }]));
+    expect(doc.sheet.s1!.conditional).toHaveLength(2);
+    doc = done(edit(doc, [{ kind: "clearConditionalFormats", sheet: "Sheet1" }]));
+    expect(doc.sheet.s1!.conditional).toBeUndefined();
+  });
+});

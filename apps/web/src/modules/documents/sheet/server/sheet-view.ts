@@ -193,6 +193,52 @@ export function sheetView(
       : [];
   });
   if (merges.length) lines.push(`<merges>${merges.join(" ")}</merges>`);
+  // The focused sheet's conditional formats, first taking priority.
+  const conditional = (doc.sheet[sheet]!.conditional ?? []).flatMap((format) => {
+    const [rowsAt, colsAt] = [positions(doc.sheet[sheet]!.rows), positions(doc.sheet[sheet]!.cols)];
+    const [top, left, bottom, right] = [
+      rowsAt.at(format.box.r1),
+      colsAt.at(format.box.c1),
+      rowsAt.at(format.box.r2),
+      colsAt.at(format.box.c2),
+    ];
+    if (!top || !left || !bottom || !right) return [];
+    const rule = format.rule;
+    const style = "style" in rule ? rule.style : {};
+    const said =
+      rule.kind === "compare"
+        ? `${rule.op} ${rule.values.join(" and ")}`
+        : rule.kind === "text"
+          ? `text ${rule.op} ${rule.text}`
+          : rule.kind === "top"
+            ? `${rule.bottom ? "bottom" : "top"} ${rule.count}${rule.percent ? "%" : ""}`
+            : rule.kind === "average"
+              ? rule.below
+                ? "belowAverage"
+                : "aboveAverage"
+              : rule.kind === "duplicate"
+                ? rule.unique
+                  ? "unique"
+                  : "duplicate"
+                : rule.kind === "blank"
+                  ? rule.not
+                    ? "notBlank"
+                    : "blank"
+                  : rule.kind === "scale"
+                    ? `colorScale ${rule.colors.join(" ")}`
+                    : `dataBar ${rule.color}`;
+    const looks = [
+      style.fill && `fill="${style.fill}"`,
+      style.fontColor && `fontColor="${style.fontColor}"`,
+      style.bold && "bold",
+      style.italic && "italic",
+    ].filter(Boolean);
+    return [
+      `<rule range="${address(top, left)}:${address(bottom, right)}" is="${escapeAttribute(said)}"${looks.length ? ` ${looks.join(" ")}` : ""}/>`,
+    ];
+  });
+  if (conditional.length)
+    lines.push(`<conditionalFormats>\n${conditional.join("\n")}\n</conditionalFormats>`);
   // The focused sheet's filter and what it hides, so the model does not take hidden rows for gone.
   const filter = doc.sheet[sheet]!.filter;
   const span = filter ? filterSpan(doc, sheet, filter) : null;

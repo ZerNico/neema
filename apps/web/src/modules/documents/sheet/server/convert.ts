@@ -18,6 +18,7 @@ import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
+import type { ConditionalRule } from "@chat/sheet/model/conditional";
 import { chartOperation } from "./convert-chart.ts";
 
 export interface ConvertInput {
@@ -550,6 +551,105 @@ export function convertOperations(
           }
         }
         emit({ op: "filter", sh, filter: { box, rules } });
+        return;
+      }
+      case "addConditionalFormat": {
+        const sh = sheetId(operation.sheet);
+        const { ids: box } = area(sh, operation.range);
+        const style = {
+          ...(operation.fill ? { fill: operation.fill } : {}),
+          ...(operation.fontColor ? { fontColor: operation.fontColor } : {}),
+          ...(operation.bold ? { bold: true } : {}),
+        };
+        const looks = Object.keys(style).length ? style : { fill: "#FFC7CE", fontColor: "#9C0006" };
+        const operand = (text: string | undefined, field: string) => {
+          if (text === undefined || !text.trim())
+            throw new Refused("invalid", `${operation.type} needs ${field}.`);
+          const number = Number(text);
+          return Number.isFinite(number) ? number : text;
+        };
+        const kind = operation.type;
+        const rule: ConditionalRule =
+          kind === "greater" || kind === "less" || kind === "equal" || kind === "notEqual"
+            ? {
+                kind: "compare",
+                op: kind,
+                values: [operand(operation.value, "value")],
+                style: looks,
+              }
+            : kind === "between"
+              ? {
+                  kind: "compare",
+                  op: "between",
+                  values: [operand(operation.value, "value"), operand(operation.value2, "value2")],
+                  style: looks,
+                }
+              : kind === "textContains"
+                ? {
+                    kind: "text",
+                    op: "contains",
+                    text: String(operand(operation.value, "value")),
+                    style: looks,
+                  }
+                : kind === "top" || kind === "bottom"
+                  ? {
+                      kind: "top",
+                      count: operation.count ?? 10,
+                      ...(operation.percent ? { percent: true } : {}),
+                      ...(kind === "bottom" ? { bottom: true } : {}),
+                      style: looks,
+                    }
+                  : kind === "aboveAverage" || kind === "belowAverage"
+                    ? {
+                        kind: "average",
+                        ...(kind === "belowAverage" ? { below: true } : {}),
+                        style: looks,
+                      }
+                    : kind === "duplicate" || kind === "unique"
+                      ? {
+                          kind: "duplicate",
+                          ...(kind === "unique" ? { unique: true } : {}),
+                          style: looks,
+                        }
+                      : kind === "blank"
+                        ? { kind: "blank", style: looks }
+                        : kind === "colorScale"
+                          ? {
+                              kind: "scale",
+                              colors: (operation.colors?.length === 2 ||
+                              operation.colors?.length === 3
+                                ? operation.colors
+                                : ["#F8696B", "#FFEB84", "#63BE7B"]) as
+                                | [string, string]
+                                | [string, string, string],
+                            }
+                          : { kind: "bar", color: operation.color ?? "#638EC6" };
+        const list = view.sheet[sh]!.conditional ?? [];
+        emit({
+          op: "conditional",
+          sh,
+          list: [
+            ...list,
+            { id: input.mint(), box: { r1: box.r1!, r2: box.r2!, c1: box.c1!, c2: box.c2! }, rule },
+          ],
+        });
+        return;
+      }
+      case "clearConditionalFormats": {
+        const sh = sheetId(operation.sheet);
+        const list = view.sheet[sh]!.conditional ?? [];
+        if (!operation.range) {
+          emit({ op: "conditional", sh, list: [] });
+          return;
+        }
+        const { box } = area(sh, operation.range);
+        const [rows, cols] = [positions(view.sheet[sh]!.rows), positions(view.sheet[sh]!.cols)];
+        const kept = list.filter((each) => {
+          const [top, bottom] = [rows.at(each.box.r1) ?? 0, rows.at(each.box.r2) ?? 0];
+          const [left, right] = [cols.at(each.box.c1) ?? 0, cols.at(each.box.c2) ?? 0];
+          return top > box.bottom || bottom < box.top || left > box.right || right < box.left;
+        });
+        emit({ op: "conditional", sh, list: kept });
         return;
       }
       case "removeFilter": {
