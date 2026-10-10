@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
 import type { PushSheetInput, PushSheetResult, SheetFrame } from "../schema.ts";
-import { SheetSync, type SheetFeedSource } from "./sheet-sync.ts";
+import { SheetSync, type SheetFeedSource, type SheetOutbox } from "./sheet-sync.ts";
 
 const moment = { now: 45_000, seed: 1 };
 const write = (r: string, c: string, v: string): SheetOp => ({
@@ -13,7 +13,7 @@ const write = (r: string, c: string, v: string): SheetOp => ({
 const valueAt = (doc: SheetDoc | null, r: string, c: string) => doc?.sheet.s1!.cells[r]?.[c]?.v;
 
 /** A sheet connection with a feed the test drives and a push it answers. */
-function connection() {
+function connection(outbox?: SheetOutbox) {
   const listeners = new Map<string, (event: MessageEvent<string>) => void>();
   const source: SheetFeedSource = {
     addEventListener: (type, listener) => listeners.set(type, listener),
@@ -32,6 +32,7 @@ function connection() {
     documentId: "sheet-1",
     clientId: "me",
     connect: () => source,
+    ...(outbox ? { outbox } : {}),
     push: async (input) => {
       pushes.push(input);
       return answer(input);
@@ -109,5 +110,35 @@ describe("a sheet's connection", () => {
     feed({ type: "reset", doc: emptyDoc(), revision: 5, moment, acked: 1 });
     expect(sync.getState().pending).toBe(1);
     expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBe("two");
+  });
+
+  it("sends what a closed tab left unsent, and forgets it once the server has it", async () => {
+    const saved = new Map<string, SheetChange[]>();
+    saved.set("old", [{ clientId: "old", seq: 4, ops: [write("s1.r1", "s1.c1", "kept")] }]);
+    const outbox: SheetOutbox = {
+      load: async () => [...saved.values()].flat(),
+      save: (_documentId, clientId, changes) => {
+        if (changes.length) saved.set(clientId, [...changes]);
+        else saved.delete(clientId);
+      },
+    };
+    const { sync, pushes, feed } = connection(outbox);
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    // Shown at once, as this tab's own unsent edits are.
+    await Promise.resolve();
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("kept");
+    await vi.runAllTimersAsync();
+    expect(pushes[0]).toMatchObject({ clientId: "old" });
+    expect(saved.size).toBe(0);
+    feed({
+      type: "changes",
+      changes: [{ clientId: "old", seq: 4, ops: [write("s1.r1", "s1.c1", "kept")] }],
+      revision: 1,
+      moment,
+    });
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("kept");
+    // This tab's own edits go under its own client, kept until sent.
+    sync.dispatch([write("s1.r2", "s1.c1", "new")]);
+    expect(saved.get("me")).toHaveLength(1);
   });
 });

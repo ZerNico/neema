@@ -1,6 +1,29 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import type { SheetChange } from "@chat/sheet/model/ops";
+import { deviceCache } from "~/modules/cache/client/device-cache.ts";
 import { pushSheet } from "../server/sheet-functions.ts";
-import { SheetSync, type SheetState } from "./sheet-sync.ts";
+import { SheetSync, type SheetOutbox, type SheetState } from "./sheet-sync.ts";
+
+const store = deviceCache<{ changes: SheetChange[]; savedAt: number }>({
+  namespace: "sheet-outbox",
+  // Unsent edits, not a cache: never evicted, whatever their size.
+  keep: true,
+  maxBytes: 16 * 1024 * 1024,
+});
+const keyOf = (documentId: string, clientId: string) => `${documentId}\u0000${clientId}`;
+/** Each client's unsent changes to a sheet, kept on this device under the sheet and the client. */
+const sheetOutbox: SheetOutbox = {
+  load: async (documentId) => {
+    await store.warm();
+    const entries = await store.reloadAll(keyOf(documentId, ""));
+    return entries.flatMap(([, entry]) => entry.changes);
+  },
+  save: (documentId, clientId, changes) => {
+    if (changes.length)
+      store.set(keyOf(documentId, clientId), { changes: [...changes], savedAt: Date.now() });
+    else store.delete(keyOf(documentId, clientId));
+  },
+};
 
 /**
  * The connections one sheet controller owns: the open one, and any closed
@@ -23,7 +46,11 @@ class SheetConnections {
   };
   getState = (): SheetState | null => this.current?.getState() ?? null;
   open(documentId: string) {
-    const sync = new SheetSync({ documentId, push: (data) => pushSheet({ data }) });
+    const sync = new SheetSync({
+      documentId,
+      push: (data) => pushSheet({ data }),
+      outbox: sheetOutbox,
+    });
     this.all.add(sync);
     this.current = sync;
     const unsubscribe = sync.subscribe(this.#changed);

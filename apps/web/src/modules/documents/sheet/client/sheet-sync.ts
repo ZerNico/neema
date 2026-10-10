@@ -19,6 +19,16 @@ export interface SheetFeedSource {
   addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
   close(): void;
 }
+/**
+ * Unsent changes kept on the device by client, so a reload or a crash loses
+ * none. Another tab may load the same ones and resend them: the server
+ * applies each client's numbers once, so that is harmless.
+ */
+export interface SheetOutbox {
+  load(documentId: string): Promise<ReadonlyArray<SheetChange>>;
+  /** Replaces what is kept for one client; nothing left removes it. */
+  save(documentId: string, clientId: string, changes: readonly SheetChange[]): void;
+}
 export interface SheetSyncOptions {
   documentId: string;
   push: (input: PushSheetInput) => Promise<PushSheetResult>;
@@ -26,6 +36,7 @@ export interface SheetSyncOptions {
   connect?: (url: string) => SheetFeedSource;
   /** Replaceable in tests; a fresh random one otherwise. */
   clientId?: string;
+  outbox?: SheetOutbox;
 }
 
 /** What the sheet shows now: the server's document with this tab's unsent changes on top. */
@@ -88,11 +99,27 @@ export class SheetSync {
   #state: SheetState;
   #undo: Step[] = [];
   #redo: Step[] = [];
+  /** Every client whose changes this tab keeps on the device: its own and any it recovered. */
+  #saved = new Set<string>();
 
   constructor(private readonly options: SheetSyncOptions) {
     this.clientId = options.clientId ?? crypto.randomUUID().slice(0, 18);
     this.#state = this.#snapshot();
     this.#connect();
+    // Changes a reload or crash left unsent, by this tab or another, are sent again first.
+    void options.outbox?.load(options.documentId).then((recovered) => {
+      if (this.#destroyed) return;
+      const mine = new Set(this.#pending.map((change) => `${change.clientId}:${change.seq}`));
+      const missing = recovered.filter(
+        (change) =>
+          change.clientId !== this.clientId && !mine.has(`${change.clientId}:${change.seq}`),
+      );
+      if (!missing.length) return;
+      for (const change of missing) this.#saved.add(change.clientId);
+      this.#pending = [...missing, ...this.#pending];
+      this.#rebuild();
+      this.#schedule(0);
+    });
   }
 
   subscribe = (listener: () => void) => {
@@ -140,6 +167,7 @@ export class SheetSync {
     this.#pending.push({ clientId: this.clientId, seq: ++this.#seq, ops });
     this.#refused = null;
     this.#rebuild();
+    this.#persist();
     this.#schedule(BATCH_MS);
     return { before, after: this.#view };
   }
@@ -197,12 +225,27 @@ export class SheetSync {
     this.#view = view;
     this.#notify();
   }
-  #acknowledge(seq: number) {
+  #acknowledge(clientId: string, seq: number) {
     const before = this.#pending.length;
-    this.#pending = this.#pending.filter((change) => change.seq > seq);
-    // A reconnect after a reload starts below what the server already has.
-    this.#seq = Math.max(this.#seq, seq);
-    return before !== this.#pending.length;
+    this.#pending = this.#pending.filter(
+      (change) => change.clientId !== clientId || change.seq > seq,
+    );
+    if (clientId === this.clientId) this.#seq = Math.max(this.#seq, seq);
+    if (before !== this.#pending.length) this.#persist();
+  }
+  /** Keeps each client's unsent changes on the device, and forgets those all sent. */
+  #persist() {
+    const outbox = this.options.outbox;
+    if (!outbox) return;
+    const byClient = new Map<string, SheetChange[]>();
+    for (const change of this.#pending)
+      byClient.set(change.clientId, [...(byClient.get(change.clientId) ?? []), change]);
+    for (const clientId of new Set([...this.#saved, ...byClient.keys()])) {
+      const changes = byClient.get(clientId) ?? [];
+      outbox.save(this.options.documentId, clientId, changes);
+      if (changes.length) this.#saved.add(clientId);
+      else this.#saved.delete(clientId);
+    }
   }
 
   #schedule(delay: number) {
@@ -216,20 +259,26 @@ export class SheetSync {
     if (this.#inflight) return this.#inflight;
     if (this.#status !== "live" || (!this.#pending.length && !this.#cursorDirty))
       return Promise.resolve();
-    const changes = this.#pending.slice(0, SHEET_TRANSPORT.changes);
-    const cursor = this.#cursorDirty ? this.#cursor : null;
-    this.#cursorDirty = false;
+    // One client's changes per push, in order: recovered ones first, then this tab's.
+    const clientId = this.#pending[0]?.clientId ?? this.clientId;
+    const run = this.#pending.findIndex((change) => change.clientId !== clientId);
+    const changes = this.#pending.slice(
+      0,
+      Math.min(run === -1 ? this.#pending.length : run, SHEET_TRANSPORT.changes),
+    );
+    const cursor = this.#cursorDirty && clientId === this.clientId ? this.#cursor : null;
+    if (cursor) this.#cursorDirty = false;
     this.#inflight = this.options
       .push({
         documentId: this.options.documentId,
-        clientId: this.clientId,
+        clientId,
         ...(changes.length ? { changes: changes.map((change) => JSON.stringify(change)) } : {}),
         ...(cursor ? { cursor } : {}),
       })
       .then(
         (result) => {
           this.#failures = 0;
-          this.#acknowledge(result.acked);
+          this.#acknowledge(clientId, result.acked);
           if (result.refused.length)
             this.#refused = `Some changes weren’t kept: ${result.refused[0]!.reason}.`;
           this.#rebuild();
@@ -292,7 +341,7 @@ export class SheetSync {
         this.#confirmed = frame.doc;
         this.#revision = frame.revision;
         this.#moment = frame.moment;
-        if (frame.acked !== null) this.#acknowledge(frame.acked);
+        if (frame.acked !== null) this.#acknowledge(this.clientId, frame.acked);
         this.#live();
         this.#rebuild();
         return;
@@ -309,7 +358,7 @@ export class SheetSync {
           const revision = start + index + 1;
           if (revision <= this.#revision) continue;
           doc = applyChange(doc, change, revision).doc;
-          if (change.clientId === this.clientId) this.#acknowledge(change.seq);
+          this.#acknowledge(change.clientId, change.seq);
         }
         this.#confirmed = doc;
         this.#revision = Math.max(this.#revision, frame.revision);
