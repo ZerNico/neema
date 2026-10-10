@@ -107,7 +107,7 @@ describe("applying formats and clears", () => {
     expect(Object.keys(result.doc.sheet.s1!.cells)).toHaveLength(0);
   });
 
-  it("clears only the cells that exist", () => {
+  it("clears only the cells that exist, and gives a new cell its column's format", () => {
     let doc = apply(emptyDoc(), [
       { op: "set", sh: "s1", cells: [{ r: "s1.r2", c: "s1.c1", v: 1 }] },
       {
@@ -130,5 +130,15 @@ describe("applying formats and clears", () => {
       2,
     ).doc;
     expect(cleared.sheet.s1!.cells["s1.r2"]?.["s1.c1"]?.v).toBeUndefined();
+    // A row inserted later has no cells yet; what is typed into it takes the column's format.
+    doc = apply(
+      doc,
+      [
+        { op: "insert", sh: "s1", axis: "rows", ids: ["later"], after: "s1.r3" },
+        { op: "set", sh: "s1", cells: [{ r: "later", c: "s1.c2", v: 0.5 }] },
+      ],
+      3,
+    ).doc;
+    expect(doc.sheet.s1!.cells.later?.["s1.c2"]?.s).toBe('{"numberFormat":"0%"}');
   });
 });

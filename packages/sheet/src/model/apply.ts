@@ -54,6 +54,12 @@ const patched = (key: string | undefined, patch: StylePatch) => {
 const alive = (entries: readonly AxisEntry[], id: string) =>
   positions(entries).at(id) !== undefined;
 
+/** The format a new cell takes from its column, then its row, as Excel's row and column formats. */
+const axisStyle = (sheet: Sheet, r: string, c: string) => {
+  const [column, row] = [sheet.colProps[c]?.s, sheet.rowProps[r]?.s];
+  return row ? patched(column, styleOf(row)) : column;
+};
+
 /** Live IDs from `a` to `b` in order, either way round; empty when either is not alive. */
 function between(entries: readonly AxisEntry[], a: string | null, b: string | null): string[] {
   const index = positions(entries);
@@ -135,6 +141,7 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
           continue;
         }
         const old = cellAt(sheet, write.r, write.c);
+        const s = old ? old.s : axisStyle(sheet, write.r, write.c);
         const content =
           write.f !== undefined
             ? { f: write.f, ...(write.array ? { array: write.array } : {}) }
@@ -147,7 +154,7 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
           {
             ...content,
             w: revision,
-            ...(old?.s ? { s: old.s } : {}),
+            ...(s ? { s } : {}),
             ...(old?.wf !== undefined ? { wf: old.wf } : {}),
           },
         ]);
