@@ -1644,6 +1644,25 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       // Streamed in the chat but wanted in the project: it goes, and is made where asked.
       if ((scope === "project") === Boolean(preview.document.projectId)) {
         const made = known.find((each) => each.id === preview.document!.id) ?? preview.document;
+        // The locale may come after the operations the preview wrote, once it had made the sheet.
+        if (locale)
+          yield* input.sheets
+            .change(
+              input.userId,
+              {
+                documentId: made.id,
+                clientId: sheetClient,
+                generationId: input.generationId ?? null,
+              },
+              input.writeGuard,
+              (doc) =>
+                Effect.succeed({
+                  result: null,
+                  ops:
+                    doc.settings.locale === locale ? null : [{ op: "settings" as const, locale }],
+                }),
+            )
+            .pipe(Effect.catchCause(() => Effect.void));
         const remaining = remainingOf(operations, preview);
         if (!Array.isArray(remaining) || remaining.length) {
           const filled = yield* sheetEdit(made, remaining);

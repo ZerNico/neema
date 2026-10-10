@@ -368,4 +368,24 @@ describe("live sheet tools", () => {
     });
     expect(fake.rows.get("sheet-1")!.doc.sheet.s1!.cells["s1.r1"]?.["s1.c1"]?.v ?? null).toBeNull();
   });
+
+  it("gives a streamed sheet the locale its call names after its operations", async () => {
+    const fake = fakeSheets();
+    const tools = await prepare(fake);
+    const operations = [
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["one"]] },
+      { kind: "setCells", sheet: "Sheet1", start: "A2", rows: [["two"]] },
+    ];
+    const text = JSON.stringify({ title: "Plan", operations, locale: "de-DE" });
+    tools.live.start("call-1", "create_sheet");
+    const wrote = fake.nextWrite();
+    await Effect.runPromise(tools.live.delta("call-1", text.slice(0, text.indexOf("A2") - 30)));
+    await wrote;
+    expect(
+      await call(tools, "create_sheet", { title: "Plan", operations, locale: "de-DE" }),
+    ).toMatchObject({
+      outcome: "created",
+    });
+    expect(fake.rows.get("sheet-1")!.doc.settings.locale).toBe("de-DE");
+  });
 });
