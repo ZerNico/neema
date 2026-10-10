@@ -17,7 +17,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { DocumentComment } from "../schema.ts";
-import { shorten, type CommentActions } from "./comment-actions.ts";
+import { shorten, type ThreadActions } from "./comment-actions.ts";
 
 /** How the assistant is named in a comment that asks it. */
 const ASSISTANT_MENTION = "@Assistant";
@@ -178,7 +178,7 @@ function Comment({
 }: {
   comment: DocumentComment;
   own: boolean;
-  actions: CommentActions | null;
+  actions: ThreadActions | null;
   isRoot: boolean;
 }) {
   const name = comment.byAssistant ? "Assistant" : (comment.author?.name ?? "Someone");
@@ -233,7 +233,7 @@ export function CommentThread({
   replies: DocumentComment[];
   anchored: boolean;
   me: string | null;
-  actions: CommentActions | null;
+  actions: ThreadActions | null;
   /** Shows the reply box; a list shows it only for the thread being read. */
   expanded: boolean;
   onQuoteClick?: (() => void) | undefined;

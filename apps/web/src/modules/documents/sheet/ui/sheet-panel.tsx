@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  CommentAdd01Icon,
   ArrowDown01Icon,
   ArrowUp01Icon,
   Cancel01Icon,
@@ -54,6 +55,17 @@ import { FieldError } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
+import { uuidv7 } from "uuidv7";
+import { toastError } from "~/ui/error-toast.ts";
+import { commentMessage } from "../../comment-message.ts";
+import {
+  commentOnDocument,
+  deleteDocumentComment,
+  resolveDocumentThread,
+} from "../../server/document-functions.ts";
+import type { ThreadActions } from "../../ui/comment-actions.ts";
+import { CommentInput, CommentThread } from "../../ui/comment-thread.tsx";
+import type { AskTarget } from "../../ui/rich-editor/editor-hooks.ts";
 import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
@@ -93,10 +105,16 @@ export default function SheetPanelBody({
   controller,
   canEdit,
   toolbarSlot,
+  me = null,
+  ask = null,
 }: {
   controller: SheetController;
   canEdit: boolean;
   toolbarSlot: HTMLElement | null;
+  /** The reader's account, to tell their own comments apart. */
+  me?: string | null;
+  /** Sends a comment to the assistant as a chat message about its cell. */
+  ask?: ((request: string, target: AskTarget) => Promise<boolean>) | null;
 }) {
   const { state, sync } = controller;
   const doc = state?.doc ?? null;
@@ -104,6 +122,8 @@ export default function SheetPanelBody({
   const [selection, setSelection] = useState<SheetSelection | null>(null);
   const [editing, setEditing] = useState<CellEditing | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // Writing a new thread on the active cell.
+  const [commenting, setCommenting] = useState(false);
   // What Find looks for, and which match is current; null while the bar is closed.
   const [finding, setFinding] = useState<{ query: string; index: number } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
@@ -137,6 +157,17 @@ export default function SheetPanelBody({
   const head = active.head;
   const source = cellSource(doc, sheet, head.r, head.c, locale);
   const style = cellStyle(doc.sheet[sheet]!.cells[head.r]?.[head.c]?.s);
+  const comments = state.comments;
+  const roots = comments.filter((each) => each.id === each.threadId);
+  /** Threads whose cell is on this sheet, by where they sit. */
+  const placed = roots.flatMap((root) => {
+    const at = doc.anchors[root.id];
+    return at && at.sh === sheet && rows.at(at.r) !== undefined && cols.at(at.c) !== undefined
+      ? [{ root, at }]
+      : [];
+  });
+  const here = placed.filter(({ at }) => at.r === head.r && at.c === head.c);
+  const shownThread = here.find(({ root }) => !root.resolvedAt) ?? here[0] ?? null;
   const context: GridContext = {
     doc,
     sheet,
@@ -149,6 +180,7 @@ export default function SheetPanelBody({
     if (!readOnly && ops.length) sync!.dispatch(ops);
   };
   const select = (next: SheetSelection) => {
+    if (next.head.r !== active.head.r || next.head.c !== active.head.c) setCommenting(false);
     setSelection(next);
     sync?.setCursor({ sheet, anchor: next.anchor, head: next.head });
   };
@@ -197,6 +229,15 @@ export default function SheetPanelBody({
     if (from?.cut && from.text === text) copied.current = null;
   };
   const decorations: GridDecoration[] = [
+    // A corner mark on each open thread's cell.
+    ...placed
+      .filter(({ root }) => !root.resolvedAt)
+      .map(({ root, at }) => ({
+        key: `thread:${root.id}`,
+        selection: { anchor: at, head: at },
+        color: "var(--warning)",
+        marker: true,
+      })),
     // Find's matches, a few hundred at most, outlined without a name.
     ...matches.slice(0, 500).map((match) => ({
       key: `find:${match.r}:${match.c}`,
@@ -213,6 +254,66 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const cellOf = (at: { r: string; c: string }) => [sheet, at.r, at.c, at.r, at.c];
+  const sendToAssistant = async (
+    thread: string,
+    quote: string,
+    body: string,
+    at: { r: string; c: string },
+  ) => {
+    const sent = await ask?.(commentMessage(quote, body), { blocks: cellOf(at), thread }).catch(
+      () => false,
+    );
+    if (!sent) toastError("Couldn’t send it to the assistant", null);
+  };
+  const threadActions = (at: { r: string; c: string }): ThreadActions | null =>
+    readOnly
+      ? null
+      : {
+          canAsk: ask !== null,
+          reply: async (threadId, quote, body, toAssistant) => {
+            try {
+              await commentOnDocument({
+                data: { documentId: controller.documentId, threadId, body, toAssistant },
+              });
+            } catch (error) {
+              toastError("Couldn’t send the reply.", error);
+              return;
+            }
+            if (toAssistant) await sendToAssistant(threadId, quote, body, at);
+          },
+          resolve: (threadId, resolved) =>
+            resolveDocumentThread({
+              data: { documentId: controller.documentId, threadId, resolved },
+            }).catch((error: unknown) => toastError("Couldn’t update the thread.", error)),
+          remove: (commentId) =>
+            deleteDocumentComment({ data: { documentId: controller.documentId, commentId } }).catch(
+              (error: unknown) => toastError("Couldn’t delete the comment.", error),
+            ),
+        };
+  const startThread = async (body: string, toAssistant: boolean) => {
+    const threadId = uuidv7();
+    const shown = cellDisplay(values.value(sheet, head.r, head.c), style, locale).text;
+    const quote = `${address}${shown ? ` · ${shown}` : ""}`.slice(0, 500);
+    const at = { r: head.r, c: head.c };
+    try {
+      await commentOnDocument({
+        data: {
+          documentId: controller.documentId,
+          threadId,
+          body,
+          quote,
+          toAssistant,
+          cell: { sh: sheet, ...at },
+        },
+      });
+    } catch (error) {
+      toastError("Couldn’t add the comment.", error);
+      return;
+    }
+    setCommenting(false);
+    if (toAssistant) await sendToAssistant(threadId, quote, body, at);
+  };
   const barText =
     editing && editing.at.r === head.r && editing.at.c === head.c ? editing.text : source;
 
@@ -270,6 +371,29 @@ export default function SheetPanelBody({
           }}
         />
       </div>
+      {shownThread || commenting ? (
+        <div className="border-border max-h-64 shrink-0 overflow-y-auto border-b p-3">
+          {shownThread ? (
+            <CommentThread
+              root={shownThread.root}
+              replies={comments.filter(
+                (each) => each.threadId === shownThread.root.id && each.id !== shownThread.root.id,
+              )}
+              anchored
+              me={me}
+              actions={threadActions(shownThread.at)}
+              expanded
+            />
+          ) : (
+            <CommentInput
+              placeholder={`Comment on ${address}`}
+              canAsk={ask !== null}
+              autoFocus
+              onSubmit={startThread}
+            />
+          )}
+        </div>
+      ) : null}
       {finding ? (
         <div className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3">
           <Input
@@ -392,6 +516,12 @@ export default function SheetPanelBody({
             onClick={() => {
               void navigator.clipboard?.readText().then(paste);
             }}
+          />
+          <MenuItem
+            icon={CommentAdd01Icon}
+            label="Comment"
+            disabled={readOnly || !!shownThread}
+            onClick={() => setCommenting(true)}
           />
           <ContextMenuSeparator />
           <MenuItem

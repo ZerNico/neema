@@ -53,6 +53,8 @@ export interface GridDecoration {
   readonly color: string;
   /** A person's name beside their selection; none for a highlight such as a find match. */
   readonly label?: string;
+  /** A corner mark on the cell instead of an outline, as a comment has. */
+  readonly marker?: boolean;
 }
 
 export interface SheetGridProps {
@@ -626,6 +628,19 @@ export function SheetGrid({
   };
   const others = decorations.flatMap((decoration) => {
     const rect = rectOf(decoration.selection);
+    if (rect && decoration.marker)
+      return [
+        <div
+          key={decoration.key}
+          aria-hidden
+          className="pointer-events-none absolute z-10 size-0 border-t-[7px] border-l-[7px] border-l-transparent"
+          style={{
+            top: rect.top + 1,
+            left: rect.left + rect.width - 8,
+            borderTopColor: decoration.color,
+          }}
+        />,
+      ];
     return rect
       ? [
           <div

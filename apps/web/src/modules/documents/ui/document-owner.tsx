@@ -228,13 +228,15 @@ function DocumentSession({
             controller={sheet}
             canEdit={controller.document?.canEdit ?? false}
             toolbarSlot={toolbarSlot}
+            me={me?.id ?? null}
+            ask={hooks.ask}
           />
         </Suspense>
       ) : (
         <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />
       ),
     }),
-    [controller, hooks, id, isSheet, sheet, subtitle, toolbarSlot],
+    [controller, hooks, id, isSheet, me, sheet, subtitle, toolbarSlot],
   );
   // The card opens the request this session last committed, not the one its
   // own render captured: a card published just before the connection landed

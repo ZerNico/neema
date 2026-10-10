@@ -11,13 +11,13 @@ import SheetPanelBody from "./sheet-panel.tsx";
 
 const apply = (doc: SheetDoc, ...ops: SheetOp[]) =>
   applyChange(doc, { clientId: "t", seq: 1, ops }, 1).doc;
-const controllerOf = (doc: SheetDoc): SheetController => {
+const controllerOf = (doc: SheetDoc, comments: SheetState["comments"] = []): SheetController => {
   const state: SheetState = {
     doc,
     revision: 1,
     moment: { now: 45_000, seed: 1 },
     status: "live",
-    comments: [],
+    comments,
     presence: new Map(),
     refused: null,
     pending: 0,
@@ -133,5 +133,29 @@ describe("an open sheet", () => {
     fireEvent.keyDown(find, { key: "Enter" });
     expect(screen.getByText("2 of 2")).toBeTruthy();
     expect(screen.getByText("B3")).toBeTruthy();
+  });
+
+  it("shows the thread on the selected cell", () => {
+    const doc = apply(emptyDoc(), {
+      op: "anchor",
+      thread: "t1",
+      at: { sh: "s1", r: "s1.r1", c: "s1.c1" },
+    });
+    const root = {
+      id: "t1",
+      threadId: "t1",
+      author: { id: "u1", name: "Ada" },
+      byAssistant: false,
+      body: "Check this total",
+      createdAt: new Date(0).toISOString(),
+      resolvedAt: null,
+      quote: "A1",
+      toAssistant: false,
+      answered: false,
+    };
+    render(
+      <SheetPanelBody controller={controllerOf(doc, [root])} canEdit={false} toolbarSlot={null} />,
+    );
+    expect(screen.getByText("Check this total")).toBeTruthy();
   });
 });

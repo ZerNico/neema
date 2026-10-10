@@ -107,3 +107,5 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
   };
 };
 export type CommentActions = ReturnType<typeof commentActions>;
+/** What a thread's card does with it, for any kind of document. */
+export type ThreadActions = Pick<CommentActions, "canAsk" | "reply" | "resolve" | "remove">;
