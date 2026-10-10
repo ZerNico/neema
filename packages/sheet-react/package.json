@@ -5,7 +5,8 @@
   "exports": {
     "./grid": "./src/grid.tsx",
     "./layout": "./src/layout.ts",
-    "./display": "./src/display.ts"
+    "./display": "./src/display.ts",
+    "./commands": "./src/commands.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

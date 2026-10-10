@@ -1,4 +1,5 @@
 import { applyChange } from "@chat/sheet/model/apply";
+import { invertChange } from "@chat/sheet/model/invert";
 import type { SheetDoc } from "@chat/sheet/model";
 import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
 import { SHEET_TRANSPORT } from "../schema.ts";
@@ -38,6 +39,14 @@ export interface SheetState {
   /** Why the last changes did not apply, for the person to see. */
   readonly refused: string | null;
   readonly pending: number;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+}
+
+/** One step of this tab's history: the sheet as it showed before and after. */
+interface Step {
+  readonly before: SheetDoc;
+  readonly after: SheetDoc;
 }
 
 const FRAME_TYPES = ["reset", "changes", "comments", "presence", "gone"] as const;
@@ -45,6 +54,7 @@ const FRAME_TYPES = ["reset", "changes", "comments", "presence", "gone"] as cons
 const BATCH_MS = 60;
 const MAX_BACKOFF_MS = 10_000;
 const NO_MOMENT: SheetMoment = { now: 0, seed: 0 };
+const HISTORY = 100;
 
 /**
  * One open sheet's connection. The feed brings the server's order; edits
@@ -76,6 +86,8 @@ export class SheetSync {
   #destroyed = false;
   #listeners = new Set<() => void>();
   #state: SheetState;
+  #undo: Step[] = [];
+  #redo: Step[] = [];
 
   constructor(private readonly options: SheetSyncOptions) {
     this.clientId = options.clientId ?? crypto.randomUUID().slice(0, 18);
@@ -96,11 +108,40 @@ export class SheetSync {
 
   /** Applies this tab's operations now and sends them; nothing happens before the first load. */
   dispatch(ops: readonly SheetOp[]) {
-    if (!this.#confirmed || !ops.length || this.#status === "gone") return;
+    const step = this.#apply(ops);
+    if (!step) return;
+    this.#undo = [...this.#undo.slice(1 - HISTORY), step];
+    this.#redo = [];
+    this.#notify();
+  }
+  /**
+   * Takes back this tab's last change, leaving anything someone else has
+   * changed since; a step with nothing left to take back is skipped.
+   */
+  undo() {
+    this.#travel(this.#undo, this.#redo);
+  }
+  redo() {
+    this.#travel(this.#redo, this.#undo);
+  }
+  #travel(from: Step[], to: Step[]) {
+    while (from.length && this.#view) {
+      const step = from.pop()!;
+      const applied = this.#apply(invertChange(step.before, step.after, this.#view));
+      if (!applied) continue;
+      to.push(applied);
+      break;
+    }
+    this.#notify();
+  }
+  #apply(ops: readonly SheetOp[]): Step | null {
+    if (!this.#confirmed || !this.#view || !ops.length || this.#status === "gone") return null;
+    const before = this.#view;
     this.#pending.push({ clientId: this.clientId, seq: ++this.#seq, ops });
     this.#refused = null;
     this.#rebuild();
     this.#schedule(BATCH_MS);
+    return { before, after: this.#view };
   }
 
   setCursor(cursor: SheetCursor | null) {
@@ -139,6 +180,8 @@ export class SheetSync {
       presence: new Map(this.#presence),
       refused: this.#refused,
       pending: this.#pending.length,
+      canUndo: this.#undo.length > 0,
+      canRedo: this.#redo.length > 0,
     };
   }
   #notify() {

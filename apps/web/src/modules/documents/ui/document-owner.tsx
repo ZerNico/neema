@@ -216,7 +216,7 @@ function DocumentSession({
       icon: isSheet ? Table01Icon : File01Icon,
       restorable: true,
       actions: isSheet ? (
-        <SheetPanelActions document={controller.document} />
+        <SheetPanelActions document={controller.document} toolbarSlot={setToolbarSlot} />
       ) : (
         <DocumentPanelActions controller={controller} toolbarSlot={setToolbarSlot} />
       ),
@@ -224,7 +224,11 @@ function DocumentSession({
         <Suspense
           fallback={<Spinner aria-label="Loading sheet" className="text-muted-foreground" />}
         >
-          <SheetPanelBody controller={sheet} />
+          <SheetPanelBody
+            controller={sheet}
+            canEdit={controller.document?.canEdit ?? false}
+            toolbarSlot={toolbarSlot}
+          />
         </Suspense>
       ) : (
         <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />
