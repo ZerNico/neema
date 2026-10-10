@@ -206,4 +206,68 @@ describe("an open sheet", () => {
     expect(pie.querySelectorAll("path")).toHaveLength(2);
     expect(screen.getAllByText("Feb").length).toBeGreaterThan(1);
   });
+
+  it("charts the selected cells from the toolbar", async () => {
+    const listeners = new Map<string, (event: MessageEvent<string>) => void>();
+    const sync = new SheetSync({
+      documentId: "sheet-1",
+      clientId: "me",
+      connect: () => ({
+        addEventListener: (type, listener) => listeners.set(type, listener),
+        close: () => {},
+      }),
+      push: () => new Promise(() => {}),
+    });
+    const doc = apply(emptyDoc(), {
+      op: "set",
+      sh: "s1",
+      cells: [
+        { r: "s1.r1", c: "s1.c1", v: "Month" },
+        { r: "s1.r1", c: "s1.c2", v: "Sales" },
+        { r: "s1.r2", c: "s1.c1", v: "Jan" },
+        { r: "s1.r2", c: "s1.c2", v: 10 },
+      ],
+    });
+    listeners.get("reset")!(
+      new MessageEvent("reset", {
+        data: JSON.stringify({
+          type: "reset",
+          doc,
+          revision: 1,
+          moment: { now: 45_000, seed: 1 },
+          acked: null,
+        }),
+      }),
+    );
+    const slot = document.createElement("div");
+    document.body.append(slot);
+    function Live() {
+      const state = useSyncExternalStore(sync.subscribe, sync.getState);
+      return (
+        <SheetPanelBody
+          controller={{
+            documentId: "sheet-1",
+            sync,
+            state,
+            flush: async () => true,
+            unpersisted: () => false,
+            selected: () => [],
+          }}
+          canEdit
+          toolbarSlot={slot}
+        />
+      );
+    }
+    render(<Live />);
+    const content = screen.getByRole("grid").firstElementChild!.lastElementChild!;
+    fireEvent.pointerDown(content, { clientX: 5, clientY: 5, button: 0 });
+    fireEvent.pointerDown(content, { clientX: 70, clientY: 25, button: 0, shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Insert chart" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Column chart" }));
+    expect(Object.values(sync.getState().doc!.charts)).toMatchObject([
+      { kind: "column", series: [{ name: "Sales" }] },
+    ]);
+    sync.destroy();
+    slot.remove();
+  });
 });

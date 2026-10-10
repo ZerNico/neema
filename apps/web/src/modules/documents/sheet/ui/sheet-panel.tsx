@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  ChartColumnIcon,
   CommentAdd01Icon,
   ArrowDown01Icon,
   ArrowUp01Icon,
@@ -23,6 +24,8 @@ import { sheetLocale } from "@chat/sheet/locales";
 import { NEW_SHEET, liveSheets, positions } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
 import {
+  chartFromSelection,
+  type ChartKind,
   clearSelection,
   copySelection,
   deleteAtSelection,
@@ -50,13 +53,23 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "~/ui/primitives/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { uuidv7 } from "uuidv7";
+import { toast } from "sonner";
 import { toastError } from "~/ui/error-toast.ts";
 import { commentMessage } from "../../comment-message.ts";
 import {
@@ -70,6 +83,7 @@ import type { AskTarget } from "../../ui/rich-editor/editor-hooks.ts";
 import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar } from "./sheet-toolbar.tsx";
+import { CHART_KINDS } from "./chart-kinds.ts";
 import { chartData } from "./chart-data.ts";
 import { SheetChart } from "./sheet-chart.tsx";
 
@@ -257,6 +271,14 @@ export default function SheetPanelBody({
       })),
   ];
   const address = `${columnLetters(cols.at(head.c)!)}${rows.at(head.r)}`;
+  const insertChart = (kind: ChartKind) => {
+    const ops = chartFromSelection(context, kind);
+    if (!ops.length)
+      toast("Select the cells to chart first", {
+        description: "A header row and label column are picked up.",
+      });
+    run(ops);
+  };
   const overlays: GridOverlay[] = Object.entries(doc.charts)
     .filter(([, chart]) => chart.sheet === sheet)
     .map(([id, chart]) => ({
@@ -268,15 +290,51 @@ export default function SheetPanelBody({
         <div className="group relative h-full">
           <SheetChart chart={chart} data={chartData(doc, values, chart)} />
           {readOnly ? null : (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Remove chart"
-              className="text-muted-foreground absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-              onClick={() => run([{ op: "chartDelete", id }])}
-            >
-              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            </Button>
+            <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Chart type"
+                      className="text-muted-foreground"
+                    />
+                  }
+                >
+                  <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  {CHART_KINDS.map((each) => (
+                    <DropdownMenuItem
+                      key={each.kind}
+                      disabled={each.kind === chart.kind}
+                      onClick={() =>
+                        run([
+                          {
+                            op: "chartPut",
+                            id,
+                            // A pie draws one series; the rest stay for another kind.
+                            chart: { ...chart, kind: each.kind },
+                          },
+                        ])
+                      }
+                    >
+                      {each.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Remove chart"
+                className="text-muted-foreground"
+                onClick={() => run([{ op: "chartDelete", id }])}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+              </Button>
+            </div>
           )}
         </div>
       ),
@@ -357,6 +415,7 @@ export default function SheetPanelBody({
               onUndo={() => sync?.undo()}
               onRedo={() => sync?.redo()}
               onFormat={(patch) => run(formatSelection(context, patch))}
+              onChart={insertChart}
             />,
             toolbarSlot,
           )
@@ -588,6 +647,19 @@ export default function SheetPanelBody({
             disabled={readOnly}
             onClick={() => run(deleteAtSelection(context, "columns"))}
           />
+          <ContextMenuSub>
+            <ContextMenuSubTrigger disabled={readOnly}>
+              <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
+              Insert chart
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-40">
+              {CHART_KINDS.map((each) => (
+                <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
+                  {each.label}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
           <ContextMenuSeparator />
           <MenuItem
             icon={SortingAZ01Icon}

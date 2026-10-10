@@ -1,6 +1,7 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import {
   ArrowDown01Icon,
+  ChartColumnIcon,
   Redo02Icon,
   TextAlignCenterIcon,
   TextAlignLeftIcon,
@@ -21,6 +22,8 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Action, Format } from "../../ui/rich-editor/toolbar.tsx";
+import { CHART_KINDS } from "./chart-kinds.ts";
+import type { ChartKind } from "@chat/sheet-react/commands";
 
 /** Number formats a person picks by name; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -47,6 +50,7 @@ export function SheetToolbar({
   onUndo,
   onRedo,
   onFormat,
+  onChart,
 }: {
   style: CellStyle;
   canUndo: boolean;
@@ -55,6 +59,8 @@ export function SheetToolbar({
   onUndo: () => void;
   onRedo: () => void;
   onFormat: (patch: StylePatch) => void;
+  /** Charts the selection; nothing to chart is the caller's to say. */
+  onChart: (kind: ChartKind) => void;
 }) {
   if (readOnly) return null;
   const current = NUMBER_FORMATS.find((each) => each.code === (style.numberFormat ?? null));
@@ -123,6 +129,32 @@ export function SheetToolbar({
               onClick={() => onFormat({ numberFormat: format.code })}
             >
               {format.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <Toolbar.Button
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Insert chart"
+                  className="text-muted-foreground"
+                  onMouseDown={(event) => event.preventDefault()}
+                />
+              }
+            />
+          }
+        >
+          <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
+        </Toolbar.Button>
+        <DropdownMenuContent align="start" className="w-40">
+          {CHART_KINDS.map((each) => (
+            <DropdownMenuItem key={each.kind} onClick={() => onChart(each.kind)}>
+              {each.label} chart
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
