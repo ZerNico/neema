@@ -7,7 +7,8 @@ import { calculateSheet } from "@chat/sheet/model/calc";
 import { parseFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { CellWrite, SheetOp } from "@chat/sheet/model/ops";
-import { SheetGrid, type CellEditing, type SheetSelection } from "./grid.tsx";
+import { SheetGrid, type CellEditing, type OverlayChange, type SheetSelection } from "./grid.tsx";
+import { dragPlace } from "./overlay-place.ts";
 
 afterEach(cleanup);
 
@@ -155,5 +156,75 @@ describe("the sheet grid", () => {
     // The pane's copy is only for the eye; the grid's own cell is the one named.
     expect(copies.filter((each) => each.closest("[aria-hidden]"))).toHaveLength(1);
     expect(screen.getAllByText("Body")).toHaveLength(1);
+  });
+
+  it("selects a chart over the cells, moves it a cell at a time and snaps a drag to a cell", () => {
+    const changes: Array<[string, OverlayChange]> = [];
+    const commands: string[] = [];
+    function Charted() {
+      const [selected, setSelected] = useState<string | null>(null);
+      return (
+        <SheetGrid
+          doc={emptyDoc()}
+          sheet="s1"
+          values={calculateSheet(emptyDoc(), { revision: 1, epoch: 0, now: 45_000, seed: 1 })}
+          locale={EN_US}
+          selection={{ anchor: at(1, 1), head: at(1, 1) }}
+          onSelectionChange={() => {}}
+          label="Budget"
+          onCommit={() => {}}
+          overlays={[
+            {
+              key: "c1",
+              at: at(2, 2),
+              width: 300,
+              height: 200,
+              label: "Sales chart",
+              content: <button type="button">Legend</button>,
+            },
+          ]}
+          selectedOverlay={selected}
+          onOverlaySelect={setSelected}
+          onOverlayChange={(key, change) => changes.push([key, change])}
+          onOverlayCommand={(key, command) => commands.push(`${key} ${command}`)}
+        />
+      );
+    }
+    render(<Charted />);
+    const chart = screen.getByRole("group", { name: "Sales chart" });
+    fireEvent.pointerDown(chart, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(window);
+    expect(chart.getAttribute("aria-selected")).toBe("true");
+    expect(chart.querySelectorAll("[data-handle]")).toHaveLength(8);
+    fireEvent.keyDown(chart, { key: "ArrowRight" });
+    fireEvent.keyDown(chart, { key: "d", metaKey: true });
+    fireEvent.keyDown(chart, { key: "Delete" });
+    expect(changes).toEqual([["c1", { at: at(2, 3), width: 300, height: 200 }]]);
+    expect(commands).toEqual(["c1 duplicate", "c1 delete"]);
+    // A drag past the click threshold lands on the cell under the new top-left corner.
+    fireEvent.pointerDown(chart, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 10 + 64 * 2 + 5, clientY: 10 + 20 * 3 + 2 });
+    fireEvent.pointerUp(window);
+    expect(changes[1]).toEqual(["c1", { at: at(5, 4), width: 300, height: 200 }]);
+    fireEvent.keyDown(chart, { key: "Escape" });
+    expect(chart.getAttribute("aria-selected")).toBe("false");
+  });
+});
+
+describe("dragging an overlay's handles", () => {
+  const place = { top: 100, left: 100, width: 200, height: 100 };
+  const min = { width: 50, height: 50 };
+  it("grows from the far side, never below its least size, and keeps proportions with shift", () => {
+    expect(dragPlace(place, { handle: "nw", dx: -20, dy: -10, ratio: false }, min)).toEqual({
+      top: 90,
+      left: 80,
+      width: 220,
+      height: 110,
+    });
+    expect(dragPlace(place, { handle: "e", dx: -400, dy: 0, ratio: false }, min).width).toBe(50);
+    expect(dragPlace(place, { handle: "se", dx: 200, dy: 0, ratio: true }, min)).toMatchObject({
+      width: 400,
+      height: 200,
+    });
   });
 });

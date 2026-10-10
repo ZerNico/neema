@@ -24,6 +24,10 @@ import {
   visibleRange,
   type AxisLayout,
 } from "./layout.ts";
+import type { OverlayCommand } from "./overlay-place.ts";
+import { OverlayFrame } from "./overlay.tsx";
+
+export type { OverlayCommand } from "./overlay-place.ts";
 
 export interface CellRef {
   readonly r: string;
@@ -64,6 +68,17 @@ export interface GridOverlay {
   readonly width: number;
   readonly height: number;
   readonly content: ReactNode;
+  /** Its accessible name, such as "Sales chart". */
+  readonly label: string;
+  /** The smallest it may be resized to. */
+  readonly min?: { readonly width: number; readonly height: number };
+}
+
+/** Where an overlay was moved or resized to: the cell under its top-left corner, and its size. */
+export interface OverlayChange {
+  readonly at: CellRef;
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface SheetGridProps {
@@ -92,6 +107,12 @@ export interface SheetGridProps {
   readonly onResize?: (axis: Axis, id: string, px: number) => void;
   readonly decorations?: readonly GridDecoration[];
   readonly overlays?: readonly GridOverlay[];
+  /** The overlay selected instead of cells, by key. */
+  readonly selectedOverlay?: string | null;
+  readonly onOverlaySelect?: (key: string | null) => void;
+  /** Without this, overlays can be selected but not moved, resized or deleted. */
+  readonly onOverlayChange?: (key: string, change: OverlayChange) => void;
+  readonly onOverlayCommand?: (key: string, command: OverlayCommand) => void;
 }
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
@@ -99,6 +120,7 @@ const FALLBACK = { width: 960, height: 640 };
 const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
+const OVERLAY_MIN = { width: 160, height: 120 };
 
 /** Row and column indexes of every merged range, and the cells each hides. */
 function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols: AxisLayout) {
@@ -147,6 +169,10 @@ export function SheetGrid({
   onResize,
   decorations = NO_DECORATIONS,
   overlays = NO_OVERLAYS,
+  selectedOverlay = null,
+  onOverlaySelect,
+  onOverlayChange,
+  onOverlayCommand,
 }: SheetGridProps) {
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
@@ -394,6 +420,7 @@ export function SheetGrid({
   };
   const onPointerDown = (event: PointerEvent) => {
     if (!rows.ids.length || !cols.ids.length) return;
+    if (selectedOverlay !== null) onOverlaySelect?.(null);
     const at = cellAt(event);
     // A right click inside the selection keeps it for the menu it opens.
     if (event.button === 2) {
@@ -846,21 +873,55 @@ export function SheetGrid({
             const row = rowIndex.get(overlay.at.r);
             const col = colIndex.get(overlay.at.c);
             if (row === undefined || col === undefined) return [];
+            const editable = !readOnly && onOverlayChange !== undefined;
+            // The cell under a point becomes the overlay's new anchor, as a chart moves with it.
+            const placeAt = (rowAt: number, colAt: number, width: number, height: number) =>
+              onOverlayChange?.(overlay.key, {
+                at: { r: rows.ids[rowAt]!, c: cols.ids[colAt]! },
+                width,
+                height,
+              });
             return [
-              <div
+              <OverlayFrame
                 key={overlay.key}
-                className="absolute z-20"
-                style={{
-                  top: rows.starts[row],
-                  left: cols.starts[col],
+                label={overlay.label}
+                place={{
+                  top: rows.starts[row]!,
+                  left: cols.starts[col]!,
                   width: overlay.width,
                   height: overlay.height,
                 }}
-                // Clicks on what it draws are its own, not a cell's.
-                onPointerDown={(event) => event.stopPropagation()}
+                selected={selectedOverlay === overlay.key}
+                editable={editable}
+                min={overlay.min ?? OVERLAY_MIN}
+                onSelect={() => onOverlaySelect?.(overlay.key)}
+                onDeselect={() => {
+                  onOverlaySelect?.(null);
+                  scroller.current?.focus({ preventScroll: true });
+                }}
+                onPlace={(place) =>
+                  placeAt(
+                    rows.indexAt(Math.max(0, place.top)),
+                    cols.indexAt(Math.max(0, place.left)),
+                    place.width,
+                    place.height,
+                  )
+                }
+                onNudge={(down, right) =>
+                  placeAt(
+                    Math.min(rows.ids.length - 1, Math.max(0, row + down)),
+                    Math.min(cols.ids.length - 1, Math.max(0, col + right)),
+                    overlay.width,
+                    overlay.height,
+                  )
+                }
+                onCommand={(command) => {
+                  onOverlayCommand?.(overlay.key, command);
+                  if (command === "delete") scroller.current?.focus({ preventScroll: true });
+                }}
               >
                 {overlay.content}
-              </div>,
+              </OverlayFrame>,
             ];
           })}
           {editingPane === "main" ? editor : null}
