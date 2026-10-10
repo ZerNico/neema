@@ -246,7 +246,7 @@ export function liveSheetExport(
       value: renderFormula(name.f, { doc, sheet: ids[0]! }),
     })),
     charts: Object.values(doc.charts).flatMap((chart) => {
-      const file = fileChartOf(doc, chart);
+      const file = fileChartOf(doc, chart, values);
       return file ? [file] : [];
     }),
     images: Object.values(doc.images ?? {}).flatMap((image) => {

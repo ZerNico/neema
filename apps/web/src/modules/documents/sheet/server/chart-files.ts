@@ -1,17 +1,24 @@
 import { parseRange } from "@chat/sheet/a1";
 import { quoteSheet } from "@chat/sheet/model/formula";
 import { liveSheets, positions, type Box, type SheetDoc } from "@chat/sheet/model";
+import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Chart, ChartAxis, ChartSeries, ChartText } from "@chat/sheet/model/chart";
+import { XError } from "@chat/sheet/engine/evaluate";
 import type { FileAxis, FileChart, FileSeries } from "~/modules/spreadsheets/server/file-charts.ts";
 import { columnLetters } from "@chat/sheet/a1";
 
 const address = (row: number, column: number) => `${columnLetters(column)}${row}`;
 
-/** A chart's text as the file keeps it: as written, or what its cell holds now. */
-export const textOf = (doc: SheetDoc, label: ChartText | undefined) => {
+/**
+ * A chart's text as the file keeps it: as written, or what its cell shows
+ * now, a formula's result included when the values are known.
+ */
+export const textOf = (doc: SheetDoc, label: ChartText | undefined, values?: SheetValues) => {
   if (!label) return undefined;
   if ("text" in label) return label.text;
-  const value = doc.sheet[label.cell.sh]?.cells[label.cell.r]?.[label.cell.c]?.v;
+  const { sh, r, c } = label.cell;
+  const value = values ? values.value(sh, r, c) : doc.sheet[sh]?.cells[r]?.[c]?.v;
+  if (value instanceof XError) return value.code;
   return value === undefined || value === null ? undefined : String(value);
 };
 
@@ -32,15 +39,15 @@ function rangeOf(doc: SheetDoc, on: string, box: Box) {
  * is left out: a subtitle, the right axis and series drawn as another kind,
  * which Excel would need a second chart group for.
  */
-export function fileChartOf(doc: SheetDoc, chart: Chart): FileChart | null {
+export function fileChartOf(doc: SheetDoc, chart: Chart, values?: SheetValues): FileChart | null {
   const host = doc.sheet[chart.sheet];
   if (!host || !liveSheets(doc).includes(chart.sheet)) return null;
   const row = positions(host.rows).at(chart.at.r);
   const col = positions(host.cols).at(chart.at.c);
   const series = chart.series.flatMap((each): FileSeries[] => {
     const on = each.sheet ?? chart.sheet;
-    const values = rangeOf(doc, on, each.values);
-    if (!values) return [];
+    const range = rangeOf(doc, on, each.values);
+    if (!range) return [];
     const categories = each.categories ? rangeOf(doc, on, each.categories) : null;
     const sizes = each.sizes ? rangeOf(doc, on, each.sizes) : null;
     const name =
@@ -52,10 +59,10 @@ export function fileChartOf(doc: SheetDoc, chart: Chart): FileChart | null {
             c2: each.name.cell.c,
           })
         : null;
-    const text = textOf(doc, each.name);
+    const text = textOf(doc, each.name, values);
     return [
       {
-        values,
+        values: range,
         ...(categories ? { categories } : {}),
         ...(sizes ? { sizes } : {}),
         ...(name ? { name: { ref: name } } : text ? { name: { text } } : {}),
@@ -71,12 +78,12 @@ export function fileChartOf(doc: SheetDoc, chart: Chart): FileChart | null {
   if (!series.length || row === undefined || col === undefined) return null;
   const axis = (given: ChartAxis | undefined): FileAxis | undefined => {
     if (!given) return undefined;
-    const title = textOf(doc, given.title);
+    const title = textOf(doc, given.title, values);
     const { title: _title, ...rest } = given;
     return { ...rest, ...(title ? { title } : {}) };
   };
   const [x, y] = [axis(chart.axes?.x), axis(chart.axes?.y)];
-  const title = textOf(doc, chart.title);
+  const title = textOf(doc, chart.title, values);
   return {
     sheet: host.name,
     at: address(row, col),

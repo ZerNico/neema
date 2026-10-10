@@ -576,6 +576,20 @@ describe("importing into a live sheet", () => {
     );
   });
 
+  it("writes a chart's title from a formula cell as the formula shows it", async () => {
+    const original = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [['="Sales "&2026'], [1], [2]] },
+      { kind: "addChart", sheet: "Sheet1", type: "column", range: "A2:A3", title: "=A1", at: "C2" },
+    ]);
+    const values = calculateSheet(original, context);
+    const imported = sheetFromWorkbook(
+      await importLiveSheet(await exportLiveSheet(liveSheetExport(original, values))),
+      settings,
+    );
+    if (!imported.ok) throw new Error(imported.reason);
+    expect(Object.values(imported.doc.charts)[0]).toMatchObject({ title: { text: "Sales 2026" } });
+  });
+
   it("keeps a chart's options through Excel and back", async () => {
     const rows = [
       ["Month", "Revenue", "Costs"],
