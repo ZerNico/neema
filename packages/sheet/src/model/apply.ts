@@ -632,11 +632,26 @@ function move(
   const colMap = new Map(cols.map((id, index) => [id, toCols[index]!]));
   const moved: [string, string, Cell][] = [];
   const emptied: [string, string, Cell][] = [];
+  // Moved to another sheet, a formula's references to its own sheet name it, so they still
+  // mean the source's cells; those to the moved cells follow them below.
+  const named = (cell: Cell): Cell =>
+    targetId === op.sh || !cell.f
+      ? cell
+      : {
+          ...cell,
+          f: {
+            parts: cell.f.parts.map((part) =>
+              typeof part !== "string" && part.k === "ref" && part.sheet === null
+                ? { ...part, sheet: op.sh }
+                : part,
+            ),
+          },
+        };
   for (const r of rows)
     for (const c of cols) {
       const cell = cellAt(source, r, c);
       emptied.push([r, c, cleared(cell, revision)]);
-      if (cell) moved.push([rowMap.get(r)!, colMap.get(c)!, { ...cell, w: revision }]);
+      if (cell) moved.push([rowMap.get(r)!, colMap.get(c)!, { ...named(cell), w: revision }]);
     }
   let next = withSheet(doc, op.sh, writeCells(source, emptied));
   const landed = next.sheet[targetId]!;
@@ -662,8 +677,7 @@ function move(
       if (!inside(part.from) || (part.to && !inside(part.to))) return part;
       changed = true;
       // Written on the target sheet, it names no sheet; anywhere else it names the target.
-      const sheetRef =
-        part.sheet === null && targetId === sheet ? null : targetId === sheet ? null : targetId;
+      const sheetRef = targetId === sheet ? null : targetId;
       return {
         ...part,
         sheet: sheetRef,

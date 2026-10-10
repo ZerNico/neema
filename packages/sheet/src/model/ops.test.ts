@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyChange } from "./apply.ts";
 import { emptyDoc } from "./model.ts";
 import { parseChange } from "./ops.ts";
+import { parseFormula, renderFormula } from "./formula.ts";
 
 const accepts = (op: unknown) => parseChange({ clientId: "c", seq: 1, ops: [op] }).ok;
 const formula = { parts: ["1"] };
@@ -140,5 +141,71 @@ describe("applying formats and clears", () => {
       3,
     ).doc;
     expect(doc.sheet.s1!.cells.later?.["s1.c2"]?.s).toBe('{"numberFormat":"0%"}');
+  });
+});
+
+describe("moving cells to another sheet", () => {
+  it("keeps a moved formula's references: to moved cells they follow, to others they name the source", () => {
+    let doc = applyChange(
+      emptyDoc(),
+      {
+        clientId: "c",
+        seq: 1,
+        ops: [
+          {
+            op: "sheetAdd",
+            id: "s2",
+            name: "Other",
+            after: "s1",
+            rows: ["o1"],
+            cols: ["p1", "p2", "p3"],
+          },
+        ],
+      },
+      1,
+    ).doc;
+    const formula = (text: string) => {
+      const parsed = parseFormula(text, { doc, sheet: "s1" });
+      if (!("formula" in parsed)) throw new Error("needs growth");
+      return parsed.formula;
+    };
+    doc = applyChange(
+      doc,
+      {
+        clientId: "c",
+        seq: 2,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: 5 },
+              { r: "s1.r1", c: "s1.c2", f: formula("A1*2") },
+              { r: "s1.r1", c: "s1.c3", f: formula("D1+1") },
+            ],
+          },
+        ],
+      },
+      2,
+    ).doc;
+    doc = applyChange(
+      doc,
+      {
+        clientId: "c",
+        seq: 3,
+        ops: [
+          {
+            op: "move",
+            sh: "s1",
+            box: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c3" },
+            to: { sh: "s2", r: "o1", c: "p1" },
+          },
+        ],
+      },
+      3,
+    ).doc;
+    const shown = (c: string) =>
+      renderFormula(doc.sheet.s2!.cells.o1![c]!.f!, { doc, sheet: "s2" });
+    expect([shown("p2"), shown("p3")]).toEqual(["A1*2", "Sheet1!D1+1"]);
   });
 });
