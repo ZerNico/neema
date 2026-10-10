@@ -396,6 +396,41 @@ describe("Ctrl+Enter", () => {
   });
 });
 
+describe("copies that reach past the grid", () => {
+  const colCount = (doc: SheetDoc) => positions(doc.sheet.s1!.cols).ids.length;
+
+  it("grows the grid for Ctrl+Enter and Fill Right rather than writing #REF!", () => {
+    const doc = emptyDoc();
+    const entered = apply(doc, enterSelection(context(doc, [1, 26], [1, 1]), "=B1"));
+    expect(formulaAt(entered, 1, 26)).toBe("AA1");
+    const typed = type(emptyDoc(), 1, 1, "=B1");
+    const filled = apply(typed, fillSelection(context(typed, [1, 1], [1, 26]), "right"));
+    expect(formulaAt(filled, 1, 26)).toBe("AA1");
+    expect(colCount(filled)).toBe(27);
+  });
+
+  it("grows once for formulas pasted from another program, each against the last", () => {
+    const doc = emptyDoc();
+    const pasted = apply(doc, pasteAtSelection(context(doc, [1, 1]), "=AB1\t=AC1", null));
+    expect([formulaAt(pasted, 1, 1), formulaAt(pasted, 1, 2)]).toEqual(["AB1", "AC1"]);
+    expect(colCount(pasted)).toBe(29);
+  });
+
+  it("fills down a cell's format and link along with its value", () => {
+    let doc = type(emptyDoc(), 1, 1, "Docs");
+    doc = apply(
+      doc,
+      formatSelection(context(doc, [1, 1]), { bold: true, link: "https://example.com" }),
+    );
+    doc = apply(doc, fillSelection(context(doc, [1, 1], [3, 1]), "down"));
+    const { r, c } = at(doc, 3, 1);
+    expect(doc.sheet.s1!.cells[r]![c]).toMatchObject({
+      v: "Docs",
+      s: '{"bold":true,"link":"https://example.com"}',
+    });
+  });
+});
+
 describe("hiding rows and columns", () => {
   it("hides what is selected, and shows again only the hidden ones a selection spans", () => {
     let doc = apply(emptyDoc(), hideAtSelection(context(emptyDoc(), [2, 2], [3, 2]), "rows", true));

@@ -105,6 +105,22 @@ function typedFormula(
   return null;
 }
 
+/** A formula copied by `shift`, the grid grown first where its references reach past it. */
+function copiedFormula(
+  formula: Formula,
+  shift: { readonly rows: number; readonly cols: number },
+  sheet: string,
+  grow: ReturnType<typeof grower>,
+  transposedFrom?: { readonly row: number; readonly col: number },
+): Formula | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const copied = copyFormula(formula, shift, { doc: grow.doc, sheet }, transposedFrom);
+    if ("formula" in copied) return copied.formula;
+    for (const each of copied.grow) grow.ensure(each.sheet, each.rows, each.cols);
+  }
+  return null;
+}
+
 /**
  * What typing `raw` into a cell writes. A leading "=" makes a formula, an
  * apostrophe keeps text as typed, and a number typed as a percentage, a
@@ -122,12 +138,25 @@ function typedLink(text: string): string | null {
 
 export function enterCell(context: GridContext, at: CellRef, raw: string): SheetOp[] {
   const grow = grower(context);
-  const cell = context.doc.sheet[context.sheet]!.cells[at.r]?.[at.c];
+  const ops = typeInto(context.sheet, at, raw, grow, context.locale);
+  return [...grow.ops, ...ops];
+}
+
+/** What typing writes, less the growth it needs, which goes into `grow` for the caller to send first. */
+function typeInto(
+  sheet: string,
+  at: CellRef,
+  raw: string,
+  grow: ReturnType<typeof grower>,
+  locale: GridContext["locale"],
+): SheetOp[] {
+  const context = { sheet, locale };
+  const cell = grow.doc.sheet[sheet]!.cells[at.r]?.[at.c];
   if (raw.startsWith("=") && raw.length > 1) {
     const f = typedFormula(raw.slice(1), context.sheet, grow);
     // A formula the grid cannot hold stays what was typed, as text.
     const write: CellWrite = f ? { ...at, f } : { ...at, v: raw };
-    return [...grow.ops, { op: "set", sh: context.sheet, cells: [write] }];
+    return [{ op: "set", sh: context.sheet, cells: [write] }];
   }
   if (raw.startsWith("'"))
     return [{ op: "set", sh: context.sheet, cells: [{ ...at, v: raw.slice(1) }] }];
@@ -153,26 +182,29 @@ export function enterCell(context: GridContext, at: CellRef, raw: string): Sheet
  */
 export function enterSelection(context: GridContext, raw: string): SheetOp[] {
   const head = context.selection.head;
-  const typed = enterCell(context, head, raw);
+  const grow = grower(context);
+  const typed = typeInto(context.sheet, head, raw, grow, context.locale);
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
   const rows = positions(sheet.rows);
   const cols = positions(sheet.cols);
   const [headRow, headCol] = [rows.at(head.r) ?? box.top, cols.at(head.c) ?? box.left];
-  return typed.flatMap((op): SheetOp[] => {
+  const written = typed.flatMap((op): SheetOp[] => {
     if (op.op === "format") return [{ ...op, area: box.area }];
     if (op.op !== "set") return [op];
-    const written = op.cells[0]!;
+    const typedCell = op.cells[0]!;
     const cells = box.rowIds.flatMap((r, y) =>
       box.colIds.map((c, x): CellWrite => {
-        if (!written.f) return { r, c, v: written.v ?? null };
+        if (!typedCell.f) return { r, c, v: typedCell.v ?? null };
         const shift = { rows: box.top + y - headRow, cols: box.left + x - headCol };
-        const moved = copyFormula(written.f, shift, { doc: context.doc, sheet: context.sheet });
-        return "formula" in moved ? { r, c, f: moved.formula } : { r, c, v: "#REF!" };
+        const f = copiedFormula(typedCell.f, shift, context.sheet, grow);
+        return f ? { r, c, f } : { r, c, v: "#REF!" };
       }),
     );
     return [{ ...op, cells }];
   });
+  // Growth for the typed formula and for each copy of it, before the writes that need it.
+  return [...grow.ops, ...written];
 }
 
 /** Empties the selected cells, keeping their formats, as Delete does. */
@@ -485,11 +517,9 @@ export function pasteAtSelection(
         return;
       }
       if ("raw" in item) {
-        const typed = enterCell({ ...context, doc: grow.doc }, at, item.raw);
-        for (const op of typed)
+        for (const op of typeInto(context.sheet, at, item.raw, grow, context.locale))
           if (op.op === "set") cells.push(...op.cells);
-          else if (op.op === "format") typedFormats.push(op);
-          else grow.ops.push(op);
+          else typedFormats.push(op);
         return;
       }
       if (part === "values" || !item.f) {
@@ -503,19 +533,19 @@ export function pasteAtSelection(
         rows: box.top + y - (own!.top + fromRow),
         cols: box.left + x - (own!.left + fromCol),
       };
-      const result = copyFormula(
+      const pasted = copiedFormula(
         item.f,
         shift,
-        { doc: grow.doc, sheet: own!.sheet },
+        own!.sheet,
+        grow,
         transpose ? { row: own!.top + fromRow, col: own!.left + fromCol } : undefined,
       );
       // On another sheet, its references are read there, as the text Excel would paste.
-      const f = !("formula" in result)
-        ? null
-        : own!.sheet === context.sheet
-          ? result.formula
+      const f =
+        !pasted || own!.sheet === context.sheet
+          ? pasted
           : typedFormula(
-              renderFormula(result.formula, { doc: grow.doc, sheet: own!.sheet }),
+              renderFormula(pasted, { doc: grow.doc, sheet: own!.sheet }),
               context.sheet,
               grow,
             );
@@ -530,30 +560,48 @@ export function pasteAtSelection(
   ];
 }
 
-/** Fills the selection from its first row down, or its first column right, as Ctrl+D and Ctrl+R do. */
+/**
+ * Fills the selection from its first row down, or its first column right, as
+ * Ctrl+D and Ctrl+R do: each cell copied whole, its format and link too.
+ */
 export function fillSelection(context: GridContext, direction: "down" | "right"): SheetOp[] {
   const box = selectionBox(context);
   const sheet = context.doc.sheet[context.sheet]!;
+  const grow = grower(context);
   const cells: CellWrite[] = [];
+  const formats: SheetOp[] = [];
   const sources = direction === "down" ? box.colIds : box.rowIds;
   const targets = direction === "down" ? box.rowIds.slice(1) : box.colIds.slice(1);
-  sources.forEach((fixed) => {
+  for (const fixed of sources) {
     const source =
       direction === "down" ? { r: box.rowIds[0]!, c: fixed } : { r: fixed, c: box.colIds[0]! };
     const cell = sheet.cells[source.r]?.[source.c];
-    targets.forEach((moving, index) => {
+    const style = cell?.s ? (JSON.parse(cell.s) as StylePatch) : {};
+    for (const [index, moving] of targets.entries()) {
       const at = direction === "down" ? { r: moving, c: fixed } : { r: fixed, c: moving };
+      const patch = replaceStyle(style, sheet.cells[at.r]?.[at.c]?.s);
+      if (patch)
+        formats.push({
+          op: "format",
+          sh: context.sheet,
+          area: { r1: at.r, r2: at.r, c1: at.c, c2: at.c },
+          patch,
+        });
       if (!cell?.f) {
         cells.push({ ...at, v: cell?.v ?? null });
-        return;
+        continue;
       }
       const shift =
         direction === "down" ? { rows: index + 1, cols: 0 } : { rows: 0, cols: index + 1 };
-      const result = copyFormula(cell.f, shift, { doc: context.doc, sheet: context.sheet });
-      cells.push("formula" in result ? { ...at, f: result.formula } : { ...at, v: "#REF!" });
-    });
-  });
-  return cells.length ? [{ op: "set", sh: context.sheet, cells }] : [];
+      const f = copiedFormula(cell.f, shift, context.sheet, grow);
+      cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
+    }
+  }
+  return [
+    ...grow.ops,
+    ...(cells.length ? [{ op: "set" as const, sh: context.sheet, cells }] : []),
+    ...formats,
+  ];
 }
 
 /** Whether dropping the selection this far away would write over cells holding something. */
@@ -615,12 +663,9 @@ export function dragSelection(
       const cell = sheet.cells[r]?.[c];
       const at = { r: rows[top - 1 + y]!, c: cols[left - 1 + x]! };
       if (cell?.f) {
-        const moved = copyFormula(
-          cell.f,
-          { rows: top - box.top, cols: left - box.left },
-          { doc: grow.doc, sheet: context.sheet },
-        );
-        cells.push("formula" in moved ? { ...at, f: moved.formula } : { ...at, v: "#REF!" });
+        const by = { rows: top - box.top, cols: left - box.left };
+        const f = copiedFormula(cell.f, by, context.sheet, grow);
+        cells.push(f ? { ...at, f } : { ...at, v: "#REF!" });
       } else cells.push({ ...at, v: cell?.v ?? null });
       const own = cell?.s ? (JSON.parse(cell.s) as Record<string, string | number | boolean>) : {};
       const there = sheet.cells[at.r]?.[at.c]?.s;
