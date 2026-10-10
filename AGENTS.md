@@ -49,8 +49,8 @@ edit the wrong thing.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
 - **document** (conversation or project document): editable Markdown owned by one chat or
-  one project, edited live by people and the model as a rich-text tree in Yjs, stored beside
-  its Markdown. Never knowledge versions or transcript content.
+  one project, edited live by people and the model as a ProseMirror tree the server orders,
+  stored beside its Markdown. Never knowledge versions or transcript content.
 - **project**: instructions, documents, files and memory shared by members (owner,
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
@@ -86,7 +86,7 @@ edit the wrong thing.
 - **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
   lists and search, neither reads nor saves memory, and is swept a day after its last
   activity. Keep clears the flag; nothing sets it later.
-- **ui block**: a ```` ```ui ```` fence in an answer, drawn as interactive UI. Its logic runs
+- **ui block**: a ` ```ui ` fence in an answer, drawn as interactive UI. Its logic runs
   in QuickJS and only JSON reaches the page. Identity is the fence's ordinal in the raw
   message text. State the reader sets is saved per block, and images are found by query
   when the fence closes. Not an attachment, not a tool. See
@@ -234,8 +234,8 @@ skipped one on purpose.
   the unread mark, channels and their dedupe.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
-- `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,
-  exact-match and streamed model edits, live sync and the one-writer hub.
+- `docs/internals/documents.md`: server-ordered ProseMirror steps, rebasing and offline
+  recovery, block IDs and the XML view, guarded and streamed model edits, the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
   kind served only as a download, what the model sees, working drafts and publication.
 - `docs/internals/pdf.md`: PDF reading in worker processes, what makes a page a scan, who reads

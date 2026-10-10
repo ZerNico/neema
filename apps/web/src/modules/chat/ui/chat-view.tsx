@@ -6,6 +6,7 @@ import {
   type ScheduleDraftHandle,
 } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
+import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import { DocumentToolName, projectDocumentResult } from "~/modules/documents/tool-schema.ts";
@@ -468,6 +469,12 @@ export function ChatView({
     const add = (target: Set<string>, id: string | undefined, owner: string | undefined) => {
       if (id && owner === conversationId && !loaded.has(id)) target.add(id);
     };
+    // A streamed creation makes the document before its call returns, so the
+    // detail already lists it; one the answer streaming now made still opens.
+    const writing = streamingMessage?.id;
+    if (writing)
+      for (const document of data.documents ?? [])
+        if (document.messageId === writing) fresh.document.add(document.id);
     for (const activity of stream.tools) {
       if (activity.family === "agent-draft" && activity.result)
         add(fresh.agent, activity.result.draftId, activity.result.draftConversationId);
@@ -489,6 +496,7 @@ export function ChatView({
     isMobile,
     projectId,
     stream.tools,
+    streamingMessage?.id,
   ]);
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
@@ -580,8 +588,18 @@ export function ChatView({
       : undefined;
   const openDocument = useRef<string | undefined>(undefined);
   openDocument.current = openDocumentId;
-  const documentFocus = () =>
-    openDocument.current ? { openDocumentId: openDocument.current } : {};
+  const documentFocus = (asked?: AskTarget & { documentId: string }) => {
+    const id = asked?.documentId ?? openDocument.current;
+    if (!id) return {};
+    const selected = asked ? [...asked.blocks] : (documents.current?.selectedBlocks(id) ?? []);
+    return {
+      openDocument: {
+        id,
+        ...(selected.length ? { selected } : {}),
+        ...(asked?.thread ? { thread: asked.thread } : {}),
+      },
+    };
+  };
 
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
@@ -672,6 +690,8 @@ export function ChatView({
       skillIds?: ReadonlyArray<string>;
       workspaceFiles?: ReadonlyArray<string>;
       workspaceImports?: WorkspaceImports;
+      /** Where in a document the request was made, instead of the editor's selection at send. */
+      asked?: AskTarget & { documentId: string };
     }) => {
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
@@ -680,7 +700,7 @@ export function ChatView({
         searchEnabled,
         reasoningEffort,
         timeZone: browserTimeZone(),
-        ...documentFocus(),
+        ...documentFocus(input.asked),
         attachmentIds: input.attachmentIds,
         researchEnabled: input.researchEnabled,
         skillIds: [...(input.skillIds ?? [])],
@@ -970,6 +990,23 @@ export function ChatView({
   // Generation actions (edit/retry/answer/save) wait on the folder; branch
   // copies history and must stay available in a browser.
   const generationDisabled = actionsDisabled || work.readOnly;
+  const sendAsk = sendMutation.mutateAsync;
+  const focusComposer = useCallback(() => composer.current?.focus(), []);
+  // A request typed inside a document: sent like the composer's, with the spot selected.
+  const askFromDocument = useCallback(
+    async (request: string, asked: AskTarget & { documentId: string }) => {
+      if (generationDisabled) return false;
+      await sendAsk({
+        content: request,
+        attachmentIds: [],
+        researchEnabled: false,
+        skillIds: [],
+        asked,
+      });
+      return true;
+    },
+    [generationDisabled, sendAsk],
+  );
   // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
   // oxlint-disable react-hooks/exhaustive-deps
   const respondToQuestion = useCallback(
@@ -1804,6 +1841,8 @@ export function ChatView({
       goneIds={scopedForgottenDocuments}
       onGone={forgetDocument}
       autoOpenIds={liveCreated.document}
+      onAsk={askFromDocument}
+      onFocusComposer={focusComposer}
       ref={documents}
     >
       <AgentDraftOwner

@@ -144,13 +144,18 @@ describe("tool parameters the model is offered", () => {
     }
   });
 
-  it("tells the model edit_document takes text for old and new", async () => {
+  it("tells the model edit_document takes a block id, a position and Markdown", async () => {
     const documents = await Effect.runPromise(
       prepareDocumentTools({ ...base, service: { list: () => Effect.succeed([]) } as never }),
     );
     const edit = toolsOf(documents.group.toolkit).find((tool) => tool.name === "edit_document")!;
     expect(Tool.getJsonSchema(edit)).toMatchObject({
-      properties: { old: { type: "string", minLength: 1 }, new: { type: "string" } },
+      properties: {
+        target: { type: "string", minLength: 1 },
+        position: { enum: ["replace", "before", "after", "end"] },
+        find: { type: "string" },
+        content: { type: "string" },
+      },
     });
   });
 });

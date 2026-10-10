@@ -13,6 +13,7 @@ import {
 import {
   DocumentToolEnvelope,
   documentResultOk,
+  isDocumentWrite,
   projectDocumentResult,
   type DocumentActivityResult,
 } from "~/modules/documents/tool-schema.ts";
@@ -1178,6 +1179,9 @@ export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: str
     if (family) return [...withoutWriting(tools), { ...position, family }];
     if (writing.name === "deep_research")
       return [...withoutWriting(tools), { ...position, family: "research" as const }];
+    // A document being written shows as running while its text streams into the panel.
+    if (isDocumentWrite(writing.name))
+      return [...withoutWriting(tools), { ...position, family: "document" as const }];
     return [...tools];
   } catch {
     return [...tools];

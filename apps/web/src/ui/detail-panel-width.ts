@@ -7,11 +7,14 @@ export const DETAIL_PANEL_MIN = 320;
 export const DETAIL_PANEL_STEP = 24;
 
 /**
- * The rail may never take more than half the window, so the conversation it
- * belongs to keeps at least as much room as the detail about it.
+ * The window the rail always leaves: the app sidebar and a chat column still
+ * readable beside a document someone is working in at full width.
  */
+const DETAIL_PANEL_LEAVES = 640;
+
+/** The rail may grow until only that is left. */
 export const detailPanelMax = (viewport: number) =>
-  Math.max(DETAIL_PANEL_MIN, Math.min(704, Math.round(viewport / 2)));
+  Math.max(DETAIL_PANEL_MIN, Math.round(viewport - DETAIL_PANEL_LEAVES));
 
 export const clampDetailPanelWidth = (width: number, viewport: number) =>
   Math.min(Math.max(Math.round(width), DETAIL_PANEL_MIN), detailPanelMax(viewport));

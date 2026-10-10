@@ -20,8 +20,10 @@ function PopoverContent({
   anchor,
   collisionPadding,
   disableAnchorTracking,
+  container,
   ...props
 }: PopoverPrimitive.Popup.Props &
+  Pick<PopoverPrimitive.Portal.Props, "container"> &
   Pick<
     PopoverPrimitive.Positioner.Props,
     | "align"
@@ -33,7 +35,7 @@ function PopoverContent({
     | "disableAnchorTracking"
   >) {
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={container}>
       <PopoverPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

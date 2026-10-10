@@ -243,6 +243,10 @@ describe("Messages stream", () => {
         ]),
       ]);
       const parts = yield* run.stream("Look", yield* toolkit);
+      // Each tool asks for its arguments as they are written.
+      expect(run.exchanges[0]!.body["tools"]).toMatchObject([
+        { name: "lookup", eager_input_streaming: true },
+      ]);
       expect(textOf(parts, "reasoning-delta")).toBe("Plan.");
       expect(textOf(parts)).toBe("Checking.");
       expect(parts.find((part) => part.type === "tool-call")).toMatchObject({

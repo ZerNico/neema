@@ -1,16 +1,28 @@
-import { and, asc, eq, gt, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, documents, documentUpdates, projects } from "~/db/schema/index.ts";
+import {
+  conversations,
+  documentComments,
+  documents,
+  documentSteps,
+  projects,
+  user,
+} from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
 import { Db } from "~/server/db.ts";
-import { DocumentNotAvailable, DocumentRejected, type EditableDocument } from "../schema.ts";
+import {
+  DocumentNotAvailable,
+  DocumentRejected,
+  type DocumentComment,
+  type EditableDocument,
+} from "../schema.ts";
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<DocumentRow, "content" | "revision" | "lastEditedBy" | "lastEditorUserId">
+  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
 type Reader = Pick<DbTx, "select">;
 
@@ -31,7 +43,6 @@ const documentColumns = (userId: string) => ({
   projectId: documents.projectId,
   createdByMessageId: documents.createdByMessageId,
   title: documents.title,
-  content: documents.content,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
   lastEditorUserId: documents.lastEditorUserId,
@@ -49,11 +60,18 @@ const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
   updatedAt: row.updatedAt.toISOString(),
 });
 
+export interface StoredStep {
+  revision: number;
+  step: Record<string, unknown>;
+  clientId: string;
+  generationId: string | null;
+  createdAt: Date;
+}
 export interface StoredDocumentState {
   document: EditableDocument;
-  snapshot: Uint8Array;
+  snapshot: Record<string, unknown>;
   snapshotRevision: number;
-  updates: Uint8Array[];
+  steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
 
@@ -65,14 +83,14 @@ export class DocumentRepo extends Context.Service<
       tx: DbTx,
       userId: string,
       owner: DocumentOwner,
-      values: Pick<DocumentRow, "title" | "content" | "lastEditedBy" | "snapshot"> & {
+      values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
-    /** Snapshot plus every later batch, in revision order: enough to rebuild the Y.Doc. */
+    /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
     /**
      * Locks the document row alone, for someone allowed to edit it. A
@@ -85,11 +103,13 @@ export class DocumentRepo extends Context.Service<
       userId: string,
       documentId: string,
     ): Effect.Effect<EditableDocument, DocumentNotAvailable | DocumentRejected>;
-    appendUpdate(
+    appendSteps(
       tx: DbTx,
-      values: Pick<
-        typeof documentUpdates.$inferInsert,
-        "documentId" | "revision" | "update" | "origin" | "userId" | "generationId"
+      rows: ReadonlyArray<
+        Pick<
+          typeof documentSteps.$inferInsert,
+          "documentId" | "revision" | "step" | "clientId" | "origin" | "userId" | "generationId"
+        >
       >,
     ): Effect.Effect<void>;
     /** Caller holds the lock; the revision is explicit so ordering stays in the service. */
@@ -99,11 +119,11 @@ export class DocumentRepo extends Context.Service<
       documentId: string,
       changes: DocumentWrite,
     ): Effect.Effect<EditableDocument>;
-    /** Folds every batch up to `revision` into the snapshot. Caller holds the lock. */
+    /** Folds every step up to `revision` into the snapshot. Caller holds the lock. */
     compact(
       tx: DbTx,
       documentId: string,
-      snapshot: Uint8Array,
+      snapshot: Record<string, unknown>,
       revision: number,
     ): Effect.Effect<void>;
     /** Deletes a project's document; a chat's goes with its answer instead. */
@@ -113,6 +133,39 @@ export class DocumentRepo extends Context.Service<
       userId: string,
       conversationId: string,
     ): Effect.Effect<void, DocumentNotAvailable>;
+    /** Oldest first, with each author's name. */
+    comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
+    /** Hands a chat's document to a project. Caller holds the document's lock. */
+    moveToProject(tx: DbTx, documentId: string, projectId: string): Effect.Effect<void>;
+    /** A person's display name, for the cursor others see. */
+    userName(userId: string): Effect.Effect<string>;
+    /** Caller holds the document's lock. False when the comment's ID is already taken. */
+    addComment(
+      tx: DbTx,
+      row: {
+        id: string;
+        documentId: string;
+        threadId: string;
+        userId: string | null;
+        origin: "user" | "model";
+        body: string;
+        quote?: string | null;
+        toAssistant?: boolean;
+      },
+    ): Effect.Effect<boolean>;
+    resolveThread(
+      tx: DbTx,
+      documentId: string,
+      threadId: string,
+      resolved: boolean,
+    ): Effect.Effect<boolean>;
+    /** A person's own comment or the assistant's; a thread's first takes its replies with it. */
+    deleteComment(
+      tx: DbTx,
+      documentId: string,
+      commentId: string,
+      userId: string,
+    ): Effect.Effect<boolean>;
   }
 >()("chat/documents/DocumentRepo") {
   static readonly layer = Layer.effect(
@@ -157,12 +210,11 @@ export class DocumentRepo extends Context.Service<
                 ? { conversationId: owner.conversationId }
                 : { projectId: owner.projectId }),
               title: values.title,
-              content: values.content,
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,
-              snapshot: Buffer.from(values.snapshot),
-              snapshotRevision: 1,
+              snapshot: values.snapshot,
+              snapshotRevision: 0,
             })
             .pipe(Effect.orDie);
           return (yield* get(userId, id, tx))!;
@@ -187,7 +239,7 @@ export class DocumentRepo extends Context.Service<
         }),
         loadState: Effect.fn("DocumentRepo.loadState")(function* (userId, documentId) {
           // The share lock holds off a compaction between the two reads, which
-          // would hand back a snapshot newer than the batches read after it.
+          // would hand back a snapshot newer than the steps read after it.
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
@@ -203,23 +255,24 @@ export class DocumentRepo extends Context.Service<
                   .pipe(Effect.orDie);
                 if (!row) return null;
                 const { snapshot, snapshotRevision, ...document } = row;
-                const updates = yield* tx
-                  .select({ update: documentUpdates.update })
-                  .from(documentUpdates)
+                const steps = yield* tx
+                  .select({
+                    revision: documentSteps.revision,
+                    step: documentSteps.step,
+                    clientId: documentSteps.clientId,
+                    generationId: documentSteps.generationId,
+                    createdAt: documentSteps.createdAt,
+                  })
+                  .from(documentSteps)
                   .where(
                     and(
-                      eq(documentUpdates.documentId, documentId),
-                      gt(documentUpdates.revision, snapshotRevision),
+                      eq(documentSteps.documentId, documentId),
+                      gt(documentSteps.revision, snapshotRevision),
                     ),
                   )
-                  .orderBy(asc(documentUpdates.revision))
+                  .orderBy(asc(documentSteps.revision))
                   .pipe(Effect.orDie);
-                return {
-                  document: toDocument(document),
-                  snapshot: new Uint8Array(snapshot),
-                  snapshotRevision,
-                  updates: updates.map(({ update }) => new Uint8Array(update)),
-                };
+                return { document: toDocument(document), snapshot, snapshotRevision, steps };
               }),
             )
             .pipe(Effect.orDie);
@@ -236,11 +289,12 @@ export class DocumentRepo extends Context.Service<
             return yield* new DocumentRejected({ reason: "this document is read-only for you" });
           return toDocument(row);
         }),
-        appendUpdate: Effect.fn("DocumentRepo.appendUpdate")(function* (tx, values) {
-          yield* tx
-            .insert(documentUpdates)
-            .values({ ...values, update: Buffer.from(values.update) })
-            .pipe(Effect.orDie);
+        appendSteps: Effect.fn("DocumentRepo.appendSteps")(function* (tx, rows) {
+          if (rows.length)
+            yield* tx
+              .insert(documentSteps)
+              .values([...rows])
+              .pipe(Effect.orDie);
         }),
         write: Effect.fn("DocumentRepo.write")(function* (tx, userId, documentId, changes) {
           yield* tx
@@ -253,22 +307,129 @@ export class DocumentRepo extends Context.Service<
         compact: Effect.fn("DocumentRepo.compact")(function* (tx, documentId, snapshot, revision) {
           yield* tx
             .update(documents)
-            .set({ snapshot: Buffer.from(snapshot), snapshotRevision: revision })
+            .set({ snapshot, snapshotRevision: revision })
             .where(eq(documents.id, documentId))
             .pipe(Effect.orDie);
           yield* tx
-            .delete(documentUpdates)
+            .delete(documentSteps)
             .where(
-              and(
-                eq(documentUpdates.documentId, documentId),
-                lte(documentUpdates.revision, revision),
-              ),
+              and(eq(documentSteps.documentId, documentId), lte(documentSteps.revision, revision)),
             )
             .pipe(Effect.orDie);
         }),
         remove: Effect.fn("DocumentRepo.remove")(function* (tx, documentId) {
           yield* tx.delete(documents).where(eq(documents.id, documentId)).pipe(Effect.orDie);
         }),
+        moveToProject: Effect.fn("DocumentRepo.moveToProject")(
+          function* (tx, documentId, projectId) {
+            yield* tx
+              .update(documents)
+              .set({
+                projectId,
+                conversationId: null,
+                createdByMessageId: null,
+                updatedAt: new Date(),
+              })
+              .where(eq(documents.id, documentId))
+              .pipe(Effect.orDie);
+          },
+        ),
+        userName: Effect.fn("DocumentRepo.userName")(function* (userId) {
+          const [row] = yield* db
+            .select({ name: user.name })
+            .from(user)
+            .where(eq(user.id, userId))
+            .pipe(Effect.orDie);
+          return row?.name ?? "Someone";
+        }),
+        comments: Effect.fn("DocumentRepo.comments")(function* (documentId, tx) {
+          const rows = yield* (tx ?? db)
+            .select({
+              id: documentComments.id,
+              threadId: documentComments.threadId,
+              body: documentComments.body,
+              createdAt: documentComments.createdAt,
+              resolvedAt: documentComments.resolvedAt,
+              origin: documentComments.origin,
+              toAssistant: documentComments.toAssistant,
+              quote: documentComments.quote,
+              authorId: user.id,
+              authorName: user.name,
+            })
+            .from(documentComments)
+            .leftJoin(user, eq(user.id, documentComments.userId))
+            .where(eq(documentComments.documentId, documentId))
+            .orderBy(asc(documentComments.createdAt), asc(documentComments.id))
+            .pipe(Effect.orDie);
+          return rows.map((row, index): DocumentComment => ({
+            id: row.id,
+            threadId: row.threadId,
+            author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
+            byAssistant: row.origin === "model",
+            body: row.body,
+            createdAt: row.createdAt.toISOString(),
+            resolvedAt: row.resolvedAt?.toISOString() ?? null,
+            quote: row.quote,
+            toAssistant: row.toAssistant,
+            // Answered by the assistant writing in the thread after it.
+            answered:
+              row.toAssistant &&
+              rows
+                .slice(index + 1)
+                .some((later) => later.threadId === row.threadId && later.origin === "model"),
+          }));
+        }),
+        addComment: Effect.fn("DocumentRepo.addComment")(function* (tx, row) {
+          const inserted = yield* tx
+            .insert(documentComments)
+            .values(row)
+            .onConflictDoNothing()
+            .returning({ id: documentComments.id })
+            .pipe(Effect.orDie);
+          return inserted.length > 0;
+        }),
+        resolveThread: Effect.fn("DocumentRepo.resolveThread")(
+          function* (tx, documentId, threadId, resolved) {
+            const updated = yield* tx
+              .update(documentComments)
+              .set({ resolvedAt: resolved ? new Date() : null })
+              .where(
+                and(eq(documentComments.documentId, documentId), eq(documentComments.id, threadId)),
+              )
+              .returning({ id: documentComments.id })
+              .pipe(Effect.orDie);
+            return updated.length > 0;
+          },
+        ),
+        deleteComment: Effect.fn("DocumentRepo.deleteComment")(
+          function* (tx, documentId, commentId, userId) {
+            const [own] = yield* tx
+              .select({ threadId: documentComments.threadId })
+              .from(documentComments)
+              .where(
+                and(
+                  eq(documentComments.documentId, documentId),
+                  eq(documentComments.id, commentId),
+                  // A person's own, or the assistant's, which has no hand to take its own back.
+                  or(eq(documentComments.userId, userId), eq(documentComments.origin, "model")),
+                ),
+              )
+              .pipe(Effect.orDie);
+            if (!own) return false;
+            yield* tx
+              .delete(documentComments)
+              .where(
+                and(
+                  eq(documentComments.documentId, documentId),
+                  own.threadId === commentId
+                    ? eq(documentComments.threadId, commentId)
+                    : eq(documentComments.id, commentId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            return true;
+          },
+        ),
       });
     }),
   );

@@ -10,11 +10,26 @@ export interface SlashItem {
   /** Extra words it is found by. */
   keywords: string;
   run: (editor: Editor, range: Range) => void;
+  /** Offered only where this holds; always when absent. */
+  available?: (editor: Editor) => boolean;
 }
 
 export interface MenuHandle {
   onKeyDown: (props: SuggestionKeyDownProps) => boolean;
 }
+
+/**
+ * Scrolls only the menu's own list to the item. `scrollIntoView` would also
+ * scroll the document panel the menu sits in, away from the caret.
+ */
+const revealInList = (item: HTMLElement) => {
+  const list = item.parentElement;
+  if (!list) return;
+  const at = item.getBoundingClientRect();
+  const frame = list.getBoundingClientRect();
+  if (at.top < frame.top) list.scrollTop -= frame.top - at.top;
+  else if (at.bottom > frame.bottom) list.scrollTop += at.bottom - frame.bottom;
+};
 
 export function SlashMenu({
   items,
@@ -67,7 +82,7 @@ export function SlashMenu({
             role="option"
             aria-selected={index === active}
             ref={(element) => {
-              if (index === active) element?.scrollIntoView?.({ block: "nearest" });
+              if (index === active && element) revealInList(element);
             }}
             className={cn(
               "flex w-full cursor-default items-center gap-2.5 rounded-2xl px-3 py-2 text-left text-sm font-medium outline-hidden select-none",

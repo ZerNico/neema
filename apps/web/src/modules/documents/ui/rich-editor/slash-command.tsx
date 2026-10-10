@@ -1,6 +1,10 @@
 import {
+  AiChat02Icon,
+  Calendar03Icon,
   CheckListIcon,
   CodeSquareIcon,
+  FunctionIcon,
+  FunctionOfXIcon,
   Heading01Icon,
   Heading02Icon,
   Heading03Icon,
@@ -8,13 +12,18 @@ import {
   LeftToRightListNumberIcon,
   MinusSignIcon,
   QuoteDownIcon,
-  Table01Icon,
+  LayoutTable01Icon,
   TextIcon,
+  UserIcon,
 } from "@hugeicons/core-free-icons";
 import { Extension, type Editor, type Range } from "@tiptap/core";
-import { isChangeOrigin } from "@tiptap/extension-collaboration";
+import { NodeSelection } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
+import { isRemoteChange } from "../../editor/remote.ts";
+import { isoDay } from "./dates.ts";
+import { editorHooks } from "./editor-hooks.ts";
+import { mountAtCaret } from "./suggestion-mount.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
@@ -83,9 +92,28 @@ export const SLASH_ITEMS: SlashItem[] = [
     run: (e, r) => blocks(e, r).toggleCodeBlock().run(),
   },
   {
+    title: "Formula",
+    icon: FunctionIcon,
+    keywords: "math equation latex katex",
+    // Empty, it opens for its LaTeX; left empty, it goes again.
+    run: (e, r) =>
+      blocks(e, r)
+        .insertContent({ type: "blockMath", attrs: { latex: "" } })
+        .run(),
+  },
+  {
+    title: "Inline formula",
+    icon: FunctionOfXIcon,
+    keywords: "math equation latex katex",
+    run: (e, r) =>
+      blocks(e, r)
+        .insertContent({ type: "inlineMath", attrs: { latex: "" } })
+        .run(),
+  },
+  {
     title: "Table",
 
-    icon: Table01Icon,
+    icon: LayoutTable01Icon,
     keywords: "grid",
     run: (e, r) => blocks(e, r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
@@ -96,13 +124,64 @@ export const SLASH_ITEMS: SlashItem[] = [
     keywords: "hr rule separator",
     run: (e, r) => blocks(e, r).setHorizontalRule().run(),
   },
+  {
+    title: "Date",
+    icon: Calendar03Icon,
+    keywords: "today day calendar",
+    run: (e, r) =>
+      blocks(e, r)
+        .insertContent([
+          { type: "dateChip", attrs: { value: isoDay(new Date()) } },
+          { type: "text", text: " " },
+        ])
+        .run(),
+  },
+  {
+    title: "Mention someone",
+    icon: UserIcon,
+    keywords: "person people @",
+    run: (e, r) => blocks(e, r).insertContent("@").run(),
+  },
+  {
+    title: "Ask the assistant",
+    icon: AiChat02Icon,
+    keywords: "ai write generate help",
+    available: (editor) => editorHooks(editor).ask !== null,
+    // A planned section with no request yet: the ask input opens on it.
+    run: (e, r) =>
+      blocks(e, r)
+        .command(({ tr, state }) => {
+          const { $from } = tr.selection;
+          const pending = state.schema.nodes.pending!.create({ intent: "" });
+          const empty = $from.depth === 1 && $from.parent.content.size === 0;
+          const at = empty ? $from.before(1) : $from.after(1);
+          if (empty) tr.replaceWith(at, $from.after(1), pending);
+          else tr.insert(at, pending);
+          tr.setSelection(NodeSelection.create(tr.doc, at));
+          return true;
+        })
+        .run(),
+  },
 ];
+
+/** How well an item answers the query: its name first, then words in it, then keywords. */
+const rank = (item: SlashItem, needle: string) => {
+  const title = item.title.toLowerCase();
+  if (title.startsWith(needle)) return 0;
+  if (title.split(" ").some((word) => word.startsWith(needle))) return 1;
+  if (title.includes(needle)) return 2;
+  return item.keywords.toLowerCase().includes(needle) ? 3 : null;
+};
 
 export const filterSlashItems = (query: string) => {
   const needle = query.trim().toLowerCase();
-  return needle
-    ? SLASH_ITEMS.filter((item) => `${item.title} ${item.keywords}`.toLowerCase().includes(needle))
-    : SLASH_ITEMS;
+  if (!needle) return SLASH_ITEMS;
+  return SLASH_ITEMS.flatMap((item) => {
+    const score = rank(item, needle);
+    return score === null ? [] : [{ item, score }];
+  })
+    .toSorted((a, b) => a.score - b.score)
+    .map(({ item }) => item);
 };
 
 /** Type / to insert a block: the same blocks the toolbar offers, found by name. */
@@ -114,8 +193,9 @@ export const SlashCommand = Extension.create({
         editor: this.editor,
         char: "/",
         // A collaborator's typing must never open this person's menu.
-        shouldShow: ({ transaction }) => !isChangeOrigin(transaction),
-        items: ({ query }) => filterSlashItems(query),
+        shouldShow: ({ transaction }) => !isRemoteChange(transaction),
+        items: ({ query, editor }) =>
+          filterSlashItems(query).filter((item) => !item.available || item.available(editor)),
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let renderer: ReactRenderer<MenuHandle> | null = null;
@@ -123,7 +203,7 @@ export const SlashCommand = Extension.create({
           return {
             onStart: (props: SuggestionProps<SlashItem, SlashItem>) => {
               renderer = new ReactRenderer(SlashMenu, { props, editor: props.editor });
-              unmount = props.mount(renderer.element);
+              unmount = mountAtCaret(props, renderer.element);
             },
             onUpdate: (props) => renderer?.updateProps(props),
             onKeyDown: (props) => {

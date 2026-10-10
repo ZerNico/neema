@@ -419,7 +419,7 @@ html[data-panel-resizing] webview {
 @layer components {
   /* Documents read at the panel's scale; blocks follow chat answers. */
   .rich-editor {
-    @apply text-foreground min-h-full text-sm leading-6 outline-none;
+    @apply text-foreground grow text-sm leading-6 outline-none;
     & > * + * {
       @apply mt-3;
     }
@@ -443,6 +443,16 @@ html[data-panel-resizing] webview {
     }
     & :not(pre) > code {
       @apply bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.8125rem];
+    }
+    /* A Mermaid block's diagram, above its source while that is being edited. */
+    & .code-diagram {
+      @apply bg-sidebar flex min-h-12 justify-center overflow-x-auto rounded-2xl border px-4 py-3;
+      & svg {
+        @apply h-auto max-w-full;
+      }
+    }
+    & .code-diagram + pre:not([hidden]) {
+      @apply mt-2;
     }
     & pre {
       @apply bg-sidebar overflow-x-auto rounded-2xl border px-4 py-3 font-mono text-[0.8125rem] leading-relaxed;
@@ -531,12 +541,35 @@ html[data-panel-resizing] webview {
       content: attr(data-placeholder);
     }
   }
-  /* Other people's carets, as Tiptap's collaboration caret draws them. */
-  .collaboration-carets__caret {
-    @apply pointer-events-none relative -mx-px border-x;
-    word-break: normal;
+  /* A mentioned person, as a chip inside the line like a date chip. */
+  .rich-editor span[data-type="mention"] {
+    @apply bg-muted text-foreground rounded-md px-1.5 text-[0.9em] font-medium;
   }
-  .collaboration-carets__label {
-    @apply absolute bottom-full -left-px rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-white select-none;
+  /* Text a comment thread is on; the open thread's text stands out more. */
+  .rich-editor .comment-anchor {
+    @apply bg-warning/20 decoration-warning/60 cursor-pointer rounded-[2px] underline decoration-2 underline-offset-4;
+    &.is-active {
+      @apply bg-warning/40;
+    }
+  }
+  /* Other people's carets, laid over the text. A placed caret slides to where
+     it moves, over about the time between two updates, so text streaming in
+     reads as typing rather than jumps. */
+  .remote-carets {
+    @apply pointer-events-none absolute inset-0 overflow-visible;
+  }
+  .remote-caret {
+    @apply absolute top-0 left-0 w-0.5 rounded-full;
+    &.is-placed {
+      transition:
+        transform 100ms linear,
+        height 100ms linear;
+      @media (prefers-reduced-motion: reduce) {
+        transition: none;
+      }
+    }
+  }
+  .remote-caret__label {
+    @apply absolute bottom-full left-0 rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-white select-none;
   }
 }

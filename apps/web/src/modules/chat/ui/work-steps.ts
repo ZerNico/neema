@@ -1,6 +1,7 @@
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkStep } from "./assistant-body.ts";
+import { documentRunLabel, documentRunSucceeded } from "./document-activity-label.ts";
 
 /** The calls behind a step, for timing, failures and what is running. */
 export const stepActivities = (step: WorkStep): ToolActivity[] => {
@@ -9,6 +10,7 @@ export const stepActivities = (step: WorkStep): ToolActivity[] => {
     case "skill":
     case "knowledge":
     case "browser":
+    case "document":
       return step.activities;
     case "working-file":
       return step.steps;
@@ -46,6 +48,8 @@ export function stepLabel(step: WorkStep): string {
       return "Using the browser";
     case "compaction":
       return "Summarizing earlier messages";
+    case "document":
+      return documentRunLabel(step.activities, step.named ?? false);
     case "working-file": {
       const noun = officeNoun(step);
       return noun ? `Working on the ${noun}` : "Publishing the file";
@@ -128,12 +132,21 @@ const pastLabels = (step: WorkStep): string[] => {
   ];
 };
 
+/** A document step none of whose calls succeeded; its own row says so. */
+const failedDocumentStep = (step: WorkStep) =>
+  step.kind === "document" &&
+  step.activities.every((call) => call.status !== "running") &&
+  !documentRunSucceeded(step.activities);
+
 /**
  * "Searched the web, read 2 pages and ran a command": each kind of step once,
- * in order. Thinking is named only when it is all there was.
+ * in order. Thinking is named only when it is all there was, and a failed
+ * document step only when nothing else was done: a retry is not news.
  */
 export const workSummary = (steps: ReadonlyArray<WorkStep>) => {
-  const acting = steps.filter((step) => step.kind !== "reasoning");
+  const all = steps.filter((step) => step.kind !== "reasoning");
+  const succeeded = all.filter((step) => !failedDocumentStep(step));
+  const acting = succeeded.length ? succeeded : all;
   const labels = [...new Set((acting.length ? acting : steps).flatMap(pastLabels))];
   if (labels.length === 0) return "Worked";
   const shown = labels

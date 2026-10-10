@@ -18,7 +18,8 @@ import {
   RowDeleteIcon,
   RowInsertIcon,
   SourceCodeIcon,
-  Table01Icon,
+  FunctionIcon,
+  LayoutTable01Icon,
   TextBoldIcon,
   TextIcon,
   TextItalicIcon,
@@ -48,6 +49,7 @@ import { Kbd } from "~/ui/primitives/kbd";
 import { Toggle } from "~/ui/primitives/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { LinkPopover } from "./link-popover.tsx";
+import { insertFormula } from "./math-item.ts";
 import { fittingControls } from "./fitting-controls.ts";
 
 type Chain = ReturnType<Editor["chain"]>;
@@ -121,7 +123,7 @@ export function Format({
   );
 }
 
-function Action({
+export function Action({
   icon,
   label,
   shortcut,
@@ -208,8 +210,24 @@ type Control =
     }
   | { kind: "link" | "table"; label: string; icon: Icon };
 
-/** In the order they give way: the last ones move into More first. */
+/** In the order they give way: the last ones move into More first, so undo and redo stay. */
 const CONTROLS: Control[] = [
+  {
+    kind: "action",
+    label: "Undo",
+    icon: Undo02Icon,
+    shortcut: "⌘Z",
+    enabled: "canUndo",
+    command: (c) => c.undo(),
+  },
+  {
+    kind: "action",
+    label: "Redo",
+    icon: Redo02Icon,
+    shortcut: "⌘⇧Z",
+    enabled: "canRedo",
+    command: (c) => c.redo(),
+  },
   {
     kind: "format",
     label: "Bold",
@@ -283,24 +301,9 @@ const CONTROLS: Control[] = [
     pressed: "codeBlock",
     command: (c) => c.toggleCodeBlock(),
   },
-  { kind: "table", label: "Table", icon: Table01Icon },
+  { kind: "table", label: "Table", icon: LayoutTable01Icon },
+  { kind: "action", label: "Formula", icon: FunctionIcon, command: insertFormula },
   { kind: "action", label: "Divider", icon: MinusSignIcon, command: (c) => c.setHorizontalRule() },
-  {
-    kind: "action",
-    label: "Undo",
-    icon: Undo02Icon,
-    shortcut: "⌘Z",
-    enabled: "canUndo",
-    command: (c) => c.undo(),
-  },
-  {
-    kind: "action",
-    label: "Redo",
-    icon: Redo02Icon,
-    shortcut: "⌘⇧Z",
-    enabled: "canRedo",
-    command: (c) => c.redo(),
-  },
 ];
 
 /** How many controls fit beside the text style. */
@@ -412,7 +415,7 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
         return state.table ? (
           <DropdownMenuSub key="table">
             <DropdownMenuSubTrigger>
-              <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+              <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
               Table
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
@@ -525,7 +528,7 @@ function InsertTableItem({ editor }: { editor: Editor }) {
         run(editor, (chain) => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))
       }
     >
-      <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+      <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
       Insert table
     </DropdownMenuItem>
   );
@@ -534,9 +537,17 @@ function InsertTableItem({ editor }: { editor: Editor }) {
 function TableItems({ editor }: { editor: Editor }) {
   return (
     <>
+      <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowBefore())}>
+        <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
+        Add row above
+      </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowAfter())}>
         <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
         Add row below
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnBefore())}>
+        <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />
+        Add column left
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnAfter())}>
         <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />
@@ -587,7 +598,7 @@ function TableMenu({ editor, inTable }: { editor: Editor; inTable: boolean }) {
             />
           }
         >
-          <HugeiconsIcon icon={Table01Icon} strokeWidth={2} />
+          <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
         </TooltipTrigger>
         <Hint label="Table" />
       </Tooltip>

@@ -1,3 +1,4 @@
+import type { OpenDocument } from "./schema.ts";
 /**
  * The submission a queued message replays when it finally starts. Frozen when
  * the person queued it, so editing the composer afterwards cannot rewrite work
@@ -19,5 +20,5 @@ export interface QueuedTurnInput {
   skillIds?: ReadonlyArray<string> | undefined;
   collectionIds?: ReadonlyArray<string> | undefined;
   timeZone?: string | undefined;
-  openDocumentId?: string | undefined;
+  openDocument?: OpenDocument | undefined;
 }

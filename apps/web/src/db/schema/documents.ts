@@ -1,9 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
-  bytea,
+  boolean,
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -13,13 +14,15 @@ import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { projects } from "./projects.ts";
 
+/** A ProseMirror document or step as its own `toJSON` writes it. */
+type ProseMirrorJson = Record<string, unknown>;
+
 /**
- * One collaboratively edited markdown document. The Yjs state is canonical:
- * `snapshot` holds it as of `snapshot_revision` and `document_updates` the
- * batches after it. `content` is the same text as plain markdown, rewritten in
- * the transaction that applies each batch, so the model, cards and search read
- * it without decoding Yjs. `revision` counts applied batches; it tells the
- * model the text moved, and protects nothing.
+ * One collaboratively edited document, a ProseMirror tree ordered by the
+ * server. `snapshot` holds the tree as of `snapshot_revision` and
+ * `document_steps` every step after it; `revision` is the number of steps
+ * applied, which is the collab version every editor rebases against.
+ * Markdown is made from the tree only where it is wanted, never stored.
  *
  * A document belongs to exactly one conversation or one project. A chat's
  * document records the answer that produced it (`created_by_message_id`), and
@@ -40,14 +43,13 @@ export const documents = pgTable(
       onDelete: "cascade",
     }),
     title: text().notNull(),
-    content: text().notNull(),
-    revision: integer().notNull().default(1),
+    revision: integer().notNull().default(0),
     lastEditedBy: text("last_edited_by").$type<"user" | "model">().notNull(),
     lastEditorUserId: text("last_editor_user_id").references(() => user.id, {
       onDelete: "set null",
     }),
-    snapshot: bytea().notNull(),
-    snapshotRevision: integer("snapshot_revision").notNull().default(1),
+    snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
+    snapshotRevision: integer("snapshot_revision").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -62,20 +64,55 @@ export const documents = pgTable(
   ],
 );
 
-/** Yjs update batches applied after the snapshot, one row per revision. */
-export const documentUpdates = pgTable(
-  "document_updates",
+/**
+ * Every step after the snapshot, one row each; `revision` is the version the
+ * step produced. Kept long so an editor that was offline can still rebase.
+ */
+export const documentSteps = pgTable(
+  "document_steps",
   {
     documentId: text("document_id")
       .notNull()
       .references(() => documents.id, { onDelete: "cascade" }),
     revision: integer().notNull(),
-    update: bytea().notNull(),
+    step: jsonb().$type<ProseMirrorJson>().notNull(),
+    /** The collab client that sent it: an editor's id, or `model`/`server`. */
+    clientId: text("client_id").notNull(),
     origin: text().$type<"user" | "model">().notNull(),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
-    /** The generation that wrote a model batch; null for a person. */
+    /** The generation that wrote a model step; null for a person. */
     generationId: text("generation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
+);
+
+/**
+ * Comments on a document's text. A thread is its first comment and the
+ * replies naming it; the text it is about carries a `comment` mark with the
+ * thread's ID, so the anchor moves with edits and goes with deleted text,
+ * leaving the thread without one.
+ */
+export const documentComments = pgTable(
+  "document_comments",
+  {
+    id: text().primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    /** The thread's first comment; that comment names itself. */
+    threadId: text("thread_id").notNull(),
+    /** The person who wrote it; null for the assistant, or once the account is gone. */
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    origin: text().$type<"user" | "model">().notNull().default("user"),
+    body: text().notNull(),
+    /** Sent to the assistant as a chat message; answered once it replies after it. */
+    toAssistant: boolean("to_assistant").notNull().default(false),
+    /** A thread's first comment only: the text it was about, kept once that text is gone. */
+    quote: text(),
+    /** Set on a thread's first comment only. */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("document_comments_document_idx").on(t.documentId, t.createdAt)],
 );

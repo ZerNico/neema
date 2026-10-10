@@ -5,17 +5,23 @@ export const DocumentToolName = Schema.Literals([
   "create_document",
   "edit_document",
   "read_chat_document",
-  "replace_document",
   "list_chat_documents",
+  "comment_on_document",
 ]);
 export type DocumentToolName = typeof DocumentToolName.Type;
+/** Calls that write into a document while their arguments stream, so they show as running from the start. */
+export const isDocumentWrite = (name: string): name is DocumentToolName =>
+  name === "create_document" || name === "edit_document" || name === "comment_on_document";
 export const DocumentToolOutcome = Schema.Literals([
   "created",
   "updated",
   "unchanged",
   "read",
   "listed",
+  "commented",
+  "anchors_affected",
   "no_match",
+  "not_found",
   "ambiguous",
   "conflict",
   "invalid",
@@ -35,7 +41,7 @@ export const DocumentActivityResult = Schema.Struct({
   documentConversationId: Schema.optionalKey(ActivityId),
   documentProjectId: Schema.optionalKey(ActivityId),
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-  revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   message: Schema.optionalKey(DocumentFailureReason),
 });
 export type DocumentActivityResult = typeof DocumentActivityResult.Type;
@@ -62,12 +68,12 @@ export function projectDocumentResult(value: unknown): DocumentActivityResult {
     ...(documentConversationId ? { documentConversationId } : {}),
     ...(documentProjectId ? { documentProjectId } : {}),
     ...(title ? { title } : {}),
-    ...(revision ? { revision } : {}),
+    ...(revision !== undefined ? { revision } : {}),
     ...(message ? { message } : {}),
   };
 }
 export const documentResultOk = (result: Pick<DocumentActivityResult, "outcome">) =>
-  ["created", "updated", "unchanged", "read", "listed"].includes(result.outcome);
+  ["created", "updated", "unchanged", "read", "listed", "commented"].includes(result.outcome);
 /** The handler's own explanation for a call that did not update a document. */
 export function documentFailureReason(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;

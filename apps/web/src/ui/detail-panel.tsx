@@ -566,10 +566,19 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   }, [registerBeforeAction, selectedId]);
 
   // A nonmodal rail owns Escape, but never steals focus from elsewhere on hide.
+  // Escape inside a field belongs to it: closing a menu or selection while
+  // writing a document must not close the document.
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") panel.hide();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, select, [contenteditable='true']")
+      )
+        return;
+      panel.hide();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

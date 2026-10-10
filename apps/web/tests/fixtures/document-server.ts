@@ -1,21 +1,49 @@
-import { fromBase64, toBase64 } from "lib0/buffer";
-import * as Y from "yjs";
+import type { Node } from "@tiptap/pm/model";
+import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
+import { Step, Transform } from "@tiptap/pm/transform";
+import { ensureIds } from "~/modules/documents/editor/block-ids.ts";
+import {
+  documentSchema,
+  parseMarkdown,
+  replaceDifference,
+  toMarkdown,
+} from "~/modules/documents/editor/markdown.ts";
 import type {
-  EditableDocument,
   DocumentFrame,
+  DocumentPresence,
+  EditableDocument,
   PushDocumentInput,
+  PushDocumentResult,
 } from "~/modules/documents/schema.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
+
+/** A stored row as tests write it: the row, and its text as Markdown. */
+export type SeedDocument = EditableDocument & { content: string };
 
 /**
- * The server half of live documents for jsdom tests: a real Y.Doc per
- * document, fed by the mocked `pushDocument` and read through a fake
- * EventSource, so merges in these tests are Yjs merges rather than stubs.
+ * A signed-in device with nothing saved: the app sets the cache owner before
+ * anything renders, and an editor's unsent changes must not carry over
+ * from one test to the next.
+ */
+export async function freshDocumentDevice() {
+  await clearDeviceCaches();
+  setDeviceCacheOwner("tester");
+}
+
+/**
+ * The server half of live documents for jsdom tests: a real ProseMirror
+ * document per id that orders steps like the server, fed by the mocked
+ * `pushDocument` and read through a fake EventSource, so merges in these
+ * tests are real rebases rather than stubs.
  */
 export function fakeDocumentServer() {
   const documents = new Map<
     string,
-    { doc: Y.Doc; row: EditableDocument; feeds: Set<FakeEventSource> }
+    {
+      doc: Node;
+      row: EditableDocument;
+      steps: { json: Record<string, unknown>; clientId: string }[];
+      feeds: Set<FakeEventSource>;
+    }
   >();
   const pushes: PushDocumentInput[] = [];
   let hold: Promise<void> | null = null;
@@ -25,53 +53,56 @@ export function fakeDocumentServer() {
     if (!found) throw new Error(`no fake document ${documentId}`);
     return found;
   };
-  const broadcast = (documentId: string, frame: DocumentFrame, except: number | null) => {
-    for (const feed of entry(documentId).feeds) if (feed.clientId !== except) feed.emit(frame);
-  };
-  const commit = (
-    documentId: string,
-    update: Uint8Array,
-    clientId: number | null,
-    by: "user" | "model",
-  ) => {
+  const commit = (documentId: string, steps: Step[], clientId: string, by: "user" | "model") => {
     const found = entry(documentId);
+    for (const step of steps) {
+      found.doc = step.apply(found.doc).doc!;
+      found.steps.push({ json: step.toJSON() as Record<string, unknown>, clientId });
+    }
     found.row = {
       ...found.row,
-      content: readMarkdown(found.doc),
-      revision: found.row.revision + 1,
+      revision: found.steps.length,
       lastEditedBy: by,
     };
-    broadcast(
-      documentId,
-      { type: "update", update: toBase64(update), revision: found.row.revision, clientId },
-      clientId,
-    );
+    const frame: DocumentFrame = {
+      type: "steps",
+      steps: steps.map((step) => step.toJSON() as Record<string, unknown>),
+      clientIds: steps.map(() => clientId),
+      revision: found.row.revision,
+    };
+    for (const feed of found.feeds) feed.emit(frame);
   };
 
   class FakeEventSource {
     readonly documentId: string;
-    readonly clientId: number | null;
+    readonly clientId: string | null;
     #listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
     #closed = false;
     constructor(url: string) {
       const parsed = new URL(url, "http://test");
       this.documentId = decodeURIComponent(parsed.pathname.split("/")[3]!);
-      const client = parsed.searchParams.get("client");
-      this.clientId = client === null ? null : Number(client);
-      const stateVector = parsed.searchParams.get("sv");
+      this.clientId = parsed.searchParams.get("client");
+      const from = parsed.searchParams.get("revision");
       queueMicrotask(() => {
         if (this.#closed) return;
         const found = documents.get(this.documentId);
         if (!found) return this.emit({ type: "gone" });
         found.feeds.add(this);
-        this.emit({
-          type: "sync",
-          update: toBase64(
-            Y.encodeStateAsUpdate(found.doc, stateVector ? fromBase64(stateVector) : undefined),
-          ),
-          awareness: null,
-          revision: found.row.revision,
-        });
+        const revision = from === null ? null : Number(from);
+        this.emit(
+          revision !== null && revision <= found.steps.length
+            ? {
+                type: "steps",
+                steps: found.steps.slice(revision).map((step) => step.json),
+                clientIds: found.steps.slice(revision).map((step) => step.clientId),
+                revision: found.steps.length,
+              }
+            : {
+                type: "reset",
+                doc: found.doc.toJSON() as Record<string, unknown>,
+                revision: found.steps.length,
+              },
+        );
       });
     }
     addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
@@ -96,14 +127,18 @@ export function fakeDocumentServer() {
   return {
     EventSource: FakeEventSource,
     pushes,
-    seed(row: EditableDocument) {
-      const doc = new Y.Doc();
-      writeMarkdown(doc, row.content);
-      documents.set(row.id, { doc, row, feeds: new Set() });
+    seed({ content, ...row }: SeedDocument) {
+      const doc = ensureIds(new Transform(parseMarkdown(content))).doc;
+      documents.set(row.id, {
+        doc,
+        row: { ...row, revision: 0 },
+        steps: [],
+        feeds: new Set(),
+      });
     },
     /** The stored row, as `getDocument` would return it. */
     row: (documentId: string) => documents.get(documentId)?.row ?? null,
-    content: (documentId: string) => readMarkdown(entry(documentId).doc),
+    content: (documentId: string) => toMarkdown(entry(documentId).doc),
     remove(documentId: string) {
       const found = documents.get(documentId);
       documents.delete(documentId);
@@ -127,22 +162,30 @@ export function fakeDocumentServer() {
       by: "user" | "model" = "model",
     ) {
       const found = entry(documentId);
-      const updates: Uint8Array[] = [];
-      const collect = (update: Uint8Array) => updates.push(update);
-      found.doc.on("update", collect);
-      writeMarkdown(found.doc, change(readMarkdown(found.doc)));
-      found.doc.off("update", collect);
-      commit(documentId, Y.mergeUpdates(updates), null, by);
+      const tr = ensureIds(
+        replaceDifference(new Transform(found.doc), parseMarkdown(change(toMarkdown(found.doc)))),
+      );
+      commit(documentId, tr.steps, by === "model" ? "model" : "elsewhere", by);
     },
-    push: async ({ data }: { data: PushDocumentInput }) => {
+    /** Another editor's cursor, sent to every open editor as is: possibly ahead of its steps. */
+    presence(documentId: string, clientId: string, presence: DocumentPresence) {
+      for (const feed of entry(documentId).feeds)
+        feed.emit({ type: "presence", clientId, presence });
+    },
+    push: async ({ data }: { data: PushDocumentInput }): Promise<PushDocumentResult> => {
       pushes.push(data);
       if (hold) await hold;
       const found = entry(data.documentId);
-      if (data.update) {
-        Y.applyUpdate(found.doc, fromBase64(data.update));
-        commit(data.documentId, fromBase64(data.update), data.clientId, "user");
-      }
-      return { revision: found.row.revision };
+      if (!data.steps) return { revision: found.steps.length, conflict: false };
+      if (data.revision !== found.steps.length)
+        return { revision: found.steps.length, conflict: true };
+      commit(
+        data.documentId,
+        data.steps.map((json) => Step.fromJSON(documentSchema, JSON.parse(json))),
+        data.clientId,
+        "user",
+      );
+      return { revision: found.steps.length, conflict: false };
     },
   };
 }

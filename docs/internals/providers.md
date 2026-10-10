@@ -89,7 +89,13 @@ same connection, once per request, and never synthesises missing state.
 ## Wire formats
 
 - **Chat Completions** is the shared standard. Files in an assistant turn move to a user
-  message after its tool results, except OpenRouter images, which it takes inline.
+  message after its tool results, except OpenRouter images, which it takes inline. A model
+  named Claude gets Anthropic's fine-grained tool streaming header: without it Anthropic holds
+  each argument value back until it is complete, so a document written through a tool arrived
+  in one burst (measured through 9router, which passes the header on). Other backends ignore it.
+  Over the Messages API (Claude on Bedrock) the same comes from `eager_input_streaming` on each
+  tool, which replaced the header there. Arguments then arrive unvalidated, so broken JSON fails
+  the call when its block closes, as it always did.
 - **Responses** is OpenAI's newer API: always `store: false` with encrypted reasoning
   included, a summary asked for (and dropped once if OpenAI refuses it to an unverified
   organisation), and tool schemas sent with `strict: false`, since omitting it means strict

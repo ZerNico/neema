@@ -43,9 +43,12 @@ import {
   type ToolSource,
 } from "../client/use-message-stream.ts";
 import { formatQuestionResponse, type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
-import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { getDocument, pushDocument } from "~/modules/documents/server/document-functions.ts";
-import { fakeDocumentServer } from "../../../../tests/fixtures/document-server.ts";
+import {
+  type SeedDocument,
+  fakeDocumentServer,
+  freshDocumentDevice,
+} from "../../../../tests/fixtures/document-server.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
@@ -2170,10 +2173,11 @@ const documentReference = (
 
 describe("ChatView documents", () => {
   let server: ReturnType<typeof fakeDocumentServer>;
+  beforeEach(freshDocumentDevice);
   beforeEach(() => {
     for (const rpc of [sendMock, retryMock, branchMock, editMock, answerMock, conversationMock])
       rpc.mockReset();
-    const current: EditableDocument = {
+    const current: SeedDocument = {
       id: "document-1",
       conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       title: "Trip plan",
@@ -2275,7 +2279,7 @@ describe("ChatView documents", () => {
     renderView(null, { toolCalls: [documentReference(), editRow] });
 
     // The compact row for the edit opens the same document as the card.
-    const update = await screen.findByRole("button", { name: /Updated Trip plan/ });
+    const update = await screen.findByRole("button", { name: /Edited Trip plan/ });
     fireEvent.click(update);
     expect(await screen.findByRole("textbox", { name: "Document source" })).toHaveValue(
       "Original source",
@@ -2397,7 +2401,7 @@ describe("ChatView documents", () => {
       expect(server.content("document-1")).toBe("Reviewed source");
       if (action !== "branch")
         expect(rpc).toHaveBeenCalledWith({
-          data: expect.objectContaining({ openDocumentId: "document-1" }),
+          data: expect.objectContaining({ openDocument: { id: "document-1" } }),
         });
     },
   );
