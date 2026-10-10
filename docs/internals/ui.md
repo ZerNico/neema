@@ -14,6 +14,10 @@ that bug.
   after `@import "tailwindcss"`: overlay primitives' `data-open:animate-in`/`fade-in-0`/`zoom-in-95`
   classes come from `tw-animate-css`, and without it overlays pop with no transition and no error. `cn`
   (the package) is re-exported by `src/ui/utils.ts`; primitives import `"cn"` directly, as the CLI emits.
+- A package that draws (`packages/sheet-react`) styles with the app's semantic token classes and
+  imports nothing from `~/ui`; the app draws its menus and toolbars from data it exposes. `app.css`
+  lists the package with `@source`: without it Tailwind never sees its classes and they are
+  silently missing.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button

@@ -66,6 +66,32 @@ browser workers and the Excel file tools); this page records the decisions behin
   the whole document and replays what it has pending.
 - The model's changes come through `change`, numbered in a client of its own per generation.
 
+## The model
+
+- `create_sheet` and `edit_sheet` load on request like the Office tools. An edit is a list of
+  operations by sheet name and A1, the Excel tools' catalogue less filters, plus inserting,
+  deleting, filling, copying, sorting and moving sheets. They are converted in order
+  (`server/convert.ts`), each against what the ones before it made, into one change; one refused
+  operation refuses the call. The grid grows to hold what is written.
+- The guards trust only what a sent request showed (the revision a staged view carried) and the
+  revisions the answer wrote itself. A write, a clear, a delete or a sort over a cell whose
+  write version is newer than both is a conflict. Bumping the seen revision on the model's own
+  write would let it overwrite a person's edit it never saw.
+- The focused sheet's view (`server/sheet-view.ts`) is calculated on the server and sent whole
+  whenever it changes; the first view of an answer stays byte for byte, as for text. Sort orders
+  rows by calculated values once, and the change carries the order.
+- A download is built in the spreadsheet worker from the stored sheet, by position, and
+  calculated there, so the file opens with every value.
+
+## Showing it
+
+- `@chat/sheet-react` draws only the grid, from the document and the values; selection is by
+  IDs and reported up. The app draws the formula bar, tabs and menus. Scrolling is the
+  browser's, with sticky headers, and only the cells in view are drawn.
+- A tab shows the server's document with its own unsent changes replayed on top
+  (`client/sheet-sync.ts`); a change of its own coming back through the feed, or an
+  acknowledgement, retires it. The panel calculates on the main thread for now.
+
 ## Calculating
 
 - Values are never stored: every replica calculates them from the document and a
