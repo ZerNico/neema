@@ -105,6 +105,20 @@ browser workers and the Excel file tools); this page records the decisions behin
   hidden rows, and a condition as the values that pass it. An import gives those rows back to
   the filter instead of hiding them by hand.
 
+## Rules on cells
+
+- Conditional formats and data validation are lists on the sheet, each rule a range by IDs,
+  replaced whole by one operation. How a cell looks under a format, and whether its value
+  breaks a rule, are worked out from the values at draw time like a filter's rows, so neither
+  is ever stale on a replica.
+- Validation guards typing in the grid only. A paste, a fill or the model may write anything,
+  which is Excel's behaviour too; Circle Invalid Data shows what slipped through. A list read
+  from cells keeps that range by IDs and its choices are the cells' shown text.
+- Excel keeps a format's look as a differential style. The library writes those but cannot
+  read them, so an import reads them from the stylesheet's XML
+  (`spreadsheets/server/file-conditional.ts`). Rule kinds a live sheet does not draw (icons,
+  formulas, time and custom validation) are dropped on import and named as dropped.
+
 ## Charts
 
 - A chart is data in the document (`model/chart.ts`): its series by IDs and every option set,
