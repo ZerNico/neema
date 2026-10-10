@@ -215,10 +215,13 @@ const plainValue = (value: unknown) =>
 /** Attributes the schema types loosely but the model's view and the editor rely on. */
 const wellTyped = (node: Node) => {
   for (const [name, value] of Object.entries(node.attrs)) {
-    // A table cell's column widths are the one list an attribute holds.
+    // A table cell's column widths are the one list an attribute holds: a
+    // number for each column it spans, and no more.
+    const span = typeof node.attrs.colspan === "number" ? node.attrs.colspan : 1;
     const widths =
       name === "colwidth" &&
       Array.isArray(value) &&
+      value.length <= Math.min(span, 64) &&
       value.every((each) => typeof each === "number");
     if (!plainValue(value) && !widths) return false;
   }

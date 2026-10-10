@@ -302,8 +302,10 @@ interface Baseline {
    * carries it again, or the next request would lose the document.
    */
   shown?: string;
-  /** The last full view the model was sent of it, in the first view or an update. */
-  xml: string;
+  /** The view's body as last sent whole, without its header's changing flags. */
+  body: string;
+  /** The selected blocks that view named. */
+  selection: string;
 }
 
 /** What streaming tells the tools a provider request carried, so only that counts as seen. */
@@ -1181,7 +1183,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       : "";
     const comments = commentsView(tree, threads.get(document.id) ?? [], asking);
     const xml = `<document${header(document, { focused: true, ...(shownSelection.length ? { selected: shownSelection.join(" ") } : {}) })}>\n${view.xml}${note}${comments ? `\n${comments}` : ""}\n</document>`;
-    return { xml, view, order, comments };
+    return { xml, view, order, comments, selection: shownSelection.join(" ") };
   };
   /** The comment threads as they are now, when they changed since the view the model holds. */
   const threadsSince = (baseline: Baseline, comments: string) =>
@@ -1286,7 +1288,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             revision: current.revision,
             order: rendered.order,
             comments: rendered.comments,
-            xml: rendered.xml,
+            body: rendered.view.xml,
+            selection: rendered.selection,
           });
         firstView = `${lead}\n<documents>\n${[rendered?.xml, othersXml(current)].filter(Boolean).join("\n")}\n</documents>`;
         if (current && rendered) stage(firstView, current.id, current.revision, rendered.view.seen);
@@ -1307,7 +1310,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           order: rendered.order,
           comments: rendered.comments,
           shown: rendered.xml,
-          xml: rendered.xml,
+          body: rendered.view.xml,
+          selection: rendered.selection,
         });
       } else if (baseline.revision !== current.revision) {
         const before = new Map(
@@ -1351,14 +1355,14 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           .map((block) => block.id);
         const moved = kept.some((id, index) => order[index] !== id);
         const delta = `<changes since="${baseline.revision}">\n${lines.join("\n")}\n</changes>`;
+        // A list of changes names no selection: a new one sends the view whole.
+        const reselected = rendered.selection !== baseline.selection;
         update =
-          moved || delta.length > rendered.xml.length / 2
+          moved || reselected || delta.length > rendered.xml.length / 2
             ? rendered.xml
             : `<document${header(current, { focused: true })}>\n${delta}${threadsSince(baseline, rendered.comments)}\n</document>`;
       } else if (windows.has(current.id)) update = rendered.xml;
-      else if (
-        rendered.xml.replace(rendered.comments, "") !== baseline.xml.replace(baseline.comments, "")
-      )
+      else if (rendered.view.xml !== baseline.body || rendered.selection !== baseline.selection)
         // The same text, seen another way: a steer's new selection, a window moved to a write.
         update = rendered.xml;
       else if (baseline.comments !== rendered.comments)

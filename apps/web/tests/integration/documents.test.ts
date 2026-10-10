@@ -673,6 +673,29 @@ describe("ownership, limits and sync", () => {
         }),
       ),
     ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    // Nor a cell claiming more column widths than columns it spans.
+    const table = await create(
+      owner,
+      await createConversation(owner),
+      "| a | b |\n| --- | --- |\n| 1 | 2 |",
+    );
+    await expect(
+      service((s) =>
+        s.push(owner, {
+          documentId: table.id,
+          clientId: "hostile",
+          revision: table.revision,
+          steps: [
+            JSON.stringify({
+              stepType: "attr",
+              pos: 2,
+              attr: "colwidth",
+              value: Array.from({ length: 1_000 }, () => 100),
+            }),
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
     // Nor an attribute holding an object, which no size count would see.
     await expect(
       service((s) =>

@@ -408,6 +408,29 @@ describe("document tools", () => {
     expect(update).not.toContain(`selected="${alpha}"`);
   });
 
+  it("sends nothing more for a person's earlier edit once it has been seen", async () => {
+    const { service, userWrite } = fakeService([{ id: "doc-1", title: "One", content: "Intro" }]);
+    userWrite("doc-1", "Intro, edited by the person");
+    const tools = await prepare(service, "doc-1");
+    expect(send(tools)).toHaveLength(2);
+    // Nothing changed: the header's edited flag flipping must not resend the document.
+    expect(send(tools)).toHaveLength(2);
+    expect(send(tools)).toHaveLength(2);
+  });
+
+  it("names a new selection that arrives after an edit", async () => {
+    const { service, userWrite, rows } = fakeService([
+      { id: "doc-1", title: "One", content: "Alpha\n\nBeta\n\nGamma" },
+    ]);
+    const [alpha, beta] = [0, 1].map((index) => blockIdOf(rows.get("doc-1")!.doc.child(index))!);
+    const tools = await prepare(service, "doc-1", [alpha!]);
+    send(tools);
+    userWrite("doc-1", "Alpha\n\nBeta\n\nGamma, edited");
+    tools.focus("doc-1", [beta!], undefined);
+    await Effect.runPromise(tools.refresh());
+    expect(send(tools).at(-1)).toContain(`selected="${beta}"`);
+  });
+
   it("opens at the selection itself when the blocks before it are too long to fit too", async () => {
     const long = "y".repeat(13_000);
     const content = [
