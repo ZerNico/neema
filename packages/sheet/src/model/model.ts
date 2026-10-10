@@ -85,11 +85,14 @@ export interface Sheet {
   readonly freeze: { readonly row: string | null; readonly col: string | null };
   /** Its AutoFilter, if it has one. */
   readonly filter?: SheetFilter;
+  /** Its conditional formats, the first taking priority. */
+  readonly conditional?: readonly ConditionalFormat[];
 }
 
 export type { Chart, ChartSeries } from "./chart.ts";
 import type { Chart } from "./chart.ts";
 import type { SheetFilter } from "./filter.ts";
+import type { ConditionalFormat } from "./conditional.ts";
 
 /** How a document reads and shows: what people type and see follows its locale; NOW its time zone. */
 export interface SheetSettings {

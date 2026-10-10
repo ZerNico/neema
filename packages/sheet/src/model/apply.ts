@@ -272,6 +272,12 @@ function applyOp(doc: SheetDoc, op: SheetOp, revision: number, dropped: string[]
       if (!sheet) return drop(doc, dropped, "frozen panes on a sheet that is gone");
       return withSheet(doc, op.sh, { ...sheet, freeze: { row: op.row, col: op.col } });
     }
+    case "conditional": {
+      const sheet = sheetOf(op.sh);
+      if (!sheet) return drop(doc, dropped, "conditional formats on a sheet that is gone");
+      const { conditional: _old, ...rest } = sheet;
+      return withSheet(doc, op.sh, op.list.length ? { ...rest, conditional: op.list } : rest);
+    }
     case "filter": {
       const sheet = sheetOf(op.sh);
       if (!sheet) return drop(doc, dropped, "a filter on a sheet that is gone");

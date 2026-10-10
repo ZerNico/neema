@@ -93,6 +93,8 @@ function layoutUndo(sh: string, before: Sheet, after: Sheet): SheetOp[] {
   for (const [key, box] of was) if (!is.has(key)) ops.push({ op: "merge", sh, box });
   if (before.freeze.row !== after.freeze.row || before.freeze.col !== after.freeze.col)
     ops.push({ op: "freeze", sh, ...before.freeze });
+  if (JSON.stringify(before.conditional ?? []) !== JSON.stringify(after.conditional ?? []))
+    ops.push({ op: "conditional", sh, list: before.conditional ?? [] });
   if (JSON.stringify(before.filter ?? null) !== JSON.stringify(after.filter ?? null))
     ops.push({ op: "filter", sh, filter: before.filter ?? null });
   return ops;
