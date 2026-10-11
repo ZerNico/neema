@@ -807,8 +807,13 @@ export function SheetToolbar({
   };
   const label = TABS.find((each) => each.value === tab)!.label;
   return (
-    <Tabs value={tab} onValueChange={(next: TabName) => setTab(next)} className="min-w-0 flex-1">
-      <div className="flex min-w-0 items-center gap-1">
+    // A size container: in a panel too narrow for one line, the tabs take a line of their own.
+    <Tabs
+      value={tab}
+      onValueChange={(next: TabName) => setTab(next)}
+      className="@container min-w-0 flex-1"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         <Toolbar.Root aria-label="History" className="flex shrink-0 items-center gap-0.5">
           <Action
             icon={Undo02Icon}
@@ -825,7 +830,11 @@ export function SheetToolbar({
             onPress={onRedo}
           />
         </Toolbar.Root>
-        <TabsList variant="line">
+        <TabsList
+          variant="line"
+          size="sm"
+          className="@max-[25rem]:order-last @max-[25rem]:basis-full"
+        >
           {TABS.map((each) => (
             <TabsTrigger key={each.value} value={each.value}>
               {each.label}
