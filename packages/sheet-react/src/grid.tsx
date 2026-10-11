@@ -51,6 +51,7 @@ import type {
 } from "./grid-types.ts";
 import { CellEditor, RefOutlines } from "./cell-editor.tsx";
 import { useCellEdit } from "./use-cell-edit.ts";
+import { FillHandle, MoveEdges } from "./grid-drags.tsx";
 import { GridOverlays } from "./grid-overlays.tsx";
 
 export type { OverlayCommand } from "./overlay-place.ts";
@@ -836,50 +837,6 @@ export function SheetGrid({
   const rowHeaders: ReactNode[] = [];
   for (let row = visibleRows.first; row <= visibleRows.last; row++) rowHeaders.push(rowHeader(row));
 
-  const [filling, setFilling] = useState<{
-    direction: GridFill["direction"];
-    count: number;
-  } | null>(null);
-  /** Drags the fill handle: the cell under the pointer, past whichever edge it is furthest beyond. */
-  const startFill = (event: PointerEvent) => {
-    if (event.button !== 0 || !box) return;
-    event.stopPropagation();
-    event.preventDefault();
-    const from = box;
-    let current: { direction: GridFill["direction"]; count: number } | null = null;
-    const move = (next: globalThis.PointerEvent) => {
-      const rect = content.current?.getBoundingClientRect();
-      if (!rect) return;
-      const row = rows.indexAt(next.clientY - rect.top);
-      const col = cols.indexAt(next.clientX - rect.left);
-      const reaches = [
-        ["down", row - from.bottom],
-        ["up", from.top - row],
-        ["right", col - from.right],
-        ["left", from.left - col],
-      ] as const;
-      const [direction, count] = reaches.reduce((best, each) => (each[1] > best[1] ? each : best));
-      // Back inside the selection, the handle marks its last rows or columns to clear.
-      const inside = row >= from.top && row <= from.bottom && col >= from.left && col <= from.right;
-      const shrink =
-        from.bottom - row >= from.right - col
-          ? { direction: "down" as const, count: row - from.bottom }
-          : { direction: "right" as const, count: col - from.right };
-      current = count > 0 ? { direction, count } : inside && shrink.count < 0 ? shrink : null;
-      setFilling(current);
-    };
-    const end = (last: globalThis.PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-      setFilling(null);
-      if (current && last.type === "pointerup")
-        onFill?.({ ...current, mode: last.ctrlKey || last.altKey ? "alternate" : "auto" });
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-  };
   // The active cell's list, open below it; the picked choice moves with the arrow keys.
   const [listOpen, setListOpen] = useState<{ at: string; picked: number } | null>(null);
   const listKey = selection ? `${selection.head.r}|${selection.head.c}` : "";
@@ -943,129 +900,6 @@ export function SheetGrid({
           </ul>
         ) : null}
       </>
-    ) : null;
-  const fillHandle =
-    box && onFill && !readOnly && !editing ? (
-      <div
-        role="button"
-        aria-label="Fill"
-        tabIndex={-1}
-        data-fill-handle=""
-        className="border-background bg-primary absolute z-20 size-2 cursor-crosshair border"
-        style={{
-          top: rows.starts[box.bottom + 1]! - 4,
-          left: cols.starts[box.right + 1]! - 4,
-        }}
-        onPointerDown={startFill}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onFill({ direction: "down", count: "auto", mode: "auto" });
-        }}
-      />
-    ) : null;
-  // The cells a fill handle drag would write, outlined while it is dragged.
-  const fillPreview =
-    box && filling
-      ? (() => {
-          const [top, bottom, left, right] =
-            filling.count < 0
-              ? filling.direction === "down"
-                ? [box.bottom + filling.count + 1, box.bottom, box.left, box.right]
-                : [box.top, box.bottom, box.right + filling.count + 1, box.right]
-              : filling.direction === "down"
-                ? [box.bottom + 1, box.bottom + filling.count, box.left, box.right]
-                : filling.direction === "up"
-                  ? [box.top - filling.count, box.top - 1, box.left, box.right]
-                  : filling.direction === "right"
-                    ? [box.top, box.bottom, box.right + 1, box.right + filling.count]
-                    : [box.top, box.bottom, box.left - filling.count, box.left - 1];
-          const [t, b] = [Math.max(0, top), Math.min(rows.ids.length - 1, bottom)];
-          const [l, r] = [Math.max(0, left), Math.min(cols.ids.length - 1, right)];
-          return (
-            <div
-              aria-hidden
-              className={`border-primary pointer-events-none absolute z-10 border-2 border-dashed ${filling.count < 0 ? "bg-muted/70" : ""}`}
-              style={{
-                top: rows.starts[t],
-                left: cols.starts[l],
-                height: rows.starts[b + 1]! - rows.starts[t]!,
-                width: cols.starts[r + 1]! - cols.starts[l]!,
-              }}
-            />
-          );
-        })()
-      : null;
-
-  const [shifting, setShifting] = useState<{ rows: number; cols: number } | null>(null);
-  /** The cell under a point on the page, by the main pane's coordinates. */
-  const cellUnder = (at: { clientX: number; clientY: number }) => {
-    const rect = content.current!.getBoundingClientRect();
-    return { row: rows.indexAt(at.clientY - rect.top), col: cols.indexAt(at.clientX - rect.left) };
-  };
-  /** Drags the selection by its border, a whole number of cells at a time. */
-  const startShift = (event: PointerEvent) => {
-    if (event.button !== 0 || !box) return;
-    event.stopPropagation();
-    event.preventDefault();
-    const from = cellUnder(event);
-    const limits = { up: -box.top, left: -box.left };
-    let current: { rows: number; cols: number } | null = null;
-    const move = (next: globalThis.PointerEvent) => {
-      const at = cellUnder(next);
-      current = {
-        rows: Math.max(limits.up, at.row - from.row),
-        cols: Math.max(limits.left, at.col - from.col),
-      };
-      setShifting(current.rows || current.cols ? current : null);
-    };
-    const end = (last: globalThis.PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-      setShifting(null);
-      if (current && (current.rows || current.cols) && last.type === "pointerup")
-        onDragSelection?.(current, last.altKey || last.ctrlKey || last.metaKey);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-  };
-  // Thin strips on the selection's border that pick it up; the cells inside keep their clicks.
-  const moveEdges =
-    box && onDragSelection && !readOnly && !editing
-      ? (() => {
-          const [top, left] = [rows.starts[box.top]!, cols.starts[box.left]!];
-          const [bottom, right] = [rows.starts[box.bottom + 1]!, cols.starts[box.right + 1]!];
-          const edges = [
-            { key: "top", top: top - 3, left, width: right - left, height: 5 },
-            { key: "bottom", top: bottom - 2, left, width: right - left - 6, height: 5 },
-            { key: "left", top, left: left - 3, width: 5, height: bottom - top },
-            { key: "right", top, left: right - 2, width: 5, height: bottom - top - 6 },
-          ];
-          return edges.map(({ key: edge, ...place }) => (
-            <div
-              key={edge}
-              aria-hidden
-              data-move-edge={edge}
-              className="absolute z-20 cursor-move"
-              style={place}
-              onPointerDown={startShift}
-            />
-          ));
-        })()
-      : null;
-  const shiftPreview =
-    box && shifting ? (
-      <div
-        aria-hidden
-        className="border-primary pointer-events-none absolute z-10 border-2 border-dashed"
-        style={{
-          top: rows.starts[Math.min(rows.ids.length - 1, box.top + shifting.rows)],
-          left: cols.starts[Math.min(cols.ids.length - 1, box.left + shifting.cols)],
-          height: rows.starts[box.bottom + 1]! - rows.starts[box.top]!,
-          width: cols.starts[box.right + 1]! - cols.starts[box.left]!,
-        }}
-      />
     ) : null;
 
   // The other selected ranges, shaded as Excel shades them, without the active range's frame.
@@ -1369,10 +1203,22 @@ export function SheetGrid({
           {anchorBox}
           {moreBoxes}
           {selectionBox}
-          {fillPreview}
-          {shiftPreview}
-          {moveEdges}
-          {fillHandle}
+          {box && !readOnly && !editing ? (
+            <>
+              {onDragSelection ? (
+                <MoveEdges
+                  box={box}
+                  rows={rows}
+                  cols={cols}
+                  content={content}
+                  onDrag={onDragSelection}
+                />
+              ) : null}
+              {onFill ? (
+                <FillHandle box={box} rows={rows} cols={cols} content={content} onFill={onFill} />
+              ) : null}
+            </>
+          ) : null}
           {cellListUi}
           {head && activeAccessory && !editing ? (
             <div
