@@ -293,6 +293,12 @@ export class AttachmentRepo extends Context.Service<
       tx: DbTx,
       input: { userId: string; documentId: string; attachmentId: string },
     ): Effect.Effect<boolean>;
+    /**
+     * Locks the blobs of attachments about to be claimed one by one, in the
+     * one global order, so two claims of the same pictures in other orders
+     * never wait on each other.
+     */
+    lockForClaims(tx: DbTx, attachmentIds: ReadonlyArray<string>): Effect.Effect<void>;
     /** A document's claimed image with its blob; null when the document holds no such image. */
     findDocumentImage(
       documentId: string,
@@ -971,6 +977,13 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const lockForClaims = Effect.fn("AttachmentRepo.lockForClaims")(function* (
+        tx: DbTx,
+        attachmentIds: ReadonlyArray<string>,
+      ) {
+        yield* lockAttachmentBlobs(tx, attachmentIds).pipe(Effect.orDie);
+      });
+
       const claimForDocument = Effect.fn("AttachmentRepo.claimForDocument")(function* (
         tx: DbTx,
         input: { userId: string; documentId: string; attachmentId: string },
@@ -1061,6 +1074,7 @@ export class AttachmentRepo extends Context.Service<
         scannedPages,
         saveScannedPages,
         claimForDocument,
+        lockForClaims,
         findDocumentImage,
         sweepUnclaimed,
       });

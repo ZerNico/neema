@@ -786,6 +786,9 @@ export class DocumentService extends Context.Service<
               });
               if (!from) return created;
               // Every picture is claimed as a person's own upload is, or nothing is stored.
+              // Their blobs are locked together first, in the global order: claimed one
+              // by one in the file's order, two imports of the same pictures could deadlock.
+              yield* attachments.lockForClaims(tx, from.images);
               for (const attachmentId of from.images)
                 if (
                   !(yield* attachments.claimForDocument(tx, {
