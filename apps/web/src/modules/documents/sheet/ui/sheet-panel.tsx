@@ -3,9 +3,6 @@ import {
   ChartColumnIcon,
   CommentAdd01Icon,
   Link01Icon,
-  ArrowDown01Icon,
-  ArrowUp01Icon,
-  Cancel01Icon,
   ClipboardIcon,
   ColumnDeleteIcon,
   ColumnInsertIcon,
@@ -84,7 +81,6 @@ import {
   ContextMenuTrigger,
 } from "~/ui/primitives/context-menu";
 import { FieldError } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
@@ -105,6 +101,9 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { FindBar } from "./find-bar.tsx";
+import { findMatches } from "./find.ts";
+import { FormulaBar } from "./formula-bar.tsx";
 import { IMAGE_LIMITS } from "@chat/sheet/model/image";
 import { pictureOf } from "./picture.ts";
 import { PivotDialog, type PivotDraft } from "./pivot-dialog.tsx";
@@ -291,7 +290,6 @@ export default function SheetPanelBody({
     choice: FillChoice | null;
   } | null>(null);
   const copied = useRef<CopiedCells | null>(null);
-  const formulaBar = useRef<HTMLTextAreaElement>(null);
   // A sheet chosen from the keyboard keeps the keyboard: its grid takes focus once drawn.
   const focusGrid = useRef(false);
   const picturePicker = useRef<HTMLInputElement>(null);
@@ -398,25 +396,9 @@ export default function SheetPanelBody({
     }
     run(ops);
   };
-  // Cells whose shown text or formula holds the query, in reading order.
-  const matches = (() => {
-    const query = finding?.query.trim().toLowerCase();
-    if (!query) return [];
-    const found: Array<{ r: string; c: string; row: number; col: number }> = [];
-    for (const [r, row] of Object.entries(doc.sheet[sheet]!.cells)) {
-      const rowAt = rows.at(r);
-      if (rowAt === undefined) continue;
-      for (const [c, cell] of Object.entries(row)) {
-        const colAt = cols.at(c);
-        if (colAt === undefined) continue;
-        const shown = cellDisplay(values.value(sheet, r, c), cellStyle(cell.s), locale).text;
-        const formula = cell.f ? cellSource(doc, sheet, r, c, locale) : "";
-        if (shown.toLowerCase().includes(query) || formula.toLowerCase().includes(query))
-          found.push({ r, c, row: rowAt, col: colAt });
-      }
-    }
-    return found.toSorted((a, b) => a.row - b.row || a.col - b.col);
-  })();
+  const matches = finding
+    ? findMatches({ doc, values, sheet, locale, rows, cols }, finding.query)
+    : [];
   const goTo = (index: number) => {
     if (!finding || !matches.length) return;
     const next = ((index % matches.length) + matches.length) % matches.length;
@@ -1026,104 +1008,29 @@ export default function SheetPanelBody({
           )
         : null}
       {state.refused ? <FieldError className="mx-3 mt-2">{state.refused}</FieldError> : null}
-      <div className="border-border flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        <span className="text-muted-foreground w-14 shrink-0 font-mono text-xs">{address}</span>
-        {/* A textarea, so a cell's line breaks survive editing here; it shows the first line. */}
-        <textarea
-          ref={formulaBar}
-          aria-label="Formula bar"
-          data-sheet-editor="true"
-          readOnly={readOnly}
-          value={barText}
-          rows={1}
-          spellCheck={false}
-          className="text-foreground h-7 min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-2 py-1.5 font-mono text-xs leading-4 whitespace-pre outline-none"
-          onFocus={() => {
-            if (!readOnly && !editing) setEditing({ at: head, text: source, mode: "edit" });
-          }}
-          onChange={(event) => setEditing({ at: head, text: event.target.value, mode: "edit" })}
-          onKeyDown={(event) => {
-            if (!editing) return;
-            if (event.key === "Enter" && event.altKey) {
-              // Alt+Enter breaks the line inside the cell, as in Excel.
-              event.preventDefault();
-              const bar = event.currentTarget;
-              bar.setRangeText("\n", bar.selectionStart, bar.selectionEnd, "end");
-              setEditing({ ...editing, text: bar.value });
-            } else if (event.key === "Enter" || event.key === "Tab") {
-              event.preventDefault();
-              commit(editing.at, editing.text);
-              setEditing(null);
-              formulaBar.current?.blur();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              setEditing(null);
-              formulaBar.current?.blur();
-            }
-          }}
-          onBlur={(event) => {
-            if (!editing) return;
-            // Into the cell's own editor, the edit carries on there.
-            if (event.relatedTarget instanceof HTMLTextAreaElement) return;
-            commit(editing.at, editing.text);
-            setEditing(null);
-          }}
-        />
-      </div>
+      <FormulaBar
+        address={address}
+        text={barText}
+        readOnly={readOnly}
+        editing={!!editing}
+        onStart={() => setEditing({ at: head, text: source, mode: "edit" })}
+        onChange={(text) => setEditing({ at: head, text, mode: "edit" })}
+        onCommit={() => {
+          if (!editing) return;
+          void commit(editing.at, editing.text);
+          setEditing(null);
+        }}
+        onCancel={() => setEditing(null)}
+      />
       {finding ? (
-        <div className="border-border flex h-9 shrink-0 items-center gap-1 border-b px-3">
-          <Input
-            autoFocus
-            aria-label="Find in sheet"
-            placeholder="Find in sheet"
-            value={finding.query}
-            // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the formula bar does.
-            className="h-7 border-0 text-xs shadow-none focus-visible:ring-0"
-            onChange={(event) => setFinding({ query: event.target.value, index: 0 })}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                goTo(finding.index + (event.shiftKey ? -1 : 1));
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                setFinding(null);
-              }
-            }}
-          />
-          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-            {finding.query.trim()
-              ? matches.length
-                ? `${Math.min(finding.index, matches.length - 1) + 1} of ${matches.length}`
-                : "No matches"
-              : ""}
-          </span>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Previous match"
-            disabled={!matches.length}
-            onClick={() => goTo(finding.index - 1)}
-          >
-            <HugeiconsIcon icon={ArrowUp01Icon} strokeWidth={2} />
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Next match"
-            disabled={!matches.length}
-            onClick={() => goTo(finding.index + 1)}
-          >
-            <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Close find"
-            onClick={() => setFinding(null)}
-          >
-            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-          </Button>
-        </div>
+        <FindBar
+          query={finding.query}
+          index={finding.index}
+          count={matches.length}
+          onQuery={(query) => setFinding({ query, index: 0 })}
+          onGo={goTo}
+          onClose={() => setFinding(null)}
+        />
       ) : null}
       <div className="flex min-h-0 flex-1">
         <ContextMenu>
