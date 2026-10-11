@@ -20,7 +20,8 @@ export const wordWorkerUrl = workerEntry(import.meta.url, "./runtime-worker.ts",
 
 /** Checks what the parent can before any worker is involved. */
 function admit(request: WordWork) {
-  if (request.kind === "create") return;
+  // A document's own tree and images, bounded by the document's limits before it gets here.
+  if (request.kind === "create" || request.kind === "exportDocument") return;
   if (request.bytes.length > WORD_LIMITS.compressedBytes)
     throw new WordError(
       "limit",

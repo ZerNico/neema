@@ -5,7 +5,9 @@ pattern: fixed, trusted operations in the Node app, no model-authored code. The 
 inspects an authorized `.docx`, edits a private working draft revision by revision, and
 publishes it through the shared [file lifecycle](files.md#files-into-tools). Kept drafts,
 Resume, skill templates and desktop imports work as for decks and workbooks. The family is
-`word`, never "document": that word means the live Markdown [documents](documents.md).
+`word`, never "document": that word means the live Markdown [documents](documents.md). The
+same workers also turn a live document into a `.docx` ([Word files](documents.md#word-files));
+that job is not a tool and shares this containment.
 
 ## Blocks, numbered per revision
 
@@ -64,7 +66,10 @@ sizes can lie; parts, total and per-part size are bounded. The parser itself rea
 central directory and allocates the sizes declared there, so that listing must name the same
 parts and declare sizes within the same bounds, or the file is refused. Macro projects, ActiveX controls and embedded objects
 are refused, as for decks. Parsing and editing run in killable worker processes of their own,
-as [jobs](presentations.md#jobs), so what remains of a hostile file ends at the timeout.
+as [jobs](presentations.md#jobs), so what remains of a hostile file ends at the timeout. A
+document's export reads nothing untrusted, but builds in a worker too, so a long document with its pictures never holds the server's event loop.
+The worker runs under Node's type stripping in development, so its modules use only erasable
+TypeScript (no parameter properties or enums) and relative imports.
 
 ## Previews
 

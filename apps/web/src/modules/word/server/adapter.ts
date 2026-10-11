@@ -246,7 +246,7 @@ function finishPackage(bytes: Uint8Array): Uint8Array {
   return changed ? zipSync(files, { level: 6 }) : bytes;
 }
 
-const save = (doc: Docx) => {
+export const save = (doc: Docx) => {
   closeBody(doc);
   const bytes = finishPackage(toUint8Array(doc));
   if (bytes.length > WORD_LIMITS.compressedBytes)
@@ -261,9 +261,10 @@ export function createWordFile() {
 // ---------------------------------------------------------------------------
 // Reading
 
-type XmlElement = Extract<WmlBlock, { kind: "raw" }>["node"];
+/** Markup the library keeps as it was, which the adapter reads and writes itself. */
+export type XmlElement = Extract<WmlBlock, { kind: "raw" }>["node"];
 /** Visible text of raw markup (hyperlinks, content controls, insertions); deleted text is left out. */
-function xmlText(node: XmlElement): string {
+export function xmlText(node: XmlElement): string {
   let text = "";
   for (const child of node.children) {
     if (child.kind === "text" && node.name.local === "t") text += child.value;
@@ -386,7 +387,7 @@ const tableShape = (table: WmlTable) => ({
 });
 
 /** Every element named `local` at or under `node`. */
-function elementsNamed(node: XmlElement, local: string, found: XmlElement[] = []) {
+export function elementsNamed(node: XmlElement, local: string, found: XmlElement[] = []) {
   if (node.name.local === local) found.push(node);
   for (const child of node.children)
     if (child.kind === "element") elementsNamed(child, local, found);
@@ -878,7 +879,7 @@ function styleId(doc: Docx, style: string): string | undefined {
   );
 }
 
-function builtInStyle(doc: Docx, style: ParagraphStyle): string | undefined {
+export function builtInStyle(doc: Docx, style: ParagraphStyle): string | undefined {
   if (style === "normal") return undefined;
   const found = findStyleIdByName(doc, STYLE_NAMES[style]);
   if (found) return found;
@@ -960,7 +961,7 @@ const EMU_PER_CM = 360_000;
 const TEXT_WIDTH_CM = 16;
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const REFERENCE = { header: "headerReference", footer: "footerReference" } as const;
-const attributeOf = (node: XmlElement, local: string) =>
+export const attributeOf = (node: XmlElement, local: string) =>
   node.attrs.find((attr) => attr.name.local === local)?.value;
 
 /** Whether any earlier section has its own properties (and may share this one's headers). */
@@ -1018,7 +1019,7 @@ function setPageText(doc: Docx, kind: "header" | "footer", text: string, pageNum
 
 const wordName = (local: string) => ({ uri: WORD_NS, local, prefix: "w" });
 /** A WordprocessingML element, `w:`-prefixed like the rest of the part. */
-function element(
+export function element(
   local: string,
   attrs: Record<string, string> = {},
   children: XmlElement["children"] = [],
@@ -1036,13 +1037,13 @@ function element(
     selfClosing: children.length === 0,
   };
 }
-const childNamed = (parent: XmlElement | undefined, local: string) =>
+export const childNamed = (parent: XmlElement | undefined, local: string) =>
   parent?.children.find(
     (child): child is XmlElement => child.kind === "element" && child.name.local === local,
   );
 
 /** Word reads property elements only in the schema's order; these are those orders. */
-const ORDER = {
+export const ORDER = {
   style: [
     "name",
     "aliases",
@@ -1173,7 +1174,7 @@ const ORDER = {
 } as const;
 
 /** `parent` with its `local` child replaced (or removed with null), children in schema order. */
-function withChild(
+export function withChild(
   parent: XmlElement,
   local: string,
   child: XmlElement | null,

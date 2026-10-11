@@ -185,6 +185,25 @@ describe("document panel", () => {
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
   });
 
+  it("downloads the stored document as Word once what was typed is saved", async () => {
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      // What the server stores when the browser asks for the file.
+      clicked.push(`${this.getAttribute("href")} ${server.content("document-1")}`);
+    });
+    await fixture();
+    const source = await openSource();
+    fireEvent.change(source, { target: { value: "typed just now" } });
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Download as Word" }));
+    await waitFor(() =>
+      expect(clicked).toEqual(["/api/documents/document-1/export typed just now"]),
+    );
+    click.mockRestore();
+  });
+
   it("copies the current source and offers no rename, delete or download", async () => {
     await fixture();
     await openSource();
