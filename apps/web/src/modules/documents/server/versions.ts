@@ -24,6 +24,7 @@ export function groupVersions(
   steps: ReadonlyArray<{
     revision: number;
     origin: "user" | "model";
+    userId: string | null;
     userName: string | null;
     createdAt: Date;
   }>,
@@ -45,7 +46,8 @@ export function groupVersions(
       versions[versions.length - 1] = { ...current, revision: step.revision };
       continue;
     }
-    const key = author?.kind === "person" ? `person:${author.name}` : (author?.kind ?? "server");
+    // By id, not name: two people called Alex are two authors.
+    const key = author?.kind === "person" ? `person:${step.userId}` : (author?.kind ?? "server");
     if (current && last && last.key === key && at - last.at <= PAUSE_MS) {
       versions[versions.length - 1] = {
         ...current,

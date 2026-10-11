@@ -109,6 +109,7 @@ export class DocumentRepo extends Context.Service<
       ReadonlyArray<{
         revision: number;
         origin: "user" | "model";
+        userId: string | null;
         userName: string | null;
         createdAt: Date;
       }>
@@ -312,6 +313,7 @@ export class DocumentRepo extends Context.Service<
             .select({
               revision: documentSteps.revision,
               origin: documentSteps.origin,
+              userId: documentSteps.userId,
               userName: user.name,
               createdAt: documentSteps.createdAt,
             })
