@@ -63,6 +63,45 @@ describe("an open sheet", () => {
     expect(screen.getByRole("grid", { name: "Notes" })).toBeTruthy();
   });
 
+  it("gives the sheet's menu the open sheet's values as CSV", async () => {
+    let doc = emptyDoc();
+    const formula = parseFormula("A1*2", { doc, sheet: "s1" });
+    if (!("formula" in formula)) throw new Error("needs growth");
+    doc = apply(doc, {
+      op: "set",
+      sh: "s1",
+      cells: [
+        { r: "s1.r1", c: "s1.c1", v: 21 },
+        { r: "s1.r1", c: "s1.c2", f: formula.formula },
+      ],
+    });
+    const slot = document.createElement("div");
+    document.body.append(slot);
+    const blobs: Blob[] = [];
+    const { createObjectURL, revokeObjectURL } = URL;
+    URL.createObjectURL = (blob: Blob) => {
+      blobs.push(blob);
+      return "blob:sheet";
+    };
+    URL.revokeObjectURL = () => {};
+    render(
+      <SheetPanelBody
+        controller={controllerOf(doc)}
+        canEdit
+        toolbarSlot={slot}
+        menu={({ downloadCsv }) => (
+          <button type="button" onClick={downloadCsv}>
+            CSV
+          </button>
+        )}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    Object.assign(URL, { createObjectURL, revokeObjectURL });
+    slot.remove();
+    expect(await blobs[0]!.text()).toMatch(/^21,42/);
+  });
+
   it("writes what is typed, calculates it and takes it back on undo", () => {
     const listeners = new Map<string, (event: MessageEvent<string>) => void>();
     const sync = new SheetSync({

@@ -183,15 +183,15 @@ export default function SheetPanelBody({
   controller,
   canEdit,
   toolbarSlot,
-  menu = null,
+  menu,
   me = null,
   ask = null,
 }: {
   controller: SheetController;
   canEdit: boolean;
   toolbarSlot: HTMLElement | null;
-  /** The sheet's menu, drawn after the comment buttons. */
-  menu?: ReactNode;
+  /** The sheet's menu, drawn after the comment buttons, given what only the open sheet can do. */
+  menu?: (actions: { downloadCsv: () => void }) => ReactNode;
   /** The reader's account, to tell their own comments apart. */
   me?: string | null;
   /** Sends a comment to the assistant as a chat message about its cell. */
@@ -434,6 +434,15 @@ export default function SheetPanelBody({
         return pickSheet(id);
       }
     }
+  };
+  /** Downloads one sheet's values as CSV, built here since only the page has them calculated. */
+  const downloadCsv = (id: string) => {
+    const csv = sheetCsv({ doc, values, locale }, id);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    link.download = `${doc.sheet[id]!.name}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
   /** Prints a sheet through a frame of its own, so the page around it stays out of the print. */
   const printSheet = (id: string) => {
@@ -927,7 +936,7 @@ export default function SheetPanelBody({
           });
         }}
       />
-      {menu}
+      {menu?.({ downloadCsv: () => downloadCsv(sheet) })}
     </>
   );
   const barText =
@@ -1394,14 +1403,7 @@ export default function SheetPanelBody({
           run={run}
           onPick={pickSheet}
           onPrint={printSheet}
-          onDownload={(id) => {
-            const csv = sheetCsv({ doc, values, locale }, id);
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-            link.download = `${doc.sheet[id]!.name}.csv`;
-            link.click();
-            URL.revokeObjectURL(link.href);
-          }}
+          onDownload={downloadCsv}
         />
         {stats ? (
           <output

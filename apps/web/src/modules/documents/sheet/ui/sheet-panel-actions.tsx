@@ -27,7 +27,14 @@ export function SheetPanelActions({
 }
 
 /** The sheet's own menu, drawn by the ribbon beside its comment buttons. */
-export function SheetMenu({ document }: { document: EditableDocument | null }) {
+export function SheetMenu({
+  document,
+  onDownloadCsv,
+}: {
+  document: EditableDocument | null;
+  /** The open sheet's values, as the page has calculated them. */
+  onDownloadCsv: () => void;
+}) {
   const [renaming, setRenaming] = useState(false);
   if (!document) return null;
   return (
@@ -70,6 +77,10 @@ export function SheetMenu({ document }: { document: EditableDocument | null }) {
           >
             <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
             Download as Excel
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onDownloadCsv}>
+            <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+            Download sheet as CSV
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -228,7 +228,9 @@ function DocumentSession({
             controller={sheet}
             canEdit={controller.document?.canEdit ?? false}
             toolbarSlot={toolbarSlot}
-            menu={<SheetMenu document={controller.document} />}
+            menu={({ downloadCsv }) => (
+              <SheetMenu document={controller.document} onDownloadCsv={downloadCsv} />
+            )}
             me={me?.id ?? null}
             ask={hooks.ask}
           />
