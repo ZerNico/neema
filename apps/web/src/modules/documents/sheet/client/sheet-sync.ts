@@ -75,6 +75,10 @@ const HISTORY = 100;
  * until the server acknowledges them by sequence number. Applying is total,
  * so replaying needs no rebasing.
  */
+/** Whether the feed's change is this one: same client, number and operations. */
+const sameChange = (a: SheetChange, b: SheetChange) =>
+  a.clientId === b.clientId && a.seq === b.seq && JSON.stringify(a.ops) === JSON.stringify(b.ops);
+
 export class SheetSync {
   /** The client this tab writes under; a new one after the server rejects its changes. */
   clientId: string;
@@ -402,6 +406,13 @@ export class SheetSync {
           this.#reconnect();
           return;
         }
+        // The feed bringing back exactly the oldest changes this tab already shows, at the
+        // revisions they were shown at, leaves the sheet as it is.
+        const before = this.#replayed();
+        const echo =
+          start === this.#revision &&
+          frame.changes.length <= before.length &&
+          frame.changes.every((change, at) => sameChange(change, before[at]!));
         let doc = this.#confirmed;
         for (const [index, change] of frame.changes.entries()) {
           const revision = start + index + 1;
@@ -415,7 +426,15 @@ export class SheetSync {
         this.#landing = this.#landing.filter((each) => each.revision > this.#revision);
         this.#moment = frame.moment;
         if (this.#status !== "live") this.#live();
-        this.#rebuild();
+        const after = this.#replayed();
+        const shift = frame.changes.length;
+        if (
+          echo &&
+          after.length === before.length - shift &&
+          after.every((change, at) => change === before[at + shift])
+        )
+          this.#notify();
+        else this.#rebuild();
         return;
       }
       case "comments":

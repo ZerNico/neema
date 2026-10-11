@@ -123,6 +123,34 @@ describe("a sheet's connection", () => {
     expect(sync.getState().pending).toBe(0);
   });
 
+  it("keeps the document when the feed brings back only this tab's own edits", async () => {
+    const { sync, feed, answerWith } = connection();
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
+    sync.dispatch([write("s1.r1", "s1.c1", "mine")]);
+    await vi.runAllTimersAsync();
+    const shown = sync.getState().doc;
+    feed({
+      type: "changes",
+      changes: [{ clientId: "me", seq: 1, ops: [write("s1.r1", "s1.c1", "mine")] }],
+      revision: 1,
+      moment: { now: 45_001, seed: 2 },
+    });
+    // The same sheet, so it is not copied and calculated again; the revision still moves on.
+    expect(sync.getState().doc).toBe(shown);
+    expect(sync.getState().revision).toBe(1);
+    // Someone else's edit is a new sheet.
+    feed({
+      type: "changes",
+      changes: [{ clientId: "other", seq: 1, ops: [write("s1.r2", "s1.c1", "theirs")] }],
+      revision: 2,
+      moment,
+    });
+    expect(sync.getState().doc).not.toBe(shown);
+    expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBe("theirs");
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("mine");
+  });
+
   it("drops changes the server rejects instead of sending them forever", async () => {
     const { sync, pushes, feed, answerWith } = connection();
     answerWith(() => ({ rejected: "this document is read-only for you" }));
