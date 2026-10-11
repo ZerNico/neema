@@ -26,7 +26,6 @@ import {
   drawnLayout,
   columnPx,
   rowPx,
-  textWidth,
   visibleRange,
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
@@ -50,25 +49,14 @@ import type {
   OnOutline,
   OverlayChange,
 } from "./grid-types.ts";
+import { CellEditor, RefOutlines } from "./cell-editor.tsx";
+import { useCellEdit } from "./use-cell-edit.ts";
 import { GridOverlays } from "./grid-overlays.tsx";
-import {
-  REF_COLORS,
-  acceptCompletion,
-  completionFor,
-  formulaRefs,
-  insertRef,
-  pointable,
-  toggleAbsolute,
-} from "./formula-edit.ts";
-import { FormulaPopup } from "./formula-popup.tsx";
 
 export type { OverlayCommand } from "./overlay-place.ts";
 export type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
 export type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
 import type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
-
-/** A cell by its row and column indexes, as A1. */
-const corner = (at: { row: number; col: number }) => `${columnLetters(at.col + 1)}${at.row + 1}`;
 
 export interface SheetGridProps {
   readonly doc: SheetDoc;
@@ -380,154 +368,24 @@ export function SheetGrid({
       mode: text === null ? "edit" : "type",
     });
   };
-  // The edit just ended: focus leaving its input afterwards must not end it again.
-  const ended = useRef<CellEditing | null>(null);
-  const editorInput = useRef<HTMLTextAreaElement>(null);
-  // Where the caret is in the formula being typed, for completions, hints and pointing.
-  const [caret, setCaret] = useState(0);
-  // The function the arrow keys have picked among the completions offered.
-  const [picked, setPicked] = useState(0);
-  /** The reference pointing wrote last, which another click or arrow replaces, and its cells. */
-  const [pointing, setPointing] = useState<{
-    start: number;
-    end: number;
-    anchor: { row: number; col: number };
-    head: { row: number; col: number };
-  } | null>(null);
-  // A caret to put back once a rewritten formula is in the input.
-  const caretAfter = useRef<number | null>(null);
-  useLayoutEffect(() => {
-    const input = editorInput.current;
-    if (input && caretAfter.current !== null) {
-      input.setSelectionRange(caretAfter.current, caretAfter.current);
-      caretAfter.current = null;
-    }
+  const focusGrid = () => scroller.current?.focus({ preventScroll: true });
+  const edit = useCellEdit({
+    editing,
+    onEditingChange,
+    onCommit,
+    onCommitSelection,
+    locale,
+    rows,
+    cols,
+    rowIndex,
+    colIndex,
+    select,
+    reveal,
+    focusGrid,
   });
-  /** Rewrites the formula being typed and where its caret goes. */
-  const rewrite = (text: string, at: number) => {
-    if (!editing) return;
-    caretAfter.current = at;
-    setCaret(at);
-    onEditingChange?.({ ...editing, text });
-  };
-  /** Writes a reference to these cells at the caret, or over the one pointed at before. */
-  const point = (from: { row: number; col: number }, headAt: { row: number; col: number }) => {
-    if (!editing) return;
-    const ref =
-      from.row === headAt.row && from.col === headAt.col
-        ? corner(from)
-        : `${corner({ row: Math.min(from.row, headAt.row), col: Math.min(from.col, headAt.col) })}:${corner({ row: Math.max(from.row, headAt.row), col: Math.max(from.col, headAt.col) })}`;
-    const written = insertRef(editing.text, caret, ref, pointing);
-    setPointing({ ...written.pointed, anchor: from, head: headAt });
-    rewrite(written.text, written.caret);
-  };
-  /** Whether the edit is pointing at cells rather than moving between them, as Excel's point mode. */
-  const pointMode = () => !!editing && (pointing !== null || pointable(editing.text, caret));
+  const { pointing, point, pointMode, commit } = edit;
   const pointDrag = useRef<{ row: number; col: number } | null>(null);
   const pasteValues = useRef(false);
-  /** Ends an edit, writing it, then moves on as Enter or Tab would. */
-  const commit = (rowStep: number, colStep: number) => {
-    if (!editing || ended.current === editing) return;
-    ended.current = editing;
-    setPointing(null);
-    onCommit!(editing.at, editing.text);
-    onEditingChange!(null);
-    const row = rowIndex.get(editing.at.r);
-    const col = colIndex.get(editing.at.c);
-    if (row !== undefined && col !== undefined) {
-      const next = {
-        row: Math.min(rows.ids.length - 1, Math.max(0, row + rowStep)),
-        col: Math.min(cols.ids.length - 1, Math.max(0, col + colStep)),
-      };
-      select(next.row, next.col, false);
-      reveal(next.row, next.col);
-    }
-    scroller.current?.focus({ preventScroll: true });
-  };
-  const cancel = () => {
-    ended.current = editing;
-    setPointing(null);
-    onEditingChange?.(null);
-    scroller.current?.focus({ preventScroll: true });
-  };
-  const onEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    event.stopPropagation();
-    const arrows: Record<string, [number, number]> = {
-      ArrowUp: [-1, 0],
-      ArrowDown: [1, 0],
-      ArrowLeft: [0, -1],
-      ArrowRight: [0, 1],
-    };
-    const offered = editing ? completionFor(editing.text, caret) : null;
-    if (offered && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-      event.preventDefault();
-      setPicked(
-        (current) => current + (event.key === "ArrowDown" ? 1 : offered.matches.length - 1),
-      );
-      return;
-    }
-    if (offered && editing && (event.key === "Tab" || event.key === "Enter")) {
-      event.preventDefault();
-      const name = offered.matches[picked % offered.matches.length]!;
-      const accepted = acceptCompletion(editing.text, caret, offered.start, name);
-      setPicked(0);
-      rewrite(accepted.text, accepted.caret);
-      return;
-    }
-    // Alt+Enter breaks the line inside the cell; Ctrl+; and Ctrl+Shift+; type today and now.
-    const stamp = stampOf(event);
-    if (editing && ((event.key === "Enter" && event.altKey) || stamp)) {
-      event.preventDefault();
-      const input = event.currentTarget;
-      const [start, end] = [input.selectionStart ?? caret, input.selectionEnd ?? caret];
-      const added = stamp ? stampText(stamp, locale) : "\n";
-      rewrite(editing.text.slice(0, start) + added + editing.text.slice(end), start + added.length);
-      return;
-    }
-    if (event.key === "F4" && editing) {
-      event.preventDefault();
-      const toggled = toggleAbsolute(editing.text, event.currentTarget.selectionStart ?? caret);
-      if (toggled) rewrite(toggled.text, toggled.caret);
-      return;
-    }
-    // Arrows in a formula waiting for a reference point at cells, starting from the edited one.
-    if (editing?.mode === "type" && arrows[event.key] && pointMode() && !event.shiftKey) {
-      event.preventDefault();
-      const [down, right] = arrows[event.key]!;
-      const from = pointing?.head ?? {
-        row: rowIndex.get(editing.at.r) ?? 0,
-        col: colIndex.get(editing.at.c) ?? 0,
-      };
-      const next = {
-        row: Math.min(rows.ids.length - 1, Math.max(0, from.row + down)),
-        col: Math.min(cols.ids.length - 1, Math.max(0, from.col + right)),
-      };
-      point(next, next);
-      return;
-    }
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && onCommitSelection && editing) {
-      // Ctrl+Enter fills the selection with what was typed, and the selection stays.
-      event.preventDefault();
-      ended.current = editing;
-      setPointing(null);
-      onCommitSelection(editing.text);
-      onEditingChange!(null);
-      scroller.current?.focus({ preventScroll: true });
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      commit(event.shiftKey ? -1 : 1, 0);
-    } else if (event.key === "Tab") {
-      event.preventDefault();
-      commit(0, event.shiftKey ? -1 : 1);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      cancel();
-    } else if (editing?.mode === "type" && arrows[event.key]) {
-      event.preventDefault();
-      commit(...arrows[event.key]!);
-    }
-  };
-
   /** Selects a rectangle by indexes, the head at its far corner. */
   const selectBox = (
     from: { row: number; col: number },
@@ -1304,15 +1162,6 @@ export function SheetGrid({
     editing && rowIndex.has(editing.at.r) && colIndex.has(editing.at.c)
       ? rectOf({ anchor: editing.at, head: editing.at })
       : null;
-  // An edit begun shows its caret after what is there, as Excel's does; a focused textarea's
-  // caret would otherwise start before the character typed to begin it.
-  const editingCell = editing ? `${editing.at.r}|${editing.at.c}` : null;
-  const editorShown = !!editorRect;
-  useLayoutEffect(() => {
-    const input = editorInput.current;
-    if (!input || editingCell === null || !editorShown) return;
-    input.setSelectionRange(input.value.length, input.value.length);
-  }, [editingCell, editorShown]);
   /** Which pane the cell being edited is drawn in, so its input sits over it. */
   const editingPane = (() => {
     if (!editing) return null;
@@ -1328,92 +1177,14 @@ export function SheetGrid({
   })();
   const editor =
     editing && editorRect ? (
-      <textarea
-        ref={editorInput}
-        rows={1}
-        spellCheck={false}
-        aria-label="Cell content"
-        autoFocus
-        value={editing.text}
-        onChange={(event) => {
-          // Typing ends pointing: the next reference is written at the caret.
-          setPointing(null);
-          setPicked(0);
-          setCaret(event.target.selectionStart ?? event.target.value.length);
-          onEditingChange?.({ ...editing, text: event.target.value });
-        }}
-        onSelect={(event) => {
-          // A select reported before a rewritten formula reaches the input has the old caret.
-          if (caretAfter.current === null) setCaret(event.currentTarget.selectionStart ?? 0);
-        }}
-        onKeyDown={onEditorKeyDown}
-        onBlur={(event) => {
-          // Focus moving to the formula bar keeps the edit going there.
-          if (
-            !(event.relatedTarget instanceof HTMLElement && event.relatedTarget.dataset.sheetEditor)
-          )
-            commit(0, 0);
-        }}
-        onPointerDown={(event) => event.stopPropagation()}
-        className="bg-background text-foreground border-primary absolute z-40 resize-none overflow-hidden border-2 px-1 text-sm leading-4 whitespace-pre outline-none"
-        style={{
-          ...editorRect,
-          // A text with line breaks grows the editor by a line each, as Excel's does.
-          fontSize: 14 * zoom,
-          lineHeight: `${16 * zoom}px`,
-          width: Math.max(
-            editorRect.width,
-            // The text's own width, measured: thin characters take less room than wide ones.
-            (Math.max(...editing.text.split("\n").map((line) => textWidth(line))) + 16) * zoom,
-          ),
-          height: Math.max(editorRect.height, editing.text.split("\n").length * 16 * zoom + 4),
-        }}
+      <CellEditor
+        editing={editing}
+        rect={editorRect}
+        zoom={zoom}
+        edit={edit}
+        onEditingChange={onEditingChange}
       />
     ) : null;
-  const formulaPopup =
-    editing && editorRect && editing.text.startsWith("=") ? (
-      <FormulaPopup
-        text={editing.text}
-        caret={caret}
-        picked={picked}
-        onPick={(name) => {
-          const offered = completionFor(editing.text, caret);
-          if (!offered) return;
-          const accepted = acceptCompletion(editing.text, caret, offered.start, name);
-          setPicked(0);
-          rewrite(accepted.text, accepted.caret);
-        }}
-        style={{ top: editorRect.top + editorRect.height + 2, left: editorRect.left }}
-      />
-    ) : null;
-  // The cells each reference of a formula being typed reads, outlined in its colour.
-  const sheetName = data.name.toLowerCase();
-  const refOutlines = editing?.text.startsWith("=")
-    ? formulaRefs(editing.text).flatMap((ref, index) => {
-        if (ref.sheet !== null && ref.sheet.toLowerCase() !== sheetName) return [];
-        const [top, bottom] =
-          ref.top === null ? [0, rows.ids.length - 1] : [ref.top - 1, ref.bottom! - 1];
-        const [left, right] =
-          ref.left === null ? [0, cols.ids.length - 1] : [ref.left - 1, ref.right! - 1];
-        if (bottom >= rows.ids.length || right >= cols.ids.length) return [];
-        const color = REF_COLORS[index % REF_COLORS.length]!;
-        return [
-          <div
-            key={`ref-${ref.start}`}
-            aria-hidden
-            className="pointer-events-none absolute z-10 border-2"
-            style={{
-              top: rows.starts[top],
-              left: cols.starts[left],
-              height: rows.starts[bottom + 1]! - rows.starts[top]!,
-              width: cols.starts[right + 1]! - cols.starts[left]!,
-              borderColor: color,
-              backgroundColor: `color-mix(in oklab, ${color} 10%, transparent)`,
-            }}
-          />,
-        ];
-      })
-    : null;
 
   const handlers = {
     onPointerDown,
@@ -1451,7 +1222,6 @@ export function SheetGrid({
       {moreBoxes}
       {selectionBox}
       {editingPane === name ? editor : null}
-      {editingPane === name ? formulaPopup : null}
     </div>
   );
 
@@ -1639,9 +1409,15 @@ export function SheetGrid({
             onCommand={onOverlayCommand}
             onLeave={() => scroller.current?.focus({ preventScroll: true })}
           />
-          {refOutlines}
+          {editing ? (
+            <RefOutlines
+              text={editing.text}
+              sheetName={data.name.toLowerCase()}
+              rows={rows}
+              cols={cols}
+            />
+          ) : null}
           {editingPane === "main" ? editor : null}
-          {editingPane === "main" ? formulaPopup : null}
           {resizing ? (
             <div
               aria-hidden
