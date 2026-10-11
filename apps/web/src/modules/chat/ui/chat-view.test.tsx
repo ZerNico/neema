@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION, type BridgeReply } from "@chat/desktop-rpc";
 import type { ConversationMode } from "../schema.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { AskUserBlock } from "./ask-user-block.tsx";
 import type { DisplayMessage } from "./message-list.tsx";
@@ -605,6 +605,15 @@ const renderView = (
 };
 
 const desktopRequest = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
+// The document panel loads its editor and comments lazily. Loaded here, a test opening a document
+// waits on what it opens, not on the first transform of those modules, which compiling makes slow.
+beforeAll(async () => {
+  await Promise.all([
+    import("~/modules/documents/ui/rich-editor/document-editor.tsx"),
+    import("~/modules/documents/ui/comments-popover.tsx"),
+  ]);
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   desktopRequest.mockReset();
