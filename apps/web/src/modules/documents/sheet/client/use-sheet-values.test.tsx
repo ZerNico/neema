@@ -16,6 +16,9 @@ class FakeWorker {
   }
   postMessage(request: CalcPost) {
     posted.push(request);
+    this.answer(request);
+  }
+  answer(request: CalcPost) {
     const answer = calculateForWire({ ...request, doc: JSON.parse(request.doc) as SheetDoc });
     queueMicrotask(() => this.#listener?.(new MessageEvent("message", { data: answer })));
   }
@@ -49,6 +52,35 @@ afterEach(() => {
 });
 
 describe("a sheet's values", () => {
+  it("show a small sheet's formulas as it opens, before its worker answers", () => {
+    class SilentWorker extends FakeWorker {
+      override postMessage(request: CalcPost) {
+        posted.push(request);
+      }
+    }
+    vi.stubGlobal("Worker", SilentWorker);
+    const { result } = renderHook(() =>
+      useSheetValues(withFormula("DATE(2026,1,5)"), at(1, 45_000)),
+    );
+    expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBe(46_027);
+    expect(posted).toHaveLength(1);
+  });
+
+  it("leave a sheet reading many cells to its worker, so opening it never stalls", async () => {
+    let answer: (() => void) | null = null;
+    class LateWorker extends FakeWorker {
+      override postMessage(request: CalcPost) {
+        answer = () => this.answer(request);
+      }
+    }
+    vi.stubGlobal("Worker", LateWorker);
+    const wide = withFormula(Array.from({ length: 30 }, () => "SUM(B:Z)").join("+"));
+    const { result } = renderHook(() => useSheetValues(wide, at(1, 45_000)));
+    expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBeNull();
+    await act(async () => answer?.());
+    expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBe(0);
+  });
+
   it("are not calculated again for a new revision's context unless a formula reads it", async () => {
     vi.stubGlobal("Worker", FakeWorker);
     const plain = withFormula("1+1");

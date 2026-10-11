@@ -231,7 +231,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   uncalculated and keep the file's value, for Excel to compute on open.
 - An open sheet calculates in a worker. Each request carries a generation and only the newest
   is calculated; a typed value shows at once and a formula keeps its last result until the new
-  one. The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
+  one. Until the worker's first answer a sheet with no result yet would show its formulas empty,
+  so one that is small (at most 1,000 formulas, reading at most 50,000 cells in all, about a
+  frame's work) is calculated once in place as it opens; a bigger one waits. The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
   row's cell contents with what it calculated before and recalculates only the formulas the
   changed cells reach (those reading them, filling them, shown as `#SPILL!`, or using
   `INDIRECT` and `OFFSET`, and everything after those), keeping every other result. A change to
