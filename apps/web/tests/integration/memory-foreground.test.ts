@@ -56,8 +56,10 @@ const DOCUMENT_TOOLS = [
   "create_document",
   "edit_document",
   "read_chat_document",
-  "replace_document",
   "list_chat_documents",
+  "comment_on_document",
+  "create_sheet",
+  "edit_sheet",
 ] as const;
 
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];

@@ -2,6 +2,7 @@ import {
   BubbleChatIcon,
   Delete02Icon,
   File01Icon,
+  FileSpreadsheetIcon,
   FileAddIcon,
   Folder01Icon,
   MoreHorizontalIcon,
@@ -11,14 +12,22 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { toast } from "sonner";
+import { uuidv7 } from "uuidv7";
+import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
+import { resolveChatModel } from "~/modules/chat/client/selected-model.ts";
+import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
+import { sendMessage } from "~/modules/chat/server/functions.ts";
+import type { DocumentAsk } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
 import {
   createProjectDocument,
   deleteProjectDocument,
 } from "~/modules/documents/server/document-functions.ts";
-import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
+import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
+import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dialog.tsx";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -53,6 +62,9 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
+import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
+import { sheetLocale } from "@chat/sheet/locales";
+import { createProjectSheet } from "~/modules/documents/sheet/server/sheet-functions.ts";
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
 import { projectChatsQuery, projectQuery } from "../client/queries.ts";
@@ -255,7 +267,11 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
 function DocumentsSection({ project, editable }: { project: ProjectDetail; editable: boolean }) {
   const documents = useQuery(projectDocumentsQuery(project.id));
   const [creating, setCreating] = useState(false);
+  // A document just made here opens once its row and connection exist.
+  const [justCreated, setJustCreated] = useState<string | null>(null);
   const rows = documents.data ?? [];
+  const owner = useRef<DocumentOwnerHandle>(null);
+  const askInNewChat = useAskInNewChat(project.id, owner);
   return (
     <Section
       title="Documents"
@@ -287,42 +303,115 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
       ) : (
         // The owner keeps each document's live controller mounted while the
         // page is open, so closing the panel never discards typing.
-        <DocumentOwner documentIds={rows.map((row) => row.id)} onGone={() => undefined}>
+        <DocumentOwner
+          ref={owner}
+          documentIds={rows.map((row) => row.id)}
+          onGone={() => undefined}
+          onAsk={askInNewChat}
+        >
           <ListCard>
             {rows.map((document) => (
-              <ProjectDocumentRow key={document.id} document={document} editable={editable} />
+              <ProjectDocumentRow
+                key={document.id}
+                document={document}
+                editable={editable}
+                openNow={document.id === justCreated}
+                onOpened={() => setJustCreated(null)}
+              />
             ))}
           </ListCard>
         </DocumentOwner>
       )}
-      <NewDocumentDialog projectId={project.id} open={creating} onOpenChange={setCreating} />
+      <NewDocumentDialog
+        projectId={project.id}
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={setJustCreated}
+      />
     </Section>
   );
+}
+
+/**
+ * A comment sent to the assistant from the project page, where no chat is
+ * open: it starts a new chat in the project with the default model, about
+ * that document and thread, and opens it.
+ */
+function useAskInNewChat(
+  projectId: string,
+  owner: RefObject<DocumentOwnerHandle | null>,
+): DocumentAsk {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  return async (request, asked) => {
+    // The request names blocks, maybe one just planted: they must be stored first.
+    if (!(await owner.current?.flush())) {
+      toast.error("Resolve the changes in your document before continuing.");
+      return false;
+    }
+    const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
+    if (!model) return false;
+    const result = await sendMessage({
+      data: {
+        conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
+        modelId: model.id,
+        content: request,
+        searchEnabled: false,
+        researchEnabled: false,
+        timeZone: browserTimeZone(),
+        attachmentIds: [],
+        openDocument: {
+          id: asked.documentId,
+          ...(asked.blocks.length ? { selected: [...asked.blocks] } : {}),
+          ...(asked.thread ? { thread: asked.thread } : {}),
+        },
+      },
+    });
+    await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    await navigate({
+      to: "/chat/$conversationId",
+      params: { conversationId: result.conversationId },
+      state: { anchorNewTurn: true },
+    });
+    return true;
+  };
 }
 
 function ProjectDocumentRow({
   document,
   editable,
+  openNow,
+  onOpened,
 }: {
   document: EditableDocument;
   editable: boolean;
+  openNow: boolean;
+  onOpened: () => void;
 }) {
   const { entry } = useDocumentPanel(document.id);
+  const open = entry?.open;
+  useEffect(() => {
+    if (!openNow || !open) return;
+    open();
+    onOpened();
+  }, [openNow, open, onOpened]);
   const confirm = useConfirm();
   const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteProjectDocument({ data: { documentId: document.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
     onError: (error) => toastError("Could not delete the document.", error),
   });
-  const progress = entry?.tasks ? `${entry.tasks.done} of ${entry.tasks.total} tasks done` : null;
-  const detail = [progress, `Updated ${relativeAgeLabel(document.updatedAt)}`]
-    .filter(Boolean)
-    .join(" · ");
+  const detail = `Updated ${relativeAgeLabel(document.updatedAt)}`;
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" />
+        <HugeiconsIcon
+          icon={document.kind === "sheet" ? FileSpreadsheetIcon : File01Icon}
+          strokeWidth={2}
+          className="size-4"
+        />
       </div>
       <button
         type="button"
@@ -345,6 +434,10 @@ function ProjectDocumentRow({
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setRenaming(true)}>
+              <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+              Rename
+            </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
               disabled={remove.isPending}
@@ -364,6 +457,9 @@ function ProjectDocumentRow({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
+      {editable ? (
+        <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+      ) : null}
     </ListRow>
   );
 }
@@ -372,17 +468,32 @@ function NewDocumentDialog({
   projectId,
   open,
   onOpenChange,
+  onCreated,
 }: {
   projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated: (documentId: string) => void;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<"text" | "sheet">("text");
   const save = useMutation({
-    mutationFn: () => createProjectDocument({ data: { projectId, title: title.trim() } }),
-    onSuccess: async () => {
+    mutationFn: () =>
+      kind === "sheet"
+        ? createProjectSheet({
+            data: {
+              projectId,
+              title: title.trim(),
+              // A new sheet types and shows numbers as this person does, and NOW reads their clock.
+              locale: sheetLocale(navigator.language).id,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            },
+          })
+        : createProjectDocument({ data: { projectId, title: title.trim() } }),
+    onSuccess: async (document) => {
+      onCreated(document.id);
       await queryClient.invalidateQueries({ queryKey: ["projects", "documents", projectId] });
       onOpenChange(false);
       setTitle("");
@@ -401,7 +512,7 @@ function NewDocumentDialog({
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
           <DialogDescription>
-            A blank Markdown document everyone in the project can edit.
+            A blank document or sheet everyone in the project can edit.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -412,6 +523,29 @@ function NewDocumentDialog({
           }}
         >
           <FieldGroup>
+            <RadioGroup
+              value={kind}
+              onValueChange={(value) => setKind(value === "sheet" ? "sheet" : "text")}
+              aria-label="Kind of document"
+              className="grid-cols-2"
+            >
+              {(
+                [
+                  ["text", "Document", "Text to write and format"],
+                  ["sheet", "Sheet", "Rows and columns with formulas"],
+                ] as const
+              ).map(([value, name, about]) => (
+                <Field key={value} orientation="horizontal">
+                  <RadioGroupItem value={value} id={`${id}-${value}`} disabled={save.isPending} />
+                  <FieldLabel htmlFor={`${id}-${value}`}>
+                    <span className="flex flex-col gap-0.5">
+                      <span>{name}</span>
+                      <span className="text-muted-foreground text-xs font-normal">{about}</span>
+                    </span>
+                  </FieldLabel>
+                </Field>
+              ))}
+            </RadioGroup>
             <Field>
               <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
               <Input
@@ -419,7 +553,7 @@ function NewDocumentDialog({
                 value={title}
                 maxLength={200}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Launch checklist"
+                placeholder={kind === "sheet" ? "Budget" : "Launch checklist"}
                 disabled={save.isPending}
                 autoFocus
               />
@@ -431,7 +565,7 @@ function NewDocumentDialog({
               Cancel
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!title.trim()}>
-              Create document
+              {kind === "sheet" ? "Create sheet" : "Create document"}
             </PendingButton>
           </DialogFooter>
         </form>

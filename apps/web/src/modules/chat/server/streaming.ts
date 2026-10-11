@@ -2,6 +2,9 @@ import type { ExternalOwner } from "~/modules/tools/server/external-completion.t
 import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
+import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
+import { readSheetFile } from "~/modules/documents/sheet/server/file-import.ts";
+import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
   ProjectFileToolName,
@@ -21,6 +24,7 @@ import {
   projectDocumentResult,
   documentResultOk,
   redactDocumentPart,
+  isDocumentWrite,
 } from "~/modules/documents/tool-schema.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
@@ -100,6 +104,7 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   Layer,
   Option,
   PubSub,
@@ -134,6 +139,7 @@ import { createWorkingFiles, type WorkingFiles } from "./working-files.ts";
 import { KeptWorkingFiles } from "./kept-working-files.ts";
 import { formatFileRef, parseFileRef } from "./file-ref.ts";
 import { preparePublishFileTool } from "./publish-file.ts";
+import type { OpenDocument } from "../schema.ts";
 import { ToolFileActivity } from "../tool-file-schema.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo, toAttachmentDto, type DbTx } from "~/modules/attachments/server/repo.ts";
@@ -379,7 +385,7 @@ export class StreamEngine extends Context.Service<
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
       /** The document open in the panel, so it is the one the model reads first. */
-      openDocumentId?: string | undefined;
+      openDocument?: OpenDocument | undefined;
       /** Continue the answer from its stored rounds instead of starting it over. */
       resume?: boolean | undefined;
       /**
@@ -444,6 +450,7 @@ export class StreamEngine extends Context.Service<
         drafts: yield* ScheduleDraftService,
       };
       const documentService = yield* DocumentService;
+      const sheetService = yield* SheetService;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
       const projectMemory = yield* ProjectMemoryService;
@@ -560,7 +567,7 @@ export class StreamEngine extends Context.Service<
         desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
-        openDocumentId?: string | undefined;
+        openDocument?: OpenDocument | undefined;
         resume?: boolean | undefined;
         abort: Deferred.Deferred<void>;
       }) {
@@ -979,12 +986,27 @@ export class StreamEngine extends Context.Service<
             currentModelId: input.modelId,
             writeGuard,
           });
+          // Set once the attempt's file resolver exists, below; a call reads it when it runs.
+          let sheetFiles:
+            | ((
+                reference: string,
+              ) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
+            | null = null;
           const documents = yield* prepareDocumentTools({
             service: documentService,
+            readSheetFile: (reference) =>
+              sheetFiles
+                ? sheetFiles(reference)
+                : Effect.fail("Files cannot be read in this chat."),
+            sheets: sheetService,
+            generationId: fence?.generationId,
+            timeZone: input.timeZone,
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,
-            openDocumentId: input.openDocumentId,
+            openDocumentId: input.openDocument?.id,
+            selectedBlocks: input.openDocument?.selected,
+            askingThread: input.openDocument?.thread,
             writeGuard,
             liveGuard: (tx: DbTx) => (fence ? ensureGenerationLive(tx, fence) : Effect.interrupt),
             project: config.resolvedProject
@@ -1084,8 +1106,7 @@ export class StreamEngine extends Context.Service<
                     ),
                   ),
                   geocode: (query) => mapLookups.value.geocode(maps.services, query),
-                  route: (mode, stops) =>
-                    mapLookups.value.route(maps.services, mode, stops),
+                  route: (mode, stops) => mapLookups.value.route(maps.services, mode, stops),
                   record: (update) => recordLookups(fence, update),
                 })
               : null;
@@ -1274,6 +1295,15 @@ export class StreamEngine extends Context.Service<
                   : {}),
               })
             : undefined;
+          if (toolFiles)
+            sheetFiles = (reference) =>
+              toolFiles
+                .resolve(reference)
+                .pipe(
+                  Effect.flatMap((file) =>
+                    readSheetFile(file, Option.getOrNull(processors.spreadsheet), input.userId),
+                  ),
+                );
           let previewTurnFiles: Array<Prompt.UserMessagePartEncoded> = [];
           let previewCount = 0;
           let previewBytes = 0;
@@ -1556,7 +1586,9 @@ export class StreamEngine extends Context.Service<
               ? permissions.agentsCreate
               : family === "schedule-draft"
                 ? permissions.schedules
-                : offeredOffice.has(family),
+                : family === "sheet"
+                  ? permissions.documents
+                  : offeredOffice.has(family),
           );
           const unlockedFamilies = new Set<LazyToolFamily>();
           const unlockTool = (name: string) => {
@@ -2535,6 +2567,9 @@ export class StreamEngine extends Context.Service<
                   )
                 : [];
               modelCallOpen = true;
+              const prompt = requestPrompt();
+              // Only what this request carries counts as what the model saw of a document.
+              documents.sent(prompt);
               return gateway
                 .streamChat({
                   imageOutput,
@@ -2544,7 +2579,7 @@ export class StreamEngine extends Context.Service<
                   // Rebuilt every round and always last: the recap has to sit
                   // behind the tool results it competes with. It is budgeted but
                   // never fed back into the continuation transcript.
-                  prompt: requestPrompt(),
+                  prompt,
                   ...(activeToolkit && toolRoundsLeft
                     ? {
                         toolkit: activeToolkit,
@@ -2688,29 +2723,29 @@ export class StreamEngine extends Context.Service<
                                                   ? "notify"
                                                   : part.name === MAP_ROUTE_TOOL && mapRouteTools
                                                     ? "map"
-                                                  : (part.name === "publish_file" &&
-                                                        publishFileTool) ||
-                                                      (part.name === "create_file" &&
-                                                        createFileTool)
-                                                    ? "tool-file"
-                                                    : officeFamilyOf(part.name)
-                                                      ? officeFamilyOf(part.name)!.family
-                                                      : Schema.is(SkillToolName)(part.name)
-                                                        ? "skill"
-                                                        : Schema.is(KnowledgeToolName)(part.name)
-                                                          ? "knowledge"
-                                                          : part.name === "deep_research"
-                                                            ? "research"
-                                                            : part.name === "web_search" ||
-                                                                part.name === "read_url"
-                                                              ? "web"
-                                                              : customToolNames.has(part.name)
-                                                                ? "custom"
-                                                                : integrationTools?.names.has(
-                                                                      part.name,
-                                                                    )
-                                                                  ? "integration"
-                                                                  : null;
+                                                    : (part.name === "publish_file" &&
+                                                          publishFileTool) ||
+                                                        (part.name === "create_file" &&
+                                                          createFileTool)
+                                                      ? "tool-file"
+                                                      : officeFamilyOf(part.name)
+                                                        ? officeFamilyOf(part.name)!.family
+                                                        : Schema.is(SkillToolName)(part.name)
+                                                          ? "skill"
+                                                          : Schema.is(KnowledgeToolName)(part.name)
+                                                            ? "knowledge"
+                                                            : part.name === "deep_research"
+                                                              ? "research"
+                                                              : part.name === "web_search" ||
+                                                                  part.name === "read_url"
+                                                                ? "web"
+                                                                : customToolNames.has(part.name)
+                                                                  ? "custom"
+                                                                  : integrationTools?.names.has(
+                                                                        part.name,
+                                                                      )
+                                                                    ? "integration"
+                                                                    : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -3600,9 +3635,7 @@ export class StreamEngine extends Context.Service<
                           }
                           if (part.name === MAP_ROUTE_TOOL && mapRouteTools) {
                             if (isPreliminary) return;
-                            const decoded = Schema.decodeUnknownOption(MapRouteResult)(
-                              part.result,
-                            );
+                            const decoded = Schema.decodeUnknownOption(MapRouteResult)(part.result);
                             const result: MapRouteResult =
                               !part.isFailure && Option.isSome(decoded)
                                 ? decoded.value
@@ -4068,7 +4101,11 @@ export class StreamEngine extends Context.Service<
                           documents.live.start(part.id, part.name);
                           // An Office edit or a research brief is a call the model
                           // can spend a while writing; say so before it completes.
-                          if (officeFamilyOfEdit(part.name) || part.name === "deep_research") {
+                          if (
+                            officeFamilyOfEdit(part.name) ||
+                            part.name === "deep_research" ||
+                            isDocumentWrite(part.name)
+                          ) {
                             pushChunk(
                               "writing",
                               JSON.stringify({
@@ -4094,7 +4131,11 @@ export class StreamEngine extends Context.Service<
                     }),
                   ),
                   Stream.runDrain,
-                  Effect.ensuring(documents.live.close),
+                  // A stopped answer keeps what its previews wrote; any other end
+                  // undoes the ones no call claimed.
+                  Effect.onExit((exit) =>
+                    Exit.hasInterrupts(exit) ? documents.live.abandon : documents.live.close,
+                  ),
                 );
             });
 
@@ -4254,6 +4295,9 @@ export class StreamEngine extends Context.Service<
             ];
             if (steered.length > 0) {
               steeredAfter = round;
+              // The latest steer's document and selection are what "this" now means.
+              const focus = steered.findLast((message) => message.openDocument)?.openDocument;
+              if (focus) documents.focus(focus.id, focus.selected, focus.thread);
               // Built exactly as history builds a user message, so a steered
               // file reaches the model the way an attached one does: native
               // when it can read it, extracted text when it cannot.
@@ -4347,7 +4391,7 @@ export class StreamEngine extends Context.Service<
         desktopExecutorId?: string | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
-        openDocumentId?: string | undefined;
+        openDocument?: OpenDocument | undefined;
         resume?: boolean | undefined;
         onSettled?: (input: {
           userId: string;
@@ -4590,6 +4634,7 @@ export class StreamEngine extends Context.Service<
     Layer.provideMerge(ScheduleDraftService.layer),
     Layer.provideMerge(AgentDraftService.layer),
     Layer.provideMerge(DocumentService.layer),
+    Layer.provideMerge(SheetService.layer),
     Layer.provideMerge(ProjectMemoryService.layer),
     Layer.provideMerge(AgentRepo.layer),
     Layer.provideMerge(KnowledgeRepo.layer),

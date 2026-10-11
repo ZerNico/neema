@@ -1,70 +1,125 @@
-import { CodeIcon, Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import {
+  Copy01Icon,
+  Download04Icon,
+  MoreVerticalIcon,
+  PencilEdit02Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { Suspense, lazy, useState } from "react";
 import { Button } from "~/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
-import { Toggle } from "~/ui/primitives/toggle";
 import { motionEase } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
-import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
+import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
+import { RenameDocumentDialog } from "./rename-document-dialog.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
 const DocumentEditor = lazy(() => import("./rich-editor/document-editor.tsx"));
+// Comments need the editor's schema too, so they load with it.
+const CommentsPopover = lazy(() =>
+  import("./comments-popover.tsx").then((module) => ({ default: module.CommentsPopover })),
+);
 
-/**
- * What is on screen, not the stored copy a second behind it: an open
- * connection's tree is read as Markdown, loading the schema only then.
- */
-const copyMarkdown = async (controller: Controller) => {
+/** Markdown of what is on screen, made only when asked; the schema loads then. */
+const markdownOf = async (sync: NonNullable<Controller["sync"]>) =>
+  (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc);
+const exportAs = async (controller: Controller, format: "pdf" | "markdown") => {
   const sync = controller.sync;
-  const text = sync
-    ? (await import("../editor/markdown.ts")).readMarkdown(sync.doc)
-    : controller.content;
-  await navigator.clipboard.writeText(text);
+  if (!sync) return;
+  const title = controller.document?.title ?? "Document";
+  const { printDocument, downloadMarkdown } = await import("./export.ts");
+  if (format === "pdf") printDocument(sync.editor, title);
+  else downloadMarkdown(await markdownOf(sync), title);
 };
 
 export function DocumentPanelActions({
   controller,
-  mode,
-  onModeChange,
   toolbarSlot,
 }: {
   controller: Controller;
-  mode: DocumentEditorMode;
-  onModeChange: (mode: DocumentEditorMode) => void;
   /** Receives the element the editor puts its formatting controls in. */
   toolbarSlot: (element: HTMLElement | null) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const document = controller.document;
   return (
     <div className="flex items-center gap-2">
-      {/* The editor's formatting fills the row; the view and Copy sit at its end. */}
+      {/* The editor's formatting fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                size="icon"
-                variant="toolbar"
-                aria-label="Show Markdown"
-                pressed={mode === "source"}
-                onPressedChange={(pressed) => onModeChange(pressed ? "source" : "live")}
-              />
-            }
-          >
-            <HugeiconsIcon icon={CodeIcon} strokeWidth={2} />
-          </TooltipTrigger>
-          <TooltipContent>
-            {mode === "source" ? "Back to the editor" : "Show Markdown"}
-          </TooltipContent>
-        </Tooltip>
+        {controller.sync ? (
+          <Suspense fallback={null}>
+            <CommentsPopover
+              editor={controller.sync.editor}
+              discussion={controller.discussion}
+              canEdit={controller.document?.canEdit ?? false}
+            />
+          </Suspense>
+        ) : null}
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Document actions"
+                      className="text-muted-foreground"
+                    />
+                  }
+                />
+              }
+            >
+              <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
+            </TooltipTrigger>
+            <TooltipContent>More</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-52">
+            {document?.canEdit ? (
+              <>
+                <DropdownMenuItem onClick={() => setRenaming(true)}>
+                  <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuItem
+              disabled={!controller.sync}
+              onClick={() => void exportAs(controller, "pdf")}
+            >
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              Export as PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!controller.sync}
+              onClick={() => void exportAs(controller, "markdown")}
+            >
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              Export as Markdown
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {document?.canEdit ? (
+          <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -73,11 +128,16 @@ export function DocumentPanelActions({
                 variant="ghost"
                 aria-label="Copy document"
                 className="text-muted-foreground"
+                disabled={!controller.sync}
                 onClick={() => {
-                  void copyMarkdown(controller).then(() => {
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 1_500);
-                  });
+                  const sync = controller.sync;
+                  if (!sync) return;
+                  void markdownOf(sync)
+                    .then((text) => navigator.clipboard.writeText(text))
+                    .then(() => {
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1_500);
+                    });
                 }}
               />
             }
@@ -93,12 +153,12 @@ export function DocumentPanelActions({
 
 export function DocumentPanelBody({
   controller,
-  mode,
   toolbarSlot,
+  hooks,
 }: {
   controller: Controller;
-  mode: DocumentEditorMode;
   toolbarSlot: HTMLElement | null;
+  hooks?: EditorHooks | undefined;
 }) {
   const reducedMotion = useAppReducedMotion();
 
@@ -125,6 +185,7 @@ export function DocumentPanelBody({
       </AnimatePresence>
       <div className="flex min-w-0 flex-1 flex-col space-y-3">
         {controller.error ? <FieldError>{controller.error}</FieldError> : null}
+        {controller.recovered ? <RecoveredChanges controller={controller} /> : null}
         <div className="flex min-w-0 flex-1 flex-col">
           {controller.sync ? (
             // The editor pads its own text, so it is pulled to the panel's
@@ -143,11 +204,12 @@ export function DocumentPanelBody({
               >
                 <div className="absolute inset-0">
                   <DocumentEditor
-                    key={controller.sync.doc.guid}
+                    key={controller.documentId}
                     sync={controller.sync}
-                    mode={mode}
                     readOnly={!controller.document?.canEdit}
                     toolbarSlot={toolbarSlot}
+                    hooks={hooks}
+                    discussion={controller.discussion}
                   />
                 </div>
               </div>
@@ -156,6 +218,33 @@ export function DocumentPanelBody({
             <Spinner aria-label="Connecting to document" className="text-muted-foreground" />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Text from changes made offline that the document no longer had a place
+ * for, kept until the person copies or dismisses it rather than dropped.
+ */
+function RecoveredChanges({ controller }: { controller: Controller }) {
+  const text = controller.recovered ?? "";
+  return (
+    <div role="status" className="bg-muted space-y-2 rounded-xl p-3 text-sm">
+      <p className="font-medium">Some offline changes couldn’t be placed</p>
+      <p className="text-muted-foreground line-clamp-4 whitespace-pre-wrap">{text}</p>
+      <div className="flex gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => void navigator.clipboard.writeText(text)}
+        >
+          <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} data-icon="inline-start" />
+          Copy
+        </Button>
+        <Button size="xs" variant="ghost" onClick={controller.dismissRecovered}>
+          Dismiss
+        </Button>
       </div>
     </div>
   );

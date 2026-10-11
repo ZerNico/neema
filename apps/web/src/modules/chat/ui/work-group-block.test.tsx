@@ -8,6 +8,7 @@ import {
 import type { WorkPart } from "./assistant-body.ts";
 import { WorkGroupBlock } from "./work-group-block.tsx";
 import { workSummary } from "./work-steps.ts";
+import type { DocumentPart } from "./assistant-body.ts";
 
 const call = (callId: string, overrides: Partial<ToolActivity> = {}): ToolActivity =>
   ({
@@ -107,6 +108,28 @@ describe("a run of work", () => {
       ]),
     ).toBe("Searched the web, read 2 pages and summarized earlier messages");
     expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
+  });
+
+  it("leaves a failed document step out of the summary unless it was all there was", () => {
+    const document = (callId: string, outcome: "updated" | "conflict"): DocumentPart => ({
+      kind: "document",
+      key: callId,
+      documentId: "doc",
+      activities: [
+        {
+          family: "document",
+          name: "edit_document",
+          callId,
+          status: "complete",
+          result: { outcome, documentId: "doc" },
+        },
+      ],
+    });
+    const web = { kind: "web", key: "w", activities: [call("a")] as never } as const;
+    expect(workSummary([web, document("x", "conflict"), document("y", "updated")])).toBe(
+      "Searched the web and edited the document",
+    );
+    expect(workSummary([document("x", "conflict")])).toBe("Couldn’t update the document");
   });
 });
 

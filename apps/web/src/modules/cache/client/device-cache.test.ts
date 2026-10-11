@@ -47,6 +47,24 @@ describe("deviceCache", () => {
     ]);
   });
 
+  it("keeps everything in a namespace that is not a cache, over budget or not", async () => {
+    setDeviceCacheOwner("alice");
+    const name = fresh();
+    const cache = deviceCache<string>({
+      namespace: name,
+      maxBytes: 300,
+      maxEntryBytes: 200,
+      keep: true,
+    });
+    await cache.warm();
+    cache.set("old", "x".repeat(150));
+    cache.set("new", "y".repeat(150));
+    cache.set("huge", "z".repeat(500));
+    expect([cache.get("old")?.length, cache.get("new")?.length, cache.get("huge")?.length]).toEqual(
+      [150, 150, 500],
+    );
+  });
+
   it("does not bring back an entry deleted while the namespace was loading", async () => {
     setDeviceCacheOwner("alice");
     const name = fresh();

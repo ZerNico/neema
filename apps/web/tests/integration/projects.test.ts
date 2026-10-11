@@ -1,10 +1,8 @@
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Exit, Layer, ManagedRuntime, Option, Redacted, Stream } from "effect";
-import { fromBase64, toBase64 } from "lib0/buffer";
+import { Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import * as Y from "yjs";
 import {
   conversations,
   defaultCapabilities,
@@ -14,9 +12,9 @@ import {
   projectMemories,
   user,
 } from "~/db/schema/index.ts";
+import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
@@ -25,6 +23,7 @@ import { ProjectService } from "~/modules/projects/server/service.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { collabEditor } from "../fixtures/collab-editor.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
@@ -76,6 +75,9 @@ const memory = <A, E>(body: (service: ProjectMemoryService["Service"]) => Effect
   run(Effect.flatMap(ProjectMemoryService, body));
 const docs = <A, E>(body: (service: DocumentService["Service"]) => Effect.Effect<A, E>) =>
   run(Effect.flatMap(DocumentService, body));
+/** The stored tree as Markdown, as one member may read it. */
+const markdownOf = (userId: string, documentId: string) =>
+  docs((s) => s.read(userId, documentId)).then((read) => toMarkdown(read!.doc));
 const newProject = (owner: string, name = "Launch") =>
   projects((s) => s.create(owner, { name, instructions: "Write in British English." }));
 const role = (userId: string, projectId: string) =>
@@ -98,31 +100,7 @@ const createGroup = async (members: ReadonlyArray<{ userId: string; shareProject
   return id;
 };
 /** A person's editor, seeded from the feed like the panel's. */
-const openEditor = async (userId: string, documentId: string) => {
-  const doc = new Y.Doc();
-  const feed = await docs((s) =>
-    s.subscribe(userId, documentId, { stateVector: null, clientId: doc.clientID }),
-  );
-  if (!feed) return null;
-  const frame = Option.getOrThrow(await run(Stream.runHead(feed)));
-  if (frame.type !== "sync") throw new Error(`expected sync, got ${frame.type}`);
-  Y.applyUpdate(doc, fromBase64(frame.update));
-  const type = (change: (markdown: string) => string) => {
-    const updates: Uint8Array[] = [];
-    const collect = (update: Uint8Array) => updates.push(update);
-    doc.on("update", collect);
-    writeMarkdown(doc, change(readMarkdown(doc)));
-    doc.off("update", collect);
-    return docs((s) =>
-      s.push(userId, {
-        documentId,
-        clientId: doc.clientID,
-        update: toBase64(Y.mergeUpdates(updates)),
-      }),
-    );
-  };
-  return { doc, markdown: () => readMarkdown(doc), type };
-};
+const openEditor = (userId: string, documentId: string) => collabEditor(run, userId, documentId);
 
 describe("roles", () => {
   it("gives the owner, direct members and group members their roles and nobody else any", async () => {
@@ -380,15 +358,15 @@ describe("project documents", () => {
       ownerEditor.type((markdown) => `${markdown}\n- [ ] announce`),
       editorEditor.type((markdown) => `# Plan\n\n${markdown}`),
     ]);
-    const stored = await docs((s) => s.get(viewer, document.id));
-    expect(stored!.content).toBe("# Plan\n\n- [ ] ship\n- [ ] announce");
+    const stored = await markdownOf(viewer, document.id);
+    expect(stored).toBe("# Plan\n\n- [ ] ship\n- [ ] announce");
 
     const viewerEditor = (await openEditor(viewer, document.id))!;
-    expect(viewerEditor.markdown()).toBe(stored!.content);
+    expect(viewerEditor.markdown()).toBe(stored);
     await expect(viewerEditor.type((markdown) => `sneaky ${markdown}`)).rejects.toMatchObject({
       _tag: "DocumentRejected",
     });
-    expect((await docs((s) => s.get(owner, document.id)))!.content).toBe(stored!.content);
+    expect(await markdownOf(owner, document.id)).toBe(stored);
     // Every member hears of the change, not only the writer.
     expect(
       events.some(
@@ -398,6 +376,19 @@ describe("project documents", () => {
           e.event.projectId === project.id,
       ),
     ).toBe(true);
+
+    // Renaming is editing: an editor may, a viewer or stranger may not.
+    await expect(docs((s) => s.rename(viewer, document.id, "Viewer's"))).rejects.toMatchObject({
+      _tag: "DocumentRejected",
+    });
+    await expect(docs((s) => s.rename(stranger, document.id, "Mine"))).rejects.toMatchObject({
+      _tag: "DocumentNotAvailable",
+    });
+    const renamed = await docs((s) => s.rename(editor, document.id, "Launch plan"));
+    expect(renamed.title).toBe("Launch plan");
+    expect((await docs((s) => s.get(viewer, document.id)))!.title).toBe("Launch plan");
+    // The text is untouched by a rename.
+    expect(await markdownOf(owner, document.id)).toBe(stored);
 
     await expect(docs((s) => s.remove(viewer, document.id))).rejects.toMatchObject({
       _tag: "DocumentRejected",

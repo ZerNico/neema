@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  describeSpreadsheetChanges,
-  parseCell,
-  parseRange,
-  parseSpreadsheetOperations,
-} from "./operations.ts";
+import { parseCell, parseRange } from "@chat/sheet/a1";
+import { describeSpreadsheetChanges, parseSpreadsheetOperations } from "./operations.ts";
 import {
   renameSheetInFormula,
   shiftFormula,

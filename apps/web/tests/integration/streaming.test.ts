@@ -15,10 +15,8 @@ import {
   Stream,
 } from "effect";
 import { uuidv7 } from "uuidv7";
-import { fromBase64, toBase64 } from "lib0/buffer";
-import * as Y from "yjs";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import {
   conversationDrafts,
   conversations,
@@ -42,6 +40,9 @@ import {
   skillRevisions,
   usageEvents,
   workTurnReservations,
+  documentSteps,
+  documents,
+  projects,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
@@ -53,8 +54,8 @@ import {
   CustomToolRuntime,
   type CustomToolRunResult,
 } from "~/modules/custom-tools/server/runtime.ts";
+import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { readMarkdown, writeMarkdown } from "~/modules/documents/editor/markdown.ts";
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -86,6 +87,7 @@ import {
 } from "~/modules/tools/server/external-completion.ts";
 import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { collabEditor } from "../fixtures/collab-editor.ts";
 import {
   FakeDocumentParser,
   FakeWebSearch,
@@ -219,7 +221,14 @@ const authoringFinish = (reason: "stop" | "tool-calls" = "stop") =>
     usage: new AiResponse.Usage({ inputTokens: { total: 100 }, outputTokens: { total: 10 } }),
   });
 /** A native call whose arguments stream in pieces first, the way providers send them. */
-const streamedTool = (input: GatewayInput, name: string, params: unknown, pieces = 12) => {
+/** A call whose arguments arrive in pieces, `pace` apart as a provider would send them. */
+const streamedTool = (
+  input: GatewayInput,
+  name: string,
+  params: unknown,
+  pieces = 12,
+  pace = Duration.zero,
+) => {
   const id = uuidv7();
   const json = JSON.stringify(params);
   const size = Math.ceil(json.length / pieces);
@@ -241,6 +250,9 @@ const streamedTool = (input: GatewayInput, name: string, params: unknown, pieces
           AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
           authoringFinish("tool-calls"),
         ).pipe(
+          Stream.tap((part) =>
+            part.type === "tool-params-delta" ? Effect.sleep(pace) : Effect.void,
+          ),
           Stream.mapEffect((part) => encodePart(part)),
           Stream.orDie,
         ),
@@ -898,7 +910,10 @@ describe("conversational agent authoring", () => {
     const block = `<script>let stops = $state(["Innsbruck", "Salzburg"]);</script><map label="Trip">{#each stops as s}<pin place={s}/>{/each}</map>`;
     authoringScript = () =>
       Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: `Trip:\n\n\`\`\`ui\n${block}\n\`\`\`\n` }),
+        AiResponse.makePart("text-delta", {
+          id: "t",
+          delta: `Trip:\n\n\`\`\`ui\n${block}\n\`\`\`\n`,
+        }),
         authoringFinish(),
       );
     try {
@@ -2037,43 +2052,78 @@ describe("conversation documents", () => {
           searchEnabled: false,
           researchEnabled: false,
           attachmentIds: [],
-          openDocumentId,
+          ...(openDocumentId ? { openDocument: { id: openDocumentId } } : {}),
         }),
       ),
     );
+  /** A chat's documents, each with its tree as Markdown, made on demand. */
   const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
     runtime.runPromise(
-      Effect.flatMap(DocumentService, (service) =>
-        service.list(seed.userId, { conversationId: seed.conversation.id }),
-      ),
+      Effect.gen(function* () {
+        const service = yield* DocumentService;
+        const listed = yield* service.list(seed.userId, { conversationId: seed.conversation.id });
+        return yield* Effect.forEach(listed, (document) =>
+          service
+            .read(seed.userId, document.id)
+            .pipe(Effect.map((read) => ({ ...document, content: toMarkdown(read!.doc) }))),
+        );
+      }),
     );
   // The tool-role messages of a prompt: what the continuation transcript feeds
   // back, as opposed to the trailing data, which carries the document on purpose.
   const toolMessages = (input: GatewayInput) =>
     JSON.stringify(input.prompt.content.filter((message) => message.role === "tool"));
-  const trailing = (input: GatewayInput) => {
-    const message = [...input.prompt.content]
-      .toReversed()
-      .find(
+  /** Every document view the request carried, in order, as the model reads it. */
+  const documentText = (input: GatewayInput) =>
+    [...input.prompt.content]
+      .filter(
         (candidate) =>
           candidate.role === "assistant" &&
-          JSON.stringify(candidate.content).includes("Application-provided documents"),
-      );
-    if (!message) return null;
-    const text = (message.content as ReadonlyArray<{ text?: string }>)
-      .map((part) => part.text ?? "")
-      .join("");
-    return JSON.parse(text.split("\n").slice(1).join("\n")) as {
-      focused: {
-        id: string;
-        title: string;
-        revision: number;
-        lastEditedBy: string;
-        editedSinceYourLastWrite: boolean;
-        content: string;
-      } | null;
-      others: ReadonlyArray<{ id: string; title: string; chars: number }>;
+          JSON.stringify(candidate.content).includes("Application-provided document"),
+      )
+      .map((message) =>
+        (message.content as ReadonlyArray<{ text?: string }>)
+          .map((part) => part.text ?? "")
+          .join(""),
+      )
+      .join("\n");
+  const attributes = (tag: string) =>
+    Object.fromEntries(
+      [...tag.matchAll(/(\w+)="([^"]*)"/g)].map((match) => [match[1]!, match[2]!]),
+    );
+  /** The focused document's latest header and the others' summaries, from the XML. */
+  const trailing = (input: GatewayInput) => {
+    const text = documentText(input);
+    if (!text) return null;
+    const headers = [...text.matchAll(/<document ([^>]*?)\/?>/g)].map((match) =>
+      attributes(match[1]!),
+    );
+    const focused = headers.filter((header) => header.focused === "true").at(-1);
+    const lastBlock = text.slice(text.lastIndexOf("<documents>"));
+    const others = [...lastBlock.matchAll(/<document ([^>]*?)\/>/g)].map((match) => {
+      const header = attributes(match[1]!);
+      return { id: header.id, title: header.title };
+    });
+    return {
+      text,
+      focused: focused
+        ? {
+            id: focused.id,
+            title: focused.title,
+            revision: Number(focused.revision),
+            lastEditedBy: focused.lastEditedBy,
+            editedSinceYourLastWrite: focused.editedSinceYourLastWrite === "true",
+          }
+        : null,
+      others,
     };
+  };
+  /** The id the request showed for the block holding `text`, as a model would read it. */
+  const blockIdIn = (input: GatewayInput, text: string) => {
+    const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(`id="([a-z0-9]+)"[^>]*>${escaped}<`).exec(documentText(input));
+    if (!match) throw new Error(`no block holding ${text} in the request`);
+    return match[1]!;
   };
 
   it.each([false, true])(
@@ -2094,7 +2144,7 @@ describe("conversation documents", () => {
           return authoringTool(
             input,
             "edit_document",
-            { old: "- [ ] ship", new: "- [ ] ship\n- [ ] announce", expectedRevision: 1 },
+            { target: blockIdIn(input, "ship"), position: "after", content: "- [ ] announce" },
             hermes,
           );
         return reply();
@@ -2107,15 +2157,16 @@ describe("conversation documents", () => {
         expect(JSON.stringify(prompts[0]!.prompt)).not.toContain("DATA TO EDIT");
         expect(trailing(prompts[0]!)).toBeNull();
         expect(trailing(prompts[1]!)).toMatchObject({
-          focused: { title: "Release checklist", revision: 1, content: CHECKLIST },
+          focused: { title: "Release checklist" },
           others: [],
         });
+        expect(trailing(prompts[1]!)!.text).toContain(">write notes</task>");
         expect(trailing(prompts[2]!)!.focused).toMatchObject({
-          revision: 2,
           lastEditedBy: "model",
           editedSinceYourLastWrite: false,
-          content: `${CHECKLIST}\n- [ ] announce`,
         });
+        expect(trailing(prompts[2]!)!.focused!.revision).toBeGreaterThan(0);
+        expect(trailing(prompts[2]!)!.text).toContain(">announce</task>");
         // The continuation carries pointers, never the document.
         expect(toolMessages(prompts[2]!)).toContain("trailing application data");
         expect(toolMessages(prompts[2]!)).not.toContain("write notes");
@@ -2123,7 +2174,6 @@ describe("conversation documents", () => {
         const [document] = await documentsOf(seed);
         expect(document).toMatchObject({
           title: "Release checklist",
-          revision: 2,
           lastEditedBy: "model",
           content: `${CHECKLIST}\n- [ ] announce`,
         });
@@ -2139,16 +2189,22 @@ describe("conversation documents", () => {
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 1,
+            // A streamed creation writes its content after the document exists.
+            revision: expect.any(Number),
           },
           {
             outcome: "updated",
             documentId: document!.id,
             documentConversationId: seed.conversation.id,
             title: "Release checklist",
-            revision: 2,
+            // The revision its write landed at; a preview settled with nothing
+            // left to write reports the one it already reached.
+            revision: expect.any(Number),
           },
         ]);
+        expect((detail.toolCalls[1]!.result as { revision: number }).revision).toBeLessThanOrEqual(
+          document!.revision,
+        );
         expect(detail.toolCalls.every((call) => call.status === "complete")).toBe(true);
         expect(JSON.stringify(detail)).not.toContain("write notes");
         const chunks = await runtime.runPromise(
@@ -2185,8 +2241,8 @@ describe("conversation documents", () => {
             conversationId: seed.conversation.id,
           });
           const feed = yield* service.subscribe(seed.userId, document!.id, {
-            stateVector: null,
-            clientId: 7,
+            revision: null,
+            clientId: "watcher",
           });
           watcher = Effect.runFork(
             Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
@@ -2204,10 +2260,16 @@ describe("conversation documents", () => {
       if (prompts.length === 2)
         return Stream.fromEffectDrain(watch).pipe(
           Stream.concat(
-            streamedTool(input, "edit_document", {
-              old: "- [ ] tag build",
-              new: "- [ ] tag the build and publish the release notes for everyone",
-            }),
+            streamedTool(
+              input,
+              "edit_document",
+              {
+                target: blockIdIn(input, "tag build"),
+                content: "- [ ] tag the build and publish the release notes for everyone",
+              },
+              12,
+              Duration.millis(40),
+            ),
           ),
         );
       return reply();
@@ -2222,8 +2284,8 @@ describe("conversation documents", () => {
           "- [ ] tag the build and publish the release notes for everyone",
         ),
       );
-      // Written while streaming, then settled: more than the one write a plain edit makes.
-      const updates = frames.filter((frame) => frame.type === "update");
+      // Written as it streamed, a piece at a time; settling writes only what is still missing.
+      const updates = frames.filter((frame) => frame.type === "steps");
       expect(updates.length).toBeGreaterThanOrEqual(2);
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
@@ -2235,6 +2297,696 @@ describe("conversation documents", () => {
     } finally {
       authoringScript = null;
       if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("pages through a long document by following each window's note to the end", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const sections = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}. `.repeat(20)}`,
+    );
+    const notes: string[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Long",
+          content: sections.join("\n\n"),
+        });
+      // Later rounds follow the latest read's result. The first view keeps
+      // its first note, so following notes in the views could repeat it.
+      const results = JSON.stringify(input.prompt.content.filter((each) => each.role === "tool"));
+      const note =
+        [...results.matchAll(/call read_chat_document with (\{[^}]*\})/g)]
+          .map((match) => match[1]!.replaceAll('\\"', '"'))
+          .at(-1) ?? /Call read_chat_document with (\{[^}]*\})/.exec(documentText(input))?.[1];
+      if (note && notes.length < 10 && notes.at(-1) !== note) {
+        notes.push(note);
+        return authoringTool(input, "read_chat_document", JSON.parse(note));
+      }
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const last = documentText(prompts.at(-1)!);
+      expect(notes.length).toBeGreaterThan(1);
+      // The final request shows the end of the document, and the last read said so.
+      expect(last).toContain("Section 120");
+      const results = JSON.stringify(
+        prompts.at(-1)!.prompt.content.filter((each) => each.role === "tool"),
+      );
+      expect(results).toContain("reaches the end of the document");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("appends to a long document's end and a section's end without reading there", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const sections = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}. `.repeat(20)}`,
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Long",
+          content: sections.join("\n\n"),
+        });
+      if (prompts.length === 2)
+        return authoringTool(input, "edit_document", { target: "end", content: "Closing words." });
+      if (prompts.length === 3) {
+        // Section 60 lies beyond the first window; its heading is in the gap's outline.
+        const heading = /<h2 id="([a-z0-9]+)">Section 60</.exec(documentText(input))?.[1];
+        return authoringTool(input, "edit_document", {
+          target: heading,
+          position: "end",
+          content: "Added to section 60.",
+        });
+      }
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.endsWith("Closing words.")).toBe(true);
+      // The request after each write shows what it wrote, far past the first window.
+      expect(documentText(prompts[2]!)).toContain("Closing words.");
+      expect(documentText(prompts[3]!)).toContain("Added to section 60.");
+      expect(document!.content).toMatch(
+        /Words of section 60\. ?\n\nAdded to section 60\.\n\n## Section 61/,
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+        "updated",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("reports a conflict, not a second copy, when a person edits a streaming insert", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const gate = await runtime.runPromise(Deferred.make<void>());
+    const text = "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length > 2) return reply();
+      const params = { target: "end", content: text };
+      const json = JSON.stringify(params);
+      const cut = json.indexOf("delta");
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "edit_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+            ).pipe(
+              // The provider pauses while the person types into what has landed.
+              Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+              Stream.concat(
+                Stream.make(
+                  AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                  AiResponse.makePart("tool-params-end", { id }),
+                  AiResponse.makePart("tool-call", {
+                    id,
+                    name: "edit_document",
+                    params,
+                    providerExecuted: false,
+                  }),
+                  authoringFinish("tool-calls"),
+                ),
+              ),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      const [created] = await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const found = yield* Effect.promise(() => documentsOf(seed));
+            if (found[0]?.content.includes("Alpha bravo charlie")) return found;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const editor = await collabEditor(runtime.runPromise, seed.userId, created!.id);
+      await editor!.type((markdown) => markdown.replace("Alpha bravo", "Alpha PERSON bravo"));
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.split("Alpha")).toHaveLength(2);
+      expect(document!.content).toContain("Alpha PERSON bravo");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "conflict",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it.each([
+    ["a scope sent after the content", { scope: "chat" }, null],
+    ["no scope, which in a project means the project", {}, "project"],
+  ] as const)(
+    "streams a project chat's new document in private until the call says where (%s)",
+    async (_label, extra, expected) => {
+      const seed = await runtime.runPromise(ordinaryChat);
+      const projectId = uuidv7();
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* db.insert(projects).values({ id: projectId, userId: seed.userId, name: "Launch" });
+          yield* db
+            .update(conversations)
+            .set({ projectId })
+            .where(eq(conversations.id, seed.conversation.id));
+        }),
+      );
+      const gate = await runtime.runPromise(Deferred.make<void>());
+      // The content first, any scope only after it, as a model may write them.
+      const params = {
+        title: "Notes",
+        content: "Alpha bravo charlie delta echo foxtrot",
+        ...extra,
+      };
+      let calls = 0;
+      authoringScript = (input) => {
+        calls++;
+        if (calls > 1) return reply();
+        const json = JSON.stringify(params);
+        const cut = json.indexOf("delta");
+        const id = uuidv7();
+        const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+        return Stream.unwrap(
+          LanguageModel.make({
+            generateText: () => Effect.die("only streaming is used here"),
+            streamText: () =>
+              Stream.make(
+                AiResponse.makePart("tool-params-start", {
+                  id,
+                  name: "create_document",
+                  providerExecuted: false,
+                }),
+                AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+              ).pipe(
+                Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+                Stream.concat(
+                  Stream.make(
+                    AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                    AiResponse.makePart("tool-params-end", { id }),
+                    AiResponse.makePart("tool-call", {
+                      id,
+                      name: "create_document",
+                      params,
+                      providerExecuted: false,
+                    }),
+                    authoringFinish("tool-calls"),
+                  ),
+                ),
+                Stream.mapEffect((part) => encodePart(part)),
+                Stream.orDie,
+              ),
+          }).pipe(
+            Effect.map((model) =>
+              model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+            ),
+          ),
+        ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+      };
+      // Every document of the chat or its project, private ones included, read from the tree.
+      const stored = () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            const service = yield* DocumentService;
+            const rows = yield* db
+              .select({ id: documents.id, projectId: documents.projectId })
+              .from(documents)
+              .where(
+                or(
+                  eq(documents.conversationId, seed.conversation.id),
+                  eq(documents.projectId, projectId),
+                ),
+              );
+            return yield* Effect.forEach(rows, (row) =>
+              service
+                .read(seed.userId, row.id)
+                .pipe(
+                  Effect.map((read) => ({ ...row, content: read ? toMarkdown(read.doc) : "" })),
+                ),
+            );
+          }),
+        );
+      try {
+        const sent = await send(seed);
+        const streaming = await runtime.runPromise(
+          Effect.gen(function* () {
+            for (;;) {
+              const found = yield* Effect.promise(stored);
+              if (found[0]?.content.includes("Alpha bravo")) return found;
+              yield* Effect.sleep(Duration.millis(50));
+            }
+          }).pipe(Effect.timeout(Duration.seconds(10))),
+        );
+        // While it streams, it is the chat's alone.
+        expect(streaming).toMatchObject([{ projectId: null }]);
+        await runtime.runPromise(Deferred.succeed(gate, undefined));
+        await settle(sent.assistantMessageId);
+        const final = await stored();
+        expect(final).toHaveLength(1);
+        expect(final[0]!.id).toBe(streaming[0]!.id);
+        expect(final[0]!.projectId).toBe(expected === "project" ? projectId : null);
+        expect(final[0]!.content).toContain("foxtrot");
+      } finally {
+        authoringScript = null;
+      }
+    },
+  );
+
+  it("keeps what a person types into a document while its creation streams", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const gate = await runtime.runPromise(Deferred.make<void>());
+    const params = {
+      title: "Trip",
+      content: "Alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima",
+    };
+    let calls = 0;
+    authoringScript = (input) => {
+      calls++;
+      if (calls > 1) return reply();
+      const json = JSON.stringify(params);
+      const cut = json.indexOf("delta");
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "create_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, cut) }),
+            ).pipe(
+              Stream.concat(Stream.fromEffectDrain(Deferred.await(gate))),
+              Stream.concat(
+                Stream.make(
+                  AiResponse.makePart("tool-params-delta", { id, delta: json.slice(cut) }),
+                  AiResponse.makePart("tool-params-end", { id }),
+                  AiResponse.makePart("tool-call", {
+                    id,
+                    name: "create_document",
+                    params,
+                    providerExecuted: false,
+                  }),
+                  authoringFinish("tool-calls"),
+                ),
+              ),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      const [created] = await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const found = yield* Effect.promise(() => documentsOf(seed));
+            if (found[0]?.content.includes("Alpha bravo charlie")) return found;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const editor = await collabEditor(runtime.runPromise, seed.userId, created!.id);
+      await editor!.type((markdown) => `${markdown}\n\nMy own note`);
+      await runtime.runPromise(Deferred.succeed(gate, undefined));
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain("My own note");
+      expect(document!.content).toContain("Alpha bravo charlie");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "conflict",
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("deletes a block when a streamed edit replaces it with nothing", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length === 2)
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: blockIdIn(input, "tag build"), content: "" },
+          6,
+          Duration.millis(20),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toBe(CHECKLIST.replace("- [ ] tag build\n", ""));
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("keeps what a streamed edit wrote when the answer is stopped mid-write", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const text = "Launch day starts with a final check of every redirect. ".repeat(6).trim();
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      // Half the arguments, then the provider goes quiet until the reader stops.
+      const json = JSON.stringify({ target: "end", content: text });
+      const id = uuidv7();
+      const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
+      return Stream.unwrap(
+        LanguageModel.make({
+          generateText: () => Effect.die("only streaming is used here"),
+          streamText: () =>
+            Stream.make(
+              AiResponse.makePart("tool-params-start", {
+                id,
+                name: "edit_document",
+                providerExecuted: false,
+              }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(0, 40) }),
+              AiResponse.makePart("tool-params-delta", { id, delta: json.slice(40, 200) }),
+            ).pipe(
+              Stream.concat(Stream.never),
+              Stream.mapEffect((part) => encodePart(part)),
+              Stream.orDie,
+            ),
+        }).pipe(
+          Effect.map((model) =>
+            model.streamText({ prompt: input.prompt, toolkit: input.toolkit! }),
+          ),
+        ),
+      ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
+    };
+    try {
+      const sent = await send(seed);
+      // Wait for the preview to have typed some of it out.
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          for (;;) {
+            const [document] = yield* Effect.promise(() => documentsOf(seed));
+            if (document && document.content.includes("final check")) return;
+            yield* Effect.sleep(Duration.millis(50));
+          }
+        }).pipe(Effect.timeout(Duration.seconds(10))),
+      );
+      const stopped = await runtime.runPromise(
+        Effect.gen(function* () {
+          const message = yield* (yield* ChatRepo).getMessage(sent.assistantMessageId);
+          return yield* (yield* StreamEngine).stopGeneration(
+            sent.assistantMessageId,
+            message?.generationId ?? undefined,
+          );
+        }),
+      );
+      expect(stopped).toBe(true);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain("Launch day starts with a final check");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("lands a streamed append at the end once, though the end moved as it streamed", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    // Longer than one window, as a thesis is.
+    const long = Array.from(
+      { length: 120 },
+      (_, index) => `## Section ${index + 1}\n\n${`Words of section ${index + 1}.`.repeat(20)}`,
+    );
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", {
+          title: "Plan",
+          content: [CHECKLIST, ...long].join("\n\n"),
+        });
+      if (prompts.length === 2)
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: "end", content: "## Closing\n\nOne closing paragraph, written once." },
+          12,
+          Duration.millis(30),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content.endsWith("## Closing\n\nOne closing paragraph, written once.")).toBe(
+        true,
+      );
+      expect(document!.content.split("## Closing")).toHaveLength(2);
+      // The request after the write shows it, so the model sees its work done.
+      expect(documentText(prompts[2]!)).toContain("written once");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("types out text that arrives in large chunks a few words at a time", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const frames: DocumentFrame[] = [];
+    let watcher: Fiber.Fiber<void> | null = null;
+    const watch = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            revision: null,
+            clientId: "watcher",
+          });
+          watcher = Effect.runFork(
+            Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
+          );
+        }),
+      ),
+    );
+    const paragraph = "The release goes out on Friday once the notes are reviewed. "
+      .repeat(7)
+      .trim();
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Plan", content: CHECKLIST });
+      if (prompts.length === 2)
+        return Stream.fromEffectDrain(watch).pipe(
+          Stream.concat(
+            // Two big chunks, as a provider that batches sends them.
+            streamedTool(
+              input,
+              "edit_document",
+              { target: blockIdIn(input, "Release"), position: "after", content: paragraph },
+              2,
+              Duration.millis(200),
+            ),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      expect(document!.content).toContain(paragraph);
+      const inserted = frames
+        .flatMap((frame) => (frame.type === "steps" ? frame.steps : []))
+        .map((step) => {
+          const slice = (step as { slice?: { content?: unknown } }).slice;
+          return JSON.stringify(slice?.content ?? "").length;
+        });
+      // Typed out over many writes, none carrying more than a short stretch of new text.
+      expect(inserted.length).toBeGreaterThan(8);
+      expect(inserted.filter((size) => size > 200)).toHaveLength(0);
+      // Each paced write is stored as the generation's, like any other model write.
+      const steps = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ origin: documentSteps.origin, generationId: documentSteps.generationId })
+            .from(documentSteps)
+            .where(eq(documentSteps.documentId, document!.id)),
+        ),
+      );
+      const model = steps.filter((step) => step.origin === "model");
+      expect(model.length).toBeGreaterThan(8);
+      expect(model.filter((step) => step.generationId === null)).toEqual([]);
+    } finally {
+      authoringScript = null;
+      if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("streams a list as its new words, never rewriting the items already there", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const frames: DocumentFrame[] = [];
+    let watcher: Fiber.Fiber<void> | null = null;
+    const watch = Effect.promise(() =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* DocumentService;
+          const [document] = yield* service.list(seed.userId, {
+            conversationId: seed.conversation.id,
+          });
+          const feed = yield* service.subscribe(seed.userId, document!.id, {
+            revision: null,
+            clientId: "watcher",
+          });
+          watcher = Effect.runFork(
+            Stream.runForEach(feed!, (frame) => Effect.sync(() => frames.push(frame))),
+          );
+        }),
+      ),
+    );
+    const list = Array.from(
+      { length: 6 },
+      (_, index) => `- step ${index + 1}: check the release notes and the build once more`,
+    ).join("\n");
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Steps", content: CHECKLIST });
+      if (prompts.length === 2)
+        return Stream.fromEffectDrain(watch).pipe(
+          Stream.concat(
+            streamedTool(
+              input,
+              "edit_document",
+              { target: blockIdIn(input, "Release"), position: "after", content: list },
+              30,
+              Duration.millis(40),
+            ),
+          ),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const replaced = frames
+        .flatMap((frame) => (frame.type === "steps" ? frame.steps : []))
+        .map((step) => {
+          const { from, to } = step as { from?: number; to?: number };
+          return from === undefined || to === undefined ? 0 : to - from;
+        });
+      expect(replaced.length).toBeGreaterThan(5);
+      // A tick replaces at most the end of the item being written; the list
+      // itself, a few hundred positions by the end, is never written again.
+      expect(Math.max(...replaced)).toBeLessThan(80);
+    } finally {
+      authoringScript = null;
+      if (watcher) await Effect.runPromise(Fiber.interrupt(watcher));
+    }
+  });
+
+  it("keeps a streamed table its own through every tick and settles it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    const table = "| Layer | Tool |\n| --- | --- |\n| Web | Next.js |\n| CMS | Payload |";
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "create_document", { title: "Stack", content: CHECKLIST });
+      if (prompts.length === 2)
+        // Paced so ticks land mid-row, when the last row is still short.
+        return streamedTool(
+          input,
+          "edit_document",
+          { target: blockIdIn(input, "Release"), position: "after", content: table },
+          24,
+          Duration.millis(40),
+        );
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [document] = await documentsOf(seed);
+      // Columns come back padded to their widest cell.
+      expect(document!.content.replace(/ +/g, " ").replace(/-{3,}/g, "---")).toBe(
+        CHECKLIST.replace(
+          "# Release",
+          "# Release\n\n| Layer | Tool |\n| --- | --- |\n| Web | Next.js |\n| CMS | Payload |",
+        ),
+      );
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+      ]);
+    } finally {
+      authoringScript = null;
     }
   });
 
@@ -2275,11 +3027,11 @@ describe("conversation documents", () => {
           content: CHECKLIST,
         });
       if (prompts.length === 2)
-        // A revision that is not a number: the preview streams, the call is refused.
+        // A position that does not exist: the preview streams, the call is refused.
         return streamedTool(input, "edit_document", {
-          old: "- [ ] tag build",
-          new: "- [ ] tag a completely different build instead",
-          expectedRevision: "soon",
+          target: blockIdIn(input, "tag build"),
+          content: "- [ ] tag a completely different build instead",
+          position: "instead",
         });
       return reply();
     };
@@ -2297,7 +3049,7 @@ describe("conversation documents", () => {
     }
   });
 
-  it("shows a person's edit between rounds and returns a preview when the anchor is gone", async () => {
+  it("shows a person's edit between rounds, flagged until the model has been sent it", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];
     // Resolved when it runs: the document only exists once round one has landed.
@@ -2308,24 +3060,14 @@ describe("conversation documents", () => {
           const [document] = yield* service.list(seed.userId, {
             conversationId: seed.conversation.id,
           });
-          // The panel's tick: one marker character in a synced Y.Doc, pushed as a batch.
-          const doc = new Y.Doc();
-          const feed = yield* service.subscribe(seed.userId, document!.id, {
-            stateVector: null,
-            clientId: doc.clientID,
-          });
-          const frame = Option.getOrThrow(yield* Stream.runHead(feed!));
-          if (frame.type !== "sync") throw new Error("expected sync");
-          Y.applyUpdate(doc, fromBase64(frame.update));
-          const updates: Uint8Array[] = [];
-          doc.on("update", (update: Uint8Array) => updates.push(update));
+          // The panel's tick, typed in an editor opened from the live feed.
+          const editor = yield* Effect.promise(() =>
+            collabEditor(runtime.runPromise, seed.userId, document!.id),
+          );
           // Ticks the first task, which in the tree is its checked attribute.
-          writeMarkdown(doc, readMarkdown(doc).replace("[ ]", "[x]"));
-          return yield* service.push(seed.userId, {
-            documentId: document!.id,
-            clientId: doc.clientID,
-            update: toBase64(Y.mergeUpdates(updates)),
-          });
+          return yield* Effect.promise(() =>
+            editor!.type((markdown) => markdown.replace("[ ]", "[x]")),
+          );
         }),
       ),
     );
@@ -2338,14 +3080,15 @@ describe("conversation documents", () => {
         });
       if (prompts.length === 2)
         return authoringTool(input, "edit_document", {
-          old: "- [ ] tag build",
-          new: "- [ ] tag build\n- [ ] run tests",
+          target: blockIdIn(input, "tag build"),
+          position: "after",
+          content: "- [ ] run tests",
         }).pipe(Stream.concat(Stream.fromEffectDrain(personTicks)));
       if (prompts.length === 3)
+        // Aimed at the task the person ticked, which this request has shown it.
         return authoringTool(input, "edit_document", {
-          old: "- [ ] write notes",
-          new: "- [ ] write release notes",
-          expectedRevision: 2,
+          target: blockIdIn(input, "write notes"),
+          content: "- [ ] write release notes",
         });
       return reply();
     };
@@ -2353,46 +3096,33 @@ describe("conversation documents", () => {
       const sent = await send(seed);
       await settle(sent.assistantMessageId);
       expect(prompts).toHaveLength(4);
+      const [document] = await documentsOf(seed);
       expect(trailing(prompts[2]!)!.focused).toMatchObject({
-        revision: 3,
         lastEditedBy: "user",
         editedSinceYourLastWrite: true,
-        content: "# Release\n\n- [x] write notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
       });
-      // Having seen the current revision through the failed edit, the flag clears.
+      expect(trailing(prompts[2]!)!.text).toContain('checked="true">write notes</task>');
+      expect(trailing(prompts[2]!)!.text).toContain(">run tests</task>");
+      // Having been sent the person's change and written after it, the flag clears.
       expect(trailing(prompts[3]!)!.focused).toMatchObject({
-        revision: 3,
+        revision: document!.revision,
+        lastEditedBy: "model",
         editedSinceYourLastWrite: false,
       });
-      const [document] = await documentsOf(seed);
-      expect(document).toMatchObject({ revision: 3, lastEditedBy: "user" });
+      expect(document!.content).toBe(
+        "# Release\n\n- [ ] write release notes\n- [ ] tag build\n- [ ] run tests\n- [ ] ship",
+      );
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
-      const missed = detail.toolCalls[2]!;
-      expect(missed.status).toBe("error");
-      expect(missed.result).toMatchObject({
-        outcome: "no_match",
-        documentId: document!.id,
-        documentConversationId: seed.conversation.id,
-        title: "Release checklist",
-        revision: 3,
-      });
-      expect(Object.keys(missed.result as object).toSorted()).toEqual([
-        "documentConversationId",
-        "documentId",
-        "message",
-        "outcome",
-        "revision",
-        "title",
+      expect(detail.toolCalls.map((call) => (call.result as { outcome: string }).outcome)).toEqual([
+        "created",
+        "updated",
+        "updated",
       ]);
-      expect(missed.error?.code).toBe("DocumentNotUpdated");
-      expect(missed.error?.message).toContain("does not occur");
-      expect(missed.error?.message).toContain("changed since revision 2");
-      // The preview reached the model in the tool result of its own round, and
-      // is then dropped from the continuation like the rest of the content.
-      expect(JSON.stringify(detail)).not.toContain("[x] write notes");
-      expect(toolMessages(prompts[3]!)).not.toContain("[x] write notes");
+      // The document reached the model only as trailing data, never in a tool result.
+      expect(JSON.stringify(detail)).not.toContain("write notes");
+      expect(toolMessages(prompts[3]!)).not.toContain("write notes");
     } finally {
       authoringScript = null;
     }
@@ -2440,9 +3170,7 @@ describe("conversation documents", () => {
         });
       if (round === 2)
         return Stream.fromEffectDrain(supersede).pipe(
-          Stream.concat(
-            authoringTool(input, "edit_document", { old: "- [ ] ship", new: "- [ ] STALE" }),
-          ),
+          Stream.concat(authoringTool(input, "edit_document", { find: "ship", content: "STALE" })),
         );
       return reply();
     };
@@ -2493,10 +3221,11 @@ describe("conversation documents", () => {
       const sent = await send(seed, first.document.id);
       await settle(sent.assistantMessageId);
       expect(trailing(prompts[0]!)).toMatchObject({
-        focused: { id: first.document.id, content: "one" },
-        others: [{ id: second.document.id, title: "Second", chars: 3 }],
+        focused: { id: first.document.id },
+        others: [{ id: second.document.id, title: "Second" }],
       });
-      expect(JSON.stringify(trailing(prompts[0]!)!.others)).not.toContain("two");
+      expect(trailing(prompts[0]!)!.text).toContain(">one</p>");
+      expect(trailing(prompts[0]!)!.text).not.toContain(">two<");
     } finally {
       authoringScript = null;
     }

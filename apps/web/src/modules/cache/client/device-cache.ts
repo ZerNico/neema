@@ -27,6 +27,12 @@ export interface DeviceCacheOptions {
   readonly maxBytes: number;
   /** A value over this is not kept at all. Defaults to `maxBytes / 8`. */
   readonly maxEntryBytes?: number;
+  /**
+   * Data that is not a cache: nothing is evicted for the budget or refused
+   * for its size. Another tab may own an entry this one loaded, and losing
+   * it would lose work rather than a placeholder.
+   */
+  readonly keep?: boolean;
 }
 
 export interface DeviceCache<V> {
@@ -34,6 +40,13 @@ export interface DeviceCache<V> {
   warm(): Promise<void>;
   /** The value, if warm and present. */
   get(key: string): V | undefined;
+  /**
+   * The value as storage holds it now, for one another tab may have written
+   * since this one warmed. A local change not yet written stays ahead of it.
+   */
+  reload(key: string): Promise<V | undefined>;
+  /** Every stored entry whose key starts with `prefix`, as storage holds them now. */
+  reloadAll(prefix: string): Promise<Array<[string, V]>>;
   set(key: string, value: V): void;
   delete(key: string): void;
 }
@@ -192,10 +205,57 @@ class NamespaceCache<V> implements DeviceCache<V> {
     return this.memory.get(key)?.value;
   }
 
+  async reloadAll(prefix: string): Promise<Array<[string, V]>> {
+    await ownerKnown;
+    const forOwner = owner;
+    const db = await open();
+    const local = () =>
+      [...this.memory]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, entry]) => [key, entry.value] as [string, V]);
+    if (!db || forOwner === null) return local();
+    try {
+      const tx = db.transaction(STORE, "readonly");
+      const range = IDBKeyRange.bound(
+        [forOwner, this.options.namespace, prefix],
+        [forOwner, this.options.namespace, `${prefix}\uffff`],
+      );
+      const [keys, values] = await Promise.all([
+        request(tx.objectStore(STORE).getAllKeys(range)),
+        request(tx.objectStore(STORE).getAll(range)),
+      ]);
+      if (owner !== forOwner) return local();
+      return keys.map((raw, index) => [(raw as Key)[2], (values[index] as Stored<V>).value]);
+    } catch {
+      return local();
+    }
+  }
+
+  async reload(key: string): Promise<V | undefined> {
+    await ownerKnown;
+    const forOwner = owner;
+    const db = await open();
+    if (!db || forOwner === null || this.dirty.has(key)) return this.get(key);
+    try {
+      const tx = db.transaction(STORE, "readonly");
+      const id: Key = [forOwner, this.options.namespace, key];
+      const entry = (await request(tx.objectStore(STORE).get(id))) as Stored<V> | undefined;
+      if (owner !== forOwner || this.dirty.has(key)) return this.get(key);
+      this.drop(key);
+      if (entry) {
+        this.memory.set(key, entry);
+        this.bytes += entry.bytes;
+      }
+      return entry?.value;
+    } catch {
+      return this.get(key);
+    }
+  }
+
   set(key: string, value: V): void {
     const bytes = sizeOf(value);
     this.drop(key);
-    if (bytes > this.maxEntryBytes) {
+    if (bytes > this.maxEntryBytes && !this.options.keep) {
       this.mark(key, undefined);
       return;
     }
@@ -229,7 +289,7 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   private evict() {
-    if (this.bytes <= this.options.maxBytes) return;
+    if (this.options.keep || this.bytes <= this.options.maxBytes) return;
     const oldest = [...this.memory.entries()].toSorted((a, b) => a[1].at - b[1].at);
     for (const [key] of oldest) {
       if (this.bytes <= this.options.maxBytes) break;

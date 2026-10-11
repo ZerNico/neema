@@ -2,7 +2,7 @@ import { isFormulaValue, makeFormula, type Cell, type CellValue } from "@office-
 import { fromArrayBuffer, loadWorkbook } from "@office-kit/xlsx/io";
 import { getSheet } from "@office-kit/xlsx/workbook";
 import { getCell, type Worksheet } from "@office-kit/xlsx/worksheet";
-import { columnLetters } from "../../operations.ts";
+import { columnLetters } from "@chat/sheet/a1";
 import { recalculate } from "../calc.ts";
 import { dynamicCells, isDynamic, markDynamic, readDynamicCells } from "../dynamic-arrays.ts";
 import { toEngineFormula } from "../formulas.ts";

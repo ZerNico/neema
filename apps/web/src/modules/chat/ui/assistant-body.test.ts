@@ -523,4 +523,51 @@ describe("runs of work", () => {
       "text",
     ]);
   });
+
+  it("folds a document's reads and edits into one step and puts the created card after the work", () => {
+    const call = (
+      callId: string,
+      name: "create_document" | "edit_document" | "read_chat_document",
+      callIndex: number,
+      outcome: "created" | "updated" | "conflict" | "read",
+      documentId: string,
+    ): ToolActivity => ({
+      family: "document",
+      name,
+      callId,
+      textOffset: 0,
+      turnIndex: 0,
+      callIndex,
+      status: "complete",
+      result: { outcome, documentId, title: documentId },
+    });
+    const { parts } = projectGrouped({
+      content: "Done.",
+      streaming: false,
+      tools: [
+        web("search", 0, 0),
+        call("create", "create_document", 1, "created", "plan"),
+        call("fill-1", "edit_document", 2, "updated", "plan"),
+        call("fill-2", "edit_document", 3, "conflict", "plan"),
+        call("fill-3", "edit_document", 4, "updated", "plan"),
+        call("other", "read_chat_document", 5, "read", "notes"),
+      ],
+      compactions: [],
+    });
+    expect(
+      parts.map((part) =>
+        part.kind === "work"
+          ? `work(${part.steps
+              .map((step) =>
+                step.kind === "document"
+                  ? `document:${step.activities.map((each) => each.callId).join("+")}`
+                  : step.kind,
+              )
+              .join(",")})`
+          : part.kind === "tool"
+            ? `card:${part.activity.callId}`
+            : part.kind,
+      ),
+    ).toEqual(["work(web,document:fill-1+fill-2+fill-3,document:other)", "card:create", "text"]);
+  });
 });

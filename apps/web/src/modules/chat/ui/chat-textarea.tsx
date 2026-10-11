@@ -44,13 +44,15 @@ const mentionable = (source: TextareaMentions | undefined) =>
 export interface TextareaMentions {
   items: readonly MentionItem[];
   onSelect: (id: string) => void;
+  /** The mark beside a name, in the list and its tag; a connected service's logo when absent. */
+  icon?: ((id: string) => ReactNode) | undefined;
 }
 
 /** What callers hold instead of a DOM element: the field is a document editor. */
 export interface ComposerFieldHandle {
   focus: (options?: { preventScroll?: boolean; atEnd?: boolean }) => void;
   /** The draft as the string everyone else sees. */
-  readonly value: string;
+  value: () => string;
   /** Puts tags at the caret without taking focus: a pick made outside the text. */
   insertTags: (tags: readonly ContextTag[]) => void;
   /** Takes out every tag of these ids: a deselection made outside the text. */
@@ -338,6 +340,7 @@ export const ChatTextarea = forwardRef<
     ContextTagNode,
     IntegrationMention.configure({
       integrations: () => mentionable(latest.current.sources["@"]),
+      icon: (id) => latest.current.sources["@"]?.icon?.(id) ?? null,
       // A typed-out mention is the same keyboard route as picking it.
       onTyped: (integrationId) => {
         const source = latest.current.sources["@"];
@@ -457,9 +460,7 @@ export const ChatTextarea = forwardRef<
         if (editor?.view.dom.isConnected) run();
         else requestAnimationFrame(run);
       },
-      get value() {
-        return editor && !editor.isDestroyed ? docToText(editor) : emitted.current;
-      },
+      value: () => (editor && !editor.isDestroyed ? docToText(editor) : emitted.current),
       insertTags: (tags) => {
         if (!editor || editor.isDestroyed || tags.length === 0) return;
         const at = editor.state.selection.to;
@@ -508,7 +509,11 @@ export const ChatTextarea = forwardRef<
           items={list.items}
           selectedIndex={selectedIndex}
           caretRect={list.caretRect}
-          iconFor={LIST_ICON[list.trigger]}
+          iconFor={
+            list.trigger === "@" && sources["@"]?.icon
+              ? (item: MentionItem) => sources["@"]!.icon!(item.id)
+              : LIST_ICON[list.trigger]
+          }
           onHover={setActive}
           onPick={(index) => {
             const item = list.items[index];

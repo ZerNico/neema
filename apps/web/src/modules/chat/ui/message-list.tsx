@@ -4,7 +4,13 @@ import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { responseFailureCopy } from "../generation-failure.ts";
 import { NO_LOOKUPS, type AssistantFile, type UiLookups } from "../assistant-output.ts";
-import { Alert02Icon, ArrowDown01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  ArrowDown01Icon,
+  Comment01Icon,
+  RefreshIcon,
+} from "@hugeicons/core-free-icons";
+import { readCommentMessage } from "~/modules/documents/comment-message.ts";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
@@ -71,7 +77,7 @@ import { activityRowClassName } from "./activity-row.ts";
 import { PlanActivityBlock } from "./plan-activity-block.tsx";
 import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
-import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { DocumentActivityBlock, DocumentRunRow } from "./document-activity-block.tsx";
 import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
 import { NotifyActivityRow } from "./notify-activity-row.tsx";
 import { MapActivityRow } from "./map-activity-row.tsx";
@@ -452,6 +458,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
   const tagged = new Set(findTags(text).map((tag) => `${tag.kind}:${tag.id}`));
   const chipSkills = message.skills?.filter((skill) => !tagged.has(`skill:${skill.id}`));
   const chipCollections = message.collectionIds?.filter((id) => !tagged.has(`collection:${id}`));
+  const comment = readCommentMessage(text);
 
   return (
     <div ref={wrapperRef} className="w-full">
@@ -486,7 +493,18 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             </AttachmentChipRow>
           ) : null}
           {/* An attachment-only turn has no text bubble to draw. */}
-          {text ? (
+          {comment ? (
+            // Sent from a comment in a document: shown as that comment, as it reads there.
+            <div className="bg-card text-card-foreground flex max-w-[80%] flex-col gap-1.5 rounded-2xl border px-4 py-3 text-sm">
+              <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} className="size-3.5" />
+                <span className="truncate">Comment on “{comment.quote}”</span>
+              </span>
+              <span className="whitespace-pre-wrap wrap-anywhere leading-relaxed">
+                {comment.body}
+              </span>
+            </div>
+          ) : text ? (
             <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
               <MessageTagText text={text} />
             </div>
@@ -800,6 +818,7 @@ const AssistantBody = memo(function AssistantBody({
         />
       );
     }
+    if (part.kind === "document") return <DocumentRunRow key={part.key} part={part} />;
     if (part.kind === "working-file")
       return (
         <WorkingFileActivityBlock

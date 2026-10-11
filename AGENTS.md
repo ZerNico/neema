@@ -48,9 +48,10 @@ edit the wrong thing.
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
-- **document** (conversation or project document): editable Markdown owned by one chat or
-  one project, edited live by people and the model as a rich-text tree in Yjs, stored beside
-  its Markdown. Never knowledge versions or transcript content.
+- **document** (conversation or project document): editable content owned by one chat or
+  one project, edited live by people and the model in an order the server sets. Of two kinds:
+  text, a ProseMirror tree written as Markdown, and a live sheet of cells and formulas held by
+  stable IDs. Never knowledge versions or transcript content.
 - **project**: instructions, documents, files and memory shared by members (owner,
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
@@ -88,7 +89,7 @@ edit the wrong thing.
 - **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
   lists and search, neither reads nor saves memory, and is swept a day after its last
   activity. Keep clears the flag; nothing sets it later.
-- **ui block**: a ```` ```ui ```` fence in an answer, drawn as interactive UI. Its logic runs
+- **ui block**: a ` ```ui ` fence in an answer, drawn as interactive UI. Its logic runs
   in QuickJS and only JSON reaches the page. Identity is the fence's ordinal in the raw
   message text. State the reader sets is saved per block, and images are found by query
   when the fence closes. Not an attachment, not a tool. See
@@ -118,7 +119,8 @@ edit the wrong thing.
 3. **Vitest projects are by extension.** `--project unit` is `src/**/*.test.ts`,
    `--project ui` is `src/**/*.test.tsx`, `--project integration` is
    `tests/integration/**`. Running a `.test.tsx` under `unit` prints "No test
-   files found" and exits green. That is not a pass.
+   files found" and exits green. That is not a pass. A package under `packages/`
+   runs its own `vitest.config.ts` (`pnpm --filter @chat/sheet test`), not `--project`.
 4. **pnpm settings live in `pnpm-workspace.yaml`.** A `pnpm` block left in
    `package.json` is silently ignored, and a patched dependency then simply does
    not apply while the build stays green. Verify a patch by grepping
@@ -236,8 +238,8 @@ skipped one on purpose.
   the unread mark, channels and their dedupe.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
-- `docs/internals/documents.md`: editable Markdown on Yjs, transcript boundaries,
-  exact-match and streamed model edits, live sync and the one-writer hub.
+- `docs/internals/documents.md`: server-ordered ProseMirror steps, rebasing and offline
+  recovery, block IDs and the XML view, guarded and streamed model edits, the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`
   kind served only as a download, what the model sees, working drafts and publication.
 - `docs/internals/pdf.md`: PDF reading in worker processes, what makes a page a scan, who reads
@@ -262,6 +264,9 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
   text replacement, measuring the package before the parser, structured previews.
+- `docs/internals/sheets.md`: live sheets. Rows, columns and sheets by stable ID, formulas held by
+  them, deletes as marks that move range endpoints inward, total deterministic apply, per-client
+  sequence numbers.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
   (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
   containment and previews.
@@ -321,11 +326,12 @@ All release candidates. Pin exactly; never float to `latest`.
   apply the old patch there with `patch -p1`, then `pnpm patch-commit`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
-- `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
-  a bump.
-- `@office-kit/xlsx` (pre-1.0) and `@formulajs/formulajs` are pinned exact. Formulas are
-  calculated by our own engine on formula.js, not HyperFormula, which is GPL-3.0; keep
-  the calculation MIT unless that decision is revisited. See
+- `@tanstack/charts` is pinned exact (1.x, after an API that moved every pre-1.0
+  release); re-probe the analytics charts and sheet charts on a bump.
+- `@office-kit/xlsx` (pre-1.0, in apps/web) and `@formulajs/formulajs` (the one dependency
+  of `packages/sheet`) are pinned exact. Formulas are calculated by our own engine on
+  formula.js, not HyperFormula, which is GPL-3.0; keep the calculation MIT unless that
+  decision is revisited. See
   [spreadsheets](docs/internals/spreadsheets.md).
 - `@office-kit/docx` (pre-1.0) is pinned exact. It has no decompression limits, so the
   adapter measures every part first; re-check that on a bump. See [word](docs/internals/word.md).
@@ -338,6 +344,9 @@ All release candidates. Pin exactly; never float to `latest`.
   exact as a pair; v1 is the separate `@modelcontextprotocol/sdk`. On a bump, run
   `src/modules/integrations/mcp/server/*.test.ts`, which drive real servers of both protocol
   eras and an authorization server. See [MCP](docs/internals/mcp.md).
+- `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
+  reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
+  component uncompiled, which is most of them. On a bump, count compiled components, not test results.
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.
 

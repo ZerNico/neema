@@ -1,3 +1,4 @@
+import { BORDER_SIDES, type BorderLine, type CellStyle } from "@chat/sheet/model/style";
 import {
   isFormulaValue,
   makeFormula,
@@ -6,27 +7,25 @@ import {
   type FormulaValue,
 } from "@office-kit/xlsx/cell";
 import {
-  makeAreaChart,
-  makeBarChart,
-  makeBarSeries,
-  makeChartSpace,
-  makeLineChart,
-  makePieChart,
-  makeScatterChart,
-  makeScatterSeries,
-  type ChartSpace,
-} from "@office-kit/xlsx/chart";
-import { addChartAt, listChartsOnSheet } from "@office-kit/xlsx/drawing";
+  addChartAt,
+  listChartsOnSheet,
+  listImagesOnSheet,
+  makeOneCellAnchor,
+} from "@office-kit/xlsx/drawing";
 import { fromArrayBuffer, loadWorkbook, workbookToBytes } from "@office-kit/xlsx/io";
 import {
   getCellAlignment,
+  getCellBorder,
   getCellDisplayText,
   getCellFill,
   getCellFont,
   getCellNumberFormat,
+  makeBorder,
   makeFill,
+  makeSide,
   patchCellFont,
   setCellAlignment,
+  setCellBorder,
   setCellBorderAll,
   setCellFill,
   setCellNumberFormat,
@@ -53,10 +52,16 @@ import {
   getColumnDimension,
   getFreezePanes,
   getMergedCells,
+  getRowDimension,
   getValueExtent,
   iterCells,
+  listComments,
+  listDataValidations,
   listTables,
+  hideColumn,
+  hideRow,
   makeAutoFilter,
+  makeFilterColumn,
   mergeCells,
   setAutoFilter,
   setCell,
@@ -65,6 +70,8 @@ import {
   setRowHeight,
   unmergeCells,
   type Worksheet,
+  makeHyperlink,
+  makeSheetProperties,
 } from "@office-kit/xlsx/worksheet";
 import { SpreadsheetError } from "../errors.ts";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
@@ -75,11 +82,11 @@ import {
   columnLetters,
   parseCell,
   parseRange,
-  parseSpreadsheetOperations,
   type CellBox,
-  type SpreadsheetOperation,
-} from "../operations.ts";
-import { recalculate, type CalcReport, type FormulaIssue } from "./calc.ts";
+} from "@chat/sheet/a1";
+import { parseSpreadsheetOperations, type SpreadsheetOperation } from "../operations.ts";
+import { recalculate, scalarOf, type CalcReport, type FormulaIssue } from "./calc.ts";
+import { XError } from "@chat/sheet/engine/values";
 import {
   isDynamic,
   markDynamicArrays,
@@ -88,6 +95,17 @@ import {
 } from "./dynamic-arrays.ts";
 import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from "./formulas.ts";
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
+import { chartReference, readFileChart, type FileChart } from "./file-charts.ts";
+import { readValidation, writeValidations, type FileValidation } from "./file-validation.ts";
+import { NOTE_LIMITS, readNote, writeNotes, type FileNote } from "./file-notes.ts";
+import { readImage, writeImage, type FileImage } from "./file-images.ts";
+import { readGroups, writeOutline, type FileGroup, type FileOutline } from "./file-outline.ts";
+import {
+  fileHighlightStyles,
+  readConditional,
+  writeConditionals,
+  type FileConditional,
+} from "./file-conditional.ts";
 import { sheetChart, sheetCharts } from "./chart-parts.ts";
 import { OFFICE_THEME_XML } from "./office-theme.ts";
 import { strToU8 } from "fflate";
@@ -372,52 +390,47 @@ function renameReferences(workbook: Workbook, from: string, to: string) {
     for (const item of listChartsOnSheet(sheet)) walk(item);
 }
 
-function chartSpace(
-  workbook: Workbook,
-  operation: Extract<SpreadsheetOperation, { kind: "addChart" }>,
-) {
-  const categories = operation.categories
-    ? absoluteRef(workbook, operation.categories, operation.sheet)
-    : undefined;
-  const series = operation.series.map((item, index) => ({
-    values: absoluteRef(workbook, item.values, operation.sheet),
-    ...(item.name ? { tx: { kind: "literal" as const, value: item.name } } : {}),
-    index,
-  }));
-  const bars = series.map((item) =>
-    makeBarSeries({
-      idx: item.index,
-      val: { ref: item.values },
-      ...(categories ? { cat: { ref: categories } } : {}),
-      ...(item.tx ? { tx: item.tx } : {}),
-    }),
+/** An addChart operation as the file chart it makes. */
+const fileChartOf = (
+  operation: Omit<Extract<SpreadsheetOperation, { kind: "addChart" }>, "kind">,
+): FileChart => ({
+  sheet: operation.sheet,
+  at: operation.at,
+  width: operation.width ?? 480,
+  height: operation.height ?? 300,
+  // The schema offers only the kinds a file chart has.
+  kind: operation.type as FileChart["kind"],
+  ...(operation.title ? { title: operation.title } : {}),
+  // Below the plot, where Excel puts a new chart's legend.
+  ...(operation.series.length > 1 || operation.type === "pie" ? { legend: "bottom" } : {}),
+  series: operation.series.map((item) => ({
+    values: item.values,
+    ...(operation.categories ? { categories: operation.categories } : {}),
+    ...(item.name ? { name: { text: item.name } } : {}),
+  })),
+});
+
+/** Places a file chart on its sheet, its ranges made absolute against the workbook. */
+function placeChart(workbook: Workbook, chart: FileChart) {
+  const item = addChartAt(
+    sheetOf(workbook, chart.sheet),
+    chart.at,
+    chartReference(chart, (ref) => absoluteRef(workbook, ref, chart.sheet)),
+    { widthPx: chart.width, heightPx: chart.height },
   );
-  const chart =
-    operation.type === "column" || operation.type === "bar"
-      ? makeBarChart({ barDir: operation.type === "column" ? "col" : "bar", series: bars })
-      : operation.type === "line"
-        ? makeLineChart({ series: bars })
-        : operation.type === "area"
-          ? makeAreaChart({ series: bars })
-          : operation.type === "pie"
-            ? makePieChart({ series: bars })
-            : makeScatterChart({
-                series: series.map((item) =>
-                  makeScatterSeries({
-                    idx: item.index,
-                    yVal: { ref: item.values },
-                    ...(categories ? { xVal: { ref: categories } } : {}),
-                    ...(item.tx ? { tx: item.tx } : {}),
-                  }),
-                ),
-              });
-  const space: ChartSpace = makeChartSpace({
-    plotArea: { chart },
-    ...(operation.title ? { title: operation.title } : {}),
-    // Below the plot, where Excel puts a new chart's legend.
-    ...(series.length > 1 || operation.type === "pie" ? { legend: { position: "b" } } : {}),
-  });
-  return space;
+  const corner = parseCell(chart.at);
+  // Excel keeps how far into its cell a chart's corner sits as offsets in EMUs.
+  if (chart.offset && corner)
+    item.anchor = makeOneCellAnchor({
+      from: {
+        col: corner.column - 1,
+        row: corner.row - 1,
+        colOff: Math.round(chart.offset.x * 9_525),
+        rowOff: Math.round(chart.offset.y * 9_525),
+      },
+      widthPx: chart.width,
+      heightPx: chart.height,
+    });
 }
 
 /** Applies one operation; a failure names it and nothing of the batch is saved. */
@@ -495,10 +508,21 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
     case "setFormat": {
       const sheet = sheetOf(workbook, operation.sheet);
       const box = rangeOf(operation.range);
+      const pen = sideOf({
+        style: operation.borderStyle ?? "thin",
+        ...(operation.borderColor && operation.borderColor !== "none"
+          ? { color: operation.borderColor }
+          : {}),
+      });
       for (const cell of everyCell(sheet, box)) {
         const font = {
           ...(operation.bold === undefined ? {} : { bold: operation.bold }),
           ...(operation.italic === undefined ? {} : { italic: operation.italic }),
+          ...(operation.underline === undefined
+            ? {}
+            : { underline: operation.underline ? ("single" as const) : undefined }),
+          ...(operation.strike === undefined ? {} : { strike: operation.strike }),
+          ...(operation.font ? { name: operation.font } : {}),
           ...(operation.fontSize === undefined ? {} : { size: operation.fontSize }),
           ...(operation.fontColor ? { color: { rgb: `FF${operation.fontColor.slice(1)}` } } : {}),
         };
@@ -526,12 +550,24 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
               : {}),
             ...(operation.wrap === undefined ? {} : { wrapText: operation.wrap }),
           });
-        if (operation.border === "all") setCellBorderAll(workbook, cell, { style: "thin" });
+        if (operation.border === "all") setCellBorderAll(workbook, cell, pen);
         if (operation.border === "none")
           setCellBorderAll(workbook, cell, { style: "none" as "thin" });
+        // One edge of the range: the cells along it keep their other sides.
+        const edge =
+          operation.border === "top" && cell.row === box.top
+            ? "top"
+            : operation.border === "bottom" && cell.row === box.bottom
+              ? "bottom"
+              : null;
+        if (edge)
+          setCellBorder(
+            workbook,
+            cell,
+            makeBorder({ ...getCellBorder(workbook, cell), [edge]: makeSide(pen) }),
+          );
       }
-      if (operation.border === "outline")
-        setRangeBorderBox(workbook, sheet, boxRef(box), { style: "thin" });
+      if (operation.border === "outline") setRangeBorderBox(workbook, sheet, boxRef(box), pen);
       return;
     }
     case "setColumnWidth": {
@@ -611,15 +647,7 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
       const sheet = sheetOf(workbook, operation.sheet);
       if (listChartsOnSheet(sheet).length >= SPREADSHEET_LIMITS.chartsPerSheet)
         fail("limit", `A sheet can hold at most ${SPREADSHEET_LIMITS.chartsPerSheet} charts.`);
-      addChartAt(
-        sheet,
-        operation.at,
-        { space: chartSpace(workbook, operation) },
-        {
-          widthPx: operation.width ?? 480,
-          heightPx: operation.height ?? 300,
-        },
-      );
+      placeChart(workbook, fileChartOf(operation));
       return;
     }
   }
@@ -813,6 +841,517 @@ export async function editSpreadsheet(bytes: Uint8Array, rawOperations: unknown)
     ...(calc.unsupported.length ? { notCalculated: calc.unsupported } : {}),
     sheets: sheetNames(workbook),
     operations: operations.map((operation) => operation.kind),
+  };
+}
+
+/** A live sheet as a workbook is built from it: every cell's input as setCells takes it, and its style. */
+export interface LiveSheetExport {
+  readonly sheets: ReadonlyArray<{
+    readonly name: string;
+    readonly cells: ReadonlyArray<{
+      readonly row: number;
+      readonly column: number;
+      readonly input?: string | number | boolean;
+      /** A legacy array formula's extent, from its cell. */
+      readonly array?: { readonly rows: number; readonly cols: number };
+      readonly style?: CellStyle;
+    }>;
+    readonly merges: readonly string[];
+    readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
+    readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
+    readonly freeze?: string;
+    readonly hiddenRows?: readonly number[];
+    readonly hiddenCols?: readonly number[];
+    readonly filter?: FileFilter;
+    readonly conditional?: readonly FileConditional[];
+    readonly validations?: readonly FileValidation[];
+    /** The tab's colour, as #RRGGBB. */
+    readonly color?: string;
+    /** Cell notes, each a comment thread. */
+    readonly notes?: readonly FileNote[];
+    /** Grouped rows and columns. */
+    readonly outline?: FileOutline;
+  }>;
+  readonly names: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /** Charts by sheet name and cell, their ranges as A1 text. */
+  readonly charts?: readonly FileChart[];
+  readonly images?: readonly FileImage[];
+}
+
+/** An AutoFilter as a file keeps one: its range, and the values each filtered column keeps. */
+export interface FileFilter {
+  readonly ref: string;
+  /** By column counted from the filter's first, 0-based; `blank` keeps empty cells too. */
+  readonly columns: ReadonlyArray<{
+    readonly col: number;
+    readonly values: readonly string[];
+    readonly blank: boolean;
+  }>;
+}
+
+/** Excel's Hyperlink style colour, which a linked cell takes unless it has its own. */
+const LINK_COLOR = "#0563C1";
+/** A link a file may carry: web and mail addresses only. */
+const fileLink = (text: unknown) =>
+  typeof text === "string" && /^(https?:\/\/|mailto:)/i.test(text) && text.length <= 2079
+    ? text
+    : null;
+
+/** A live sheet's style properties, as the `format` operation stores them, on one cell. */
+/** Each edge of a style by the side Excel names it. */
+const FILE_SIDES = {
+  borderTop: "top",
+  borderBottom: "bottom",
+  borderLeft: "left",
+  borderRight: "right",
+} as const;
+/** An edge's line as the file writes it: colour as ARGB, black where none is set. */
+const sideOf = (line: BorderLine) => ({
+  style: line.style,
+  ...(line.color ? { color: { rgb: `FF${line.color.slice(1)}` } } : {}),
+});
+/**
+ * A file's edge as a line, or null for none. Excel's other dashes become
+ * dashed and its hair line thin; black is the default colour, kept as none.
+ */
+function lineOf(side: { style?: string; color?: { rgb?: string } } | undefined): BorderLine | null {
+  const name = side?.style;
+  if (!name || name === "none") return null;
+  const style: BorderLine["style"] =
+    name === "medium" || name === "thick" || name === "double" || name === "dotted"
+      ? name
+      : /dash/i.test(name)
+        ? "dashed"
+        : "thin";
+  const color = rgbOf(side.color);
+  return color && color !== "#000000" ? { style, color } : { style };
+}
+
+function styleCell(workbook: Workbook, cell: Cell, style: CellStyle) {
+  const font = {
+    ...(style.bold ? { bold: true } : {}),
+    ...(style.italic ? { italic: true } : {}),
+    ...(style.underline ? { underline: "single" as const } : {}),
+    ...(style.strike ? { strike: true } : {}),
+    ...(style.fontFamily ? { name: style.fontFamily } : {}),
+    ...(style.fontSize !== undefined ? { size: style.fontSize } : {}),
+    ...(style.fontColor ? { color: { rgb: `FF${style.fontColor.slice(1)}` } } : {}),
+  };
+  if (Object.keys(font).length) patchCellFont(workbook, cell, font);
+  if (style.fill)
+    setCellFill(
+      workbook,
+      cell,
+      makeFill({ patternType: "solid", fgColor: { rgb: `FF${style.fill.slice(1)}` } }),
+    );
+  if (style.numberFormat) setCellNumberFormat(workbook, cell, style.numberFormat);
+  if (style.horizontal || style.vertical || style.wrap)
+    setCellAlignment(workbook, cell, {
+      ...(style.horizontal ? { horizontal: style.horizontal } : {}),
+      ...(style.vertical ? { vertical: style.vertical } : {}),
+      ...(style.wrap ? { wrapText: true } : {}),
+    });
+  const edges = {
+    ...(style.borderTop ? { top: makeSide(sideOf(style.borderTop)) } : {}),
+    ...(style.borderBottom ? { bottom: makeSide(sideOf(style.borderBottom)) } : {}),
+    ...(style.borderLeft ? { left: makeSide(sideOf(style.borderLeft)) } : {}),
+    ...(style.borderRight ? { right: makeSide(sideOf(style.borderRight)) } : {}),
+  };
+  if (Object.keys(edges).length) setCellBorder(workbook, cell, makeBorder(edges));
+}
+
+/**
+ * A workbook made from a live sheet. Its formulas are written as Excel 365
+ * reads them and calculated here, so the file opens with every value.
+ */
+export async function exportLiveSheet(spec: LiveSheetExport) {
+  const workbook = createWorkbook();
+  const authored = new Set<Cell>();
+  for (const each of spec.sheets) {
+    const sheet = addWorksheet(workbook, each.name);
+    for (const { row, column, input, array, style } of each.cells) {
+      if (input !== undefined) {
+        setCell(sheet, row, column, toCellValue(input));
+        const cell = getCell(sheet, row, column);
+        // A legacy array formula keeps its range, and is not authored, so it stays legacy.
+        if (cell && isFormulaValue(cell.value) && array)
+          cell.value = {
+            ...cell.value,
+            t: "array",
+            ref: boxRef({
+              top: row,
+              left: column,
+              bottom: row + array.rows - 1,
+              right: column + array.cols - 1,
+            }),
+          };
+        else if (cell && isFormulaValue(cell.value)) authored.add(cell);
+      }
+      const link = fileLink(style?.link);
+      // A link is Excel's hyperlink on the cell, looking as Excel's Hyperlink style does.
+      // A target the file format refuses leaves the cell's text without its link.
+      if (link)
+        try {
+          sheet.hyperlinks.push(
+            makeHyperlink({ ref: `${columnLetters(column)}${row}`, target: link }),
+          );
+        } catch {
+          // Kept as text.
+        }
+      if (style)
+        styleCell(
+          workbook,
+          ensureCell(sheet, row, column),
+          link ? { ...style, underline: true, fontColor: style.fontColor ?? LINK_COLOR } : style,
+        );
+    }
+    for (const merge of each.merges) mergeCells(sheet, merge);
+    for (const [column, width] of each.widths) setColumnWidth(sheet, column, width);
+    for (const [row, height] of each.heights) setRowHeight(sheet, row, height);
+    if (each.freeze) setFreezePanes(sheet, each.freeze);
+    if (each.conditional?.length) writeConditionals(workbook, sheet, each.conditional);
+    if (each.validations?.length) writeValidations(sheet, each.validations);
+    if (each.notes?.length) writeNotes(sheet, each.notes);
+    if (each.outline) writeOutline(sheet, each.outline);
+    if (each.color)
+      sheet.sheetProperties = makeSheetProperties({
+        ...sheet.sheetProperties,
+        tabColor: { rgb: `FF${each.color.slice(1).toUpperCase()}` },
+      });
+    for (const row of each.hiddenRows ?? []) hideRow(sheet, row);
+    for (const column of each.hiddenCols ?? []) hideColumn(sheet, column);
+    if (each.filter)
+      setAutoFilter(
+        sheet,
+        makeAutoFilter({
+          ref: each.filter.ref,
+          filterColumns: each.filter.columns.map((column) =>
+            makeFilterColumn({ colId: column.col, values: column.values, blank: column.blank }),
+          ),
+        }),
+      );
+  }
+  for (const name of spec.names) addDefinedName(workbook, name);
+  for (const chart of spec.charts ?? []) placeChart(workbook, chart);
+  for (const image of spec.images ?? []) writeImage(sheetOf(workbook, image.sheet), image);
+  recalculate(workbook, { authored });
+  return save(workbook);
+}
+
+/** A workbook read for a live sheet: what it keeps by position, and what it leaves behind. */
+export interface LiveSheetImport {
+  readonly sheets: ReadonlyArray<{
+    readonly name: string;
+    readonly rows: number;
+    readonly cols: number;
+    readonly cells: ReadonlyArray<{
+      readonly row: number;
+      readonly column: number;
+      /** A value, or a formula as typed (with "="). */
+      readonly value?: string | number | boolean;
+      readonly formula?: string;
+      /** A legacy array formula's extent; a dynamic one spills by itself. */
+      readonly array?: { readonly rows: number; readonly cols: number };
+      readonly style?: CellStyle;
+    }>;
+    readonly merges: readonly string[];
+    readonly widths: ReadonlyArray<readonly [column: number, characters: number]>;
+    readonly heights: ReadonlyArray<readonly [row: number, points: number]>;
+    readonly freeze?: string;
+    readonly hiddenRows?: readonly number[];
+    readonly hiddenCols?: readonly number[];
+    readonly filter?: FileFilter;
+    readonly conditional?: readonly FileConditional[];
+    readonly validations?: readonly FileValidation[];
+    /** The tab's colour, as #RRGGBB. */
+    readonly color?: string;
+    /** Cell notes, each a comment thread. */
+    readonly notes?: readonly FileNote[];
+    /** Grouped rows and columns. */
+    readonly outline?: FileOutline;
+  }>;
+  /** Defined names; `sheet` is the sheet a name is local to, absent for the workbook's. */
+  readonly names: ReadonlyArray<{
+    readonly name: string;
+    readonly value: string;
+    readonly sheet?: string;
+  }>;
+  readonly charts: readonly FileChart[];
+  readonly images: readonly FileImage[];
+  /** What a live sheet does not keep, in words, for the model to tell the person. */
+  readonly dropped: readonly string[];
+}
+
+/** Fonts Excel and its readers start a workbook with; a cell in one keeps no font of its own. */
+const DEFAULT_FONTS = new Set(["Calibri", "Aptos", "Aptos Narrow", "Arial"]);
+const rgbOf = (color: { rgb?: string } | undefined) =>
+  color?.rgb && /^[0-9a-f]{8}$/i.test(color.rgb) ? `#${color.rgb.slice(2).toUpperCase()}` : null;
+
+/** Whether a collapsed group folds a row or column away. */
+const folded = (groups: readonly FileGroup[], index: number) =>
+  groups.some((group) => group.collapsed && index >= group.from && index <= group.to);
+
+/** A linked cell's style: its link, without the look Excel's Hyperlink style gave it. */
+function linkedStyle(style: CellStyle | undefined, link: string): CellStyle {
+  const { underline: _, fontColor, ...rest } = style ?? {};
+  return { ...rest, ...(fontColor && fontColor !== LINK_COLOR ? { fontColor } : {}), link };
+}
+
+/** A cell's style as a live sheet stores it: only what its format operation knows. */
+function liveStyle(workbook: Workbook, cell: Cell): CellStyle | undefined {
+  const style: { -readonly [K in keyof CellStyle]?: CellStyle[K] } = {};
+  const font = getCellFont(workbook, cell);
+  if (font.bold) style.bold = true;
+  if (font.italic) style.italic = true;
+  if (font.underline) style.underline = true;
+  if (font.strike) style.strike = true;
+  // The workbook's default font is the sheet's own; only another is kept.
+  if (font.name && !DEFAULT_FONTS.has(font.name)) style.fontFamily = font.name;
+  if (font.size && font.size !== 11) style.fontSize = font.size;
+  const fontColor = rgbOf(font.color);
+  if (fontColor && fontColor !== "#000000") style.fontColor = fontColor;
+  const fill = getCellFill(workbook, cell);
+  const fillColor =
+    fill.kind === "pattern" && fill.patternType === "solid" ? rgbOf(fill.fgColor) : null;
+  if (fillColor) style.fill = fillColor;
+  const format = getCellNumberFormat(workbook, cell);
+  if (format && format !== "General") style.numberFormat = format;
+  const alignment = getCellAlignment(workbook, cell);
+  if (
+    alignment.horizontal === "left" ||
+    alignment.horizontal === "center" ||
+    alignment.horizontal === "right"
+  )
+    style.horizontal = alignment.horizontal;
+  if (
+    alignment.vertical === "top" ||
+    alignment.vertical === "center" ||
+    alignment.vertical === "bottom"
+  )
+    style.vertical = alignment.vertical;
+  if (alignment.wrapText) style.wrap = true;
+  const border = getCellBorder(workbook, cell);
+  for (const key of BORDER_SIDES) {
+    const line = lineOf(border[FILE_SIDES[key]]);
+    if (line) style[key] = line;
+  }
+  return Object.keys(style).length ? style : undefined;
+}
+
+/**
+ * Reads a workbook for a live sheet: cells by position with their values,
+ * formulas as text and styles, and sizes, merges, panes and names. What a
+ * live sheet cannot hold is listed in `dropped`, never guessed at.
+ */
+export async function importLiveSheet(bytes: Uint8Array): Promise<LiveSheetImport> {
+  const workbook = await openWorkbook(bytes);
+  unshareFormulas(workbook);
+  const dropped = new Set<string>();
+  const charts: FileChart[] = [];
+  const images: FileImage[] = [];
+  const highlightStyles = fileHighlightStyles(bytes);
+  const sheets = [...iterWorksheets(workbook)].map((sheet) => {
+    const cells: Array<LiveSheetImport["sheets"][number]["cells"][number]> = [];
+    let [rows, cols] = [0, 0];
+    // Hyperlinks by cell; one over a range links each of its cells.
+    const links = new Map<string, string>();
+    for (const hyperlink of sheet.hyperlinks) {
+      const link = fileLink(hyperlink.target);
+      const box = parseRange(hyperlink.ref);
+      if (!link || !box) {
+        dropped.add("links within the workbook or to files");
+        continue;
+      }
+      for (let row = box.top; row <= Math.min(box.bottom, box.top + 999); row++)
+        for (let col = box.left; col <= Math.min(box.right, box.left + 99); col++)
+          links.set(`${row}:${col}`, link);
+    }
+    // An array formula's other cells hold its cached results, not values typed there; kept,
+    // they would block the formula's own spill.
+    const arrays = [...iterCells(sheet)].flatMap((cell) =>
+      isFormulaValue(cell.value) && cell.value.t === "array" && cell.value.ref
+        ? [parseRange(cell.value.ref)].filter((box) => box !== null)
+        : [],
+    );
+    const cached = (row: number, col: number) =>
+      arrays.some(
+        (box) =>
+          row >= box.top &&
+          row <= box.bottom &&
+          col >= box.left &&
+          col <= box.right &&
+          !(row === box.top && col === box.left),
+      );
+    for (const cell of iterCells(sheet)) {
+      const value = cell.value;
+      const link = links.get(`${cell.row}:${cell.col}`);
+      const style = link ? linkedStyle(liveStyle(workbook, cell), link) : liveStyle(workbook, cell);
+      let entry: LiveSheetImport["sheets"][number]["cells"][number] | null = null;
+      if (isFormulaValue(value)) {
+        if (value.t === "array" && value.ref && !isDynamic(workbook, sheet, cell)) {
+          const box = parseRange(value.ref);
+          entry = {
+            row: cell.row,
+            column: cell.col,
+            formula: value.formula,
+            ...(box
+              ? { array: { rows: box.bottom - box.top + 1, cols: box.right - box.left + 1 } }
+              : {}),
+          };
+        } else if (value.formula)
+          entry = { row: cell.row, column: cell.col, formula: value.formula };
+      } else if (!cached(cell.row, cell.col)) {
+        const scalar = scalarOf(value);
+        if (scalar instanceof XError)
+          entry = { row: cell.row, column: cell.col, value: scalar.code };
+        else if (scalar !== null) entry = { row: cell.row, column: cell.col, value: scalar };
+      }
+      if (!entry && !style) continue;
+      cells.push({
+        ...(entry ?? { row: cell.row, column: cell.col }),
+        ...(style ? { style } : {}),
+      });
+      rows = Math.max(rows, cell.row);
+      cols = Math.max(cols, cell.col);
+    }
+    const merges = getMergedCells(sheet).map((merge) =>
+      boxRef({ top: merge.minRow, left: merge.minCol, bottom: merge.maxRow, right: merge.maxCol }),
+    );
+    const widths: Array<[number, number]> = [];
+    for (let column = 1; column <= Math.max(cols, 26); column++) {
+      const width = getColumnDimension(sheet, column)?.width;
+      if (width !== undefined) widths.push([column, width]);
+    }
+    const heights: Array<[number, number]> = [];
+    for (let row = 1; row <= rows; row++) {
+      const height = getRowDimension(sheet, row);
+      if (height?.customHeight && height.height !== undefined) heights.push([row, height.height]);
+    }
+    for (const item of listChartsOnSheet(sheet)) {
+      const chart = readFileChart(sheet, item);
+      if (chart) charts.push(chart);
+      else dropped.add("charts of kinds a live sheet does not draw");
+    }
+    for (const item of listImagesOnSheet(sheet)) {
+      const image = readImage(sheet, item);
+      if (image) images.push(image);
+      else dropped.add("pictures too large or of kinds a live sheet does not show");
+    }
+    if (listTables(sheet).length) dropped.add("table formatting (the data stays)");
+    const autoFilter = getAutoFilter(sheet);
+    const filter: FileFilter | undefined = autoFilter
+      ? {
+          ref: autoFilter.ref,
+          columns: autoFilter.filterColumns.flatMap((column) =>
+            column.kind === "filters"
+              ? [{ col: column.colId, values: column.values, blank: !!column.blank }]
+              : [],
+          ),
+        }
+      : undefined;
+    // Rows Excel hid for its filter are the filter's to hide again, not hidden by hand.
+    const filterBox = filter?.columns.length ? parseRange(filter.ref) : null;
+    const hiddenRows: number[] = [];
+    // Empty rows may be hidden too: as far down as a new live sheet reaches.
+    for (let row = 1; row <= Math.max(rows, 1_000); row++)
+      if (
+        getRowDimension(sheet, row)?.hidden &&
+        !(filterBox && row > filterBox.top && row <= filterBox.bottom)
+      )
+        hiddenRows.push(row);
+    // Groups from each row's and column's outline level; a collapsed one's rows are its, not hidden.
+    const rowGroups = readGroups(
+      Math.max(rows, 1_000),
+      (row) => getRowDimension(sheet, row)?.outlineLevel ?? 0,
+      (row) => getRowDimension(sheet, row)?.hidden === true,
+    );
+    const colGroups = readGroups(
+      Math.max(cols, 26),
+      (column) => getColumnDimension(sheet, column)?.outlineLevel ?? 0,
+      (column) => getColumnDimension(sheet, column)?.hidden === true,
+    );
+    const tabColor = rgbOf(sheet.sheetProperties?.tabColor);
+    const hiddenCols: number[] = [];
+    for (let column = 1; column <= Math.max(cols, 26); column++)
+      if (getColumnDimension(sheet, column)?.hidden) hiddenCols.push(column);
+    const refOf = (
+      range: (typeof sheet.conditionalFormatting)[number]["sqref"]["ranges"][number],
+    ) =>
+      boxRef({ top: range.minRow, left: range.minCol, bottom: range.maxRow, right: range.maxCol });
+    // A rule over several ranges comes in as one rule per range, which a live sheet draws alike.
+    const conditional = sheet.conditionalFormatting
+      .flatMap((format) =>
+        format.rules
+          .toSorted((a, b) => a.priority - b.priority)
+          .flatMap((rule) => {
+            const read = readConditional(rule, highlightStyles);
+            if (!format.sqref.ranges.length || !read) {
+              dropped.add(
+                "conditional formats of kinds a live sheet does not draw (icon sets, formulas)",
+              );
+              return [];
+            }
+            return format.sqref.ranges.map((range) => ({
+              ref: refOf(range),
+              rule: read,
+              priority: rule.priority,
+            }));
+          }),
+      )
+      .toSorted((a, b) => a.priority - b.priority)
+      .map(({ ref, rule }) => ({ ref, rule }));
+    const validations = listDataValidations(sheet).flatMap((validation) => {
+      const read = validation.sqref.ranges.map((range) => readValidation(validation, refOf(range)));
+      if (!read.length || read.includes(null))
+        dropped.add("data validation of kinds a live sheet does not check (times, formulas)");
+      return read.filter((each) => each !== null);
+    });
+    const notes = listComments(sheet)
+      .slice(0, NOTE_LIMITS.notes)
+      .flatMap((note) => readNote(note) ?? []);
+    const freeze = getFreezePanes(sheet);
+    return {
+      name: sheet.title,
+      rows,
+      cols,
+      cells,
+      merges,
+      widths,
+      heights,
+      ...(freeze ? { freeze } : {}),
+      ...(hiddenRows.some((row) => !folded(rowGroups, row))
+        ? { hiddenRows: hiddenRows.filter((row) => !folded(rowGroups, row)) }
+        : {}),
+      ...(hiddenCols.some((column) => !folded(colGroups, column))
+        ? { hiddenCols: hiddenCols.filter((column) => !folded(colGroups, column)) }
+        : {}),
+      ...(filter ? { filter } : {}),
+      ...(conditional.length ? { conditional } : {}),
+      ...(validations.length ? { validations } : {}),
+      ...(tabColor ? { color: tabColor } : {}),
+      ...(rowGroups.length || colGroups.length
+        ? {
+            outline: {
+              ...(rowGroups.length ? { rows: rowGroups } : {}),
+              ...(colGroups.length ? { cols: colGroups } : {}),
+            },
+          }
+        : {}),
+      ...(notes.length ? { notes } : {}),
+    };
+  });
+  return {
+    sheets,
+    names: workbook.definedNames
+      .filter((name) => !name.name.startsWith("_xlnm."))
+      .map((name) => {
+        const sheet =
+          name.scope === undefined ? undefined : workbook.sheets[name.scope]?.sheet.title;
+        return { name: name.name, value: name.value, ...(sheet ? { sheet } : {}) };
+      }),
+    charts,
+    images,
+    dropped: [...dropped],
   };
 }
 

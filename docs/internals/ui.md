@@ -14,6 +14,14 @@ that bug.
   after `@import "tailwindcss"`: overlay primitives' `data-open:animate-in`/`fade-in-0`/`zoom-in-95`
   classes come from `tw-animate-css`, and without it overlays pop with no transition and no error. `cn`
   (the package) is re-exported by `src/ui/utils.ts`; primitives import `"cn"` directly, as the CLI emits.
+- A package that draws (`packages/sheet-react`) styles with the app's semantic token classes and
+  imports nothing from `~/ui`; the app draws its menus and toolbars from data it exposes. `app.css`
+  lists the package with `@source`: without it Tailwind never sees its classes and they are
+  silently missing.
+- What sits over a sheet's cells (a chart) is selected, moved and resized by the grid, which
+  knows cell geometry; the app passes its content and turns the moves into operations. Its
+  options are edited in a pane beside the grid, never a dialog, so each change shows on the
+  chart as it is made, for everyone.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button
@@ -50,6 +58,22 @@ className={buttonVariants({...})}>`.
   `--radius-composer-inner` the concentric radius for anything sitting `inset-1` within it.
 - `Button` already has an `xs` size (24px tall). Reach for it before writing `h-6` and a padding
   override; five call sites in the folder strip had hand-rolled it while the size went unused.
+
+## React Compiler
+
+The build and the UI tests compile components with React Compiler (`reactCompilerPreset` through
+`@rolldown/plugin-babel`, since `@vitejs/plugin-react` 6 has no Babel). Test files themselves are left
+out: their harnesses rerender with fakes that read mutable state, which a memoized harness never reads
+again. Oxlint runs the compiler's own rules, so code it would refuse fails lint first. Two traps it does
+not catch:
+
+- A memo that recomputes on a counter (`revision`, `version`) while reading a mutable object is
+  recompiled on what it reads, so the counter stops reaching it. Give the changing value to React as
+  state, as `CodeViewer` keeps shiki's result, or mark the function `"use no memo"` with the reason, as
+  the desktop work approvals do.
+- The compiler skips a function only for `eslint-disable` comments on `react-hooks` rules; an
+  `oxlint-disable` one does not stop it. Dependencies left out on purpose are then filled in. A
+  snapshot taken once belongs in state keyed by what starts it, as the chat's stream seed is.
 
 ## Page chrome and layout
 
@@ -134,7 +158,10 @@ false`), so a page body is written against data already there. This includes loc
 - On a narrow screen the same rail covers the page below the header and slides in from the right,
   rather than rising as a bottom sheet, so the corner toggle and its right-panel icon mean the same
   thing at every width. Until someone drags the rail's edge its width is a share of the window; a
-  dragged width is kept.
+  dragged width is kept. It stops where the sidebar and a readable page would no longer fit, and
+  dragged well past that it takes the whole row: the page beside it turns invisible, keeping its
+  state, until the edge is dragged back, the strip's full-width button is pressed again, or the
+  rail closes. That state is never stored, so a reload brings the page back.
 - A `restorable` request's tab outlives navigation and restarts: its id and title, never its body,
   are stored per account in `localStorage` (`detail-panel-tabs.ts`). A restored tab shows a pending
   body until the owner of its kind refreshes it, and owners refresh every tab of their kind, not
@@ -273,9 +300,9 @@ false`), so a page body is written against data already there. This includes loc
   widgets keep canonical resources reachable after retry/edit removes their tool rows. Branch
   references stay historical and inert even if the branch later acquires a resource of its own.
 - Agent-draft reconciliation accepts clean remote fields and disjoint edits, but differing edits
-  to one field require an inline choice. Conversation-document source is a live Yjs document, so
-  concurrent edits merge with no choice to make and the panel stays editable while the assistant
-  answers ([documents](documents.md)). Flush every owned editor
+  to one field require an inline choice. A conversation document is ordered by the server and each
+  editor rebases its own steps, so concurrent edits need no choice and the panel stays editable
+  while the assistant answers ([documents](documents.md)). Flush every owned editor
   before send, structured answer, retry, edit, branch or save, never Stop. A document or draft
   belongs to its creating answer, so rewinding that answer removes it; its card stays at the
   creating tool call's text offset, or at the end of that answer while no tool row names it yet,

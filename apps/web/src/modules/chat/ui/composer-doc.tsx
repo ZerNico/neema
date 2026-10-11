@@ -1,5 +1,6 @@
 import { InputRule, Node, type Editor, type JSONContent } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
+import type { ReactNode } from "react";
 import {
   integrationForName,
   mentionNamePattern,
@@ -57,6 +58,8 @@ export interface IntegrationMentionOptions {
   onTyped: (integrationId: string) => void;
   /** The names a typed "@" may complete, read when the rule runs. */
   integrations: () => Mentionable;
+  /** A mark of the source's own instead of a service's logo; null for the logo. */
+  icon: (id: string) => ReactNode;
 }
 
 /**
@@ -72,7 +75,7 @@ export const IntegrationMention = Node.create<IntegrationMentionOptions>({
   selectable: false,
 
   addOptions() {
-    return { onTyped: () => undefined, integrations: () => [] };
+    return { onTyped: () => undefined, integrations: () => [], icon: () => null };
   },
 
   addAttributes() {

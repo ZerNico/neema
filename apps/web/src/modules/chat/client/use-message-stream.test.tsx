@@ -181,12 +181,7 @@ describe("useMessageStream ask replay", () => {
         family: "document",
         phase: "result",
         callId: "document-1",
-        name:
-          outcome === "read"
-            ? "read_chat_document"
-            : outcome === "conflict"
-              ? "replace_document"
-              : "edit_document",
+        name: outcome === "read" ? "read_chat_document" : "edit_document",
         outcome,
         documentId: "doc-1",
         documentConversationId: "c1",

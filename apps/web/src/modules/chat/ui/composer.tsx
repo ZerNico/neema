@@ -211,7 +211,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (touched.current) return;
         touched.current = true;
         // Someone may already have typed before the prefill arrived.
-        const typed = textareaRef.current?.value;
+        const typed = textareaRef.current?.value();
         if (typed) {
           setDraft(typed);
           return;
@@ -222,7 +222,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       },
       offerDraft: (text) => {
         touched.current = true;
-        const typed = textareaRef.current?.value ?? "";
+        const typed = textareaRef.current?.value() ?? "";
         setDraft(typed.trim() ? `${typed.trimEnd()}\n${text}` : text);
         textareaRef.current?.focus();
       },

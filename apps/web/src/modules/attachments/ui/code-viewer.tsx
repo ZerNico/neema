@@ -1,5 +1,5 @@
 import { code } from "@streamdown/code";
-import { useMemo, useReducer, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { cn } from "~/ui/utils";
 
 // A file viewer, not a chat code fence: Streamdown's fence adds its own
@@ -8,7 +8,8 @@ import { cn } from "~/ui/utils";
 // gutter+code grid instead, reusing the `code` plugin's shared highlighter and
 // grammar cache.
 
-type Tokens = NonNullable<ReturnType<typeof code.highlight>>["tokens"];
+type Highlighted = NonNullable<ReturnType<typeof code.highlight>>;
+type Tokens = Highlighted["tokens"];
 
 // Highlighting walks every token of the file; past this the gutter and plain
 // text are still worth having, the colours are not.
@@ -34,23 +35,30 @@ const useHighlighted = (text: string, language: string): Tokens | null => {
     [language],
   );
   const eligible = supported !== null && text.length <= HIGHLIGHT_CHAR_CAP;
-  const [version, retry] = useReducer((n: number) => n + 1, 0);
+  // What highlighting gave once its grammar loaded, for the text and language it was asked.
+  const [arrived, setArrived] = useState<{
+    text: string;
+    language: string;
+    result: Highlighted;
+  } | null>(null);
 
-  // This one call both reads the cache and subscribes: returns tokens if
-  // already highlighted, else null after registering a callback. Must run
-  // synchronously, not in an effect, since an already-loaded grammar can
-  // resolve before an effect subscribes. The callback only re-renders; the
-  // retry reads the populated cache.
-  return useMemo(() => {
-    if (!eligible) return null;
-    void version;
-    const result = code.highlight(
-      { code: text, language: supported as never, themes: [...THEMES] },
-      retry,
-    );
-    return result === null ? null : dropTrailingBlank(result.tokens, text);
-    // oxlint-disable-next-line react/memo-dependencies -- version and retry re-run highlighting once the grammar loads
-  }, [text, supported, eligible, version, retry]);
+  // This one call both reads the cache and subscribes: tokens if already highlighted, else
+  // null after registering a callback with the result. It runs during render, not in an
+  // effect, since an already-loaded grammar can resolve before an effect subscribes.
+  const cached = useMemo(
+    () =>
+      eligible
+        ? code.highlight(
+            { code: text, language: supported as never, themes: [...THEMES] },
+            (result) => setArrived({ text, language: supported, result }),
+          )
+        : null,
+    [text, supported, eligible],
+  );
+  const result =
+    cached ??
+    (arrived && arrived.text === text && arrived.language === supported ? arrived.result : null);
+  return useMemo(() => (result ? dropTrailingBlank(result.tokens, text) : null), [result, text]);
 };
 
 /**

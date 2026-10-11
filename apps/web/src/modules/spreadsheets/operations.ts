@@ -4,6 +4,7 @@ import {
   xmlSafe,
   type Definition as OfficeDefinition,
 } from "../office/operations.ts";
+import { MAX_COLUMN, MAX_ROW, columnIndex, parseCell, parseRange } from "@chat/sheet/a1";
 import { SpreadsheetError } from "./errors.ts";
 import { SPREADSHEET_LIMITS } from "./limits.ts";
 
@@ -16,13 +17,13 @@ type OwnField = {
   readonly type: "sheet" | "cell" | "range" | "columns" | "rowSpan" | "color" | "rows";
   readonly about: string;
 };
-type Definition = OfficeDefinition<OwnField>;
+export type Definition = OfficeDefinition<OwnField>;
 
-const sheet = {
+export const sheet = {
   type: "sheet",
   about: "Sheet name, exactly as inspect_spreadsheet lists it.",
 } as const;
-const range = {
+export const range = {
   type: "range",
   about: 'A cell or rectangle on the sheet, e.g. "B2" or "A1:D20".',
 } as const;
@@ -55,6 +56,9 @@ export const SPREADSHEET_OPERATIONS = {
       range,
       bold: { type: "boolean", about: "Bold text." },
       italic: { type: "boolean", about: "Italic text." },
+      underline: { type: "boolean", about: "Underlined text." },
+      strike: { type: "boolean", about: "Struck-through text." },
+      font: { type: "string", max: 60, about: 'Font name, e.g. "Calibri" or "Georgia".' },
       fontSize: { type: "number", min: 6, max: 72, about: "Font size in points." },
       fontColor: { type: "color", about: "Text colour as #RRGGBB." },
       fill: { type: "color", about: 'Background colour as #RRGGBB, or "none".' },
@@ -79,9 +83,16 @@ export const SPREADSHEET_OPERATIONS = {
       border: {
         type: "string",
         max: 10,
-        options: ["all", "outline", "none"],
-        about: "Thin borders on every cell, around the range, or none.",
+        options: ["all", "outline", "top", "bottom", "none"],
+        about: "Borders on every cell, around the range, along its top or bottom edge, or none.",
       },
+      borderStyle: {
+        type: "string",
+        max: 10,
+        options: ["thin", "medium", "thick", "dashed", "dotted", "double"],
+        about: 'The border\'s line, thin by default; e.g. "double" under a total.',
+      },
+      borderColor: { type: "color", about: "The border's colour as #RRGGBB; black by default." },
     },
     required: ["sheet", "range"],
     change: ["formatted", "range"],
@@ -221,68 +232,20 @@ type ValueOf<F> = F extends { type: "integer" | "number" }
         ? ValueOf<I>[]
         : F extends { type: "object"; fields: infer Fs; required: readonly (infer R)[] }
           ? Shape<Fs, R>
-          : string;
+          : F extends { options: readonly (infer O)[] }
+            ? O
+            : string;
 type Shape<Fs, R> = { -readonly [K in keyof Fs & R]: ValueOf<Fs[K]> } & {
   -readonly [K in Exclude<keyof Fs, R>]?: ValueOf<Fs[K]>;
 };
-export type SpreadsheetOperation = {
-  [K in SpreadsheetOperationKind]: { kind: K } & Shape<
-    Catalog[K]["fields"],
-    Catalog[K]["required"][number]
-  >;
-}[SpreadsheetOperationKind];
+/** One operation of a catalog, typed from its table. */
+export type OperationOf<T extends Record<string, Definition>> = {
+  [K in keyof T & string]: { kind: K } & Shape<T[K]["fields"], T[K]["required"][number]>;
+}[keyof T & string];
+export type SpreadsheetOperation = OperationOf<Catalog>;
 
-const CELL = /^\$?([A-Z]{1,3})\$?([1-9]\d{0,6})$/;
 const COLUMN = /^[A-Z]{1,3}$/;
 const ROW = /^[1-9]\d{0,6}$/;
-/** Excel's own bounds: a reference past them is not a cell. */
-export const MAX_ROW = 1_048_576;
-export const MAX_COLUMN = 16_384;
-
-/** "AB" → 28. */
-export const columnIndex = (letters: string) =>
-  [...letters].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0);
-export const columnLetters = (index: number) => {
-  let letters = "";
-  for (let rest = index; rest > 0; rest = Math.floor((rest - 1) / 26))
-    letters = String.fromCharCode(65 + ((rest - 1) % 26)) + letters;
-  return letters;
-};
-
-/** A1 cell reference to 1-based row and column, or null. */
-export function parseCell(raw: string): { row: number; column: number } | null {
-  const match = CELL.exec(raw.trim().toUpperCase());
-  if (!match) return null;
-  const column = columnIndex(match[1]!);
-  const row = Number(match[2]);
-  return column <= MAX_COLUMN && row <= MAX_ROW ? { row, column } : null;
-}
-export interface CellBox {
-  readonly top: number;
-  readonly left: number;
-  readonly bottom: number;
-  readonly right: number;
-}
-/** "B2" or "A1:D9" (either corner first) to a normalized box, or null. */
-export function parseRange(raw: string): CellBox | null {
-  const [first, second, ...rest] = raw.trim().split(":");
-  if (rest.length || !first) return null;
-  const a = parseCell(first);
-  const b = second === undefined ? a : parseCell(second);
-  if (!a || !b) return null;
-  return {
-    top: Math.min(a.row, b.row),
-    left: Math.min(a.column, b.column),
-    bottom: Math.max(a.row, b.row),
-    right: Math.max(a.column, b.column),
-  };
-}
-export const boxRef = (box: CellBox) => {
-  const start = `${columnLetters(box.left)}${box.top}`;
-  const end = `${columnLetters(box.right)}${box.bottom}`;
-  return start === end ? start : `${start}:${end}`;
-};
-export const boxArea = (box: CellBox) => (box.bottom - box.top + 1) * (box.right - box.left + 1);
 
 const sheetNameProblem = (name: string) =>
   name.length === 0 || name.length > 31
@@ -314,17 +277,20 @@ const describe = (field: OwnField) => {
   }
 };
 
+const fail = (path: string, message: string): never => {
+  throw new SpreadsheetError("invalid_operation", `${path}: ${message}`);
+};
+
 function cellInput(raw: unknown, path: string): CellInput {
   if (raw === null || typeof raw === "boolean") return raw;
   if (typeof raw === "number")
-    return Number.isFinite(raw) ? raw : engine.fail(path, "not a finite number");
-  if (typeof raw !== "string")
-    return engine.fail(path, `expected a value; received ${received(raw)}`);
-  if (!xmlSafe(raw)) return engine.fail(path, "text contains control characters");
+    return Number.isFinite(raw) ? raw : fail(path, "not a finite number");
+  if (typeof raw !== "string") return fail(path, `expected a value; received ${received(raw)}`);
+  if (!xmlSafe(raw)) return fail(path, "text contains control characters");
   const limit = raw.startsWith("=")
     ? SPREADSHEET_LIMITS.formulaChars
     : SPREADSHEET_LIMITS.textChars;
-  if (raw.length > limit) return engine.fail(path, `longer than Excel's ${limit} characters`);
+  if (raw.length > limit) return fail(path, `longer than Excel's ${limit} characters`);
   return raw;
 }
 
@@ -333,7 +299,7 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
     case "sheet": {
       if (typeof raw !== "string") return wrong();
       const problem = sheetNameProblem(raw);
-      return problem ? engine.fail(path, problem) : raw;
+      return problem ? fail(path, problem) : raw;
     }
     case "cell":
       return typeof raw === "string" && parseCell(raw) ? raw.trim().toUpperCase() : wrong();
@@ -369,7 +335,7 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
       return rows.map((row, index) =>
         Array.isArray(row)
           ? row.map((item, column) => cellInput(item, `${path}[${index}][${column}]`))
-          : engine.fail(
+          : fail(
               `${path}[${index}]`,
               `expected a row (a list of values); received ${received(row)}`,
             ),
@@ -378,26 +344,32 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
   }
 }
 
-const engine = operationEngine({
-  operations: SPREADSHEET_OPERATIONS,
-  maxOperations: SPREADSHEET_LIMITS.operationsPerCall,
-  Error: SpreadsheetError,
-  own: {
-    describe,
-    value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
-    schema: (field) =>
-      field.type === "rows"
-        ? {
-            type: "array",
-            description: field.about,
-            items: {
+/** The engine for a table of spreadsheet operations: the Excel tools' or a live sheet's. */
+export const spreadsheetEngine = (
+  operations: Readonly<Record<string, Definition>>,
+  maxOperations: number,
+) =>
+  operationEngine({
+    operations,
+    maxOperations,
+    Error: SpreadsheetError,
+    own: {
+      describe,
+      value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
+      schema: (field) =>
+        field.type === "rows"
+          ? {
               type: "array",
-              items: { type: ["string", "number", "boolean", "null"] },
-            },
-          }
-        : { type: "string", description: field.about },
-  },
-});
+              description: field.about,
+              items: {
+                type: "array",
+                items: { type: ["string", "number", "boolean", "null"] },
+              },
+            }
+          : { type: "string", description: field.about },
+    },
+  });
+const engine = spreadsheetEngine(SPREADSHEET_OPERATIONS, SPREADSHEET_LIMITS.operationsPerCall);
 
 /** Validates a batch before any worker opens the workbook. */
 export function parseSpreadsheetOperations(input: unknown): SpreadsheetOperation[] {
@@ -408,25 +380,25 @@ export function parseSpreadsheetOperations(input: unknown): SpreadsheetOperation
       const rows = operation.rows as CellInput[][];
       const width = Math.max(...rows.map((row) => row.length));
       if (start.row + rows.length - 1 > MAX_ROW || start.column + width - 1 > MAX_COLUMN)
-        engine.fail(path, "the values run past the last row or column of a sheet");
+        fail(path, "the values run past the last row or column of a sheet");
       cells += rows.reduce((sum, row) => sum + row.length, 0);
     }
     if (
       kind === "setFormat" &&
       Object.keys(operation).every((key) => key === "sheet" || key === "range")
     )
-      engine.fail(path, "provide at least one property to change");
+      fail(path, "provide at least one property to change");
     if (
       kind === "addChart" &&
       operation.type === "pie" &&
       (operation.series as unknown[]).length !== 1
     )
-      engine.fail(path, "a pie chart takes exactly one series");
+      fail(path, "a pie chart takes exactly one series");
     if (kind === "defineName" && !/^[A-Za-z_\\][\w.]{0,99}$/.test(operation.name as string))
-      engine.fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
+      fail(`${path}.name`, "start with a letter; use letters, digits, _ and . only");
   });
   if (cells > SPREADSHEET_LIMITS.cellsPerCall)
-    engine.fail(
+    fail(
       "operations",
       `at most ${SPREADSHEET_LIMITS.cellsPerCall} cells per call; received ${cells}. Split into smaller calls; no edits were applied`,
     );

@@ -8,7 +8,7 @@ import {
 import { addExcelTable, getCell, setCell } from "@office-kit/xlsx/worksheet";
 import { describe, expect, it } from "vitest";
 import { recalculate } from "../calc.ts";
-import { parseFormula, Unsupported } from "./parse.ts";
+import { parseFormula, Unsupported } from "@chat/sheet/engine/parse";
 
 /** A one-sheet workbook from rows of values ("=…" is a formula), recalculated. */
 function sheet(rows: CellValue[][], setup?: (workbook: Workbook) => void) {

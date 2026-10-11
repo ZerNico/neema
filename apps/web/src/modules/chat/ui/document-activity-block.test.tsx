@@ -44,7 +44,7 @@ describe("document activity", () => {
         })}
       />,
     );
-    expect(screen.getByText("Updated Trip plan")).toBeVisible();
+    expect(screen.getByText("Edited Trip plan")).toBeVisible();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
@@ -80,7 +80,7 @@ describe("document activity", () => {
         callIndex: 0,
         status: "running",
       }),
-    ).toBe("Updating the document");
+    ).toBe("Editing the document");
     expect(
       documentActivityLabel(
         activity({

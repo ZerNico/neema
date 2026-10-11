@@ -1,9 +1,12 @@
-import { File01Icon } from "@hugeicons/core-free-icons";
+import { File01Icon, FileSpreadsheetIcon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
 import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { projectMembersQuery } from "~/modules/projects/client/queries.ts";
 import {
   useCallback,
+  Suspense,
+  lazy,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -13,10 +16,12 @@ import {
   useRef,
 } from "react";
 import { useDocument } from "../client/use-document.ts";
-import { taskProgress } from "../task-items.ts";
+import { useSheet } from "../sheet/client/use-sheet.ts";
+import { SheetMenu, SheetPanelActions } from "../sheet/ui/sheet-panel-actions.tsx";
+import { Spinner } from "~/ui/primitives/spinner";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
-import type { DocumentEditorMode } from "./rich-editor/document-editor.tsx";
+import type { DocumentAsk, EditorHooks, MentionCandidate } from "./rich-editor/editor-hooks.ts";
 import {
   useDetailPanel,
   useDetailPanelReconciler,
@@ -31,6 +36,8 @@ import {
 export interface DocumentOwnerHandle {
   /** Every mounted document, so a send never races typing it has not stored yet. */
   flush: () => Promise<boolean>;
+  /** The blocks the person has selected in one document's open editor. */
+  selectedBlocks: (documentId: string) => string[];
 }
 interface DocumentOwnerProps {
   documentIds: ReadonlyArray<string>;
@@ -40,10 +47,21 @@ interface DocumentOwnerProps {
   ref?: Ref<DocumentOwnerHandle> | undefined;
   /** Documents the answer being watched just created; their panel opens by itself. */
   autoOpenIds?: ReadonlySet<string> | undefined;
+  /**
+   * Sends a request typed inside a document as a chat message, with the spot
+   * it was asked at selected; false when it cannot go now. Absent outside a chat.
+   */
+  onAsk?: DocumentAsk | undefined;
+  /** Moves focus to the chat's input, keeping the document's selection for the message. */
+  onFocusComposer?: (() => void) | undefined;
 }
+// The grid and the formula engine load with the first open sheet, not the chat.
+const SheetPanelBody = lazy(() => import("../sheet/ui/sheet-panel.tsx"));
+
 interface Session {
   entry: DocumentPanelEntry;
   flush: () => Promise<boolean>;
+  selectedBlocks: () => string[];
 }
 
 /** Controllers stay mounted when transcript rows or panel bodies are replaced. */
@@ -52,6 +70,8 @@ export function DocumentOwner({
   goneIds = EMPTY_DOCUMENT_IDS,
   onGone,
   autoOpenIds,
+  onAsk,
+  onFocusComposer,
   children,
   ref,
 }: DocumentOwnerProps) {
@@ -64,9 +84,6 @@ export function DocumentOwner({
         return previous &&
           previous.title === session.entry.title &&
           previous.status === session.entry.status &&
-          previous.tasks?.done === session.entry.tasks?.done &&
-          previous.tasks?.total === session.entry.tasks?.total &&
-          previous.chars === session.entry.chars &&
           previous.expanded === session.entry.expanded &&
           !previous.open === !session.entry.open &&
           !previous.retry === !session.entry.retry
@@ -92,6 +109,7 @@ export function DocumentOwner({
         for (const session of sessions.values()) ready = (await session.flush()) && ready;
         return ready;
       },
+      selectedBlocks: (documentId) => sessions.get(documentId)?.selectedBlocks() ?? [],
     }),
     [sessions],
   );
@@ -113,6 +131,8 @@ export function DocumentOwner({
           forget={forget}
           onGone={onGone}
           autoOpen={autoOpenIds?.has(documentId) ?? false}
+          onAsk={onAsk}
+          onFocusComposer={onFocusComposer}
         />
       ))}
       <DocumentPanelContext.Provider value={value}>{children}</DocumentPanelContext.Provider>
@@ -126,46 +146,100 @@ function DocumentSession({
   forget,
   onGone,
   autoOpen,
+  onAsk,
+  onFocusComposer,
 }: {
   documentId: string;
   publish: (documentId: string, session: Session) => void;
   forget: (documentId: string) => void;
   onGone: (documentId: string) => void;
   autoOpen: boolean;
+  onAsk: DocumentAsk | undefined;
+  onFocusComposer: (() => void) | undefined;
 }) {
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
   // The editor for everyone (read-only for a viewer) until they pick the Markdown.
-  const [mode, setMode] = useState<DocumentEditorMode>("live");
   // The actions row the editor portals its formatting controls into.
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
   const id = `document:${documentId}`;
   // Only the document open in the panel holds a live connection.
   const controller = useDocument(documentId, selected === id);
+  const isSheet = controller.document?.kind === "sheet";
+  const { controller: sheet, state: sheetState } = useSheet(documentId, selected === id && isSheet);
+  const unpersisted = useCallback(
+    () => controller.unpersisted() || sheet.unpersisted(),
+    [controller, sheet],
+  );
+  const flush = useCallback(async () => {
+    const [text, cells] = await Promise.all([controller.flush(), sheet.flush()]);
+    return text && cells;
+  }, [controller, sheet]);
   useBlocker({
-    shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
-    enableBeforeUnload: controller.unpersisted,
+    shouldBlockFn: async () => unpersisted() && !(await flush()),
+    enableBeforeUnload: unpersisted,
   });
   const { data: me } = useQuery(sessionUserQuery);
   const subtitle = documentSubtitle(controller, me?.id);
+  const projectId = controller.document?.projectId ?? null;
+  const { data: members } = useQuery({
+    ...projectMembersQuery(projectId ?? ""),
+    enabled: projectId !== null,
+  });
+  const people = useMemo<MentionCandidate[]>(
+    () => [
+      ...(me ? [{ id: me.id, label: me.name, detail: me.email }] : []),
+      ...(members?.users ?? [])
+        .filter((user) => user.userId !== me?.id)
+        .map((user) => ({ id: user.userId, label: user.name, detail: user.email })),
+    ],
+    [me, members],
+  );
+  // Read when the @ list opens, so members loading late still show.
+  const candidates = useRef<MentionCandidate[]>([]);
+  useEffect(() => {
+    candidates.current = people;
+  }, [people]);
+  const hooks = useMemo<EditorHooks>(
+    () => ({
+      mentions: () => candidates.current,
+      ask: onAsk ? (request, target) => onAsk(request, { ...target, documentId }) : null,
+      focusComposer: onFocusComposer ?? null,
+    }),
+    [documentId, onAsk, onFocusComposer],
+  );
   const request = useMemo(
     () => ({
       id,
       title: controller.document?.title ?? "Document",
       subtitle,
-      icon: File01Icon,
+      icon: isSheet ? FileSpreadsheetIcon : File01Icon,
       restorable: true,
-      actions: (
-        <DocumentPanelActions
-          controller={controller}
-          mode={mode}
-          onModeChange={setMode}
-          toolbarSlot={setToolbarSlot}
-        />
+      actions: isSheet ? (
+        <SheetPanelActions document={controller.document} toolbarSlot={setToolbarSlot} />
+      ) : (
+        <DocumentPanelActions controller={controller} toolbarSlot={setToolbarSlot} />
       ),
-      body: <DocumentPanelBody controller={controller} mode={mode} toolbarSlot={toolbarSlot} />,
+      body: isSheet ? (
+        <Suspense
+          fallback={<Spinner aria-label="Loading sheet" className="text-muted-foreground" />}
+        >
+          <SheetPanelBody
+            controller={sheet}
+            canEdit={controller.document?.canEdit ?? false}
+            toolbarSlot={toolbarSlot}
+            menu={({ downloadCsv }) => (
+              <SheetMenu document={controller.document} onDownloadCsv={downloadCsv} />
+            )}
+            me={me?.id ?? null}
+            ask={hooks.ask}
+          />
+        </Suspense>
+      ) : (
+        <DocumentPanelBody controller={controller} toolbarSlot={toolbarSlot} hooks={hooks} />
+      ),
     }),
-    [controller, id, mode, subtitle, toolbarSlot],
+    [controller, hooks, id, isSheet, me, sheet, subtitle, toolbarSlot],
   );
   // The card opens the request this session last committed, not the one its
   // own render captured: a card published just before the connection landed
@@ -196,9 +270,8 @@ function DocumentSession({
         : controller.error
           ? "Changes not saved yet"
           : subtitle,
-      tasks: available ? taskProgress(controller.content) : null,
       inProject: available ? controller.document?.projectId != null : null,
-      chars: controller.content.length,
+      sheet: available ? isSheet : null,
       expanded: selected === id,
       open: available ? () => panel.open(latestRequest.current) : null,
       retry: failed
@@ -207,16 +280,22 @@ function DocumentSession({
           }
         : null,
     }),
-    [available, controller, failed, id, panel, selected, subtitle],
+    [available, controller, failed, id, isSheet, panel, selected, subtitle],
   );
-  const flush = controller.flush;
+  const textSelection = controller.selectedBlocks;
+  const sheetSelection = sheet.selected;
+  const selectedBlocks = useCallback(
+    () => (isSheet ? sheetSelection() : textSelection()),
+    [isSheet, sheetSelection, textSelection],
+  );
   useEffect(() => {
-    publish(documentId, { entry, flush });
-  }, [documentId, entry, flush, publish]);
+    publish(documentId, { entry, flush, selectedBlocks });
+  }, [documentId, entry, flush, selectedBlocks, publish]);
   useEffect(() => () => forget(documentId), [documentId, forget]);
   const gone =
     controller.status === "gone" ||
-    (controller.query.isSuccess && controller.query.data === null && !controller.unpersisted());
+    sheetState?.status === "gone" ||
+    (controller.query.isSuccess && controller.query.data === null && !unpersisted());
   useEffect(() => {
     if (gone) onGone(documentId);
   }, [documentId, gone, onGone]);

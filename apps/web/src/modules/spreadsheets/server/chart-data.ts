@@ -4,7 +4,7 @@ import { listChartsOnSheet } from "@office-kit/xlsx/drawing";
 import { getCellDisplayText } from "@office-kit/xlsx/styles";
 import { getSheet, iterWorksheets, type Workbook } from "@office-kit/xlsx/workbook";
 import { getCell } from "@office-kit/xlsx/worksheet";
-import { boxArea, parseRange } from "../operations.ts";
+import { boxArea, parseRange } from "@chat/sheet/a1";
 import { chartAnchors } from "./chart-parts.ts";
 
 /**

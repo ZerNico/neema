@@ -1,4 +1,9 @@
-import { ArrowRight01Icon, File01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
+import {
+  ArrowRight01Icon,
+  File01Icon,
+  FileSpreadsheetIcon,
+  Folder01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { DocumentToolActivity } from "../client/use-message-stream.ts";
@@ -12,17 +17,17 @@ import {
   activityCardInteractiveClassName,
   activityRowClassName,
 } from "./activity-row.ts";
-import { documentActivityLabel } from "./document-activity-label.ts";
+import { type DocumentPart, isDocumentCard } from "./assistant-body.ts";
+import { documentRunLabel, documentRunSucceeded } from "./document-activity-label.ts";
 
 export function DocumentWidget({ documentId, title }: { documentId: string; title?: string }) {
   const { owned, gone, entry } = useDocumentPanel(documentId);
   const name = entry?.title ?? title ?? "Document";
   // A project document is shared with every member; say so where it appears.
-  const kind = entry?.inProject ? "Project document" : "Document";
+  const noun = entry?.sheet ? "sheet" : "document";
+  const kind = entry?.inProject ? `Project ${noun}` : entry?.sheet ? "Sheet" : "Document";
   const status = entry
-    ? entry.tasks
-      ? `${kind} · ${entry.tasks.done} of ${entry.tasks.total} tasks done`
-      : kind
+    ? kind
     : gone
       ? "Document deleted"
       : owned
@@ -32,7 +37,7 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
     <>
       <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-xl">
         <HugeiconsIcon
-          icon={entry?.inProject ? Folder01Icon : File01Icon}
+          icon={entry?.inProject ? Folder01Icon : entry?.sheet ? FileSpreadsheetIcon : File01Icon}
           strokeWidth={2}
           className="text-muted-foreground size-4"
           aria-hidden
@@ -76,27 +81,21 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
   );
 }
 
-/** One line for a call that touched a document the full card already shows. */
-function DocumentActivityRow({
-  activity,
-  documentId,
-}: {
-  activity: DocumentToolActivity;
-  documentId: string | undefined;
-}) {
-  const { entry } = useDocumentPanel(documentId ?? "");
-  const failed = activity.status === "error" || !activity.result?.outcome;
+/** One line for a run of reads and edits on a document, opening it when it is here. */
+export function DocumentRunRow({ part }: { part: DocumentPart }) {
+  const { entry } = useDocumentPanel(part.documentId ?? "");
+  const running = part.activities.some((call) => call.status === "running");
   const face = (
     <ActivityFace
       icon={File01Icon}
-      label={documentActivityLabel(activity)}
+      label={documentRunLabel(part.activities, part.named ?? false)}
       // The error was written for the model ("use a larger anchor"); the label says it in reader words.
-      status={activity.status === "running" ? "running" : failed ? "failed" : "done"}
+      status={running ? "running" : documentRunSucceeded(part.activities) ? "done" : "failed"}
     />
   );
   // The row names a document that is open one click away, so it opens it rather
   // than making the person hunt for the card that created it.
-  if (documentId && entry?.open)
+  if (part.documentId && entry?.open)
     return (
       <button
         type="button"
@@ -110,15 +109,25 @@ function DocumentActivityRow({
   return <div className={cn(activityRowClassName, "mb-2")}>{face}</div>;
 }
 
+/** A created document's card; any other call, alone, as a run of one. */
 export function DocumentActivityBlock({ activity }: { activity: DocumentToolActivity }) {
   const reference = activity.result?.documentId;
-  const create = activity.name === "create_document" && activity.result?.outcome === "created";
-  if (reference && create)
+  if (reference && isDocumentCard(activity))
     return (
       <DocumentWidget
         documentId={reference}
         {...(activity.result?.title ? { title: activity.result.title } : {})}
       />
     );
-  return <DocumentActivityRow activity={activity} documentId={reference} />;
+  return (
+    <DocumentRunRow
+      part={{
+        kind: "document",
+        key: activity.callId,
+        ...(reference ? { documentId: reference } : {}),
+        activities: [activity],
+        named: true,
+      }}
+    />
+  );
 }
