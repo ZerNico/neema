@@ -256,8 +256,9 @@ export class SheetSync {
       revision > this.#revision
         ? this.#pending.filter((change) => done(change) && !refused.has(change.seq))
         : [];
+    // Only the feed (or a reset) brings a landing change: a later answer leaves earlier ones be.
     this.#landing = [
-      ...this.#landing.filter((each) => !done(each.change)),
+      ...(revision ? this.#landing : this.#landing.filter((each) => !done(each.change))),
       ...landed.map((change) => ({ change, revision })),
     ];
     this.#pending = this.#pending.filter((change) => !done(change));

@@ -94,6 +94,31 @@ describe("a sheet's connection", () => {
     expect(sync.getState().refused).toBe("Some changes weren’t kept: no.");
   });
 
+  it("keeps every acknowledged edit shown while the feed lags", async () => {
+    const { sync, feed, answerWith } = connection();
+    feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
+    answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
+    sync.dispatch([write("s1.r1", "s1.c1", "first")]);
+    await vi.runAllTimersAsync();
+    answerWith(() => ({ revision: 2, acked: 2, refused: [] }));
+    sync.dispatch([write("s1.r2", "s1.c1", "second")]);
+    await vi.runAllTimersAsync();
+    // The feed has brought neither: both stay, the first not lost to the second's answer.
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("first");
+    expect(valueAt(sync.getState().doc, "s1.r2", "s1.c1")).toBe("second");
+    feed({
+      type: "changes",
+      changes: [
+        { clientId: "me", seq: 1, ops: [write("s1.r1", "s1.c1", "first")] },
+        { clientId: "me", seq: 2, ops: [write("s1.r2", "s1.c1", "second")] },
+      ],
+      revision: 2,
+      moment,
+    });
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe("first");
+    expect(sync.getState().pending).toBe(0);
+  });
+
   it("drops changes the server rejects instead of sending them forever", async () => {
     const { sync, pushes, feed, answerWith } = connection();
     answerWith(() => ({ rejected: "this document is read-only for you" }));
