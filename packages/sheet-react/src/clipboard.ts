@@ -1,4 +1,4 @@
-import { cellStyle } from "@chat/sheet/model/style";
+import { BORDER_SIDES, cellStyle, type BorderLine } from "@chat/sheet/model/style";
 import { XError } from "@chat/sheet/engine/values";
 import { LIVE_LIMITS } from "@chat/sheet/model/limits";
 import type { StylePatch } from "@chat/sheet/model/ops";
@@ -44,10 +44,10 @@ export function cellHtml(
     (aligned || style.horizontal) && `text-align:${style.horizontal ?? shown.align}`,
     style.vertical && `vertical-align:${style.vertical === "center" ? "middle" : style.vertical}`,
     style.wrap && "white-space:normal",
-    style.borderTop && "border-top:1px solid #000000",
-    style.borderBottom && "border-bottom:1px solid #000000",
-    style.borderLeft && "border-left:1px solid #000000",
-    style.borderRight && "border-right:1px solid #000000",
+    ...BORDER_SIDES.map((side) => {
+      const line = style[side];
+      return line && `${SIDE_CSS[side]}:${EDGE_PT[line.style]} ${line.color ?? "#000000"}`;
+    }),
     style.numberFormat && `mso-number-format:'${style.numberFormat.replaceAll("'", "\\'")}'`,
   ].filter(Boolean);
   const number =
@@ -72,6 +72,51 @@ export function selectionHtml(context: GridContext): string {
     (r) => `<tr>${box.colIds.map((c) => cellHtml(context, r, c)).join("")}</tr>`,
   );
   return `<meta charset="utf-8"><table><tbody>${rows.join("")}</tbody></table>`;
+}
+
+const SIDE_CSS = {
+  borderTop: "border-top",
+  borderBottom: "border-bottom",
+  borderLeft: "border-left",
+  borderRight: "border-right",
+} as const;
+/** Each line as Excel writes it into HTML, in points, so Excel reads back the same line. */
+const EDGE_PT: Readonly<Record<BorderLine["style"], string>> = {
+  thin: ".5pt solid",
+  medium: "1.0pt solid",
+  thick: "1.5pt solid",
+  dashed: ".5pt dashed",
+  dotted: ".5pt dotted",
+  double: "2.0pt double",
+};
+
+/**
+ * A pasted edge's CSS as a line, or null for none. Widths in points are
+ * Excel's (.5, 1 and 1.5 for thin, medium, thick), in pixels a browser's or
+ * Sheets' (1, 2, 3). Black is left as the default colour.
+ */
+function lineOf(edge: string): BorderLine | null {
+  const text = edge.trim().toLowerCase();
+  if (/\b(none|hidden)\b/.test(text) || /(^|\s)0(\.0+)?(px|pt)?(\s|$)/.test(text)) return null;
+  const colorText =
+    /#[0-9a-f]{3}(?:[0-9a-f]{3})?\b|rgba?\([^)]*\)|\b(?:black|white|windowtext)\b/.exec(text)?.[0];
+  const color = colorText ? hexColor(colorText) : null;
+  const width = /([\d.]+)(px|pt)\b/.exec(text);
+  const px = width ? Number(width[1]) * (width[2] === "pt" ? 4 / 3 : 1) : 1;
+  // The steps in pixels of Excel's points, else of a browser's own widths.
+  const [medium, thick] = width?.[2] === "pt" ? [1.1, 1.75] : [1.5, 2.5];
+  const style: BorderLine["style"] = /\bdouble\b/.test(text)
+    ? "double"
+    : /\bdashed\b/.test(text)
+      ? "dashed"
+      : /\bdotted\b/.test(text)
+        ? "dotted"
+        : /\bthick\b/.test(text) || px >= thick
+          ? "thick"
+          : /\bmedium\b/.test(text) || px >= medium
+            ? "medium"
+            : "thin";
+  return color && color !== "#000000" ? { style, color } : { style };
 }
 
 /** A CSS colour as #RRGGBB, or null for one that is not a plain colour. */
@@ -116,7 +161,7 @@ const NAMED_FORMATS: Record<string, string> = {
 
 /** Declarations as a cell's style, leaving out what every cell has unless set. */
 function styleOf(declarations: ReadonlyMap<string, string>): StylePatch {
-  const style: Record<string, string | number | boolean> = {};
+  const style: Record<string, string | number | boolean | BorderLine> = {};
   const get = (name: string) => declarations.get(name)?.trim().toLowerCase();
   const weight = get("font-weight");
   if (weight === "bold" || weight === "bolder" || Number(weight) >= 600) style.bold = true;
@@ -148,10 +193,10 @@ function styleOf(declarations: ReadonlyMap<string, string>): StylePatch {
   if (vertical === "top") style.vertical = "top";
   if (vertical === "middle") style.vertical = "center";
   if (get("white-space") === "normal" || get("white-space") === "pre-wrap") style.wrap = true;
-  for (const side of ["top", "bottom", "left", "right"] as const) {
-    const edge = get(`border-${side}`) ?? get("border");
-    if (edge && !/\b(none|hidden)\b/.test(edge) && !/(^|\s)0(\.0+)?(px|pt)?(\s|$)/.test(edge))
-      style[`border${side[0]!.toUpperCase()}${side.slice(1)}`] = true;
+  for (const side of BORDER_SIDES) {
+    const edge = get(SIDE_CSS[side]) ?? get("border");
+    const line = edge ? lineOf(edge) : null;
+    if (line) style[side] = line;
   }
   const format = declarations.get("mso-number-format")?.trim();
   if (format) {

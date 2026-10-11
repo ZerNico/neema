@@ -83,9 +83,16 @@ export const SPREADSHEET_OPERATIONS = {
       border: {
         type: "string",
         max: 10,
-        options: ["all", "outline", "none"],
-        about: "Thin borders on every cell, around the range, or none.",
+        options: ["all", "outline", "top", "bottom", "none"],
+        about: "Borders on every cell, around the range, along its top or bottom edge, or none.",
       },
+      borderStyle: {
+        type: "string",
+        max: 10,
+        options: ["thin", "medium", "thick", "dashed", "dotted", "double"],
+        about: 'The border\'s line, thin by default; e.g. "double" under a total.',
+      },
+      borderColor: { type: "color", about: "The border's colour as #RRGGBB; black by default." },
     },
     required: ["sheet", "range"],
     change: ["formatted", "range"],

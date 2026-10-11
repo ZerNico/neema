@@ -70,7 +70,7 @@ describe("HTML on the clipboard", () => {
     expect(read[2]![0]!.raw).toBe("Line one\nline two");
     expect(read[2]![1]).toMatchObject({
       value: 0.25,
-      style: { numberFormat: "0.00%", borderBottom: true },
+      style: { numberFormat: "0.00%", borderBottom: { style: "thin" } },
     });
   });
 
@@ -144,6 +144,30 @@ describe("HTML on the clipboard", () => {
         { raw: "50%", value: 0.5, style: { numberFormat: "0%" } },
       ],
     ]);
+  });
+
+  it("keeps each edge's line and colour through a copy, and reads other programs' widths", () => {
+    const lines = {
+      borderTop: { style: "thick", color: "#C00000" },
+      borderBottom: { style: "double" },
+      borderLeft: { style: "dashed", color: "#00B050" },
+      borderRight: { style: "medium" },
+    } as const;
+    let doc = apply(emptyDoc(), [
+      { op: "set", sh: "s1", cells: [{ ...at(emptyDoc(), 1, 1), v: 1 }] },
+    ]);
+    doc = apply(doc, formatSelection(context(doc, [1, 1]), lines));
+    expect(readHtmlTable(selectionHtml(context(doc, [1, 1])))![0]![0]!.style).toEqual(lines);
+    // Sheets writes pixels, Excel points; black is the default colour, kept as none.
+    const pasted = readHtmlTable(
+      `<table><tr><td style="border-top:2px solid #000000;border-bottom:3px solid rgb(255,0,0);border-left:1pt solid windowtext;border-right:1px dotted black">x</td></tr></table>`,
+    )![0]![0]!.style;
+    expect(pasted).toEqual({
+      borderTop: { style: "medium" },
+      borderBottom: { style: "thick", color: "#FF0000" },
+      borderLeft: { style: "medium" },
+      borderRight: { style: "dotted" },
+    });
   });
 
   it("bounds a pasted table's spans, refusing one larger than a sheet", () => {

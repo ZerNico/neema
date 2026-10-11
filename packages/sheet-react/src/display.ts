@@ -1,4 +1,4 @@
-import type { CellStyle } from "@chat/sheet/model/style";
+import type { BorderLine, CellStyle } from "@chat/sheet/model/style";
 import type { CSSProperties } from "react";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
@@ -37,7 +37,20 @@ export function cellDisplay(value: Scalar, style: CellStyle, locale: SheetLocale
   };
 }
 
-const EDGE = "1px solid currentColor";
+/** Each line style's width and CSS style on screen, as Excel draws them at 100%. */
+const LINES: Readonly<Record<BorderLine["style"], readonly [number, string]>> = {
+  thin: [1, "solid"],
+  medium: [2, "solid"],
+  thick: [3, "solid"],
+  dashed: [1, "dashed"],
+  dotted: [1, "dotted"],
+  double: [3, "double"],
+};
+/** A cell edge as CSS, in its own colour or the text's. */
+export const edgeCss = (line: BorderLine) => {
+  const [width, style] = LINES[line.style];
+  return `${width}px ${style} ${line.color ?? "currentColor"}`;
+};
 /** The style a cell's own properties give it; colours are the sheet's data, not the app's. */
 export function cellCss(style: CellStyle): CSSProperties {
   return {
@@ -55,10 +68,10 @@ export function cellCss(style: CellStyle): CSSProperties {
     ...(style.fontColor ? { color: style.fontColor } : {}),
     ...(style.fill ? { backgroundColor: style.fill } : {}),
     ...(style.wrap ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } : {}),
-    ...(style.borderTop ? { borderTop: EDGE } : {}),
-    ...(style.borderBottom ? { borderBottom: EDGE } : {}),
-    ...(style.borderLeft ? { borderLeft: EDGE } : {}),
-    ...(style.borderRight ? { borderRight: EDGE } : {}),
+    ...(style.borderTop ? { borderTop: edgeCss(style.borderTop) } : {}),
+    ...(style.borderBottom ? { borderBottom: edgeCss(style.borderBottom) } : {}),
+    ...(style.borderLeft ? { borderLeft: edgeCss(style.borderLeft) } : {}),
+    ...(style.borderRight ? { borderRight: edgeCss(style.borderRight) } : {}),
   };
 }
 

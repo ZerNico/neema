@@ -16,6 +16,7 @@ import {
   type SheetDoc,
 } from "@chat/sheet/model";
 import { parseChange, type CellWrite, type SheetOp, type StylePatch } from "@chat/sheet/model/ops";
+import type { BorderLine } from "@chat/sheet/model/style";
 import type { CellInput } from "~/modules/spreadsheets/operations.ts";
 import type { LiveSheetOperation } from "../live-operations.ts";
 import type { FilterCondition, FilterRule } from "@chat/sheet/model/filter";
@@ -233,22 +234,34 @@ export function convertOperations(
             operation.numberFormat.toLowerCase() === "general" ? null : operation.numberFormat;
         const formats: Array<{ area: typeof whole; patch: StylePatch }> = [];
         if (Object.keys(patch).length) formats.push({ area: whole, patch });
-        const edges = { borderTop: true, borderBottom: true, borderLeft: true, borderRight: true };
-        if (operation.border === "all") formats.push({ area: whole, patch: edges });
+        const line: BorderLine = {
+          style: operation.borderStyle ?? "thin",
+          ...(operation.borderColor && operation.borderColor !== "none"
+            ? { color: operation.borderColor }
+            : {}),
+        };
+        const [top, bottom, left, right] = [rows[0]!, rows.at(-1)!, cols[0]!, cols.at(-1)!];
+        const topEdge = { area: { ...whole, r2: top }, patch: { borderTop: line } };
+        const bottomEdge = { area: { ...whole, r1: bottom }, patch: { borderBottom: line } };
+        if (operation.border === "all")
+          formats.push({
+            area: whole,
+            patch: { borderTop: line, borderBottom: line, borderLeft: line, borderRight: line },
+          });
         if (operation.border === "none")
           formats.push({
             area: whole,
             patch: { borderTop: null, borderBottom: null, borderLeft: null, borderRight: null },
           });
-        if (operation.border === "outline") {
-          const [top, bottom, left, right] = [rows[0]!, rows.at(-1)!, cols[0]!, cols.at(-1)!];
+        if (operation.border === "top") formats.push(topEdge);
+        if (operation.border === "bottom") formats.push(bottomEdge);
+        if (operation.border === "outline")
           formats.push(
-            { area: { ...whole, r2: top }, patch: { borderTop: true } },
-            { area: { ...whole, r1: bottom }, patch: { borderBottom: true } },
-            { area: { ...whole, c2: left }, patch: { borderLeft: true } },
-            { area: { ...whole, c1: right }, patch: { borderRight: true } },
+            topEdge,
+            bottomEdge,
+            { area: { ...whole, c2: left }, patch: { borderLeft: line } },
+            { area: { ...whole, c1: right }, patch: { borderRight: line } },
           );
-        }
         emit(...formats.map((each) => ({ op: "format" as const, sh, ...each })));
         return;
       }

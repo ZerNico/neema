@@ -15,13 +15,24 @@ export interface CellStyle {
   readonly horizontal?: "left" | "center" | "right";
   readonly vertical?: "top" | "center" | "bottom";
   readonly wrap?: boolean;
-  readonly borderTop?: boolean;
-  readonly borderBottom?: boolean;
-  readonly borderLeft?: boolean;
-  readonly borderRight?: boolean;
+  readonly borderTop?: BorderLine;
+  readonly borderBottom?: BorderLine;
+  readonly borderLeft?: BorderLine;
+  readonly borderRight?: BorderLine;
   /** A web or mail address the cell opens, as Excel's hyperlinks. */
   readonly link?: string;
 }
+
+/** How a cell's edge is drawn, as Excel's common line styles; thin by default. */
+export const BORDER_STYLES = ["thin", "medium", "thick", "dashed", "dotted", "double"] as const;
+export type BorderStyle = (typeof BORDER_STYLES)[number];
+/** One edge of a cell: its line, and its colour as `#RRGGBB` (absent, the text's default). */
+export interface BorderLine {
+  readonly style: BorderStyle;
+  readonly color?: string;
+}
+/** The four edges a style may draw, in the order Excel lists them. */
+export const BORDER_SIDES = ["borderTop", "borderBottom", "borderLeft", "borderRight"] as const;
 
 /** Properties a format change sets, or removes with null. */
 export type StylePatch = { readonly [K in keyof CellStyle]?: CellStyle[K] | null };
@@ -35,7 +46,10 @@ export const cellStyle = (key: string | undefined): CellStyle => {
   let style = read.get(key);
   if (!style) {
     // Keys are written only by `styleKey`, from checked patches.
-    style = Object.freeze(JSON.parse(key) as CellStyle);
+    const parsed = JSON.parse(key) as Record<string, unknown>;
+    // Sheets written before edges had a line stored `true`: a thin one.
+    for (const side of BORDER_SIDES) if (parsed[side] === true) parsed[side] = { style: "thin" };
+    style = Object.freeze(parsed as CellStyle);
     // One process serves every document: the cache is bounded, not kept for its lifetime.
     if (read.size >= STYLES_KEPT) read.clear();
     read.set(key, style);
@@ -43,13 +57,28 @@ export const cellStyle = (key: string | undefined): CellStyle => {
   return style;
 };
 
+/** A value with every object's keys in a fixed order, so equal values write equal JSON. */
+const ordered = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(ordered)
+    : value !== null && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .toSorted()
+            .map((key) => [key, ordered((value as Record<string, unknown>)[key])]),
+        )
+      : value;
+
 /** A style's key: its properties in a fixed order, so every replica writes the same key. */
-export const styleKey = (style: CellStyle) => {
-  const keys = Object.keys(style).toSorted() as Array<keyof CellStyle>;
-  return keys.length
-    ? JSON.stringify(Object.fromEntries(keys.map((key) => [key, style[key]])))
-    : undefined;
-};
+export const styleKey = (style: CellStyle) =>
+  Object.keys(style).length ? JSON.stringify(ordered(style)) : undefined;
+
+/** Whether two values of a style property are the same, an edge's line compared by its parts. */
+const same = (a: unknown, b: unknown) =>
+  a === b ||
+  (typeof a === "object" &&
+    typeof b === "object" &&
+    JSON.stringify(ordered(a)) === JSON.stringify(ordered(b)));
 
 /** The key of a style with a patch applied. */
 export const patchStyle = (key: string | undefined, patch: StylePatch) => {
@@ -69,7 +98,7 @@ export const restyle = (from: string | undefined, to: StylePatch): StylePatch | 
   const had = cellStyle(from);
   const patch: Record<string, unknown> = {};
   for (const name of new Set([...Object.keys(had), ...Object.keys(to)]) as Set<keyof CellStyle>)
-    if (had[name] !== (to[name] ?? undefined)) patch[name] = to[name] ?? null;
+    if (!same(had[name], to[name] ?? undefined)) patch[name] = to[name] ?? null;
   return Object.keys(patch).length ? (patch as StylePatch) : null;
 };
 
@@ -79,6 +108,12 @@ export const restyle = (from: string | undefined, to: StylePatch): StylePatch | 
  * anything else is refused, so what is stored is always what readers draw.
  */
 const flag = (value: unknown) => typeof value === "boolean";
+/** A line's style and, if any, its colour: nothing else, so a stored edge is always drawable. */
+export const isBorderLine = (value: unknown): value is BorderLine =>
+  isRecord(value) &&
+  (BORDER_STYLES as readonly unknown[]).includes(value.style) &&
+  (value.color === undefined || isColor(value.color)) &&
+  Object.keys(value).every((key) => key === "style" || key === "color");
 const oneOf =
   (...options: readonly string[]) =>
   (value: unknown) =>
@@ -89,10 +124,10 @@ const STYLE: Readonly<Record<string, (value: unknown) => boolean>> = {
   underline: flag,
   strike: flag,
   wrap: flag,
-  borderTop: flag,
-  borderBottom: flag,
-  borderLeft: flag,
-  borderRight: flag,
+  borderTop: isBorderLine,
+  borderBottom: isBorderLine,
+  borderLeft: isBorderLine,
+  borderRight: isBorderLine,
   // A font's name only: nothing that could end a CSS declaration it is written into.
   fontFamily: (value) => typeof value === "string" && /^[^;{}<>"'\\\n]{1,64}$/.test(value),
   fontSize: (value) => isNumberIn(value, 1, 409),

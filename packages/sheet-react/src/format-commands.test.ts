@@ -50,13 +50,29 @@ const formulaAt = (doc: SheetDoc, row: number, col: number) => {
 describe("the Home tab's commands", () => {
   it("draws borders around, inside, or on one side of the selection", () => {
     const doc = apply(emptyDoc(), borderSelection(context(emptyDoc(), [1, 1], [2, 2]), "outer"));
-    expect(styleAt(doc, 1, 1)).toEqual({ borderTop: true, borderLeft: true });
-    expect(styleAt(doc, 2, 2)).toEqual({ borderBottom: true, borderRight: true });
+    const thin = { style: "thin" };
+    expect(styleAt(doc, 1, 1)).toEqual({ borderTop: thin, borderLeft: thin });
+    expect(styleAt(doc, 2, 2)).toEqual({ borderBottom: thin, borderRight: thin });
     const inner = apply(emptyDoc(), borderSelection(context(emptyDoc(), [1, 1], [2, 2]), "inner"));
-    expect(styleAt(inner, 1, 1)).toEqual({ borderRight: true, borderBottom: true });
+    expect(styleAt(inner, 1, 1)).toEqual({ borderRight: thin, borderBottom: thin });
     expect(styleAt(inner, 2, 2)).toEqual({});
     const cleared = apply(doc, borderSelection(context(doc, [1, 1], [2, 2]), "none"));
     expect(styleAt(cleared, 1, 1)).toEqual({});
+    // Excel's thick outside and double bottom borders: the line given, on the edges asked for.
+    const red = { style: "thick", color: "#C00000" } as const;
+    const thick = apply(
+      emptyDoc(),
+      borderSelection(context(emptyDoc(), [1, 1], [2, 2]), "outer", red),
+    );
+    expect(styleAt(thick, 2, 1)).toEqual({ borderBottom: red, borderLeft: red });
+    const double = apply(
+      emptyDoc(),
+      borderSelection(context(emptyDoc(), [1, 1], [1, 2]), "topBottom", { style: "double" }),
+    );
+    expect(styleAt(double, 1, 2)).toEqual({
+      borderTop: { style: "double" },
+      borderBottom: { style: "double" },
+    });
   });
 
   it("adds and removes decimals in any number format, from what General shows", () => {

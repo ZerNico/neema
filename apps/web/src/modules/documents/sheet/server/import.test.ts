@@ -58,6 +58,21 @@ describe("importing into a live sheet", () => {
         ],
       },
       { kind: "setFormat", sheet: "Sheet1", range: "A1:C1", bold: true, fill: "#FFEE00" },
+      {
+        kind: "setFormat",
+        sheet: "Sheet1",
+        range: "A1:C1",
+        border: "outline",
+        borderStyle: "thick",
+        borderColor: "#C00000",
+      },
+      {
+        kind: "setFormat",
+        sheet: "Sheet1",
+        range: "A3:B3",
+        border: "bottom",
+        borderStyle: "double",
+      },
       { kind: "setFormat", sheet: "Sheet1", range: "C2", numberFormat: "0.00" },
       { kind: "mergeCells", sheet: "Sheet1", range: "D1:E1" },
       { kind: "freezePanes", sheet: "Sheet1", cell: "A2" },
@@ -72,9 +87,16 @@ describe("importing into a live sheet", () => {
     expect(renderFormula(gross.f!, { doc, sheet: "s1" })).toBe("B2*(1+Tax)");
     expect(valueOf(doc, "Sheet1", 2, 3)).toBe(12);
     expect(valueOf(doc, "Sheet1", 4, 3)).toBe(2);
-    expect(JSON.parse(cellOf(doc, "Sheet1", 1, 1)!.s!)).toMatchObject({
+    const red = { style: "thick", color: "#C00000" };
+    expect(JSON.parse(cellOf(doc, "Sheet1", 1, 1)!.s!)).toEqual({
       bold: true,
       fill: "#FFEE00",
+      borderTop: red,
+      borderBottom: red,
+      borderLeft: red,
+    });
+    expect(JSON.parse(cellOf(doc, "Sheet1", 3, 2)!.s!)).toEqual({
+      borderBottom: { style: "double" },
     });
     expect(JSON.parse(gross.s!)).toEqual({ numberFormat: "0.00" });
     const sheet = doc.sheet.s1!;

@@ -8,7 +8,7 @@ import type { Validation } from "@chat/sheet/model/validation";
 import { withoutBounds } from "@chat/sheet/model/box";
 import type { SheetOp, StylePatch } from "@chat/sheet/model/ops";
 import { enterCell, rangesOf, selectionBox, type GridContext } from "./commands.ts";
-import { cellStyle } from "@chat/sheet/model/style";
+import { cellStyle, type BorderLine } from "@chat/sheet/model/style";
 
 /**
  * The Home tab's formatting commands, as operations on the selection:
@@ -16,10 +16,25 @@ import { cellStyle } from "@chat/sheet/model/style";
  * every command, so the toolbar only calls them.
  */
 
-export type BorderKind = "all" | "outer" | "inner" | "top" | "bottom" | "left" | "right" | "none";
+export type BorderKind =
+  | "all"
+  | "outer"
+  | "inner"
+  | "top"
+  | "bottom"
+  | "topBottom"
+  | "left"
+  | "right"
+  | "none";
 
-/** Borders on the selection as Excel's border menu sets them, thin lines on cell edges. */
-export function borderSelection(context: GridContext, kind: BorderKind): SheetOp[] {
+const THIN: BorderLine = { style: "thin" };
+
+/** Borders on the selection as Excel's border menu sets them, in the line given, thin by default. */
+export function borderSelection(
+  context: GridContext,
+  kind: BorderKind,
+  line: BorderLine = THIN,
+): SheetOp[] {
   const box = selectionBox(context);
   const area = box.area;
   const [first, last] = [box.rowIds[0]!, box.rowIds.at(-1)!];
@@ -32,18 +47,18 @@ export function borderSelection(context: GridContext, kind: BorderKind): SheetOp
   });
   const none = { borderTop: null, borderBottom: null, borderLeft: null, borderRight: null };
   const outer = [
-    format({ ...area, r2: first }, { borderTop: true }),
-    format({ ...area, r1: last }, { borderBottom: true }),
-    format({ ...area, c2: left }, { borderLeft: true }),
-    format({ ...area, c1: right }, { borderRight: true }),
+    format({ ...area, r2: first }, { borderTop: line }),
+    format({ ...area, r1: last }, { borderBottom: line }),
+    format({ ...area, c2: left }, { borderLeft: line }),
+    format({ ...area, c1: right }, { borderRight: line }),
   ];
   // Inside lines: each cell's right edge but the last column's, each bottom edge but the last row's.
   const inner = [
     ...(box.colIds.length > 1
-      ? [format({ ...area, c2: box.colIds.at(-2)! }, { borderRight: true })]
+      ? [format({ ...area, c2: box.colIds.at(-2)! }, { borderRight: line })]
       : []),
     ...(box.rowIds.length > 1
-      ? [format({ ...area, r2: box.rowIds.at(-2)! }, { borderBottom: true })]
+      ? [format({ ...area, r2: box.rowIds.at(-2)! }, { borderBottom: line })]
       : []),
   ];
   switch (kind) {
@@ -51,7 +66,7 @@ export function borderSelection(context: GridContext, kind: BorderKind): SheetOp
       return [format(area, none)];
     case "all":
       return [
-        format(area, { borderTop: true, borderBottom: true, borderLeft: true, borderRight: true }),
+        format(area, { borderTop: line, borderBottom: line, borderLeft: line, borderRight: line }),
       ];
     case "outer":
       return outer;
@@ -61,6 +76,8 @@ export function borderSelection(context: GridContext, kind: BorderKind): SheetOp
       return [outer[0]!];
     case "bottom":
       return [outer[1]!];
+    case "topBottom":
+      return [outer[0]!, outer[1]!];
     case "left":
       return [outer[2]!];
     case "right":

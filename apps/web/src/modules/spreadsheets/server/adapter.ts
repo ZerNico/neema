@@ -1,4 +1,4 @@
-import type { CellStyle } from "@chat/sheet/model/style";
+import { BORDER_SIDES, type BorderLine, type CellStyle } from "@chat/sheet/model/style";
 import {
   isFormulaValue,
   makeFormula,
@@ -508,6 +508,12 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
     case "setFormat": {
       const sheet = sheetOf(workbook, operation.sheet);
       const box = rangeOf(operation.range);
+      const pen = sideOf({
+        style: operation.borderStyle ?? "thin",
+        ...(operation.borderColor && operation.borderColor !== "none"
+          ? { color: operation.borderColor }
+          : {}),
+      });
       for (const cell of everyCell(sheet, box)) {
         const font = {
           ...(operation.bold === undefined ? {} : { bold: operation.bold }),
@@ -544,12 +550,24 @@ function apply(workbook: Workbook, operation: SpreadsheetOperation, written: Wri
               : {}),
             ...(operation.wrap === undefined ? {} : { wrapText: operation.wrap }),
           });
-        if (operation.border === "all") setCellBorderAll(workbook, cell, { style: "thin" });
+        if (operation.border === "all") setCellBorderAll(workbook, cell, pen);
         if (operation.border === "none")
           setCellBorderAll(workbook, cell, { style: "none" as "thin" });
+        // One edge of the range: the cells along it keep their other sides.
+        const edge =
+          operation.border === "top" && cell.row === box.top
+            ? "top"
+            : operation.border === "bottom" && cell.row === box.bottom
+              ? "bottom"
+              : null;
+        if (edge)
+          setCellBorder(
+            workbook,
+            cell,
+            makeBorder({ ...getCellBorder(workbook, cell), [edge]: makeSide(pen) }),
+          );
       }
-      if (operation.border === "outline")
-        setRangeBorderBox(workbook, sheet, boxRef(box), { style: "thin" });
+      if (operation.border === "outline") setRangeBorderBox(workbook, sheet, boxRef(box), pen);
       return;
     }
     case "setColumnWidth": {
@@ -880,6 +898,35 @@ const fileLink = (text: unknown) =>
     : null;
 
 /** A live sheet's style properties, as the `format` operation stores them, on one cell. */
+/** Each edge of a style by the side Excel names it. */
+const FILE_SIDES = {
+  borderTop: "top",
+  borderBottom: "bottom",
+  borderLeft: "left",
+  borderRight: "right",
+} as const;
+/** An edge's line as the file writes it: colour as ARGB, black where none is set. */
+const sideOf = (line: BorderLine) => ({
+  style: line.style,
+  ...(line.color ? { color: { rgb: `FF${line.color.slice(1)}` } } : {}),
+});
+/**
+ * A file's edge as a line, or null for none. Excel's other dashes become
+ * dashed and its hair line thin; black is the default colour, kept as none.
+ */
+function lineOf(side: { style?: string; color?: { rgb?: string } } | undefined): BorderLine | null {
+  const name = side?.style;
+  if (!name || name === "none") return null;
+  const style: BorderLine["style"] =
+    name === "medium" || name === "thick" || name === "double" || name === "dotted"
+      ? name
+      : /dash/i.test(name)
+        ? "dashed"
+        : "thin";
+  const color = rgbOf(side.color);
+  return color && color !== "#000000" ? { style, color } : { style };
+}
+
 function styleCell(workbook: Workbook, cell: Cell, style: CellStyle) {
   const font = {
     ...(style.bold ? { bold: true } : {}),
@@ -904,12 +951,11 @@ function styleCell(workbook: Workbook, cell: Cell, style: CellStyle) {
       ...(style.vertical ? { vertical: style.vertical } : {}),
       ...(style.wrap ? { wrapText: true } : {}),
     });
-  const side = makeSide({ style: "thin" });
   const edges = {
-    ...(style.borderTop ? { top: side } : {}),
-    ...(style.borderBottom ? { bottom: side } : {}),
-    ...(style.borderLeft ? { left: side } : {}),
-    ...(style.borderRight ? { right: side } : {}),
+    ...(style.borderTop ? { top: makeSide(sideOf(style.borderTop)) } : {}),
+    ...(style.borderBottom ? { bottom: makeSide(sideOf(style.borderBottom)) } : {}),
+    ...(style.borderLeft ? { left: makeSide(sideOf(style.borderLeft)) } : {}),
+    ...(style.borderRight ? { right: makeSide(sideOf(style.borderRight)) } : {}),
   };
   if (Object.keys(edges).length) setCellBorder(workbook, cell, makeBorder(edges));
 }
@@ -1085,13 +1131,10 @@ function liveStyle(workbook: Workbook, cell: Cell): CellStyle | undefined {
     style.vertical = alignment.vertical;
   if (alignment.wrapText) style.wrap = true;
   const border = getCellBorder(workbook, cell);
-  for (const [side, key] of [
-    ["top", "borderTop"],
-    ["bottom", "borderBottom"],
-    ["left", "borderLeft"],
-    ["right", "borderRight"],
-  ] as const)
-    if (border[side]?.style && border[side].style !== "none") style[key] = true;
+  for (const key of BORDER_SIDES) {
+    const line = lineOf(border[FILE_SIDES[key]]);
+    if (line) style[key] = line;
+  }
   return Object.keys(style).length ? style : undefined;
 }
 
