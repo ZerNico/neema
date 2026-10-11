@@ -4,6 +4,8 @@ import { positions, type AxisEntry, type AxisProps } from "@chat/sheet/model";
 export const ROW_PX = 20;
 export const COLUMN_PX = 64;
 export const HEADER_ROW_PX = 24;
+/** The outline gutter's width per level. */
+export const OUTLINE_STEP = 14;
 export const HEADER_COLUMN_PX = 48;
 
 /** A row's stored height is in points, a column's width in characters, as Excel keeps them. */

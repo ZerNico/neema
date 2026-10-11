@@ -1,4 +1,5 @@
 import type { Axis } from "@chat/sheet/model";
+import type { PlacedGroup } from "@chat/sheet/model/outline";
 import type { ReactNode } from "react";
 import type { NumberFormatKind } from "./format-commands.ts";
 import type { CellRef, SheetSelection } from "./selection.ts";
@@ -63,3 +64,9 @@ export interface OverlayChange {
   readonly width: number;
   readonly height: number;
 }
+
+/** Collapsing or expanding a group, or showing the outline down to a level. */
+export type OnOutline = (
+  axis: Axis,
+  action: { readonly group: PlacedGroup } | { readonly level: number },
+) => void;

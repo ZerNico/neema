@@ -17,16 +17,12 @@ import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
-import {
-  collapsedOf,
-  outlineDepth,
-  placeGroups,
-  type PlacedGroup,
-} from "@chat/sheet/model/outline";
+import { collapsedOf, outlineDepth, placeGroups } from "@chat/sheet/model/outline";
 import { cellDisplay, safeLink } from "./display.ts";
 import {
   HEADER_COLUMN_PX,
   HEADER_ROW_PX,
+  OUTLINE_STEP,
   drawnLayout,
   columnPx,
   rowPx,
@@ -34,6 +30,7 @@ import {
   visibleRange,
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
+import { OutlineLevels, OutlineMarks } from "./grid-outline.tsx";
 import { drawPane, type PaneDrawing } from "./grid-cells.tsx";
 import {
   adding,
@@ -46,8 +43,14 @@ import {
   type FilledCells,
 } from "./grid-navigation.ts";
 import { commandShortcut, ctrlShortcut, stampOf, stampText } from "./grid-keys.ts";
-import type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
-import { OverlayFrame } from "./overlay.tsx";
+import type {
+  GridCommand,
+  GridDecoration,
+  GridOverlay,
+  OnOutline,
+  OverlayChange,
+} from "./grid-types.ts";
+import { GridOverlays } from "./grid-overlays.tsx";
 import {
   REF_COLORS,
   acceptCompletion,
@@ -122,10 +125,7 @@ export interface SheetGridProps {
   /** Drawn under the active cell, as a link's chip is. */
   readonly activeAccessory?: ReactNode;
   /** Collapsing or expanding a group, or showing an outline level; without it, no buttons show. */
-  readonly onOutline?: (
-    axis: Axis,
-    action: { readonly group: PlacedGroup } | { readonly level: number },
-  ) => void;
+  readonly onOutline?: OnOutline;
   /**
    * How large the cells draw, 1 as stored. Only this view scales: sizes it
    * reports back, from a resize or a moved chart, are unscaled.
@@ -164,13 +164,10 @@ function BesideBox({
 const FALLBACK = { width: 960, height: 640 };
 /** How far a reveal may scroll and still glide there. */
 const GLIDE_PX = 240;
-/** The outline gutter's width per level. */
-const OUTLINE_STEP = 14;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
 const NO_ROWS: ReadonlySet<string> = new Set();
 const NO_LOOKS: ReadonlyMap<string, CellLook> = new Map();
-const OVERLAY_MIN = { width: 160, height: 120 };
 
 /**
  * A sheet's cells, drawn only where the viewport is. Scrolling is the
@@ -975,85 +972,6 @@ export function SheetGrid({
       </div>
     );
   };
-  /** A group's bracket and its button, on the summary row or column after it, as Excel draws them. */
-  const outlineMark = (axis: Axis, group: PlacedGroup) => {
-    const layout = axis === "rows" ? rows : cols;
-    const across = (group.level - 1) * OUTLINE_STEP + OUTLINE_STEP / 2;
-    const [from, to] = [layout.starts[group.start - 1]!, layout.starts[group.end]!];
-    const after = group.end < layout.ids.length ? group.end : group.end - 1;
-    const along = layout.starts[after]! + (layout.size(after) - 12) / 2;
-    const offset = axis === "rows" ? 0 : headerWidth;
-    const line =
-      !group.group.collapsed && to > from ? (
-        <div
-          key={`line-${group.index}`}
-          aria-hidden
-          className="border-muted-foreground/60 pointer-events-none absolute"
-          style={
-            axis === "rows"
-              ? {
-                  top: from + 2,
-                  left: across,
-                  height: to - from - 2,
-                  width: 4,
-                  borderLeftWidth: 1,
-                  borderBottomWidth: 1,
-                }
-              : {
-                  left: offset + from + 2,
-                  top: across,
-                  width: to - from - 2,
-                  height: 4,
-                  borderTopWidth: 1,
-                  borderRightWidth: 1,
-                }
-          }
-        />
-      ) : null;
-    const button = onOutline ? (
-      <button
-        key={`button-${group.index}`}
-        type="button"
-        aria-label={`${group.group.collapsed ? "Expand" : "Collapse"} ${axis === "rows" ? "rows" : "columns"} ${
-          axis === "rows" ? group.start : columnLetters(group.start)
-        } to ${axis === "rows" ? group.end : columnLetters(group.end)}`}
-        className="border-border bg-background text-muted-foreground hover:text-foreground absolute flex size-3 items-center justify-center rounded-xs border text-[10px] leading-none"
-        style={
-          axis === "rows"
-            ? { top: along, left: across - 6 }
-            : { left: offset + along, top: across - 6 }
-        }
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => onOutline(axis, { group })}
-      >
-        {group.group.collapsed ? "+" : "−"}
-      </button>
-    ) : null;
-    return [line, button];
-  };
-  const rowOutline = rowGroups.flatMap((group) => outlineMark("rows", group));
-  const colOutline = colGroups.flatMap((group) => outlineMark("columns", group));
-  // Excel's numbered buttons: show the outline down to a level.
-  const levelButtons = (axis: Axis, depth: number) =>
-    onOutline && depth
-      ? Array.from({ length: depth + 1 }, (_, index) => (
-          <button
-            key={`${axis}-level-${index}`}
-            type="button"
-            aria-label={`Show ${axis === "rows" ? "row" : "column"} outline level ${index + 1}`}
-            className="border-border bg-background text-muted-foreground hover:text-foreground absolute flex size-3 items-center justify-center rounded-xs border text-[9px] leading-none"
-            style={
-              axis === "rows"
-                ? { left: index * OUTLINE_STEP + 1, top: colGutter + (HEADER_ROW_PX - 12) / 2 }
-                : { top: index * OUTLINE_STEP + 1, left: rowGutter + (HEADER_COLUMN_PX - 12) / 2 }
-            }
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onOutline(axis, { level: index + 1 })}
-          >
-            {index + 1}
-          </button>
-        ))
-      : null;
   const columnHeaders: ReactNode[] = [];
   for (let col = visibleCols.first; col <= visibleCols.last; col++)
     columnHeaders.push(columnHeader(col));
@@ -1613,8 +1531,15 @@ export function SheetGrid({
                 );
               }}
             />
-            {levelButtons("rows", rowGutter ? outlineDepth(rowGroups) : 0)}
-            {levelButtons("columns", colGutter ? outlineDepth(colGroups) : 0)}
+            {onOutline ? (
+              <OutlineLevels
+                rowDepth={rowGutter ? outlineDepth(rowGroups) : 0}
+                colDepth={colGutter ? outlineDepth(colGroups) : 0}
+                rowGutter={rowGutter}
+                colGutter={colGutter}
+                onOutline={onOutline}
+              />
+            ) : null}
             {Array.from({ length: frozenCols }, (_, col) => columnHeader(col))}
             {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, headerHeight))}
             {frozenRows && frozenCols
@@ -1625,7 +1550,13 @@ export function SheetGrid({
                 )
               : null}
           </div>
-          {colOutline}
+          <OutlineMarks
+            axis="columns"
+            groups={colGroups}
+            layout={cols}
+            offset={headerWidth}
+            onOutline={onOutline}
+          />
           {columnHeaders}
           {frozenRows ? pane("top", { first: 0, last: frozenRows - 1 }, visibleCols) : null}
         </div>
@@ -1637,7 +1568,13 @@ export function SheetGrid({
             marginTop: -frozenHeight,
           }}
         >
-          {rowOutline}
+          <OutlineMarks
+            axis="rows"
+            groups={rowGroups}
+            layout={rows}
+            offset={0}
+            onOutline={onOutline}
+          />
           {rowHeaders}
           {frozenCols ? pane("left", visibleRows, { first: 0, last: frozenCols - 1 }) : null}
         </div>
@@ -1688,79 +1625,20 @@ export function SheetGrid({
               {selectionAccessory}
             </div>
           ) : null}
-          {overlays.flatMap((overlay) => {
-            const row = rowIndex.get(overlay.at.r);
-            const col = colIndex.get(overlay.at.c);
-            if (row === undefined || col === undefined) return [];
-            const editable = !readOnly && onOverlayChange !== undefined;
-            const offset = {
-              x: (overlay.offset?.x ?? 0) * zoom,
-              y: (overlay.offset?.y ?? 0) * zoom,
-            };
-            // The cell under its corner becomes its anchor, the rest an offset, as Excel keeps one.
-            const placeAt = (top: number, left: number, width: number, height: number) => {
-              const [rowAt, colAt] = [rows.indexAt(top), cols.indexAt(left)];
-              onOverlayChange?.(overlay.key, {
-                at: { r: rows.ids[rowAt]!, c: cols.ids[colAt]! },
-                offset: {
-                  x: Math.round(Math.max(0, left - cols.starts[colAt]!) / zoom),
-                  y: Math.round(Math.max(0, top - rows.starts[rowAt]!) / zoom),
-                },
-                width: Math.round(width / zoom),
-                height: Math.round(height / zoom),
-              });
-            };
-            return [
-              <OverlayFrame
-                key={overlay.key}
-                label={overlay.label}
-                place={{
-                  top: rows.starts[row]! + offset.y,
-                  left: cols.starts[col]! + offset.x,
-                  width: overlay.width * zoom,
-                  height: overlay.height * zoom,
-                }}
-                selected={selectedOverlay === overlay.key}
-                editable={editable}
-                min={{
-                  width: (overlay.min ?? OVERLAY_MIN).width * zoom,
-                  height: (overlay.min ?? OVERLAY_MIN).height * zoom,
-                }}
-                onSelect={() => onOverlaySelect?.(overlay.key)}
-                onDeselect={() => {
-                  onOverlaySelect?.(null);
-                  scroller.current?.focus({ preventScroll: true });
-                }}
-                onPlace={(place) =>
-                  placeAt(
-                    Math.max(0, place.top),
-                    Math.max(0, place.left),
-                    place.width,
-                    place.height,
-                  )
-                }
-                onNudge={(down, right) => {
-                  // A cell at a time, keeping how far into its cell it sits.
-                  const [rowAt, colAt] = [
-                    Math.min(rows.ids.length - 1, Math.max(0, row + down)),
-                    Math.min(cols.ids.length - 1, Math.max(0, col + right)),
-                  ];
-                  placeAt(
-                    rows.starts[rowAt]! + Math.min(offset.y, rows.size(rowAt)),
-                    cols.starts[colAt]! + Math.min(offset.x, cols.size(colAt)),
-                    overlay.width * zoom,
-                    overlay.height * zoom,
-                  );
-                }}
-                onCommand={(command) => {
-                  onOverlayCommand?.(overlay.key, command);
-                  if (command === "delete") scroller.current?.focus({ preventScroll: true });
-                }}
-              >
-                {overlay.content}
-              </OverlayFrame>,
-            ];
-          })}
+          <GridOverlays
+            overlays={overlays}
+            rows={rows}
+            cols={cols}
+            rowIndex={rowIndex}
+            colIndex={colIndex}
+            zoom={zoom}
+            selected={selectedOverlay}
+            editable={!readOnly && onOverlayChange !== undefined}
+            onSelect={onOverlaySelect}
+            onChange={onOverlayChange}
+            onCommand={onOverlayCommand}
+            onLeave={() => scroller.current?.focus({ preventScroll: true })}
+          />
           {refOutlines}
           {editingPane === "main" ? editor : null}
           {editingPane === "main" ? formulaPopup : null}
