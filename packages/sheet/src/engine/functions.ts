@@ -86,20 +86,48 @@ const optionalBoolean = (args: Value[], call: Call, index: number, fallback: boo
 // ---------------------------------------------------------------------------
 // Aggregates
 
+// A range's numbers by its rows, strict and lenient. Ranges are never changed once read, and a
+// pass hands the same rows to every formula reading one: a column summed by a thousand
+// formulas is read once.
+const strictNumbers = new WeakMap<Scalar[][], number[] | XError>();
+const lenientNumbers = new WeakMap<Scalar[][], number[] | XError>();
+function gridNumbers(grid: Grid, lenient: boolean): number[] | XError {
+  const cache = lenient ? lenientNumbers : strictNumbers;
+  const known = cache.get(grid.rows);
+  if (known) return known;
+  let numbers: number[] | XError = [];
+  read: for (const row of grid.rows)
+    for (const item of row) {
+      if (item instanceof XError) {
+        numbers = item;
+        break read;
+      }
+      if (typeof item === "number") numbers.push(item);
+      else if (lenient && typeof item === "boolean") numbers.push(item ? 1 : 0);
+      else if (lenient && typeof item === "string") numbers.push(0);
+    }
+  cache.set(grid.rows, numbers);
+  return numbers;
+}
+
 /**
  * Numbers as SUM reads them: a range or array gives only its numbers; a value
  * written as an argument is converted, and text that isn't a number fails.
  * `lenient` is the A-functions' reading: text counts 0 and TRUE 1.
  */
 function numbersOf(args: Value[], call: Call, lenient = false): number[] | XError {
+  // One range alone, as SUM(A1:A2000) has: its numbers as read before, copied for the caller.
+  if (args.length === 1 && args[0] instanceof Grid) {
+    const numbers = gridNumbers(args[0], lenient);
+    return numbers instanceof XError ? numbers : numbers.slice();
+  }
   const found: number[] = [];
   for (const [index, arg] of args.entries()) {
     if (arg instanceof Grid || arg instanceof Areas) {
-      for (const item of flat(arg)) {
-        if (item instanceof XError) return item;
-        if (typeof item === "number") found.push(item);
-        else if (lenient && typeof item === "boolean") found.push(item ? 1 : 0);
-        else if (lenient && typeof item === "string") found.push(0);
+      for (const grid of arg instanceof Areas ? arg.grids : [arg]) {
+        const numbers = gridNumbers(grid, lenient);
+        if (numbers instanceof XError) return numbers;
+        for (const each of numbers) found.push(each);
       }
       continue;
     }
