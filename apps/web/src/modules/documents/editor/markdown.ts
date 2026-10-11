@@ -162,13 +162,22 @@ const INLINE_TYPES = new Set(
     .filter((type) => type.isInline)
     .map((type) => type.name),
 );
-/** Nodes holding blocks that marked may hand bare text, as a tight list does its items. */
-const BLOCK_HOLDERS = new Set(["callout", "detailsContent", "blockquote"]);
+/**
+ * Nodes holding blocks, which marked may hand bare inline content: text in a
+ * tight list or a callout, a picture alone on its line at the top level.
+ */
+const BLOCK_HOLDERS = new Set(
+  Object.values(documentSchema.nodes)
+    .filter(
+      (type) => !type.inlineContent && type.contentMatch.matchType(documentSchema.nodes.paragraph!),
+    )
+    .map((type) => type.name),
+);
 const LIST_ITEMS = new Set(["listItem", "taskItem"]);
 
 /**
  * Parsed JSON fitted to the schema where marked's tokens and it disagree:
- * bare text inside a block holder goes in a paragraph, and a list item that
+ * bare inline content in a block holder goes in a paragraph, and a list item that
  * starts with another block (a callout, an embed) gets the paragraph a list
  * item must start with.
  */

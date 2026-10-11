@@ -302,6 +302,17 @@ describe("the new blocks against ordinary text", () => {
     }
   });
 
+  it("put a picture alone on its line in a paragraph, at the top level and inside blocks", () => {
+    for (const markdown of [
+      "# Goals\n\n![Dot](/x.png)\n\nShip it.",
+      "![Dot](/x.png)",
+      "| a |\n|---|\n| ![Dot](/x.png) |",
+      "> [!NOTE]\n> ![Dot](/x.png)",
+    ])
+      roundTrips(markdown);
+    expect(parseMarkdown("![Dot](/x.png)").firstChild!.type.name).toBe("paragraph");
+  });
+
   it("keep footnote definitions and </details> lines that sit in code", () => {
     const code = "Text\n\n```\n[^1]: hello\n```";
     expect(toMarkdown(parseMarkdown(code))).toBe(code);
