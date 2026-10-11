@@ -233,7 +233,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   is calculated; a typed value shows at once and a formula keeps its last result until the new
   one. Until the worker's first answer a sheet with no result yet would show its formulas empty,
   so one that is small (at most 1,000 formulas, reading at most 50,000 cells in all, about a
-  frame's work) is calculated once in place as it opens; a bigger one waits. The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
+  frame's work) is calculated once in place as it opens, and that stands in until the answer.
+  A bigger one waits, and so does one using a function whose work its references do not bound
+  (`SEQUENCE`, `MAKEARRAY`, `INDIRECT`, `OFFSET` and the like). The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
   row's cell contents with what it calculated before and recalculates only the formulas the
   changed cells reach (those reading them, filling them, shown as `#SPILL!`, or using
   `INDIRECT` and `OFFSET`, and everything after those), keeping every other result. A change to

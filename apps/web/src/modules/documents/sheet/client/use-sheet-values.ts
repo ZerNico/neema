@@ -18,6 +18,14 @@ const span = (axis: Positions, from: string | null, to: string | null) =>
     ? axis.ids.length
     : Math.abs((axis.at(to) ?? 0) - (axis.at(from) ?? 0)) + 1;
 
+/**
+ * Functions whose work is not what their references cover: arrays made from a number, and
+ * references made from text or offsets. One of them leaves a sheet to the worker, since
+ * `SUM(SEQUENCE(1000000))` reads no cell and still takes 200ms.
+ */
+const UNBOUNDED =
+  /\b(SEQUENCE|RANDARRAY|MAKEARRAY|EXPAND|MUNIT|MAP|REDUCE|SCAN|BYROW|BYCOL|INDIRECT|OFFSET)\s*\(/i;
+
 /** Whether a document's formulas are few and read little enough to calculate at once. */
 const small = (doc: SheetDoc) => {
   let formulas = 0;
@@ -38,7 +46,10 @@ const small = (doc: SheetDoc) => {
         if (!cell.f) continue;
         if (++formulas > FIRST_IN_PLACE.formulas) return false;
         for (const part of cell.f.parts) {
-          if (typeof part === "string") continue;
+          if (typeof part === "string") {
+            if (UNBOUNDED.test(part)) return false;
+            continue;
+          }
           // A reference across sheets is rare enough to leave to the worker.
           if (part.k === "span") return false;
           const size = sized(part.sheet ?? id);
@@ -54,9 +65,10 @@ const small = (doc: SheetDoc) => {
 /**
  * A sheet's values, calculated in a worker so typing never waits on a big
  * sheet. Each request carries a generation; an answer for an older one is
- * dropped. Without workers (tests, old browsers) it calculates in place, and
- * so does a small sheet until the worker's first answer, so its formulas show
- * as it opens rather than once the worker has loaded.
+ * dropped. Without workers (tests, old browsers) it calculates in place. A
+ * small sheet is also calculated in place once, as it opens, and that stands
+ * in until the worker's first answer, so its formulas show at once rather than
+ * once the worker has loaded; an edit before then waits for the worker.
  */
 export function useSheetValues(
   doc: SheetDoc | null,
@@ -94,11 +106,19 @@ export function useSheetValues(
     };
     worker.current?.postMessage(request);
   }, [target, inline]);
+  // The sheet as it opened, calculated here once; "worker" when it is too big to.
+  const [opened, setOpened] = useState<CalcResult | "worker" | null>(null);
+  if (opened === null && !inline && result === null && target.doc && target.context)
+    setOpened(
+      small(target.doc)
+        ? calculateForWire({ generation: 0, doc: target.doc, context: target.context })
+        : "worker",
+    );
   return useMemo(() => {
     const { doc: shown, context: at } = target;
     if (!shown || !at) return null;
-    if (inline || (result === null && small(shown)))
+    if (inline)
       return valuesOf(shown, at, calculateForWire({ generation: 0, doc: shown, context: at }));
-    return valuesOf(shown, at, result);
-  }, [target, inline, result]);
+    return valuesOf(shown, at, result ?? (opened === "worker" ? null : opened));
+  }, [target, inline, result, opened]);
 }
