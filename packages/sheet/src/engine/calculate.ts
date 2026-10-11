@@ -474,12 +474,11 @@ function pass(store: CellStore, limits: CalcLimits) {
     };
   };
 
-  const errors: FormulaIssue[] = [];
-  let errorCount = 0;
+  // Every error, listed in reading order (sheet, row, column) rather than the order formulas
+  // happened to be calculated in, which a pass reusing results does not repeat.
+  const flagged: Array<{ formula: StoredFormula; code: string }> = [];
   const flag = (formula: StoredFormula, code: string) => {
-    errorCount += 1;
-    if (errors.length < limits.errorsListed)
-      errors.push({ cell: address(formula.sheet, formula.row, formula.column), error: code });
+    flagged.push({ formula, code });
   };
   const record = (formula: Formula, result: Scalar, area?: CellBox) => {
     if (result instanceof XError) flag(formula.stored, result.code);
@@ -607,8 +606,26 @@ function pass(store: CellStore, limits: CalcLimits) {
   // calling an array function is saved dynamic, for Excel to spill.
   for (const stored of unread)
     store.setUncalculated(stored, stored.form === "normal" && ARRAY_CALL.test(stored.text));
+  const errors: FormulaIssue[] = flagged
+    .toSorted(
+      (a, b) =>
+        sheetIndex.get(a.formula.sheet.toLowerCase())! -
+          sheetIndex.get(b.formula.sheet.toLowerCase())! ||
+        a.formula.row - b.formula.row ||
+        a.formula.column - b.formula.column,
+    )
+    .slice(0, limits.errorsListed)
+    .map(({ formula, code }) => ({
+      cell: address(formula.sheet, formula.row, formula.column),
+      error: code,
+    }));
   return {
-    result: { formulas: formulas.length, errors, errorCount, unsupported: [...unsupported] },
+    result: {
+      formulas: formulas.length,
+      errors,
+      errorCount: flagged.length,
+      unsupported: [...unsupported],
+    },
     reshaped,
   };
 }
