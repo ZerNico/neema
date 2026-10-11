@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { SheetLocale } from "@chat/sheet/locales";
 import { REF_COLORS, acceptCompletion, completionFor, formulaRefs } from "./formula-edit.ts";
 import { FormulaPopup } from "./formula-popup.tsx";
 import { textWidth, type AxisLayout } from "./layout.ts";
@@ -10,7 +11,7 @@ export function CellEditor({
   editing,
   rect,
   zoom,
-  listSeparator,
+  locale,
   edit: {
     editorInput,
     caret,
@@ -28,8 +29,8 @@ export function CellEditor({
   editing: CellEditing;
   rect: { top: number; left: number; width: number; height: number };
   zoom: number;
-  /** What the argument hint writes between arguments, as the sheet's locale types them. */
-  listSeparator: string;
+  /** The sheet's locale, whose separators the formula is typed in. */
+  locale: SheetLocale;
   edit: ReturnType<typeof useCellEdit>;
   onEditingChange: ((editing: CellEditing | null) => void) | undefined;
 }) {
@@ -81,7 +82,7 @@ export function CellEditor({
           text={editing.text}
           caret={caret}
           picked={picked}
-          listSeparator={listSeparator}
+          locale={locale}
           onPick={(name) => {
             const offered = completionFor(editing.text, caret);
             if (!offered) return;
@@ -99,17 +100,19 @@ export function CellEditor({
 /** The cells each reference of a formula being typed reads, outlined in its colour. */
 export function RefOutlines({
   text,
+  locale,
   sheetName,
   rows,
   cols,
 }: {
   text: string;
+  locale: SheetLocale;
   sheetName: string;
   rows: AxisLayout;
   cols: AxisLayout;
 }) {
   if (!text.startsWith("=")) return [];
-  return formulaRefs(text).flatMap((ref, index) => {
+  return formulaRefs(text, locale).flatMap((ref, index) => {
     if (ref.sheet !== null && ref.sheet.toLowerCase() !== sheetName) return [];
     const [top, bottom] =
       ref.top === null ? [0, rows.ids.length - 1] : [ref.top - 1, ref.bottom! - 1];

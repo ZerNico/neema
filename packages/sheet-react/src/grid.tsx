@@ -1043,7 +1043,7 @@ export function SheetGrid({
         editing={editing}
         rect={editorRect}
         zoom={zoom}
-        listSeparator={locale.listSeparator}
+        locale={locale}
         edit={edit}
         onEditingChange={onEditingChange}
       />
@@ -1292,6 +1292,7 @@ export function SheetGrid({
           {editing ? (
             <RefOutlines
               text={editing.text}
+              locale={locale}
               sheetName={data.name.toLowerCase()}
               rows={rows}
               cols={cols}

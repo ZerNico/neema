@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DE_DE } from "@chat/sheet/locales";
 import {
   acceptCompletion,
   callAt,
@@ -74,5 +75,23 @@ describe("a formula as it is typed", () => {
     ]);
     expect(toggleAbsolute("=A1+Data!B2:C3", 14)!.text).toBe("=A1+Data!$B$2:$C$3");
     expect(toggleAbsolute("=1+2", 2)).toBeNull();
+  });
+});
+
+describe("a formula typed in a comma-decimal locale", () => {
+  it("finds references, cycles $ and points after an array's column separator", () => {
+    expect(formulaRefs("={A1\\B1}", DE_DE).map((ref) => [ref.text, ref.start])).toEqual([
+      ["A1", 2],
+      ["B1", 5],
+    ]);
+    expect(toggleAbsolute("={A1\\B1}", 6, DE_DE)).toEqual({ text: "={A1\\$B$1}", caret: 9 });
+    expect(pointable("={A1\\", 5)).toBe(true);
+  });
+
+  it("counts arguments by ';', not by a decimal comma or an array's separators", () => {
+    expect(callAt("=ROUND(1,5", 10, DE_DE)).toEqual({ name: "ROUND", argument: 0 });
+    expect(callAt("=ROUND(1,5;2", 12, DE_DE)).toEqual({ name: "ROUND", argument: 1 });
+    expect(callAt("=SUM({1\\2;3\\4}", 15, DE_DE)).toEqual({ name: "SUM", argument: 0 });
+    expect(callAt("=SUM({1,2;3,4},A1", 18)).toEqual({ name: "SUM", argument: 1 });
   });
 });

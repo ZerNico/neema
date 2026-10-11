@@ -1,3 +1,4 @@
+import type { SheetLocale } from "@chat/sheet/locales";
 import { callAt, completionFor } from "./formula-edit.ts";
 import { signatureOf } from "./formula-help.ts";
 
@@ -9,14 +10,14 @@ export function FormulaPopup({
   text,
   caret,
   picked,
-  listSeparator,
+  locale,
   onPick,
   style,
 }: {
   text: string;
   caret: number;
   picked: number;
-  listSeparator: string;
+  locale: SheetLocale;
   onPick: (name: string) => void;
   style: { top: number; left: number };
 }) {
@@ -47,7 +48,7 @@ export function FormulaPopup({
         ))}
       </ul>
     );
-  const call = callAt(text, caret);
+  const call = callAt(text, caret, locale);
   const hint = call ? signatureOf(call.name, call.argument) : null;
   if (!hint) return null;
   return (
@@ -59,7 +60,7 @@ export function FormulaPopup({
       {hint.name}(
       {hint.args.map((arg, index) => (
         <span key={arg}>
-          {index ? `${listSeparator} ` : ""}
+          {index ? `${locale.listSeparator} ` : ""}
           <span className={index === hint.current ? "font-semibold" : "text-muted-foreground"}>
             {arg}
           </span>

@@ -160,7 +160,11 @@ export function useCellEdit({
     }
     if (event.key === "F4" && editing) {
       event.preventDefault();
-      const toggled = toggleAbsolute(editing.text, event.currentTarget.selectionStart ?? caret);
+      const toggled = toggleAbsolute(
+        editing.text,
+        event.currentTarget.selectionStart ?? caret,
+        locale,
+      );
       if (toggled) rewrite(toggled.text, toggled.caret);
       return;
     }

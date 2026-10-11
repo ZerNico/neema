@@ -1,5 +1,7 @@
 import { functionNames } from "@chat/sheet/engine/functions";
 import { lex } from "@chat/sheet/engine/parse";
+import { delocalizeFormula } from "@chat/sheet/formula-locale";
+import type { SheetLocale } from "@chat/sheet/locales";
 import { isCommon } from "./formula-help.ts";
 
 /**
@@ -23,12 +25,19 @@ export interface FormulaRef {
   readonly right: number | null;
 }
 
+/**
+ * Typed text in English syntax, for reading only. Every separator the locale changes is one
+ * character for one, so each offset into it is the same offset into what was typed.
+ */
+const english = (text: string, locale: SheetLocale | undefined) =>
+  locale ? delocalizeFormula(text, locale) : text;
+
 /** The references in a typed formula, in order; none in plain text. */
-export function formulaRefs(text: string): FormulaRef[] {
+export function formulaRefs(text: string, locale?: SheetLocale): FormulaRef[] {
   if (!text.startsWith("=")) return [];
   const refs: FormulaRef[] = [];
   let offset = 1;
-  for (const piece of lex(text.slice(1))) {
+  for (const piece of lex(english(text, locale).slice(1))) {
     if (piece.k === "ref") {
       const to = piece.to ?? piece.from;
       refs.push({
@@ -60,8 +69,8 @@ const inString = (text: string, index: number) => {
   for (let at = 0; at < index; at++) if (text[at] === '"') quoted = !quoted;
   return quoted;
 };
-/** Characters after which a reference or a function may start. */
-const OPENERS = new Set(["=", "(", ",", ";", "+", "-", "*", "/", "^", "&", "<", ">", ":", " "]);
+/** Characters after which a reference or a function may start; a backslash splits a localized array's columns. */
+const OPENERS = new Set(["=", "(", ",", ";", "\\", "+", "-", "*", "/", "^", "&", "<", ">", ":", " "]);
 
 /** The function name being typed before the caret, and the names it could become. */
 export function completion(
@@ -97,20 +106,31 @@ export function acceptCompletion(text: string, caret: number, start: number, nam
   return { text: `${before}${call}${after}`, caret: before.length + name.length + 1 };
 }
 
-/** The innermost call the caret is in, and which of its arguments, counting from 0. */
-export function callAt(text: string, caret: number): { name: string; argument: number } | null {
-  if (!text.startsWith("=")) return null;
+/**
+ * The innermost call the caret is in, and which of its arguments, counting from 0. Read in
+ * English syntax, so a localized decimal comma or an array's separators start no argument.
+ */
+export function callAt(
+  typed: string,
+  caret: number,
+  locale?: SheetLocale,
+): { name: string; argument: number } | null {
+  if (!typed.startsWith("=")) return null;
+  const text = english(typed, locale);
   const stack: Array<{ name: string; argument: number }> = [];
   let quoted = false;
+  let braces = 0;
   for (let at = 1; at < caret; at++) {
     const char = text[at]!;
     if (char === '"') quoted = !quoted;
     if (quoted) continue;
-    if (char === "(") {
+    if (char === "{") braces++;
+    else if (char === "}") braces = Math.max(0, braces - 1);
+    else if (char === "(") {
       const name = /([A-Za-z_][A-Za-z0-9_.]*)$/.exec(text.slice(1, at))?.[1] ?? "";
       stack.push({ name: name.toUpperCase(), argument: 0 });
     } else if (char === ")") stack.pop();
-    else if ((char === "," || char === ";") && stack.length) stack.at(-1)!.argument++;
+    else if (char === "," && !braces && stack.length) stack.at(-1)!.argument++;
   }
   const inner = stack.at(-1);
   return inner?.name ? inner : null;
@@ -155,8 +175,8 @@ const cycleCorner = (corner: string) => {
 };
 
 /** F4: the reference at the caret with its `$` marks cycled, or null when there is none. */
-export function toggleAbsolute(text: string, caret: number) {
-  const ref = formulaRefs(text).find((each) => caret >= each.start && caret <= each.end);
+export function toggleAbsolute(text: string, caret: number, locale?: SheetLocale) {
+  const ref = formulaRefs(text, locale).find((each) => caret >= each.start && caret <= each.end);
   if (!ref) return null;
   const bang = ref.text.lastIndexOf("!");
   const sheet = bang === -1 ? "" : ref.text.slice(0, bang + 1);
