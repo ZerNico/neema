@@ -9,12 +9,13 @@ import { DocumentPending } from "./pending-item.tsx";
 import { CodeBlockView } from "./code-block-view.tsx";
 import { DocumentTaskItem } from "./task-item.tsx";
 import { BrowserBlockMath, BrowserInlineMath } from "./math-item.ts";
+import { DocumentFind } from "./find.ts";
 import { openLink } from "./links.ts";
 
 /**
  * The browser's editor: the shared schema, with tasks drawn by the app's
  * checkbox, Mermaid blocks as diagrams, formulas through KaTeX and planned sections as placeholders (rendering only, the schema is
- * unchanged), the `/` menu and the size cap. The connection adds collaboration and other people's cursors.
+ * unchanged), the `/` menu, find and the size cap. The connection adds collaboration and other people's cursors.
  */
 export const browserEditorExtensions = [
   ...documentExtensions.map(
@@ -33,6 +34,7 @@ export const browserEditorExtensions = [
   ),
   Placeholder.configure({ placeholder: "Write, or type / for blocks" }),
   SlashCommand,
+  DocumentFind,
   SizeCap,
 ];
 

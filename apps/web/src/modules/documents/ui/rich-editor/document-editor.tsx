@@ -8,6 +8,7 @@ import { EditorContextMenu } from "./context-menu.tsx";
 import { setEditorHooks, type EditorHooks } from "./editor-hooks.ts";
 import type { DocumentDiscussion } from "../../client/use-document.ts";
 import { CommentCard } from "./comment-card.tsx";
+import { DocumentFindBar } from "./find-bar.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 
 /** The connection's editor; the connection itself stays with the caller. */
@@ -68,6 +69,7 @@ function RichEditor({
       {toolbarSlot && !readOnly
         ? createPortal(<DocumentToolbar editor={editor} />, toolbarSlot)
         : null}
+      <DocumentFindBar editor={editor} />
       {/* Room above the first line for another person's cursor label. */}
       <div
         ref={setScroller}

@@ -3,6 +3,7 @@ import {
   Calendar03Icon,
   CommentAdd01Icon,
   FunctionOfXIcon,
+  SearchReplaceIcon,
   UserIcon,
   CheckListIcon,
   CodeSquareIcon,
@@ -51,6 +52,7 @@ import { LinkPopover } from "./link-popover.tsx";
 import { insertFormula } from "./math-item.ts";
 import { NodeSelection } from "@tiptap/pm/state";
 import { startComment } from "./comment-start.ts";
+import { setFindOpen } from "./find.ts";
 import { Ribbon, type RibbonTab } from "../ribbon.tsx";
 import { isoDay } from "./dates.ts";
 
@@ -274,13 +276,7 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
                 (c) => c.toggleOrderedList(),
                 "⌘⇧7",
               )}
-              {format(
-                "Checklist",
-                CheckListIcon,
-                state.taskList,
-                (c) => c.toggleTaskList(),
-                "⌘⇧9",
-              )}
+              {format("Checklist", CheckListIcon, state.taskList, (c) => c.toggleTaskList(), "⌘⇧9")}
               {format("Quote", QuoteDownIcon, state.blockquote, (c) => c.toggleBlockquote(), "⌘⇧B")}
               {format(
                 "Code block",
@@ -290,6 +286,19 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
                 "⌘⌥C",
               )}
             </>
+          ),
+        },
+        {
+          id: "editing",
+          label: "Editing",
+          controls: (
+            <Action
+              icon={SearchReplaceIcon}
+              label="Find and replace"
+              shortcut="⌘⇧H"
+              disabled={false}
+              onPress={() => setFindOpen(editor, "replace")}
+            />
           ),
         },
       ],

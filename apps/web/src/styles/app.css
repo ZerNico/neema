@@ -577,6 +577,13 @@ html[data-panel-resizing] webview {
       @apply bg-warning/40;
     }
   }
+  /* Find's matches, in a colour apart from comments'; the current one stands out more. */
+  .rich-editor .find-match {
+    @apply bg-chart-1/20 rounded-[2px];
+    &.find-match-current {
+      @apply bg-chart-1/45;
+    }
+  }
   /* Other people's carets, laid over the text. A placed caret slides to where
      it moves, over about the time between two updates, so text streaming in
      reads as typing rather than jumps. */

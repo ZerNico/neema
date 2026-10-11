@@ -395,6 +395,40 @@ describe("document editor", () => {
     );
   });
 
+  it("finds the selected words and replaces every match in one undoable step", async () => {
+    const sync = await replica("Ship the plan.\n\nThe **plan** ships Friday.");
+    mount(sync);
+    const editor = await editorOf();
+    act(() => {
+      editor.commands.setTextSelection({ from: 10, to: 14 });
+    });
+    // Mod is Ctrl off a Mac, which jsdom is.
+    fireEvent.keyDown(editor.view.dom, { key: "f", ctrlKey: true });
+    const query = await screen.findByRole("textbox", { name: "Find in document" });
+    expect(query).toHaveValue("plan");
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    fireEvent.change(query, { target: { value: "ship" } });
+    expect(screen.getByText(/of 2/)).toBeInTheDocument();
+    // Replacing comes with the ribbon's button, and keeps each match's formatting.
+    fireEvent.change(query, { target: { value: "plan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find and replace" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Replace with" }), {
+      target: { value: "roadmap" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Replace all" }));
+    await waitFor(() =>
+      expect(server.content(sync.id)).toBe("Ship the roadmap.\n\nThe **roadmap** ships Friday."),
+    );
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(sync.markdown()).toBe("Ship the plan.\n\nThe **plan** ships Friday.");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Find in document" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+  });
+
   it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {
     const sync = await replica("Plan the launch");
     mount(sync);
