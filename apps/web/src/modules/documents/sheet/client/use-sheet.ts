@@ -66,12 +66,13 @@ class SheetConnections {
       ? [cursor.sheet, cursor.anchor.r, cursor.anchor.c, cursor.head.r, cursor.head.c]
       : [];
   };
-  open(documentId: string) {
-    const sync = new SheetSync({
-      documentId,
-      push: (data) => pushSheet({ data }),
-      outbox: sheetOutbox,
-    });
+  open(documentId: string, mode: SheetMode) {
+    // A reader never sends, so it neither pushes nor resends what another tab left unsent.
+    const sync = new SheetSync(
+      mode === "edit"
+        ? { documentId, push: (data) => pushSheet({ data }), outbox: sheetOutbox }
+        : { documentId, push: () => Promise.reject(new Error("This sheet is open to read only")) },
+    );
     this.all.add(sync);
     this.current = sync;
     const unsubscribe = sync.subscribe(this.#changed);
@@ -104,15 +105,18 @@ export interface SheetController {
   readonly selected: () => string[];
 }
 
+/** Whether a connection may write: a panel's sheet, or one only drawn elsewhere, as an embed. */
+export type SheetMode = "edit" | "read";
+
 /**
  * One controller per sheet, mounted beside its document's; only an open
  * sheet holds a connection, and one closing stays until its edits are sent.
  */
-export function useSheet(documentId: string, live: boolean) {
+export function useSheet(documentId: string, live: boolean, mode: SheetMode = "edit") {
   const [connections] = useState(() => new SheetConnections());
   useEffect(
-    () => (live ? connections.open(documentId) : undefined),
-    [connections, documentId, live],
+    () => (live ? connections.open(documentId, mode) : undefined),
+    [connections, documentId, live, mode],
   );
   const state = useSyncExternalStore(connections.subscribe, connections.getState, () => null);
   const flush = useCallback(async () => {

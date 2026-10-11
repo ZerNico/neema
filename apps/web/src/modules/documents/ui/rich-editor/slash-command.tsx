@@ -19,6 +19,7 @@ import {
   ArrowRight01Icon,
   TextFootnoteIcon,
   Image01Icon,
+  FileSpreadsheetIcon,
 } from "@hugeicons/core-free-icons";
 import { Extension, type Editor, type Range } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
@@ -30,6 +31,7 @@ import { isoDay } from "./dates.ts";
 import { editorHooks } from "./editor-hooks.ts";
 import { canAddImages, pickImages } from "./image-upload.ts";
 import { mountAtCaret } from "./suggestion-mount.ts";
+import { canPickSheet, openSheetPicker } from "./sheet-embeds.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
@@ -149,6 +151,16 @@ export const SLASH_ITEMS: SlashItem[] = [
     run: (e, r) => {
       blocks(e, r).run();
       pickImages(e);
+    },
+  },
+  {
+    title: "Sheet",
+    icon: FileSpreadsheetIcon,
+    keywords: "spreadsheet range chart cells embed live",
+    available: canPickSheet,
+    run: (e, r) => {
+      blocks(e, r).run();
+      openSheetPicker(e);
     },
   },
   {

@@ -652,6 +652,25 @@ html[data-panel-resizing] webview {
       @apply -rotate-45;
     }
   }
+  /* A range or chart of a live sheet: a caption naming it, then the cells, compact and read-only. */
+  .rich-editor .sheet-embed {
+    @apply flex flex-col gap-1.5 rounded-xl;
+    &[data-selected] {
+      @apply ring-ring/50 ring-2;
+    }
+    & .sheet-embed-caption {
+      @apply text-muted-foreground flex max-w-full items-center gap-1.5 self-start text-xs [&_svg]:size-3.5 [&_svg]:shrink-0;
+    }
+    & .sheet-embed-table {
+      @apply max-w-full overflow-x-auto rounded-lg border;
+    }
+    & table {
+      @apply w-auto min-w-full tabular-nums;
+    }
+    & td {
+      @apply min-w-0 px-2 py-1 whitespace-pre;
+    }
+  }
   /* Footnotes number themselves by their order in the text. */
   .rich-editor {
     counter-reset: footnote;

@@ -17,6 +17,7 @@ import { getDocumentVersion, getDocumentVersions } from "../../server/document-f
 import type { DocumentVersion } from "../../server/versions.ts";
 import { browserEditorExtensions } from "./editor-extensions.ts";
 import { restoreVersion } from "./version-restore.ts";
+import { SheetEmbedSources } from "./sheet-embed-sources.tsx";
 
 const when = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -134,5 +135,11 @@ function VersionPreview({ json }: { json: JSONContent }) {
     editable: false,
     immediatelyRender: true,
   });
-  return <EditorContent editor={preview} />;
+  // Embeds in an old version show their sheet as it is now: values are never kept.
+  return (
+    <>
+      <EditorContent editor={preview} />
+      {preview ? <SheetEmbedSources editor={preview} /> : null}
+    </>
+  );
 }

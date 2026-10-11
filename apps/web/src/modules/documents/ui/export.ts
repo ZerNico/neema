@@ -60,6 +60,11 @@ sup[data-footnote] { counter-increment: footnote; }
 sup[data-footnote]::after { content: counter(footnote); font-size: 0.75em; }
 mark { background: #fef08a; color: inherit; }
 img { max-width: 100%; height: auto; vertical-align: bottom; }
+[data-sheet-embed] { margin: 0 0 9pt; break-inside: avoid; white-space: normal; }
+[data-sheet-embed] .sheet-embed-caption { font-size: 9pt; color: #555; margin: 0 0 3pt; }
+[data-sheet-embed] table { width: auto; }
+[data-sheet-embed] td { padding: 2pt 5pt; white-space: pre; }
+[data-sheet-embed] svg { max-width: 100%; height: auto; }
 ol.footnotes { margin: 18pt 0 0; padding: 8pt 0 0 18pt; border-top: 0.75pt solid #d4d4d8; font-size: 9.5pt; }
 `;
 
@@ -132,11 +137,43 @@ export const printDocument = (editor: Editor, title: string) => {
       figure.innerHTML = svg;
       code.parentElement!.replaceWith(figure);
     }
-    view.addEventListener("afterprint", () => frame.remove(), { once: true });
-    view.focus();
-    view.print();
+    void printSheetEmbeds(editor, page).finally(() => {
+      view.addEventListener("afterprint", () => frame.remove(), { once: true });
+      view.focus();
+      view.print();
+    });
   });
   document.body.append(frame);
+};
+
+/** What an embed shows, the same on the printed element and the editor's drawing of it. */
+const embedKey = (element: HTMLElement) =>
+  [element.dataset.sheet, element.dataset.range ?? "", element.dataset.chart ?? ""].join("\u0000");
+
+/**
+ * Sheet embeds print what the editor drew of them: a range as its table, a
+ * chart as an SVG of the drawing. One not drawn keeps its caption line.
+ */
+const printSheetEmbeds = async (editor: Editor, page: Document) => {
+  const printed = [...page.querySelectorAll<HTMLElement>("[data-sheet-embed]")];
+  if (!printed.length) return;
+  const views = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-sheet-embed-view]")];
+  const drawn = new Map(views.map((view) => [embedKey(view), view]));
+  // The chart library's exporter loads only for a document that prints a chart.
+  const charts = views.some((view) => view.querySelector("figure[data-chart-id]"))
+    ? await import("../sheet/ui/chart-image.ts")
+    : null;
+  for (const embed of printed) {
+    const view = drawn.get(embedKey(embed));
+    if (!view) continue;
+    const caption = view.querySelector(".sheet-embed-caption")?.textContent;
+    const line = embed.querySelector(".sheet-embed-caption");
+    if (caption && line) line.textContent = caption;
+    const table = view.querySelector("table");
+    const figure = view.querySelector<HTMLElement>("figure[data-chart-id]");
+    if (table) embed.append(page.importNode(table, true));
+    else if (figure && charts) embed.insertAdjacentHTML("beforeend", charts.chartSvg(figure));
+  }
 };
 
 /** The document's Markdown as a `.md` file. */
