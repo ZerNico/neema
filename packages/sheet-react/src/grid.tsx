@@ -3,6 +3,7 @@ import { cellStyle } from "@chat/sheet/model/style";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useMemo,
@@ -468,11 +469,14 @@ export function SheetGrid({
   );
 
   // A selection set from outside, as a find does, is scrolled into view like one moved by key.
+  // Only its moving does: any redraw rebuilds reveal, and one while the reader has scrolled
+  // away (to drag a chart) must not pull them back.
   const headRow = head?.row;
   const headCol = head?.col;
+  const revealHead = useEffectEvent((row: number, col: number) => reveal(row, col));
   useEffect(() => {
-    if (headRow !== undefined && headCol !== undefined) reveal(headRow, headCol);
-  }, [headRow, headCol, reveal]);
+    if (headRow !== undefined && headCol !== undefined) revealHead(headRow, headCol);
+  }, [headRow, headCol]);
 
   const writable = !readOnly && !!onEditingChange && !!onCommit;
   const beginEdit = (text: string | null) => {

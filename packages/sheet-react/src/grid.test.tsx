@@ -712,3 +712,27 @@ describe("dragging an overlay's handles", () => {
     });
   });
 });
+
+describe("scrolling to the selection", () => {
+  it("leaves the scroll alone when the grid redraws without the selection moving", () => {
+    const doc = emptyDoc();
+    const values = calculateSheet(doc, { revision: 1, epoch: 0, now: 45_000, seed: 1 });
+    const props = {
+      doc,
+      sheet: "s1",
+      values,
+      locale: EN_US,
+      selection: { anchor: at(80, 1), head: at(80, 1) },
+      onSelectionChange: () => {},
+      label: "Budget",
+    };
+    const { rerender } = render(<SheetGrid {...props} hiddenRows={new Set()} />);
+    const grid = screen.getByRole("grid");
+    expect(grid.scrollTop).toBeGreaterThan(0);
+    // Scrolled back up by hand, as to drag a chart there.
+    grid.scrollTop = 0;
+    // A parent redrawing hands over a new set of hidden rows with the same rows in it.
+    rerender(<SheetGrid {...props} hiddenRows={new Set()} />);
+    expect(grid.scrollTop).toBe(0);
+  });
+});
