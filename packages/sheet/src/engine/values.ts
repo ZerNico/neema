@@ -229,3 +229,16 @@ export function wildcard(pattern: string) {
   };
 }
 export const hasWildcard = (text: string) => /[*?~]/.test(text);
+
+/**
+ * The smallest and largest of some numbers, read in a loop: spreading them
+ * into Math.min passes each as an argument, and a long column overflows the stack.
+ */
+export function extent(numbers: readonly number[]): readonly [low: number, high: number] {
+  let [low, high] = [Infinity, -Infinity];
+  for (const each of numbers) {
+    if (each < low) low = each;
+    if (each > high) high = each;
+  }
+  return [low, high];
+}

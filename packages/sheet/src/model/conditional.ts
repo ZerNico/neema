@@ -1,3 +1,4 @@
+import { extent } from "../engine/values.ts";
 import { placeBox } from "./box.ts";
 import type { SheetValues } from "./calc.ts";
 import { shownText } from "./filter.ts";
@@ -195,7 +196,7 @@ export function conditionalLooks(
       case "scale":
       case "bar": {
         if (!numbers.length) break;
-        const [low, high] = [Math.min(...numbers), Math.max(...numbers)];
+        const [low, high] = extent(numbers);
         const middle = (low + high) / 2;
         for (const cell of cells) {
           if (typeof cell.value !== "number") continue;

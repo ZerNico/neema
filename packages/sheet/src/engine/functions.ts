@@ -22,6 +22,7 @@ import {
   VALUE,
   vector,
   wildcard,
+  extent,
   XError,
   type Ref,
   type Scalar,
@@ -119,8 +120,8 @@ const onNumbers =
   };
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 const average = (values: number[]) => (values.length ? sum(values) / values.length : DIV0);
-const max = (values: number[]) => (values.length ? Math.max(...values) : 0);
-const min = (values: number[]) => (values.length ? Math.min(...values) : 0);
+const max = (values: number[]) => (values.length ? extent(values)[1] : 0);
+const min = (values: number[]) => (values.length ? extent(values)[0] : 0);
 
 /** A formula.js statistic over the numbers alone, so its own coercion never runs. */
 const libraryStat =

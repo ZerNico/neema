@@ -1,4 +1,4 @@
-import { CALC, DIV0, Grid, SPILL, VALUE, XError, compare, type Scalar } from "./values.ts";
+import { CALC, DIV0, Grid, SPILL, VALUE, XError, compare, extent, type Scalar } from "./values.ts";
 
 /** The most cells a PIVOTBY makes, as many as a live sheet lets one formula spill into. */
 export const PIVOT_CELLS = 200_000;
@@ -50,9 +50,9 @@ function summarise(fn: Aggregate, values: readonly Scalar[], whole: number): Sca
     case "COUNTA":
       return values.filter((each) => each !== null && each !== "").length;
     case "MIN":
-      return numbers.length ? Math.min(...numbers) : 0;
+      return numbers.length ? extent(numbers)[0] : 0;
     case "MAX":
-      return numbers.length ? Math.max(...numbers) : 0;
+      return numbers.length ? extent(numbers)[1] : 0;
     case "PRODUCT":
       return numbers.length ? numbers.reduce((total, each) => total * each, 1) : 0;
     case "MEDIAN": {
