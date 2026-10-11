@@ -155,6 +155,7 @@ const sameMembers = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
 
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
 const FALLBACK = { width: 960, height: 640 };
+const NONE_VISIBLE = { first: 0, last: -1 };
 /** How far a reveal may scroll and still glide there. */
 const GLIDE_PX = 240;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
@@ -208,7 +209,15 @@ export function SheetGrid({
   const gridId = useId();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const [viewport, setViewport] = useState({ top: 0, left: 0, ...FALLBACK });
+  // Unmeasured until the layout effect reads the grid's box, before the first paint. Until then
+  // no cells are drawn: drawing a guessed viewport's would draw them all twice on opening.
+  const [measured, setViewport] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const viewport = measured ?? { top: 0, left: 0, ...FALLBACK };
   const data = doc.sheet[sheet]!;
   const rowGroups = useMemo(
     () => placeGroups(data.rows, data.outline?.rows),
@@ -253,12 +262,22 @@ export function SheetGrid({
   const measure = useCallback(() => {
     const element = scroller.current;
     if (!element) return;
-    setViewport({
+    const next = {
       top: element.scrollTop,
       left: element.scrollLeft,
       width: element.clientWidth || FALLBACK.width,
       height: element.clientHeight || FALLBACK.height,
-    });
+    };
+    // A resize or scroll that moved nothing keeps the grid as drawn.
+    setViewport((current) =>
+      current &&
+      current.top === next.top &&
+      current.left === next.left &&
+      current.width === next.width &&
+      current.height === next.height
+        ? current
+        : next,
+    );
   }, []);
   useLayoutEffect(() => {
     measure();
@@ -729,8 +748,8 @@ export function SheetGrid({
       />
     ) : null;
 
-  const visibleRows = visibleRange(rows, viewport.top, viewport.height);
-  const visibleCols = visibleRange(cols, viewport.left, viewport.width);
+  const visibleRows = measured ? visibleRange(rows, viewport.top, viewport.height) : NONE_VISIBLE;
+  const visibleCols = measured ? visibleRange(cols, viewport.left, viewport.width) : NONE_VISIBLE;
   const drawing: PaneDrawing = {
     gridId,
     sheet,
