@@ -580,10 +580,12 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   }, [mounted]);
   const expanded = wide && !overlay;
   const width = expanded && room > 0 ? room : kept;
-  // Closing the rail gives the page back, so it never reopens over a hidden page.
+  // Closing the rail, or leaving the page it was opened on, gives the page back, so a rail
+  // never reopens or arrives on another page over a hidden page.
   useEffect(() => {
     if (!open) setDetailPanelExpanded(false);
   }, [open]);
+  useEffect(() => () => setDetailPanelExpanded(false), []);
   useEffect(() => {
     if (!expanded || !open) return;
     const html = document.documentElement;

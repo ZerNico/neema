@@ -332,7 +332,7 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
 });
 
 it("takes the whole row at full width, and gives the page back", async () => {
-  render(<Harness />);
+  const { unmount } = render(<Harness />);
   act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
   const html = document.documentElement;
   fireEvent.click(screen.getByRole("button", { name: "Full width" }));
@@ -349,6 +349,26 @@ it("takes the whole row at full width, and gives the page back", async () => {
   act(() => panel.hide());
   await waitFor(() => expect(html).not.toHaveAttribute("data-panel-expanded"));
   act(() => panel.show());
+  expect(screen.getByRole("button", { name: "Full width" })).toBeInTheDocument();
+  unmount();
+});
+
+it("gives the next page its room when that page's rail arrives open", async () => {
+  // The next page left its own tab open, so its rail is open the moment it is shown.
+  const view = render(<Harness userId="u1" />);
+  environment.pathname = "/chat/two";
+  view.rerender(<Harness userId="u1" />);
+  act(() => panel.open({ id: "doc", title: "Doc", body: <p>Doc body</p>, restorable: true }));
+  environment.pathname = "/chat/one";
+  view.rerender(<Harness userId="u1" />);
+  act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
+  const html = document.documentElement;
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  await waitFor(() => expect(html).toHaveAttribute("data-panel-expanded"));
+  environment.pathname = "/chat/two";
+  view.rerender(<Harness userId="u1" />);
+  expect(screen.getByRole("tab", { name: "Doc" })).toBeInTheDocument();
+  expect(html).not.toHaveAttribute("data-panel-expanded");
   expect(screen.getByRole("button", { name: "Full width" })).toBeInTheDocument();
 });
 
