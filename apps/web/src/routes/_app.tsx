@@ -114,7 +114,8 @@ function AuthenticatedLayout({
                           included, so it runs the full height and opening it
                           shrinks the chat instead of covering it. */}
                       <div className="relative flex min-h-0 flex-1">
-                        <div className="flex min-w-0 flex-1 flex-col">
+                        {/* A full-width rail leaves the page no room: hidden, it keeps its state. */}
+                        <div className="flex min-w-0 flex-1 flex-col [html[data-panel-expanded]_&]:invisible [html[data-panel-expanded]_&]:overflow-hidden">
                           <AppHeader>
                             {/* On a wide screen the toggle heads the rail. */}
                             <SidebarTrigger className="md:hidden" />

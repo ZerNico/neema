@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src/**/*.ts"],
+  "compilerOptions": {
+    // Isomorphic by construction: no DOM or Node types, so a browser or Node
+    // global fails here. Intl is part of ES2023; oxlint bans it instead.
+    "lib": ["ES2023"],
+    "types": []
+  }
+}

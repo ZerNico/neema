@@ -19,6 +19,9 @@ export const WorkContext = createContext<{
  * every stream chunk.
  */
 export function useWorkApprovals(conversationId: string) {
+  // The controller changes in place and says so through `revision`: compiled, its reads would
+  // be kept per controller and never read again.
+  "use no memo";
   const { controller, revision } = useContext(WorkContext);
   return useMemo(
     () => ({

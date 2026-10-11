@@ -1,5 +1,6 @@
-import { columnIndex, columnLetters, MAX_COLUMN, MAX_ROW } from "../operations.ts";
-import { parseFormula, type Node } from "./engine/parse.ts";
+import { columnIndex, columnLetters, MAX_COLUMN, MAX_ROW } from "@chat/sheet/a1";
+import { parseFormula, type Node } from "@chat/sheet/engine/parse";
+import { AGGREGATES } from "@chat/sheet/engine/pivot";
 
 /**
  * Functions newer than Excel 2007 are stored with a namespace prefix. Without
@@ -161,9 +162,17 @@ const FUTURE_FUNCTIONS = new Map(
     "WRAPROWS",
     "XLOOKUP",
     "XMATCH",
+    "GROUPBY",
+    "PIVOTBY",
+    "PERCENTOF",
     "XOR",
     "Z.TEST",
   ].map((name) => [name, "_xlfn."]),
+);
+/** An aggregate passed by name as an argument, not called: what GROUPBY and PIVOTBY take. */
+const ETA_ARGUMENT = new RegExp(
+  `([,(]\\s*)(${AGGREGATES.map((name) => name.replace(".", "\\.")).join("|")})(?=\\s*[,)])`,
+  "gi",
 );
 // FILTER and SORT live one namespace further in.
 for (const name of ["FILTER", "SORT"]) FUTURE_FUNCTIONS.set(name, "_xlfn._xlws.");
@@ -322,12 +331,21 @@ function withoutTables(text: string) {
  * spelled out, future functions and LET and LAMBDA names prefixed.
  */
 export function toFileFormula(text: string) {
-  const stored = outsideQuotes(expandShorthands(text.replace(/^=/, "")), (code) =>
+  const prefixed = outsideQuotes(expandShorthands(text.replace(/^=/, "")), (code) =>
     code.replace(/(?<![\w.])([A-Z][A-Z0-9.]*)(?=\s*\()/gi, (name: string) => {
       const prefix = FUTURE_FUNCTIONS.get(name.toUpperCase());
       return prefix ? prefix + name.toUpperCase() : name;
     }),
   );
+  // A function GROUPBY or PIVOTBY takes by name is stored in Excel's eta form, `_xleta.SUM`.
+  const stored = /\b(?:GROUPBY|PIVOTBY)\s*\(/i.test(prefixed)
+    ? outsideQuotes(prefixed, (code) =>
+        code.replace(
+          ETA_ARGUMENT,
+          (_, before: string, name: string) => `${before}_xleta.${name.toUpperCase()}`,
+        ),
+      )
+    : prefixed;
   if (!/\b(?:LET|LAMBDA)\s*\(/i.test(stored)) return stored;
   let names: Set<string>;
   try {
@@ -346,7 +364,7 @@ export function toFileFormula(text: string) {
 
 /** A stored formula as the calculation engine reads it: "=" and no namespaces. */
 export const toEngineFormula = (stored: string) =>
-  `=${outsideQuotes(stored, (code) => code.replace(/_xlfn\.(?:_xlws\.)?|_xlpm\./gi, ""))}`;
+  `=${outsideQuotes(stored, (code) => code.replace(/_xlfn\.(?:_xlws\.)?|_xlpm\.|_xleta\./gi, ""))}`;
 
 /** A sheet name as a reference writes it: quoted unless it is a plain identifier. */
 export const quoteSheet = (name: string) =>

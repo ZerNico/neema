@@ -48,9 +48,10 @@ edit the wrong thing.
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
-- **document** (conversation or project document): editable Markdown owned by one chat or
-  one project, edited live by people and the model as a ProseMirror tree the server orders,
-  stored beside its Markdown. Never knowledge versions or transcript content.
+- **document** (conversation or project document): editable content owned by one chat or
+  one project, edited live by people and the model in an order the server sets. Of two kinds:
+  text, a ProseMirror tree written as Markdown, and a live sheet of cells and formulas held by
+  stable IDs. Never knowledge versions or transcript content.
 - **project**: instructions, documents, files and memory shared by members (owner,
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
@@ -116,7 +117,8 @@ edit the wrong thing.
 3. **Vitest projects are by extension.** `--project unit` is `src/**/*.test.ts`,
    `--project ui` is `src/**/*.test.tsx`, `--project integration` is
    `tests/integration/**`. Running a `.test.tsx` under `unit` prints "No test
-   files found" and exits green. That is not a pass.
+   files found" and exits green. That is not a pass. A package under `packages/`
+   runs its own `vitest.config.ts` (`pnpm --filter @chat/sheet test`), not `--project`.
 4. **pnpm settings live in `pnpm-workspace.yaml`.** A `pnpm` block left in
    `package.json` is silently ignored, and a patched dependency then simply does
    not apply while the build stays green. Verify a patch by grepping
@@ -257,6 +259,9 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
   text replacement, measuring the package before the parser, structured previews.
+- `docs/internals/sheets.md`: live sheets. Rows, columns and sheets by stable ID, formulas held by
+  them, deletes as marks that move range endpoints inward, total deterministic apply, per-client
+  sequence numbers.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
   (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
   containment and previews.
@@ -316,11 +321,12 @@ All release candidates. Pin exactly; never float to `latest`.
   apply the old patch there with `patch -p1`, then `pnpm patch-commit`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
-- `@tanstack/charts` is pre-alpha, pinned exact; re-probe the analytics charts on
-  a bump.
-- `@office-kit/xlsx` (pre-1.0) and `@formulajs/formulajs` are pinned exact. Formulas are
-  calculated by our own engine on formula.js, not HyperFormula, which is GPL-3.0; keep
-  the calculation MIT unless that decision is revisited. See
+- `@tanstack/charts` is pinned exact (1.x, after an API that moved every pre-1.0
+  release); re-probe the analytics charts and sheet charts on a bump.
+- `@office-kit/xlsx` (pre-1.0, in apps/web) and `@formulajs/formulajs` (the one dependency
+  of `packages/sheet`) are pinned exact. Formulas are calculated by our own engine on
+  formula.js, not HyperFormula, which is GPL-3.0; keep the calculation MIT unless that
+  decision is revisited. See
   [spreadsheets](docs/internals/spreadsheets.md).
 - `@office-kit/docx` (pre-1.0) is pinned exact. It has no decompression limits, so the
   adapter measures every part first; re-check that on a bump. See [word](docs/internals/word.md).
@@ -329,6 +335,9 @@ All release candidates. Pin exactly; never float to `latest`.
   install script only fetches CUDA files and is denied in `allowBuilds`. On a bump, run the OCR
   test in `pdf/server/pages.test.ts` with model files present and `pnpm build`, whose PDF worker
   smoke proves the natives load from the output. See [PDFs](docs/internals/pdf.md).
+- `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
+  reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
+  component uncompiled, which is most of them. On a bump, count compiled components, not test results.
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.
 

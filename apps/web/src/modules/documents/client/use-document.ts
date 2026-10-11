@@ -143,9 +143,12 @@ export function useDocument(documentId: string, live: boolean) {
   const query = useQuery(documentQuery(documentId));
   const { data: user } = useQuery(sessionUserQuery);
   const [connections] = useState(() => new Connections());
+  // A sheet has a connection of its own (`useSheet`); its text feed would only say gone, and
+  // that would close the sheet. So no feed opens until the document's kind is known.
+  const text = query.data != null && query.data.kind !== "sheet";
   useEffect(
-    () => (live ? connections.open(documentId) : undefined),
-    [connections, documentId, live],
+    () => (live && text ? connections.open(documentId) : undefined),
+    [connections, documentId, live, text],
   );
   useSyncExternalStore(
     connections.subscribe,

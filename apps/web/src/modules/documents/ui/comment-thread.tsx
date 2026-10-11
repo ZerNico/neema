@@ -1,5 +1,6 @@
 import {
   AiChat02Icon,
+  File01Icon,
   ArrowUp01Icon,
   CheckmarkCircle02Icon,
   Delete02Icon,
@@ -17,7 +18,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import type { DocumentComment } from "../schema.ts";
-import { shorten, type CommentActions } from "./comment-actions.ts";
+import { shorten, type ThreadActions } from "./comment-actions.ts";
 
 /** How the assistant is named in a comment that asks it. */
 const ASSISTANT_MENTION = "@Assistant";
@@ -178,16 +179,22 @@ function Comment({
 }: {
   comment: DocumentComment;
   own: boolean;
-  actions: CommentActions | null;
+  actions: ThreadActions | null;
   isRoot: boolean;
 }) {
-  const name = comment.byAssistant ? "Assistant" : (comment.author?.name ?? "Someone");
+  const name = comment.byAssistant
+    ? "Assistant"
+    : comment.fromFile
+      ? comment.fromFile.name || "Note"
+      : (comment.author?.name ?? "Someone");
   return (
     <div className="group/comment flex gap-2.5">
       <Avatar size="sm">
         <AvatarFallback>
           {comment.byAssistant ? (
             <HugeiconsIcon icon={AiChat02Icon} strokeWidth={2} className="size-3.5" />
+          ) : comment.fromFile ? (
+            <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-3.5" />
           ) : (
             initials(name)
           )}
@@ -196,6 +203,9 @@ function Comment({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex h-6 items-center gap-2 text-xs">
           <span className="truncate font-medium">{name}</span>
+          {comment.fromFile ? (
+            <span className="text-muted-foreground shrink-0">from Excel</span>
+          ) : null}
           <span className="text-muted-foreground shrink-0">
             {relativeAgeLabel(comment.createdAt)}
           </span>
@@ -228,22 +238,26 @@ export function CommentThread({
   actions,
   expanded,
   onQuoteClick,
+  label,
 }: {
   root: DocumentComment;
   replies: DocumentComment[];
   anchored: boolean;
   me: string | null;
-  actions: CommentActions | null;
+  actions: ThreadActions | null;
   /** Shows the reply box; a list shows it only for the thread being read. */
   expanded: boolean;
   onQuoteClick?: (() => void) | undefined;
+  /** What the thread is about as it stands now, where that can change (a sheet's cell); else its quote. */
+  label?: string | undefined;
 }) {
   const all = [root, ...replies];
+  const about = label ?? root.quote ?? "";
   const waiting = all.some((each) => each.toAssistant && !each.answered);
   const quote = (
     <span className="line-clamp-2 text-left">
       {anchored ? null : <span className="font-medium">Text removed · </span>}
-      {shorten(root.quote ?? "", 160)}
+      {shorten(about, 160)}
     </span>
   );
   return (
@@ -281,7 +295,7 @@ export function CommentThread({
           <Comment
             key={comment.id}
             comment={comment}
-            own={comment.byAssistant || comment.author?.id === me}
+            own={comment.byAssistant || comment.fromFile !== null || comment.author?.id === me}
             actions={actions}
             isRoot={comment.id === root.id}
           />
@@ -297,9 +311,7 @@ export function CommentThread({
         <CommentInput
           placeholder="Reply"
           canAsk={actions.canAsk}
-          onSubmit={(body, toAssistant) =>
-            actions.reply(root.id, root.quote ?? "", body, toAssistant)
-          }
+          onSubmit={(body, toAssistant) => actions.reply(root.id, about, body, toAssistant)}
         />
       ) : null}
     </div>

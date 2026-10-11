@@ -5,6 +5,8 @@ export interface DocumentPanelEntry {
   status: string;
   /** Shared with the project rather than kept in this chat; null until loaded. */
   inProject: boolean | null;
+  /** A live sheet rather than a text document; null until loaded. */
+  sheet: boolean | null;
   expanded: boolean;
   open: (() => void) | null;
   retry: (() => void) | null;

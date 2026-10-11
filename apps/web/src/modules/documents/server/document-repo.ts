@@ -22,7 +22,7 @@ import {
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
+  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId" | "committedAt">
 >;
 type Reader = Pick<DbTx, "select">;
 
@@ -43,6 +43,7 @@ const documentColumns = (userId: string) => ({
   projectId: documents.projectId,
   createdByMessageId: documents.createdByMessageId,
   title: documents.title,
+  kind: documents.kind,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
   lastEditorUserId: documents.lastEditorUserId,
@@ -50,7 +51,7 @@ const documentColumns = (userId: string) => ({
   updatedAt: documents.updatedAt,
   access: accessSql(userId),
 });
-type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
+type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision" | "committedAt"> & {
   access: ProjectRole | null;
 };
 const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
@@ -71,6 +72,8 @@ export interface StoredDocumentState {
   document: EditableDocument;
   snapshot: Record<string, unknown>;
   snapshotRevision: number;
+  /** When the document's current revision was committed. */
+  committedAt: Date;
   steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
@@ -85,6 +88,7 @@ export class DocumentRepo extends Context.Service<
       owner: DocumentOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
+        kind?: "text" | "sheet";
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
@@ -147,7 +151,8 @@ export class DocumentRepo extends Context.Service<
         documentId: string;
         threadId: string;
         userId: string | null;
-        origin: "user" | "model";
+        origin: "user" | "model" | "file";
+        fileAuthor?: string | null;
         body: string;
         quote?: string | null;
         toAssistant?: boolean;
@@ -210,6 +215,7 @@ export class DocumentRepo extends Context.Service<
                 ? { conversationId: owner.conversationId }
                 : { projectId: owner.projectId }),
               title: values.title,
+              kind: values.kind ?? "text",
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,
@@ -248,13 +254,14 @@ export class DocumentRepo extends Context.Service<
                     ...documentColumns(userId),
                     snapshot: documents.snapshot,
                     snapshotRevision: documents.snapshotRevision,
+                    committedAt: documents.committedAt,
                   })
                   .from(documents)
                   .where(and(eq(documents.id, documentId), isNotNull(accessSql(userId))))
                   .for("share", { of: documents })
                   .pipe(Effect.orDie);
                 if (!row) return null;
-                const { snapshot, snapshotRevision, ...document } = row;
+                const { snapshot, snapshotRevision, committedAt, ...document } = row;
                 const steps = yield* tx
                   .select({
                     revision: documentSteps.revision,
@@ -272,7 +279,13 @@ export class DocumentRepo extends Context.Service<
                   )
                   .orderBy(asc(documentSteps.revision))
                   .pipe(Effect.orDie);
-                return { document: toDocument(document), snapshot, snapshotRevision, steps };
+                return {
+                  document: toDocument(document),
+                  snapshot,
+                  snapshotRevision,
+                  committedAt,
+                  steps,
+                };
               }),
             )
             .pipe(Effect.orDie);
@@ -353,6 +366,7 @@ export class DocumentRepo extends Context.Service<
               origin: documentComments.origin,
               toAssistant: documentComments.toAssistant,
               quote: documentComments.quote,
+              fileAuthor: documentComments.fileAuthor,
               authorId: user.id,
               authorName: user.name,
             })
@@ -366,6 +380,7 @@ export class DocumentRepo extends Context.Service<
             threadId: row.threadId,
             author: row.authorId ? { id: row.authorId, name: row.authorName ?? "" } : null,
             byAssistant: row.origin === "model",
+            fromFile: row.origin === "file" ? { name: row.fileAuthor ?? "" } : null,
             body: row.body,
             createdAt: row.createdAt.toISOString(),
             resolvedAt: row.resolvedAt?.toISOString() ?? null,
@@ -410,8 +425,12 @@ export class DocumentRepo extends Context.Service<
                 and(
                   eq(documentComments.documentId, documentId),
                   eq(documentComments.id, commentId),
-                  // A person's own, or the assistant's, which has no hand to take its own back.
-                  or(eq(documentComments.userId, userId), eq(documentComments.origin, "model")),
+                  // A person's own, or the assistant's or a file's, which no one else can take back.
+                  or(
+                    eq(documentComments.userId, userId),
+                    eq(documentComments.origin, "model"),
+                    eq(documentComments.origin, "file"),
+                  ),
                 ),
               )
               .pipe(Effect.orDie);

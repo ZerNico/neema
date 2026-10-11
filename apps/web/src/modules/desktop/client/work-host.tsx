@@ -323,6 +323,8 @@ export function WorkConnectionNotice() {
 }
 
 export function WorkAttention() {
+  // Reads the controller, which changes in place, again on every `revision`; see useWorkApprovals.
+  "use no memo";
   const host = useContext(WorkContext);
   const { controller } = host;
   const attention = useMemo(() => host.controller?.attention() ?? [], [host]);

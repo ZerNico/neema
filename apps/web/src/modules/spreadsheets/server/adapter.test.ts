@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSpreadsheet,
   editSpreadsheet,
+  importLiveSheet,
   inspectSpreadsheet,
   previewChart,
   previewSpreadsheet,
@@ -90,6 +91,34 @@ describe("spreadsheet adapter", () => {
     const preview = await previewSpreadsheet(start.bytes);
     expect(preview.rows[0]![0]).toMatchObject({ text: "1,234.50", bold: true });
     expect(preview.columnWidths[0]).toBe(18);
+  });
+
+  it("draws borders in the line and colour asked for, along one edge or around", async () => {
+    const { bytes } = await edit(await createSpreadsheet(), [
+      {
+        kind: "setCells",
+        sheet: "Sheet1",
+        start: "A1",
+        rows: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
+      { kind: "setFormat", sheet: "Sheet1", range: "A1:B1", border: "top", borderStyle: "dashed" },
+      {
+        kind: "setFormat",
+        sheet: "Sheet1",
+        range: "A2:B2",
+        border: "bottom",
+        borderStyle: "double",
+        borderColor: "#C00000",
+      },
+    ]);
+    const { cells } = (await importLiveSheet(bytes)).sheets[0]!;
+    const style = (row: number, column: number) =>
+      cells.find((cell) => cell.row === row && cell.column === column)?.style;
+    expect(style(1, 2)).toEqual({ borderTop: { style: "dashed" } });
+    expect(style(2, 1)).toEqual({ borderBottom: { style: "double", color: "#C00000" } });
   });
 
   it("follows a renamed sheet in formulas and names, and reports what a deleted one breaks", async () => {

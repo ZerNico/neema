@@ -1,4 +1,6 @@
 import {
+  ArrowExpand01Icon,
+  ArrowShrink02Icon,
   PanelRightCloseIcon,
   PanelRightIcon,
   PanelRightOpenIcon,
@@ -25,6 +27,7 @@ import {
   DETAIL_PANEL_MIN,
   DETAIL_PANEL_STEP,
   detailPanelMax,
+  setDetailPanelExpanded,
   useDetailPanelWidth,
 } from "~/ui/detail-panel-width.ts";
 import {
@@ -327,11 +330,12 @@ function usePanelPresentation() {
     generation: 0,
   });
   if (presentation.selected !== selected) {
+    // Refreshes do not restart animation; close/reopen does, even for one ID.
+    const sameId = presentation.selected?.id === selected?.id;
     setPresentation({
       selected,
       request: selected ?? presentation.request,
-      // Refreshes do not restart animation; close/reopen does, even for one ID.
-      generation: presentation.generation + (presentation.selected?.id === selected?.id ? 0 : 1),
+      generation: presentation.generation + (sameId ? 0 : 1),
     });
   }
   const finishExit = useCallback((generation: number) => {
@@ -404,18 +408,23 @@ function restorePanelFocus(root: HTMLElement, opener: HTMLElement | null) {
  */
 function DetailPanelResizer({
   width,
+  expanded,
   dragging,
   onResize,
   onReset,
   onDraggingChange,
 }: {
   width: number;
+  expanded: boolean;
   dragging: boolean;
   onResize: (width: number, persist?: boolean) => void;
   onReset: () => void;
   onDraggingChange: (dragging: boolean) => void;
 }) {
-  const start = useRef<{ x: number; width: number } | null>(null);
+  // The pointer's width, not the shown one: past the widest the shown width
+  // stops, and only the pointer's says whether the drag ended in the snap.
+  const start = useRef<{ x: number; width: number; to: number } | null>(null);
+  const max = detailPanelMax(typeof window === "undefined" ? width * 2 : window.innerWidth);
   return (
     <div
       role="separator"
@@ -423,7 +432,7 @@ function DetailPanelResizer({
       aria-label="Resize panel"
       aria-valuenow={width}
       aria-valuemin={DETAIL_PANEL_MIN}
-      aria-valuemax={detailPanelMax(typeof window === "undefined" ? width * 2 : window.innerWidth)}
+      aria-valuemax={expanded ? width : max}
       tabIndex={0}
       // A grabbable strip that draws nothing itself: the rail already has a
       // border there, so the only mark is the line below, tinting that edge.
@@ -432,7 +441,7 @@ function DetailPanelResizer({
       className="group absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize touch-none focus-visible:outline-none"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
-        start.current = { x: event.clientX, width };
+        start.current = { x: event.clientX, width, to: width };
         event.currentTarget.setPointerCapture(event.pointerId);
         onDraggingChange(true);
       }}
@@ -440,25 +449,34 @@ function DetailPanelResizer({
         const from = start.current;
         if (!from) return;
         // The rail is on the right, so dragging left widens it.
-        onResize(from.width + (from.x - event.clientX), false);
+        from.to = from.width + (from.x - event.clientX);
+        onResize(from.to, false);
       }}
       onPointerUp={(event) => {
-        if (!start.current) return;
+        const from = start.current;
+        if (!from) return;
         start.current = null;
         event.currentTarget.releasePointerCapture(event.pointerId);
         onDraggingChange(false);
-        onResize(width);
+        onResize(from.to);
       }}
       onLostPointerCapture={() => {
-        if (!start.current) return;
+        const from = start.current;
+        if (!from) return;
         start.current = null;
         onDraggingChange(false);
-        onResize(width);
+        onResize(from.to);
       }}
       onDoubleClick={onReset}
       onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") onResize(width + DETAIL_PANEL_STEP);
-        else if (event.key === "ArrowRight") onResize(width - DETAIL_PANEL_STEP);
+        // At its widest, one more step takes the whole row, and one back leaves it.
+        if (event.key === "ArrowLeft") {
+          if (width >= max) setDetailPanelExpanded(true);
+          else onResize(width + DETAIL_PANEL_STEP);
+        } else if (event.key === "ArrowRight") {
+          if (expanded) setDetailPanelExpanded(false);
+          else onResize(width - DETAIL_PANEL_STEP);
+        }
         else if (event.key === "Home" || event.key === "End") onReset();
         else return;
         event.preventDefault();
@@ -473,6 +491,30 @@ function DetailPanelResizer({
         )}
       />
     </div>
+  );
+}
+
+/** Takes the whole row for the rail, and gives the page back. */
+function PanelExpandButton({ expanded }: { expanded: boolean }) {
+  const label = expanded ? "Exit full width" : "Full width";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setDetailPanelExpanded(!expanded)}
+            aria-label={label}
+            aria-pressed={expanded}
+            className="text-muted-foreground shrink-0"
+          />
+        }
+      >
+        <HugeiconsIcon icon={expanded ? ArrowShrink02Icon : ArrowExpand01Icon} strokeWidth={2} />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -514,7 +556,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   const { selected, request, open, generation, finishExit } = usePanelPresentation();
   const selectedId = selected?.id;
   const reducedMotion = useAppReducedMotion();
-  const { width, resize, reset } = useDetailPanelWidth();
+  const { width: kept, expanded: wide, resize, reset } = useDetailPanelWidth();
   const [dragging, setDragging] = useState(false);
   const root = useRef<HTMLElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -526,6 +568,32 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   const still = reducedMotion || arrived;
   // An overlay leaves the header where it is, so it publishes no inset.
   useTitlebarInset(root, request !== null && !overlay);
+  // At full width the rail is as wide as its row, which the page beside it leaves.
+  const [room, setRoom] = useState(0);
+  const mounted = request !== null;
+  useEffect(() => {
+    const row = root.current?.parentElement;
+    if (!mounted || !row) return;
+    const observer = new ResizeObserver(([entry]) => setRoom(entry?.contentRect.width ?? 0));
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [mounted]);
+  const expanded = wide && !overlay;
+  const width = expanded && room > 0 ? room : kept;
+  // Closing the rail, or leaving the page it was opened on, gives the page back, so a rail
+  // never reopens or arrives on another page over a hidden page.
+  useEffect(() => {
+    if (!open) setDetailPanelExpanded(false);
+  }, [open]);
+  useEffect(() => () => setDetailPanelExpanded(false), []);
+  useEffect(() => {
+    if (!expanded || !open) return;
+    const html = document.documentElement;
+    html.dataset.panelExpanded = "";
+    return () => {
+      delete html.dataset.panelExpanded;
+    };
+  }, [expanded, open]);
 
   // A drag leaves the 8px handle almost immediately, so hold the cursor on the
   // document and stop text selection while it lasts. Embedded pages ignore the
@@ -634,6 +702,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
       ) : (
         <PanelTitlebar>
           <TabStrip ids={ids} />
+          <PanelExpandButton expanded={expanded} />
           <PanelToggleSpace />
         </PanelTitlebar>
       )}
@@ -650,6 +719,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
         {overlay ? null : (
           <DetailPanelResizer
             width={width}
+            expanded={expanded}
             dragging={dragging}
             onResize={resize}
             onReset={reset}
@@ -663,7 +733,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
             id={ids.panel}
             {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
             className={cn(
-              "min-h-0 flex-1",
+              // Its own stacking context: a body's layers (a sheet's sticky headers) stay
+              // beneath the resize handle, which they would otherwise cover.
+              "isolate min-h-0 flex-1",
               // A filling body (a web page, drawn above the panel) leaves the
               // resize handle's strip uncovered, or nothing could grab it.
               request.fill ? cn("flex flex-col", !overlay && "pl-1.5") : "overflow-y-auto px-4",

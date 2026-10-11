@@ -73,7 +73,7 @@ export function ConversationTitle({
     let frame = 0;
     let start: number | null = null;
     const step = (now: number) => {
-      start ??= now;
+      if (start === null) start = now;
       const progress = Math.min(1, (now - start) / REVEAL_DURATION_MS);
       setShown(progress === 1 ? null : Math.ceil(progress * title.length));
       if (progress < 1) frame = requestAnimationFrame(step);

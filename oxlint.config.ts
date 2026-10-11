@@ -42,6 +42,8 @@ export default defineConfig({
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
     "react/react-in-jsx-scope": "off",
+    // Code React Compiler cannot compile is left as written, unmemoized and unnoticed.
+    "react/unsupported-syntax": "error",
     // Fast Refresh swaps a module only when it exports nothing but components;
     // a helper exported beside one reloads it and everything importing it.
     "react/only-export-components": "warn",
@@ -94,6 +96,17 @@ export default defineConfig({
       // The design system owns styling; tests exercise class forwarding.
       files: ["apps/web/src/ui/**", "**/*.test.tsx"],
       rules: { "shadcn/no-restyle": "off" },
+    },
+    {
+      // Sheet values must format and parse the same in every browser and on
+      // the server, so the package uses its own locale tables, never Intl.
+      files: ["packages/sheet/**"],
+      rules: {
+        "no-restricted-globals": [
+          "error",
+          { name: "Intl", message: "Use the sheet's own locale tables: Intl differs per runtime." },
+        ],
+      },
     },
     {
       files: ["apps/web/src/ui/detail-panel.test.tsx"],

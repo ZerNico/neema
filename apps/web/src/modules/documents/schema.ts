@@ -106,6 +106,16 @@ export const CommentInput = Schema.Struct({
   quote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DOCUMENT_LIMITS.quote))),
   /** Also sent to the assistant as a chat message. */
   toAssistant: Schema.optionalKey(Schema.Boolean),
+  /** A new thread's cell on a sheet, by sheet, row and column IDs; `r2`/`c2` make it a range. */
+  cell: Schema.optionalKey(
+    Schema.Struct({
+      sh: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+      r: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+      c: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+      r2: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
+      c2: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
+    }),
+  ),
 });
 export type CommentInput = typeof CommentInput.Type;
 export const ResolveThreadInput = Schema.Struct({
@@ -126,6 +136,8 @@ export interface DocumentComment {
   /** Null for the assistant, or once the account is gone. */
   author: { id: string; name: string } | null;
   byAssistant: boolean;
+  /** A note read from an imported file: the author name it gave, empty when none. */
+  fromFile: { name: string } | null;
   body: string;
   createdAt: string;
   /** On a thread's first comment only. */
@@ -165,6 +177,8 @@ export interface EditableDocument {
   projectId: string | null;
   createdByMessageId?: string | null;
   title: string;
+  /** A text document or a live sheet. */
+  kind: "text" | "sheet";
   revision: number;
   lastEditedBy: "user" | "model";
   lastEditorUserId?: string | null;

@@ -9,6 +9,8 @@
 
 /* Streamdown ships Tailwind utility classes in its dist */
 @source "../../node_modules/streamdown/dist/*.js";
+/* The sheet grid draws with the app's semantic token classes (see docs/internals/ui.md). */
+@source "../../../../packages/sheet-react/src";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -49,6 +51,7 @@
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
+  --color-chart-foreground: var(--chart-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --text-2xs: 0.6875rem;
@@ -100,11 +103,19 @@
      cycle. Slot 4 is magenta, not the amber a 4-colour palette reaches for
      first: amber sits ~6 ΔE from slot 2 under deuteranopia, and slot 4 stacks
      directly on slot 2. Magenta holds the trio's own 13.7 ΔE floor in normal,
-     deuteranopic, protanopic and tritanopic simulation. */
+     deuteranopic, protanopic and tritanopic simulation. Slots 5 to 8 are
+     for sheet charts with more series than that; past four, a legend's order
+     tells series apart as much as their hue. */
   --chart-1: #2a78d6;
   --chart-2: #eb6834;
   --chart-3: #1baf7a;
   --chart-4: #cc2f9e;
+  --chart-5: #7b5cd6;
+  --chart-6: #b08414;
+  --chart-7: #0f7f8a;
+  --chart-8: #6b7280;
+  /* Text on a chart colour, as a person's name on their cursor. */
+  --chart-foreground: oklch(0.985 0 0);
 }
 
 .dark {
@@ -142,6 +153,11 @@
   --chart-2: #d95926;
   --chart-3: #199e70;
   --chart-4: #e874bd;
+  --chart-5: #9d84ec;
+  --chart-6: #d1a338;
+  --chart-7: #2fa7b3;
+  --chart-8: #9ca3af;
+  --chart-foreground: oklch(0.145 0 0);
 }
 
 /* @tanstack/charts reads its palette from --ts-chart-N. */
@@ -150,6 +166,10 @@
   --ts-chart-2: var(--chart-2);
   --ts-chart-3: var(--chart-3);
   --ts-chart-4: var(--chart-4);
+  --ts-chart-5: var(--chart-5);
+  --ts-chart-6: var(--chart-6);
+  --ts-chart-7: var(--chart-7);
+  --ts-chart-8: var(--chart-8);
 }
 
 /* Window chrome is optional and independent of authenticated route lifetime. */
@@ -262,6 +282,11 @@ html[data-desktop-chrome="darwin"][data-detail-panel] .desktop-titlebar-content 
 
 html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-content {
   width: calc(100% - var(--detail-panel-inset, 0px));
+}
+
+/* A full-width rail hides the page, header included. */
+html[data-panel-expanded] .desktop-titlebar-content {
+  visibility: hidden;
 }
 
 /* Sits above the header or the open panel's strip, whichever reaches the corner,
@@ -570,6 +595,6 @@ html[data-panel-resizing] webview {
     }
   }
   .remote-caret__label {
-    @apply absolute bottom-full left-0 rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-white select-none;
+    @apply absolute bottom-full left-0 rounded-md rounded-bl-none px-1.5 text-[0.6875rem] leading-normal font-medium whitespace-nowrap text-chart-foreground select-none;
   }
 }

@@ -228,40 +228,66 @@ const COMMENT_CHARS = 600;
  * aimed. The thread a message was sent from (`asking`) is always shown and
  * marked, even once its text is gone. Empty when there are none.
  */
-export const commentsView = (
-  doc: Node,
+/** Where a thread sits as its view says it: a block and the text it is on, or a sheet's cell. */
+export type ThreadPlace = { block?: string | null; cell?: string; quote?: string } | null;
+
+/**
+ * Open threads and their comments as the model reads them. The thread a
+ * message was sent from always has a place; the rest share what is left.
+ * A thread `place` cannot find is detached; only the asking one still shows.
+ */
+export const threadsView = (
   comments: ReadonlyArray<DocumentComment>,
-  asking: string | null = null,
+  asking: string | null,
+  place: (threadId: string) => ThreadPlace,
 ) => {
-  const anchors = commentAnchors(doc);
-  // The thread the message was sent from always has a place; the rest share what is left.
   const asked = comments.filter((each) => each.id === asking && each.id === each.threadId);
   const others = comments.filter(
     (each) =>
-      each.id === each.threadId && each.id !== asking && !each.resolvedAt && anchors.has(each.id),
+      each.id === each.threadId &&
+      each.id !== asking &&
+      !each.resolvedAt &&
+      place(each.id) !== null,
   );
   const threads = [...asked, ...others.slice(0, COMMENT_THREADS - asked.length)];
   if (!threads.length) return "";
   const lines = threads.map((thread) => {
-    const anchor = anchors.get(thread.id);
+    const where = place(thread.id);
     const messages = comments
       .filter((each) => each.threadId === thread.id)
       .map(
         (each) =>
           `<comment${attributes({
-            by: each.byAssistant ? "you" : (each.author?.name ?? "Someone"),
+            by: each.byAssistant
+              ? "you"
+              : each.fromFile
+                ? `${each.fromFile.name || "Someone"} (a note in the imported file)`
+                : (each.author?.name ?? "Someone"),
             to: each.toAssistant ? "you" : null,
             answered: each.toAssistant ? each.answered : null,
           })}>${escapeText(each.body.slice(0, COMMENT_CHARS))}</comment>`,
       );
     return `<thread${attributes({
       id: thread.id,
-      block: anchor?.blockId,
-      quote: (anchor?.text ?? thread.quote ?? "").slice(0, 200),
-      detached: anchor ? null : true,
+      block: where?.block,
+      cell: where?.cell,
+      quote: (where?.quote ?? thread.quote ?? "").slice(0, 200),
+      detached: where ? null : true,
       resolved: thread.resolvedAt ? true : null,
       asking: thread.id === asking ? true : null,
     })}>\n${messages.join("\n")}\n</thread>`;
   });
   return `<comments>\n${lines.join("\n")}\n</comments>`;
+};
+
+export const commentsView = (
+  doc: Node,
+  comments: ReadonlyArray<DocumentComment>,
+  asking: string | null = null,
+) => {
+  const anchors = commentAnchors(doc);
+  return threadsView(comments, asking, (id) => {
+    const anchor = anchors.get(id);
+    return anchor ? { block: anchor.blockId, quote: anchor.text } : null;
+  });
 };

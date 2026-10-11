@@ -9,6 +9,8 @@ export function documentActivityLabel(
     if (activity.name === "create_document") return "Creating a document";
     if (activity.name === "edit_document") return "Editing the document";
     if (activity.name === "comment_on_document") return "Commenting";
+    if (activity.name === "create_sheet") return "Creating a sheet";
+    if (activity.name === "edit_sheet") return "Editing the sheet";
     return "Reading documents";
   }
   switch (activity.result?.outcome) {
@@ -54,6 +56,7 @@ export function documentRunLabel(calls: ReadonlyArray<DocumentToolActivity>, nam
   const title = named ? calls.find((call) => call.result?.title)?.result?.title : undefined;
   const running = calls.find((call) => call.status === "running");
   if (running?.name === "edit_document") return title ? `Editing ${title}` : "Editing the document";
+  if (running?.name === "edit_sheet") return title ? `Editing ${title}` : "Editing the sheet";
   if (running?.name === "read_chat_document")
     return title ? `Reading ${title}` : "Reading the document";
   if (running) return documentActivityLabel(running, null);

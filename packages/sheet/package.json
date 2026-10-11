@@ -1,0 +1,49 @@
+{
+  "name": "@chat/sheet",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./a1": "./src/a1.ts",
+    "./dates": "./src/dates.ts",
+    "./delimited": "./src/delimited.ts",
+    "./locales": "./src/locales.ts",
+    "./formula-locale": "./src/formula-locale.ts",
+    "./number-format": "./src/number-format.ts",
+    "./value-parse": "./src/value-parse.ts",
+    "./engine/parse": "./src/engine/parse.ts",
+    "./engine/evaluate": "./src/engine/evaluate.ts",
+    "./engine/values": "./src/engine/values.ts",
+    "./engine/calculate": "./src/engine/calculate.ts",
+    "./engine/functions": "./src/engine/functions.ts",
+    "./engine/pivot": "./src/engine/pivot.ts",
+    "./model": "./src/model/model.ts",
+    "./model/formula": "./src/model/formula.ts",
+    "./model/ops": "./src/model/ops.ts",
+    "./model/apply": "./src/model/apply.ts",
+    "./model/box": "./src/model/box.ts",
+    "./model/draft": "./src/model/draft.ts",
+    "./model/style": "./src/model/style.ts",
+    "./model/limits": "./src/model/limits.ts",
+    "./model/calc": "./src/model/calc.ts",
+    "./model/invert": "./src/model/invert.ts",
+    "./model/chart": "./src/model/chart.ts",
+    "./model/fill": "./src/model/fill.ts",
+    "./model/filter": "./src/model/filter.ts",
+    "./model/conditional": "./src/model/conditional.ts",
+    "./model/validation": "./src/model/validation.ts",
+    "./model/outline": "./src/model/outline.ts",
+    "./model/image": "./src/model/image.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm exec vitest run"
+  },
+  "dependencies": {
+    "@formulajs/formulajs": "4.6.1"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

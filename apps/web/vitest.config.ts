@@ -1,9 +1,19 @@
 import { fileURLToPath } from "node:url";
+import babel from "@rolldown/plugin-babel";
+import { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
 
 export default defineConfig({
-  plugins: [customToolRuntimeWorker()],
+  // Components are tested as the app builds them, memoized by React Compiler. The tests
+  // themselves are not: their harnesses rerender with fakes that read mutable state.
+  plugins: [
+    customToolRuntimeWorker(),
+    babel({
+      presets: [reactCompilerPreset()],
+      exclude: [/[/\\]node_modules[/\\]/, /\.test\.tsx?$/],
+    }),
+  ],
   resolve: {
     alias: {
       "~": fileURLToPath(new URL("./src", import.meta.url)),

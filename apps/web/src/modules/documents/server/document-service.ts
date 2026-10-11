@@ -1,25 +1,10 @@
-import {
-  Clock,
-  Context,
-  Duration,
-  Effect,
-  Layer,
-  PubSub,
-  Schedule,
-  Schema,
-  Semaphore,
-  Stream,
-} from "effect";
+import { Clock, Context, Duration, Effect, Layer, PubSub, Schedule, Schema, Stream } from "effect";
 import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
-import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
-import { projects } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { projectCan } from "~/modules/projects/schema.ts";
-import { projectAudience, projectRole } from "~/modules/projects/server/access.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import {
@@ -67,6 +52,14 @@ import {
   type PushDocumentResult,
 } from "../schema.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
+import {
+  commentDeletion,
+  documentLocks,
+  lockProjectForEditing,
+  notifyDocumentChanged,
+  personComment,
+  threadResolution,
+} from "./live-shared.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 /** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
@@ -183,20 +176,6 @@ export const EDITED_MEANWHILE = "someone edited the document while it was being 
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
 
-/** Holds the project row against deletion while a document is added to it. */
-const lockProjectForEditing = (tx: DbTx, userId: string, projectId: string) =>
-  Effect.gen(function* () {
-    const [row] = yield* tx
-      .select({ id: projects.id })
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .for("share")
-      .pipe(Effect.orDie);
-    const role = row ? yield* projectRole(tx, userId, projectId) : null;
-    if (!role) return yield* new DocumentNotAvailable({ documentId: projectId });
-    if (!projectCan.edit(role))
-      return yield* new DocumentRejected({ reason: "this project is read-only for you" });
-  });
 /** A value the schema's attributes hold: anything else, an object above all, is a client's invention. */
 const plainValue = (value: unknown) =>
   value === null || ["string", "number", "boolean"].includes(typeof value);
@@ -444,28 +423,7 @@ export class DocumentService extends Context.Service<
       const scope = yield* Effect.scope;
       // One process owns every document's live state (see docs/internals/documents.md).
       const entries = new Map<string, Entry>();
-      const locks = new Map<string, { semaphore: Semaphore.Semaphore; holders: number }>();
-
-      /** Every read-modify-write of one document runs alone, so memory and rows move together. */
-      const exclusive =
-        (documentId: string) =>
-        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          Effect.acquireUseRelease(
-            Effect.sync(() => {
-              const lock = locks.get(documentId) ?? {
-                semaphore: Semaphore.makeUnsafe(1),
-                holders: 0,
-              };
-              lock.holders++;
-              locks.set(documentId, lock);
-              return lock;
-            }),
-            (lock) => lock.semaphore.withPermits(1)(effect),
-            (lock) =>
-              Effect.sync(() => {
-                if (--lock.holders === 0) locks.delete(documentId);
-              }),
-          );
+      const exclusive = documentLocks();
       // A cursor moves several times a second; its label is looked up once a minute at most.
       const names = new Map<string, { name: string; at: number }>();
       const nameOf = (userId: string) =>
@@ -505,7 +463,9 @@ export class DocumentService extends Context.Service<
             return { entry: cached, document };
           }
           const state = yield* documents.loadState(userId, documentId);
-          if (!state) return yield* new DocumentNotAvailable({ documentId });
+          // A sheet's snapshot is not ProseMirror JSON: the sheet service owns it.
+          if (!state || state.document.kind !== "text")
+            return yield* new DocumentNotAvailable({ documentId });
           const snapshot = Node.fromJSON(documentSchema, state.snapshot);
           // Stored steps were checked when they arrived; one that no longer
           // applies means storage is corrupt, which is a defect.
@@ -536,28 +496,7 @@ export class DocumentService extends Context.Service<
           return { entry, document: state.document };
         });
 
-      /** A chat's document concerns its owner; a project's, every member. */
-      const documentChanged = (
-        userId: string,
-        document: Pick<EditableDocument, "id" | "conversationId" | "projectId">,
-      ) =>
-        Effect.gen(function* () {
-          const audience = document.projectId
-            ? yield* projectAudience(db, document.projectId)
-            : [userId];
-          yield* Effect.forEach(
-            audience,
-            (memberId) =>
-              bus.publish(memberId, {
-                type: "document.changed",
-                ...(document.conversationId
-                  ? { conversationId: document.conversationId }
-                  : { projectId: document.projectId! }),
-                documentId: document.id,
-              }),
-            { discard: true },
-          );
-        }).pipe(Effect.catchCause(() => Effect.logWarning("document invalidation failed")));
+      const documentChanged = notifyDocumentChanged(db, bus);
       /** A person's keystrokes would otherwise send one notification per batch. */
       const documentChangedSoon = (userId: string, documentId: string, entry: Entry) =>
         Effect.suspend(() => {
@@ -1093,26 +1032,7 @@ export class DocumentService extends Context.Service<
       ) {
         const parsed = yield* decode(CommentInput, "invalid comment")(input);
         yield* commentWrite(userId, parsed.documentId, (tx) =>
-          Effect.gen(function* () {
-            const existing = yield* documents.comments(parsed.documentId, tx);
-            if (existing.length >= DOCUMENT_LIMITS.comments)
-              return yield* new DocumentRejected({ reason: "this document has too many comments" });
-            const thread = existing.find((each) => each.id === parsed.threadId);
-            if (thread && thread.threadId !== thread.id)
-              return yield* new DocumentRejected({ reason: "reply to a thread's first comment" });
-            // A new thread's ID is the client's; one taken elsewhere is refused, not a crash.
-            const added = yield* documents.addComment(tx, {
-              id: thread ? uuidv7() : parsed.threadId,
-              documentId: parsed.documentId,
-              threadId: parsed.threadId,
-              userId,
-              origin: "user",
-              body: parsed.body,
-              quote: thread ? null : (parsed.quote ?? null),
-              toAssistant: parsed.toAssistant ?? false,
-            });
-            if (!added) return yield* new DocumentRejected({ reason: "that thread ID is taken" });
-          }),
+          personComment(documents, userId, parsed)(tx).pipe(Effect.asVoid),
         );
       });
 
@@ -1121,17 +1041,7 @@ export class DocumentService extends Context.Service<
         input: ResolveThreadInput,
       ) {
         const parsed = yield* decode(ResolveThreadInput, "invalid thread")(input);
-        yield* commentWrite(userId, parsed.documentId, (tx) =>
-          documents
-            .resolveThread(tx, parsed.documentId, parsed.threadId, parsed.resolved)
-            .pipe(
-              Effect.flatMap((found) =>
-                found
-                  ? Effect.void
-                  : Effect.fail(new DocumentRejected({ reason: "no such thread" })),
-              ),
-            ),
-        );
+        yield* commentWrite(userId, parsed.documentId, threadResolution(documents, parsed));
       });
 
       const deleteComment = Effect.fn("DocumentService.deleteComment")(function* (
@@ -1139,19 +1049,7 @@ export class DocumentService extends Context.Service<
         input: DeleteCommentInput,
       ) {
         const parsed = yield* decode(DeleteCommentInput, "invalid comment")(input);
-        yield* commentWrite(userId, parsed.documentId, (tx) =>
-          documents
-            .deleteComment(tx, parsed.documentId, parsed.commentId, userId)
-            .pipe(
-              Effect.flatMap((found) =>
-                found
-                  ? Effect.void
-                  : Effect.fail(
-                      new DocumentRejected({ reason: "only your own or the assistant's comments" }),
-                    ),
-              ),
-            ),
-        );
+        yield* commentWrite(userId, parsed.documentId, commentDeletion(documents, userId, parsed));
       });
 
       /**

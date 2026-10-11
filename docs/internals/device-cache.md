@@ -2,7 +2,7 @@
 
 `modules/cache/client/device-cache.ts` keeps data on the reader's device in IndexedDB for things
 worth showing at once on the next visit and cheap to lose. The ui block tree cache is its first
-user (see [generative UI](generative-ui.md)); a document's unsent steps are another (see [documents](documents.md)).
+user (see [generative UI](generative-ui.md)); a document's unsent steps are another (see [documents](documents.md)), and a live sheet's unsent changes, kept per client so any tab can resend them (see [sheets](sheets.md)).
 
 - One database (`neema-cache`) with one store holds every cache, keyed `[owner, namespace, key]`.
   A new cache is a new namespace, never a schema version. Each namespace has its own byte budget

@@ -8,6 +8,7 @@ const comment = (body: string): DocumentComment => ({
   threadId: "t1",
   author: { id: "u1", name: "Ada" },
   byAssistant: false,
+  fromFile: null,
   body,
   createdAt: new Date(0).toISOString(),
   resolvedAt: null,
@@ -36,5 +37,34 @@ describe("a comment thread", () => {
     expect(screen.getAllByText("Assistant")).toHaveLength(1);
     expect(screen.getByText(/make this shorter/)).toBeTruthy();
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("names a file's note by the author the file gave, never as a person here", () => {
+    render(
+      <CommentThread
+        root={{
+          ...comment("Check this figure"),
+          author: null,
+          fromFile: { name: "Jane Doe" },
+          toAssistant: false,
+        }}
+        replies={[
+          {
+            ...comment("Checked"),
+            id: "r1",
+            author: null,
+            fromFile: { name: "" },
+            toAssistant: false,
+          },
+        ]}
+        anchored
+        me="u1"
+        actions={null}
+        expanded={false}
+      />,
+    );
+    expect(screen.getByText("Jane Doe")).toBeTruthy();
+    expect(screen.getByText("Note")).toBeTruthy();
+    expect(screen.getAllByText("from Excel")).toHaveLength(2);
   });
 });
