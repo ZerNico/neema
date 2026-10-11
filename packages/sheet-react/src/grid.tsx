@@ -149,6 +149,10 @@ function BesideBox({
   return <div ref={onElement} aria-hidden className="pointer-events-none absolute" style={rect} />;
 }
 
+/** Whether two sets hold the same members. */
+const sameMembers = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+  a.size === b.size && [...a].every((member) => b.has(member));
+
 /** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
 const FALLBACK = { width: 960, height: 640 };
 /** How far a reveal may scroll and still glide there. */
@@ -214,15 +218,20 @@ export function SheetGrid({
     () => placeGroups(data.cols, data.outline?.cols),
     [data.cols, data.outline?.cols],
   );
+  // A filter's hidden rows come as a new set whenever values change; the layout is rebuilt
+  // only when the rows in it do.
+  const [steadyHidden, setSteadyHidden] = useState(hiddenRows);
+  if (steadyHidden !== hiddenRows && !sameMembers(steadyHidden, hiddenRows))
+    setSteadyHidden(hiddenRows);
   const rows = useMemo(
     () =>
       drawnLayout(
         data.rows,
         data.rowProps,
-        [...hiddenRows, ...collapsedOf(data.rows, rowGroups)],
+        [...steadyHidden, ...collapsedOf(data.rows, rowGroups)],
         (props) => rowPx(props) * zoom,
       ),
-    [data.rows, data.rowProps, hiddenRows, rowGroups, zoom],
+    [data.rows, data.rowProps, steadyHidden, rowGroups, zoom],
   );
   const cols = useMemo(
     () =>
