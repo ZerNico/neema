@@ -258,9 +258,7 @@ export class DocumentRepo extends Context.Service<
             const [chat] = yield* (tx ?? db)
               .select({ userId: conversations.userId })
               .from(conversations)
-              .where(
-                and(eq(conversations.id, owner.conversationId), eq(conversations.userId, userId)),
-              )
+              .where(ownedConversationById(owner.conversationId, userId))
               .pipe(Effect.orDie);
             return chat?.userId ?? null;
           }
