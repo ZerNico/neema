@@ -103,6 +103,41 @@ describe("calculation over any storage", () => {
     expect(report).toMatchObject({ formulas: 3, errorCount: 0 });
   });
 
+  it("reads a range once for every formula reading it, and afresh once a spill reshapes", () => {
+    const cells: Record<string, Scalar | `=${string}`> = { A1: 3, B1: "=A1*2" };
+    for (let row = 2; row <= 100; row++) cells[`B${row}`] = row;
+    for (let row = 1; row <= 50; row++) cells[`C${row}`] = "=SUM($B$1:$B$100)";
+    // Read before and after the spill it sums takes its shape this pass.
+    Object.assign(cells, { D1: "=SEQUENCE(A1)", E1: "=SUM(D1:D9)", E2: "=SUM(D1:D9)" });
+    const sheet = memoryStore(cells);
+    let reads = 0;
+    const value = sheet.store.value;
+    sheet.store.value = (...args) => {
+      reads += 1;
+      return value(...args);
+    };
+    calculate(sheet.store, limits);
+    const total = 6 + (100 * 101) / 2 - 1;
+    expect([sheet.at("C1"), sheet.at("C50")]).toEqual([total, total]);
+    expect([sheet.at("E1"), sheet.at("E2")]).toEqual([6, 6]);
+    // Fifty sums of a hundred cells, read as one range a pass rather than five thousand reads.
+    expect(reads).toBeLessThan(1_000);
+  });
+
+  it("does not share a range read while a formula in it was still being computed", () => {
+    // A1 computes B1 through INDIRECT, and B1 reads A1:A2 while A1 is still unfinished.
+    const sheet = memoryStore({
+      A1: '=INDIRECT("B1")+1',
+      A2: 5,
+      B1: "=SUM(A1:A2)",
+      C1: "=SUM(A1:A2)",
+    });
+    calculate(sheet.store, limits);
+    expect([sheet.at("B1"), sheet.at("A1")]).toEqual([5, 6]);
+    // C1 reads the range once A1 is done, not as B1 saw it.
+    expect(sheet.at("C1")).toBe(11);
+  });
+
   it("spills, is blocked by a value in the way, and spills again once it is gone", () => {
     const sheet = memoryStore({ A1: "=SEQUENCE(3)", A3: "in the way" });
     const blocked = calculate(sheet.store, limits);

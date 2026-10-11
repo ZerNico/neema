@@ -392,6 +392,10 @@ function pass(store: CellStore, limits: CalcLimits) {
 
   // 0 waiting, 1 being computed, 2 done.
   const state = new Uint8Array(formulas.length);
+  // Ranges read this pass, shared by every formula reading the same box. One read while a
+  // formula in it was still being computed (a cycle) is not shared: its values were not final.
+  const grids = new Map<string, Scalar[][]>();
+  let unsettled = 0;
   let nested = 0;
   const demand = (id: number | undefined) => {
     if (id === undefined || state[id] !== 0 || !ordered.has(id)) return;
@@ -414,12 +418,26 @@ function pass(store: CellStore, limits: CalcLimits) {
         const sheet = sheetNamed(name);
         if (!sheet) return new XError("#REF!");
         // Only references computed at run time (INDIRECT, OFFSET) can reach a formula not yet done.
-        demand(ids.get(cellKey(sheet, row, column)));
+        const formulaAt = ids.get(cellKey(sheet, row, column));
+        demand(formulaAt);
+        if (formulaAt !== undefined && state[formulaAt] === 1) unsettled += 1;
         for (const at of areasByColumn.get(sheet)?.get(column) ?? []) {
           const area = areas[at]!;
-          if (state[area.id] === 0 && inside(area.box, row, column)) demand(area.id);
+          if (!inside(area.box, row, column)) continue;
+          if (state[area.id] === 0) demand(area.id);
+          if (state[area.id] === 1) unsettled += 1;
         }
         return store.value(sheet, row, column);
+      },
+      grid: (name, box, read) => {
+        const sheet = sheetNamed(name);
+        const key = `${sheet}\u0000${boxRef(box)}`;
+        const known = grids.get(key);
+        if (known) return known;
+        const before = unsettled;
+        const rows = read();
+        if (unsettled === before) grids.set(key, rows);
+        return rows;
       },
       clip: (name, box) => {
         const sheet = sheetNamed(name);
@@ -511,7 +529,11 @@ function pass(store: CellStore, limits: CalcLimits) {
     clear(formula, kept);
     const anchor = own(formula.stored);
     // Formulas were ordered by the old shape; one that reads a newly spilled cell needs another pass.
-    if (boxRef(formula.area ?? anchor) !== boxRef(kept ?? anchor)) reshaped = true;
+    if (boxRef(formula.area ?? anchor) !== boxRef(kept ?? anchor)) {
+      reshaped = true;
+      // Cells it now covers or left were read as they were: ranges are read afresh.
+      grids.clear();
+    }
     record(formula, blocked ? new XError("#SPILL!") : (grid.rows[0]?.[0] ?? null), kept ?? anchor);
     if (kept) {
       grid.rows.forEach((line, r) =>

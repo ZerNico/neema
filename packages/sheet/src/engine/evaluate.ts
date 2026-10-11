@@ -45,6 +45,11 @@ export interface Scope {
   cell(sheet: string, row: number, column: number): Scalar;
   /** A box clipped to where the sheet has content, so a whole column is not a million reads. */
   clip(sheet: string, box: CellBox): CellBox | null;
+  /**
+   * A range's values, built by `read` or shared with another formula that
+   * read the same box: a hundred lookups into one table read it once.
+   */
+  grid?(sheet: string, box: CellBox, read: () => Scalar[][]): Scalar[][];
   /** A defined name's formula, for the formula's sheet. */
   name(name: string): Node | null;
   /** The sheets from `first` to `last` in workbook order, or null if either is missing. */
@@ -98,14 +103,17 @@ class Evaluation {
     const area = (box.bottom - box.top + 1) * (box.right - box.left + 1);
     const read = area > DENSE_CELLS ? this.scope.clip(sheet, box) : box;
     if (!read) return new Grid([[null]], ref);
-    const rows: Scalar[][] = [];
-    for (let row = read.top; row <= read.bottom; row++) {
-      const line: Scalar[] = [];
-      for (let column = read.left; column <= read.right; column++)
-        line.push(this.scope.cell(sheet, row, column));
-      rows.push(line);
-    }
-    return new Grid(rows, ref);
+    const build = () => {
+      const rows: Scalar[][] = [];
+      for (let row = read.top; row <= read.bottom; row++) {
+        const line: Scalar[] = [];
+        for (let column = read.left; column <= read.right; column++)
+          line.push(this.scope.cell(sheet, row, column));
+        rows.push(line);
+      }
+      return rows;
+    };
+    return new Grid(this.scope.grid ? this.scope.grid(sheet, read, build) : build(), ref);
   }
 
   /** The one cell of `ref` in the formula's row or column, as legacy Excel reads a range. */
