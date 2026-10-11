@@ -21,3 +21,17 @@ describe("finding text in a document", () => {
     expect(texts("cost $x$ total", "cost x")).toEqual([]);
   });
 });
+
+describe("matches a replacement can take", () => {
+  it("never overlap, as a word processor's find steps past each match", () => {
+    expect(texts("banana", "ana")).toEqual(["ana"]);
+    expect(texts("aaaa", "aaa")).toEqual(["aaa"]);
+    expect(texts("aaaaaa", "aa")).toEqual(["aa", "aa", "aa"]);
+  });
+
+  it("keep their places when ignoring case changes a character's length", () => {
+    // Lowercasing "İ" gives two characters; matches after it must not shift.
+    expect(texts("İ cat", "cat")).toEqual(["cat"]);
+    expect(texts("İstanbul", "istanbul")).toEqual([]);
+  });
+});

@@ -44,13 +44,28 @@ const OBJECT = "￼";
 const WORD = /[\p{L}\p{N}_]/u;
 
 /**
- * Every match of `query` in the document, in order. A match never crosses
- * blocks; within one, inline nodes that are not text break it. Each inline
- * node takes one position per character, so offsets map straight to positions.
+ * Text folded for a search that ignores case, one character at a time: a
+ * character whose lowercase is another length ("İ" is two) stays as written,
+ * so every offset still points at the same character of the document.
+ */
+const fold = (text: string) => {
+  let folded = "";
+  for (const character of text) {
+    const lower = character.toLocaleLowerCase();
+    folded += lower.length === character.length ? lower : character;
+  }
+  return folded;
+};
+
+/**
+ * Every match of `query` in the document, in order and never overlapping, so
+ * replacing them all replaces each once. A match never crosses blocks; within
+ * one, inline nodes that are not text break it. Each inline node takes one
+ * position per character, so offsets map straight to positions.
  */
 export function findMatches(doc: PmNode, query: string, options: FindOptions): Match[] {
   if (!query) return [];
-  const needle = options.caseSensitive ? query : query.toLocaleLowerCase();
+  const needle = options.caseSensitive ? query : fold(query);
   const matches: Match[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
@@ -58,12 +73,17 @@ export function findMatches(doc: PmNode, query: string, options: FindOptions): M
     node.forEach((child) => {
       text += child.isText ? child.text! : OBJECT.repeat(child.nodeSize);
     });
-    const haystack = options.caseSensitive ? text : text.toLocaleLowerCase();
-    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+    const haystack = options.caseSensitive ? text : fold(text);
+    let at = haystack.indexOf(needle);
+    while (at !== -1) {
       const end = at + needle.length;
-      if (options.wholeWord && (WORD.test(text[at - 1] ?? "") || WORD.test(text[end] ?? "")))
+      if (options.wholeWord && (WORD.test(text[at - 1] ?? "") || WORD.test(text[end] ?? ""))) {
+        at = haystack.indexOf(needle, at + 1);
         continue;
+      }
       matches.push({ from: pos + 1 + at, to: pos + 1 + end });
+      // On past the match, as a word processor's find does.
+      at = haystack.indexOf(needle, end);
     }
     return false;
   });
