@@ -382,3 +382,21 @@ describe("a document as a Word file", () => {
     );
   });
 });
+
+describe("a Word file from awkward documents", () => {
+  const docOf = (content: object[]) => Node.fromJSON(documentSchema, { type: "doc", content });
+  const paragraph = (text: string, extra: object[] = []) => ({
+    type: "paragraph",
+    content: [{ type: "text", text }, ...extra],
+  });
+  const readBack = (bytes: Uint8Array, bounds = BOUNDS) =>
+    Node.fromJSON(documentSchema, wordToDocument(bytes, bounds).tree);
+
+  it("leaves out characters XML forbids, which Word would refuse to open", () => {
+    const doc = docOf([paragraph("a\u000Bb\u000C\u0001c￾d\uD800e")]);
+    const bytes = documentToWord(wordExportInput("T\u0001itle", doc, [], {}));
+    expect(validate(openDocx(bytes)).filter((issue) => issue.level === "error")).toEqual([]);
+    expect(title(openDocx(bytes))).toBe("Title");
+    expect(readBack(bytes).textContent).toBe("abcde");
+  });
+});

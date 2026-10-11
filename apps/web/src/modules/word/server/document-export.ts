@@ -112,6 +112,22 @@ const runProperties = (format: Format): XmlElement | undefined => {
   return children.length ? element("rPr", {}, children) : undefined;
 };
 
+/** What XML 1.0 forbids: control characters but tab and line ends, U+FFFE, U+FFFF and lone surrogates. */
+const XML_FORBIDDEN =
+  // oxlint-disable-next-line no-control-regex -- these control characters are what is being removed
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** Every string in plain data with what XML forbids taken out, which Word would refuse to open. */
+const xmlSafe = <T>(value: T): T => {
+  if (typeof value === "string") return value.replace(XML_FORBIDDEN, "") as T;
+  if (Array.isArray(value)) return value.map(xmlSafe) as T;
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, each]) => [key, xmlSafe(each)]),
+    ) as T;
+  return value;
+};
+
 /** Text as run pieces: tabs and line breaks are elements of their own in Word. */
 const piecesOf = (text: string): WmlRunPiece[] =>
   text.split(/(\t|\r?\n)/).flatMap((part): WmlRunPiece[] => {
@@ -226,7 +242,13 @@ interface OpenComment {
  * and comments. What Word has no place for is written as text (formulas as
  * their LaTeX, dates and people as they read).
  */
-export function documentToWord(input: DocumentForWord): Uint8Array {
+export function documentToWord(raw: DocumentForWord): Uint8Array {
+  const input: DocumentForWord = {
+    ...raw,
+    title: xmlSafe(raw.title),
+    tree: xmlSafe(raw.tree),
+    threads: xmlSafe(raw.threads),
+  };
   const doc = createDocx({ paragraphs: [] });
   setTitle(doc, input.title);
   const threads = new Map(input.threads.map((thread) => [thread.id, thread]));
