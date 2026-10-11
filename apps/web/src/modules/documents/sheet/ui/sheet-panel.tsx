@@ -20,7 +20,15 @@ import {
   ViewOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
 import { sheetLocale } from "@chat/sheet/locales";
@@ -228,12 +236,15 @@ export default function SheetPanelBody({
   controller,
   canEdit,
   toolbarSlot,
+  menu = null,
   me = null,
   ask = null,
 }: {
   controller: SheetController;
   canEdit: boolean;
   toolbarSlot: HTMLElement | null;
+  /** The sheet's menu, drawn after the comment buttons. */
+  menu?: ReactNode;
   /** The reader's account, to tell their own comments apart. */
   me?: string | null;
   /** Sends a comment to the assistant as a chat message about its cell. */
@@ -966,6 +977,7 @@ export default function SheetPanelBody({
           });
         }}
       />
+      {menu}
     </>
   );
   const barText =

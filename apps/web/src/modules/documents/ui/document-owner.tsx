@@ -17,7 +17,7 @@ import {
 } from "react";
 import { useDocument } from "../client/use-document.ts";
 import { useSheet } from "../sheet/client/use-sheet.ts";
-import { SheetPanelActions } from "../sheet/ui/sheet-panel-actions.tsx";
+import { SheetMenu, SheetPanelActions } from "../sheet/ui/sheet-panel-actions.tsx";
 import { Spinner } from "~/ui/primitives/spinner";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
@@ -228,6 +228,7 @@ function DocumentSession({
             controller={sheet}
             canEdit={controller.document?.canEdit ?? false}
             toolbarSlot={toolbarSlot}
+            menu={<SheetMenu document={controller.document} />}
             me={me?.id ?? null}
             ask={hooks.ask}
           />
