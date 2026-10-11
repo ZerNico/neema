@@ -4,6 +4,8 @@ import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
 import { readSheetFile } from "~/modules/documents/sheet/server/file-import.ts";
+import type { WordDocumentFile } from "~/modules/documents/server/document-tools.ts";
+import { readWordDocument } from "~/modules/documents/server/word-import.ts";
 import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
@@ -993,12 +995,16 @@ export class StreamEngine extends Context.Service<
                 reference: string,
               ) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
             | null = null;
+          let wordFiles: ((reference: string) => Effect.Effect<WordDocumentFile, string>) | null =
+            null;
           const documents = yield* prepareDocumentTools({
             service: documentService,
             readSheetFile: (reference) =>
               sheetFiles
                 ? sheetFiles(reference)
                 : Effect.fail("Files cannot be read in this chat."),
+            readWordFile: (reference) =>
+              wordFiles ? wordFiles(reference) : Effect.fail("Files cannot be read in this chat."),
             sheets: sheetService,
             generationId: fence?.generationId,
             timeZone: input.timeZone,
@@ -1305,6 +1311,33 @@ export class StreamEngine extends Context.Service<
                     readSheetFile(file, Option.getOrNull(processors.spreadsheet), input.userId),
                   ),
                 );
+          if (toolFiles)
+            wordFiles = (reference) =>
+              toolFiles.resolve(reference).pipe(
+                Effect.flatMap((file) =>
+                  readWordDocument(
+                    file,
+                    Option.getOrNull(processors.word),
+                    input.userId,
+                    // Its pictures are the sender's uploads until the new document claims them.
+                    (image) =>
+                      Option.isSome(imageAttachments)
+                        ? imageAttachments.value
+                            .upload({
+                              userId: input.userId,
+                              fileName: image.name,
+                              declaredMediaType: image.mediaType,
+                              bytes: image.bytes,
+                              allowedKinds: ["image"],
+                            })
+                            .pipe(
+                              Effect.map((attachment) => attachment.id),
+                              Effect.mapError(() => "unstored"),
+                            )
+                        : Effect.fail("unstored"),
+                  ),
+                ),
+              );
           let previewTurnFiles: Array<Prompt.UserMessagePartEncoded> = [];
           let previewCount = 0;
           let previewBytes = 0;

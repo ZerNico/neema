@@ -34,3 +34,39 @@ export interface DocumentForWord {
   images: Record<string, Uint8Array>;
   threads: WordThread[];
 }
+
+/** The bounds a document holds, passed in so the worker refuses a file past them as it reads. */
+export interface DocumentBounds {
+  blocks: number;
+  chars: number;
+  imageBytes: number;
+  comments: number;
+  comment: number;
+  quote: number;
+}
+
+/** A comment read from a Word file, by the thread it belongs to. */
+export interface ImportedComment {
+  author: string;
+  text: string;
+}
+export interface ImportedThread {
+  /** The placeholder its text's comment marks carry. */
+  ref: string;
+  comments: ImportedComment[];
+  quote: string;
+  resolved: boolean;
+}
+
+/** A Word file read as a document: images by index (`image:N` sources), threads by `ref`. */
+export interface WordAsDocument {
+  title: string | null;
+  tree: TreeNode;
+  images: Array<{ bytes: Uint8Array; mediaType: string }>;
+  threads: ImportedThread[];
+  /** What the file held that a document cannot, one phrase each. */
+  dropped: string[];
+}
+
+/** Where an imported image's bytes sit until the app stores them. */
+export const IMAGE_REF = "image:";

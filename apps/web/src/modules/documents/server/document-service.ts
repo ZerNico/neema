@@ -56,6 +56,8 @@ import {
 } from "../schema.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 import { groupVersions, type DocumentVersion } from "./versions.ts";
+import { placeImported, type ImportedText } from "./word-import.ts";
+import type { TreeNode } from "~/modules/word/server/document-tree.ts";
 import {
   commentDeletion,
   documentLocks,
@@ -256,6 +258,16 @@ const buildDocument = (content: string, outline: ReadonlyArray<string> = []) => 
   ])!;
   return ensureIds(squareTables(new Transform(doc))).doc;
 };
+/** A tree read from a file, as the schema builds it, every block given an ID; refused if it does not fit. */
+const importedDocument = (json: TreeNode) =>
+  Effect.try({
+    try: () => {
+      const doc = Node.fromJSON(documentSchema, json);
+      doc.check();
+      return ensureIds(squareTables(new Transform(doc))).doc;
+    },
+    catch: () => new DocumentRejected({ reason: "this file could not be read as a document" }),
+  });
 /**
  * Where the preview writes now: its own blocks once it has some, else the
  * target as the edit names it. Null when that cannot be told any more.
@@ -283,10 +295,15 @@ export class DocumentService extends Context.Service<
       documentId: string,
       title: string,
     ): Effect.Effect<EditableDocument, DocumentError>;
+    /**
+     * A new document from Markdown, or from `from`, a Word file already read:
+     * its images are claimed and its comments become threads of origin `file`.
+     */
     create<E = never, R = never>(
       userId: string,
       input: CreateDocumentInput,
       guard?: DocumentWriteGuard<E, R>,
+      from?: ImportedText,
     ): Effect.Effect<
       { outcome: "created"; document: EditableDocument; planned: string[] },
       DocumentError | E,
@@ -725,10 +742,16 @@ export class DocumentService extends Context.Service<
         userId: string,
         input: CreateDocumentInput,
         guard?: DocumentWriteGuard<E, R>,
+        from?: ImportedText,
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
-          const doc = buildDocument(parsed.content, parsed.outline);
+          // An imported tree names the document in its images' addresses, so its ID comes first.
+          const id = uuidv7();
+          const threadIds = new Map(from?.threads.map((thread) => [thread.ref, uuidv7()]));
+          const doc = from
+            ? yield* importedDocument(placeImported(from, id, threadIds))
+            : buildDocument(parsed.content, parsed.outline);
           // Stored as the editor will write it back, so the next read matches.
           yield* withinTreeCap(doc);
           const owner = parsed.projectId
@@ -748,7 +771,8 @@ export class DocumentService extends Context.Service<
               if ("conversationId" in owner)
                 yield* documents.lockConversation(tx, userId, owner.conversationId);
               else yield* lockProjectForEditing(tx, userId, owner.projectId);
-              return yield* documents.create(tx, userId, owner, {
+              const created = yield* documents.create(tx, userId, owner, {
+                id,
                 title: parsed.title,
                 // Only a chat's document dies with the answer that made it.
                 createdByMessageId:
@@ -756,6 +780,34 @@ export class DocumentService extends Context.Service<
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: doc.toJSON() as Record<string, unknown>,
               });
+              if (!from) return created;
+              // Every picture is claimed as a person's own upload is, or nothing is stored.
+              for (const attachmentId of from.images)
+                if (
+                  !(yield* attachments.claimForDocument(tx, {
+                    userId,
+                    documentId: created.id,
+                    attachmentId,
+                  }))
+                )
+                  return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+              // A file's comments are threads of their own origin; the names in it prove nothing.
+              for (const thread of from.threads) {
+                const threadId = threadIds.get(thread.ref)!;
+                for (const [index, comment] of thread.comments.entries())
+                  yield* documents.addComment(tx, {
+                    id: index ? uuidv7() : threadId,
+                    documentId: created.id,
+                    threadId,
+                    userId: null,
+                    origin: "file",
+                    fileAuthor: comment.author || null,
+                    body: comment.text,
+                    ...(index === 0 && thread.quote ? { quote: thread.quote } : {}),
+                  });
+                if (thread.resolved) yield* documents.resolveThread(tx, created.id, threadId, true);
+              }
+              return created;
             }),
           );
           yield* documentChanged(userId, document);

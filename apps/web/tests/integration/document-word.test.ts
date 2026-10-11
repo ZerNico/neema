@@ -5,24 +5,29 @@ import { deflateSync } from "node:zlib";
 import { PgClient } from "@effect/sql-pg";
 import { Transform } from "@tiptap/pm/transform";
 import { images, openDocx, outline, title } from "@office-kit/docx";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { eq } from "drizzle-orm";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { user } from "~/db/schema/index.ts";
+import { documentImages, documents, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { documentSchema } from "~/modules/documents/editor/markdown.ts";
+import { documentSchema, parseMarkdown, toMarkdown } from "~/modules/documents/editor/markdown.ts";
+import { createFromWord } from "~/modules/documents/server/create-from-word.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
+import { wordExportInput } from "~/modules/documents/server/word-export.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { documentToWord } from "~/modules/word/server/document-export.ts";
+import { wordToDocument } from "~/modules/word/server/document-import.ts";
 import { WordProcessor, type WordWork } from "~/modules/word/server/runtime.ts";
 import { Db } from "~/server/db.ts";
 import { Route as ExportRoute } from "~/routes/api/documents/$documentId.export.ts";
+import { Route as ImageRoute } from "~/routes/api/documents/$documentId.images.$attachmentId.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 vi.mock("~/modules/auth/server/auth.ts", () => ({
@@ -65,6 +70,8 @@ beforeAll(async () => {
   const word = Layer.succeed(WordProcessor, {
     run: async (request: WordWork) => {
       if (request.kind === "exportDocument") return documentToWord(request.document) as never;
+      if (request.kind === "importDocument")
+        return wordToDocument(request.bytes, request.bounds) as never;
       throw new Error(`Unexpected Word work: ${request.kind}`);
     },
     close: async () => {},
@@ -154,6 +161,31 @@ const download = async (documentId: string, userId?: string) =>
     }),
     params: { documentId },
   } as never);
+const fetchImage = async (src: string, userId: string) => {
+  const [, , , documentId, , attachmentId] = src.split("/");
+  return handlers(ImageRoute).GET({
+    request: new Request(`http://localhost${src}`, { headers: { "x-test-user": userId } }),
+    params: { documentId: documentId!, attachmentId: attachmentId! },
+  } as never);
+};
+
+const importWord = (
+  userId: string,
+  projectId: string,
+  file: { name: string; bytes: Uint8Array },
+  typed?: string,
+) =>
+  runtime.runPromiseExit(
+    createFromWord(userId, {
+      owner: { projectId },
+      ...(typed ? { title: typed } : {}),
+      by: "user",
+      file: { ...file, mediaType: "" },
+    }),
+  );
+const refusal = (exit: Exit.Exit<unknown, unknown>) =>
+  Exit.isFailure(exit) ? (Cause.squash(exit.cause) as { reason?: string }).reason : "created";
+
 describe("downloading a document as Word", () => {
   it("gives a reader the stored document, with its images, and nobody else anything", async () => {
     const { owner, viewer, projectId } = await project();
@@ -225,5 +257,139 @@ describe("downloading a document as Word", () => {
       Effect.flatMap(SheetService, (s) => s.create(owner, { projectId, title: "Budget" })),
     );
     expect((await download(sheet.id, owner)).status).toBe(404);
+  });
+});
+
+describe("starting a document from a Word file", () => {
+  const wordFile = (markdown: string, threads = true) => {
+    let commented = parseMarkdown(markdown);
+    if (threads) {
+      let from = -1;
+      commented.descendants((node, position) => {
+        if (from < 0 && node.isText && node.text?.startsWith("Ship")) from = position;
+        return from < 0;
+      });
+      commented = new Transform(commented).addMark(
+        from,
+        from + "Ship it.".length,
+        documentSchema.marks.comment!.create({ thread: "t1" }),
+      ).doc;
+    }
+    return documentToWord(
+      wordExportInput(
+        "Imported plan",
+        commented,
+        threads
+          ? [
+              {
+                id: "t1",
+                threadId: "t1",
+                author: { id: "x", name: "Grace" },
+                byAssistant: false,
+                fromFile: null,
+                body: "Which Friday?",
+                createdAt: "2026-10-01T09:00:00.000Z",
+                resolvedAt: null,
+                quote: null,
+                toAssistant: false,
+                answered: false,
+              },
+            ]
+          : [],
+        { "/api/documents/old/images/dot": PNG },
+      ),
+    );
+  };
+
+  it("keeps its text, claims its pictures for the document and brings its comments as file threads", async () => {
+    const { owner, viewer, projectId } = await project();
+    const bytes = wordFile(
+      "# Goals\n\n- one\n- two\n\n![Dot](/api/documents/old/images/dot)\n\nShip it.",
+    );
+    const exit = await importWord(owner, projectId, { name: "Plan.docx", bytes });
+    if (!Exit.isSuccess(exit)) throw Cause.squash(exit.cause);
+    const { document, dropped } = exit.value;
+    expect(dropped).toEqual([]);
+    // The file's own title, since the person gave none.
+    expect(document).toMatchObject({ title: "Imported plan", projectId, lastEditedBy: "user" });
+
+    const read = await run(Effect.flatMap(DocumentService, (s) => s.read(viewer, document.id)));
+    const markdown = toMarkdown(read!.doc);
+    const src = /!\[Dot\]\(([^)]+)\)/.exec(markdown)?.[1] ?? "";
+    expect(markdown).toBe(`# Goals\n\n- one\n- two\n\n![Dot](${src})\n\nShip it.`);
+    expect(src).toMatch(new RegExp(`^/api/documents/${document.id}/images/`));
+    // Served exactly as an uploaded image: to a reader, through this document.
+    const image = await fetchImage(src, viewer);
+    expect(image.status).toBe(200);
+    expect(new Uint8Array(await image.arrayBuffer())).toEqual(PNG);
+    const claims = await run(
+      Effect.flatMap(Db, (db) =>
+        db.select().from(documentImages).where(eq(documentImages.documentId, document.id)),
+      ),
+    );
+    expect(claims).toHaveLength(1);
+
+    expect(read!.comments).toEqual([
+      expect.objectContaining({
+        fromFile: { name: "Grace" },
+        author: null,
+        body: "Which Friday?",
+        quote: "Ship it.",
+        resolvedAt: null,
+      }),
+    ]);
+    // Its mark is on the text it was about.
+    let marked = "";
+    read!.doc.descendants((node) => {
+      if (node.marks.some((mark) => mark.attrs.thread === read!.comments[0]!.threadId))
+        marked += node.text;
+      return true;
+    });
+    expect(marked).toBe("Ship it.");
+
+    // The exported file says what it is; a title typed in the dialog wins.
+    const titled = await importWord(owner, projectId, { name: "Plan.docx", bytes }, "Mine");
+    expect(Exit.isSuccess(titled) && titled.value.document.title).toBe("Mine");
+  });
+
+  it("refuses a file too large for a document, a broken one and an old one, storing nothing", async () => {
+    const { owner, viewer, projectId } = await project();
+    const count = async () =>
+      (
+        await run(
+          Effect.flatMap(Db, (db) =>
+            db.select().from(documents).where(eq(documents.projectId, projectId)),
+          ),
+        )
+      ).length;
+    const long = wordFile(
+      Array.from({ length: 5_001 }, (_, index) => `Line ${index}`).join("\n\n"),
+      false,
+    );
+    expect(refusal(await importWord(owner, projectId, { name: "Long.docx", bytes: long }))).toBe(
+      "This Word file is too long for a document: it has 5,001 paragraphs, list items and tables, and a document holds 5,000.",
+    );
+    expect(
+      refusal(
+        await importWord(owner, projectId, {
+          name: "Broken.docx",
+          bytes: new TextEncoder().encode("PK not really a zip"),
+        }),
+      ),
+    ).toBe("This is not a Word file the app can open.");
+    expect(
+      refusal(
+        await importWord(owner, projectId, {
+          name: "Old.doc",
+          bytes: new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]),
+        }),
+      ),
+    ).toBe("Old.doc is an older Word file; save it as .docx first.");
+    // A viewer may not start documents in the project, from a file or otherwise.
+    const small = wordFile("Ship it.", false);
+    expect(refusal(await importWord(viewer, projectId, { name: "Small.docx", bytes: small }))).toBe(
+      "this project is read-only for you",
+    );
+    expect(await count()).toBe(0);
   });
 });

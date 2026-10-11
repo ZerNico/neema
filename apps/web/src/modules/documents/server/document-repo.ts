@@ -89,6 +89,8 @@ export class DocumentRepo extends Context.Service<
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
         kind?: "text" | "sheet";
+        /** Given when the snapshot already names the document, as an imported image's address does. */
+        id?: string;
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
@@ -221,7 +223,7 @@ export class DocumentRepo extends Context.Service<
       return DocumentRepo.of({
         lockConversation,
         create: Effect.fn("DocumentRepo.create")(function* (tx, userId, owner, values) {
-          const id = uuidv7();
+          const id = values.id ?? uuidv7();
           yield* tx
             .insert(documents)
             .values({
