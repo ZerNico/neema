@@ -428,4 +428,12 @@ describe("a Word file from awkward documents", () => {
     expect(read.childCount).toBe(2);
     expect(read.child(1).textContent).toBe("firstsecond");
   });
+
+  it("counts footnotes' notes toward the document's length", () => {
+    const doc = docOf([
+      paragraph("Short.", [{ type: "footnote", attrs: { note: "n".repeat(200) } }]),
+    ]);
+    const bytes = documentToWord(wordExportInput("Notes", doc, [], {}));
+    expect(() => wordToDocument(bytes, { ...BOUNDS, chars: 100 })).toThrow(/206 characters/);
+  });
 });

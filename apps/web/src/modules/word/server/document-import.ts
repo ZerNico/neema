@@ -290,6 +290,8 @@ class WordReader {
     const walk = (node: TreeNode) => {
       if (BLOCK_TYPES.has(node.type)) blocks += 1;
       chars += node.text?.length ?? 0;
+      // A footnote's note is text of the document too, held in its attributes.
+      if (typeof node.attrs?.note === "string") chars += node.attrs.note.length;
       node.content?.forEach(walk);
     };
     walk(tree);
