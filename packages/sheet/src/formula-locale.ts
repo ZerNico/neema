@@ -36,12 +36,13 @@ const quoted = (text: string, at: number, quote: string) => {
   return end;
 };
 
-/** Copies a structured reference's brackets, nested ones included. */
+/** Copies a structured reference's brackets, nested ones included; "'" escapes the next character. */
 const bracketed = (text: string, at: number) => {
   let depth = 0;
   let end = at;
   while (end < text.length) {
-    if (text[end] === "[") depth++;
+    if (text[end] === "'") end++;
+    else if (text[end] === "[") depth++;
     else if (text[end] === "]" && --depth === 0) return end + 1;
     end++;
   }

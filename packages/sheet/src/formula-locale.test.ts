@@ -27,6 +27,10 @@ describe("a formula's separators in a locale", () => {
       `=IF(STDEV.S('Q1, 2.5'!A1:A3)>1,5;"a, b; 1.5";Sales[[#Headers],[Net, 2.5]])`,
     );
     expect(delocalizeFormula(localizeFormula(stored, DE_DE), DE_DE)).toBe(stored);
+    // A column name may escape a bracket with an apostrophe, as Excel writes it.
+    const escaped = "=SUM(Table[Cost']; net],1.5)";
+    expect(localizeFormula(escaped, DE_DE)).toBe("=SUM(Table[Cost']; net];1,5)");
+    expect(delocalizeFormula(localizeFormula(escaped, DE_DE), DE_DE)).toBe(escaped);
   });
 
   it("read a ',' typed between names out of habit as a separator, between digits as a decimal", () => {
@@ -51,6 +55,7 @@ describe("a formula's separators in a locale", () => {
       "'My, sheet'!A1",
       "{1,2;3,4}",
       "Tbl[[#All],[a, b]]",
+      "Tbl[Cost']; net]",
       "+",
       " ",
       "TRUE",
