@@ -151,6 +151,27 @@ interface Formula {
   readonly area: CellBox | null;
 }
 
+// Formulas as parsed, by their text. Without tables a formula's text alone decides its tree,
+// which is never changed once built, so a calculation after an edit parses only what changed.
+const parsedTexts = new Map<string, Node | Unsupported>();
+const PARSED_KEPT = 50_000;
+function parsedText(text: string): Node {
+  let parsed = parsedTexts.get(text);
+  if (!parsed) {
+    try {
+      parsed = parseFormula(text, {});
+    } catch (error) {
+      if (!(error instanceof Unsupported)) throw error;
+      parsed = error;
+    }
+    // One process calculates every document: the cache is bounded, not kept for its lifetime.
+    if (parsedTexts.size >= PARSED_KEPT) parsedTexts.clear();
+    parsedTexts.set(text, parsed);
+  }
+  if (parsed instanceof Unsupported) throw parsed;
+  return parsed;
+}
+
 const cellKey = (sheet: string, row: number, column: number) =>
   `${sheet.toLowerCase()}\u0000${row}\u0000${column}`;
 const inside = (box: CellBox | null, row: number, column: number) =>
@@ -211,7 +232,9 @@ function pass(store: CellStore, limits: CalcLimits) {
     try {
       formulas.push({
         stored,
-        node: parseFormula(stored.text, contextFor(stored.sheet, stored.row, stored.column)),
+        node: tables.size
+          ? parseFormula(stored.text, contextFor(stored.sheet, stored.row, stored.column))
+          : parsedText(stored.text),
         kind,
         area: stored.form === "array" ? (stored.area ?? own(stored)) : null,
       });
