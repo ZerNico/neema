@@ -1,6 +1,6 @@
 import {
   ArrowExpand01Icon,
-  ArrowShrink01Icon,
+  ArrowShrink02Icon,
   PanelRightCloseIcon,
   PanelRightIcon,
   PanelRightOpenIcon,
@@ -511,7 +511,7 @@ function PanelExpandButton({ expanded }: { expanded: boolean }) {
           />
         }
       >
-        <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} strokeWidth={2} />
+        <HugeiconsIcon icon={expanded ? ArrowShrink02Icon : ArrowExpand01Icon} strokeWidth={2} />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
