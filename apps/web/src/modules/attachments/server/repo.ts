@@ -189,6 +189,8 @@ export class AttachmentRepo extends Context.Service<
       attachment: AttachmentWithBlob;
       claimedByMessageId: string | null;
       conversationUserId: string | null;
+      /** A document holds it as an image: its readers are the document's, not the uploader. */
+      claimedByDocument: boolean;
     } | null>;
     /** Deletes an unclaimed attachment; returns storage keys to remove. */
     deleteUnclaimed(
@@ -416,6 +418,7 @@ export class AttachmentRepo extends Context.Service<
             // A queued file is shown in the queue strip before it is a
             // message's, so its conversation's owner may read it too.
             queuedConversationUserId: queuedConversations.userId,
+            claimedByDocument: sql<boolean>`exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`,
           })
           .from(attachments)
           .innerJoin(attachmentBlobs, eq(attachments.blobId, attachmentBlobs.id))
@@ -438,12 +441,18 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
         const row = rows[0];
         if (!row) return null;
-        const { claimedByMessageId, conversationUserId, queuedConversationUserId, ...attachment } =
-          row;
+        const {
+          claimedByMessageId,
+          conversationUserId,
+          queuedConversationUserId,
+          claimedByDocument,
+          ...attachment
+        } = row;
         return {
           attachment,
           claimedByMessageId,
           conversationUserId: conversationUserId ?? queuedConversationUserId,
+          claimedByDocument,
         };
       });
 

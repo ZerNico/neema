@@ -158,6 +158,21 @@ describe("claiming a document image", () => {
     expect(reason(await addImage(editor, documentId, image.id))).toBe(IMAGE_REFUSED);
   });
 
+  it("serves a claimed image only through its document, not to its uploader directly", async () => {
+    const { editor, documentId } = await projectDocument();
+    const upload1 = await upload(editor, png(7));
+    const before = await runtime.runPromiseExit(
+      Effect.flatMap(AttachmentService, (s) => s.read({ userId: editor, attachmentId: upload1.id })),
+    );
+    expect(Exit.isSuccess(before)).toBe(true);
+    expect(refusal(await addImage(editor, documentId, upload1.id))).toBe("claimed");
+    // The plain file route caches for good and outlives project access, so it refuses.
+    const after = await runtime.runPromiseExit(
+      Effect.flatMap(AttachmentService, (s) => s.read({ userId: editor, attachmentId: upload1.id })),
+    );
+    expect(Exit.isFailure(after)).toBe(true);
+  });
+
   it("refuses someone else's upload, a viewer, a stranger and a non-image alike", async () => {
     const { owner, editor, viewer, documentId } = await projectDocument();
     const stranger = await createUser();
