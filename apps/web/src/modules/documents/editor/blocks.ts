@@ -1,5 +1,6 @@
 import { Node, type JSONContent, type MarkdownTokenizer } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
+import { inlineStart } from "./inline-start.ts";
 
 /**
  * Blocks beyond what plain Markdown has, each written as the Markdown that
@@ -16,14 +17,33 @@ const isCalloutKind = (value: unknown): value is CalloutKind =>
 /** Each line's `>` and the one space after it, as a blockquote takes them off. */
 const unquote = (lines: string[]) => lines.map((line) => line.replace(/^ {0,3}> ?/, "")).join("\n");
 
-/** A quoted block's lines: every line from the first that starts with `>`. */
+/**
+ * A quoted block's lines: every line from the first that starts with `>`.
+ * Read a line at a time, never splitting the rest of the document, which
+ * this runs on for every block.
+ */
 const quotedLines = (src: string) => {
   const lines: string[] = [];
-  for (const line of src.split("\n")) {
+  for (let at = 0; at < src.length;) {
+    const end = src.indexOf("\n", at);
+    const line = src.slice(at, end === -1 ? undefined : end);
     if (!/^ {0,3}>/.test(line)) break;
     lines.push(line);
+    if (end === -1) break;
+    at = end + 1;
   }
   return lines;
+};
+
+/**
+ * Where a block of ours may start in text marked would otherwise read as one
+ * paragraph: only after a line break. marked asks from the paragraph's second
+ * character on, so a match at 0 would cut an escaped opening ("\[sheet")
+ * after its backslash. A block at the very start is found by its tokenizer.
+ */
+export const lineStart = (src: string, pattern: RegExp) => {
+  const match = new RegExp(`\\n${pattern.source}`, pattern.flags).exec(src);
+  return match ? match.index + 1 : -1;
 };
 
 /** Children rendered and quoted line by line, blank lines kept as a bare `>`. */
@@ -36,10 +56,7 @@ const quote = (text: string) =>
 const calloutTokenizer: MarkdownTokenizer = {
   name: "callout",
   level: "block",
-  start: (src) => {
-    const match = /(^|\n) {0,3}> ?\[!/.exec(src);
-    return match ? match.index + match[1]!.length : -1;
-  },
+  start: (src) => lineStart(src, / {0,3}> ?\[!/),
   tokenize: (src, _tokens, lexer) => {
     const lines = quotedLines(src);
     const kind = /^ {0,3}> ?\[!(\w+)\][ \t]*$/.exec(lines[0] ?? "")?.[1]?.toLowerCase();
@@ -91,14 +108,24 @@ export const Callout = Node.create({
   },
 });
 
-/** A `<details>` block's extent: through the `</details>` that closes it, nested ones counted. */
+/**
+ * A `<details>` block's extent: through the `</details>` that closes it,
+ * nested ones counted and lines inside fenced code skipped, read a line at a time.
+ */
 const detailsExtent = (src: string) => {
   let depth = 0;
-  let at = 0;
-  for (const line of src.split("\n")) {
-    if (/^\s*<details>\s*$/i.test(line)) depth++;
+  let fence: string | null = null;
+  for (let at = 0; at < src.length;) {
+    const end = src.indexOf("\n", at);
+    const line = src.slice(at, end === -1 ? undefined : end);
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+    } else if (marker) fence = marker;
+    else if (/^\s*<details>\s*$/i.test(line)) depth++;
     else if (/^\s*<\/details>\s*$/i.test(line) && --depth === 0) return at + line.length;
-    at += line.length + 1;
+    if (end === -1) break;
+    at = end + 1;
   }
   return -1;
 };
@@ -106,10 +133,7 @@ const detailsExtent = (src: string) => {
 const detailsTokenizer: MarkdownTokenizer = {
   name: "details",
   level: "block",
-  start: (src) => {
-    const match = /(^|\n)<details>[ \t]*\n/i.exec(src);
-    return match ? match.index + match[1]!.length : -1;
-  },
+  start: (src) => lineStart(src, /<details>[ \t]*\n/i),
   tokenize: (src, _tokens, lexer) => {
     const head = /^<details>[ \t]*\n<summary>(.*?)<\/summary>[ \t]*(?:\n|$)/i.exec(src);
     if (!head) return undefined;
@@ -203,15 +227,19 @@ export const footnoteDefinitions = new Map<string, string>();
 /** A footnote's note escaped for `^[…]`, where `]` and `\` would end or escape it. */
 const escapeNote = (note: string) => note.replace(/[\\\]]/g, "\\$&");
 
-const INLINE_NOTE = /^\^\[((?:\\.|[^\\\]\n])*)\]/;
-const REFERENCE = /^\[\^([^\]\s]+)\]/;
+// A note of at most 1,000 characters: unbounded, a line of "^[" took seconds to read.
+const INLINE_NOTE = /^\^\[((?:\\.|[^\\\]\n]){0,1000})\]/;
+// A label of at most 100 characters: unbounded, a line of "[^" read to its end every time.
+const REFERENCE = /^\[\^([^\]\s]{1,100})\]/;
 
 const footnoteTokenizer: MarkdownTokenizer = {
   name: "footnote",
   level: "inline",
-  start: (src) => src.search(/\^\[|\[\^/),
+  start: (src) => inlineStart(src, /\^\[|\[\^/),
   tokenize: (src) => {
-    const inline = INLINE_NOTE.exec(src);
+    // Most "^[" are no note: a "]" within reach is checked first, cheaply.
+    const inline =
+      src.startsWith("^[") && src.slice(2, 1_003).includes("]") ? INLINE_NOTE.exec(src) : null;
     if (inline)
       return { type: "footnote", raw: inline[0], note: inline[1]!.replace(/\\(.)/g, "$1") };
     // A reference with no definition is left as text: chat citations pasted in are not notes.

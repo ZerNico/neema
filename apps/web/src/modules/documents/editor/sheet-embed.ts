@@ -1,6 +1,7 @@
 import { Node, type MarkdownTokenizer } from "@tiptap/core";
 import type { Node as TreeNode } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
+import { lineStart } from "./blocks.ts";
 
 /** What an embed shows: a range of a live sheet, or one of its charts. */
 export interface SheetEmbedAttrs {
@@ -31,10 +32,7 @@ const ATTRIBUTE = /([a-z]+)="((?:\\.|[^"\\\n])*)"/g;
 const tokenizer: MarkdownTokenizer = {
   name: "sheetEmbed",
   level: "block",
-  start: (src) => {
-    const match = /(^|\n)\[sheet[ \t]/.exec(src);
-    return match ? match.index + match[1]!.length : -1;
-  },
+  start: (src) => lineStart(src, /\[sheet[ \t]/),
   tokenize: (src) => {
     const match = SHORTCODE.exec(src);
     if (!match) return undefined;

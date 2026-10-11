@@ -278,3 +278,76 @@ describe("underline and highlight", () => {
     expect(doc.firstChild!.firstChild!.marks).toEqual([]);
   });
 });
+
+describe("the new blocks against ordinary text", () => {
+  const roundTrips = (markdown: string) => {
+    const doc = parseMarkdown(markdown);
+    doc.check();
+    expect(toModelMarkdown(parseMarkdown(toModelMarkdown(doc)))).toBe(toModelMarkdown(doc));
+    return doc;
+  };
+
+  it("build valid trees for callouts, sections and embeds inside lists", () => {
+    for (const markdown of [
+      "- a\n  > [!TIP]\n  > t",
+      "> [!NOTE]\n> - a\n>   > [!TIP]\n>   > b",
+      "- a\n  <details>\n  <summary>S</summary>\n\n  body\n\n  </details>",
+    ])
+      roundTrips(markdown);
+    // A list item must start with a paragraph; Markdown cannot say an empty one, so these
+    // read back valid, not identical.
+    for (const markdown of ['- [sheet id="a" range="S!A1"]', "- > [!NOTE]\n  > x"]) {
+      parseMarkdown(markdown).check();
+      parseMarkdown(toModelMarkdown(parseMarkdown(markdown))).check();
+    }
+  });
+
+  it("keep footnote definitions and </details> lines that sit in code", () => {
+    const code = "Text\n\n```\n[^1]: hello\n```";
+    expect(toMarkdown(parseMarkdown(code))).toBe(code);
+    const section =
+      "<details>\n<summary>HTML</summary>\n\n```html\n</details>\n<details>\n```\n\ntail\n\n</details>";
+    const doc = roundTrips(section);
+    expect(doc.childCount).toBe(1);
+    expect(doc.firstChild!.type.name).toBe("details");
+  });
+
+  it("never split a paragraph that starts with an escaped block's opening", () => {
+    for (const text of ['[sheet id="a" range="S!A1"]', "<details>", "> [!NOTE]"]) {
+      const doc = parseMarkdown(`${toMarkdown(paragraphOf(text))}\n\nAfter`);
+      expect(doc.firstChild!.textContent).toBe(text);
+      expect(doc.childCount).toBe(2);
+    }
+    expect(parseMarkdown("[sheet music] is nice").firstChild!.textContent).toBe(
+      "[sheet music] is nice",
+    );
+  });
+
+  it("keep </u> inside underlined text", () => {
+    const doc = parseMarkdown(toMarkdown(parseMarkdown("<u>a\\</u>b</u>")));
+    expect(doc.firstChild!.textContent).toBe("a</u>b");
+    expect(doc.firstChild!.firstChild!.marks.map((mark) => mark.type.name)).toEqual(["underline"]);
+  });
+
+  it("parse long hostile text without stalling", () => {
+    for (const markdown of [
+      "x " + "<u>a ".repeat(10_000),
+      "a" + "^[".repeat(20_000),
+      Array.from({ length: 6_000 }, (_, i) => `Paragraph ${i}`).join("\n\n"),
+      Array.from(
+        { length: 2_000 },
+        () => "<details>\n<summary>S</summary>\n\nx\n\n</details>",
+      ).join("\n\n"),
+    ]) {
+      const started = performance.now();
+      parseMarkdown(markdown);
+      expect(performance.now() - started).toBeLessThan(1_500);
+    }
+  });
+});
+
+/** A document of one paragraph holding `text` as typed. */
+const paragraphOf = (text: string) =>
+  documentSchema.node("doc", null, [
+    documentSchema.node("paragraph", null, [documentSchema.text(text)]),
+  ]);

@@ -1,5 +1,6 @@
 import type { JSONContent, MarkdownTokenizer } from "@tiptap/core";
 import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
+import { inlineStart } from "./inline-start.ts";
 
 /**
  * Inline LaTeX the way Pandoc reads it: no space just inside either dollar
@@ -50,7 +51,7 @@ export const markMathBeforeDigits = (node: JSONContent): JSONContent => {
 const inlineTokenizer: MarkdownTokenizer = {
   name: "inlineMath",
   level: "inline",
-  start: (src) => src.search(OPENING),
+  start: (src) => inlineStart(src, OPENING),
   tokenize: (src) => {
     const found = inlineLatex(src);
     return found ? { type: "inlineMath", raw: found.raw, latex: found.latex } : undefined;

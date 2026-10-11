@@ -116,31 +116,110 @@ export const toMarkdown = (node: Node) => {
   return markdown ? `${markdown}\n\n${definitions}` : definitions;
 };
 
-/** A footnote's definition: its label, then its note, lines indented under it continuing it. */
-const DEFINITION = /^\[\^([^\]\s]+)\]:[ \t]+(.*(?:\n(?: {2,}|\t).*)*)\n?/gm;
+/** A footnote's definition line: its label, then its note. */
+const DEFINITION = /^\[\^([^\]\s]+)\]:[ \t]+(.*)$/;
+/** A fenced code block's opening or closing line. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The Markdown with its footnotes' definitions taken out into
+ * `footnoteDefinitions`, lines indented under one continuing it. A line in
+ * fenced code is code, never a definition.
+ */
+const takeDefinitions = (markdown: string) => {
+  const kept: string[] = [];
+  const lines = markdown.split("\n");
+  let fence: string | null = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const marker = FENCE.exec(line)?.[1];
+    if (fence || marker) {
+      if (!fence) fence = marker!;
+      else if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      kept.push(line);
+      continue;
+    }
+    const definition = DEFINITION.exec(line);
+    if (!definition) {
+      kept.push(line);
+      continue;
+    }
+    let note = definition[2]!;
+    while (/^(?: {2,}|\t)\S/.test(lines[index + 1] ?? "")) note += ` ${lines[++index]!.trim()}`;
+    footnoteDefinitions.set(definition[1]!, note.trim());
+  }
+  // Where definitions stood, blank lines would read as empty paragraphs.
+  return kept.length === lines.length
+    ? markdown
+    : kept
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd();
+};
+
+const INLINE_TYPES = new Set(
+  Object.values(documentSchema.nodes)
+    .filter((type) => type.isInline)
+    .map((type) => type.name),
+);
+/** Nodes holding blocks that marked may hand bare text, as a tight list does its items. */
+const BLOCK_HOLDERS = new Set(["callout", "detailsContent", "blockquote"]);
+const LIST_ITEMS = new Set(["listItem", "taskItem"]);
+
+/**
+ * Parsed JSON fitted to the schema where marked's tokens and it disagree:
+ * bare text inside a block holder goes in a paragraph, and a list item that
+ * starts with another block (a callout, an embed) gets the paragraph a list
+ * item must start with.
+ */
+const fitTree = (node: JSONContent): JSONContent => {
+  if (!node.content) return node;
+  let content = node.content.map(fitTree);
+  if (BLOCK_HOLDERS.has(node.type ?? "")) {
+    const blocks: JSONContent[] = [];
+    for (const child of content) {
+      const last = blocks.at(-1);
+      if (!INLINE_TYPES.has(child.type ?? "")) blocks.push(child);
+      else if (last?.type === "paragraph" && last.attrs?.loose)
+        last.content = [...(last.content ?? []), child];
+      else blocks.push({ type: "paragraph", attrs: { loose: true }, content: [child] });
+    }
+    content = blocks.map((block) =>
+      block.attrs?.loose ? { type: "paragraph", content: block.content ?? [] } : block,
+    );
+  }
+  if (LIST_ITEMS.has(node.type ?? "") && content[0]?.type !== "paragraph")
+    content = [{ type: "paragraph" }, ...content];
+  return { ...node, content };
+};
 
 /**
  * Markdown parsed with its footnotes' definitions taken out first, so a
  * reference anywhere before or after finds its note and none is left as a
- * stray paragraph.
+ * stray paragraph, then fitted to the schema.
  */
 const parse = (markdown: string) => {
   footnoteDefinitions.clear();
-  const body = markdown.replace(DEFINITION, (_line, label: string, note: string) => {
-    footnoteDefinitions.set(label, note.replace(/\s*\n\s*/g, " ").trim());
-    return "";
-  });
   try {
-    // Where definitions stood, blank lines would read as empty paragraphs.
-    return manager.parse(body === markdown ? body : body.replace(/\n{3,}/g, "\n\n").trimEnd());
+    return fitTree(manager.parse(takeDefinitions(markdown)));
   } finally {
     footnoteDefinitions.clear();
   }
 };
 
-/** A document tree from Markdown; empty Markdown is an empty document. */
-export const parseMarkdown = (markdown: string) =>
-  Node.fromJSON(documentSchema, markdown.trim() ? parse(markdown) : { type: "doc", content: [] });
+/**
+ * A document tree from Markdown; empty Markdown is an empty document. It is
+ * checked against the schema, so Markdown that cannot be a valid tree is
+ * refused here rather than stored.
+ */
+export const parseMarkdown = (markdown: string) => {
+  const doc = Node.fromJSON(
+    documentSchema,
+    markdown.trim() ? parse(markdown) : { type: "doc", content: [] },
+  );
+  if (doc.childCount) doc.check();
+  return doc;
+};
 
 /** Markdown in the canonical form the editor would write it back as. */
 export const normalizeMarkdown = (markdown: string) =>
