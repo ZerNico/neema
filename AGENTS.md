@@ -335,6 +335,9 @@ All release candidates. Pin exactly; never float to `latest`.
   install script only fetches CUDA files and is denied in `allowBuilds`. On a bump, run the OCR
   test in `pdf/server/pages.test.ts` with model files present and `pnpm build`, whose PDF worker
   smoke proves the natives load from the output. See [PDFs](docs/internals/pdf.md).
+- `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
+  reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
+  component uncompiled, which is most of them. On a bump, count compiled components, not test results.
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.
 
