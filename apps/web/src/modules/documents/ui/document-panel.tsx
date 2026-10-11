@@ -58,8 +58,9 @@ export function DocumentPanelActions({
   const [renaming, setRenaming] = useState(false);
   const document = controller.document;
   return (
-    <div className="flex items-center gap-2">
-      {/* The editor's formatting fills the row; Copy sits at its end. */}
+    // Comments, the menu and Copy line up with the ribbon's tab row, not the middle of both lines.
+    <div className="flex items-start gap-2">
+      {/* The editor's ribbon fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
         {controller.sync ? (

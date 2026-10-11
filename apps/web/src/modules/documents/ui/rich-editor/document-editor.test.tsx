@@ -14,7 +14,6 @@ import { sortColumn } from "./table-sort.ts";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
 import { browserEditorExtensions, browserEditorProps } from "./editor-extensions.ts";
-import { fittingControls } from "./fitting-controls.ts";
 
 beforeAll(() => {
   // jsdom lays nothing out; ProseMirror measures the selection to scroll it into view.
@@ -172,7 +171,8 @@ describe("document editor", () => {
       // From the end of "Area" into "def": the formula takes "de".
       editor.commands.setTextSelection({ from: 5, to: 9 });
     });
-    fireEvent.click(screen.getByRole("button", { name: "Formula" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Formula" }));
     const field = await screen.findByRole("textbox", { name: "LaTeX" });
     await waitFor(() => expect(field).toHaveValue("de"));
     fireEvent.keyDown(field, { key: "Enter" });
@@ -187,7 +187,9 @@ describe("document editor", () => {
     act(() => {
       editor.commands.setTextSelection({ from: 9, to: 15 });
     });
-    fireEvent.click(screen.getByRole("button", { name: "Formula" }));
+    // Formulas are on the ribbon's Insert tab.
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Formula" }));
     const field = await screen.findByRole("textbox", { name: "LaTeX" });
     expect(field).toHaveValue("pi r^2");
     fireEvent.change(field, { target: { value: "\\pi r^2" } });
@@ -322,7 +324,7 @@ describe("document editor", () => {
     mount(sync, { readOnly: true });
     const editor = await editorOf();
     expect(editor.isEditable).toBe(false);
-    expect(screen.queryByRole("toolbar", { name: "Formatting" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "History" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Document" })).toHaveAttribute(
       "contenteditable",
       "false",
@@ -366,15 +368,15 @@ describe("document editor", () => {
       <DocumentEditor sync={sync} readOnly={false} toolbarSlot={toolbar} />,
     );
     await editorOf();
-    expect(within(toolbar).getByRole("toolbar", { name: "Formatting" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("toolbar", { name: "History" })).toBeInTheDocument();
     rerender(<DocumentEditor sync={sync} readOnly toolbarSlot={toolbar} />);
     expect(within(toolbar).queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
-  it("is one Tab stop, with arrow keys moving between its controls", async () => {
+  it("keeps Undo and Redo one Tab stop, with arrow keys moving between them", async () => {
     mount(await replica("Plan"));
     await editorOf();
-    const toolbar = screen.getByRole("toolbar", { name: "Formatting" });
+    const toolbar = screen.getByRole("toolbar", { name: "History" });
     const reachable = within(toolbar)
       .getAllByRole("button")
       .filter((button) => button.tabIndex === 0);
@@ -393,12 +395,28 @@ describe("document editor", () => {
     );
   });
 
-  it("folds what does not fit into More, keeping a slot for it", () => {
-    expect(fittingControls(0, 14)).toBe(14);
-    expect(fittingControls(14 * 34, 14)).toBe(14);
-    expect(fittingControls(14 * 34 - 1, 14)).toBe(12);
-    expect(fittingControls(4 * 34 + 10, 14)).toBe(3);
-    expect(fittingControls(20, 14)).toBe(0);
+  it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {
+    const sync = await replica("Plan the launch");
+    mount(sync);
+    const editor = await editorOf();
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Divider" }));
+    await waitFor(() => expect(sync.markdown()).toContain("---"));
+    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    // A comment needs text to sit on.
+    expect(await screen.findByRole("button", { name: "New comment" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 5 });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "New comment" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      ),
+    );
   });
 
   it("opens a link on Cmd or Ctrl click while editing, and on any click for a viewer", () => {
