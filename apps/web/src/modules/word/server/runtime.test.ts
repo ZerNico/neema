@@ -34,6 +34,63 @@ describe("Word worker runtime", () => {
     }
   });
 
+  it("writes a live document as a Word file and reads one back as a document, in a worker", async () => {
+    const runtime = createWordRuntime(workerUrl, { workers: 1 });
+    try {
+      const bytes = await runtime.run({
+        kind: "exportDocument",
+        document: {
+          title: "Plan",
+          tree: {
+            type: "doc",
+            content: [
+              { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Goals" }] },
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Ship", marks: [{ type: "bold" }] }],
+              },
+            ],
+          },
+          images: {},
+          threads: [],
+        },
+      });
+      const read = await runtime.run({
+        kind: "importDocument",
+        bytes,
+        bounds: {
+          blocks: 10,
+          chars: 1_000,
+          imageBytes: 1_000,
+          comments: 5,
+          comment: 100,
+          quote: 50,
+        },
+      });
+      expect(read.title).toBe("Plan");
+      expect(read.tree.content).toEqual([
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Goals" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Ship", marks: [{ type: "bold" }] }] },
+      ]);
+      await expect(
+        runtime.run({
+          kind: "importDocument",
+          bytes,
+          bounds: {
+            blocks: 1,
+            chars: 1_000,
+            imageBytes: 1_000,
+            comments: 5,
+            comment: 100,
+            quote: 50,
+          },
+        }),
+      ).rejects.toThrow(/too long for a document/);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("refuses a malformed batch before any worker starts", async () => {
     const runtime = createWordRuntime(new URL("./missing-worker.mjs", import.meta.url));
     try {

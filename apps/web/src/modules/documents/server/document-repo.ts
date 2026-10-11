@@ -93,13 +93,36 @@ export class DocumentRepo extends Context.Service<
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
         kind?: "text" | "sheet";
+        /** Given when the snapshot already names the document, as an imported image's address does. */
+        id?: string;
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
+    /**
+     * Whose files images in the owner's documents are: the project's owner, or
+     * the chat's. Null unless the caller may edit there.
+     */
+    imageOwner(userId: string, owner: DocumentOwner, tx?: Reader): Effect.Effect<string | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
     /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
+    /**
+     * Who wrote each kept step after `afterRevision`, and when, in revision
+     * order: a person by name, the assistant, or no one (the server's own repairs).
+     */
+    stepAuthors(
+      documentId: string,
+      afterRevision: number,
+    ): Effect.Effect<
+      ReadonlyArray<{
+        revision: number;
+        origin: "user" | "model";
+        userId: string | null;
+        userName: string | null;
+        createdAt: Date;
+      }>
+    >;
     /**
      * Locks the document row alone, for someone allowed to edit it. A
      * person's batches arrive several times a second, and the conversation
@@ -210,7 +233,7 @@ export class DocumentRepo extends Context.Service<
       return DocumentRepo.of({
         lockConversation,
         create: Effect.fn("DocumentRepo.create")(function* (tx, userId, owner, values) {
-          const id = uuidv7();
+          const id = values.id ?? uuidv7();
           yield* tx
             .insert(documents)
             .values({
@@ -230,6 +253,24 @@ export class DocumentRepo extends Context.Service<
           return (yield* get(userId, id, tx))!;
         }),
         get,
+        imageOwner: Effect.fn("DocumentRepo.imageOwner")(function* (userId, owner, tx) {
+          if ("conversationId" in owner) {
+            const [chat] = yield* (tx ?? db)
+              .select({ userId: conversations.userId })
+              .from(conversations)
+              .where(
+                and(eq(conversations.id, owner.conversationId), eq(conversations.userId, userId)),
+              )
+              .pipe(Effect.orDie);
+            return chat?.userId ?? null;
+          }
+          const [project] = yield* (tx ?? db)
+            .select({ userId: projects.userId, role: projectRoleSql(userId) })
+            .from(projects)
+            .where(eq(projects.id, owner.projectId))
+            .pipe(Effect.orDie);
+          return project && projectCan.edit(project.role) ? project.userId : null;
+        }),
         list: Effect.fn("DocumentRepo.list")(function* (userId, owner) {
           const access = accessSql(userId);
           const rows = yield* db
@@ -292,6 +333,26 @@ export class DocumentRepo extends Context.Service<
                 };
               }),
             )
+            .pipe(Effect.orDie);
+        }),
+        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(function* (documentId, afterRevision) {
+          return yield* db
+            .select({
+              revision: documentSteps.revision,
+              origin: documentSteps.origin,
+              userId: documentSteps.userId,
+              userName: user.name,
+              createdAt: documentSteps.createdAt,
+            })
+            .from(documentSteps)
+            .leftJoin(user, eq(user.id, documentSteps.userId))
+            .where(
+              and(
+                eq(documentSteps.documentId, documentId),
+                gt(documentSteps.revision, afterRevision),
+              ),
+            )
+            .orderBy(asc(documentSteps.revision))
             .pipe(Effect.orDie);
         }),
         lock: Effect.fn("DocumentRepo.lock")(function* (tx, userId, documentId) {

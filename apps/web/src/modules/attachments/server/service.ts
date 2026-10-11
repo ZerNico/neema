@@ -39,6 +39,15 @@ export class AttachmentService extends Context.Service<
       allowedKinds?: ReadonlyArray<AttachmentKind>;
       association?: AttachmentAssociation;
     }): Effect.Effect<Attachment, AttachmentRejected>;
+    /**
+     * Uploads a person's free image upload again as `toUserId`'s own, whose
+     * blob outlives the person. Null when it is not such an upload.
+     */
+    copyImage(input: {
+      userId: string;
+      attachmentId: string;
+      toUserId: string;
+    }): Effect.Effect<string | null>;
     /** Removes an upload the user has not sent yet. */
     remove(input: {
       userId: string;
@@ -61,6 +70,14 @@ export class AttachmentService extends Context.Service<
       AttachmentNotAvailable
     >;
     /**
+     * A document's image, for a reader the document has already admitted:
+     * the claim, not the uploader, decides which bytes this may return.
+     */
+    readDocumentImage(input: {
+      documentId: string;
+      attachmentId: string;
+    }): Effect.Effect<AttachmentBytes, AttachmentNotAvailable>;
+    /**
      * Removes bytes whose last row a committed transaction just deleted.
      * Callers pass the keys those repo methods returned.
      */
@@ -75,70 +92,7 @@ export class AttachmentService extends Context.Service<
       const repo = yield* AttachmentRepo;
       const store = yield* BlobStore;
 
-      // Physical deletion trails the commit so a rolled-back transaction never
-      // orphans deleted bytes. The reverse case, bytes with no row, is covered
-      // by the cleanup ledger: `collectOrphanedBlobs` and uploads both record
-      // intent first, so an interrupted delete or crashed upload gets finished
-      // by the reconciler, not leaked.
-      const deleteBlobs = (keys: ReadonlyArray<string>) =>
-        Effect.forEach(
-          keys,
-          (key) =>
-            store
-              .delete(key)
-              .pipe(
-                Effect.andThen(repo.clearBlobIntents([key])),
-                Effect.catchTag("BlobStoreError", logBlobFailure),
-              ),
-          { discard: true },
-        );
-
-      const upload = Effect.fn("AttachmentService.upload")(function* (input: {
-        userId: string;
-        fileName: string;
-        declaredMediaType: string;
-        bytes: Uint8Array;
-        allowedKinds?: ReadonlyArray<AttachmentKind>;
-        association?: AttachmentAssociation;
-      }) {
-        const validated = yield* validateAttachment({
-          fileName: input.fileName,
-          declaredMediaType: input.declaredMediaType,
-          bytes: input.bytes,
-        });
-
-        if (input.allowedKinds && !input.allowedKinds.includes(validated.kind))
-          return yield* new AttachmentRejected({
-            cause: "type",
-            reason: "upload a PDF or text document",
-          });
-
-        // Hashed here, over the bytes we actually received: a client-supplied
-        // hash would be both untrustworthy and a free existence oracle.
-        const sha256 = sha256Hex(input.bytes);
-        const storageKey = blobStorageKey(input.userId, sha256);
-
-        // Before the bytes exist: an interrupted upload leaves an object whose
-        // row never landed, and nothing that follows rows could ever find it.
-        yield* repo.recordBlobCandidate(storageKey);
-        yield* store.put(storageKey, input.bytes).pipe(Effect.orDie);
-
-        const { attachment, unusedStorageKey } = yield* repo.create({
-          ...(input.association ? { association: input.association } : {}),
-          userId: input.userId,
-          sha256,
-          storageKey,
-          size: input.bytes.length,
-          mediaType: validated.mediaType,
-          fileName: validated.fileName,
-        });
-        // A concurrent dedup winner owns a different key. Only our unreferenced
-        // candidate is disposable; never delete the shared winner's bytes.
-        if (unusedStorageKey) yield* deleteBlobs([unusedStorageKey]);
-        // The key a row now owns is no longer a candidate for removal.
-        else yield* repo.clearBlobIntents([storageKey]);
-        return attachment;
-      });
+      const { deleteBlobs, upload, copyImage } = attachmentWriter(repo, store);
 
       const remove = Effect.fn("AttachmentService.remove")(function* (input: {
         userId: string;
@@ -184,6 +138,23 @@ export class AttachmentService extends Context.Service<
         } satisfies AttachmentBytes;
       });
 
+      const readDocumentImage = Effect.fn("AttachmentService.readDocumentImage")(function* (input: {
+        documentId: string;
+        attachmentId: string;
+      }) {
+        const image = yield* repo.findDocumentImage(input.documentId, input.attachmentId);
+        if (!image) return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentId });
+        return {
+          fileName: image.fileName,
+          mediaType: image.mediaType,
+          size: image.size,
+          bytes: yield* store.get(image.storageKey).pipe(
+            Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
+            Effect.orDie,
+          ),
+        } satisfies AttachmentBytes;
+      });
+
       const purgeUserFiles = Effect.fn("AttachmentService.purgeUserFiles")(function* (
         userId: string,
       ) {
@@ -226,10 +197,115 @@ export class AttachmentService extends Context.Service<
         Effect.forkScoped,
       );
 
-      return AttachmentService.of({ upload, remove, read, open, deleteBlobs, purgeUserFiles });
+      return AttachmentService.of({
+        upload,
+        copyImage,
+        remove,
+        read,
+        open,
+        readDocumentImage,
+        deleteBlobs,
+        purgeUserFiles,
+      });
     }),
   );
 }
+
+/**
+ * Writing stored files, for the attachment service and for anything that
+ * registers bytes outside it: the cleanup ledger is kept the same way by all.
+ */
+export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobStore["Service"]) => {
+  // Physical deletion trails the commit so a rolled-back transaction never
+  // orphans deleted bytes. The reverse case, bytes with no row, is covered
+  // by the cleanup ledger: `collectOrphanedBlobs` and uploads both record
+  // intent first, so an interrupted delete or crashed upload gets finished
+  // by the reconciler, not leaked.
+  const deleteBlobs = (keys: ReadonlyArray<string>) =>
+    Effect.forEach(
+      keys,
+      (key) =>
+        store
+          .delete(key)
+          .pipe(
+            Effect.andThen(repo.clearBlobIntents([key])),
+            Effect.catchTag("BlobStoreError", logBlobFailure),
+          ),
+      { discard: true },
+    );
+
+  const upload = Effect.fn("AttachmentService.upload")(function* (input: {
+    userId: string;
+    fileName: string;
+    declaredMediaType: string;
+    bytes: Uint8Array;
+    allowedKinds?: ReadonlyArray<AttachmentKind>;
+    association?: AttachmentAssociation;
+  }) {
+    const validated = yield* validateAttachment({
+      fileName: input.fileName,
+      declaredMediaType: input.declaredMediaType,
+      bytes: input.bytes,
+    });
+
+    if (input.allowedKinds && !input.allowedKinds.includes(validated.kind))
+      return yield* new AttachmentRejected({
+        cause: "type",
+        reason: "upload a PDF or text document",
+      });
+
+    // Hashed here, over the bytes we actually received: a client-supplied
+    // hash would be both untrustworthy and a free existence oracle.
+    const sha256 = sha256Hex(input.bytes);
+    const storageKey = blobStorageKey(input.userId, sha256);
+
+    // Before the bytes exist: an interrupted upload leaves an object whose
+    // row never landed, and nothing that follows rows could ever find it.
+    yield* repo.recordBlobCandidate(storageKey);
+    yield* store.put(storageKey, input.bytes).pipe(Effect.orDie);
+
+    const { attachment, unusedStorageKey } = yield* repo.create({
+      ...(input.association ? { association: input.association } : {}),
+      userId: input.userId,
+      sha256,
+      storageKey,
+      size: input.bytes.length,
+      mediaType: validated.mediaType,
+      fileName: validated.fileName,
+    });
+    // A concurrent dedup winner owns a different key. Only our unreferenced
+    // candidate is disposable; never delete the shared winner's bytes.
+    if (unusedStorageKey) yield* deleteBlobs([unusedStorageKey]);
+    // The key a row now owns is no longer a candidate for removal.
+    else yield* repo.clearBlobIntents([storageKey]);
+    return attachment;
+  });
+
+  const copyImage = Effect.fn("AttachmentService.copyImage")(function* (input: {
+    userId: string;
+    attachmentId: string;
+    toUserId: string;
+  }) {
+    const image = yield* repo.findFreeImage(input.userId, input.attachmentId);
+    if (!image) return null;
+    const bytes = yield* store.get(image.storageKey).pipe(
+      Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
+      Effect.orDie,
+    );
+    return yield* upload({
+      userId: input.toUserId,
+      fileName: image.fileName,
+      declaredMediaType: image.mediaType,
+      bytes,
+      allowedKinds: ["image"],
+    }).pipe(
+      Effect.map((copy) => copy.id),
+      Effect.catchTag("AttachmentRejected", () => Effect.succeed(null)),
+    );
+  });
+
+  return { deleteBlobs, upload, copyImage };
+};
 
 const logBlobFailure = (error: BlobStoreError) =>
   Effect.logError(`failed to delete blob ${error.key}: ${error.message}`);

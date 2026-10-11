@@ -6,8 +6,11 @@ import {
   CommentInput,
   ConversationIdInput,
   CreateProjectDocumentInput,
+  DOCUMENT_LIMITS,
   DeleteCommentInput,
   DocumentIdInput,
+  DocumentImageInput,
+  DocumentVersionInput,
   ProjectDocumentsInput,
   PushDocumentInput,
   RenameDocumentInput,
@@ -17,6 +20,8 @@ import {
 } from "../schema.ts";
 import { SheetService } from "../sheet/server/sheet-service.ts";
 import { DocumentService } from "./document-service.ts";
+import { createFromWord } from "./create-from-word.ts";
+import { WORD_LIMITS } from "~/modules/word/limits.ts";
 
 /** A comment goes to the service of its document's kind: a sheet anchors threads on cells. */
 const commentsOf = (userId: string, documentId: string) =>
@@ -44,6 +49,32 @@ export const getDocument = createServerFn({ method: "GET" })
       publicResult(
         Effect.flatMap(DocumentService, (service) =>
           service.get(context.session.user.id, data.documentId),
+        ),
+      ),
+    ),
+  );
+/** A text document's versions, newest first, for someone who may edit it. */
+export const getDocumentVersions = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentIdInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.versions(context.session.user.id, data.documentId),
+        ),
+      ),
+    ),
+  );
+/** The document as it was at one of its versions, as tree JSON text; null when no longer kept. */
+export const getDocumentVersion = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentVersionInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.versionAt(context.session.user.id, data.documentId, data.revision),
         ),
       ),
     ),
@@ -102,6 +133,36 @@ export const createProjectDocument = createServerFn({ method: "POST" })
       ),
     ),
   );
+/**
+ * A project document started from a Word file: multipart, since the file is
+ * bytes. Answers what the file held that a document cannot, to show the person.
+ */
+export const createProjectDocumentFromWord = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator((data: FormData) => data)
+  .handler(async ({ context, data }) => {
+    const file = data.get("file");
+    const projectId = data.get("projectId");
+    const title = data.get("title");
+    if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
+      throw new Response("Expected a Word file and a project", { status: 400 });
+    if (file.size > WORD_LIMITS.compressedBytes)
+      throw new Response(
+        `A Word file can be at most ${WORD_LIMITS.compressedBytes / 1024 / 1024} MB.`,
+        { status: 413 },
+      );
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return runtime.runPromise(
+      publicResult(
+        createFromWord(context.session.user.id, {
+          owner: { projectId },
+          title: typeof title === "string" ? title.slice(0, DOCUMENT_LIMITS.title) : undefined,
+          by: "user",
+          file: { name: file.name, mediaType: file.type, bytes },
+        }),
+      ),
+    );
+  });
 /** A chat's or a project's document, renamed by someone who may edit it. */
 export const renameDocument = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -111,6 +172,19 @@ export const renameDocument = createServerFn({ method: "POST" })
       publicResult(
         Effect.flatMap(DocumentService, (service) =>
           service.rename(context.session.user.id, data.documentId, data.title.trim()),
+        ),
+      ),
+    ),
+  );
+/** Puts the editor's own image upload in the document; answers with the address to show it at. */
+export const addDocumentImage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentImageInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.addImage(context.session.user.id, data),
         ),
       ),
     ),

@@ -46,7 +46,7 @@ describe("the sheet tabs", () => {
     ).toBe("true");
     fireEvent.click(screen.getByRole("menuitem", { name: "Move left" }));
     fireEvent.contextMenu(screen.getByRole("tab", { name: "Data" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Download as CSV" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export as CSV" }));
     fireEvent.contextMenu(screen.getByRole("tab", { name: "Data" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Print" }));
     fireEvent.click(screen.getByRole("button", { name: "Add sheet" }));

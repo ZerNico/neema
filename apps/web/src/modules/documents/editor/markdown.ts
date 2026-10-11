@@ -1,14 +1,17 @@
 import { getSchema, type JSONContent } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
+import { isolatedMarked } from "./isolated-marked.ts";
 import { Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
+import { footnoteDefinitions, numberFootnotes } from "./blocks.ts";
 import { plainChips } from "./chips.ts";
+import { plainSheetEmbeds } from "./sheet-embed.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 import { escapeMathDollars, markMathBeforeDigits } from "./math.ts";
 
 export const documentSchema = getSchema(documentExtensions);
-const manager = new MarkdownManager({ extensions: documentExtensions });
+const manager = new MarkdownManager({ extensions: documentExtensions, marked: isolatedMarked() });
 
 type EncodeText = (text: string, node: unknown, parent: unknown) => string;
 const upstreamEncode = Reflect.get(manager, "encodeTextForMarkdown") as EncodeText;
@@ -92,24 +95,144 @@ const serialize = (json: JSONContent) =>
   );
 
 /**
- * The Markdown the model reads and writes: chips as shortcodes
- * (`[date value="…"]`, `[@ id="…" label="…"]`), so it can tell them from text.
+ * The Markdown the model reads and writes: chips and sheet embeds as
+ * shortcodes (`[date value="…"]`, `[@ id="…" label="…"]`, `[sheet id="…" range="…"]`),
+ * so it can tell them from text.
  */
 export const toModelMarkdown = (node: Node) => serialize(node.toJSON());
 
-/** The Markdown a tree reads as for people, for Copy and export. */
-export const toMarkdown = (node: Node) => toModelMarkdown(plainChips(node));
-
-/** A document tree from Markdown; empty Markdown is an empty document. */
-export const parseMarkdown = (markdown: string) =>
-  Node.fromJSON(
-    documentSchema,
-    markdown.trim() ? manager.parse(markdown) : { type: "doc", content: [] },
+/**
+ * The Markdown a tree reads as for people, for Copy and export: footnotes as
+ * numbered references with their definitions at the end, as GitHub draws them,
+ * and sheet embeds as a line naming what they showed.
+ */
+export const toMarkdown = (node: Node) => {
+  const { json, notes } = numberFootnotes(
+    plainSheetEmbeds(plainChips(node)).toJSON() as JSONContent,
   );
+  const markdown = serialize(json);
+  if (!notes.length) return markdown;
+  const definitions = notes.map((note, index) => `[^${index + 1}]: ${note}`).join("\n");
+  return markdown ? `${markdown}\n\n${definitions}` : definitions;
+};
+
+/** A footnote's definition line: its label, then its note. */
+const DEFINITION = /^\[\^([^\]\s]+)\]:[ \t]+(.*)$/;
+/** A fenced code block's opening or closing line. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The Markdown with its footnotes' definitions taken out into
+ * `footnoteDefinitions`, lines indented under one continuing it. A line in
+ * fenced code is code, never a definition.
+ */
+const takeDefinitions = (markdown: string) => {
+  const kept: string[] = [];
+  const lines = markdown.split("\n");
+  let fence: string | null = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const marker = FENCE.exec(line)?.[1];
+    if (fence || marker) {
+      if (!fence) fence = marker!;
+      else if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      kept.push(line);
+      continue;
+    }
+    const definition = DEFINITION.exec(line);
+    if (!definition) {
+      kept.push(line);
+      continue;
+    }
+    let note = definition[2]!;
+    while (/^(?: {2,}|\t)\S/.test(lines[index + 1] ?? "")) note += ` ${lines[++index]!.trim()}`;
+    footnoteDefinitions.set(definition[1]!, note.trim());
+  }
+  // Where definitions stood, blank lines would read as empty paragraphs.
+  return kept.length === lines.length
+    ? markdown
+    : kept
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd();
+};
+
+const INLINE_TYPES = new Set(
+  Object.values(documentSchema.nodes)
+    .filter((type) => type.isInline)
+    .map((type) => type.name),
+);
+/**
+ * Nodes holding blocks, which marked may hand bare inline content: text in a
+ * tight list or a callout, a picture alone on its line at the top level.
+ */
+const BLOCK_HOLDERS = new Set(
+  Object.values(documentSchema.nodes)
+    .filter(
+      (type) => !type.inlineContent && type.contentMatch.matchType(documentSchema.nodes.paragraph!),
+    )
+    .map((type) => type.name),
+);
+const LIST_ITEMS = new Set(["listItem", "taskItem"]);
+
+/**
+ * Parsed JSON fitted to the schema where marked's tokens and it disagree:
+ * bare inline content in a block holder goes in a paragraph, and a list item that
+ * starts with another block (a callout, an embed) gets the paragraph a list
+ * item must start with.
+ */
+const fitTree = (node: JSONContent): JSONContent => {
+  if (!node.content) return node;
+  let content = node.content.map(fitTree);
+  if (BLOCK_HOLDERS.has(node.type ?? "")) {
+    const blocks: JSONContent[] = [];
+    for (const child of content) {
+      const last = blocks.at(-1);
+      if (!INLINE_TYPES.has(child.type ?? "")) blocks.push(child);
+      else if (last?.type === "paragraph" && last.attrs?.loose)
+        last.content = [...(last.content ?? []), child];
+      else blocks.push({ type: "paragraph", attrs: { loose: true }, content: [child] });
+    }
+    content = blocks.map((block) =>
+      block.attrs?.loose ? { type: "paragraph", content: block.content ?? [] } : block,
+    );
+  }
+  if (LIST_ITEMS.has(node.type ?? "") && content[0]?.type !== "paragraph")
+    content = [{ type: "paragraph" }, ...content];
+  return { ...node, content };
+};
+
+/**
+ * Markdown parsed with its footnotes' definitions taken out first, so a
+ * reference anywhere before or after finds its note and none is left as a
+ * stray paragraph, then fitted to the schema.
+ */
+const parse = (markdown: string) => {
+  footnoteDefinitions.clear();
+  try {
+    return fitTree(manager.parse(takeDefinitions(markdown)));
+  } finally {
+    footnoteDefinitions.clear();
+  }
+};
+
+/**
+ * A document tree from Markdown; empty Markdown is an empty document. It is
+ * checked against the schema, so Markdown that cannot be a valid tree is
+ * refused here rather than stored.
+ */
+export const parseMarkdown = (markdown: string) => {
+  const doc = Node.fromJSON(
+    documentSchema,
+    markdown.trim() ? parse(markdown) : { type: "doc", content: [] },
+  );
+  if (doc.childCount) doc.check();
+  return doc;
+};
 
 /** Markdown in the canonical form the editor would write it back as. */
 export const normalizeMarkdown = (markdown: string) =>
-  markdown.trim() ? serialize(manager.parse(markdown)) : "";
+  markdown.trim() ? serialize(parse(markdown)) : "";
 
 /**
  * Makes `tr`'s document equal `next` by replacing only the range where the

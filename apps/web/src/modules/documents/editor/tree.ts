@@ -67,6 +67,9 @@ const TAGS: Record<string, string> = {
   horizontalRule: "hr",
   blockMath: "math",
   pending: "pending",
+  callout: "callout",
+  details: "details",
+  sheetEmbed: "sheet",
 };
 
 /** A heading's level as a tag number; anything a stray client set is read as 2. */
@@ -103,6 +106,9 @@ const render = (node: Node, seen: SeenBlock[]): string => {
       return `${head()}>${escapeText(String(node.attrs.latex ?? ""))}</${tag}>`;
     case "pending":
       return `${head({ intent: node.attrs.intent as string })}/>`;
+    case "sheetEmbed":
+      // `id` is the block's own, so the sheet it shows is `document`.
+      return `${head({ document: node.attrs.sheet as string | null, range: node.attrs.range as string | null, chart: node.attrs.chart as string | null })}/>`;
     case "listItem":
     case "taskItem": {
       const extra = name === "taskItem" ? { checked: Boolean(node.attrs.checked) } : {};
@@ -114,6 +120,14 @@ const render = (node: Node, seen: SeenBlock[]): string => {
         return `${head(extra)}>${inline(only)}</${tag}>`;
       }
       return `${head(extra)}>${children(node, seen)}</${tag}>`;
+    }
+    case "callout":
+      return `${head({ kind: node.attrs.kind as string })}>${children(node, seen)}</${tag}>`;
+    case "details": {
+      // The title as inline Markdown, then what folds away under it.
+      const summary = node.firstChild!;
+      const content = node.lastChild!;
+      return `${head()}><summary>${inline(summary)}</summary>${children(content, seen)}</${tag}>`;
     }
     case "orderedList":
       return `${head({ start: node.attrs.start === 1 ? null : (node.attrs.start as number) })}>${children(node, seen)}</${tag}>`;

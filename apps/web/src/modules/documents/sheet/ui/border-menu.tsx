@@ -25,7 +25,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { ColorSwatches, ToolbarMenu } from "./toolbar-controls.tsx";
+import { ColorSwatches, ToolbarMenu } from "../../ui/ribbon-controls.tsx";
 
 const BORDERS: ReadonlyArray<{ border: BorderKind; label: string; icon: typeof BorderAll01Icon }> =
   [

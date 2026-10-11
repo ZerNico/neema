@@ -11,6 +11,7 @@ import {
   conversationQueueEntryAttachments,
   conversationWorkingFiles,
   conversations,
+  documentImages,
   messageAttachments,
   messages,
 } from "~/db/schema/index.ts";
@@ -78,13 +79,13 @@ const withBlobColumns = {
 // must not be dressed up as a user-level conflict.
 
 /**
- * No owner of either kind: not a transcript message's file and not a queued
- * message's. Every "is this upload still free" question reads this, so a
- * queued file is never swept, deleted as abandoned, or claimed a second time.
+ * No owner of any kind: not a transcript message's file, a queued message's,
+ * a kept working file's or a document's image. Every "is this upload still
+ * free" question reads this, so an owned file is never swept, deleted as
+ * abandoned, or claimed a second time. Once an owner row cascades away with
+ * its chat, answer or document, the sweep takes the attachment and its bytes.
  */
-// A kept working file is the third owner kind: once its row cascades away with
-// the chat or its answer, the sweep takes the attachment and its bytes.
-const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id})`;
+const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id}) and not exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`;
 
 /** Whose files these are: a transcript message, or a queued message. */
 type AttachmentOwner = { kind: "message"; id: string } | { kind: "queue"; id: string };
@@ -189,6 +190,8 @@ export class AttachmentRepo extends Context.Service<
       attachment: AttachmentWithBlob;
       claimedByMessageId: string | null;
       conversationUserId: string | null;
+      /** A document holds it as an image: its readers are the document's, not the uploader. */
+      claimedByDocument: boolean;
     } | null>;
     /** Deletes an unclaimed attachment; returns storage keys to remove. */
     deleteUnclaimed(
@@ -282,6 +285,35 @@ export class AttachmentRepo extends Context.Service<
       engine: string;
       pages: Record<number, string>;
     }): Effect.Effect<void>;
+    /**
+     * Gives a document one of this person's free image uploads, or the
+     * document owner's `copy` of it, consuming the original. Null, and nothing
+     * written, for anything else: someone else's, already owned, not an image,
+     * or unknown all answer alike. Returns the claimed ID and the storage keys
+     * to delete after commit.
+     */
+    claimForDocument(
+      tx: DbTx,
+      input: {
+        userId: string;
+        documentId: string;
+        attachmentId: string;
+        copy?: { userId: string; attachmentId: string } | undefined;
+      },
+    ): Effect.Effect<{ claimed: string; discard: ReadonlyArray<string> } | null>;
+    /** One of this person's free image uploads with its blob, or null. */
+    findFreeImage(userId: string, attachmentId: string): Effect.Effect<AttachmentWithBlob | null>;
+    /**
+     * Locks the blobs of attachments about to be claimed one by one, in the
+     * one global order, so two claims of the same pictures in other orders
+     * never wait on each other.
+     */
+    lockForClaims(tx: DbTx, attachmentIds: ReadonlyArray<string>): Effect.Effect<void>;
+    /** A document's claimed image with its blob; null when the document holds no such image. */
+    findDocumentImage(
+      documentId: string,
+      attachmentId: string,
+    ): Effect.Effect<AttachmentWithBlob | null>;
     /** Unclaimed uploads older than the cutoff (tab closed before sending). */
     sweepUnclaimed(olderThan: Date): Effect.Effect<ReadonlyArray<string>>;
     /**
@@ -402,6 +434,7 @@ export class AttachmentRepo extends Context.Service<
             // A queued file is shown in the queue strip before it is a
             // message's, so its conversation's owner may read it too.
             queuedConversationUserId: queuedConversations.userId,
+            claimedByDocument: sql<boolean>`exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`,
           })
           .from(attachments)
           .innerJoin(attachmentBlobs, eq(attachments.blobId, attachmentBlobs.id))
@@ -424,12 +457,18 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
         const row = rows[0];
         if (!row) return null;
-        const { claimedByMessageId, conversationUserId, queuedConversationUserId, ...attachment } =
-          row;
+        const {
+          claimedByMessageId,
+          conversationUserId,
+          queuedConversationUserId,
+          claimedByDocument,
+          ...attachment
+        } = row;
         return {
           attachment,
           claimedByMessageId,
           conversationUserId: conversationUserId ?? queuedConversationUserId,
+          claimedByDocument,
         };
       });
 
@@ -948,6 +987,80 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const lockForClaims = Effect.fn("AttachmentRepo.lockForClaims")(function* (
+        tx: DbTx,
+        attachmentIds: ReadonlyArray<string>,
+      ) {
+        yield* lockAttachmentBlobs(tx, attachmentIds).pipe(Effect.orDie);
+      });
+
+      const freeImage = (tx: DbTx | typeof db, userId: string, attachmentId: string) =>
+        tx
+          .select(withBlobColumns)
+          .from(attachments)
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(and(eq(attachments.id, attachmentId), eq(attachments.userId, userId), unclaimed))
+          .pipe(
+            Effect.orDie,
+            Effect.map(([row]) => (row && attachmentKind(row.mediaType) === "image" ? row : null)),
+          );
+
+      const findFreeImage = Effect.fn("AttachmentRepo.findFreeImage")(function* (
+        userId: string,
+        attachmentId: string,
+      ) {
+        return yield* freeImage(db, userId, attachmentId);
+      });
+
+      const claimForDocument = Effect.fn("AttachmentRepo.claimForDocument")(function* (
+        tx: DbTx,
+        input: {
+          userId: string;
+          documentId: string;
+          attachmentId: string;
+          copy?: { userId: string; attachmentId: string } | undefined;
+        },
+      ) {
+        // The blob lock is what keeps two owner tables from both claiming one
+        // upload; the unique index only covers this table.
+        yield* lockAttachmentBlobs(
+          tx,
+          input.copy ? [input.attachmentId, input.copy.attachmentId] : [input.attachmentId],
+        ).pipe(Effect.orDie);
+        if (!(yield* freeImage(tx, input.userId, input.attachmentId))) return null;
+        const { copy } = input;
+        if (copy && !(yield* freeImage(tx, copy.userId, copy.attachmentId))) return null;
+        const claimed = copy?.attachmentId ?? input.attachmentId;
+        yield* tx
+          .insert(documentImages)
+          .values({ documentId: input.documentId, attachmentId: claimed })
+          .pipe(Effect.orDie);
+        // The original is spent, so a second claim of it finds nothing to take.
+        const discard = copy
+          ? yield* deleteAttachmentRows(tx, [input.attachmentId], true).pipe(Effect.orDie)
+          : [];
+        return { claimed, discard };
+      });
+
+      const findDocumentImage = Effect.fn("AttachmentRepo.findDocumentImage")(function* (
+        documentId: string,
+        attachmentId: string,
+      ) {
+        const [row] = yield* db
+          .select(withBlobColumns)
+          .from(documentImages)
+          .innerJoin(attachments, eq(attachments.id, documentImages.attachmentId))
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(
+            and(
+              eq(documentImages.documentId, documentId),
+              eq(documentImages.attachmentId, attachmentId),
+            ),
+          )
+          .pipe(Effect.orDie);
+        return row ?? null;
+      });
+
       const sweepUnclaimed = Effect.fn("AttachmentRepo.sweepUnclaimed")(function* (
         olderThan: Date,
       ) {
@@ -991,6 +1104,10 @@ export class AttachmentRepo extends Context.Service<
         cacheParsedText,
         scannedPages,
         saveScannedPages,
+        claimForDocument,
+        findFreeImage,
+        lockForClaims,
+        findDocumentImage,
         sweepUnclaimed,
       });
     }),

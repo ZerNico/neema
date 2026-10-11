@@ -34,6 +34,17 @@ const refuse = (outcome: EditRefusal["outcome"], message: string): EditRefusal =
   message,
 });
 
+/** Markdown as a tree, or null where it cannot form a valid one. */
+const parsedOrNull = (markdown: string) => {
+  try {
+    return parseMarkdown(markdown);
+  } catch {
+    return null;
+  }
+};
+
+const UNREADABLE = "That Markdown cannot be read as a document.";
+
 /** One block by ID, or why it cannot be used. */
 const locate = (doc: Node, id: string) => {
   const found = findBlocks(doc, id);
@@ -151,7 +162,8 @@ export const fitBlocks = (
   endIndex: number,
   markdown: string,
 ): Fragment | EditRefusal => {
-  const parsed = parseMarkdown(markdown);
+  const parsed = parsedOrNull(markdown);
+  if (!parsed) return refuse("invalid", UNREADABLE);
   const schema = parent.type.schema;
   // Built with the document's schema, which may be another instance of the same one.
   let content = Fragment.fromJSON(schema, parsed.content.toJSON());
@@ -278,7 +290,8 @@ export const applyTreeEdit = (
     if (node.type.name === "codeBlock")
       content = next ? Fragment.from(doc.type.schema.text(next)) : Fragment.empty;
     else {
-      const parsed = parseMarkdown(next);
+      const parsed = parsedOrNull(next);
+      if (!parsed) return refuse("invalid", UNREADABLE);
       const first = parsed.firstChild;
       if (parsed.childCount > 1 || (first && !first.isTextblock))
         return refuse(

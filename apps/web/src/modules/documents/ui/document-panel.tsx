@@ -9,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
 import { Suspense, lazy, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -37,6 +38,17 @@ const CommentsPopover = lazy(() =>
 /** Markdown of what is on screen, made only when asked; the schema loads then. */
 const markdownOf = async (sync: NonNullable<Controller["sync"]>) =>
   (await import("../editor/markdown.ts")).toMarkdown(sync.editor.state.doc);
+/** The server builds the Word file from what it stores, so what was typed is sent first. */
+const downloadWord = async (controller: Controller) => {
+  if (!(await controller.flush())) {
+    toast.error("Your latest changes aren’t saved yet.");
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = `/api/documents/${encodeURIComponent(controller.documentId)}/export`;
+  link.download = "";
+  link.click();
+};
 const exportAs = async (controller: Controller, format: "pdf" | "markdown") => {
   const sync = controller.sync;
   if (!sync) return;
@@ -58,8 +70,9 @@ export function DocumentPanelActions({
   const [renaming, setRenaming] = useState(false);
   const document = controller.document;
   return (
-    <div className="flex items-center gap-2">
-      {/* The editor's formatting fills the row; Copy sits at its end. */}
+    // Comments, the menu and Copy line up with the ribbon's tab row, not the middle of both lines.
+    <div className="flex items-start gap-2">
+      {/* The editor's ribbon fills the row; Copy sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
         {controller.sync ? (
@@ -114,6 +127,13 @@ export function DocumentPanelActions({
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               Export as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!controller.document}
+              onClick={() => void downloadWord(controller)}
+            >
+              <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+              Export as Word
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -205,6 +225,7 @@ export function DocumentPanelBody({
                 <div className="absolute inset-0">
                   <DocumentEditor
                     key={controller.documentId}
+                    documentId={controller.documentId}
                     sync={controller.sync}
                     readOnly={!controller.document?.canEdit}
                     toolbarSlot={toolbarSlot}

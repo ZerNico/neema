@@ -77,6 +77,15 @@ export function DocumentOwner({
 }: DocumentOwnerProps) {
   const [sessions, setSessions] = useState<ReadonlyMap<string, Session>>(new Map());
   useDetailPanelReconciler("document:", documentIds);
+  // Read when an embed is drawn, so a document loading later can still be opened from one.
+  const latestSessions = useRef(sessions);
+  useEffect(() => {
+    latestSessions.current = sessions;
+  }, [sessions]);
+  const opener = useCallback(
+    (documentId: string) => latestSessions.current.get(documentId)?.entry.open ?? null,
+    [],
+  );
   const publish = useCallback(
     (documentId: string, session: Session) =>
       setSessions((current) => {
@@ -133,6 +142,7 @@ export function DocumentOwner({
           autoOpen={autoOpenIds?.has(documentId) ?? false}
           onAsk={onAsk}
           onFocusComposer={onFocusComposer}
+          opener={opener}
         />
       ))}
       <DocumentPanelContext.Provider value={value}>{children}</DocumentPanelContext.Provider>
@@ -148,6 +158,7 @@ function DocumentSession({
   autoOpen,
   onAsk,
   onFocusComposer,
+  opener,
 }: {
   documentId: string;
   publish: (documentId: string, session: Session) => void;
@@ -156,6 +167,7 @@ function DocumentSession({
   autoOpen: boolean;
   onAsk: DocumentAsk | undefined;
   onFocusComposer: (() => void) | undefined;
+  opener: EditorHooks["opener"];
 }) {
   const panel = useDetailPanel();
   const selected = useDetailPanelSelectedId();
@@ -205,8 +217,9 @@ function DocumentSession({
       mentions: () => candidates.current,
       ask: onAsk ? (request, target) => onAsk(request, { ...target, documentId }) : null,
       focusComposer: onFocusComposer ?? null,
+      opener,
     }),
-    [documentId, onAsk, onFocusComposer],
+    [documentId, onAsk, onFocusComposer, opener],
   );
   const request = useMemo(
     () => ({

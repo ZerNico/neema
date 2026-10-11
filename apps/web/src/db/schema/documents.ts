@@ -9,7 +9,9 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { attachments } from "./attachments.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { projects } from "./projects.ts";
@@ -146,4 +148,27 @@ export const documentComments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("document_comments_document_idx").on(t.documentId, t.createdAt)],
+);
+
+/**
+ * An image a person put into a text document: an upload the document claims,
+ * served to the document's readers. The claim outlives the image's removal
+ * from the text, so undo can bring it back, and goes only with the document;
+ * the unclaimed sweep then takes the attachment and its bytes.
+ */
+export const documentImages = pgTable(
+  "document_images",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.documentId, t.attachmentId] }),
+    uniqueIndex("document_images_attachment_idx").on(t.attachmentId),
+  ],
 );

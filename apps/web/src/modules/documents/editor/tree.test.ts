@@ -321,3 +321,27 @@ describe("streamed text", () => {
     expect(tr.doc.eq(next)).toBe(true);
   });
 });
+
+describe("new blocks in the model's view", () => {
+  it("names a callout's kind and a collapsible section's title, each with an id", () => {
+    const doc = withIds(
+      "> [!TIP]\n> Save often.\n\n<details>\n<summary>Details</summary>\n\nHidden^[A note.]\n\n</details>",
+    );
+    const { xml, seen } = blockView(doc, { budget: 5_000 });
+    expect(xml).toBe(
+      '<callout id="b1" kind="tip"><p id="b2">Save often.</p></callout>\n<details id="b3"><summary>Details</summary><p id="b4">Hidden^[A note.]</p></details>',
+    );
+    expect(seen.map((block) => block.id)).toEqual(["b1", "b2", "b3", "b4"]);
+  });
+
+  it("shows a sheet embed with its block id and the sheet it shows as its document", () => {
+    const doc = withIds(
+      'Totals:\n\n[sheet id="sheet-1" range="Data!A1:D9"]\n\n[sheet id="sheet-1" chart="c1"]',
+    );
+    const { xml, seen } = blockView(doc, { budget: 5_000 });
+    expect(xml).toBe(
+      '<p id="b1">Totals:</p>\n<sheet id="b2" document="sheet-1" range="Data!A1:D9"/>\n<sheet id="b3" document="sheet-1" chart="c1"/>',
+    );
+    expect(seen.map((block) => block.id)).toEqual(["b1", "b2", "b3"]);
+  });
+});

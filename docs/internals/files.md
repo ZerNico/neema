@@ -1,7 +1,7 @@
 # Files
 
 One rule for every file the app stores: a chat upload, a file a tool or the model returns,
-and a project file. Any bytes are kept; the bytes decide what the file is, never the
+an image in a document, and a project file. Any bytes are kept; the bytes decide what the file is, never the
 declared type, and only the kinds we understand are shown or handed to a model.
 
 ## Kinds
@@ -19,11 +19,22 @@ declared type, and only the kinds we understand are shown or handed to a model.
   versions, knowledge versions, skill files) answers through `fileResponse`
   (`server/file-response.ts`): `nosniff`, a `file` sent as `application/octet-stream` whatever
   its stored type says, and only images and PDFs ever inline. HTML and SVG are active content
-  on this origin and must never render there. Only `/api/files` caches, because an attachment's
-  access never changes while it exists; a route whose access can be revoked caches nothing.
+  on this origin and must never render there. Only `/api/files` caches, because who may read an
+  attachment there never changes while it exists. A route whose access can be revoked caches
+  nothing, a document's images included.
   Office files may also be previewed through separate read-only endpoints; the original
   remains a download. See [presentations](presentations.md).
 
+- An attachment has at most one owner: a message, a queued message, a kept working file, or a
+  text document it is an image of (`document_images`). The `unclaimed` predicate in
+  `attachments/server/repo.ts` reads all four, so an owned upload is never swept, deleted as
+  abandoned or claimed again, and every claim takes the blob lock first, since the owner tables
+  share no unique index. An owner that cascades away leaves its attachment to the unclaimed
+  sweep. A document's images are claimed attachments, served to that document's readers at
+  `/api/documents/:id/images/:attachmentId` without caching, and kept until the document goes,
+  even once taken out of its text. Their bytes are the document owner's (the project's owner
+  or the chat's), as a project file's are, so they outlive any member who added them and go
+  with the document. See [documents](documents.md).
 - A message's attachments carry a `kind`: `file`, or `search_image` for an image a ```ui
   block asked for (see [generative UI](generative-ui.md)). A search image belongs to the
   answer for lifetime, retry and branch, but it is page material, not a file of the chat.

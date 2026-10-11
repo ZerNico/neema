@@ -24,6 +24,7 @@ import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
 import {
   createProjectDocument,
+  createProjectDocumentFromWord,
   deleteProjectDocument,
 } from "~/modules/documents/server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
@@ -479,9 +480,25 @@ function NewDocumentDialog({
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<"text" | "sheet">("text");
+  // A text document may start from a Word file instead of blank.
+  const [file, setFile] = useState<File | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const reset = () => {
+    setTitle("");
+    setFile(null);
+  };
   const save = useMutation({
-    mutationFn: () =>
-      kind === "sheet"
+    mutationFn: async () => {
+      if (kind === "text" && file) {
+        const data = new FormData();
+        data.set("file", file);
+        data.set("projectId", projectId);
+        data.set("title", title.trim());
+        const imported = await createProjectDocumentFromWord({ data });
+        if (imported.dropped.length) toast(`Left out: ${imported.dropped.join(", ")}`);
+        return imported.document;
+      }
+      return kind === "sheet"
         ? createProjectSheet({
             data: {
               projectId,
@@ -491,12 +508,13 @@ function NewDocumentDialog({
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
           })
-        : createProjectDocument({ data: { projectId, title: title.trim() } }),
+        : createProjectDocument({ data: { projectId, title: title.trim() } });
+    },
     onSuccess: async (document) => {
       onCreated(document.id);
       await queryClient.invalidateQueries({ queryKey: ["projects", "documents", projectId] });
       onOpenChange(false);
-      setTitle("");
+      reset();
     },
   });
   return (
@@ -504,7 +522,7 @@ function NewDocumentDialog({
       open={open}
       onOpenChange={(next) => {
         if (!next && save.isPending) return;
-        if (!next) setTitle("");
+        if (!next) reset();
         onOpenChange(next);
       }}
     >
@@ -546,6 +564,41 @@ function NewDocumentDialog({
                 </Field>
               ))}
             </RadioGroup>
+            {kind === "text" ? (
+              <Field>
+                <FieldLabel htmlFor={`${id}-file`}>Start from a Word file</FieldLabel>
+                <div className="flex items-center gap-2">
+                  <Input
+                    ref={picker}
+                    id={`${id}-file`}
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    disabled={save.isPending}
+                    onChange={(event) => {
+                      const picked = event.target.files?.[0] ?? null;
+                      setFile(picked);
+                      if (picked && !title.trim())
+                        setTitle(picked.name.replace(/\.[^.]+$/, "").slice(0, 200));
+                    }}
+                  />
+                  {file ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={save.isPending}
+                      onClick={() => {
+                        setFile(null);
+                        if (picker.current) picker.current.value = "";
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+                <FieldDescription>Optional</FieldDescription>
+              </Field>
+            ) : null}
             <Field>
               <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
               <Input
@@ -559,7 +612,13 @@ function NewDocumentDialog({
               />
             </Field>
           </FieldGroup>
-          {save.isError ? <FieldError>Could not create the document.</FieldError> : null}
+          {save.isError ? (
+            <FieldError>
+              {kind === "text" && file && save.error instanceof Error && save.error.message
+                ? save.error.message
+                : "Could not create the document."}
+            </FieldError>
+          ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
               Cancel

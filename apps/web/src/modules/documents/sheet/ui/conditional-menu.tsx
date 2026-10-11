@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
-import { ToolbarMenu } from "./toolbar-controls.tsx";
+import { ToolbarMenu } from "../../ui/ribbon-controls.tsx";
 
 /** Excel's ready-made highlight styles. */
 const STYLES: ReadonlyArray<{ value: string; label: string; style: ConditionalStyle }> = [

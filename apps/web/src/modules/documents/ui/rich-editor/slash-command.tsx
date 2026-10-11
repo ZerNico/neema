@@ -15,15 +15,23 @@ import {
   LayoutTable01Icon,
   TextIcon,
   UserIcon,
+  InformationSquareIcon,
+  ArrowRight01Icon,
+  TextFootnoteIcon,
+  Image01Icon,
+  FileSpreadsheetIcon,
 } from "@hugeicons/core-free-icons";
 import { Extension, type Editor, type Range } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { isRemoteChange } from "../../editor/remote.ts";
+import { insertDetails, insertFootnote, setCallout } from "./block-items.ts";
 import { isoDay } from "./dates.ts";
 import { editorHooks } from "./editor-hooks.ts";
+import { canAddImages, pickImages } from "./image-upload.ts";
 import { mountAtCaret } from "./suggestion-mount.ts";
+import { canPickSheet, openSheetPicker } from "./sheet-embeds.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
@@ -116,6 +124,44 @@ export const SLASH_ITEMS: SlashItem[] = [
     icon: LayoutTable01Icon,
     keywords: "grid",
     run: (e, r) => blocks(e, r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+  },
+  {
+    title: "Callout",
+    icon: InformationSquareIcon,
+    keywords: "note tip warning alert info box",
+    run: (e, r) => setCallout("note")(blocks(e, r)).run(),
+  },
+  {
+    title: "Collapsible section",
+    icon: ArrowRight01Icon,
+    keywords: "toggle details fold expand",
+    run: (e, r) => insertDetails(blocks(e, r)).run(),
+  },
+  {
+    title: "Footnote",
+    icon: TextFootnoteIcon,
+    keywords: "note reference source",
+    run: (e, r) => insertFootnote(blocks(e, r)).run(),
+  },
+  {
+    title: "Image",
+    icon: Image01Icon,
+    keywords: "picture photo upload",
+    available: canAddImages,
+    run: (e, r) => {
+      blocks(e, r).run();
+      pickImages(e);
+    },
+  },
+  {
+    title: "Sheet",
+    icon: FileSpreadsheetIcon,
+    keywords: "spreadsheet range chart cells embed live",
+    available: canPickSheet,
+    run: (e, r) => {
+      blocks(e, r).run();
+      openSheetPicker(e);
+    },
   },
   {
     title: "Divider",

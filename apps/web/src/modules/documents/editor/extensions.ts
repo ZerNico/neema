@@ -11,12 +11,16 @@ import {
 } from "@tiptap/extension-table";
 import { UniqueID } from "@tiptap/extension-unique-id";
 import { Markdown } from "@tiptap/markdown";
+import { isolatedMarked } from "./isolated-marked.ts";
 import { StarterKit } from "@tiptap/starter-kit";
 import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
+import { Callout, Details, DetailsContent, DetailsSummary, Footnote } from "./blocks.ts";
+import { DocumentUnderline, Highlight } from "./marks.ts";
 import { DateChip, PersonMention } from "./chips.ts";
 import { DocumentBlockMath, DocumentInlineMath } from "./math.ts";
 import { CommentMark } from "./comments.ts";
 import { Pending } from "./pending.ts";
+import { SheetEmbed } from "./sheet-embed.ts";
 import { isRemoteChange } from "./remote.ts";
 
 /** Addresses a link may point at; anything else (javascript:, data:) is refused. */
@@ -126,6 +130,7 @@ export const documentExtensions: AnyExtension[] = [
     // It appends an empty paragraph whenever a document opens, which under
     // collab is a step: opening would count as editing, and a viewer could not.
     trailingNode: false,
+    // Ours, written as <u> (`marks.ts`).
     underline: false,
     codeBlock: false,
     orderedList: false,
@@ -136,6 +141,8 @@ export const documentExtensions: AnyExtension[] = [
     },
   }),
   DocumentCodeBlock,
+  DocumentUnderline,
+  Highlight,
   // Markdown images sit inside text; a block image would split the paragraph.
   Image.configure({ inline: true }),
   DocumentOrderedList,
@@ -151,6 +158,12 @@ export const documentExtensions: AnyExtension[] = [
   DocumentBlockMath,
   DateChip,
   PersonMention,
+  Callout,
+  Details,
+  DetailsSummary,
+  DetailsContent,
+  Footnote,
+  SheetEmbed,
   CommentMark,
   // Steps received from the server already carry the IDs their sender gave.
   UniqueID.configure({
@@ -159,5 +172,5 @@ export const documentExtensions: AnyExtension[] = [
     generateID: newBlockId,
     filterTransaction: (transaction) => !isRemoteChange(transaction),
   }),
-  Markdown,
+  Markdown.configure({ marked: isolatedMarked() }),
 ];

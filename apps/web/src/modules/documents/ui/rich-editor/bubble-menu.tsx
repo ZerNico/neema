@@ -8,12 +8,13 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Toolbar } from "@base-ui/react/toolbar";
 import type { Editor } from "@tiptap/core";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { NodeSelection } from "@tiptap/pm/state";
 import { useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { useState } from "react";
 import { commentsKey } from "../../client/comments-plugin.ts";
 import { LinkPopover } from "./link-popover.tsx";
+import { startComment } from "./comment-start.ts";
 import { Format } from "./toolbar.tsx";
 
 /**
@@ -65,15 +66,8 @@ export function DocumentBubbleMenu({
             icon={CommentAdd01Icon}
             label="Comment"
             pressed={false}
-            onPress={() => {
-              const { from, to } = editor.state.selection;
-              // The card holds the range; the selection collapses so the bubble steps aside.
-              editor.view.dispatch(
-                editor.state.tr
-                  .setSelection(TextSelection.create(editor.state.doc, to))
-                  .setMeta(commentsKey, { compose: { from, to } }),
-              );
-            }}
+            // The selection collapses as the card opens, so the bubble steps aside.
+            onPress={() => startComment(editor)}
           />
           {state.inCode ? null : (
             <>

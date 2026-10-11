@@ -1,5 +1,12 @@
 import {
   ArrowDown01Icon,
+  Calendar03Icon,
+  CommentAdd01Icon,
+  FunctionOfXIcon,
+  SearchReplaceIcon,
+  Clock01Icon,
+  TextNumberSignIcon,
+  UserIcon,
   CheckListIcon,
   CodeSquareIcon,
   ColumnDeleteIcon,
@@ -8,11 +15,20 @@ import {
   Heading01Icon,
   Heading02Icon,
   Heading03Icon,
+  Heading04Icon,
+  Heading05Icon,
+  Heading06Icon,
+  InformationSquareIcon,
+  ArrowRight01Icon,
+  TextFootnoteIcon,
+  BulbIcon,
+  AlertDiamondIcon,
+  Alert02Icon,
+  StopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListNumberIcon,
   Link01Icon,
   MinusSignIcon,
-  MoreHorizontalIcon,
   QuoteDownIcon,
   Redo02Icon,
   RowDeleteIcon,
@@ -23,6 +39,10 @@ import {
   TextBoldIcon,
   TextIcon,
   TextItalicIcon,
+  TextUnderlineIcon,
+  HighlighterIcon,
+  Image01Icon,
+  FileSpreadsheetIcon,
   TextStrikethroughIcon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -30,19 +50,15 @@ import { Toolbar } from "@base-ui/react/toolbar";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Kbd } from "~/ui/primitives/kbd";
@@ -50,7 +66,19 @@ import { Toggle } from "~/ui/primitives/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { LinkPopover } from "./link-popover.tsx";
 import { insertFormula } from "./math-item.ts";
-import { fittingControls } from "./fitting-controls.ts";
+import { NodeSelection } from "@tiptap/pm/state";
+import { startComment } from "./comment-start.ts";
+import { insertDetails, insertFootnote, setCallout } from "./block-items.ts";
+import { ToolbarMenu } from "../ribbon-controls.tsx";
+import type { CalloutKind } from "../../editor/blocks.ts";
+import { setFindOpen } from "./find.ts";
+import { setWordCountShown, useWordCountShown } from "./document-stats.ts";
+import { OutlineMenu } from "./outline-menu.tsx";
+import { Ribbon, type RibbonTab } from "../ribbon.tsx";
+import { isoDay } from "./dates.ts";
+import { pickImages } from "./image-upload.ts";
+import { openSheetPicker } from "./sheet-embeds.ts";
+import { VersionHistoryDialog } from "./version-history.tsx";
 
 type Chain = ReturnType<Editor["chain"]>;
 type Icon = HugeiconsIconProps["icon"];
@@ -64,14 +92,26 @@ const BLOCKS = [
   { value: "h1", label: "Heading 1", icon: Heading01Icon },
   { value: "h2", label: "Heading 2", icon: Heading02Icon },
   { value: "h3", label: "Heading 3", icon: Heading03Icon },
+  { value: "h4", label: "Heading 4", icon: Heading04Icon },
+  { value: "h5", label: "Heading 5", icon: Heading05Icon },
+  { value: "h6", label: "Heading 6", icon: Heading06Icon },
 ] as const;
 type Block = (typeof BLOCKS)[number]["value"];
+
+/** Callouts by kind, as GitHub names its alerts. */
+const CALLOUTS: ReadonlyArray<{ kind: CalloutKind; label: string; icon: Icon }> = [
+  { kind: "note", label: "Note", icon: InformationSquareIcon },
+  { kind: "tip", label: "Tip", icon: BulbIcon },
+  { kind: "important", label: "Important", icon: AlertDiamondIcon },
+  { kind: "warning", label: "Warning", icon: Alert02Icon },
+  { kind: "caution", label: "Caution", icon: StopIcon },
+];
 
 const setBlock = (editor: Editor, block: Block) =>
   run(editor, (chain) =>
     block === "paragraph"
       ? chain.setParagraph()
-      : chain.setHeading({ level: Number(block.slice(1)) as 1 | 2 | 3 }),
+      : chain.setHeading({ level: Number(block.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6 }),
   );
 
 function Hint({ label, shortcut }: { label: string; shortcut?: string | undefined }) {
@@ -167,15 +207,15 @@ const useToolbarState = (editor: Editor) =>
   useEditorState({
     editor,
     selector: ({ editor: current }) => ({
-      block: (current.isActive("heading", { level: 1 })
-        ? "h1"
-        : current.isActive("heading", { level: 2 })
-          ? "h2"
-          : current.isActive("heading", { level: 3 })
-            ? "h3"
-            : "paragraph") as Block,
+      block: (BLOCKS.find(
+        (item) =>
+          item.value !== "paragraph" &&
+          current.isActive("heading", { level: Number(item.value.slice(1)) }),
+      )?.value ?? "paragraph") as Block,
       bold: current.isActive("bold"),
       italic: current.isActive("italic"),
+      underline: current.isActive("underline"),
+      highlight: current.isActive("highlight"),
       strike: current.isActive("strike"),
       code: current.isActive("code"),
       link: current.isActive("link"),
@@ -185,339 +225,343 @@ const useToolbarState = (editor: Editor) =>
       blockquote: current.isActive("blockquote"),
       codeBlock: current.isActive("codeBlock"),
       table: current.isActive("table"),
+      // A comment needs text to sit on: a range of it, not a selected chip or block.
+      canComment:
+        !current.state.selection.empty && !(current.state.selection instanceof NodeSelection),
       canUndo: current.can().undo(),
       canRedo: current.can().redo(),
     }),
   });
-type ToolbarState = ReturnType<typeof useToolbarState>;
-
-type Control =
-  | {
-      kind: "format";
-      label: string;
-      icon: Icon;
-      shortcut?: string | undefined;
-      pressed: keyof ToolbarState;
-      command: (chain: Chain) => Chain;
-    }
-  | {
-      kind: "action";
-      label: string;
-      icon: Icon;
-      shortcut?: string | undefined;
-      enabled?: "canUndo" | "canRedo";
-      command: (chain: Chain) => Chain;
-    }
-  | { kind: "link" | "table"; label: string; icon: Icon };
-
-/** In the order they give way: the last ones move into More first, so undo and redo stay. */
-const CONTROLS: Control[] = [
-  {
-    kind: "action",
-    label: "Undo",
-    icon: Undo02Icon,
-    shortcut: "⌘Z",
-    enabled: "canUndo",
-    command: (c) => c.undo(),
-  },
-  {
-    kind: "action",
-    label: "Redo",
-    icon: Redo02Icon,
-    shortcut: "⌘⇧Z",
-    enabled: "canRedo",
-    command: (c) => c.redo(),
-  },
-  {
-    kind: "format",
-    label: "Bold",
-    icon: TextBoldIcon,
-    shortcut: "⌘B",
-    pressed: "bold",
-    command: (c) => c.toggleBold(),
-  },
-  {
-    kind: "format",
-    label: "Italic",
-    icon: TextItalicIcon,
-    shortcut: "⌘I",
-    pressed: "italic",
-    command: (c) => c.toggleItalic(),
-  },
-  { kind: "link", label: "Link", icon: Link01Icon },
-  {
-    kind: "format",
-    label: "Checklist",
-    icon: CheckListIcon,
-    shortcut: "⌘⇧9",
-    pressed: "taskList",
-    command: (c) => c.toggleTaskList(),
-  },
-  {
-    kind: "format",
-    label: "Bulleted list",
-    icon: LeftToRightListBulletIcon,
-    shortcut: "⌘⇧8",
-    pressed: "bulletList",
-    command: (c) => c.toggleBulletList(),
-  },
-  {
-    kind: "format",
-    label: "Numbered list",
-    icon: LeftToRightListNumberIcon,
-    shortcut: "⌘⇧7",
-    pressed: "orderedList",
-    command: (c) => c.toggleOrderedList(),
-  },
-  {
-    kind: "format",
-    label: "Strikethrough",
-    icon: TextStrikethroughIcon,
-    shortcut: "⌘⇧S",
-    pressed: "strike",
-    command: (c) => c.toggleStrike(),
-  },
-  {
-    kind: "format",
-    label: "Inline code",
-    icon: SourceCodeIcon,
-    shortcut: "⌘E",
-    pressed: "code",
-    command: (c) => c.toggleCode(),
-  },
-  {
-    kind: "format",
-    label: "Quote",
-    icon: QuoteDownIcon,
-    shortcut: "⌘⇧B",
-    pressed: "blockquote",
-    command: (c) => c.toggleBlockquote(),
-  },
-  {
-    kind: "format",
-    label: "Code block",
-    icon: CodeSquareIcon,
-    shortcut: "⌘⌥C",
-    pressed: "codeBlock",
-    command: (c) => c.toggleCodeBlock(),
-  },
-  { kind: "table", label: "Table", icon: LayoutTable01Icon },
-  { kind: "action", label: "Formula", icon: FunctionIcon, command: insertFormula },
-  { kind: "action", label: "Divider", icon: MinusSignIcon, command: (c) => c.setHorizontalRule() },
-];
-
-/** How many controls fit beside the text style. */
-const useFitting = (total: number) => {
-  const row = useRef<HTMLDivElement>(null);
-  const style = useRef<HTMLButtonElement>(null);
-  const [room, setRoom] = useState(0);
-  useLayoutEffect(() => {
-    const element = row.current;
-    if (!element || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      setRoom((entry?.contentRect.width ?? 0) - (style.current?.offsetWidth ?? 0) - 2);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return { row, style, fitting: fittingControls(room, total) };
-};
+/** Inserts a node where the selection is, the way the slash menu does. */
+const insert = (content: Parameters<Chain["insertContent"]>[0]) => (chain: Chain) =>
+  chain.insertContent(content);
 
 /**
- * The document's formatting row. Every control is a command on the shared
- * tree, so what it does syncs like typing. It never wraps: what does not fit
- * the panel's width moves, last first, into a More menu.
+ * The document's ribbon, as the sheet's. Every control is a command on the
+ * shared tree, so what it does syncs like typing.
  */
-export function DocumentToolbar({ editor }: { editor: Editor }) {
+export function DocumentToolbar({ editor, documentId }: { editor: Editor; documentId: string }) {
   const state = useToolbarState(editor);
-  const { row, style, fitting } = useFitting(CONTROLS.length);
+  const wordCount = useWordCountShown();
   const [linkAnchor, setLinkAnchor] = useState<Element | null>(null);
-  const more = useRef<HTMLButtonElement>(null);
-  const shown = CONTROLS.slice(0, fitting);
-  const folded = CONTROLS.slice(fitting);
-  const block = BLOCKS.find((item) => item.value === state.block) ?? BLOCKS[0];
-
-  const inRow = (control: Control): ReactNode => {
-    switch (control.kind) {
-      case "format":
-        return (
-          <Format
-            key={control.label}
-            icon={control.icon}
-            label={control.label}
-            shortcut={control.shortcut}
-            pressed={Boolean(state[control.pressed])}
-            onPress={() => run(editor, control.command)}
-          />
-        );
-      case "action":
-        return (
-          <Action
-            key={control.label}
-            icon={control.icon}
-            label={control.label}
-            shortcut={control.shortcut}
-            disabled={control.enabled ? !state[control.enabled] : false}
-            onPress={() => run(editor, control.command)}
-          />
-        );
-      case "link":
-        return (
-          <Format
-            key="link"
-            icon={Link01Icon}
-            label="Link"
-            pressed={state.link}
-            onPress={setLinkAnchor}
-          />
-        );
-      case "table":
-        return <TableMenu key="table" editor={editor} inTable={state.table} />;
-    }
-  };
-
-  const inMenu = (control: Control): ReactNode => {
-    switch (control.kind) {
-      case "format":
-        return (
-          <DropdownMenuCheckboxItem
-            key={control.label}
-            checked={Boolean(state[control.pressed])}
-            onCheckedChange={() => run(editor, control.command)}
-          >
-            <HugeiconsIcon icon={control.icon} strokeWidth={2} />
-            {control.label}
-          </DropdownMenuCheckboxItem>
-        );
-      case "action":
-        return (
-          <DropdownMenuItem
-            key={control.label}
-            disabled={control.enabled ? !state[control.enabled] : false}
-            onClick={() => run(editor, control.command)}
-          >
-            <HugeiconsIcon icon={control.icon} strokeWidth={2} />
-            {control.label}
-          </DropdownMenuItem>
-        );
-      case "link":
-        return (
-          <DropdownMenuItem
-            key="link"
-            // The menu hands focus back to its button as it closes; open after that.
-            onClick={() => requestAnimationFrame(() => setLinkAnchor(more.current))}
-          >
-            <HugeiconsIcon icon={Link01Icon} strokeWidth={2} />
-            Link…
-          </DropdownMenuItem>
-        );
-      case "table":
-        return state.table ? (
-          <DropdownMenuSub key="table">
-            <DropdownMenuSubTrigger>
-              <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
-              Table
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <TableItems editor={editor} />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ) : (
-          <InsertTableItem key="table" editor={editor} />
-        );
-    }
-  };
-
-  return (
-    // One Tab stop for the whole row; arrow keys move between its controls.
-    <Toolbar.Root
-      ref={row}
-      aria-label="Formatting"
-      className="flex min-w-0 flex-1 items-center gap-0.5"
-    >
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toolbar.Button
-                render={
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        ref={style}
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Text style: ${block.label}`}
-                        className="text-muted-foreground"
-                        onMouseDown={keepSelection}
-                      />
-                    }
-                  />
-                }
+  const [history, setHistory] = useState(false);
+  const format = (
+    label: string,
+    icon: Icon,
+    pressed: boolean,
+    command: (chain: Chain) => Chain,
+    shortcut?: string,
+  ) => (
+    <Format
+      key={label}
+      icon={icon}
+      label={label}
+      shortcut={shortcut}
+      pressed={pressed}
+      onPress={() => run(editor, command)}
+    />
+  );
+  const action = (label: string, icon: Icon, command: (chain: Chain) => Chain) => (
+    <Action
+      key={label}
+      icon={icon}
+      label={label}
+      disabled={false}
+      onPress={() => run(editor, command)}
+    />
+  );
+  const tabs: RibbonTab<"home" | "insert" | "review" | "view">[] = [
+    {
+      value: "home",
+      label: "Home",
+      groups: [
+        {
+          id: "text",
+          label: "Text",
+          controls: (
+            <>
+              <TextStyleMenu editor={editor} block={state.block} />
+              {format("Bold", TextBoldIcon, state.bold, (c) => c.toggleBold(), "⌘B")}
+              {format("Italic", TextItalicIcon, state.italic, (c) => c.toggleItalic(), "⌘I")}
+              {format(
+                "Underline",
+                TextUnderlineIcon,
+                state.underline,
+                (c) => c.toggleUnderline(),
+                "⌘U",
+              )}
+              {format("Highlight", HighlighterIcon, state.highlight, (c) => c.toggleHighlight())}
+              {format(
+                "Strikethrough",
+                TextStrikethroughIcon,
+                state.strike,
+                (c) => c.toggleStrike(),
+                "⌘⇧S",
+              )}
+              {format("Inline code", SourceCodeIcon, state.code, (c) => c.toggleCode(), "⌘E")}
+              <Format icon={Link01Icon} label="Link" pressed={state.link} onPress={setLinkAnchor} />
+            </>
+          ),
+        },
+        {
+          id: "paragraph",
+          label: "Paragraph",
+          controls: (
+            <>
+              {format(
+                "Bulleted list",
+                LeftToRightListBulletIcon,
+                state.bulletList,
+                (c) => c.toggleBulletList(),
+                "⌘⇧8",
+              )}
+              {format(
+                "Numbered list",
+                LeftToRightListNumberIcon,
+                state.orderedList,
+                (c) => c.toggleOrderedList(),
+                "⌘⇧7",
+              )}
+              {format("Checklist", CheckListIcon, state.taskList, (c) => c.toggleTaskList(), "⌘⇧9")}
+              {format("Quote", QuoteDownIcon, state.blockquote, (c) => c.toggleBlockquote(), "⌘⇧B")}
+              {format(
+                "Code block",
+                CodeSquareIcon,
+                state.codeBlock,
+                (c) => c.toggleCodeBlock(),
+                "⌘⌥C",
+              )}
+            </>
+          ),
+        },
+        {
+          id: "editing",
+          label: "Editing",
+          controls: (
+            <Action
+              icon={SearchReplaceIcon}
+              label="Find and replace"
+              shortcut="⌘⇧H"
+              disabled={false}
+              onPress={() => setFindOpen(editor, "replace")}
+            />
+          ),
+        },
+      ],
+    },
+    {
+      value: "insert",
+      label: "Insert",
+      groups: [
+        {
+          id: "tables",
+          label: "Tables",
+          controls: <TableMenu editor={editor} inTable={state.table} />,
+        },
+        {
+          id: "math",
+          label: "Formulas",
+          controls: (
+            <>
+              {action("Formula", FunctionIcon, insertFormula)}
+              {action(
+                "Inline formula",
+                FunctionOfXIcon,
+                insert({ type: "inlineMath", attrs: { latex: "" } }),
+              )}
+            </>
+          ),
+        },
+        {
+          id: "blocks",
+          label: "Blocks",
+          controls: (
+            <>
+              <Action
+                icon={Image01Icon}
+                label="Image"
+                disabled={false}
+                onPress={() => pickImages(editor)}
               />
-            }
-          >
-            <HugeiconsIcon icon={block.icon} strokeWidth={2} />
-            <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
-          </TooltipTrigger>
-          <Hint label="Text style" />
-        </Tooltip>
-        <DropdownMenuContent align="start" className="w-44">
-          <DropdownMenuRadioGroup
-            value={state.block}
-            onValueChange={(value: Block) => setBlock(editor, value)}
-          >
-            {BLOCKS.map((item) => (
-              <DropdownMenuRadioItem key={item.value} value={item.value}>
-                <HugeiconsIcon icon={item.icon} strokeWidth={2} />
-                {item.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {shown.map(inRow)}
-      {folded.length ? (
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger
+              <Action
+                icon={FileSpreadsheetIcon}
+                label="Sheet"
+                disabled={false}
+                onPress={() => openSheetPicker(editor)}
+              />
+              {action("Divider", MinusSignIcon, (c) => c.setHorizontalRule())}
+              {action(
+                "Date",
+                Calendar03Icon,
+                insert([
+                  { type: "dateChip", attrs: { value: isoDay(new Date()) } },
+                  { type: "text", text: " " },
+                ]),
+              )}
+              {action("Mention someone", UserIcon, insert("@"))}
+            </>
+          ),
+        },
+        {
+          id: "sections",
+          label: "Sections",
+          controls: (
+            <>
+              <ToolbarMenu label="Callout" icon={InformationSquareIcon}>
+                <DropdownMenuContent align="start" className="w-44">
+                  {CALLOUTS.map((callout) => (
+                    <DropdownMenuItem
+                      key={callout.kind}
+                      onClick={() => run(editor, setCallout(callout.kind))}
+                    >
+                      <HugeiconsIcon icon={callout.icon} strokeWidth={2} />
+                      {callout.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </ToolbarMenu>
+              {action("Collapsible section", ArrowRight01Icon, insertDetails)}
+              {action("Footnote", TextFootnoteIcon, insertFootnote)}
+            </>
+          ),
+        },
+      ],
+    },
+    {
+      value: "review",
+      label: "Review",
+      groups: [
+        {
+          id: "comments",
+          label: "Comments",
+          controls: (
+            <Action
+              icon={CommentAdd01Icon}
+              label="New comment"
+              disabled={!state.canComment}
+              onPress={() => startComment(editor)}
+            />
+          ),
+        },
+        {
+          id: "history",
+          label: "History",
+          controls: (
+            <Action
+              icon={Clock01Icon}
+              label="Version history"
+              disabled={false}
+              onPress={() => setHistory(true)}
+            />
+          ),
+        },
+      ],
+    },
+    {
+      value: "view",
+      label: "View",
+      groups: [
+        {
+          id: "navigate",
+          label: "Navigate",
+          controls: <OutlineMenu editor={editor} />,
+        },
+        {
+          id: "show",
+          label: "Show",
+          controls: (
+            <Format
+              icon={TextNumberSignIcon}
+              label="Word count"
+              pressed={wordCount}
+              onPress={() => setWordCountShown(!wordCount)}
+            />
+          ),
+        },
+      ],
+    },
+  ];
+  return (
+    <>
+      <Ribbon
+        tabs={tabs}
+        history={
+          <>
+            <Action
+              icon={Undo02Icon}
+              label="Undo"
+              shortcut="⌘Z"
+              disabled={!state.canUndo}
+              onPress={() => run(editor, (c) => c.undo())}
+            />
+            <Action
+              icon={Redo02Icon}
+              label="Redo"
+              shortcut="⌘⇧Z"
+              disabled={!state.canRedo}
+              onPress={() => run(editor, (c) => c.redo())}
+            />
+          </>
+        }
+      />
+      <LinkPopover editor={editor} anchor={linkAnchor} onClose={() => setLinkAnchor(null)} />
+      {/* Mounted while open: its queries belong to the history, not the toolbar. */}
+      {history ? (
+        <VersionHistoryDialog
+          editor={editor}
+          documentId={documentId}
+          open
+          onOpenChange={setHistory}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The text style of the block the selection starts in: text or a heading. */
+function TextStyleMenu({ editor, block }: { editor: Editor; block: Block }) {
+  const shown = BLOCKS.find((item) => item.value === block) ?? BLOCKS[0];
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Toolbar.Button
               render={
-                <Toolbar.Button
+                <DropdownMenuTrigger
                   render={
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          ref={more}
-                          size="icon-sm"
-                          variant="ghost"
-                          aria-label="More formatting"
-                          className="text-muted-foreground"
-                          onMouseDown={keepSelection}
-                        />
-                      }
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Text style: ${shown.label}`}
+                      className="text-muted-foreground"
+                      onMouseDown={keepSelection}
                     />
                   }
                 />
               }
-            >
-              <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-            </TooltipTrigger>
-            <Hint label="More formatting" />
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-52">
-            {folded.map((control, index) => {
-              const previous = folded[index - 1];
-              // Undo and redo are about the document, not the selection.
-              const divide = previous && control.label === "Undo";
-              return divide
-                ? [<DropdownMenuSeparator key="history" />, inMenu(control)]
-                : inMenu(control);
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-      <LinkPopover editor={editor} anchor={linkAnchor} onClose={() => setLinkAnchor(null)} />
-    </Toolbar.Root>
+            />
+          }
+        >
+          <HugeiconsIcon icon={shown.icon} strokeWidth={2} />
+          <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
+        </TooltipTrigger>
+        <Hint label="Text style" />
+      </Tooltip>
+      <DropdownMenuContent align="start" className="w-44">
+        <DropdownMenuRadioGroup
+          value={block}
+          onValueChange={(value: Block) => setBlock(editor, value)}
+        >
+          {BLOCKS.map((item) => (
+            <DropdownMenuRadioItem key={item.value} value={item.value}>
+              <HugeiconsIcon icon={item.icon} strokeWidth={2} />
+              {item.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

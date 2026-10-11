@@ -1,13 +1,23 @@
-import type { Node } from "@tiptap/pm/model";
+import { Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { Effect, Schema } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { describe, expect, it } from "vitest";
 import { blockIdOf, ensureIds } from "../editor/block-ids.ts";
-import { documentSchema, parseMarkdown, replaceDifference } from "../editor/markdown.ts";
+import {
+  documentSchema,
+  parseMarkdown,
+  replaceDifference,
+  toMarkdown,
+} from "../editor/markdown.ts";
 import { applyTreeEdit } from "../editor/tree-edit.ts";
 import type { EditableDocument } from "../schema.ts";
+import { documentToWord } from "~/modules/word/server/document-export.ts";
+import { wordToDocument } from "~/modules/word/server/document-import.ts";
+import type { WordRuntime } from "~/modules/word/server/runtime.ts";
 import { FOCUS_CHARS, prepareDocumentTools, type DocumentToolService } from "./document-tools.ts";
+import { wordExportInput } from "./word-export.ts";
+import { placeImported, readWordDocument } from "./word-import.ts";
 
 const CONVERSATION = "conv-1";
 const stamp = new Date(0).toISOString();
@@ -63,9 +73,19 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
         const row = rows.get(documentId);
         return row ? { document: row.document, doc: row.doc, comments: [] } : null;
       }),
-    create: (_userId, input) =>
+    create: (_userId, input, _guard, from) =>
       Effect.sync(() => {
-        const doc = build(input.content, input.outline);
+        const doc = from
+          ? ensureIds(
+              new Transform(
+                Node.fromJSON(
+                  documentSchema,
+                  placeImported(from, `doc-${nextDocument + 1}`, new Map()),
+                ),
+              ),
+              mint,
+            ).doc
+          : build(input.content, input.outline);
         const document = put(
           {
             id: `doc-${++nextDocument}`,
@@ -528,5 +548,54 @@ describe("document tools", () => {
       await call(tools, "edit_document", { find: "missing", content: "x" }),
     ];
     for (const result of results) expect(JSON.stringify(result)).not.toContain("SECRET");
+  });
+});
+
+describe("a document from a Word file", () => {
+  // The importer in process; the worker boundary is covered by the Word runtime test.
+  const inProcess: WordRuntime = {
+    run: async (request) => {
+      if (request.kind !== "importDocument")
+        throw new Error(`Unexpected Word work: ${request.kind}`);
+      return wordToDocument(request.bytes, request.bounds) as never;
+    },
+    close: async () => {},
+  };
+  const brief = documentToWord(
+    wordExportInput("Brief", parseMarkdown("# Goals\n\n- ship it\n- tell people"), [], {}),
+  );
+
+  it("starts from the file the person gave, titled as the file, and nothing streams first", async () => {
+    const { service, rows } = fakeService();
+    const tools = await Effect.runPromise(
+      prepareDocumentTools({
+        service,
+        userId: "user",
+        conversationId: CONVERSATION,
+        messageId: "message-1",
+        writeGuard: () => Effect.void,
+        readWordFile: (reference) =>
+          reference === "attachment:a1"
+            ? readWordDocument(
+                { name: "Brief.docx", mediaType: "", bytes: brief },
+                inProcess,
+                "user",
+                () => Effect.fail("unstored"),
+              )
+            : Effect.fail("There is no file attachment:zz in this chat."),
+      }),
+    );
+    const created = await call(tools, "create_document", { fromFile: "attachment:a1" });
+    expect(created).toMatchObject({ outcome: "created", title: "Brief" });
+    expect(toMarkdown(rows.get(String(created.documentId))!.doc)).toBe(
+      "# Goals\n\n- ship it\n- tell people",
+    );
+    expect(await call(tools, "create_document", { fromFile: "attachment:zz" })).toEqual({
+      outcome: "invalid",
+      message: "There is no file attachment:zz in this chat.",
+    });
+    expect(await call(tools, "create_document", { content: "No title" })).toMatchObject({
+      outcome: "invalid",
+    });
   });
 });

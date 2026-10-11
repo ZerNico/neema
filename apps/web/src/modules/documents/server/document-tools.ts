@@ -43,6 +43,15 @@ import type { SheetService } from "../sheet/server/sheet-service.ts";
 import { sheetView, type SheetWindow } from "../sheet/server/sheet-view.ts";
 import { sheetFromWorkbook, type ImportedNote } from "../sheet/server/import.ts";
 import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
+import { titleFromFile, type ImportedText } from "./word-import.ts";
+
+/** A Word file read for a document to start from, its pictures already stored. */
+export interface WordDocumentFile {
+  name: string;
+  title: string | null;
+  imported: ImportedText;
+  dropped: string[];
+}
 
 /** Above this the focused document is sent as a window of blocks, not whole. */
 export const FOCUS_CHARS = 24_000;
@@ -66,7 +75,8 @@ const DocumentSummary = Schema.Struct({
   lastEditedBy: Schema.Literals(["user", "model"]),
 });
 const CreateParams = Schema.Struct({
-  title: DocumentTitle,
+  title: Schema.optionalKey(DocumentTitle),
+  fromFile: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300))),
   content: Schema.optionalKey(Schema.String),
   outline: Schema.optionalKey(
     Schema.Array(Intent).check(Schema.isMaxLength(DOCUMENT_LIMITS.outline)),
@@ -211,11 +221,12 @@ const decode = <S extends Schema.Codec<unknown, unknown, never, never>>(
 
 const createTool = Tool.make("create_document", {
   description:
-    "Create one document beside this chat, only for something the person asked to keep or work on over time: a draft to revise, notes, a brief or a specification, a checklist to tick off later. A plan, explanation or comparison they asked to see is an answer: write it in your reply, not here. The person watches the document fill in. For anything of more than two sections, plan first: pass the title, at most a one-line intro as content, and outline, one short line per section still to write. Each outline entry appears as a planned placeholder; then fill them one per edit_document call (target the placeholder's id from the result's blocks, Markdown as content), with a short line in chat between calls. content is Markdown. Write tasks as bullet items, `- [ ] step`. scope matters only in a chat that belongs to a project: there it defaults to project, and chat keeps a private scratch document. Do not repeat the document in your reply.",
+    "Create one document beside this chat, only for something the person asked to keep or work on over time: a draft to revise, notes, a brief or a specification, a checklist to tick off later. A plan, explanation or comparison they asked to see is an answer: write it in your reply, not here. The person watches the document fill in. For anything of more than two sections, plan first: pass the title, at most a one-line intro as content, and outline, one short line per section still to write. Each outline entry appears as a planned placeholder; then fill them one per edit_document call (target the placeholder's id from the result's blocks, Markdown as content), with a short line in chat between calls. content is Markdown. Write tasks as bullet items, `- [ ] step`. To work on a Word file the person gave you as a live document, pass it as fromFile (its attachment: or project: reference) instead of content; its headings, lists, tables, pictures, footnotes and comments come with it, and the title defaults to the file's. scope matters only in a chat that belongs to a project: there it defaults to project, and chat keeps a private scratch document. For a Word file the person wants edited or downloaded as a file, use the Word tools instead. Do not repeat the document in your reply.",
   parameters: Schema.Struct({
-    title: Schema.optionalKey(transport(CreateParams.fields.title)),
+    title: Schema.optionalKey(transport(DocumentTitle)),
     // Before the content, so a streamed creation knows where it belongs early.
     scope: Schema.optionalKey(transport(Scope)),
+    fromFile: Schema.optionalKey(transport(Schema.String)),
     content: Schema.optionalKey(transport(Schema.String)),
     outline: Schema.optionalKey(transport(CreateParams.fields.outline)),
   }),
@@ -427,6 +438,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   readSheetFile?:
     | ((reference: string) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
     | undefined;
+  /** Reads a Word file the sender may read, by reference, for a document to start from. */
+  readWordFile?: ((reference: string) => Effect.Effect<WordDocumentFile, string>) | undefined;
   /** The lighter fence for the many small writes of an edit streaming in. */
   liveGuard?: ((tx: DbTx) => Effect.Effect<unknown>) | undefined;
   project?: DocumentProject | null | undefined;
@@ -651,6 +664,11 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     Effect.gen(function* () {
       const title = fields.get("title");
       if (!title?.complete) return;
+      // A document from a file is made by the call, once the file has been read.
+      if (keys.includes("fromFile")) {
+        state.failed = true;
+        return;
+      }
       if (!state.created) {
         // Only once something follows the title, so a scope given right after it counts.
         const after = keys.filter((key) => key !== "title");
@@ -830,7 +848,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         outcome: "invalid",
         message: `Provide a title, and Markdown content and/or an outline. ${decoded.issue}`,
       };
-    const { scope: requested, content = "", outline, title } = decoded.value;
+    const { scope: requested, content = "", outline, fromFile } = decoded.value;
     // In a project someone may edit, a document is shared work unless asked otherwise.
     // Outside a project there is only the chat, whatever scope the model named.
     const scope = input.project
@@ -841,6 +859,13 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
         outcome: "invalid",
         message:
           "The project is read-only for this person. Create the document in this chat instead.",
+      };
+    if (fromFile !== undefined) return yield* createFromFile(fromFile, decoded.value.title, scope);
+    const title = decoded.value.title;
+    if (!title)
+      return {
+        outcome: "invalid",
+        message: "Provide a title, and Markdown content and/or an outline.",
       };
     const preview = claimCreate(title);
     if (preview?.created && scope === "project" && !preview.created.projectId) {
@@ -935,6 +960,67 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       return { outcome: "invalid", message: `The document was rejected: ${result}.` };
     yield* afterWrite(result.document);
     return { outcome: "created", ...reference(result.document), blocks: result.planned };
+  });
+
+  /** A document started from a Word file: read, then made at once, with nothing previewed. */
+  const createFromFile = Effect.fn(function* (
+    fileReference: string,
+    requestedTitle: string | undefined,
+    scope: "chat" | "project",
+  ): Effect.fn.Return<Result> {
+    if (!input.readWordFile)
+      return { outcome: "unavailable", message: "Files cannot be read in this chat." };
+    const file = yield* Effect.result(input.readWordFile(fileReference));
+    if (EffectResult.isFailure(file))
+      return { outcome: "invalid", message: file.failure.slice(0, 600) };
+    const title = requestedTitle ?? file.success.title ?? titleFromFile(file.success.name);
+    // A preview made before the file was named is not this document.
+    const preview = claimCreate(title);
+    if (preview?.created) {
+      yield* service
+        .discard(input.userId, preview.created.id, input.writeGuard, preview.revision ?? undefined)
+        .pipe(
+          Effect.catchTag("DocumentRejected", () => Effect.void),
+          Effect.catchTag("DocumentNotAvailable", () => Effect.void),
+        );
+      known = known.filter((document) => document.id !== preview.created!.id);
+    }
+    const result = yield* service
+      .create(
+        input.userId,
+        scope === "project"
+          ? { projectId: input.project!.id, title, content: "" }
+          : {
+              conversationId: input.conversationId,
+              createdByMessageId: input.messageId,
+              title,
+              content: "",
+            },
+        input.writeGuard,
+        file.success.imported,
+      )
+      .pipe(
+        Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
+        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+      );
+    if (result === null)
+      return { outcome: "unavailable", message: "This chat cannot hold documents." };
+    if (typeof result === "string")
+      return { outcome: "invalid", message: `The document was rejected: ${result}.` };
+    yield* afterWrite(result.document);
+    const { dropped } = file.success;
+    return {
+      outcome: "created",
+      ...reference(result.document),
+      ...(dropped.length
+        ? {
+            message: `Left out, since a document cannot hold them: ${dropped.join(", ")}.`.slice(
+              0,
+              600,
+            ),
+          }
+        : {}),
+    };
   });
 
   const edit = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {

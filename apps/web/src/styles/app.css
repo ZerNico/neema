@@ -577,6 +577,122 @@ html[data-panel-resizing] webview {
       @apply bg-warning/40;
     }
   }
+  /* A callout: drawn like a quote (rule and indent) so it sits with the text, its rule in
+     its kind's colour and its kind named above, as GitHub draws an alert. */
+  .rich-editor [data-callout] {
+    @apply border-l-4 pl-4;
+    & > * + * {
+      @apply mt-2;
+    }
+    &::before {
+      @apply mb-0.5 block text-sm font-medium;
+    }
+    &[data-callout="note"] {
+      @apply border-chart-1;
+      &::before {
+        @apply text-chart-1;
+        content: "Note";
+      }
+    }
+    &[data-callout="tip"] {
+      @apply border-success;
+      &::before {
+        @apply text-success;
+        content: "Tip";
+      }
+    }
+    &[data-callout="important"] {
+      @apply border-chart-4;
+      &::before {
+        @apply text-chart-4;
+        content: "Important";
+      }
+    }
+    &[data-callout="warning"] {
+      @apply border-warning;
+      &::before {
+        @apply text-warning;
+        content: "Warning";
+      }
+    }
+    &[data-callout="caution"] {
+      @apply border-destructive;
+      &::before {
+        @apply text-destructive;
+        content: "Caution";
+      }
+    }
+  }
+  /* A collapsible section: a fold chevron before its title; folded, only the title shows. */
+  .rich-editor [data-details] {
+    @apply relative pl-6;
+    & summary {
+      @apply block font-medium;
+      &.is-empty::before {
+        @apply text-muted-foreground pointer-events-none float-left h-0 font-normal;
+        content: attr(data-placeholder);
+      }
+    }
+    & [data-details-content] {
+      @apply mt-1;
+      & > * + * {
+        @apply mt-3;
+      }
+    }
+    &[data-open="false"] [data-details-content] {
+      @apply hidden;
+    }
+  }
+  .rich-editor .details-toggle {
+    @apply text-muted-foreground hover:text-foreground absolute top-1 left-0 flex size-5 items-center justify-center rounded-sm;
+    &::before {
+      @apply size-1.5 rotate-45 border-r-2 border-b-2 border-current transition-transform motion-reduce:transition-none;
+      content: "";
+    }
+    &[aria-expanded="false"]::before {
+      @apply -rotate-45;
+    }
+  }
+  /* A range or chart of a live sheet: a caption naming it, then the cells, compact and read-only. */
+  .rich-editor .sheet-embed {
+    @apply flex flex-col gap-1.5 rounded-xl;
+    &[data-selected] {
+      @apply ring-ring/50 ring-2;
+    }
+    & .sheet-embed-caption {
+      @apply text-muted-foreground flex max-w-full items-center gap-1.5 self-start text-xs [&_svg]:size-3.5 [&_svg]:shrink-0;
+    }
+    & .sheet-embed-table {
+      @apply max-w-full overflow-x-auto rounded-lg border;
+    }
+    & table {
+      @apply w-auto min-w-full tabular-nums;
+    }
+    & td {
+      @apply min-w-0 px-2 py-1 whitespace-pre;
+    }
+  }
+  /* Footnotes number themselves by their order in the text. */
+  .rich-editor {
+    counter-reset: footnote;
+    & [data-footnote] {
+      counter-increment: footnote;
+    }
+    & .footnote-number::after {
+      content: counter(footnote);
+    }
+  }
+  /* Highlighted text, as a highlighter marks it; comments are told apart by their underline. */
+  .rich-editor mark {
+    @apply bg-warning/35 text-foreground rounded-[2px];
+  }
+  /* Find's matches, in a colour apart from comments'; the current one stands out more. */
+  .rich-editor .find-match {
+    @apply bg-chart-1/20 rounded-[2px];
+    &.find-match-current {
+      @apply bg-chart-1/45;
+    }
+  }
   /* Other people's carets, laid over the text. A placed caret slides to where
      it moves, over about the time between two updates, so text streaming in
      reads as typing rather than jumps. */
