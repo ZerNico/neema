@@ -1,4 +1,3 @@
-import type { NumberFormatKind } from "./format-commands.ts";
 import { cellStyle } from "@chat/sheet/model/style";
 import {
   useCallback,
@@ -14,8 +13,6 @@ import {
   type ReactNode,
 } from "react";
 import { columnLetters } from "@chat/sheet/a1";
-import { serialOf } from "@chat/sheet/dates";
-import { formatValue } from "@chat/sheet/number-format";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
@@ -38,6 +35,8 @@ import {
   type AxisLayout,
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
+import { commandShortcut, ctrlShortcut, stampOf, stampText } from "./grid-keys.ts";
+import type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import {
   REF_COLORS,
@@ -51,6 +50,7 @@ import {
 import { FormulaPopup } from "./formula-popup.tsx";
 
 export type { OverlayCommand } from "./overlay-place.ts";
+export type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
 export type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
 import type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
 
@@ -65,78 +65,8 @@ const adding = (selection: SheetSelection, at: CellRef): SheetSelection => ({
   ),
 });
 
-/** What the keyboard asks of the sheet; the app decides what each writes. */
-export type GridCommand =
-  | {
-      readonly kind:
-        | "clear"
-        | "undo"
-        | "redo"
-        | "find"
-        | "filter"
-        | "link"
-        | "group"
-        | "ungroup"
-        | "print";
-    }
-  | { readonly kind: "fill"; readonly direction: "down" | "right" }
-  | { readonly kind: "toggle"; readonly property: "bold" | "italic" | "underline" | "strike" }
-  /** Excel's Ctrl+Shift number formats; the app writes each in the sheet's locale. */
-  | { readonly kind: "numberFormat"; readonly format: NumberFormatKind }
-  | { readonly kind: "borders"; readonly border: "outer" | "none" }
-  | { readonly kind: "autosum" }
-  | { readonly kind: "hide"; readonly axis: Axis; readonly hidden: boolean }
-  /** Whole rows or columns selected, as Ctrl+Shift+Plus and Ctrl+Minus act on them. */
-  | { readonly kind: "insert" | "delete"; readonly axis: Axis }
-  | { readonly kind: "comment" }
-  | { readonly kind: "sheet"; readonly step: 1 | -1 }
-  | { readonly kind: "newSheet" };
-/** Excel's Ctrl+Shift number formats, by the character each key types. */
-const FORMAT_KEYS: Readonly<Record<string, NumberFormatKind>> = {
-  "~": "general",
-  "!": "number",
-  $: "currency",
-  "%": "percent",
-  "#": "date",
-  "@": "time",
-  "^": "scientific",
-};
-/** Someone else's selection, drawn in their colour. */
-export interface GridDecoration {
-  readonly key: string;
-  readonly selection: SheetSelection;
-  readonly color: string;
-  /** A person's name beside their selection; none for a highlight such as a find match. */
-  readonly label?: string;
-  /** A corner mark on the cell instead of an outline, as a comment has. */
-  readonly marker?: boolean;
-}
-
 /** A cell by its row and column indexes, as A1. */
 const corner = (at: { row: number; col: number }) => `${columnLetters(at.col + 1)}${at.row + 1}`;
-
-/** Something drawn over the cells from a cell's top-left corner, such as a chart. */
-export interface GridOverlay {
-  readonly key: string;
-  readonly at: CellRef;
-  /** Where its corner sits inside that cell, in pixels. */
-  readonly offset?: { readonly x: number; readonly y: number };
-  readonly width: number;
-  readonly height: number;
-  readonly content: ReactNode;
-  /** Its accessible name, such as "Sales chart". */
-  readonly label: string;
-  /** The smallest it may be resized to. */
-  readonly min?: { readonly width: number; readonly height: number };
-}
-
-/** Where an overlay was moved or resized to: the cell under its top-left corner, how far into it, and its size. */
-export interface OverlayChange {
-  readonly at: CellRef;
-  readonly offset: { readonly x: number; readonly y: number };
-  readonly width: number;
-  readonly height: number;
-}
 
 export interface SheetGridProps {
   readonly doc: SheetDoc;
@@ -220,22 +150,6 @@ export interface SheetGridProps {
   readonly onDragSelection?: (shift: { rows: number; cols: number }, copy: boolean) => void;
 }
 
-/** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
-/** Ctrl+; asks for today's date and Ctrl+Shift+; (or Cmd+; on a Mac) for the time, as in Excel. */
-const stampOf = (event: KeyboardEvent): "date" | "time" | null => {
-  if (event.altKey || (event.key !== ";" && event.key !== ":")) return null;
-  if (event.ctrlKey && !event.metaKey) return event.shiftKey ? "time" : "date";
-  return event.metaKey && !event.ctrlKey ? "time" : null;
-};
-/** Today or now as the text a cell reads back as that date or time. */
-function stampText(kind: "date" | "time", locale: SheetLocale) {
-  const now = new Date();
-  if (kind === "time")
-    return formatValue((now.getHours() * 60 + now.getMinutes()) / 1440, "h:mm", locale)?.text ?? "";
-  const serial = serialOf(now.getFullYear(), now.getMonth() + 1, now.getDate()) ?? 0;
-  return formatValue(serial, locale.shortDate, locale)?.text ?? "";
-}
-
 /** The invisible box something outside the grid sits beside, handed out as it mounts. */
 function BesideBox({
   rect,
@@ -247,6 +161,7 @@ function BesideBox({
   return <div ref={onElement} aria-hidden className="pointer-events-none absolute" style={rect} />;
 }
 
+/** jsdom and a hidden panel measure nothing; a typical panel's size stands in. */
 const FALLBACK = { width: 960, height: 640 };
 /** How far a reveal may scroll and still glide there. */
 const GLIDE_PX = 240;
@@ -703,38 +618,6 @@ export function SheetGrid({
     return [row, col] as const;
   };
 
-  /**
-   * Excel's Ctrl and Ctrl+Shift shortcuts for formats, borders, hiding,
-   * inserting and deleting; null for any other key.
-   */
-  const shortcutOf = (event: KeyboardEvent): GridCommand | null => {
-    // Ctrl alone, as Excel for Mac has them too: Cmd with these keys zooms the page
-    // (Cmd+0, Cmd+Minus, Cmd+Plus) or takes a screenshot (Cmd+Shift+4).
-    if (!event.ctrlKey || event.metaKey) return null;
-    const format = event.shiftKey ? FORMAT_KEYS[event.key] : undefined;
-    if (format) return { kind: "numberFormat", format };
-    if (event.shiftKey && event.key === "&") return { kind: "borders", border: "outer" };
-    if (event.shiftKey && event.key === "_") return { kind: "borders", border: "none" };
-    // Ctrl+9 hides rows and Ctrl+0 columns; with Shift they show again.
-    if (event.code === "Digit9" || event.code === "Digit0")
-      return {
-        kind: "hide",
-        axis: event.code === "Digit9" ? "rows" : "columns",
-        hidden: !event.shiftKey,
-      };
-    if (event.key === "-" || event.key === "+" || (event.shiftKey && event.key === "=")) {
-      // Only whole rows or columns: for cells, Excel asks which way to shift them.
-      if (!box) return null;
-      const axis: Axis | null =
-        box.left === 0 && box.right === cols.ids.length - 1
-          ? "rows"
-          : box.top === 0 && box.bottom === rows.ids.length - 1
-            ? "columns"
-            : null;
-      return axis ? { kind: event.key === "-" ? "delete" : "insert", axis } : null;
-    }
-    return null;
-  };
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
     // An open list takes the arrows, Enter and Escape; Alt+Down opens one, as in Excel.
@@ -800,36 +683,8 @@ export function SheetGrid({
     // The paste event cannot tell which keys made it, so Cmd+Shift+V is noted for it.
     pasteValues.current = command && event.shiftKey && event.key.toLowerCase() === "v";
     if (writable && command && !event.altKey) {
-      const lower = event.key.toLowerCase();
-      const found: GridCommand | null =
-        lower === "l" && event.shiftKey
-          ? { kind: "filter" }
-          : lower === "k" || lower === "j"
-            ? // Cmd+Shift+K and J group and ungroup on a Mac; Cmd+K inserts a link.
-              event.shiftKey
-              ? { kind: lower === "k" ? "group" : "ungroup" }
-              : lower === "k"
-                ? { kind: "link" }
-                : null
-            : lower === "z"
-              ? { kind: event.shiftKey ? "redo" : "undo" }
-              : lower === "y"
-                ? { kind: "redo" }
-                : lower === "d"
-                  ? { kind: "fill", direction: "down" }
-                  : lower === "r"
-                    ? { kind: "fill", direction: "right" }
-                    : lower === "b"
-                      ? { kind: "toggle", property: "bold" }
-                      : lower === "i"
-                        ? { kind: "toggle", property: "italic" }
-                        : lower === "u"
-                          ? { kind: "toggle", property: "underline" }
-                          : // Ctrl+5 strikes through, as in Excel.
-                            event.key === "5"
-                            ? { kind: "toggle", property: "strike" }
-                            : null;
-      const more = found ?? shortcutOf(event);
+      const more =
+        commandShortcut(event) ?? ctrlShortcut(event, box, rows.ids.length, cols.ids.length);
       if (more) {
         event.preventDefault();
         onCommand?.(more);
