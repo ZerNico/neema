@@ -80,7 +80,7 @@ export function SheetMenu({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onDownloadCsv}>
             <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-            Download sheet as CSV
+            Download as CSV
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
