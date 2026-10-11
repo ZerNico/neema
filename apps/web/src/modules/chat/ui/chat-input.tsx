@@ -215,9 +215,7 @@ export const ChatInput = forwardRef<
   const textareaRef = useRef<ComposerFieldHandle>(null);
   useImperativeHandle(forwardedRef, () => ({
     focus: (options) => textareaRef.current?.focus(options),
-    get value() {
-      return textareaRef.current?.value ?? value;
-    },
+    value: () => textareaRef.current?.value() ?? value,
     insertTags: (tags) => textareaRef.current?.insertTags(tags),
     removeTags: (kind, ids) => textareaRef.current?.removeTags(kind, ids),
   }));
