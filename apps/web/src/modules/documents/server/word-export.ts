@@ -1,8 +1,12 @@
 import type { Node } from "@tiptap/pm/model";
+import type { SheetDoc } from "@chat/sheet/model";
+import type { SheetValues } from "@chat/sheet/model/calc";
 import { Effect } from "effect";
 import { WORD_LIMITS } from "~/modules/word/limits.ts";
 import type { DocumentForWord, TreeNode, WordThread } from "~/modules/word/server/document-tree.ts";
 import { documentImagePath, type DocumentComment } from "../schema.ts";
+import { embedAttrs, embedCaption } from "../editor/sheet-embed.ts";
+import { embedMoreText, embedTable } from "../sheet/embed-range.ts";
 
 export const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -75,15 +79,88 @@ const threadsForWord = (comments: readonly DocumentComment[]): WordThread[] =>
       };
     });
 
+/** A sheet a download's embeds show, as the reader may read it now, calculated. */
+export interface EmbeddedSheet {
+  title: string;
+  doc: SheetDoc;
+  values: SheetValues;
+}
+
+/** Distinct sheets one download calculates at most; embeds of others keep their caption. */
+const EMBEDDED_SHEETS = 20;
+
+/** The sheets the tree's embeds show, in order, once each, up to the download's limit. */
+export const embeddedSheetIds = (doc: Node) => {
+  const found = new Set<string>();
+  doc.descendants((node) => {
+    const attrs = node.type.name === "sheetEmbed" ? embedAttrs(node.attrs) : null;
+    if (attrs && found.size < EMBEDDED_SHEETS) found.add(attrs.sheet);
+    return node.isBlock;
+  });
+  return [...found];
+};
+
+const paragraphOf = (text: string, marks: TreeNode["marks"] = []): TreeNode => ({
+  type: "paragraph",
+  ...(text ? { content: [{ type: "text", text, ...(marks.length ? { marks } : {}) }] } : {}),
+});
+const ITALIC = [{ type: "italic" }];
+
+/**
+ * An embed as Word has a place for it: its caption line, then a range's
+ * cells as a table of the values they show now. A chart, or a sheet the
+ * reader cannot read, keeps only the caption.
+ */
+const embedForWord = (node: TreeNode, sheets: ReadonlyMap<string, EmbeddedSheet>): TreeNode[] => {
+  const attrs = embedAttrs(node.attrs ?? {});
+  if (!attrs) return [];
+  const sheet = sheets.get(attrs.sheet);
+  const table = sheet && attrs.range ? embedTable(sheet.doc, sheet.values, attrs.range) : null;
+  const caption = sheet ? `${sheet.title} · ${attrs.range ?? "chart"}` : embedCaption(attrs);
+  if (!table?.rows.length) return [paragraphOf(caption, ITALIC)];
+  const rows = table.rows.map((row) => ({
+    type: "tableRow",
+    content: row.map((cell) => ({
+      type: "tableCell",
+      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+      content: [
+        paragraphOf(cell.text, [
+          ...(cell.bold ? [{ type: "bold" }] : []),
+          ...(cell.italic ? ITALIC : []),
+        ]),
+      ],
+    })),
+  }));
+  const more = embedMoreText(table);
+  return [
+    paragraphOf(caption, ITALIC),
+    { type: "table", content: rows },
+    ...(more ? [paragraphOf(more, ITALIC)] : []),
+  ];
+};
+
+const withSheetEmbeds = (node: TreeNode, sheets: ReadonlyMap<string, EmbeddedSheet>): TreeNode =>
+  node.content
+    ? {
+        ...node,
+        content: node.content.flatMap((child) =>
+          child.type === "sheetEmbed"
+            ? embedForWord(child, sheets)
+            : [withSheetEmbeds(child, sheets)],
+        ),
+      }
+    : node;
+
 /** What the Word worker builds a document's file from. */
 export const wordExportInput = (
   title: string,
   doc: Node,
   comments: readonly DocumentComment[],
   images: Record<string, Uint8Array>,
+  sheets: ReadonlyMap<string, EmbeddedSheet> = new Map(),
 ): DocumentForWord => ({
   title,
-  tree: doc.toJSON() as TreeNode,
+  tree: withSheetEmbeds(doc.toJSON() as TreeNode, sheets),
   images,
   threads: threadsForWord(comments),
 });

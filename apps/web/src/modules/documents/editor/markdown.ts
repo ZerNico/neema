@@ -6,6 +6,7 @@ import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
 import { footnoteDefinitions, numberFootnotes } from "./blocks.ts";
 import { plainChips } from "./chips.ts";
+import { plainSheetEmbeds } from "./sheet-embed.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 import { escapeMathDollars, markMathBeforeDigits } from "./math.ts";
 
@@ -94,17 +95,21 @@ const serialize = (json: JSONContent) =>
   );
 
 /**
- * The Markdown the model reads and writes: chips as shortcodes
- * (`[date value="…"]`, `[@ id="…" label="…"]`), so it can tell them from text.
+ * The Markdown the model reads and writes: chips and sheet embeds as
+ * shortcodes (`[date value="…"]`, `[@ id="…" label="…"]`, `[sheet id="…" range="…"]`),
+ * so it can tell them from text.
  */
 export const toModelMarkdown = (node: Node) => serialize(node.toJSON());
 
 /**
  * The Markdown a tree reads as for people, for Copy and export: footnotes as
- * numbered references with their definitions at the end, as GitHub draws them.
+ * numbered references with their definitions at the end, as GitHub draws them,
+ * and sheet embeds as a line naming what they showed.
  */
 export const toMarkdown = (node: Node) => {
-  const { json, notes } = numberFootnotes(plainChips(node).toJSON() as JSONContent);
+  const { json, notes } = numberFootnotes(
+    plainSheetEmbeds(plainChips(node)).toJSON() as JSONContent,
+  );
   const markdown = serialize(json);
   if (!notes.length) return markdown;
   const definitions = notes.map((note, index) => `[^${index + 1}]: ${note}`).join("\n");

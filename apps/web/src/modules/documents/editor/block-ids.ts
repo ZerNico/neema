@@ -21,6 +21,7 @@ export const BLOCK_TYPES = [
   "pending",
   "callout",
   "details",
+  "sheetEmbed",
 ] as const;
 const blockTypes = new Set<string>(BLOCK_TYPES);
 export const isBlock = (node: Node) => blockTypes.has(node.type.name);

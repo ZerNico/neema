@@ -69,6 +69,7 @@ const TAGS: Record<string, string> = {
   pending: "pending",
   callout: "callout",
   details: "details",
+  sheetEmbed: "sheet",
 };
 
 /** A heading's level as a tag number; anything a stray client set is read as 2. */
@@ -105,6 +106,9 @@ const render = (node: Node, seen: SeenBlock[]): string => {
       return `${head()}>${escapeText(String(node.attrs.latex ?? ""))}</${tag}>`;
     case "pending":
       return `${head({ intent: node.attrs.intent as string })}/>`;
+    case "sheetEmbed":
+      // `id` is the block's own, so the sheet it shows is `document`.
+      return `${head({ document: node.attrs.sheet as string | null, range: node.attrs.range as string | null, chart: node.attrs.chart as string | null })}/>`;
     case "listItem":
     case "taskItem": {
       const extra = name === "taskItem" ? { checked: Boolean(node.attrs.checked) } : {};

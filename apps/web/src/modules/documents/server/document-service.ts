@@ -29,6 +29,7 @@ import { overCap } from "../editor/limits.ts";
 import { presenceUser } from "../presence-user.ts";
 import { detachedThreads, quoteRange } from "../editor/comments.ts";
 import { squareTables } from "../editor/tables.ts";
+import { embedAttrs } from "../editor/sheet-embed.ts";
 import {
   documentSchema,
   parseMarkdown,
@@ -207,6 +208,9 @@ const wellTyped = (node: Node) => {
       return typeof start === "number" && Number.isInteger(start) && start >= 0;
     case "taskItem":
       return typeof checked === "boolean";
+    // A sheet and exactly one of a range and a chart; the sheet is checked when read, not here.
+    case "sheetEmbed":
+      return embedAttrs(node.attrs) !== null;
     default:
       return true;
   }

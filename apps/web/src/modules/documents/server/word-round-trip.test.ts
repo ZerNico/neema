@@ -19,7 +19,11 @@ import { wordToDocument } from "~/modules/word/server/document-import.ts";
 import type { WordRuntime } from "~/modules/word/server/runtime.ts";
 import { documentSchema, parseMarkdown, toMarkdown } from "../editor/markdown.ts";
 import { DOCUMENT_LIMITS, type DocumentComment } from "../schema.ts";
-import { exportImages, wordExportInput } from "./word-export.ts";
+import { applyChange } from "@chat/sheet/model/apply";
+import { calculateSheet } from "@chat/sheet/model/calc";
+import { parseFormula } from "@chat/sheet/model/formula";
+import { emptyDoc } from "@chat/sheet/model";
+import { embeddedSheetIds, exportImages, wordExportInput } from "./word-export.ts";
 import { placeImported, readWordDocument } from "./word-import.ts";
 
 /** A real PNG of `width` by `height` grey pixels, so Word and the importer both read its size. */
@@ -301,6 +305,80 @@ describe("a document as a Word file", () => {
     );
     expect(() => wordToDocument(new TextEncoder().encode("not a zip"), BOUNDS)).toThrow(
       /not a Word file the app can open/,
+    );
+  });
+
+  it("writes a sheet embed's range as a table of what its cells show now", async () => {
+    let sheet = emptyDoc("Data");
+    const formula = parseFormula("B1*2", { doc: sheet, sheet: "s1" });
+    if (!("formula" in formula)) throw new Error("needs growth");
+    sheet = applyChange(
+      sheet,
+      {
+        clientId: "seed",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: "Rent" },
+              { r: "s1.r1", c: "s1.c2", v: 900 },
+              { r: "s1.r2", c: "s1.c1", v: "Twice" },
+              { r: "s1.r2", c: "s1.c2", f: formula.formula },
+            ],
+          },
+          {
+            op: "format",
+            sh: "s1",
+            area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c1" },
+            patch: { bold: true },
+          },
+        ],
+      },
+      1,
+    ).doc;
+    const doc = parseMarkdown(
+      [
+        "Costs:",
+        '[sheet id="sheet-1" range="Data!A1:B2"]',
+        '[sheet id="sheet-1" chart="c1"]',
+        '[sheet id="private" range="Data!A1"]',
+      ].join("\n\n"),
+    );
+    // The route reads only sheets the reader may read; `private` is not among them.
+    expect(embeddedSheetIds(doc)).toEqual(["sheet-1", "private"]);
+    const sheets = new Map([
+      [
+        "sheet-1",
+        {
+          title: "Budget",
+          doc: sheet,
+          values: calculateSheet(sheet, { revision: 1, epoch: 0, now: 45_000, seed: 1 }),
+        },
+      ],
+    ]);
+    const read = await Effect.runPromise(
+      readWordDocument(
+        {
+          name: "Costs.docx",
+          mediaType: "",
+          bytes: documentToWord(wordExportInput("Costs", doc, [], {}, sheets)),
+        },
+        inProcess,
+        "someone",
+        () => Effect.succeed("unused"),
+      ),
+    );
+    const back = Node.fromJSON(documentSchema, placeImported(read.imported, "doc-3", new Map()));
+    expect(toMarkdown(back)).toBe(
+      [
+        "Costs:",
+        "*Budget · Data!A1:B2*",
+        "| **Rent** | 900  |\n| -------- | ---- |\n| Twice    | 1800 |",
+        "*Budget · chart*",
+        "*Sheet range Data!A1*",
+      ].join("\n\n"),
     );
   });
 });

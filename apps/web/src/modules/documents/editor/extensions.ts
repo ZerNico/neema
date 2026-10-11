@@ -20,6 +20,7 @@ import { DateChip, PersonMention } from "./chips.ts";
 import { DocumentBlockMath, DocumentInlineMath } from "./math.ts";
 import { CommentMark } from "./comments.ts";
 import { Pending } from "./pending.ts";
+import { SheetEmbed } from "./sheet-embed.ts";
 import { isRemoteChange } from "./remote.ts";
 
 /** Addresses a link may point at; anything else (javascript:, data:) is refused. */
@@ -162,6 +163,7 @@ export const documentExtensions: AnyExtension[] = [
   DetailsSummary,
   DetailsContent,
   Footnote,
+  SheetEmbed,
   CommentMark,
   // Steps received from the server already carry the IDs their sender gave.
   UniqueID.configure({

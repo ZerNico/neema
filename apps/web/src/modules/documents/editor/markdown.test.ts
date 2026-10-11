@@ -143,6 +143,45 @@ describe("document Markdown", () => {
     expect(toMarkdown(doc)).toBe("Ship on 2026-10-20 with @Ada.");
   });
 
+  it("reads and writes sheet embeds as shortcodes for the model, and as a plain line for people", () => {
+    const markdown = [
+      "Totals:",
+      '[sheet id="sheet-1" range="\'Q3 \\"final\\"\'!A1:D9"]',
+      '[sheet id="sheet-1" chart="chart-2"]',
+      "After.",
+    ].join("\n\n");
+    const doc = parseMarkdown(markdown);
+    expect(doc.childCount).toBe(4);
+    expect(doc.child(1).type.name).toBe("sheetEmbed");
+    expect(doc.child(1).attrs).toMatchObject({
+      sheet: "sheet-1",
+      range: "'Q3 \"final\"'!A1:D9",
+      chart: null,
+    });
+    expect(doc.child(2).attrs).toMatchObject({ sheet: "sheet-1", range: null, chart: "chart-2" });
+    expect(toModelMarkdown(doc)).toBe(markdown);
+    // People's Markdown has no values to show, so it names what was there,
+    // and that line reads back as text, never as an embed.
+    const plain = toMarkdown(doc);
+    expect(plain).toBe("Totals:\n\n*Sheet range 'Q3 \"final\"'!A1:D9*\n\n*Sheet chart*\n\nAfter.");
+    const reread = parseMarkdown(plain);
+    reread.descendants((node) => {
+      expect(node.type.name).not.toBe("sheetEmbed");
+      return true;
+    });
+  });
+
+  it("leaves a sheet shortcode as text when it names both or neither of a range and a chart", () => {
+    for (const markdown of [
+      '[sheet id="s" range="A!A1" chart="c"]',
+      '[sheet id="s"]',
+      'Inline [sheet id="s" range="A!A1"] stays text',
+    ]) {
+      const doc = parseMarkdown(markdown);
+      expect(doc.firstChild!.type.name).toBe("paragraph");
+    }
+  });
+
   it("keeps raw HTML as text instead of markup", () => {
     const written = normalizeMarkdown("before <b>x</b>\n\n<script>alert(1)</script>");
     expect(written).toBe("before \\<b>x\\</b>\n\n\\<script>alert(1)\\</script>");
