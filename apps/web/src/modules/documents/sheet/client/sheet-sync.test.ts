@@ -94,12 +94,16 @@ describe("a sheet's connection", () => {
     expect(sync.getState().refused).toBe("Some changes weren’t kept: no.");
   });
 
-  it("keeps every acknowledged edit shown while the feed lags", async () => {
+  it("keeps every acknowledged edit shown while the feed lags, as the same document", async () => {
     const { sync, feed, answerWith } = connection();
     feed({ type: "reset", doc: emptyDoc(), revision: 0, moment, acked: null });
     answerWith(() => ({ revision: 1, acked: 1, refused: [] }));
     sync.dispatch([write("s1.r1", "s1.c1", "first")]);
+    const shown = sync.getState().doc;
     await vi.runAllTimersAsync();
+    // Acknowledging moves nothing on the sheet: it shows the very same document.
+    expect(sync.getState().doc).toBe(shown);
+    expect(sync.getState().pending).toBe(0);
     answerWith(() => ({ revision: 2, acked: 2, refused: [] }));
     sync.dispatch([write("s1.r2", "s1.c1", "second")]);
     await vi.runAllTimersAsync();

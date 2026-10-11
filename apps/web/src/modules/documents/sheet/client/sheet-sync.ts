@@ -233,14 +233,15 @@ export class SheetSync {
     this.#state = this.#snapshot();
     for (const listener of this.#listeners) listener();
   }
+  /** The changes replayed over what the server confirmed, in order. */
+  #replayed() {
+    return [...this.#landing.map((each) => each.change), ...this.#pending];
+  }
   /** What the sheet shows: landing and unsent changes replayed over what the server confirmed. */
   #rebuild() {
     let view = this.#confirmed;
     if (view)
-      for (const [index, change] of [
-        ...this.#landing.map((each) => each.change),
-        ...this.#pending,
-      ].entries())
+      for (const [index, change] of this.#replayed().entries())
         view = applyChange(view, change, this.#revision + index + 1).doc;
     this.#view = view;
     this.#notify();
@@ -315,6 +316,7 @@ export class SheetSync {
       .then(
         (result) => {
           this.#failures = 0;
+          const before = this.#replayed();
           if ("rejected" in result) this.#reject(clientId, result.rejected);
           else {
             const refused = new Set(result.refused.map((each) => each.seq));
@@ -322,7 +324,12 @@ export class SheetSync {
             if (result.refused.length)
               this.#refused = `Some changes weren’t kept: ${result.refused[0]!.reason}.`;
           }
-          this.#rebuild();
+          // Acknowledged changes only move from unsent to landing, the sheet showing the same:
+          // a new document would have a large sheet copied and calculated again for nothing.
+          const after = this.#replayed();
+          if (after.length === before.length && after.every((change, at) => change === before[at]))
+            this.#notify();
+          else this.#rebuild();
         },
         () => {
           this.#failures++;
