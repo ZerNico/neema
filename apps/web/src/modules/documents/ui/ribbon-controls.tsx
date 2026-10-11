@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
-// Pressing a toolbar control must not take focus from the grid or the cell being typed in;
+// Pressing a ribbon control must not take focus from the grid, the cell being typed in or the text;
 // a field in a menu, such as a colour's hex code, still takes it.
 const keepFocus = (event: { preventDefault: () => void; target: EventTarget }) => {
   if (!(event.target instanceof HTMLInputElement)) event.preventDefault();

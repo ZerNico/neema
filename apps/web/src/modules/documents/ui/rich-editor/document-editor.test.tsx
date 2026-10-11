@@ -429,6 +429,31 @@ describe("document editor", () => {
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
   });
 
+  it("counts words under the text and jumps to a heading from the outline", async () => {
+    const sync = await replica("# Plan\n\nShip it soon\n\n## Risks\n\nNone yet");
+    mount(sync);
+    const editor = await editorOf();
+    expect(screen.getByRole("status", { name: "Word count" })).toHaveTextContent(
+      "7 words · 29 characters",
+    );
+    act(() => {
+      editor.commands.setTextSelection({ from: 7, to: 14 });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "Word count" })).toHaveTextContent("2 of 7 words"),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "View" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Outline" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Risks" }));
+    await waitFor(() =>
+      expect(editor.state.selection.$from.parent.textContent).toBe("Risks"),
+    );
+    // Hidden from the View tab, and remembered on this device.
+    fireEvent.click(screen.getByRole("button", { name: "Word count" }));
+    expect(screen.queryByRole("status", { name: "Word count" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Word count" }));
+  });
+
   it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {
     const sync = await replica("Plan the launch");
     mount(sync);

@@ -4,6 +4,7 @@ import {
   CommentAdd01Icon,
   FunctionOfXIcon,
   SearchReplaceIcon,
+  TextNumberSignIcon,
   UserIcon,
   CheckListIcon,
   CodeSquareIcon,
@@ -53,6 +54,8 @@ import { insertFormula } from "./math-item.ts";
 import { NodeSelection } from "@tiptap/pm/state";
 import { startComment } from "./comment-start.ts";
 import { setFindOpen } from "./find.ts";
+import { setWordCountShown, useWordCountShown } from "./document-stats.ts";
+import { OutlineMenu } from "./outline-menu.tsx";
 import { Ribbon, type RibbonTab } from "../ribbon.tsx";
 import { isoDay } from "./dates.ts";
 
@@ -206,6 +209,7 @@ const insert = (content: Parameters<Chain["insertContent"]>[0]) => (chain: Chain
  */
 export function DocumentToolbar({ editor }: { editor: Editor }) {
   const state = useToolbarState(editor);
+  const wordCount = useWordCountShown();
   const [linkAnchor, setLinkAnchor] = useState<Element | null>(null);
   const format = (
     label: string,
@@ -232,7 +236,7 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
       onPress={() => run(editor, command)}
     />
   );
-  const tabs: RibbonTab<"home" | "insert" | "review">[] = [
+  const tabs: RibbonTab<"home" | "insert" | "review" | "view">[] = [
     {
       value: "home",
       label: "Home",
@@ -359,6 +363,29 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
               label="New comment"
               disabled={!state.canComment}
               onPress={() => startComment(editor)}
+            />
+          ),
+        },
+      ],
+    },
+    {
+      value: "view",
+      label: "View",
+      groups: [
+        {
+          id: "navigate",
+          label: "Navigate",
+          controls: <OutlineMenu editor={editor} />,
+        },
+        {
+          id: "show",
+          label: "Show",
+          controls: (
+            <Format
+              icon={TextNumberSignIcon}
+              label="Word count"
+              pressed={wordCount}
+              onPress={() => setWordCountShown(!wordCount)}
             />
           ),
         },

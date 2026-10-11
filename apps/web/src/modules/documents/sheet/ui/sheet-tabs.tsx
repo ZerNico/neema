@@ -30,7 +30,7 @@ import {
 } from "~/ui/primitives/context-menu";
 import { Input } from "~/ui/primitives/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
-import { ColorSwatches } from "./toolbar-controls.tsx";
+import { ColorSwatches } from "../../ui/ribbon-controls.tsx";
 
 // Along the strip only, and never past either end of it.
 const MODIFIERS = [

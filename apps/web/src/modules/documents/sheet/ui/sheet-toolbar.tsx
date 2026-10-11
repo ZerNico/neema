@@ -67,7 +67,7 @@ import { Ribbon, type RibbonGroup } from "../../ui/ribbon.tsx";
 import { Action, Format } from "../../ui/rich-editor/toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { BorderMenu } from "./border-menu.tsx";
-import { ColorMenu, ToolbarMenu } from "./toolbar-controls.tsx";
+import { ColorMenu, ToolbarMenu } from "../../ui/ribbon-controls.tsx";
 import { ZOOM_STEPS, stepZoom } from "./zoom.ts";
 
 /** What the toolbar asks of the sheet; the panel turns each into operations on the selection. */

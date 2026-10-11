@@ -9,6 +9,7 @@ import { setEditorHooks, type EditorHooks } from "./editor-hooks.ts";
 import type { DocumentDiscussion } from "../../client/use-document.ts";
 import { CommentCard } from "./comment-card.tsx";
 import { DocumentFindBar } from "./find-bar.tsx";
+import { WordCount } from "./word-count.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 
 /** The connection's editor; the connection itself stays with the caller. */
@@ -90,6 +91,7 @@ function RichEditor({
           }}
         />
       </div>
+      <WordCount editor={editor} />
       {readOnly ? null : (
         <>
           <DocumentBubbleMenu editor={editor} scroller={scroller} />
