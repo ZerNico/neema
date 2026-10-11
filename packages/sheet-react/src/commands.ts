@@ -13,9 +13,9 @@ import {
   type SheetDoc,
 } from "@chat/sheet/model";
 import type { CellWrite, SheetOp, StylePatch } from "@chat/sheet/model/ops";
-export type { ChartKind };
 import { parseDelimited, writeDelimited } from "@chat/sheet/delimited";
 import { readSource, seriesFrom, type ChartKind } from "@chat/sheet/model/chart";
+export type { ChartKind } from "@chat/sheet/model/chart";
 import { parseTyped } from "@chat/sheet/value-parse";
 import { cellDisplay, safeLink } from "./display.ts";
 import { fillSeries, type FillMode, type FillPart } from "@chat/sheet/model/fill";
