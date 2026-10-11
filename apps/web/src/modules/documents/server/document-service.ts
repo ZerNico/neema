@@ -263,8 +263,13 @@ const ownedRange = (doc: Node, live: LiveEdit) => {
 };
 
 /** Markdown, then a planned section per outline entry, with every block given an ID. */
-const buildDocument = (content: string, outline: ReadonlyArray<string> = []) => {
-  const parsed = parseMarkdown(content);
+const buildDocument = (content: string, outline: ReadonlyArray<string> = []) =>
+  Effect.try({
+    try: () => parseMarkdown(content),
+    catch: () => new DocumentRejected({ reason: "this Markdown could not be read as a document" }),
+  }).pipe(Effect.map((parsed) => withOutline(parsed, outline)));
+
+const withOutline = (parsed: Node, outline: ReadonlyArray<string>) => {
   const pending = outline.map((intent) =>
     documentSchema.nodes.pending!.create({ intent: intent.slice(0, PENDING_INTENT_CHARS) }),
   );
@@ -845,7 +850,7 @@ export class DocumentService extends Context.Service<
           const threadIds = new Map(from?.threads.map((thread) => [thread.ref, uuidv7()]));
           const doc = from
             ? yield* importedDocument(placeImported(from, id, threadIds, plan.copies))
-            : buildDocument(parsed.content, parsed.outline);
+            : yield* buildDocument(parsed.content, parsed.outline);
           // Stored as the editor will write it back, so the next read matches.
           yield* withinTreeCap(doc);
           const { document, spent } = yield* transaction((tx) =>
@@ -944,7 +949,7 @@ export class DocumentService extends Context.Service<
             Effect.gen(function* () {
               if (input.ifRevision !== undefined && document.revision !== input.ifRevision)
                 return yield* new DocumentRejected({ reason: EDITED_MEANWHILE });
-              const next = buildDocument(input.content, input.outline);
+              const next = yield* buildDocument(input.content, input.outline);
               yield* withinTreeCap(next);
               return {
                 result: { document },
