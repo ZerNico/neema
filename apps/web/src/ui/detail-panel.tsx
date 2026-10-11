@@ -327,11 +327,12 @@ function usePanelPresentation() {
     generation: 0,
   });
   if (presentation.selected !== selected) {
+    // Refreshes do not restart animation; close/reopen does, even for one ID.
+    const sameId = presentation.selected?.id === selected?.id;
     setPresentation({
       selected,
       request: selected ?? presentation.request,
-      // Refreshes do not restart animation; close/reopen does, even for one ID.
-      generation: presentation.generation + (presentation.selected?.id === selected?.id ? 0 : 1),
+      generation: presentation.generation + (sameId ? 0 : 1),
     });
   }
   const finishExit = useCallback((generation: number) => {

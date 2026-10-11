@@ -76,7 +76,7 @@ export function useSync(
     };
     source.addEventListener("error", () => {
       authorized = false;
-      connection++;
+      connection += 1;
       clearTimeout(identityRetry);
       clearKnowledgeTimer();
     });
@@ -120,7 +120,8 @@ export function useSync(
       authorized = false;
       clearTimeout(identityRetry);
       clearKnowledgeTimer();
-      void open(++connection);
+      connection += 1;
+      void open(connection);
     });
 
     source.addEventListener("sync", (raw) => {
@@ -129,7 +130,8 @@ export function useSync(
       if (event.type === "sync.ready") {
         clearTimeout(identityRetry);
         clearKnowledgeTimer();
-        void open(++connection);
+        connection += 1;
+      void open(connection);
         return;
       }
       if (!authorized) return;
