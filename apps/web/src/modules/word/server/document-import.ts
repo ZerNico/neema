@@ -121,7 +121,8 @@ export function wordToDocument(bytes: Uint8Array, bounds: DocumentBounds): WordA
 /** What one paragraph is on its own, before neighbours group. */
 type Classified =
   | { kind: "heading"; level: number }
-  | { kind: "bullet" | "ordered"; level: number; number: number }
+  // `list` is Word's numbering instance: two lists side by side differ only by it.
+  | { kind: "bullet" | "ordered"; level: number; number: number; list: string }
   | { kind: "task"; level: number; checked: boolean }
   | { kind: "code" | "quote" | "rule" | "math" }
   | { kind: "calloutPart"; label: string | null }
@@ -803,13 +804,13 @@ class WordReader {
       const format = this.#numbering(numId, ilvl);
       if (format) {
         if (TASK_START.test(text)) return { kind: "task", level: ilvl, checked };
-        if (format.bullet) return { kind: "bullet", level: ilvl, number: 1 };
+        if (format.bullet) return { kind: "bullet", level: ilvl, number: 1, list: numId };
         let number = this.#numbers.get(original);
         if (number === undefined) {
           number = this.count(numId, ilvl, format.start);
           this.#numbers.set(original, number);
         }
-        return { kind: "ordered", level: ilvl, number };
+        return { kind: "ordered", level: ilvl, number, list: numId };
       }
     }
     if (TASK_START.test(text)) return { kind: "task", level: levelOf(indent), checked };
@@ -1007,7 +1008,7 @@ class WordReader {
    */
   private list(entries: readonly Entry[], from: number) {
     const root: TreeNode[] = [];
-    const stack: Array<{ list: TreeNode; level: number; kind: string }> = [];
+    const stack: Array<{ list: TreeNode; level: number; kind: string; id: string | null }> = [];
     let index = from;
     for (; index < entries.length; index++) {
       const entry = entries[index]!;
@@ -1026,7 +1027,8 @@ class WordReader {
       const level = Math.min(is.level, 8);
       while (stack.length && stack.at(-1)!.level > level) stack.pop();
       let top = stack.at(-1);
-      if (top && top.level === level && top.kind !== is.kind) {
+      const id = is.kind === "task" ? null : is.list;
+      if (top && top.level === level && (top.kind !== is.kind || top.id !== id)) {
         stack.pop();
         top = stack.at(-1);
       }
@@ -1040,7 +1042,7 @@ class WordReader {
         const parent = top?.list.content!.at(-1);
         if (parent) parent.content!.push(list);
         else root.push(list);
-        top = { list, level, kind: is.kind };
+        top = { list, level, kind: is.kind, id };
         stack.push(top);
       }
       let inline = entry.inline;

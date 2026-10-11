@@ -416,4 +416,16 @@ describe("a Word file from awkward documents", () => {
     // Asked for 1208 by 400 pixels, halved to the page’s 604 pixels of width.
     expect([Number(extent?.[1]), Number(extent?.[2])]).toEqual([604 * 9_525, 200 * 9_525]);
   });
+
+  it("reads two numbered lists side by side as two lists", () => {
+    const list = (items: string[]) => ({
+      type: "orderedList",
+      attrs: { start: 1 },
+      content: items.map((item) => ({ type: "listItem", content: [paragraph(item)] })),
+    });
+    const doc = docOf([list(["one", "two"]), list(["first", "second"])]);
+    const read = readBack(documentToWord(wordExportInput("Lists", doc, [], {})));
+    expect(read.childCount).toBe(2);
+    expect(read.child(1).textContent).toBe("firstsecond");
+  });
 });
