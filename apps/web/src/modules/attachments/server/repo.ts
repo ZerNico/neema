@@ -285,14 +285,23 @@ export class AttachmentRepo extends Context.Service<
       pages: Record<number, string>;
     }): Effect.Effect<void>;
     /**
-     * Gives a document one of this person's free image uploads. False, and
-     * nothing written, for anything else: someone else's, already owned, not
-     * an image, or unknown all answer alike.
+     * Gives a document one of this person's free image uploads, or the
+     * document owner's `copy` of it, consuming the original. Null, and nothing
+     * written, for anything else: someone else's, already owned, not an image,
+     * or unknown all answer alike. Returns the claimed ID and the storage keys
+     * to delete after commit.
      */
     claimForDocument(
       tx: DbTx,
-      input: { userId: string; documentId: string; attachmentId: string },
-    ): Effect.Effect<boolean>;
+      input: {
+        userId: string;
+        documentId: string;
+        attachmentId: string;
+        copy?: { userId: string; attachmentId: string } | undefined;
+      },
+    ): Effect.Effect<{ claimed: string; discard: ReadonlyArray<string> } | null>;
+    /** One of this person's free image uploads with its blob, or null. */
+    findFreeImage(userId: string, attachmentId: string): Effect.Effect<AttachmentWithBlob | null>;
     /**
      * Locks the blobs of attachments about to be claimed one by one, in the
      * one global order, so two claims of the same pictures in other orders
@@ -984,31 +993,52 @@ export class AttachmentRepo extends Context.Service<
         yield* lockAttachmentBlobs(tx, attachmentIds).pipe(Effect.orDie);
       });
 
+      const freeImage = (tx: DbTx | typeof db, userId: string, attachmentId: string) =>
+        tx
+          .select(withBlobColumns)
+          .from(attachments)
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(and(eq(attachments.id, attachmentId), eq(attachments.userId, userId), unclaimed))
+          .pipe(
+            Effect.orDie,
+            Effect.map(([row]) => (row && attachmentKind(row.mediaType) === "image" ? row : null)),
+          );
+
+      const findFreeImage = Effect.fn("AttachmentRepo.findFreeImage")(function* (
+        userId: string,
+        attachmentId: string,
+      ) {
+        return yield* freeImage(db, userId, attachmentId);
+      });
+
       const claimForDocument = Effect.fn("AttachmentRepo.claimForDocument")(function* (
         tx: DbTx,
-        input: { userId: string; documentId: string; attachmentId: string },
+        input: {
+          userId: string;
+          documentId: string;
+          attachmentId: string;
+          copy?: { userId: string; attachmentId: string } | undefined;
+        },
       ) {
         // The blob lock is what keeps two owner tables from both claiming one
         // upload; the unique index only covers this table.
-        yield* lockAttachmentBlobs(tx, [input.attachmentId]).pipe(Effect.orDie);
-        const [free] = yield* tx
-          .select({ mediaType: attachmentBlobs.mediaType })
-          .from(attachments)
-          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
-          .where(
-            and(
-              eq(attachments.id, input.attachmentId),
-              eq(attachments.userId, input.userId),
-              unclaimed,
-            ),
-          )
-          .pipe(Effect.orDie);
-        if (!free || attachmentKind(free.mediaType) !== "image") return false;
+        yield* lockAttachmentBlobs(
+          tx,
+          input.copy ? [input.attachmentId, input.copy.attachmentId] : [input.attachmentId],
+        ).pipe(Effect.orDie);
+        if (!(yield* freeImage(tx, input.userId, input.attachmentId))) return null;
+        const { copy } = input;
+        if (copy && !(yield* freeImage(tx, copy.userId, copy.attachmentId))) return null;
+        const claimed = copy?.attachmentId ?? input.attachmentId;
         yield* tx
           .insert(documentImages)
-          .values({ documentId: input.documentId, attachmentId: input.attachmentId })
+          .values({ documentId: input.documentId, attachmentId: claimed })
           .pipe(Effect.orDie);
-        return true;
+        // The original is spent, so a second claim of it finds nothing to take.
+        const discard = copy
+          ? yield* deleteAttachmentRows(tx, [input.attachmentId], true).pipe(Effect.orDie)
+          : [];
+        return { claimed, discard };
       });
 
       const findDocumentImage = Effect.fn("AttachmentRepo.findDocumentImage")(function* (
@@ -1074,6 +1104,7 @@ export class AttachmentRepo extends Context.Service<
         scannedPages,
         saveScannedPages,
         claimForDocument,
+        findFreeImage,
         lockForClaims,
         findDocumentImage,
         sweepUnclaimed,

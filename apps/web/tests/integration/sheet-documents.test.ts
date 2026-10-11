@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Fiber, Layer, ManagedRuntime, Option, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -7,6 +10,7 @@ import type { SheetOp } from "@chat/sheet/model/ops";
 import { conversations, projectMembers, projects, user } from "~/db/schema/index.ts";
 import type { SheetFrame } from "~/modules/documents/sheet/schema.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
+import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
@@ -14,6 +18,8 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+
+process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "sheet-documents-it-"));
 
 let database: TestDatabase;
 type Services = Db | DocumentRepo | DocumentService | SheetService;
@@ -31,10 +37,12 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 8 })),
   );
-  const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, TestBus).pipe(
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(infrastructure),
-  );
+  const core = Layer.mergeAll(
+    DocumentRepo.layer,
+    AttachmentRepo.layer,
+    TestBus,
+    fsBlobStoreLayer,
+  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
   appLayer = Layer.mergeAll(DocumentService.layer, SheetService.layer).pipe(
     Layer.provideMerge(core),
   );

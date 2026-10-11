@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { Node } from "@tiptap/pm/model";
 import { eq } from "drizzle-orm";
@@ -32,6 +35,7 @@ import {
 } from "~/modules/documents/editor/markdown.ts";
 import { blockView } from "~/modules/documents/editor/tree.ts";
 import { presenceUser } from "~/modules/documents/presence-user.ts";
+import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
@@ -41,6 +45,8 @@ import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+
+process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "documents-it-"));
 
 let database: TestDatabase;
 type Services = Db | DocumentRepo | DocumentService;
@@ -70,10 +76,12 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
-  const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, TestBus).pipe(
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(infrastructure),
-  );
+  const core = Layer.mergeAll(
+    DocumentRepo.layer,
+    AttachmentRepo.layer,
+    TestBus,
+    fsBlobStoreLayer,
+  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
   appLayer = DocumentService.layer.pipe(Layer.provideMerge(core));
   runtime = ManagedRuntime.make(appLayer);
 }, 180_000);

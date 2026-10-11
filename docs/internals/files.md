@@ -32,7 +32,9 @@ declared type, and only the kinds we understand are shown or handed to a model.
   share no unique index. An owner that cascades away leaves its attachment to the unclaimed
   sweep. A document's images are claimed attachments, served to that document's readers at
   `/api/documents/:id/images/:attachmentId` without caching, and kept until the document goes,
-  even once taken out of its text. See [documents](documents.md).
+  even once taken out of its text. Their bytes are the document owner's (the project's owner
+  or the chat's), as a project file's are, so they outlive any member who added them and go
+  with the document. See [documents](documents.md).
 - A message's attachments carry a `kind`: `file`, or `search_image` for an image a ```ui
   block asked for (see [generative UI](generative-ui.md)). A search image belongs to the
   answer for lifetime, retry and branch, but it is page material, not a file of the chat.

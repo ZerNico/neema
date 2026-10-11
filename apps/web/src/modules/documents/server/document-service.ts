@@ -3,6 +3,8 @@ import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { uuidv7 } from "uuidv7";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import { attachmentWriter } from "~/modules/attachments/server/service.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -262,6 +264,12 @@ const buildDocument = (content: string, outline: ReadonlyArray<string> = []) => 
   ])!;
   return ensureIds(squareTables(new Transform(doc))).doc;
 };
+/** Who a document belongs to, as the image owner is read from it. */
+const ownerOf = (document: Pick<EditableDocument, "projectId" | "conversationId">) =>
+  document.projectId
+    ? { projectId: document.projectId }
+    : { conversationId: document.conversationId ?? "" };
+
 /** A tree read from a file, as the schema builds it, every block given an ID; refused if it does not fit. */
 const importedDocument = (json: TreeNode) =>
   Effect.try({
@@ -458,6 +466,7 @@ export class DocumentService extends Context.Service<
       const policy = yield* FeaturePolicy;
       const documents = yield* DocumentRepo;
       const attachments = yield* AttachmentRepo;
+      const files = attachmentWriter(attachments, yield* BlobStore);
       const bus = yield* SyncBus;
       const scope = yield* Effect.scope;
       // One process owns every document's live state (see docs/internals/documents.md).
@@ -559,6 +568,64 @@ export class DocumentService extends Context.Service<
 
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
+
+      /**
+       * Copies the caller's image uploads to the owner of the document's files
+       * when that is someone else, so an image outlives whoever added it.
+       * Done before the claim's transaction, like any upload; a copy left
+       * unclaimed is swept.
+       */
+      const planImages = (
+        userId: string,
+        owner: DocumentOwner | null,
+        attachmentIds: ReadonlyArray<string>,
+      ) =>
+        Effect.gen(function* () {
+          const copies = new Map<string, string>();
+          if (!owner || !(yield* policy.can(userId, "documents"))) return { ownerId: null, copies };
+          const ownerId = yield* documents.imageOwner(userId, owner);
+          if (!ownerId || ownerId === userId) return { ownerId, copies };
+          for (const attachmentId of attachmentIds) {
+            const copy = yield* files.copyImage({ userId, attachmentId, toUserId: ownerId });
+            if (copy) copies.set(attachmentId, copy);
+          }
+          return { ownerId, copies };
+        });
+
+      /**
+       * Claims each upload as planned, or nothing: the plan must still name
+       * the owner, and each claim re-checks its upload under the blob lock.
+       * Returns the storage keys to delete after commit, or null when refused.
+       */
+      const claimImages = (
+        tx: DbTx,
+        userId: string,
+        documentId: string,
+        owner: DocumentOwner,
+        plan: { ownerId: string | null; copies: ReadonlyMap<string, string> },
+        attachmentIds: ReadonlyArray<string>,
+      ) =>
+        Effect.gen(function* () {
+          const { ownerId, copies } = plan;
+          if (!ownerId || (yield* documents.imageOwner(userId, owner, tx)) !== ownerId) return null;
+          // Locked together first, in the global order: claimed one by one in
+          // the file's order, two imports of the same pictures could deadlock.
+          yield* attachments.lockForClaims(tx, [...attachmentIds, ...copies.values()]);
+          const spent: string[] = [];
+          for (const attachmentId of attachmentIds) {
+            const copy = copies.get(attachmentId);
+            if (ownerId !== userId && !copy) return null;
+            const claim = yield* attachments.claimForDocument(tx, {
+              userId,
+              documentId,
+              attachmentId,
+              copy: copy ? { userId: ownerId, attachmentId: copy } : undefined,
+            });
+            if (!claim) return null;
+            spent.push(...claim.discard);
+          }
+          return spent;
+        });
 
       const requireDocuments = (userId: string, tx?: DbTx) =>
         policy
@@ -750,14 +817,6 @@ export class DocumentService extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
-          // An imported tree names the document in its images' addresses, so its ID comes first.
-          const id = uuidv7();
-          const threadIds = new Map(from?.threads.map((thread) => [thread.ref, uuidv7()]));
-          const doc = from
-            ? yield* importedDocument(placeImported(from, id, threadIds))
-            : buildDocument(parsed.content, parsed.outline);
-          // Stored as the editor will write it back, so the next read matches.
-          yield* withinTreeCap(doc);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
             : parsed.conversationId
@@ -767,7 +826,18 @@ export class DocumentService extends Context.Service<
             return yield* new DocumentRejected({
               reason: "a document belongs to a chat or a project",
             });
-          const document = yield* transaction((tx) =>
+          const images = from?.images ?? [];
+          const plan = yield* planImages(userId, images.length ? owner : null, images);
+          // An imported tree names the document and each claimed image in their
+          // addresses, so both are settled first.
+          const id = uuidv7();
+          const threadIds = new Map(from?.threads.map((thread) => [thread.ref, uuidv7()]));
+          const doc = from
+            ? yield* importedDocument(placeImported(from, id, threadIds, plan.copies))
+            : buildDocument(parsed.content, parsed.outline);
+          // Stored as the editor will write it back, so the next read matches.
+          yield* withinTreeCap(doc);
+          const { document, spent } = yield* transaction((tx) =>
             Effect.gen(function* () {
               // Keep fence failures outside recoverable validation/conflict handling.
               if (guard) yield* guard(tx);
@@ -784,20 +854,12 @@ export class DocumentService extends Context.Service<
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: doc.toJSON() as Record<string, unknown>,
               });
-              if (!from) return created;
+              if (!from) return { document: created, spent: [] };
               // Every picture is claimed as a person's own upload is, or nothing is stored.
-              // Their blobs are locked together first, in the global order: claimed one
-              // by one in the file's order, two imports of the same pictures could deadlock.
-              yield* attachments.lockForClaims(tx, from.images);
-              for (const attachmentId of from.images)
-                if (
-                  !(yield* attachments.claimForDocument(tx, {
-                    userId,
-                    documentId: created.id,
-                    attachmentId,
-                  }))
-                )
-                  return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+              const keys = images.length
+                ? yield* claimImages(tx, userId, created.id, owner, plan, images)
+                : [];
+              if (!keys) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
               // A file's comments are threads of their own origin; the names in it prove nothing.
               for (const thread of from.threads) {
                 const threadId = threadIds.get(thread.ref)!;
@@ -814,9 +876,10 @@ export class DocumentService extends Context.Service<
                   });
                 if (thread.resolved) yield* documents.resolveThread(tx, created.id, threadId, true);
               }
-              return created;
+              return { document: created, spent: keys };
             }),
           );
+          yield* files.deleteBlobs(spent);
           yield* documentChanged(userId, document);
           return { outcome: "created" as const, document, planned: plannedIds(doc) };
         });
@@ -1435,19 +1498,25 @@ export class DocumentService extends Context.Service<
           return renamed;
         }),
         addImage: Effect.fn("DocumentService.addImage")(function* (userId, input) {
-          const claimed = yield* transaction((tx) =>
+          const found = yield* documents.get(userId, input.documentId);
+          const plan = yield* planImages(userId, found?.kind === "text" ? ownerOf(found) : null, [
+            input.attachmentId,
+          ]);
+          const spent = yield* transaction((tx) =>
             Effect.gen(function* () {
               yield* requireDocuments(userId, tx);
               // The row lock holds off a delete until the claim commits.
               const document = yield* documents.lock(tx, userId, input.documentId);
-              return (
-                document.kind === "text" &&
-                (yield* attachments.claimForDocument(tx, { userId, ...input }))
-              );
+              if (document.kind !== "text") return null;
+              return yield* claimImages(tx, userId, document.id, ownerOf(document), plan, [
+                input.attachmentId,
+              ]);
             }),
           );
-          if (!claimed) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
-          return documentImagePath(input.documentId, input.attachmentId);
+          if (!spent) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+          yield* files.deleteBlobs(spent);
+          const claimed = plan.copies.get(input.attachmentId) ?? input.attachmentId;
+          return documentImagePath(input.documentId, claimed);
         }),
         create,
         versions: Effect.fn("DocumentService.versions")(function* (userId, documentId) {

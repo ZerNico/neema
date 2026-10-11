@@ -94,6 +94,11 @@ export class DocumentRepo extends Context.Service<
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
+    /**
+     * Whose files images in the owner's documents are: the project's owner, or
+     * the chat's. Null unless the caller may edit there.
+     */
+    imageOwner(userId: string, owner: DocumentOwner, tx?: Reader): Effect.Effect<string | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
     /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
@@ -244,6 +249,24 @@ export class DocumentRepo extends Context.Service<
           return (yield* get(userId, id, tx))!;
         }),
         get,
+        imageOwner: Effect.fn("DocumentRepo.imageOwner")(function* (userId, owner, tx) {
+          if ("conversationId" in owner) {
+            const [chat] = yield* (tx ?? db)
+              .select({ userId: conversations.userId })
+              .from(conversations)
+              .where(
+                and(eq(conversations.id, owner.conversationId), eq(conversations.userId, userId)),
+              )
+              .pipe(Effect.orDie);
+            return chat?.userId ?? null;
+          }
+          const [project] = yield* (tx ?? db)
+            .select({ userId: projects.userId, role: projectRoleSql(userId) })
+            .from(projects)
+            .where(eq(projects.id, owner.projectId))
+            .pipe(Effect.orDie);
+          return project && projectCan.edit(project.role) ? project.userId : null;
+        }),
         list: Effect.fn("DocumentRepo.list")(function* (userId, owner) {
           const access = accessSql(userId);
           const rows = yield* db

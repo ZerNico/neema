@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { conversations, documentImages, documents, user } from "~/db/schema/index.ts";
+import { attachments, conversations, documentImages, documents, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -459,6 +459,59 @@ describe("starting a document from a Word file", () => {
     // The exported file says what it is; a title typed in the dialog wins.
     const titled = await importWord(owner, projectId, { name: "Plan.docx", bytes }, "Mine");
     expect(Exit.isSuccess(titled) && titled.value.document.title).toBe("Mine");
+  });
+
+  it("stores a member's imported pictures as the project owner's, so they outlive the member", async () => {
+    const { owner, viewer, projectId } = await project();
+    const editor = await createUser("Editor");
+    await run(
+      Effect.flatMap(ProjectService, (s) =>
+        s.changeMembers(owner, projectId, {
+          action: "addUser",
+          email: `${editor}@t.io`,
+          role: "editor",
+        }),
+      ),
+    );
+    const bytes = wordFile("See ![Dot](/api/documents/old/images/dot)\n\nShip it.", false);
+    const exit = await importWord(editor, projectId, { name: "Plan.docx", bytes });
+    if (!Exit.isSuccess(exit)) throw Cause.squash(exit.cause);
+    const { document } = exit.value;
+    const read = await run(Effect.flatMap(DocumentService, (s) => s.read(viewer, document.id)));
+    const src = /!\[Dot\]\(([^)]+)\)/.exec(toMarkdown(read!.doc))?.[1] ?? "";
+    const claims = await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .select({ attachmentId: documentImages.attachmentId, userId: attachments.userId })
+          .from(documentImages)
+          .innerJoin(attachments, eq(attachments.id, documentImages.attachmentId))
+          .where(eq(documentImages.documentId, document.id)),
+      ),
+    );
+    // The tree points at the claimed copy, which is the owner's; the editor keeps no upload.
+    expect(claims).toEqual([{ attachmentId: claims[0]?.attachmentId, userId: owner }]);
+    expect(src).toBe(`/api/documents/${document.id}/images/${claims[0]!.attachmentId}`);
+    const editorsFiles = await run(
+      Effect.flatMap(Db, (db) =>
+        db.select().from(attachments).where(eq(attachments.userId, editor)),
+      ),
+    );
+    expect(editorsFiles).toEqual([]);
+
+    // As account deletion does; the document's readers still get the picture.
+    await run(Effect.flatMap(Db, (db) => db.delete(user).where(eq(user.id, editor))));
+    await run(Effect.flatMap(AttachmentService, (s) => s.purgeUserFiles(editor)));
+    for (const reader of [owner, viewer]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two readers, in order.
+      const image = await fetchImage(src, reader);
+      expect(image.status).toBe(200);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- The same response's body.
+      expect(new Uint8Array(await image.arrayBuffer())).toEqual(PNG);
+    }
+    const word = openDocx(
+      new Uint8Array(await (await download(document.id, viewer)).arrayBuffer()),
+    );
+    expect(images(word).map((each) => each.data)).toEqual([PNG]);
   });
 
   it("refuses a file too large for a document, a broken one and an old one, storing nothing", async () => {

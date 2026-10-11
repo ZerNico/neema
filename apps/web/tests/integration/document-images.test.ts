@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { attachments, documentImages, user } from "~/db/schema/index.ts";
+import { attachmentBlobs, attachments, documentImages, user } from "~/db/schema/index.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -34,6 +35,7 @@ process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "document-images-it-"))
 
 type Services =
   | Db
+  | BlobStore
   | AttachmentRepo
   | AttachmentService
   | DocumentService
@@ -140,6 +142,35 @@ const fetchImage = (documentId: string, attachmentId: string, userId?: string) =
   });
 };
 
+/** The attachment a successful claim answered with, read back from its address. */
+const claimedId = (result: Exit.Exit<string, unknown>) => {
+  if (Exit.isFailure(result)) throw Cause.squash(result.cause);
+  return decodeURIComponent(result.value.split("/").at(-1) ?? "");
+};
+const attachmentRow = (attachmentId: string) =>
+  run(
+    Effect.flatMap(Db, (db) =>
+      db
+        .select({ userId: attachments.userId, storageKey: attachmentBlobs.storageKey })
+        .from(attachments)
+        .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+        .where(eq(attachments.id, attachmentId)),
+    ),
+  ).then((rows) => rows[0] ?? null);
+const storedBytes = (storageKey: string) =>
+  run(Effect.flatMap(BlobStore, (store) => store.exists(storageKey)));
+/** A cutoff in the future makes every unclaimed upload due. */
+const sweep = () =>
+  run(
+    Effect.gen(function* () {
+      const keys = yield* AttachmentRepo.use((repo) =>
+        repo.sweepUnclaimed(new Date(Date.now() + 60_000)),
+      );
+      yield* AttachmentService.use((service) => service.deleteBlobs(keys));
+      return keys;
+    }),
+  );
+
 const claimOf = (attachmentId: string) =>
   run(
     Effect.flatMap(Db, (db) =>
@@ -148,27 +179,87 @@ const claimOf = (attachmentId: string) =>
   );
 
 describe("claiming a document image", () => {
-  it("lets an editor claim their own image upload and answers with its address", async () => {
-    const { editor, documentId } = await projectDocument();
-    const image = await upload(editor, png(1));
-    const result = await addImage(editor, documentId, image.id);
+  it("claims the owner's own upload as it is and answers with its address", async () => {
+    const { owner, documentId } = await projectDocument();
+    const image = await upload(owner, png(11));
+    const result = await addImage(owner, documentId, image.id);
     expect(result).toStrictEqual(Exit.succeed(`/api/documents/${documentId}/images/${image.id}`));
     expect(await claimOf(image.id)).toHaveLength(1);
+    expect((await attachmentRow(image.id))?.userId).toBe(owner);
     // Claimed once: neither this document nor another may take it again.
+    expect(reason(await addImage(owner, documentId, image.id))).toBe(IMAGE_REFUSED);
+  });
+
+  it("claims an editor's upload as the project owner's copy and spends the original", async () => {
+    const { owner, editor, documentId } = await projectDocument();
+    const image = await upload(editor, png(1));
+    const original = await attachmentRow(image.id);
+    const result = await addImage(editor, documentId, image.id);
+    const claimed = claimedId(result);
+    expect(claimed).not.toBe(image.id);
+    expect(result).toStrictEqual(Exit.succeed(`/api/documents/${documentId}/images/${claimed}`));
+    expect(await claimOf(claimed)).toHaveLength(1);
+    const copy = await attachmentRow(claimed);
+    expect(copy?.userId).toBe(owner);
+    expect(await storedBytes(copy!.storageKey)).toBe(true);
+    // The editor's upload is gone with its bytes, so it cannot be claimed again.
+    expect(await attachmentRow(image.id)).toBeNull();
+    expect(await storedBytes(original!.storageKey)).toBe(false);
     expect(reason(await addImage(editor, documentId, image.id))).toBe(IMAGE_REFUSED);
   });
 
+  it("gives one upload to only one of two documents claiming it at once", async () => {
+    const { owner, editor, projectId, documentId } = await projectDocument();
+    const other = await run(
+      Effect.flatMap(DocumentService, (s) =>
+        s.create(owner, { projectId, title: "Other", content: "", by: "user" }),
+      ),
+    );
+    const image = await upload(editor, png(12));
+    const results = await Promise.all([
+      addImage(editor, documentId, image.id),
+      addImage(editor, other.document.id, image.id),
+    ]);
+    expect(results.map(refusal).toSorted()).toEqual(["DocumentRejected", "claimed"]);
+    const held = claimedId(results.find(Exit.isSuccess)!);
+    expect(await claimOf(held)).toHaveLength(1);
+    // Both copied before their transactions; the refused one's copy is the sweep's.
+    const ownersFiles = () =>
+      run(
+        Effect.flatMap(Db, (db) =>
+          db.select({ id: attachments.id }).from(attachments).where(eq(attachments.userId, owner)),
+        ),
+      ).then((rows) => rows.map((row) => row.id));
+    expect(await ownersFiles()).toHaveLength(2);
+    await sweep();
+    expect(await ownersFiles()).toEqual([held]);
+    const winner = Exit.isSuccess(results[0]!) ? documentId : other.document.id;
+    expect((await fetchImage(winner, held, owner)).status).toBe(200);
+  });
+
   it("serves a claimed image only through its document, not to its uploader directly", async () => {
-    const { editor, documentId } = await projectDocument();
+    const { owner, editor, documentId } = await projectDocument();
     const upload1 = await upload(editor, png(7));
     const before = await runtime.runPromiseExit(
-      Effect.flatMap(AttachmentService, (s) => s.read({ userId: editor, attachmentId: upload1.id })),
+      Effect.flatMap(AttachmentService, (s) =>
+        s.read({ userId: editor, attachmentId: upload1.id }),
+      ),
     );
     expect(Exit.isSuccess(before)).toBe(true);
-    expect(refusal(await addImage(editor, documentId, upload1.id))).toBe("claimed");
+    const claimed = await addImage(editor, documentId, upload1.id);
+    expect(refusal(claimed)).toBe("claimed");
+    // Nor to the owner whose copy it is.
+    const owners = await runtime.runPromiseExit(
+      Effect.flatMap(AttachmentService, (s) =>
+        s.read({ userId: owner, attachmentId: claimedId(claimed) }),
+      ),
+    );
+    expect(Exit.isFailure(owners)).toBe(true);
     // The plain file route caches for good and outlives project access, so it refuses.
     const after = await runtime.runPromiseExit(
-      Effect.flatMap(AttachmentService, (s) => s.read({ userId: editor, attachmentId: upload1.id })),
+      Effect.flatMap(AttachmentService, (s) =>
+        s.read({ userId: editor, attachmentId: upload1.id }),
+      ),
     );
     expect(Exit.isFailure(after)).toBe(true);
   });
@@ -214,8 +305,9 @@ describe("serving a document image", () => {
   it("serves a project member another member's image, uncached, and nobody outside", async () => {
     const { editor, viewer, owner, projectId, documentId } = await projectDocument();
     const bytes = png(5);
-    const image = await upload(editor, bytes);
-    await addImage(editor, documentId, image.id);
+    const image = {
+      id: claimedId(await addImage(editor, documentId, (await upload(editor, bytes)).id)),
+    };
 
     const response = await fetchImage(documentId, image.id, viewer);
     expect(response.status).toBe(200);
@@ -246,31 +338,37 @@ describe("the unclaimed sweep", () => {
     const { owner, documentId } = await projectDocument();
     const image = await upload(owner, png(7));
     await addImage(owner, documentId, image.id);
-    // A cutoff in the future makes every unclaimed upload due.
-    const sweep = () =>
-      run(
-        Effect.gen(function* () {
-          const keys = yield* AttachmentRepo.use((repo) =>
-            repo.sweepUnclaimed(new Date(Date.now() + 60_000)),
-          );
-          yield* AttachmentService.use((service) => service.deleteBlobs(keys));
-          return keys;
-        }),
-      );
-    const attachmentRow = () =>
-      run(
-        Effect.flatMap(Db, (db) =>
-          db.select().from(attachments).where(eq(attachments.id, image.id)),
-        ),
-      );
 
     await sweep();
-    expect(await attachmentRow()).toHaveLength(1);
+    expect(await attachmentRow(image.id)).not.toBeNull();
     expect((await fetchImage(documentId, image.id, owner)).status).toBe(200);
 
     await run(Effect.flatMap(DocumentService, (s) => s.remove(owner, documentId)));
     expect(await claimOf(image.id)).toHaveLength(0);
     expect((await sweep()).length).toBeGreaterThan(0);
-    expect(await attachmentRow()).toHaveLength(0);
+    expect(await attachmentRow(image.id)).toBeNull();
+  });
+});
+
+describe("a member who deletes their account", () => {
+  it("leaves the images they added to the project's documents in place", async () => {
+    const { owner, editor, viewer, documentId } = await projectDocument();
+    const bytes = png(21);
+    const image = await upload(editor, bytes);
+    const claimed = claimedId(await addImage(editor, documentId, image.id));
+
+    // As account deletion does: the row goes, its rows cascade, then the person's files go.
+    await run(Effect.flatMap(Db, (db) => db.delete(user).where(eq(user.id, editor))));
+    await run(Effect.flatMap(AttachmentService, (s) => s.purgeUserFiles(editor)));
+    await sweep();
+
+    expect(await claimOf(claimed)).toHaveLength(1);
+    for (const reader of [owner, viewer]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two readers, in order.
+      const response = await fetchImage(documentId, claimed, reader);
+      expect(response.status).toBe(200);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- The same response's body.
+      expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(bytes);
+    }
   });
 });

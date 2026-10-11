@@ -28,13 +28,15 @@ export interface ImportedText {
 
 /**
  * The imported tree as it is stored: images at the new document's addresses,
- * comment marks on their threads' IDs, links only to web and mail. Anything
- * else the worker sent is dropped here, whatever the file made it say.
+ * under the attachment `claimedAs` maps each upload to, comment marks on their
+ * threads' IDs, links only to web and mail. Anything else the worker sent is
+ * dropped here, whatever the file made it say.
  */
 export const placeImported = (
   imported: ImportedText,
   documentId: string,
   threadIds: ReadonlyMap<string, string>,
+  claimedAs: ReadonlyMap<string, string> = new Map(),
 ): TreeNode => {
   const claimed = new Set(imported.images);
   const place = (node: TreeNode): TreeNode | null => {
@@ -42,7 +44,10 @@ export const placeImported = (
       const src = typeof node.attrs?.src === "string" ? node.attrs.src : "";
       const id = src.startsWith(ATTACHMENT_REF) ? src.slice(ATTACHMENT_REF.length) : "";
       if (!claimed.has(id)) return null;
-      return { ...node, attrs: { ...node.attrs, src: documentImagePath(documentId, id) } };
+      return {
+        ...node,
+        attrs: { ...node.attrs, src: documentImagePath(documentId, claimedAs.get(id) ?? id) },
+      };
     }
     const marks = node.marks?.flatMap((mark) => {
       if (mark.type === "comment") {
