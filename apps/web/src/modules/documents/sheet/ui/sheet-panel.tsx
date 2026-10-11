@@ -1,22 +1,6 @@
 import { cellStyle } from "@chat/sheet/model/style";
-import {
-  ChartColumnIcon,
-  CommentAdd01Icon,
-  Link01Icon,
-  ClipboardIcon,
-  ColumnDeleteIcon,
-  ColumnInsertIcon,
-  Copy01Icon,
-  Delete02Icon,
-  RowDeleteIcon,
-  RowInsertIcon,
-  Scissor01Icon,
-  SortingAZ01Icon,
-  SortingZA01Icon,
-  ViewIcon,
-  ViewOffIcon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
+import { CommentAdd01Icon, Copy01Icon, Delete02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
   useContext,
   useEffect,
@@ -52,7 +36,6 @@ import {
   eachRange,
   sheetCsv,
   type PastePart,
-  sortSelection,
   type CopiedCells,
   type GridContext,
 } from "@chat/sheet-react/commands";
@@ -70,16 +53,7 @@ import {
 } from "@chat/sheet-react/grid";
 import { Button } from "~/ui/primitives/button";
 import { readHtmlTable, selectionHtml } from "@chat/sheet-react/clipboard";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from "~/ui/primitives/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "~/ui/primitives/context-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { Spinner } from "~/ui/primitives/spinner";
@@ -101,6 +75,7 @@ import type { SheetController } from "../client/use-sheet.ts";
 import { useSheetValues } from "../client/use-sheet-values.ts";
 import { SheetToolbar, type ToolbarCommand } from "./sheet-toolbar.tsx";
 import { SheetTabs } from "./sheet-tabs.tsx";
+import { CellMenuItems, MenuItem } from "./cell-menu.tsx";
 import { FindBar } from "./find-bar.tsx";
 import { findMatches } from "./find.ts";
 import { FormulaBar } from "./formula-bar.tsx";
@@ -134,7 +109,6 @@ import {
   shortcutFormat,
 } from "@chat/sheet-react/format-commands";
 import { formatValue, generalText } from "@chat/sheet/number-format";
-import { CHART_KINDS } from "./chart-kinds.ts";
 import { CHART_LIMITS, chartData } from "@chat/sheet/model/chart";
 import { ChartEditor } from "./chart-editor/chart-editor.tsx";
 import { FillOptions, type FillChoice } from "./fill-options.tsx";
@@ -162,25 +136,6 @@ import { parseTyped } from "@chat/sheet/value-parse";
 import { ChartContextItems, ChartMenuButton } from "./sheet-charts.tsx";
 import { chartDecorations, chartImage, duplicateChart, type ChartAction } from "./chart-actions.ts";
 
-function MenuItem({
-  icon,
-  label,
-  disabled = false,
-  onClick,
-}: {
-  icon: HugeiconsIconProps["icon"];
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <ContextMenuItem disabled={disabled} onClick={onClick}>
-      <HugeiconsIcon icon={icon} strokeWidth={2} />
-      {label}
-    </ContextMenuItem>
-  );
-}
-
 /** Text and HTML on the clipboard from a menu, text alone where the browser has no ClipboardItem. */
 function writeClipboard(text: string, html: string) {
   const clipboard = navigator.clipboard;
@@ -207,17 +162,6 @@ const pickedOf = (key: string): Picked =>
   key.startsWith("image:")
     ? { kind: "image", id: key.slice("image:".length) }
     : { kind: "chart", id: key.slice("chart:".length) };
-
-/** Excel's Paste Special choices, as the cell menu offers them. */
-const PASTE_SPECIAL: ReadonlyArray<{
-  label: string;
-  options: { part?: PastePart; transpose?: boolean };
-}> = [
-  { label: "Values only", options: { part: "values" } },
-  { label: "Formulas only", options: { part: "formulas" } },
-  { label: "Formats only", options: { part: "formats" } },
-  { label: "Transposed", options: { transpose: true } },
-];
 
 const sameSelection = (a: SheetSelection, b: SheetSelection) =>
   a.anchor.r === b.anchor.r &&
@@ -1235,156 +1179,20 @@ export default function SheetPanelBody({
                 />
               </>
             ) : (
-              <>
-                <MenuItem
-                  icon={Scissor01Icon}
-                  label="Cut"
-                  disabled={readOnly}
-                  onClick={() => {
-                    copied.current = copySelection(context, true);
-                    writeClipboard(copied.current.text, selectionHtml(context));
-                  }}
-                />
-                <MenuItem
-                  icon={Copy01Icon}
-                  label="Copy"
-                  onClick={() => {
-                    copied.current = copySelection(context, false);
-                    writeClipboard(copied.current.text, selectionHtml(context));
-                  }}
-                />
-                <MenuItem
-                  icon={ClipboardIcon}
-                  label="Paste"
-                  disabled={readOnly}
-                  onClick={() => pasteFromMenu()}
-                />
-                <ContextMenuSub>
-                  <ContextMenuSubTrigger disabled={readOnly}>
-                    <HugeiconsIcon icon={ClipboardIcon} strokeWidth={2} />
-                    Paste special
-                  </ContextMenuSubTrigger>
-                  <ContextMenuSubContent className="w-44">
-                    {PASTE_SPECIAL.map((each) => (
-                      <MenuItem
-                        key={each.label}
-                        icon={ClipboardIcon}
-                        label={each.label}
-                        onClick={() => pasteFromMenu(each.options)}
-                      />
-                    ))}
-                  </ContextMenuSubContent>
-                </ContextMenuSub>
-                <MenuItem
-                  icon={CommentAdd01Icon}
-                  label="Comment"
-                  disabled={readOnly}
-                  onClick={() => setCommenting(true)}
-                />
-                <MenuItem
-                  icon={Link01Icon}
-                  label={style.link ? "Edit link" : "Insert link"}
-                  disabled={readOnly}
-                  onClick={() => setLinking(true)}
-                />
-                <ContextMenuSeparator />
-                <MenuItem
-                  icon={RowInsertIcon}
-                  label="Insert rows above"
-                  disabled={readOnly}
-                  onClick={() => run(insertAtSelection(context, "rows", "before"))}
-                />
-                <MenuItem
-                  icon={RowInsertIcon}
-                  label="Insert rows below"
-                  disabled={readOnly}
-                  onClick={() => run(insertAtSelection(context, "rows", "after"))}
-                />
-                <MenuItem
-                  icon={ColumnInsertIcon}
-                  label="Insert columns left"
-                  disabled={readOnly}
-                  onClick={() => run(insertAtSelection(context, "columns", "before"))}
-                />
-                <MenuItem
-                  icon={ColumnInsertIcon}
-                  label="Insert columns right"
-                  disabled={readOnly}
-                  onClick={() => run(insertAtSelection(context, "columns", "after"))}
-                />
-                <MenuItem
-                  icon={RowDeleteIcon}
-                  label="Delete rows"
-                  disabled={readOnly}
-                  onClick={() => run(deleteAtSelection(context, "rows"))}
-                />
-                <MenuItem
-                  icon={ColumnDeleteIcon}
-                  label="Delete columns"
-                  disabled={readOnly}
-                  onClick={() => run(deleteAtSelection(context, "columns"))}
-                />
-                <ContextMenuSub>
-                  <ContextMenuSubTrigger disabled={readOnly}>
-                    <HugeiconsIcon icon={ViewOffIcon} strokeWidth={2} />
-                    Hide and unhide
-                  </ContextMenuSubTrigger>
-                  <ContextMenuSubContent className="w-44">
-                    <MenuItem
-                      icon={ViewOffIcon}
-                      label="Hide rows"
-                      onClick={() => run(hideAtSelection(context, "rows", true))}
-                    />
-                    <MenuItem
-                      icon={ViewOffIcon}
-                      label="Hide columns"
-                      onClick={() => run(hideAtSelection(context, "columns", true))}
-                    />
-                    <MenuItem
-                      icon={ViewIcon}
-                      label="Unhide rows"
-                      onClick={() => run(hideAtSelection(context, "rows", false))}
-                    />
-                    <MenuItem
-                      icon={ViewIcon}
-                      label="Unhide columns"
-                      onClick={() => run(hideAtSelection(context, "columns", false))}
-                    />
-                  </ContextMenuSubContent>
-                </ContextMenuSub>
-                <ContextMenuSub>
-                  <ContextMenuSubTrigger disabled={readOnly}>
-                    <HugeiconsIcon icon={ChartColumnIcon} strokeWidth={2} />
-                    Insert chart
-                  </ContextMenuSubTrigger>
-                  <ContextMenuSubContent className="w-40">
-                    {CHART_KINDS.map((each) => (
-                      <ContextMenuItem key={each.kind} onClick={() => insertChart(each.kind)}>
-                        {each.label}
-                      </ContextMenuItem>
-                    ))}
-                  </ContextMenuSubContent>
-                </ContextMenuSub>
-                <ContextMenuSeparator />
-                <MenuItem
-                  icon={SortingAZ01Icon}
-                  label="Sort A to Z"
-                  disabled={readOnly}
-                  onClick={() => run(sortSelection(context, false))}
-                />
-                <MenuItem
-                  icon={SortingZA01Icon}
-                  label="Sort Z to A"
-                  disabled={readOnly}
-                  onClick={() => run(sortSelection(context, true))}
-                />
-                <MenuItem
-                  icon={Delete02Icon}
-                  label="Clear contents"
-                  disabled={readOnly}
-                  onClick={() => run(clearSelection(context))}
-                />
-              </>
+              <CellMenuItems
+                readOnly={readOnly}
+                linked={!!style.link}
+                context={context}
+                run={run}
+                onCopy={(cut) => {
+                  copied.current = copySelection(context, cut);
+                  writeClipboard(copied.current.text, selectionHtml(context));
+                }}
+                onPaste={pasteFromMenu}
+                onComment={() => setCommenting(true)}
+                onLink={() => setLinking(true)}
+                onChart={insertChart}
+              />
             )}
           </ContextMenuContent>
         </ContextMenu>
