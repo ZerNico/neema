@@ -577,14 +577,15 @@ html[data-panel-resizing] webview {
       @apply bg-warning/40;
     }
   }
-  /* A callout: a note, tip or warning set apart, its kind named above its text. */
+  /* A callout: drawn like a quote (rule and indent) so it sits with the text, its rule in
+     its kind's colour and its kind named above, as GitHub draws an alert. */
   .rich-editor [data-callout] {
-    @apply bg-muted/40 rounded-xl border-l-4 px-4 py-3;
+    @apply border-l-4 pl-4;
     & > * + * {
       @apply mt-2;
     }
     &::before {
-      @apply mb-1 block text-xs font-semibold tracking-wide uppercase;
+      @apply mb-0.5 block text-sm font-medium;
     }
     &[data-callout="note"] {
       @apply border-chart-1;

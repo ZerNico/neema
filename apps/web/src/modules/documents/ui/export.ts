@@ -49,7 +49,7 @@ figure.diagram { margin: 0 0 9pt; text-align: center; break-inside: avoid; white
 figure.diagram svg { max-width: 100%; height: auto; }
 .formula { margin: 0 0 9pt; text-align: center; break-inside: avoid; }
 h4, h5, h6 { font-size: 11pt; line-height: 1.25; margin: 12pt 0 4pt; break-after: avoid; }
-[data-callout] { margin: 0 0 9pt; padding: 6pt 10pt; border-left: 3pt solid #888; background: #f4f4f5; break-inside: avoid; }
+[data-callout] { margin: 0 0 9pt; padding-left: 10pt; border-left: 3pt solid #888; break-inside: avoid; }
 [data-callout="note"] { border-color: #2563eb; } [data-callout="tip"] { border-color: #16a34a; }
 [data-callout="important"] { border-color: #7c3aed; } [data-callout="warning"] { border-color: #d97706; }
 [data-callout="caution"] { border-color: #dc2626; }
