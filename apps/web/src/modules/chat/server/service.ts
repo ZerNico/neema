@@ -60,7 +60,7 @@ import {
 import { StreamEngine } from "./streaming.ts";
 import { resumeFirstTurn } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
-import { QueueSweepInterval, TemporarySweepInterval } from "./generation-fence.ts";
+import { ConversationSweepInterval, QueueSweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
@@ -385,7 +385,21 @@ export class ChatService extends Context.Service<
       conversationId: string;
       messageId: string;
     }): Effect.Effect<{ stopped: boolean }, ConversationNotFound | MessageNotFound>;
-    deleteConversation(input: { userId: string; conversationId: string }): Effect.Effect<void>;
+    /**
+     * Deletes a chat the way Undo can reverse: gone for every reader until
+     * the sweep purges it, with any answer still running stopped. Returns the
+     * delete's mark for its Undo, or null when there was nothing to delete.
+     */
+    deleteConversation(input: {
+      userId: string;
+      conversationId: string;
+    }): Effect.Effect<string | null>;
+    /** Undoes the delete `mark` names. False once purged or deleted again. */
+    restoreConversation(input: {
+      userId: string;
+      conversationId: string;
+      mark: string;
+    }): Effect.Effect<boolean>;
     /** Work-chat policy. Refused on a plain chat, where there is nothing to govern. */
     updateWorkSettings(input: {
       userId: string;
@@ -415,8 +429,8 @@ export class ChatService extends Context.Service<
     listArchived(input: {
       userId: string;
     }): Effect.Effect<ReadonlyArray<{ id: string; title: string | null; archivedAt: Date }>>;
-    /** One pass of the temporary-chat sweep; exposed so tests need not wait for it. */
-    sweepTemporary(): Effect.Effect<void>;
+    /** One pass of the expired-chat sweep; exposed so tests need not wait for it. */
+    sweepExpired(): Effect.Effect<void>;
     /**
      * Fires one schedule into a fresh conversation or an existing one.
      * Internal: no composer concerns (attachments, desktop, clarifications)
@@ -2076,12 +2090,61 @@ function makeChatService() {
       userId: string;
       conversationId: string;
     }) {
-      const orphanedKeys = yield* repo.deleteConversation(input.userId, input.conversationId);
-      yield* attachmentService.deleteBlobs(orphanedKeys);
+      // Marked first: every way an answer starts locks the chat as owned and
+      // not deleted, so nothing new begins once this commits, and the list
+      // below is complete. A repeated delete returns the same mark and stops
+      // again, so a retry finishes what a failed one left.
+      const mark = yield* repo.trashConversation(input.userId, input.conversationId);
+      if (mark === null) return null;
       yield* sync.publish(input.userId, {
         type: "conversation.deleted",
         conversationId: input.conversationId,
       });
+      // Stopped the way Stop stops one, then awaited, so the answer has settled
+      // as stopped before the client offers an Undo that brings it back. One
+      // not started yet stops as it starts (`StreamEngine.stopGeneration`). A
+      // failure here still leaves the chat deleted, so its Undo stays offered.
+      yield* repo.listLiveAnswers(input.conversationId).pipe(
+        Effect.flatMap((live) =>
+          Effect.forEach(
+            live,
+            (answer) =>
+              Effect.gen(function* () {
+                const runId = answer.generationId ?? undefined;
+                if (answer.generationId && repo.research)
+                  yield* repo.research.cancelForGeneration(answer.messageId, answer.generationId);
+                yield* engine.stopGeneration(answer.messageId, runId);
+                // Awaited even when another Stop got there first and is still settling.
+                yield* engine
+                  .awaitSettled(answer.messageId, runId)
+                  .pipe(Effect.timeoutOption(Duration.seconds(10)));
+              }),
+            { discard: true },
+          ),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logError("stopping a deleted chat's answers failed", cause),
+        ),
+      );
+      return mark;
+    });
+
+    const restoreConversation = Effect.fn("ChatService.restoreConversation")(function* (input: {
+      userId: string;
+      conversationId: string;
+      mark: string;
+    }) {
+      const restored = yield* repo.restoreConversation(
+        input.userId,
+        input.conversationId,
+        input.mark,
+      );
+      if (restored)
+        yield* sync.publish(input.userId, {
+          type: "conversation.updated",
+          conversationId: input.conversationId,
+        });
+      return restored;
     });
 
     const updateWorkSettings = Effect.fn("ChatService.updateWorkSettings")(function* (input: {
@@ -2170,24 +2233,24 @@ function makeChatService() {
       return yield* repo.listArchived(input.userId);
     });
 
-    // Deletes expired temporary chats the way a person's own delete does, so
-    // research, attachments and every open tab settle the same way.
-    const sweepTemporary = Effect.fn("ChatService.sweepTemporary")(function* () {
-      const expired = yield* repo.listExpiredTemporary(100);
+    // Purges deleted chats past their grace period and expired temporary
+    // ones, so research, attachments and every open tab settle one way.
+    const sweepExpired = Effect.fn("ChatService.sweepExpired")(function* () {
+      const expired = yield* repo.listExpired(100);
       for (const { id } of expired) {
-        const deleted = yield* repo.deleteExpiredTemporary(id);
-        if (!deleted) continue;
-        yield* attachmentService.deleteBlobs(deleted.keys);
-        yield* sync.publish(deleted.userId, { type: "conversation.deleted", conversationId: id });
+        const purged = yield* repo.purgeExpired(id);
+        if (!purged) continue;
+        yield* attachmentService.deleteBlobs(purged.keys);
+        yield* sync.publish(purged.userId, { type: "conversation.purged", conversationId: id });
       }
     });
 
     const sweepInterval = yield* QueueSweepInterval;
     if (sweepInterval) yield* startQueueSweeper(drainQueue, sweepInterval);
-    const temporarySweepInterval = yield* TemporarySweepInterval;
-    if (temporarySweepInterval)
-      yield* sweepTemporary().pipe(
-        Effect.catchCause((cause) => Effect.logError("temporary chat sweep failed", cause)),
+    const conversationSweepInterval = yield* ConversationSweepInterval;
+    if (conversationSweepInterval)
+      yield* sweepExpired().pipe(
+        Effect.catchCause((cause) => Effect.logError("expired chat sweep failed", cause)),
         // Failed calls' full arguments are kept a week, then go the same way.
         Effect.andThen(
           repo
@@ -2198,7 +2261,7 @@ function makeChatService() {
               ),
             ),
         ),
-        Effect.repeat(Schedule.spaced(temporarySweepInterval)),
+        Effect.repeat(Schedule.spaced(conversationSweepInterval)),
         Effect.forkScoped,
       );
 
@@ -2219,6 +2282,7 @@ function makeChatService() {
       editMessage,
       stopGeneration,
       deleteConversation,
+      restoreConversation,
       updateWorkSettings,
       renameConversation,
       keepConversation,
@@ -2226,7 +2290,7 @@ function makeChatService() {
       setArchived,
       archiveAll,
       listArchived,
-      sweepTemporary,
+      sweepExpired,
       runScheduledTurn,
     });
   });

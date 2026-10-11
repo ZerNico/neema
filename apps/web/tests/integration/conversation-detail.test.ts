@@ -26,6 +26,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { purgeConversation } from "./purge.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
@@ -178,7 +179,7 @@ describe("loadConversationDetail", () => {
           sourceConversationId: source.conversationId,
           throughMessageId: source.assistantId,
         });
-        yield* repo.deleteConversation(userId, source.conversationId);
+        yield* purgeConversation(userId, source.conversationId);
         const detail = yield* loadConversationDetail(userId, branch.id);
         expect(detail.branchedFrom).toBeNull();
         expect(detail.conversation.fileReferenceAliases).toEqual({

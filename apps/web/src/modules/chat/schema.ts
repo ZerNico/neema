@@ -97,6 +97,12 @@ const generationFields = {
 /** How long a temporary chat outlives its last message. */
 export const TEMPORARY_CHAT_HOURS = 24;
 
+/**
+ * How long a deleted chat waits for Undo before the sweep purges it. Well past
+ * the toast that offers Undo, so the two never race.
+ */
+export const DELETED_CHAT_GRACE_SECONDS = 120;
+
 export const ConversationMode = Schema.Literals(["chat", "work"]);
 export type ConversationMode = typeof ConversationMode.Type;
 
@@ -199,6 +205,12 @@ export const AnswerQuestionInput = Schema.Struct({
 
 export const ConversationIdInput = Schema.Struct({
   conversationId: Schema.String,
+});
+
+/** An Undo names the delete it reverses by the mark that delete returned. */
+export const ConversationRestoreInput = Schema.Struct({
+  conversationId: Schema.String,
+  mark: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)),
 });
 
 export const ConversationArchiveInput = Schema.Struct({

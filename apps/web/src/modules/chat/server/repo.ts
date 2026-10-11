@@ -41,7 +41,7 @@ import {
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import { composeFileReferenceAliases } from "../file-reference-aliases.ts";
-import { TEMPORARY_CHAT_HOURS, type OpenDocument } from "../schema.ts";
+import { DELETED_CHAT_GRACE_SECONDS, TEMPORARY_CHAT_HOURS, type OpenDocument } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { projectResearchProgress } from "../research-schema.ts";
 import { createResearchStore, type ResearchStore } from "./research/repo.ts";
@@ -71,6 +71,7 @@ import {
   workTurnReservations,
   conversationIntegrations,
 } from "~/db/schema/index.ts";
+import { deleteMark, ownedConversation, ownedConversationById } from "./owned-conversation.ts";
 import { readKeptWorkingFiles } from "./kept-working-files.ts";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import type { ResolvedProject } from "~/modules/projects/schema.ts";
@@ -210,14 +211,14 @@ const positionBefore = (id: string) =>
 /** Chats a list may show: never temporary, never archived. */
 const listedBy = (userId: string) =>
   and(
-    eq(conversations.userId, userId),
+    ownedConversation(userId),
     eq(conversations.temporary, false),
     isNull(conversations.archivedAt),
   );
 
 /** Chats search may find: archived ones too, marked, never temporary. */
 const searchableBy = (userId: string) =>
-  and(eq(conversations.userId, userId), eq(conversations.temporary, false));
+  and(ownedConversation(userId), eq(conversations.temporary, false));
 
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
@@ -466,7 +467,7 @@ const lockOwnedConversation = (tx: DbTx, userId: string, conversationId: string)
     const owned = yield* tx
       .select({ id: conversations.id })
       .from(conversations)
-      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+      .where(ownedConversationById(conversationId, userId))
       .for("update")
       .pipe(Effect.orDie);
     if (owned.length === 0) return yield* new ConversationNotFound({ conversationId });
@@ -490,9 +491,7 @@ const ownFinishedAnswer = Effect.fn("ChatRepo.ownFinishedAnswer")(function* (
   const owner = tx
     .select({ id: conversations.id })
     .from(conversations)
-    .where(
-      and(eq(conversations.id, target.conversationId), eq(conversations.userId, input.userId)),
-    );
+    .where(ownedConversationById(target.conversationId, input.userId));
   const owned = yield* (input.lock ? owner.for("update") : owner).pipe(Effect.orDie);
   if (owned.length === 0) return null;
   const [message] = yield* tx
@@ -1087,22 +1086,39 @@ export class ChatRepo extends Context.Service<
      * since a manual rename that landed first must not be overwritten.
      */
     setTitleIfPending(conversationId: string, title: string): Effect.Effect<boolean>;
+    /** Answers still streaming in the chat, for a delete to stop. */
+    listLiveAnswers(
+      conversationId: string,
+    ): Effect.Effect<ReadonlyArray<{ messageId: string; generationId: string | null }>>;
     /**
-     * Returns storage keys the caller must delete after the commit.
+     * Marks an owned chat deleted and returns the mark, which names this
+     * delete for its Undo; a chat already deleted keeps and returns its own.
+     * Nothing is removed until the sweep purges it after its grace period.
+     * Null when it was not there to delete.
      */
-    deleteConversation(
+    trashConversation(userId: string, conversationId: string): Effect.Effect<string | null>;
+    /**
+     * Undoes the delete `mark` names, while the sweep has not purged it. False
+     * when the chat is gone or was deleted again since: an old Undo must not
+     * reverse a newer delete.
+     */
+    restoreConversation(
       userId: string,
       conversationId: string,
-    ): Effect.Effect<ReadonlyArray<string>>;
-    /** Temporary chats past their lifetime with no live answer, oldest first. */
-    listExpiredTemporary(limit: number): Effect.Effect<ReadonlyArray<{ id: string }>>;
+      mark: string,
+    ): Effect.Effect<boolean>;
     /**
-     * Deletes the chat only if it is still an expired temporary one under the
-     * row lock, so a Keep or a new message landing after the listing wins.
-     * Null when it no longer qualifies; otherwise its owner and the storage
-     * keys the caller must delete after the commit.
+     * Chats due for purging, oldest first: deleted ones past their grace
+     * period and temporary ones past their lifetime with no live answer.
      */
-    deleteExpiredTemporary(
+    listExpired(limit: number): Effect.Effect<ReadonlyArray<{ id: string }>>;
+    /**
+     * Purges the chat only if it is still due under the row lock, so a Keep,
+     * an Undo or a new message landing after the listing wins. Null when it no
+     * longer qualifies; otherwise its owner and the storage keys the caller
+     * must delete after the commit.
+     */
+    purgeExpired(
       conversationId: string,
     ): Effect.Effect<{ userId: string; keys: ReadonlyArray<string> } | null>;
     /**
@@ -1422,14 +1438,21 @@ export class ChatRepo extends Context.Service<
         });
 
       /**
-       * A temporary chat a day past its last activity, judged by the database
-       * clock. One with an answer still inside its lease is left for the next
-       * pass rather than deleted from under the generation.
+       * A deleted chat past its grace period, or a temporary one a day past
+       * its last activity, judged by the database clock. A deleted chat waits
+       * out its grace whatever else holds, or its Undo could lose. A temporary
+       * chat with an answer still inside its lease is left for the next pass
+       * rather than deleted from under the generation; a deleted one had its
+       * answer stopped by the delete.
        */
-      const expiredTemporary = and(
-        eq(conversations.temporary, true),
-        sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt}) < now() - make_interval(hours => ${TEMPORARY_CHAT_HOURS})`,
-        sql`not exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming' and ${messages.generationLeaseUntil} > now())`,
+      const expired = or(
+        sql`${conversations.deletedAt} < now() - make_interval(secs => ${DELETED_CHAT_GRACE_SECONDS})`,
+        and(
+          isNull(conversations.deletedAt),
+          eq(conversations.temporary, true),
+          sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt}) < now() - make_interval(hours => ${TEMPORARY_CHAT_HOURS})`,
+          sql`not exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming' and ${messages.generationLeaseUntil} > now())`,
+        ),
       );
 
       /**
@@ -1707,7 +1730,7 @@ export class ChatRepo extends Context.Service<
           const rows = yield* db
             .select()
             .from(conversations)
-            .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+            .where(ownedConversationById(conversationId, userId))
             .pipe(Effect.orDie);
           const row = rows[0];
           if (!row) return yield* new ConversationNotFound({ conversationId });
@@ -1749,12 +1772,7 @@ export class ChatRepo extends Context.Service<
                   const existing = yield* tx
                     .select()
                     .from(conversations)
-                    .where(
-                      and(
-                        eq(conversations.id, input.conversation.id),
-                        eq(conversations.userId, input.userId),
-                      ),
-                    )
+                    .where(ownedConversationById(input.conversation.id, input.userId))
                     .for("update")
                     .pipe(Effect.orDie);
                   const conversation = existing[0];
@@ -1904,12 +1922,7 @@ export class ChatRepo extends Context.Service<
                     const conversationRows = yield* tx
                       .select()
                       .from(conversations)
-                      .where(
-                        and(
-                          eq(conversations.id, conversationId),
-                          eq(conversations.userId, input.userId),
-                        ),
-                      )
+                      .where(ownedConversationById(conversationId, input.userId))
                       .pipe(Effect.orDie);
                     const turnMessages = yield* tx
                       .select()
@@ -1925,7 +1938,10 @@ export class ChatRepo extends Context.Service<
                       .toReversed()
                       .find((message) => message.role === "user");
                     const assistant = turnMessages[assistantIndex];
-                    if (!conversationRows[0] || !assistant || !userMessage)
+                    // Deleted since: a replay finds the chat gone like any send.
+                    if (!conversationRows[0])
+                      return yield* new ConversationNotFound({ conversationId });
+                    if (!assistant || !userMessage)
                       return yield* Effect.die("Activated Work turn is incomplete");
                     return {
                       conversation: conversationRows[0],
@@ -1961,12 +1977,7 @@ export class ChatRepo extends Context.Service<
                   const rows = yield* tx
                     .select()
                     .from(conversations)
-                    .where(
-                      and(
-                        eq(conversations.id, conversationId),
-                        eq(conversations.userId, input.userId),
-                      ),
-                    )
+                    .where(ownedConversationById(conversationId, input.userId))
                     .for("update")
                     .pipe(Effect.orDie);
                   const row = rows[0];
@@ -2165,6 +2176,7 @@ export class ChatRepo extends Context.Service<
             .where(
               and(
                 eq(conversations.mode, input.mode),
+                isNull(conversations.deletedAt),
                 input.userId ? eq(conversations.userId, input.userId) : undefined,
                 sql`exists (select 1 from conversation_queue_entries queued where queued.conversation_id = ${conversations.id})`,
                 sql`exists (select 1 from messages settled where settled.id = ${tail} and settled.role = 'assistant' and settled.status = 'complete')`,
@@ -2183,7 +2195,12 @@ export class ChatRepo extends Context.Service<
                 const [conversation] = yield* tx
                   .select()
                   .from(conversations)
-                  .where(eq(conversations.id, input.conversationId))
+                  .where(
+                    and(
+                      eq(conversations.id, input.conversationId),
+                      isNull(conversations.deletedAt),
+                    ),
+                  )
                   .for("update")
                   .pipe(Effect.orDie);
                 if (!conversation) return { promoted: false, reason: "empty" } as const;
@@ -2576,7 +2593,7 @@ export class ChatRepo extends Context.Service<
             .where(
               and(
                 eq(conversations.id, conversationId),
-                eq(conversations.userId, userId),
+                ownedConversation(userId),
                 eq(conversations.unread, true),
               ),
             )
@@ -2592,7 +2609,7 @@ export class ChatRepo extends Context.Service<
               .where(
                 and(
                   eq(conversations.id, conversationId),
-                  eq(conversations.userId, userId),
+                  ownedConversation(userId),
                   eq(conversations.temporary, true),
                 ),
               )
@@ -2610,7 +2627,7 @@ export class ChatRepo extends Context.Service<
               .where(
                 and(
                   eq(conversations.id, conversationId),
-                  eq(conversations.userId, userId),
+                  ownedConversation(userId),
                   eq(conversations.temporary, false),
                   archived ? isNull(conversations.archivedAt) : isNotNull(conversations.archivedAt),
                 ),
@@ -2659,24 +2676,61 @@ export class ChatRepo extends Context.Service<
           },
         ),
 
-        deleteConversation: Effect.fn("ChatRepo.deleteConversation")(
+        listLiveAnswers: Effect.fn("ChatRepo.listLiveAnswers")(function* (conversationId) {
+          return yield* db
+            .select({ messageId: messages.id, generationId: messages.generationId })
+            .from(messages)
+            .where(
+              and(eq(messages.conversationId, conversationId), eq(messages.status, "streaming")),
+            )
+            .pipe(Effect.orDie);
+        }),
+
+        trashConversation: Effect.fn("ChatRepo.trashConversation")(
           function* (userId, conversationId) {
-            const deleted = yield* deleteLocked(conversationId, eq(conversations.userId, userId));
-            return deleted?.keys ?? [];
+            // A chat already deleted keeps its mark: a repeated delete, a
+            // retry or a second tab, names the same delete for its Undo.
+            const [row] = yield* db
+              .update(conversations)
+              .set({ deletedAt: sql`coalesce(${conversations.deletedAt}, now())` })
+              .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+              .returning({ mark: deleteMark })
+              .pipe(Effect.orDie);
+            return row?.mark ?? null;
           },
         ),
 
-        listExpiredTemporary: Effect.fn("ChatRepo.listExpiredTemporary")(function* (limit) {
+        restoreConversation: Effect.fn("ChatRepo.restoreConversation")(
+          function* (userId, conversationId, mark) {
+            const rows = yield* db
+              .update(conversations)
+              .set({ deletedAt: null })
+              .where(
+                and(
+                  eq(conversations.id, conversationId),
+                  eq(conversations.userId, userId),
+                  eq(conversations.deletedAt, sql`${mark}::timestamptz`),
+                ),
+              )
+              .returning({ id: conversations.id })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
+
+        listExpired: Effect.fn("ChatRepo.listExpired")(function* (limit) {
           return yield* db
             .select({ id: conversations.id })
             .from(conversations)
-            .where(expiredTemporary)
-            .orderBy(sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`)
+            .where(expired)
+            .orderBy(
+              sql`coalesce(${conversations.deletedAt}, ${conversations.lastMessageAt}, ${conversations.createdAt})`,
+            )
             .limit(limit)
             .pipe(Effect.orDie);
         }),
 
-        deleteExpiredTemporary: (conversationId) => deleteLocked(conversationId, expiredTemporary),
+        purgeExpired: (conversationId) => deleteLocked(conversationId, expired),
 
         cloneConversationPrefix: Effect.fn("ChatRepo.cloneConversationPrefix")(function* (input) {
           return yield* db
@@ -2689,12 +2743,7 @@ export class ChatRepo extends Context.Service<
                 const sourceRows = yield* tx
                   .select()
                   .from(conversations)
-                  .where(
-                    and(
-                      eq(conversations.id, input.sourceConversationId),
-                      eq(conversations.userId, input.userId),
-                    ),
-                  )
+                  .where(ownedConversationById(input.sourceConversationId, input.userId))
                   .for("update")
                   .pipe(Effect.orDie);
                 const source = sourceRows[0];
@@ -3235,7 +3284,7 @@ export class ChatRepo extends Context.Service<
             .innerJoin(conversations, eq(messages.conversationId, conversations.id))
             .where(
               and(
-                eq(conversations.userId, owner.userId),
+                ownedConversation(owner.userId),
                 eq(conversations.id, owner.conversationId),
                 eq(messages.id, owner.messageId),
                 eq(messages.generationId, owner.generationId),
@@ -3618,12 +3667,7 @@ export class ChatRepo extends Context.Service<
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)
-                  .where(
-                    and(
-                      eq(conversations.id, target.conversationId),
-                      eq(conversations.userId, input.userId),
-                    ),
-                  )
+                  .where(ownedConversationById(target.conversationId, input.userId))
                   .for("update")
                   .pipe(Effect.orDie);
                 if (owned.length === 0) return "refused" as const;
@@ -3853,12 +3897,7 @@ export class ChatRepo extends Context.Service<
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)
-                  .where(
-                    and(
-                      eq(conversations.id, target.conversationId),
-                      eq(conversations.userId, input.userId),
-                    ),
-                  )
+                  .where(ownedConversationById(target.conversationId, input.userId))
                   .for("update")
                   .pipe(Effect.orDie);
                 if (owned.length === 0) return lost;
@@ -4043,12 +4082,7 @@ export class ChatRepo extends Context.Service<
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)
-                  .where(
-                    and(
-                      eq(conversations.id, target.conversationId),
-                      eq(conversations.userId, input.userId),
-                    ),
-                  )
+                  .where(ownedConversationById(target.conversationId, input.userId))
                   .for("update")
                   .pipe(Effect.orDie);
                 if (owned.length === 0) return lost;
@@ -4189,12 +4223,7 @@ export class ChatRepo extends Context.Service<
                 const owned = yield* tx
                   .select({ id: conversations.id })
                   .from(conversations)
-                  .where(
-                    and(
-                      eq(conversations.id, input.conversationId),
-                      eq(conversations.userId, input.userId),
-                    ),
-                  )
+                  .where(ownedConversationById(input.conversationId, input.userId))
                   .for("update")
                   .pipe(Effect.orDie);
                 if (owned.length === 0) return null;

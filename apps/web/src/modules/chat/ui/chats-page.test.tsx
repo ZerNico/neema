@@ -27,6 +27,7 @@ vi.mock("@tanstack/react-router", () => ({
   useMatches: () => [{ pathname: "/chats" }],
   useNavigate: () => vi.fn(),
   useParams: () => ({}),
+  useRouter: () => ({ state: { location: { pathname: "/" } } }),
 }));
 
 const listMock = vi.mocked(listConversations);

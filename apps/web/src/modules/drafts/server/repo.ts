@@ -2,6 +2,10 @@ import { and, asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { conversationDrafts, conversations } from "~/db/schema/index.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { DraftNotAvailable, type ConversationDraft, type DraftKind } from "../draft-schema.ts";
@@ -71,7 +75,7 @@ export class DraftRepo extends Context.Service<
         const [conversation] = yield* tx
           .select({ id: conversations.id })
           .from(conversations)
-          .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+          .where(ownedConversationById(conversationId, userId))
           .for("update")
           .pipe(Effect.orDie);
         if (!conversation) return yield* new DraftNotAvailable({ conversationId });
@@ -113,7 +117,7 @@ export class DraftRepo extends Context.Service<
             .innerJoin(conversations, eq(conversations.id, conversationDrafts.conversationId))
             .where(
               and(
-                eq(conversations.userId, userId),
+                ownedConversation(userId),
                 eq(conversationDrafts.id, draftId),
                 eq(conversationDrafts.kind, kind),
               ),
@@ -129,7 +133,7 @@ export class DraftRepo extends Context.Service<
               .innerJoin(conversations, eq(conversations.id, conversationDrafts.conversationId))
               .where(
                 and(
-                  eq(conversations.userId, userId),
+                  ownedConversation(userId),
                   eq(conversationDrafts.conversationId, conversationId),
                   eq(conversationDrafts.kind, kind),
                 ),

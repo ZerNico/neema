@@ -14,6 +14,7 @@ import {
   messageAttachments,
   messages,
 } from "~/db/schema/index.ts";
+import { ownedConversation } from "~/modules/chat/server/owned-conversation.ts";
 import { attachmentKind } from "../constants.ts";
 import type { Attachment, MessageAttachment, QueuedAttachment } from "../schema.ts";
 import { AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
@@ -760,7 +761,7 @@ export class AttachmentRepo extends Context.Service<
           .where(
             and(
               eq(conversations.id, conversationId),
-              eq(conversations.userId, userId),
+              ownedConversation(userId),
               eq(attachments.userId, userId),
               eq(messageAttachments.kind, "file"),
             ),

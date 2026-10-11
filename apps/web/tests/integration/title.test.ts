@@ -9,6 +9,7 @@ import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
 import { Db } from "~/server/db.ts";
+import { purgeConversation } from "./purge.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
@@ -152,7 +153,7 @@ describe("conversation titles", () => {
         const repo = yield* ChatRepo;
         const userId = yield* makeUser();
         const conversationId = yield* startConversation(userId);
-        yield* repo.deleteConversation(userId, conversationId);
+        yield* purgeConversation(userId, conversationId);
         return yield* repo.setTitleIfPending(conversationId, "Gone");
       }),
     );

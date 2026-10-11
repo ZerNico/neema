@@ -77,6 +77,10 @@ export const conversations = pgTable(
     // search. A message the owner sends clears it; a schedule's does not. See
     // docs/internals/archived-chats.md.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // Deleted by its owner and gone for every reader, but kept for a grace
+    // period so Undo can bring it back; the sweep purges it after. See
+    // docs/internals/deleted-chats.md.
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     // A scheduled run answered here and its owner has not opened the chat
     // since. Set when the run settles, cleared by opening it.
     unread: boolean().notNull().default(false),
@@ -114,6 +118,10 @@ export const conversations = pgTable(
     index("conversations_temporary_activity_idx")
       .on(sql`coalesce(${t.lastMessageAt}, ${t.createdAt})`)
       .where(sql`${t.temporary}`),
+    // Serves the same sweep's purge of deleted chats past their grace period.
+    index("conversations_deleted_at_idx")
+      .on(t.deletedAt)
+      .where(sql`${t.deletedAt} is not null`),
   ],
 );
 

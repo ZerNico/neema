@@ -49,11 +49,14 @@ export class ScheduleFire extends Context.Service<
           target: target ? { kind: "existing", ...target } : { kind: "new" },
           onSettled: settlement.settle,
         });
-      // A fresh chat; in "same chat" mode it becomes the chat later fires use.
+      // A fresh chat; in "same chat" mode it becomes the chat later fires use,
+      // replacing the one this fire found gone (`row.chatId`), if any.
       const fresh = (row: ScheduleRow, runId: string) =>
         turn(row, runId, null).pipe(
           Effect.tap((started) =>
-            row.chatMode === "same" ? repo.adoptChat(row.id, started.conversationId) : Effect.void,
+            row.chatMode === "same"
+              ? repo.adoptChat(row.id, started.conversationId, row.chatId)
+              : Effect.void,
           ),
         );
       const start = (row: ScheduleRow, runId: string) =>
@@ -63,8 +66,10 @@ export class ScheduleFire extends Context.Service<
                 ...BUSY_RETRY,
                 while: (error) => Predicate.isTagged(error, "ConversationBusy"),
               }),
-              // Deleted since the claim (the FK clears chatId for later fires):
-              // start its replacement now rather than skipping this one.
+              // Deleted since the claim: start its replacement now rather than
+              // skipping this one, and adopt it, whether the chat is purged
+              // (the FK cleared chatId) or waiting out its grace. An Undo in
+              // between brings the old chat back but leaves the schedule here.
               Effect.catchTag("ConversationNotFound", () => fresh(row, runId)),
             )
           : fresh(row, runId);

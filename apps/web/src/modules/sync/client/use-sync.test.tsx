@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_SESSION_CREATED_EVENT } from "~/modules/auth/ticket-events.ts";
+import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "./use-sync.ts";
+
+vi.mock("~/modules/desktop/client/bridge.ts", () => ({ discardWorkspace: vi.fn() }));
 
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
 
@@ -270,6 +273,18 @@ describe("useSync", () => {
     source.emit("sync", event);
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+  });
+
+  it("discards a work chat's local folder only once the chat is purged, not at its delete", () => {
+    const { invalidate, source } = renderSync();
+
+    source.emit("sync", { type: "conversation.deleted", conversationId: "c1" });
+    expect(discardWorkspace).not.toHaveBeenCalled();
+
+    source.emit("sync", { type: "conversation.purged", conversationId: "c1" });
+    expect(discardWorkspace).toHaveBeenCalledExactlyOnceWith("c1");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["search", "recent-chats"] });
   });
 
   it.each(["memory.changed", "memory.policy.changed"] as const)(

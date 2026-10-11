@@ -9,6 +9,10 @@ import {
   projects,
   user,
 } from "~/db/schema/index.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
@@ -33,7 +37,7 @@ type Reader = Pick<DbTx, "select">;
 const accessSql = (userId: string) => sql<ProjectRole | null>`(case
   when ${documents.conversationId} is not null then (
     select 'owner' from ${conversations}
-    where ${conversations.id} = ${documents.conversationId} and ${conversations.userId} = ${userId}
+    where ${conversations.id} = ${documents.conversationId} and ${ownedConversation(userId)}
   )
   else (select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId})
 end)`;
@@ -185,7 +189,7 @@ export class DocumentRepo extends Context.Service<
         const [conversation] = yield* tx
           .select({ id: conversations.id })
           .from(conversations)
-          .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+          .where(ownedConversationById(conversationId, userId))
           .for("update")
           .pipe(Effect.orDie);
         if (!conversation) return yield* new DocumentNotAvailable({ conversationId });

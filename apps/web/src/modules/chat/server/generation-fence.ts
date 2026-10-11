@@ -33,6 +33,8 @@ export const lockGeneration = (tx: DbTx, fence: GenerationIdentity) =>
     const [conversation] = yield* tx
       .select({ id: conversations.id })
       .from(conversations)
+      // Ownership only, not the deleted mark: a delete stops the answer as
+      // Stop does, and an attempt still finishing must settle, not strand.
       .where(
         and(eq(conversations.id, fence.conversationId), eq(conversations.userId, fence.userId)),
       )
@@ -90,10 +92,11 @@ export const QueueSweepInterval = Context.Reference<Duration.Duration | null>(
 );
 
 /**
- * How often expired temporary chats are deleted; `null` turns the sweep off.
- * Tests call `ChatService.sweepTemporary` directly instead.
+ * How often deleted chats past their grace period and expired temporary chats
+ * are purged; `null` turns the sweep off. Tests call
+ * `ChatService.sweepExpired` directly instead.
  */
-export const TemporarySweepInterval = Context.Reference<Duration.Duration | null>(
-  "chat/TemporarySweepInterval",
-  { defaultValue: () => Duration.minutes(10) },
+export const ConversationSweepInterval = Context.Reference<Duration.Duration | null>(
+  "chat/ConversationSweepInterval",
+  { defaultValue: () => Duration.minutes(1) },
 );

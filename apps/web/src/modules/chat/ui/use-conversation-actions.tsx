@@ -1,9 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
-import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -19,62 +18,121 @@ import { Input } from "~/ui/primitives/input";
 import {
   deleteConversation,
   renameConversation,
+  restoreConversation,
   setConversationArchived,
 } from "../server/functions.ts";
+import { holdRow, inLane } from "../client/held-rows.ts";
+import { undoToast } from "~/ui/undo-toast.ts";
 import type { ConversationActions } from "./conversation-actions.tsx";
 
 /**
- * Rename and delete for a conversation row, shared by the sidebar and the
- * chats page so both behave identically. Invalidation is by the
- * `["conversations"]` prefix, which covers every page and search variant on
- * both surfaces.
+ * Rename, archive and delete for a conversation row, shared by the sidebar,
+ * the chats page and the archived list so all behave identically. Archive and
+ * delete act at once and offer Undo; see docs/internals/deleted-chats.md.
+ * Invalidation is by the `["conversations"]` prefix, which covers every page
+ * and search variant.
  */
 export function useConversationActions(): ConversationActions {
   const navigate = useNavigate();
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const confirm = useConfirm();
   const params = useParams({ strict: false });
   const activeId = "conversationId" in params ? params.conversationId : undefined;
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
 
-  const removeMutation = useMutation({
-    mutationFn: (conversationId: string) => deleteConversation({ data: { conversationId } }),
-    onSuccess: async (_, conversationId) => {
-      // Best-effort: a work chat's local workspace dies with it. A failure
-      // leaves a stray directory, nothing the server waits for; a no-op in a
-      // browser.
-      discardWorkspace(conversationId);
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      // Only the surface that is actually showing the deleted chat navigates
-      // away; on /chats there is no conversationId param at all.
-      if (activeId === conversationId) await navigate({ to: "/" });
-    },
-    onError: (error) => toastError("Could not delete the chat.", error),
-  });
+  const refresh = (conversationId: string) =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+      queryClient.invalidateQueries({ queryKey: ["projects", "chats"] }),
+      queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+    ]);
 
-  const archiveMutation = useMutation({
-    mutationFn: (input: { conversationId: string; archived: boolean }) =>
-      setConversationArchived({ data: input }),
-    onSuccess: async (_, input) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-        queryClient.invalidateQueries({ queryKey: ["conversation", input.conversationId] }),
-      ]);
-      // The chat leaves every list at once, so offer the way straight back.
-      if (input.archived)
-        toast("Chat archived", {
-          action: {
-            label: "Undo",
-            onClick: () =>
-              archiveMutation.mutate({ conversationId: input.conversationId, archived: false }),
-          },
-        });
-    },
-    onError: (error, input) =>
-      toastError(
-        input.archived ? "Could not archive the chat." : "Could not unarchive the chat.",
-        error,
+  /**
+   * Holds the chat out of every list, runs `act`, and offers to run `revert`
+   * with what `act` returned once it has landed; `act` returning null means
+   * there was nothing to reverse. Undo shows the chat again at once. A chat
+   * that `leaves` is closed if open, and reopened only after the server
+   * agrees it exists again, and only if the reader is still where the close
+   * left them. `kept` runs once the action has landed and the toast went
+   * without its Undo.
+   */
+  const reversibly = async <T,>(input: {
+    conversationId: string;
+    leaves: boolean;
+    done: string;
+    failed: string;
+    act: () => Promise<T | null>;
+    revert: (acted: T) => Promise<boolean>;
+    kept?: () => void;
+  }) => {
+    const { conversationId, kept } = input;
+    const closed = input.leaves && activeId === conversationId;
+    const hold = await holdRow(queryClient, conversationId);
+    if (closed) void navigate({ to: "/" });
+    const acted = inLane(conversationId, input.act);
+    let undone = false;
+    const undo = async () => {
+      undone = true;
+      hold.show();
+      const result = await acted.catch(() => null);
+      // A failed or empty act is handled below, which already said so.
+      if (result === null) return;
+      const reverted = await inLane(conversationId, () => input.revert(result)).catch(
+        (error: unknown) => {
+          toastError("Could not undo.", error);
+          return null;
+        },
+      );
+      hold.release();
+      await refresh(conversationId);
+      if (reverted === false) toast("That chat is already gone");
+      else if (reverted && closed && router.state.location.pathname === "/")
+        await navigate({ to: "/chat/$conversationId", params: { conversationId } });
+    };
+    const dismiss = undoToast(
+      input.done,
+      () => void undo(),
+      kept &&
+        (() =>
+          void acted.then(
+            (result) => result !== null && kept(),
+            () => undefined,
+          )),
+    );
+    acted.then(
+      (result) => {
+        if (result === null) dismiss();
+        // An Undo under way releases once its own revert has landed.
+        else if (undone) return;
+        hold.release();
+        return refresh(conversationId);
+      },
+      (error: unknown) => {
+        dismiss();
+        hold.show();
+        hold.release();
+        void refresh(conversationId);
+        toastError(input.failed, error);
+      },
+    );
+  };
+
+  const unarchiveMutation = useMutation({
+    mutationFn: (conversationId: string) =>
+      inLane(conversationId, () =>
+        setConversationArchived({ data: { conversationId, archived: false } }),
       ),
+    onMutate: (conversationId) => holdRow(queryClient, conversationId),
+    onSuccess: (_, conversationId, hold) => {
+      hold.release();
+      return refresh(conversationId);
+    },
+    onError: (error, conversationId, hold) => {
+      hold?.show();
+      hold?.release();
+      void refresh(conversationId);
+      toastError("Could not unarchive the chat.", error);
+    },
   });
 
   const renameMutation = useMutation({
@@ -90,20 +148,36 @@ export function useConversationActions(): ConversationActions {
   const title = renaming?.title.trim() ?? "";
 
   return {
-    setArchived: (conversation, archived) =>
-      archiveMutation.mutate({ conversationId: conversation.id, archived }),
+    setArchived: (conversation, archived) => {
+      if (!archived) return unarchiveMutation.mutate(conversation.id);
+      const conversationId = conversation.id;
+      void reversibly({
+        conversationId,
+        // An archived chat still opens; only the lists let it go.
+        leaves: false,
+        done: "Chat archived",
+        failed: "Could not archive the chat.",
+        act: () =>
+          setConversationArchived({ data: { conversationId, archived: true } }).then(() => true),
+        revert: () =>
+          setConversationArchived({ data: { conversationId, archived: false } }).then(() => true),
+      });
+    },
     startRename: (conversation) =>
       setRenaming({ id: conversation.id, title: conversation.title ?? "" }),
-    confirmDelete: async (conversation) => {
-      if (
-        await confirm({
-          title: `Delete “${conversation.title ?? "New chat"}”?`,
-          description: "The chat and all its messages are removed permanently.",
-          confirmLabel: "Delete chat",
-        })
-      ) {
-        removeMutation.mutate(conversation.id);
-      }
+    remove: (conversation) => {
+      const conversationId = conversation.id;
+      void reversibly({
+        conversationId,
+        leaves: true,
+        done: "Chat deleted",
+        failed: "Could not delete the chat.",
+        act: () => deleteConversation({ data: { conversationId } }),
+        revert: (mark) => restoreConversation({ data: { conversationId, mark } }),
+        // Undo is only ever offered here, so a work chat's folder can go once
+        // it is not taken. The purge event is the fallback for a closed tab.
+        kept: () => discardWorkspace(conversationId),
+      });
     },
     renameDialog: (
       <Dialog

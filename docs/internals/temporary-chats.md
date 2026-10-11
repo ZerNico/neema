@@ -21,7 +21,8 @@ the rest of this page depends on.
 ## Kept out of every list
 
 - `ChatRepo.listedBy` is the predicate for "chats a list may show" and
-  `ChatRepo.searchableBy` for "chats search may find"; both exclude temporary chats (they differ
+  `ChatRepo.searchableBy` for "chats search may find". Both build on `ownedConversation`, so
+  neither shows a [deleted](deleted-chats.md) chat, and both exclude temporary chats (they differ
   on [archived](archived-chats.md) ones). Every list uses `listedBy`: `listConversations` (the
   sidebar, `/chats`, the palette's recent chats, the schedule chat picker). The title query,
   `recentMatches` and `indexedMatches` behind `searchConversations` use `searchableBy`. A new
@@ -41,12 +42,16 @@ the rest of this page depends on.
   `TEMPORARY_CHAT_HOURS`, compared against the database clock inside the sweep's SQL (see the
   blob-cleanup note in `AGENTS.md` for why a JS clock is not used). Keep therefore has only
   one column to clear, and a new message pushes expiry back without any extra write.
-- `ChatService.sweepTemporary` runs every `TemporarySweepInterval`. It lists candidates, then
-  deletes each one in `deleteExpiredTemporary`, which checks the expiry condition again under
-  the row lock. A Keep or a new message that lands between listing and deletion wins. A chat
-  with an answer still inside its lease is skipped until the next pass.
-- Deletion uses the same transaction body as a person's own delete (`deleteLocked`): research
-  is settled, attachments are released into `blob_cleanup_intents`, and `conversation.deleted`
-  reaches every open tab.
+- The sweep is the one that also purges [deleted chats](deleted-chats.md):
+  `ChatService.sweepExpired` runs every `ConversationSweepInterval`, lists candidates, then
+  purges each one in `purgeExpired`, which checks the condition again under the row lock. A
+  Keep or a new message that lands between listing and purge wins. A temporary chat with an
+  answer still inside its lease is skipped until the next pass.
+- The purge goes through `deleteLocked`, like a deleted chat's: research is settled,
+  attachments are released into `blob_cleanup_intents`, and `conversation.purged` reaches every
+  open tab. There is no grace and no Undo here, since the day without activity was the grace.
+  A temporary chat someone deletes leaves this clock for the deleted-chat one and waits out its
+  grace like any deleted chat, however long it has been idle. Undo puts it back on this clock,
+  which may already have run out.
 - `usage_events` keeps its rows. The ledger is append-only and has no foreign key to
   conversations, for any deletion.

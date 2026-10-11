@@ -8,10 +8,12 @@ its schedule.
 
 ## Two predicates, not one
 
-- `ChatRepo.listedBy` is "chats a list may show": owner, not temporary, not archived. Every list
+- `ChatRepo.listedBy` is "chats a list may show": owned and not [deleted](deleted-chats.md)
+  (`ownedConversation`), not temporary, not archived. Every list
   uses it (see [temporary chats](temporary-chats.md) for the full set). The project chat list
   has its own where-clause in `projects/server/service.ts` and repeats the archived condition.
-- `ChatRepo.searchableBy` is "chats search may find": owner, not temporary, archived allowed.
+- `ChatRepo.searchableBy` is "chats search may find": owned and not deleted, not temporary,
+  archived allowed.
   The title query, `recentMatches` and `indexedMatches` use it, and each hit carries
   `archived`. Search is how an archived chat is found again, which is why it is ChatGPT's rule
   too.
@@ -36,5 +38,6 @@ so there is nothing to archive it from, and Archive all skips it through `listed
 ## Events
 
 Archive, unarchive and Archive all publish `conversation.updated`; every tab refreshes its chat
-lists and details by key prefix. Archive all publishes one event for the whole batch, since the
+lists and details by key prefix. Archive acts at once and offers Undo through the same toast as
+delete (`src/ui/undo-toast.ts`), and an archived chat that is open stays open. Archive all publishes one event for the whole batch, since the
 refresh does not depend on which chat it names.

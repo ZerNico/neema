@@ -8,6 +8,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type ConversationCursor } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { outlastGrace } from "./purge.ts";
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | Db, unknown>;
@@ -405,8 +406,8 @@ describe("temporary chat expiry", () => {
           generationLeaseUntil: new Date(now + HOUR),
         });
 
-        const listed = new Set((yield* repo.listExpiredTemporary(100)).map((r) => r.id));
-        const deleted = yield* repo.deleteExpiredTemporary(ids.expired);
+        const listed = new Set((yield* repo.listExpired(100)).map((r) => r.id));
+        const deleted = yield* repo.purgeExpired(ids.expired);
         const remaining = yield* db
           .select({ id: conversations.id })
           .from(conversations)
@@ -438,10 +439,10 @@ describe("temporary chat expiry", () => {
           updatedAt: long,
           lastMessageAt: long,
         });
-        const listed = (yield* repo.listExpiredTemporary(100)).some((r) => r.id === id);
+        const listed = (yield* repo.listExpired(100)).some((r) => r.id === id);
         const kept = yield* repo.keepConversation(userId, id);
         const keptAgain = yield* repo.keepConversation(userId, id);
-        const deleted = yield* repo.deleteExpiredTemporary(id);
+        const deleted = yield* repo.purgeExpired(id);
         const [row] = yield* db.select().from(conversations).where(eq(conversations.id, id));
         return { listed, kept, keptAgain, deleted, temporary: row?.temporary };
       }),
@@ -453,5 +454,173 @@ describe("temporary chat expiry", () => {
       deleted: null,
       temporary: false,
     });
+  });
+});
+
+describe("deleted chats", () => {
+  it("leave every list, search and lookup until restored, then come back as they were", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ChatRepo;
+        const id = uuidv7();
+        yield* seed(userId, [{ id, title: "Quarterly plan", created: 0 }]);
+        const visible = () =>
+          Effect.gen(function* () {
+            const listed = (yield* page(userId, { limit: 10 })).ids.includes(id);
+            const found = (yield* repo.searchConversations({
+              userId,
+              query: "quarterly",
+              limit: 10,
+            })).some((hit) => hit.conversationId === id);
+            const opened = yield* repo.getConversation(userId, id).pipe(
+              Effect.as(true),
+              Effect.catchTag("ConversationNotFound", () => Effect.succeed(false)),
+            );
+            return { listed, found, opened };
+          });
+        const before = yield* visible();
+        const mark = yield* repo.trashConversation(userId, id);
+        const trashedAgain = yield* repo.trashConversation(userId, id);
+        const during = yield* visible();
+        const archived = yield* repo.setArchived(userId, id, true);
+        const restored = yield* repo.restoreConversation(userId, id, mark!);
+        const restoredAgain = yield* repo.restoreConversation(userId, id, mark!);
+        const after = yield* visible();
+        return {
+          before,
+          trashed: typeof mark,
+          // A repeated delete names the same delete, so either Undo works.
+          trashedAgain: trashedAgain === mark ? "same mark" : trashedAgain,
+          during,
+          archived,
+          restored,
+          restoredAgain,
+          after,
+        };
+      }),
+    );
+    const shown = { listed: true, found: true, opened: true };
+    expect(result).toEqual({
+      before: shown,
+      trashed: "string",
+      trashedAgain: "same mark",
+      during: { listed: false, found: false, opened: false },
+      archived: false,
+      restored: true,
+      restoredAgain: false,
+      after: shown,
+    });
+  });
+
+  it("is only the owner's to delete or restore", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const alice = yield* makeUser();
+        const mallory = yield* makeUser();
+        const repo = yield* ChatRepo;
+        const id = uuidv7();
+        yield* seed(alice, [{ id, title: null, created: 0 }]);
+        const trashedByMallory = yield* repo.trashConversation(mallory, id);
+        const mark = yield* repo.trashConversation(alice, id);
+        const restoredByMallory = yield* repo.restoreConversation(mallory, id, mark!);
+        return { trashedByMallory, restoredByMallory };
+      }),
+    );
+    expect(result).toEqual({ trashedByMallory: null, restoredByMallory: false });
+  });
+
+  it("lets an old Undo leave a newer delete alone", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ChatRepo;
+        const id = uuidv7();
+        yield* seed(userId, [{ id, title: null, created: 0 }]);
+        // Two tabs hold the first delete's Undo; one uses it, then deletes again.
+        const first = yield* repo.trashConversation(userId, id);
+        yield* repo.restoreConversation(userId, id, first!);
+        const second = yield* repo.trashConversation(userId, id);
+        const staleUndo = yield* repo.restoreConversation(userId, id, first!);
+        const freshUndo = yield* repo.restoreConversation(userId, id, second!);
+        return { distinct: first !== second, staleUndo, freshUndo };
+      }),
+    );
+    expect(result).toEqual({ distinct: true, staleUndo: false, freshUndo: true });
+  });
+
+  it("gives a deleted temporary chat its grace, however old it is", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const id = uuidv7();
+        yield* seed(userId, [{ id, title: null, created: 0 }]);
+        // A day past its last activity: the sweep would take it, undeleted.
+        yield* db.update(conversations).set({ temporary: true }).where(eq(conversations.id, id));
+        const dueBefore = (yield* repo.listExpired(100)).some((row) => row.id === id);
+        const mark = yield* repo.trashConversation(userId, id);
+        const dueDeleted = (yield* repo.listExpired(100)).some((row) => row.id === id);
+        const purged = yield* repo.purgeExpired(id);
+        const restored = yield* repo.restoreConversation(userId, id, mark!);
+        // Leave nothing due for the other cases in this file.
+        yield* db.delete(conversations).where(eq(conversations.id, id));
+        return { dueBefore, dueDeleted, purged, restored };
+      }),
+    );
+    expect(result).toEqual({ dueBefore: true, dueDeleted: false, purged: null, restored: true });
+  });
+
+  it("purges only past the grace period, and an Undo before the purge wins", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const recent = uuidv7();
+        const old = uuidv7();
+        const undone = uuidv7();
+        yield* seed(userId, [
+          { id: recent, title: null, created: 0 },
+          { id: old, title: null, created: 1 },
+          { id: undone, title: null, created: 2 },
+        ]);
+        const marks = new Map<string, string>();
+        for (const id of [recent, old, undone])
+          marks.set(id, (yield* repo.trashConversation(userId, id))!);
+        marks.set(old, yield* outlastGrace(old));
+        marks.set(undone, yield* outlastGrace(undone));
+        const due = new Set((yield* repo.listExpired(100)).map((row) => row.id));
+        const restored = yield* repo.restoreConversation(userId, undone, marks.get(undone)!);
+        const purgedUndone = yield* repo.purgeExpired(undone);
+        const purgedRecent = yield* repo.purgeExpired(recent);
+        const purgedOld = yield* repo.purgeExpired(old);
+        const restoredAfterPurge = yield* repo.restoreConversation(userId, old, marks.get(old)!);
+        const remaining = yield* db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(eq(conversations.userId, userId));
+        // Leave nothing due for the other cases in this file.
+        yield* repo.restoreConversation(userId, recent, marks.get(recent)!);
+        return {
+          due: [recent, old, undone].map((id) => due.has(id)),
+          restored,
+          purgedUndone,
+          purgedRecent,
+          purgedOld,
+          restoredAfterPurge,
+          remaining: new Set(remaining.map((row) => row.id)),
+          ids: { recent, old, undone },
+        };
+      }),
+    );
+    expect(result.due).toEqual([false, true, true]);
+    expect(result.restored).toBe(true);
+    expect(result.purgedUndone).toBeNull();
+    expect(result.purgedRecent).toBeNull();
+    expect(result.purgedOld).toEqual({ userId: expect.any(String), keys: [] });
+    expect(result.restoredAfterPurge).toBe(false);
+    expect(result.remaining).toEqual(new Set([result.ids.recent, result.ids.undone]));
   });
 });

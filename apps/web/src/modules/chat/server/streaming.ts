@@ -403,9 +403,10 @@ export class StreamEngine extends Context.Service<
     }): Effect.Effect<void>;
     /**
      * Winds a running generation down early, keeping whatever it has already
-     * produced. False when this instance is not the one running it, the same
-     * single-instance constraint the live chunk tail has (replay is durable,
-     * the in-flight fiber is not).
+     * produced. One whose row exists but whose fiber has not registered yet
+     * stops as it registers. False when this instance is not running it now,
+     * the same single-instance constraint the live chunk tail has (replay is
+     * durable, the in-flight fiber is not).
      */
     stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
     /**
@@ -509,6 +510,11 @@ export class StreamEngine extends Context.Service<
           owner: ExternalOwner | null;
         }
       >();
+      // messageId -> a stop that came before its generation registered (the
+      // row commits a few steps before the fiber). The fiber claims it and
+      // stops at once. Kept here, not on the chat, so an Undo cannot clear it;
+      // an unclaimed one is pruned after a minute.
+      const earlyStops = new Map<string, { runId: string; at: number }>();
       const runtimeScope = yield* Effect.scope;
       // A generation whose process died stays "streaming" forever unless
       // someone settles it: the client cannot stop it (nothing is registered
@@ -4381,6 +4387,13 @@ export class StreamEngine extends Context.Service<
           owner,
         };
         inFlight.set(input.messageId, registration);
+        // After registering: a stop from now on finds the registration, and
+        // one from before it left an early stop to claim.
+        const early = earlyStops.get(input.messageId);
+        if (early?.runId === input.generationId) {
+          earlyStops.delete(input.messageId);
+          yield* Deferred.succeed(abort, undefined);
+        }
         // Detached from the request fiber: survives the HTTP response ending.
         yield* Effect.forkIn(
           Effect.gen(function* () {
@@ -4463,6 +4476,11 @@ export class StreamEngine extends Context.Service<
       const stopGeneration = (messageId: string, expectedRunId?: string): Effect.Effect<boolean> =>
         Effect.suspend(() => {
           const registration = inFlight.get(messageId);
+          if (!registration && expectedRunId) {
+            const now = Date.now();
+            for (const [id, stop] of earlyStops) if (now - stop.at > 60_000) earlyStops.delete(id);
+            earlyStops.set(messageId, { runId: expectedRunId, at: now });
+          }
           if (!registration || registration.runId !== expectedRunId) return Effect.succeed(false);
           return Deferred.succeed(registration.abort, undefined).pipe(
             Effect.tap(() =>

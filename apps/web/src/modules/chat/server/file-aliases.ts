@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { conversations } from "~/db/schema/index.ts";
+import { ownedConversationById } from "./owned-conversation.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type { Db } from "~/server/db.ts";
 
@@ -17,7 +17,7 @@ export const currentAttachmentId = (
   db
     .select({ aliases: conversations.fileReferenceAliases })
     .from(conversations)
-    .where(and(eq(conversations.id, chat.conversationId), eq(conversations.userId, chat.userId)))
+    .where(ownedConversationById(chat.conversationId, chat.userId))
     .limit(1)
     .pipe(
       Effect.orDie,

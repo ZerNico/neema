@@ -54,11 +54,13 @@ export class ScheduleRepo extends Context.Service<
       tx?: DbTx,
     ): Effect.Effect<ScheduleRow>;
     /**
-     * Records the chat a "same chat" schedule's first fire created. Only while
-     * the schedule still wants one: an edit that picked another chat, or
-     * switched to a new chat each time, wins over a fire already running.
+     * Records the chat a "same chat" schedule's fire created, in place of
+     * `replacing`, the deleted chat that fire found (null for a first fire).
+     * Only while the schedule still holds what the fire saw, or nothing, the
+     * purge having cleared it: an edit that picked another chat, or switched
+     * to a new chat each time, wins over a fire already running.
      */
-    adoptChat(scheduleId: string, chatId: string): Effect.Effect<void>;
+    adoptChat(scheduleId: string, chatId: string, replacing: string | null): Effect.Effect<void>;
     /** The owner's schedule that keeps running in this chat, if any. */
     findByChat(userId: string, chatId: string): Effect.Effect<ScheduleRow | null>;
     update(
@@ -163,7 +165,7 @@ export class ScheduleRepo extends Context.Service<
             .pipe(Effect.orDie);
           return row ?? null;
         }),
-        adoptChat: Effect.fn("ScheduleRepo.adoptChat")(function* (scheduleId, chatId) {
+        adoptChat: Effect.fn("ScheduleRepo.adoptChat")(function* (scheduleId, chatId, replacing) {
           yield* db
             .update(schedules)
             .set({ chatId, updatedAt: new Date() })
@@ -171,7 +173,9 @@ export class ScheduleRepo extends Context.Service<
               and(
                 eq(schedules.id, scheduleId),
                 eq(schedules.chatMode, "same"),
-                isNull(schedules.chatId),
+                replacing === null
+                  ? isNull(schedules.chatId)
+                  : or(isNull(schedules.chatId), eq(schedules.chatId, replacing)),
               ),
             )
             .pipe(Effect.orDie);
@@ -195,11 +199,20 @@ export class ScheduleRepo extends Context.Service<
           const rows = yield* db
             .select({
               run: scheduleRuns,
+              // Through the join, so a chat deleted and waiting out its grace
+              // period reads as gone, as it will once purged.
+              conversationId: conversations.id,
               conversationTitle: conversations.title,
             })
             .from(scheduleRuns)
             .innerJoin(schedules, eq(schedules.id, scheduleRuns.scheduleId))
-            .leftJoin(conversations, eq(conversations.id, scheduleRuns.conversationId))
+            .leftJoin(
+              conversations,
+              and(
+                eq(conversations.id, scheduleRuns.conversationId),
+                isNull(conversations.deletedAt),
+              ),
+            )
             .where(
               and(
                 eq(schedules.userId, userId),
@@ -218,12 +231,12 @@ export class ScheduleRepo extends Context.Service<
           const page = rows.slice(0, limit);
           const last = rows.length > limit ? page.at(-1) : undefined;
           return {
-            runs: page.map(({ run, conversationTitle }) => ({
+            runs: page.map(({ run, conversationId, conversationTitle }) => ({
               id: run.id,
               firedAt: run.firedAt.toISOString(),
               status: run.status,
               error: run.error,
-              conversationId: run.conversationId,
+              conversationId,
               conversationTitle,
             })),
             nextCursor: last ? { firedAt: last.run.firedAt, id: last.run.id } : null,

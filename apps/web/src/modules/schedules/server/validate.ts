@@ -7,6 +7,7 @@ import {
   knowledgeCollections,
   skills,
 } from "~/db/schema/index.ts";
+import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import { findIntegrationType } from "~/modules/integrations/catalog.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { parseMailbox } from "~/modules/integrations/mailbox.ts";
@@ -178,7 +179,7 @@ export const checkScheduleResources = (
       const [chat] = yield* tx
         .select({ mode: conversations.mode, temporary: conversations.temporary })
         .from(conversations)
-        .where(and(eq(conversations.id, settings.chatId), eq(conversations.userId, userId)))
+        .where(ownedConversationById(settings.chatId, userId))
         .limit(1);
       if (!chat) return yield* new ScheduleRejected({ reason: "the selected chat is unavailable" });
       if (chat.mode !== "chat")

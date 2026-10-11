@@ -61,6 +61,7 @@ import {
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
+import { purgeConversation } from "./purge.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -1696,7 +1697,7 @@ describe("ending a run", () => {
     );
   });
 
-  it("checkpoints active research usage before conversation deletion and interrupts its owner", async () => {
+  it("checkpoints active research usage before a deleted conversation is purged and interrupts its owner", async () => {
     const input = await runtime.runPromise(seed);
     const release = Deferred.makeUnsafe<void>();
     hold = {
@@ -1711,7 +1712,8 @@ describe("ending a run", () => {
       await runtime.runPromise(Deferred.await(gate.reached));
       const run = (await runFor(sent.assistantMessageId))!;
       const generationId = await generationOf(sent.assistantMessageId);
-      await remote.runPromise(ChatService.use((service) => service.deleteConversation(input)));
+      // A purge reaching research still running, as on another instance.
+      await remote.runPromise(purgeConversation(input.userId, input.conversationId));
       hold = null;
       await runtime.runPromise(Deferred.succeed(release, undefined));
       await runtime.runPromise(

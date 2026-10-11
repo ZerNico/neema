@@ -12,6 +12,10 @@ import {
   projects,
   user,
 } from "~/db/schema/index.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -463,7 +467,7 @@ export class ProjectService extends Context.Service<
           .where(
             and(
               eq(conversations.projectId, projectId),
-              eq(conversations.userId, userId),
+              ownedConversation(userId),
               // Archived chats leave every list, a project's too.
               isNull(conversations.archivedAt),
             ),
@@ -488,7 +492,7 @@ export class ProjectService extends Context.Service<
             const [conversation] = yield* tx
               .select({ projectId: conversations.projectId, temporary: conversations.temporary })
               .from(conversations)
-              .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+              .where(ownedConversationById(conversationId, userId))
               .for("update")
               .pipe(Effect.orDie);
             if (!conversation)

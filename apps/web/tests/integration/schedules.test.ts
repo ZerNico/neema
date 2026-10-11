@@ -431,11 +431,31 @@ describe("durable scheduled attempts", () => {
             resolve: () => Effect.succeed(PLAIN_GENERATION),
           });
           const afterSend = yield* archivedAt();
-          return { afterFire, afterSend };
+          // Deleted and waiting out its grace period: the fire finds no chat,
+          // which is what sends it to a fresh one.
+          yield* db
+            .update(messages)
+            .set({ status: "complete" })
+            .where(eq(messages.conversationId, chatId));
+          yield* chatRepo.trashConversation(owner, chatId);
+          const intoDeleted = yield* chatRepo
+            .createTurn({
+              userId: owner,
+              conversation: { kind: "existing", id: chatId },
+              modelId,
+              content: schedule.prompt,
+              attachmentIds: [],
+              scheduleId: schedule.id,
+              scheduleRunId: (yield* repo.beginRun(schedule.id)).id,
+              resolve: () => Effect.succeed(PLAIN_GENERATION),
+            })
+            .pipe(Effect.match({ onFailure: (error) => error._tag, onSuccess: () => "created" }));
+          return { afterFire, afterSend, intoDeleted };
         }),
       );
       expect(result.afterFire).not.toBeNull();
       expect(result.afterSend).toBeNull();
+      expect(result.intoDeleted).toBe("ConversationNotFound");
     } finally {
       await turnRuntime.dispose();
     }
@@ -842,10 +862,10 @@ describe("schedule removal", () => {
         const fresh = yield* insert(userId, { chatMode: "new" });
         const first = yield* chat(userId, same.id);
         const second = yield* chat(userId, same.id);
-        yield* repo.adoptChat(same.id, first);
+        yield* repo.adoptChat(same.id, first, null);
         // A later fire (or a race) never replaces the chat already in use.
-        yield* repo.adoptChat(same.id, second);
-        yield* repo.adoptChat(fresh.id, first);
+        yield* repo.adoptChat(same.id, second, null);
+        yield* repo.adoptChat(fresh.id, first, null);
         return {
           same: (yield* repo.get(userId, same.id))!.chatId,
           fresh: (yield* repo.get(userId, fresh.id))!.chatId,
@@ -855,6 +875,30 @@ describe("schedule removal", () => {
     );
     expect(result.same).toBe(result.first);
     expect(result.fresh).toBeNull();
+  });
+
+  it("moves a same-chat schedule off the deleted chat its fire found, Undo or not", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const same = yield* insert(userId, { chatMode: "same", chatId: null });
+        const first = yield* chat(userId, same.id);
+        const second = yield* chat(userId, same.id);
+        const edited = yield* chat(userId, same.id);
+        yield* repo.adoptChat(same.id, first, null);
+        // The fire found `first` deleted and started `second`; an Undo of that
+        // delete may land before the adoption, which still goes ahead.
+        yield* repo.adoptChat(same.id, second, first);
+        const adopted = (yield* repo.get(userId, same.id))!.chatId;
+        // A fire that saw `first` must not undo an edit that picked another chat.
+        yield* repo.update(userId, same.id, { chatId: edited });
+        yield* repo.adoptChat(same.id, second, first);
+        return { adopted, afterEdit: (yield* repo.get(userId, same.id))!.chatId, second, edited };
+      }),
+    );
+    expect(result.adopted).toBe(result.second);
+    expect(result.afterEdit).toBe(result.edited);
   });
 
   it("only accepts the owner's plain chat as a schedule's chat", async () => {
@@ -868,6 +912,11 @@ describe("schedule removal", () => {
         yield* db.insert(conversations).values({ id: work, userId, mode: "work" });
         const temporary = uuidv7();
         yield* db.insert(conversations).values({ id: temporary, userId, temporary: true });
+        const deleted = yield* chat(userId);
+        yield* db
+          .update(conversations)
+          .set({ deletedAt: new Date() })
+          .where(eq(conversations.id, deleted));
         const check = (chatId: string) =>
           checkScheduleResources(db as never, userId, {
             skillIds: [],
@@ -884,6 +933,7 @@ describe("schedule removal", () => {
           theirs: yield* check(theirs),
           work: yield* check(work),
           temporary: yield* check(temporary),
+          deleted: yield* check(deleted),
         };
       }),
     );
@@ -892,6 +942,7 @@ describe("schedule removal", () => {
       theirs: "the selected chat is unavailable",
       work: "a work chat cannot run a schedule",
       temporary: "a temporary chat cannot run a schedule",
+      deleted: "the selected chat is unavailable",
     });
   });
 

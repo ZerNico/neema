@@ -666,6 +666,31 @@ describe("saved memory repository", () => {
     );
     expect(saved.outcome).toBe("created");
 
+    // Deleted and waiting out its grace: no link to a chat that will not
+    // open, and the provenance is back after an Undo.
+    const grace = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const memory = yield* MemoryService;
+        const marked = (deletedAt: Date | null) =>
+          db
+            .update(conversations)
+            .set({ deletedAt })
+            .where(eq(conversations.id, source.sourceConversationId))
+            .pipe(Effect.orDie);
+        yield* marked(new Date());
+        const [during] = yield* memory.list(userId);
+        yield* marked(null);
+        const [after] = yield* memory.list(userId);
+        return { during, after };
+      }),
+    );
+    expect(grace.during).toMatchObject({ sourceConversationId: null, sourceMessageId: null });
+    expect(grace.after).toMatchObject({
+      sourceConversationId: source.sourceConversationId,
+      sourceMessageId: source.sourceMessageId,
+    });
+
     await runtime.runPromise(
       Db.use((db) =>
         db

@@ -95,6 +95,7 @@ import {
   NoIntegrations,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { outlastGrace } from "./purge.ts";
 import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
@@ -4141,6 +4142,52 @@ describe("queued turns", () => {
     expect(result?.result).toMatchObject({ ok: true, fileName: "steer.txt", matches: 1 });
   }, 60_000);
 
+  it("stops an answer a delete reached before it started, even after an Undo", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* setupConversation;
+        // The turn committed, but its fiber has not registered yet: the delete
+        // finds the row with nothing running to stop, and an Undo follows.
+        const mark = yield* chat.deleteConversation({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+        });
+        const restored = yield* chat.restoreConversation({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          mark: mark!,
+        });
+        let calls = 0;
+        authoringScript = () => {
+          calls += 1;
+          return Stream.make(
+            AiResponse.makePart("text-delta", { id: "t", delta: "Too late." }),
+            authoringFinish(),
+          ) as Stream.Stream<ChatStreamPart>;
+        };
+        yield* engine.startGeneration({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId ?? undefined,
+          modelId: textModelId,
+          searchEnabled: false,
+        });
+        yield* waitForAnswer(seed.assistant.id);
+        authoringScript = null;
+        return {
+          restored,
+          status: (yield* repo.getMessage(seed.assistant.id))?.status,
+          calls,
+        };
+      }),
+    );
+    expect(result).toEqual({ restored: true, status: "aborted", calls: 0 });
+  }, 60_000);
+
   it("places a steer between replayed turns for an image-output model", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -7698,6 +7745,63 @@ describe("custom tool calls", () => {
       }
     }, 60_000);
 
+    it("stops a running answer on a delete, so Undo brings back a stopped one", async () => {
+      const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
+      let calls = 0;
+      let deleting: Fiber.Fiber<string | null, unknown> | undefined;
+      customToolRun = (input) =>
+        Effect.gen(function* () {
+          calls += 1;
+          // The second call is where the person deletes the chat. Forked: the
+          // delete waits for this very answer to settle.
+          if (calls === 2)
+            deleting = runtime.runFork(
+              ChatService.use((service) =>
+                service.deleteConversation({ userId: seed.userId, conversationId }),
+              ),
+            );
+          return yield* keeperRun!(input);
+        });
+      try {
+        draftTwice(tool);
+        const stopped = await runtime.runPromise(
+          answer(seed.userId, conversationId, "Draft notes."),
+        );
+        const mark = await runtime.runPromise(Fiber.join(deleting!));
+        const result = await runtime.runPromise(
+          Effect.gen(function* () {
+            const repo = yield* ChatRepo;
+            const service = yield* ChatService;
+            const hidden = yield* repo.getConversation(seed.userId, conversationId).pipe(
+              Effect.flip,
+              Effect.map((error) => error._tag),
+            );
+            const restored = yield* service.restoreConversation({
+              userId: seed.userId,
+              conversationId,
+              mark: mark!,
+            });
+            const detail = yield* loadConversationDetail(seed.userId, conversationId);
+            return {
+              hidden,
+              restored,
+              status: (yield* repo.getMessage(stopped))?.status,
+              shown: detail.messages.some((message) => message.id === stopped),
+            };
+          }),
+        );
+        expect(result).toEqual({
+          hidden: "ConversationNotFound",
+          restored: true,
+          status: "aborted",
+          shown: true,
+        });
+      } finally {
+        authoringScript = null;
+        customToolRun = null;
+      }
+    }, 60_000);
+
     it("continues a stopped answer's draft from its last kept revision", async () => {
       const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
       let calls = 0;
@@ -7878,10 +7982,15 @@ describe("custom tool calls", () => {
         expect(await runtime.runPromise(keptRows(conversationId))).toHaveLength(1);
         await runtime.runPromise(
           ChatService.use((service) =>
-            service.deleteConversation({ userId: seed.userId, conversationId }),
+            service
+              .deleteConversation({ userId: seed.userId, conversationId })
+              .pipe(
+                Effect.andThen(outlastGrace(conversationId)),
+                Effect.andThen(service.sweepExpired()),
+              ),
           ),
         );
-        // Deleting the chat releases the kept copy at once, not at the next sweep.
+        // Purging the chat releases the kept copy with it, not at the kept-file sweep.
         expect(await runtime.runPromise(userAttachments(seed.userId))).toEqual([]);
       } finally {
         authoringScript = null;

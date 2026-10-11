@@ -60,9 +60,11 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   unattended fire never has, so they are refused at save (`checkScheduleResources`) and
   again by `runScheduledTurn` itself. A chat that is still answering is waited
   on, every 15 seconds for up to five minutes, then the run is recorded as skipped: the
-  owner may be mid-conversation in it. A picked chat that was deleted is cleared by its FK
-  (`on delete set null`); that fire and later ones start a new chat and adopt it
-  (`adoptChat`, only while the schedule still wants one, so an edit mid-fire wins).
+  owner may be mid-conversation in it. A picked chat that was [deleted](deleted-chats.md) is not
+  found, so the fire starts a new chat and adopts it (`adoptChat`). It adopts only while the
+  schedule still holds the chat that fire found gone, or none, the purge having cleared it by
+  its FK (`on delete set null`). An edit mid-fire wins, and Undo of the delete brings back the
+  old chat without moving the schedule back to it.
 - Retained selections are never permissions: `modelId` and `agentId` have no FK. A missing
   model falls back to the user's default chat model at fire time (an unattended missed fire is
   worse than a different model answering); only a genuinely deleted agent degrades the fire

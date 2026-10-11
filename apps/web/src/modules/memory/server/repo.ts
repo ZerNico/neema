@@ -2,6 +2,10 @@ import { and, asc, desc, eq, getTableColumns, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { conversations, memories, memorySettings, messages, tools } from "~/db/schema/index.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import { Db } from "~/server/db.ts";
 import {
   MAX_MEMORIES_PER_USER,
@@ -71,7 +75,7 @@ const selectSourceMessage = (
         eq(messages.id, sourceMessageId),
         eq(messages.conversationId, sourceConversationId),
         eq(messages.role, "user"),
-        eq(conversations.userId, userId),
+        ownedConversation(userId),
       ),
     )
     // Hold the source stable through hash validation and the memory write. A
@@ -181,17 +185,12 @@ export class MemoryRepo extends Context.Service<
         const rows = yield* db
           .select({
             ...getTableColumns(memories),
+            reachableConversationId: conversations.id,
             sourceConversationTitle: conversations.title,
             currentSourceContent: messages.content,
           })
           .from(memories)
-          .leftJoin(
-            conversations,
-            and(
-              eq(conversations.id, memories.sourceConversationId),
-              eq(conversations.userId, userId),
-            ),
-          )
+          .leftJoin(conversations, ownedConversationById(memories.sourceConversationId, userId))
           .leftJoin(messages, eq(messages.id, memories.sourceMessageId))
           .where(eq(memories.userId, userId))
           .orderBy(
@@ -203,14 +202,21 @@ export class MemoryRepo extends Context.Service<
           )
           .pipe(Effect.orDie);
 
-        return rows.map(({ sourceConversationTitle, currentSourceContent, ...row }) => ({
-          ...toMemory(row),
-          sourceConversationTitle,
-          sourceMessageEdited:
-            row.sourceMessageHash !== null &&
-            currentSourceContent !== null &&
-            hashSourceMessageContent(currentSourceContent) !== row.sourceMessageHash,
-        }));
+        // Provenance is shown only for a chat the reader can still open. The
+        // stored ids stay, so an Undo of a delete brings the link back.
+        return rows.map(
+          ({ reachableConversationId, sourceConversationTitle, currentSourceContent, ...row }) => ({
+            ...toMemory(row),
+            sourceConversationId: reachableConversationId,
+            sourceConversationTitle,
+            sourceMessageId: reachableConversationId === null ? null : row.sourceMessageId,
+            sourceMessageEdited:
+              reachableConversationId !== null &&
+              row.sourceMessageHash !== null &&
+              currentSourceContent !== null &&
+              hashSourceMessageContent(currentSourceContent) !== row.sourceMessageHash,
+          }),
+        );
       });
 
       const listReferenceable = Effect.fn("MemoryRepo.listReferenceable")(function* (

@@ -43,6 +43,7 @@ import {
   NoIntegrations,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { outlastGrace, purgeConversation } from "./purge.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -670,7 +671,7 @@ describe("branching a conversation", () => {
           [early!.id, late!.id].toSorted(),
         );
         expect(firstAliases.workspaceAncestors).toEqual([source.conversation.id]);
-        yield* repo.deleteConversation(userId, source.conversation.id);
+        yield* purgeConversation(userId, source.conversation.id);
         expect(
           (yield* repo.getConversation(userId, first.conversation.id)).branchedFrom,
         ).toBeNull();
@@ -699,7 +700,7 @@ describe("branching a conversation", () => {
           callIndex: originalCalls[0]!.callIndex,
           textOffset: originalCalls[0]!.textOffset,
         });
-        yield* repo.deleteConversation(userId, first.conversation.id);
+        yield* purgeConversation(userId, first.conversation.id);
         const surviving = yield* repo.getConversation(userId, second.id);
         expect(surviving.branchedFrom).toBeNull();
         expect(surviving.fileReferenceAliases).toEqual(expected);
@@ -751,7 +752,6 @@ describe("branching a conversation", () => {
   it("keeps the shared blob until the last conversation referencing it is gone", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const repo = yield* ChatRepo;
         const db = yield* Db;
         const userId = yield* makeUser();
         const source = yield* seedThread(userId, [{ user: "here", assistant: "a1" }]);
@@ -763,9 +763,9 @@ describe("branching a conversation", () => {
         const blobRows = () =>
           db.select().from(attachmentBlobs).where(eq(attachmentBlobs.id, blobId));
 
-        const afterBranchDelete = yield* repo.deleteConversation(userId, forked.conversation.id);
+        const afterBranchDelete = yield* purgeConversation(userId, forked.conversation.id);
         const survives = (yield* blobRows()).length;
-        const afterSourceDelete = yield* repo.deleteConversation(userId, source.conversation.id);
+        const afterSourceDelete = yield* purgeConversation(userId, source.conversation.id);
         return {
           afterBranchDelete,
           survives,
@@ -933,7 +933,7 @@ describe("branching a conversation", () => {
         });
         const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
 
-        yield* repo.deleteConversation(userId, source.conversation.id);
+        yield* purgeConversation(userId, source.conversation.id);
         const after = yield* repo.getConversation(userId, forked.conversation.id);
         return {
           branchedFrom: after.branchedFrom,
@@ -1054,7 +1054,7 @@ describe("temporary chats", () => {
           .set({ temporary: true, createdAt: long, lastMessageAt: long })
           .where(eq(conversationsTable.id, source.conversation.id));
         const events = yield* listenFor(userId, 1);
-        yield* chat.sweepTemporary();
+        yield* chat.sweepExpired();
         const remaining = yield* db
           .select({ id: conversationsTable.id })
           .from(conversationsTable)
@@ -1067,7 +1067,66 @@ describe("temporary chats", () => {
       }),
     );
     expect(result.remaining).toEqual([]);
-    expect(result.events).toEqual([{ type: "conversation.deleted", conversationId: result.id }]);
+    expect(result.events).toEqual([{ type: "conversation.purged", conversationId: result.id }]);
+  });
+});
+
+describe("deleted chats", () => {
+  it("can be undone until the sweep purges them, and every tab hears each step", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
+        const id = source.conversation.id;
+        const events = yield* listenFor(userId, 4);
+        const firstMark = yield* chat.deleteConversation({ userId, conversationId: id });
+        // Inside the grace period the sweep leaves it alone.
+        yield* chat.sweepExpired();
+        const restored = yield* chat.restoreConversation({
+          userId,
+          conversationId: id,
+          mark: firstMark!,
+        });
+        const messagesBack = (yield* repo.listMessages(id)).length;
+        yield* chat.deleteConversation({ userId, conversationId: id });
+        const mark = yield* outlastGrace(id);
+        yield* chat.sweepExpired();
+        const restoredAfterPurge = yield* chat.restoreConversation({
+          userId,
+          conversationId: id,
+          mark,
+        });
+        const remaining = yield* db
+          .select({ id: conversationsTable.id })
+          .from(conversationsTable)
+          .where(eq(conversationsTable.id, id));
+        return {
+          id,
+          restored,
+          messagesBack,
+          restoredAfterPurge,
+          remaining,
+          events: Array.from(yield* Fiber.join(events)),
+        };
+      }),
+    );
+    expect(result).toMatchObject({
+      restored: true,
+      messagesBack: 2,
+      restoredAfterPurge: false,
+      remaining: [],
+    });
+    expect(result.events).toEqual(
+      [
+        "conversation.deleted",
+        "conversation.updated",
+        "conversation.deleted",
+        "conversation.purged",
+      ].map((type) => ({ type, conversationId: result.id })),
+    );
   });
 });
 

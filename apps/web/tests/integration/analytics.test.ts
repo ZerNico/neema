@@ -36,6 +36,7 @@ import {
   NoIntegrations,
 } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
+import { purgeConversation } from "./purge.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -370,13 +371,12 @@ describe("usage ledger capture", () => {
     finishMetadata = undefined;
     const result = await run(
       Effect.gen(function* () {
-        const repo = yield* ChatRepo;
         const providers = yield* ProviderRepo;
         const userId = yield* makeUser();
         const model = yield* makeModel();
         const turn = yield* generateOnce(userId, model.id);
 
-        yield* repo.deleteConversation(userId, turn.conversationId);
+        yield* purgeConversation(userId, turn.conversationId);
         yield* providers.deleteModel(model.id);
         const events = yield* eventsForMessage(turn.assistantMessageId);
         return { events, modelName: model.displayName };

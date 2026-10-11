@@ -51,8 +51,14 @@ export const SyncEvent = Schema.Union([
     type: Schema.Literal("conversation.queue.changed"),
     conversationId: Schema.String,
   }),
+  // Deleted by its owner, still restorable for a grace period.
   Schema.Struct({
     type: Schema.Literal("conversation.deleted"),
+    conversationId: Schema.String,
+  }),
+  // Gone for good: a delete past its grace period or an expired temporary chat.
+  Schema.Struct({
+    type: Schema.Literal("conversation.purged"),
     conversationId: Schema.String,
   }),
   Schema.Struct({

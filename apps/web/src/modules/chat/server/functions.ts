@@ -13,6 +13,7 @@ import {
   ConversationDetailInput,
   ConversationHistoryInput,
   ConversationIdInput,
+  ConversationRestoreInput,
   EditMessageInput,
   ListConversationsInput,
   MessageIdInput,
@@ -661,6 +662,21 @@ export const deleteConversation = createServerFn({ method: "POST" })
         chat.deleteConversation({
           userId: context.session.user.id,
           conversationId: data.conversationId,
+        }),
+      ),
+    ),
+  );
+
+export const restoreConversation = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ConversationRestoreInput))
+  .handler(({ data, context }) =>
+    runtime.runPromise(
+      ChatService.use((chat) =>
+        chat.restoreConversation({
+          userId: context.session.user.id,
+          conversationId: data.conversationId,
+          mark: data.mark,
         }),
       ),
     ),

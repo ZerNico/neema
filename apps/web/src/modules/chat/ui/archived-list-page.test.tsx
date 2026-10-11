@@ -24,6 +24,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
   useNavigate: () => vi.fn(),
   useParams: () => ({}),
+  useRouter: () => ({ state: { location: { pathname: "/" } } }),
 }));
 
 const renderPage = (rows: ReadonlyArray<{ id: string; title: string | null }>) => {

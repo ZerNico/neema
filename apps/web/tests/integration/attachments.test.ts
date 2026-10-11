@@ -32,6 +32,7 @@ import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { purgeConversation } from "./purge.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -623,7 +624,7 @@ describe("attachment replacement on edit", () => {
         const survivesOneReference = yield* store.exists(key);
 
         // Deleting the conversation releases the last reference.
-        const conversationKeys = yield* repo.deleteConversation(userId, turn.conversation.id);
+        const conversationKeys = yield* purgeConversation(userId, turn.conversation.id);
         yield* service.deleteBlobs(conversationKeys);
 
         return {
@@ -663,9 +664,10 @@ describe("attachment replacement on edit", () => {
         });
         const key = (yield* blobsOf(alice))[0]!.storageKey;
 
-        // The ownership check must gate the attachment release, not just the
-        // conversation delete, otherwise this destroys Alice's files.
-        const keys = yield* repo.deleteConversation(mallory, turn.conversation.id);
+        // The purge itself checks no owner, so the delete before it must:
+        // were Mallory's delete to mark the chat, the purge would take
+        // Alice's files with it.
+        const keys = yield* purgeConversation(mallory, turn.conversation.id);
 
         const db = yield* Db;
         const stillThere = yield* db
@@ -1018,7 +1020,7 @@ describe("generated assistant image transactions", () => {
             .where(eq(messageChunks.messageId, turn.assistant.id)),
         ).toHaveLength(0);
         yield* service.deleteBlobs(retry.orphanedKeys);
-        yield* service.deleteBlobs(yield* repo.deleteConversation(userId, turn.conversation.id));
+        yield* service.deleteBlobs(yield* purgeConversation(userId, turn.conversation.id));
         expect(yield* repo.getConversation(userId, branch.id)).toMatchObject({
           branchedFrom: null,
           fileReferenceAliases: branch.fileReferenceAliases,
@@ -1028,7 +1030,7 @@ describe("generated assistant image transactions", () => {
             (yield* service.read({ userId, attachmentId: clonedImage.attachment.id })).bytes,
           ).equals(png),
         ).toBe(true);
-        yield* service.deleteBlobs(yield* repo.deleteConversation(userId, branch.id));
+        yield* service.deleteBlobs(yield* purgeConversation(userId, branch.id));
         expect(yield* attachmentCount(userId)).toBe(0);
         expect(
           (yield* Effect.result(service.read({ userId, attachmentId: clonedImage.attachment.id })))
@@ -1335,7 +1337,7 @@ describe("queued message files", () => {
           attachmentIds: [file.id],
           input: queued(),
         });
-        const keys = yield* repo.deleteConversation(userId, conversation.id);
+        const keys = yield* purgeConversation(userId, conversation.id);
         return { keys: [...keys], key, left: yield* attachmentCount(userId) };
       }),
     );

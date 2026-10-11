@@ -279,6 +279,10 @@ skipped one on purpose.
   what a branch or schedule does with one.
 - `docs/internals/archived-chats.md`: the list and search predicates, what unarchives a chat
   and why a schedule's fire does not.
+- `docs/internals/deleted-chats.md`: delete with Undo. The `deleted_at` mark, the one owned-chat
+  predicate every reader uses, marking before stopping and early stops, Undo naming its delete,
+  grace versus toast, the shared purge sweep, held rows in the client, and when a work chat's
+  folder goes.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
 - `docs/internals/providers.md`: `@chat/model-client` and its presets, admin overrides,

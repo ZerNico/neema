@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
+import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
 
@@ -131,7 +132,7 @@ export function useSync(
         clearTimeout(identityRetry);
         clearKnowledgeTimer();
         connection += 1;
-      void open(connection);
+        void open(connection);
         return;
       }
       if (!authorized) return;
@@ -179,10 +180,16 @@ export function useSync(
         case "conversation.created":
         case "conversation.updated":
         case "conversation.deleted":
+        case "conversation.purged":
+          // Not at the delete itself: Undo would find a work chat's folder gone.
+          if (event.type === "conversation.purged") discardWorkspace(event.conversationId);
           refreshWork();
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           // A project's chat list is the same rows, filtered by project.
           void queryClient.invalidateQueries({ queryKey: ["projects", "chats"] });
+          // And the palette's recent chats and chat search, cached apart.
+          void queryClient.invalidateQueries({ queryKey: ["search", "recent-chats"] });
+          void queryClient.invalidateQueries({ queryKey: ["search", "chats"] });
           if (event.type !== "conversation.created") {
             // Prefix, not this id alone: a branch's detail embeds its source's
             // title, so renaming or deleting one conversation can stale
@@ -192,6 +199,8 @@ export function useSync(
             // Saved memories embed source titles and whether the source still
             // exists, so rename/delete events must refresh their provenance.
             void queryClient.invalidateQueries({ queryKey: ["memory"] });
+            // A schedule's run history links each run's chat only while it opens.
+            void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
           }
           break;
         case "conversation.queue.changed":

@@ -38,7 +38,8 @@ export interface ActionableConversation {
 export interface ConversationActions {
   startRename: (conversation: ActionableConversation) => void;
   setArchived: (conversation: ActionableConversation, archived: boolean) => void;
-  confirmDelete: (conversation: ActionableConversation) => Promise<void>;
+  /** Deletes at once and offers Undo; no confirmation. */
+  remove: (conversation: ActionableConversation) => void;
   /** Mount once per surface: the shared rename dialog. */
   renameDialog: ReactNode;
 }
@@ -68,7 +69,7 @@ export function ConversationMenuItems({
           {conversation.archived ? "Unarchive" : "Archive"}
         </DropdownMenuItem>
       )}
-      <DropdownMenuItem variant="destructive" onClick={() => actions.confirmDelete(conversation)}>
+      <DropdownMenuItem variant="destructive" onClick={() => actions.remove(conversation)}>
         <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         Delete
       </DropdownMenuItem>

@@ -1,0 +1,2 @@
+ALTER TABLE "conversations" ADD COLUMN "deleted_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "conversations_deleted_at_idx" ON "conversations" ("deleted_at") WHERE "deleted_at" is not null;

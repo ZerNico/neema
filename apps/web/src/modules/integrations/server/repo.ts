@@ -17,6 +17,7 @@ import {
   schedules,
   user,
 } from "~/db/schema/index.ts";
+import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import type { ToolPermission } from "../consent.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
@@ -528,7 +529,7 @@ export class IntegrationRepo extends Context.Service<
             const owned = yield* db
               .select({ id: conversations.id })
               .from(conversations)
-              .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
+              .where(ownedConversationById(conversationId, userId))
               .pipe(Effect.orDie);
             if (owned.length === 0) return false;
             const set = {
