@@ -249,7 +249,7 @@ function SheetTab({
         </ContextMenuItem>
         <ContextMenuItem onClick={onDownload}>
           <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-          Download as CSV
+          Export as CSV
         </ContextMenuItem>
         <ContextMenuItem onClick={onPrint}>
           <HugeiconsIcon icon={PrinterIcon} strokeWidth={2} />

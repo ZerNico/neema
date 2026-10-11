@@ -133,7 +133,7 @@ export function DocumentPanelActions({
               onClick={() => void downloadWord(controller)}
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-              Download as Word
+              Export as Word
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

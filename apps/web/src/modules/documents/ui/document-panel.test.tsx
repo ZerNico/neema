@@ -197,7 +197,7 @@ describe("document panel", () => {
     const source = await openSource();
     fireEvent.change(source, { target: { value: "typed just now" } });
     fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Download as Word" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export as Word" }));
     await waitFor(() =>
       expect(clicked).toEqual(["/api/documents/document-1/export typed just now"]),
     );

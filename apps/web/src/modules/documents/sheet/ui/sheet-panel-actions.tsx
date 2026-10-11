@@ -76,11 +76,11 @@ export function SheetMenu({
             }}
           >
             <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-            Download as Excel
+            Export as Excel
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onDownloadCsv}>
             <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-            Download as CSV
+            Export as CSV
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
