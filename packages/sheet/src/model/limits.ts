@@ -61,6 +61,27 @@ interface SheetMeasure {
  * what it changed, not the whole document.
  */
 const measures = new WeakMap<SheetLimits, WeakMap<Sheet, SheetMeasure>>();
+
+// A row's cells as JSON, by length: a change makes new objects only of the rows it touches.
+const rowBytes = new WeakMap<object, number>();
+/**
+ * The length of a sheet's JSON, each row of cells written once while it is
+ * unchanged, so an edit costs its rows rather than the whole sheet.
+ */
+export function sheetBytes(sheet: Sheet): number {
+  const rows = Object.entries(sheet.cells);
+  // Its JSON with "cells":{} is the rest; the rows go between those braces, comma-separated.
+  let bytes = JSON.stringify({ ...sheet, cells: {} }).length + Math.max(0, rows.length - 1);
+  for (const [r, row] of rows) {
+    let written = rowBytes.get(row);
+    if (written === undefined) {
+      written = JSON.stringify(row).length;
+      rowBytes.set(row, written);
+    }
+    bytes += JSON.stringify(r).length + 1 + written;
+  }
+  return bytes;
+}
 function measureSheet(sheet: Sheet, limits: SheetLimits): SheetMeasure {
   const cache = measures.get(limits) ?? new WeakMap<Sheet, SheetMeasure>();
   measures.set(limits, cache);
@@ -98,7 +119,7 @@ function measureSheet(sheet: Sheet, limits: SheetLimits): SheetMeasure {
         if (text > limits.formulaText)
           return { ...empty, over: `a formula longer than ${limits.formulaText} characters` };
       }
-    return { over: null, cells, formulas, styles, bytes: JSON.stringify(sheet).length };
+    return { over: null, cells, formulas, styles, bytes: sheetBytes(sheet) };
   };
   const measured = measure();
   cache.set(sheet, measured);
