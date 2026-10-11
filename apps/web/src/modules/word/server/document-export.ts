@@ -359,9 +359,12 @@ export function documentToWord(raw: DocumentForWord): Uint8Array {
     const bytes = input.images[src];
     const kind = bytes ? imageOf(bytes) : null;
     if (bytes && kind && kind.width > 0 && kind.height > 0) {
-      const wanted = pixels(node.attrs?.width);
-      const width = Math.min(TEXT_WIDTH_PX, wanted ?? kind.width);
-      const height = pixels(node.attrs?.height) ?? (width * kind.height) / kind.width;
+      const wanted = pixels(node.attrs?.width) ?? kind.width;
+      const tall = pixels(node.attrs?.height) ?? (wanted * kind.height) / kind.width;
+      // Capped at the text width, the height shrinks with it.
+      const scale = Math.min(1, TEXT_WIDTH_PX / wanted);
+      const width = wanted * scale;
+      const height = tall * scale;
       insertImageInto(doc, at, bytes, {
         widthEmu: Math.round(width * EMU_PER_PX),
         heightEmu: Math.round(height * EMU_PER_PX),

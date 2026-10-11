@@ -399,4 +399,21 @@ describe("a Word file from awkward documents", () => {
     expect(title(openDocx(bytes))).toBe("Title");
     expect(readBack(bytes).textContent).toBe("abcde");
   });
+
+  it("keeps a picture's shape when it is narrowed to the page", () => {
+    const doc = docOf([
+      paragraph("A ", [
+        { type: "image", attrs: { src: "pic", alt: "Wide", width: 1208, height: 400 } },
+      ]),
+    ]);
+    const xml = JSON.stringify(
+      openDocx(documentToWord(wordExportInput("Wide", doc, [], { pic: LOGO }))).document,
+    );
+    const extent =
+      /"local":"extent".*?"local":"cx".*?"value":"(\d+)".*?"local":"cy".*?"value":"(\d+)"/.exec(
+        xml,
+      );
+    // Asked for 1208 by 400 pixels, halved to the page’s 604 pixels of width.
+    expect([Number(extent?.[1]), Number(extent?.[2])]).toEqual([604 * 9_525, 200 * 9_525]);
+  });
 });
