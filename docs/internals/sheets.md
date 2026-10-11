@@ -226,12 +226,22 @@ browser workers and the Excel file tools); this page records the decisions behin
   uncalculated and keep the file's value, for Excel to compute on open.
 - An open sheet calculates in a worker. Each request carries a generation and only the newest
   is calculated; a typed value shows at once and a formula keeps its last result until the new
-  one. A full recalculation of 10,000 formulas, a 5,000-long chain among them, takes about
-  60 ms on an M-series Mac, so calculation stays whole rather than incremental.
+  one. The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
+  row's cell contents with what it calculated before and recalculates only the formulas the
+  changed cells reach (those reading them, filling them, shown as `#SPILL!`, or using
+  `INDIRECT` and `OFFSET`, and everything after those), keeping every other result. A change to
+  rows, columns, sheets or names, a new moment for a sheet that reads it, or a spill changing
+  shape starts over whole. On the page, a new revision's context alone calculates nothing unless
+  a formula read the moment, and the feed echoing a tab's own edits keeps its document, so a
+  confirmed edit is calculated once. Within a pass every formula reading one range shares its
+  values and the numbers drawn from them, and parsed formulas are kept by text: a 2,000-row sheet
+  with 10,000 formulas calculates whole in about 80 ms and follows an edit in about 40.
 
 ## Tests that hold it
 
 `model/property.test.ts` checks formulas against Excel's own bookkeeping after random inserts
 and deletes, and three clients and a server converging through reordered and resent changes;
-`model/invert.test.ts` that undoing any change brings back what the sheet showed. Export and
+`model/invert.test.ts` that undoing any change brings back what the sheet showed;
+`model/calc-follow.test.ts` that a calculation following the last gives what a whole one gives,
+edit after random edit. Export and
 import are tested as a round trip through the Excel tools' own reader.

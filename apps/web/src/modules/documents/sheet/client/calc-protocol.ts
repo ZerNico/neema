@@ -37,7 +37,11 @@ export const fromWire = (value: WireScalar): Scalar =>
 
 /** Calculates a document and lists what differs from what it holds: formulas' results and spills. */
 export function calculateForWire(request: CalcRequest): CalcResult {
-  const values = calculateSheet(request.doc, request.context);
+  return wireOf(request, calculateSheet(request.doc, request.context));
+}
+
+/** A calculation's formulas' results and spills, as they cross to the page. */
+export function wireOf(request: CalcRequest, values: SheetValues): CalcResult {
   const results: Array<readonly [string, WireScalar]> = [];
   const spills: Array<readonly [string, readonly string[], readonly string[]]> = [];
   for (const [sheet, data] of Object.entries(request.doc.sheet))
