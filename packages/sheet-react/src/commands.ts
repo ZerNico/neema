@@ -3,6 +3,7 @@ import { cellStyle, restyle } from "@chat/sheet/model/style";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { SheetValues } from "@chat/sheet/model/calc";
+import { delocalizeFormula } from "@chat/sheet/formula-locale";
 import { renderFormula } from "@chat/sheet/model/formula";
 import {
   NEW_SHEET,
@@ -83,6 +84,7 @@ function typedLink(text: string): string | null {
   return null;
 }
 
+/** What a person typed into a cell, a formula's separators as the sheet's locale types them. */
 export function enterCell(context: GridContext, at: CellRef, raw: string): SheetOp[] {
   const grow = draft(context.doc, context.mint);
   const ops = typeInto(context.sheet, at, raw, grow, context.locale);
@@ -100,7 +102,7 @@ function typeInto(
   const context = { sheet, locale };
   const cell = grow.doc.sheet[sheet]!.cells[at.r]?.[at.c];
   if (raw.startsWith("=") && raw.length > 1) {
-    const f = grow.formula(raw.slice(1), context.sheet);
+    const f = grow.formula(delocalizeFormula(raw.slice(1), locale), context.sheet);
     // A formula the grid cannot hold stays what was typed, as text.
     const write: CellWrite = f ? { ...at, f } : { ...at, v: raw };
     return [{ op: "set", sh: context.sheet, cells: [write] }];

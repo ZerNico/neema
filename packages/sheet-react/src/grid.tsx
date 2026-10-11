@@ -1043,6 +1043,7 @@ export function SheetGrid({
         editing={editing}
         rect={editorRect}
         zoom={zoom}
+        listSeparator={locale.listSeparator}
         edit={edit}
         onEditingChange={onEditingChange}
       />

@@ -2,6 +2,7 @@ import type { BorderLine, CellStyle } from "@chat/sheet/model/style";
 import type { CSSProperties } from "react";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
+import { localizeFormula } from "@chat/sheet/formula-locale";
 import { renderFormula } from "@chat/sheet/model/formula";
 import type { SheetDoc } from "@chat/sheet/model";
 import { formatValue, generalText } from "@chat/sheet/number-format";
@@ -75,7 +76,7 @@ export function cellCss(style: CellStyle): CSSProperties {
   };
 }
 
-/** What the formula bar shows for a cell: its formula as typed, else its value. */
+/** What the formula bar shows for a cell: its formula as the locale types it, else its value. */
 export function cellSource(
   doc: SheetDoc,
   sheet: string,
@@ -85,7 +86,7 @@ export function cellSource(
 ) {
   const cell = doc.sheet[sheet]?.cells[r]?.[c];
   if (!cell) return "";
-  if (cell.f) return `=${renderFormula(cell.f, { doc, sheet })}`;
+  if (cell.f) return `=${localizeFormula(renderFormula(cell.f, { doc, sheet }), locale)}`;
   if (cell.v === undefined || cell.v === null) return "";
   if (typeof cell.v === "boolean") return cell.v ? "TRUE" : "FALSE";
   if (typeof cell.v === "number") return generalText(cell.v, locale);

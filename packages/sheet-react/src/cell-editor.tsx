@@ -10,6 +10,7 @@ export function CellEditor({
   editing,
   rect,
   zoom,
+  listSeparator,
   edit: {
     editorInput,
     caret,
@@ -27,6 +28,8 @@ export function CellEditor({
   editing: CellEditing;
   rect: { top: number; left: number; width: number; height: number };
   zoom: number;
+  /** What the argument hint writes between arguments, as the sheet's locale types them. */
+  listSeparator: string;
   edit: ReturnType<typeof useCellEdit>;
   onEditingChange: ((editing: CellEditing | null) => void) | undefined;
 }) {
@@ -78,6 +81,7 @@ export function CellEditor({
           text={editing.text}
           caret={caret}
           picked={picked}
+          listSeparator={listSeparator}
           onPick={(name) => {
             const offered = completionFor(editing.text, caret);
             if (!offered) return;

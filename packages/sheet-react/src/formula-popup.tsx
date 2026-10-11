@@ -9,12 +9,14 @@ export function FormulaPopup({
   text,
   caret,
   picked,
+  listSeparator,
   onPick,
   style,
 }: {
   text: string;
   caret: number;
   picked: number;
+  listSeparator: string;
   onPick: (name: string) => void;
   style: { top: number; left: number };
 }) {
@@ -57,7 +59,7 @@ export function FormulaPopup({
       {hint.name}(
       {hint.args.map((arg, index) => (
         <span key={arg}>
-          {index ? ", " : ""}
+          {index ? `${listSeparator} ` : ""}
           <span className={index === hint.current ? "font-semibold" : "text-muted-foreground"}>
             {arg}
           </span>

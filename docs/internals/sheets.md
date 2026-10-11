@@ -11,6 +11,11 @@ browser workers and the Excel file tools); this page records the decisions behin
   sheet, rows and columns by ID with each `$` as written (`model/formula.ts`). A1 text is made
   only where someone reads it: the formula bar, the model's view, the evaluator and export.
   It is never parsed back after a structural change, so an insert changes no formula.
+- Formula text is English everywhere but where a person reads or types it. Where the locale's
+  decimal is a comma, the formula bar and cell editor show and read `;` between arguments, `,`
+  in numbers and `\` between array columns (`formula-locale.ts`), as Google Sheets does; names
+  stay English. Text built in code, such as a pivot formula, is localized before it is entered
+  as if typed.
 - 3-D references (`First:Last!A1`) stay positional within each sheet, as Excel's are. Names'
   identifiers are text; their definitions are formulas like any other. `INDIRECT` text stays
   positional.

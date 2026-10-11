@@ -1,13 +1,16 @@
 /**
  * What a sheet's locale changes: separators, names and the order dates are
  * typed in. Tables of our own rather than Intl, so every browser and the
- * server write the same text for the same value. Formula syntax and
- * function names stay English in every locale.
+ * server write the same text for the same value. Function names stay
+ * English in every locale; a formula's separators follow it only where a
+ * person reads or types one (`formula-locale.ts`).
  */
 export interface SheetLocale {
   readonly id: string;
   readonly decimal: string;
   readonly group: string;
+  /** Between a function's arguments as a person types them: ";" where "," is the decimal. */
+  readonly listSeparator: "," | ";";
   readonly dateSeparator: string;
   readonly timeSeparator: string;
   /** How a typed date with three numbers is read, and the short date it is shown in. */
@@ -44,6 +47,7 @@ export const EN_US: SheetLocale = {
   id: "en-US",
   decimal: ".",
   group: ",",
+  listSeparator: ",",
   dateSeparator: "/",
   timeSeparator: ":",
   dateOrder: "MDY",
@@ -92,6 +96,7 @@ export const DE_DE: SheetLocale = {
   id: "de-DE",
   decimal: ",",
   group: ".",
+  listSeparator: ";",
   dateSeparator: ".",
   timeSeparator: ":",
   dateOrder: "DMY",
@@ -124,6 +129,7 @@ export const FR_FR: SheetLocale = {
   decimal: ",",
   // A narrow no-break space, as French Excel groups thousands.
   group: "\u202f",
+  listSeparator: ";",
   dateSeparator: "/",
   timeSeparator: ":",
   dateOrder: "DMY",

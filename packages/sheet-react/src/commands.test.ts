@@ -27,6 +27,7 @@ import {
   type GridContext,
 } from "./commands.ts";
 import { selectionStats } from "./format-commands.ts";
+import { cellSource } from "./display.ts";
 
 let minted = 0;
 let revision = 0;
@@ -69,6 +70,16 @@ describe("typing into a cell", () => {
     expect(doc.sheet.s1!.cells[r]![c]).toMatchObject({ v: 0.125, s: '{"numberFormat":"0.00%"}' });
     doc = type(doc, 2, 1, "'=not a formula");
     expect(shown(doc, 2, 1)).toBe("=not a formula");
+  });
+
+  it("reads a formula in the locale's separators, keeps it in English and shows it back", () => {
+    let doc = type(emptyDoc(), 1, 1, "5");
+    doc = type(doc, 1, 2, "=ROUND(A1/3;2)*1,5", DE_DE);
+    expect(formulaAt(doc, 1, 2)).toBe("ROUND(A1/3,2)*1.5");
+    expect(shown(doc, 1, 2)).toBe(2.505);
+    const { r, c } = at(doc, 1, 2);
+    expect(cellSource(doc, "s1", r, c, DE_DE)).toBe("=ROUND(A1/3;2)*1,5");
+    expect(cellSource(doc, "s1", r, c, EN_US)).toBe("=ROUND(A1/3,2)*1.5");
   });
 
   it("makes a formula, growing the grid for a reference past it", () => {

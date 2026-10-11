@@ -7,6 +7,7 @@
     "./dates": "./src/dates.ts",
     "./delimited": "./src/delimited.ts",
     "./locales": "./src/locales.ts",
+    "./formula-locale": "./src/formula-locale.ts",
     "./number-format": "./src/number-format.ts",
     "./value-parse": "./src/value-parse.ts",
     "./engine/parse": "./src/engine/parse.ts",

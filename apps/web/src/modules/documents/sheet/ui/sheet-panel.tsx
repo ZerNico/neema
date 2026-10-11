@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { columnLetters } from "@chat/sheet/a1";
+import { localizeFormula } from "@chat/sheet/formula-locale";
 import { sheetLocale } from "@chat/sheet/locales";
 import { NEW_SHEET, liveSheets, positions, type CellAnchor } from "@chat/sheet/model";
 import type { SheetOp } from "@chat/sheet/model/ops";
@@ -657,7 +658,8 @@ export default function SheetPanelBody({
   /** A pivot table as its formula: on a sheet of its own, or two columns right of the data. */
   const insertPivot = (draft: PivotDraft) => {
     const box = selectionBox(context);
-    const formula = pivotFormula(doc.sheet[sheet]!.name, box, draft);
+    // Built in English and entered as if typed, so in the sheet's own separators.
+    const formula = localizeFormula(pivotFormula(doc.sheet[sheet]!.name, box, draft), locale);
     const beside = cols.ids[box.right + 1];
     if (draft.place === "beside" && beside) {
       run(enterCell(context, { r: rows.ids[box.top - 1]!, c: beside }, formula));
