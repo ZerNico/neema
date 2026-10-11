@@ -10,7 +10,21 @@ import {
   MoreHorizontalIcon,
   ImageAdd01Icon,
   CheckListIcon,
+  CircleIcon,
+  ColumnDeleteIcon,
+  ColumnInsertIcon,
+  CommentAdd01Icon,
+  RowDeleteIcon,
+  RowInsertIcon,
+  Search01Icon,
+  SearchAddIcon,
+  SearchMinusIcon,
+  SortingAZ01Icon,
+  SortingZA01Icon,
+  TextIndentLessIcon,
   TextIndentMoreIcon,
+  ViewIcon,
+  ViewOffIcon,
   DecimalsArrowLeftIcon,
   DecimalsArrowRightIcon,
   EraserIcon,
@@ -58,6 +72,7 @@ import { Action, Format } from "../../ui/rich-editor/toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
 import { BorderMenu } from "./border-menu.tsx";
 import { ColorMenu, ToolbarMenu } from "./toolbar-controls.tsx";
+import { ZOOM_STEPS, stepZoom } from "./zoom.ts";
 
 /** What the toolbar asks of the sheet; the panel turns each into operations on the selection. */
 export type ToolbarCommand =
@@ -71,13 +86,24 @@ export type ToolbarCommand =
   | { readonly kind: "chart"; readonly chart: ChartKind }
   | { readonly kind: "filter" }
   | { readonly kind: "sort" }
+  | { readonly kind: "sortOrder"; readonly descending: boolean }
+  | { readonly kind: "find" }
+  | { readonly kind: "comment" }
+  | { readonly kind: "zoom"; readonly zoom: number }
+  | { readonly kind: "insert"; readonly axis: Axis; readonly side: "before" | "after" }
+  | { readonly kind: "delete"; readonly axis: Axis }
+  | { readonly kind: "hide"; readonly axis: Axis; readonly hidden: boolean }
   | { readonly kind: "validation" }
   | { readonly kind: "circles" }
   | { readonly kind: "link" }
   | { readonly kind: "pivot" }
   | { readonly kind: "picture" }
   | { readonly kind: "print" }
-  | { readonly kind: "outline"; readonly group: boolean; readonly axis: "rows" | "columns" };
+  /** Without an axis, whole columns selected group columns and anything else rows. */
+  | { readonly kind: "outline"; readonly group: boolean };
+type Axis = "rows" | "columns";
+/** The chart kinds the Insert tab shows as buttons; the rest are under More charts. */
+const QUICK_CHARTS = new Set(["column", "line", "pie", "scatter"]);
 
 /** Number formats by name, as Excel's list offers them; the code is what a cell keeps. */
 const NUMBER_FORMATS = [
@@ -249,6 +275,7 @@ export function SheetToolbar({
   conditional,
   filtered = false,
   circling = false,
+  zoom,
 }: {
   style: CellStyle;
   canUndo: boolean;
@@ -267,6 +294,7 @@ export function SheetToolbar({
   circling?: boolean;
   /** Whether the sheet has a filter, which the filter button shows pressed. */
   filtered?: boolean;
+  zoom: number;
 }) {
   const [tab, setTab] = useState<TabName>("home");
   if (readOnly)
@@ -283,8 +311,20 @@ export function SheetToolbar({
   const sortAndFilter = (
     <>
       <Action
+        icon={SortingAZ01Icon}
+        label="Sort A to Z"
+        disabled={false}
+        onPress={() => onCommand({ kind: "sortOrder", descending: false })}
+      />
+      <Action
+        icon={SortingZA01Icon}
+        label="Sort Z to A"
+        disabled={false}
+        onPress={() => onCommand({ kind: "sortOrder", descending: true })}
+      />
+      <Action
         icon={SortingIcon}
-        label="Sort range"
+        label="Sort…"
         disabled={false}
         onPress={() => onCommand({ kind: "sort" })}
       />
@@ -491,7 +531,6 @@ export function SheetToolbar({
                 ))}
               </DropdownMenuContent>
             </ToolbarMenu>
-            {sortAndFilter}
             <ToolbarMenu label="Clear" icon={EraserIcon}>
               <DropdownMenuContent align="start" className="w-40">
                 <DropdownMenuItem onClick={() => onCommand({ kind: "clear", what: "formats" })}>
@@ -502,6 +541,13 @@ export function SheetToolbar({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </ToolbarMenu>
+            <Action
+              icon={Search01Icon}
+              label="Find"
+              shortcut="⌘F"
+              disabled={false}
+              onPress={() => onCommand({ kind: "find" })}
+            />
           </>
         ),
       },
@@ -520,6 +566,36 @@ export function SheetToolbar({
         ),
       },
       {
+        id: "charts",
+        label: "Charts",
+        controls: (
+          <>
+            {CHART_KINDS.filter((each) => QUICK_CHARTS.has(each.kind)).map((each) => (
+              <Action
+                key={each.kind}
+                icon={each.icon}
+                label={`${each.label} chart`}
+                disabled={false}
+                onPress={() => onCommand({ kind: "chart", chart: each.kind })}
+              />
+            ))}
+            <ToolbarMenu label="More charts" icon={ChartColumnIcon}>
+              <DropdownMenuContent align="start" className="w-40">
+                {CHART_KINDS.filter((each) => !QUICK_CHARTS.has(each.kind)).map((each) => (
+                  <DropdownMenuItem
+                    key={each.kind}
+                    onClick={() => onCommand({ kind: "chart", chart: each.kind })}
+                  >
+                    <HugeiconsIcon icon={each.icon} strokeWidth={2} />
+                    {each.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+          </>
+        ),
+      },
+      {
         id: "illustrations",
         label: "Illustrations",
         controls: (
@@ -532,35 +608,25 @@ export function SheetToolbar({
         ),
       },
       {
-        id: "charts",
-        label: "Charts",
-        controls: (
-          <ToolbarMenu label="Insert chart" icon={ChartColumnIcon}>
-            <DropdownMenuContent align="start" className="w-40">
-              {CHART_KINDS.map((each) => (
-                <DropdownMenuItem
-                  key={each.kind}
-                  onClick={() => onCommand({ kind: "chart", chart: each.kind })}
-                >
-                  <HugeiconsIcon icon={each.icon} strokeWidth={2} />
-                  {each.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </ToolbarMenu>
-        ),
-      },
-      {
         id: "links",
-        label: "Links",
+        label: "Links and comments",
         controls: (
-          <Action
-            icon={Link01Icon}
-            label="Insert link"
-            shortcut="⌘K"
-            disabled={false}
-            onPress={() => onCommand({ kind: "link" })}
-          />
+          <>
+            <Action
+              icon={Link01Icon}
+              label="Insert link"
+              shortcut="⌘K"
+              disabled={false}
+              onPress={() => onCommand({ kind: "link" })}
+            />
+            <Action
+              icon={CommentAdd01Icon}
+              label="New comment"
+              shortcut="⇧F2"
+              disabled={false}
+              onPress={() => onCommand({ kind: "comment" })}
+            />
+          </>
         ),
       },
     ],
@@ -570,46 +636,102 @@ export function SheetToolbar({
         id: "tools",
         label: "Data tools",
         controls: (
-          <ToolbarMenu label="Data validation" icon={CheckListIcon}>
-            <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuItem onClick={() => onCommand({ kind: "validation" })}>
-                Data validation…
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onCommand({ kind: "circles" })}>
-                {circling ? "Clear validation circles" : "Circle invalid data"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </ToolbarMenu>
+          <>
+            <Action
+              icon={CheckListIcon}
+              label="Data validation"
+              disabled={false}
+              onPress={() => onCommand({ kind: "validation" })}
+            />
+            <Format
+              icon={CircleIcon}
+              label={circling ? "Clear validation circles" : "Circle invalid data"}
+              pressed={circling}
+              onPress={() => onCommand({ kind: "circles" })}
+            />
+          </>
+        ),
+      },
+      {
+        id: "cells",
+        label: "Rows and columns",
+        controls: (
+          <>
+            <ToolbarMenu label="Insert cells" icon={RowInsertIcon}>
+              <DropdownMenuContent align="start" className="w-48">
+                {(
+                  [
+                    ["Insert rows above", "rows", "before", RowInsertIcon],
+                    ["Insert rows below", "rows", "after", RowInsertIcon],
+                    ["Insert columns left", "columns", "before", ColumnInsertIcon],
+                    ["Insert columns right", "columns", "after", ColumnInsertIcon],
+                  ] as const
+                ).map(([text, axis, side, icon]) => (
+                  <DropdownMenuItem
+                    key={text}
+                    onClick={() => onCommand({ kind: "insert", axis, side })}
+                  >
+                    <HugeiconsIcon icon={icon} strokeWidth={2} />
+                    {text}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <ToolbarMenu label="Delete cells" icon={RowDeleteIcon}>
+              <DropdownMenuContent align="start" className="w-44">
+                <DropdownMenuItem onClick={() => onCommand({ kind: "delete", axis: "rows" })}>
+                  <HugeiconsIcon icon={RowDeleteIcon} strokeWidth={2} />
+                  Delete rows
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCommand({ kind: "delete", axis: "columns" })}>
+                  <HugeiconsIcon icon={ColumnDeleteIcon} strokeWidth={2} />
+                  Delete columns
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <ToolbarMenu label="Hide and unhide" icon={ViewOffIcon}>
+              <DropdownMenuContent align="start" className="w-44">
+                {(
+                  [
+                    ["Hide rows", "rows", true],
+                    ["Hide columns", "columns", true],
+                    ["Unhide rows", "rows", false],
+                    ["Unhide columns", "columns", false],
+                  ] as const
+                ).map(([text, axis, hidden]) => (
+                  <DropdownMenuItem
+                    key={text}
+                    onClick={() => onCommand({ kind: "hide", axis, hidden })}
+                  >
+                    <HugeiconsIcon icon={hidden ? ViewOffIcon : ViewIcon} strokeWidth={2} />
+                    {text}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+          </>
         ),
       },
       {
         id: "outline",
         label: "Outline",
         controls: (
-          <ToolbarMenu label="Group" icon={TextIndentMoreIcon}>
-            <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuItem
-                onClick={() => onCommand({ kind: "outline", group: true, axis: "rows" })}
-              >
-                Group rows
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => onCommand({ kind: "outline", group: true, axis: "columns" })}
-              >
-                Group columns
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => onCommand({ kind: "outline", group: false, axis: "rows" })}
-              >
-                Ungroup rows
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => onCommand({ kind: "outline", group: false, axis: "columns" })}
-              >
-                Ungroup columns
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </ToolbarMenu>
+          <>
+            <Action
+              icon={TextIndentMoreIcon}
+              label="Group"
+              shortcut="⇧⌘K"
+              disabled={false}
+              onPress={() => onCommand({ kind: "outline", group: true })}
+            />
+            <Action
+              icon={TextIndentLessIcon}
+              label="Ungroup"
+              shortcut="⇧⌘J"
+              disabled={false}
+              onPress={() => onCommand({ kind: "outline", group: false })}
+            />
+          </>
         ),
       },
     ],
@@ -634,6 +756,38 @@ export function SheetToolbar({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </ToolbarMenu>
+        ),
+      },
+      {
+        id: "zoom",
+        label: "Zoom",
+        controls: (
+          <>
+            <Action
+              icon={SearchMinusIcon}
+              label="Zoom out"
+              disabled={zoom <= ZOOM_STEPS[0]}
+              onPress={() => onCommand({ kind: "zoom", zoom: stepZoom(zoom, -1) })}
+            />
+            <ToolbarMenu label="Zoom" text={`${Math.round(zoom * 100)}%`}>
+              <DropdownMenuContent align="start" className="w-24">
+                {ZOOM_STEPS.map((step) => (
+                  <DropdownMenuItem
+                    key={step}
+                    onClick={() => onCommand({ kind: "zoom", zoom: step })}
+                  >
+                    {Math.round(step * 100)}%
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </ToolbarMenu>
+            <Action
+              icon={SearchAddIcon}
+              label="Zoom in"
+              disabled={zoom >= ZOOM_STEPS.at(-1)!}
+              onPress={() => onCommand({ kind: "zoom", zoom: stepZoom(zoom, 1) })}
+            />
+          </>
         ),
       },
       {

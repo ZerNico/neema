@@ -35,6 +35,7 @@ import {
   selectionBox,
   eachRange,
   sheetCsv,
+  sortSelection,
   type PastePart,
   type CopiedCells,
   type GridContext,
@@ -629,11 +630,18 @@ export default function SheetPanelBody({
         });
       else setPivoting(true);
     } else if (command.kind === "outline")
-      run(
-        command.group
-          ? groupSelection(context, command.axis)
-          : ungroupSelection(context, command.axis),
-      );
+      onCommand({ kind: command.group ? "group" : "ungroup" });
+    else if (command.kind === "sortOrder") run(sortSelection(context, command.descending));
+    else if (command.kind === "insert")
+      run(insertAtSelection(context, command.axis, command.side));
+    else if (
+      command.kind === "delete" ||
+      command.kind === "hide" ||
+      command.kind === "find" ||
+      command.kind === "comment"
+    )
+      onCommand(command);
+    else if (command.kind === "zoom") setZoom(command.zoom);
     else if (command.kind === "print") printSheet(sheet);
     else insertChart(command.chart);
   };
@@ -955,6 +963,7 @@ export default function SheetPanelBody({
                 />
               }
               filtered={!!sheetFilter}
+              zoom={zoom}
               circling={circling}
               preview={(code) => {
                 const value = values.value(sheet, head.r, head.c);
