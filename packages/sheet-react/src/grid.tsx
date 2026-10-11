@@ -32,9 +32,19 @@ import {
   rowPx,
   textWidth,
   visibleRange,
-  type AxisLayout,
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
+import {
+  adding,
+  autofit,
+  dataEdge,
+  key,
+  mergeIndex,
+  onSheet,
+  regionAround,
+  usedEnd,
+  type FilledCells,
+} from "./grid-navigation.ts";
 import { commandShortcut, ctrlShortcut, stampOf, stampText } from "./grid-keys.ts";
 import type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
 import { OverlayFrame } from "./overlay.tsx";
@@ -53,17 +63,6 @@ export type { OverlayCommand } from "./overlay-place.ts";
 export type { GridCommand, GridDecoration, GridOverlay, OverlayChange } from "./grid-types.ts";
 export type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
 import type { CellEditing, CellRef, GridFill, SheetSelection } from "./selection.ts";
-
-/** At most this many ranges are selected at once. */
-const MAX_RANGES = 50;
-/** The selection's ranges with a new one begun at `at`, as Cmd or Ctrl and a click do. */
-const adding = (selection: SheetSelection, at: CellRef): SheetSelection => ({
-  anchor: at,
-  head: at,
-  more: [...(selection.more ?? []), { anchor: selection.anchor, head: selection.head }].slice(
-    -MAX_RANGES + 1,
-  ),
-});
 
 /** A cell by its row and column indexes, as A1. */
 const corner = (at: { row: number; col: number }) => `${columnLetters(at.col + 1)}${at.row + 1}`;
@@ -167,35 +166,11 @@ const FALLBACK = { width: 960, height: 640 };
 const GLIDE_PX = 240;
 /** The outline gutter's width per level. */
 const OUTLINE_STEP = 14;
-const key = (row: number, col: number) => `${row}:${col}`;
 const NO_DECORATIONS: readonly GridDecoration[] = [];
 const NO_OVERLAYS: readonly GridOverlay[] = [];
 const NO_ROWS: ReadonlySet<string> = new Set();
 const NO_LOOKS: ReadonlyMap<string, CellLook> = new Map();
 const OVERLAY_MIN = { width: 160, height: 120 };
-
-/** Row and column indexes of every merged range, and the cells each hides. */
-function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols: AxisLayout) {
-  const rowAt = new Map(rows.ids.map((id, index) => [id, index]));
-  const colAt = new Map(cols.ids.map((id, index) => [id, index]));
-  const spans = new Map<string, { top: number; left: number; bottom: number; right: number }>();
-  const covered = new Set<string>();
-  for (const merge of doc.sheet[sheet]!.merges) {
-    const [top, bottom, left, right] = [
-      rowAt.get(merge.r1),
-      rowAt.get(merge.r2),
-      colAt.get(merge.c1),
-      colAt.get(merge.c2),
-    ];
-    if (top === undefined || bottom === undefined || left === undefined || right === undefined)
-      continue;
-    spans.set(key(top, left), { top, left, bottom, right });
-    for (let row = top; row <= bottom; row++)
-      for (let col: number = left; col <= right; col++)
-        if (row !== top || col !== left) covered.add(key(row, col));
-  }
-  return { spans, covered };
-}
 
 /**
  * A sheet's cells, drawn only where the viewport is. Scrolling is the
@@ -307,6 +282,11 @@ export function SheetGrid({
 
   const rowIndex = useMemo(() => new Map(rows.ids.map((id, index) => [id, index])), [rows]);
   const colIndex = useMemo(() => new Map(cols.ids.map((id, index) => [id, index])), [cols]);
+  const filled: FilledCells = {
+    rows: rows.ids.length,
+    cols: cols.ids.length,
+    at: (row, col) => values.value(sheet, rows.ids[row]!, cols.ids[col]!) !== null,
+  };
   // Frozen up to and including these: the rows and columns that stay while the rest scrolls.
   const frozenRows = data.freeze.row ? (rowIndex.get(data.freeze.row) ?? -1) + 1 : 0;
   const frozenCols = data.freeze.col ? (colIndex.get(data.freeze.col) ?? -1) + 1 : 0;
@@ -551,46 +531,6 @@ export function SheetGrid({
     }
   };
 
-  const onSheet = (r: number, c: number) =>
-    r >= 0 && r < rows.ids.length && c >= 0 && c < cols.ids.length;
-  const filledAt = (row: number, col: number) =>
-    values.value(sheet, rows.ids[row]!, cols.ids[col]!) !== null;
-  /**
-   * Where Ctrl+Arrow lands, as in Excel: the end of the run of filled cells it
-   * starts in, else the next filled cell, else the sheet's edge.
-   */
-  const dataEdge = (row: number, col: number, down: number, right: number) => {
-    let [r, c] = [row, col];
-    if (!onSheet(r + down, c + right)) return [r, c] as const;
-    if (filledAt(r, c) && filledAt(r + down, c + right)) {
-      while (onSheet(r + down, c + right) && filledAt(r + down, c + right))
-        [r, c] = [r + down, c + right];
-      return [r, c] as const;
-    }
-    [r, c] = [r + down, c + right];
-    while (onSheet(r + down, c + right) && !filledAt(r, c)) [r, c] = [r + down, c + right];
-    return [r, c] as const;
-  };
-  /** The block of filled cells around a cell, as Ctrl+A first selects: grown while a neighbour holds something. */
-  const regionAround = (row: number, col: number) => {
-    let [top, bottom, left, right] = [row, row, col, col];
-    for (let grew = true; grew;) {
-      grew = false;
-      const any = (r1: number, r2: number, c1: number, c2: number) => {
-        for (let r = Math.max(0, r1); r <= Math.min(rows.ids.length - 1, r2); r++)
-          for (let c = Math.max(0, c1); c <= Math.min(cols.ids.length - 1, c2); c++)
-            if (filledAt(r, c)) return true;
-        return false;
-      };
-      if (top > 0 && any(top - 1, top - 1, left - 1, right + 1)) [top, grew] = [top - 1, true];
-      if (bottom < rows.ids.length - 1 && any(bottom + 1, bottom + 1, left - 1, right + 1))
-        [bottom, grew] = [bottom + 1, true];
-      if (left > 0 && any(top, bottom, left - 1, left - 1)) [left, grew] = [left - 1, true];
-      if (right < cols.ids.length - 1 && any(top, bottom, right + 1, right + 1))
-        [right, grew] = [right + 1, true];
-    }
-    return { top, bottom, left, right };
-  };
   /** Selects a rectangle by indexes, the head at its far corner. */
   const selectBox = (
     from: { row: number; col: number },
@@ -602,21 +542,6 @@ export function SheetGrid({
       head: { r: rows.ids[to.row]!, c: cols.ids[to.col]! },
       ...(more ? { more } : {}),
     });
-  /** The last row and column anything is written in, where Ctrl+End goes. */
-  const usedEnd = () => {
-    let [row, col] = [0, 0];
-    for (const [r, cells] of Object.entries(data.cells)) {
-      const at = rowIndex.get(r);
-      if (at === undefined) continue;
-      for (const c of Object.keys(cells)) {
-        const across = colIndex.get(c);
-        if (across === undefined) continue;
-        row = Math.max(row, at);
-        col = Math.max(col, across);
-      }
-    }
-    return [row, col] as const;
-  };
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (!head) return;
@@ -732,7 +657,7 @@ export function SheetGrid({
     if (command && !event.altKey && event.key.toLowerCase() === "a" && box) {
       // First the block of data around the cell, then, pressed again, the whole sheet.
       event.preventDefault();
-      const region = regionAround(head.row, head.col);
+      const region = regionAround(filled, head.row, head.col);
       const already =
         box.top === region.top &&
         box.bottom === region.bottom &&
@@ -796,17 +721,17 @@ export function SheetGrid({
     const jump = event.metaKey || event.ctrlKey;
     if (move && jump && event.key.startsWith("Arrow")) {
       // From the selection's moving end, so Ctrl+Shift+Arrow keeps extending.
-      target = [...dataEdge(head.row, head.col, Math.sign(move[0]), Math.sign(move[1]))];
+      target = [...dataEdge(filled, head.row, head.col, Math.sign(move[0]), Math.sign(move[1]))];
     } else if (move) {
       // Hidden rows and columns are stepped over, as Excel's arrows do.
       let [row, col] = [head.row + move[0], head.col + move[1]];
       const [down, right] = [Math.sign(move[0]), Math.sign(move[1])];
       if (down || right)
-        while (onSheet(row, col) && (!rows.size(row) || !cols.size(col)))
+        while (onSheet(filled, row, col) && (!rows.size(row) || !cols.size(col)))
           [row, col] = [row + down, col + right];
-      target = onSheet(row, col) ? [row, col] : [head.row, head.col];
+      target = onSheet(filled, row, col) ? [row, col] : [head.row, head.col];
     } else if (event.key === "Home") target = [jump ? 0 : head.row, 0];
-    else if (event.key === "End" && jump) target = [...usedEnd()];
+    else if (event.key === "End" && jump) target = [...usedEnd(data.cells, rowIndex, colIndex)];
     if (!target) return;
     event.preventDefault();
     const row = Math.min(rows.ids.length - 1, Math.max(0, target[0]));
@@ -890,30 +815,6 @@ export function SheetGrid({
     start: number;
     size: number;
   } | null>(null);
-  /**
-   * What a double-click on a header's edge sizes it to, as Excel's AutoFit:
-   * a column as wide as its widest shown text, a row as tall as its largest
-   * font. Null when it holds nothing to fit.
-   */
-  const autofit = (axis: Axis, index: number): number | null => {
-    const id = (axis === "columns" ? cols : rows).ids[index]!;
-    let largest = 0;
-    for (const [r, row] of Object.entries(data.cells)) {
-      if (axis === "rows" && r !== id) continue;
-      for (const [c, cell] of Object.entries(row)) {
-        if (axis === "columns" && c !== id) continue;
-        const style = cellStyle(cell.s);
-        const fontPx = style.fontSize ? (style.fontSize * 4) / 3 : 14;
-        if (axis === "rows") {
-          largest = Math.max(largest, Math.ceil(fontPx * 1.4));
-          continue;
-        }
-        const shown = cellDisplay(values.value(sheet, r, c), style, locale).text;
-        if (shown) largest = Math.max(largest, textWidth(shown, fontPx, style.bold) + 10);
-      }
-    }
-    return largest ? Math.ceil(Math.max(axis === "columns" ? 24 : 20, largest)) : null;
-  };
   const resizeHandle = (axis: Axis, index: number) =>
     writable && onResize ? (
       <div
@@ -925,7 +826,11 @@ export function SheetGrid({
         }
         onDoubleClick={(event) => {
           event.stopPropagation();
-          const size = autofit(axis, index);
+          const size = autofit(
+            { cells: data.cells, values, sheet, locale },
+            axis,
+            (axis === "columns" ? cols : rows).ids[index]!,
+          );
           if (size !== null) onResize(axis, (axis === "columns" ? cols : rows).ids[index]!, size);
         }}
         onPointerDown={(event) => {
