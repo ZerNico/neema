@@ -64,6 +64,11 @@ export interface CellStore {
   setCircular(formula: StoredFormula): void;
   /** Time and chance for a formula's NOW, TODAY and RAND; without it they are not calculated. */
   volatile?(formula: StoredFormula): Scope["volatile"];
+  /**
+   * The formula's result in the calculation a change is measured from, for a
+   * pass given changes; undefined for a formula that was not there.
+   */
+  previous?(formula: StoredFormula): Scalar | undefined;
 }
 
 export interface CalcLimits {
@@ -191,14 +196,34 @@ const own = (formula: StoredFormula) => ({
  * them, as Excel 365 does. The order is built without recursion, so a long
  * chain of cells each reading the one above can't overflow the stack.
  */
-export function calculate(store: CellStore, limits: CalcLimits): CalcReport {
-  let report = pass(store, limits);
+export function calculate(
+  store: CellStore,
+  limits: CalcLimits,
+  changed: readonly ChangedBox[] | null = null,
+): CalcReport {
+  let report = pass(store, limits, changed);
+  // A spill that changed shape moved what others read: the passes after it calculate everything.
   for (let passes = 1; report.reshaped && passes < MAX_PASSES; passes++)
-    report = pass(store, limits);
+    report = pass(store, limits, null);
   return report.result;
 }
 
-function pass(store: CellStore, limits: CalcLimits) {
+/**
+ * Cells whose content changed since the store's results were calculated. With
+ * them, a pass calculates only the formulas the change can reach; every other
+ * keeps the result the store already holds.
+ */
+export interface ChangedBox {
+  readonly sheet: string;
+  readonly box: CellBox;
+}
+
+/** Functions whose references are known only when they run, so any change may reach them. */
+const RUNTIME_REFERENCES = new Set(["INDIRECT", "OFFSET"]);
+const overlaps = (a: CellBox, b: CellBox) =>
+  a.top <= b.bottom && a.bottom >= b.top && a.left <= b.right && a.right >= b.left;
+
+function pass(store: CellStore, limits: CalcLimits, changed: readonly ChangedBox[] | null) {
   const order = store.sheets;
   const sheetIndex = new Map(order.map((sheet, index) => [sheet.toLowerCase(), index]));
   const sheetNamed = (name: string) => {
@@ -357,7 +382,10 @@ function pass(store: CellStore, limits: CalcLimits) {
     for (const area of areaOwners(sheet, box)) link(area.id, node);
     return node;
   };
+  // What each formula reads, by sheet and box, to find those a change reaches.
+  const reads: ChangedBox[][] = changed ? formulas.map(() => []) : [];
   const linkBox = (sheet: string, box: CellBox, id: number) => {
+    if (changed) reads[id]!.push({ sheet, box });
     if (box.top === box.bottom && box.left === box.right) {
       const source = ids.get(cellKey(sheet, box.top, box.left));
       if (source !== undefined) link(source, id);
@@ -618,6 +646,40 @@ function pass(store: CellStore, limits: CalcLimits) {
     }
   }
 
+  if (changed) {
+    // What the change reaches: formulas in changed cells, reading them, filling them, waiting
+    // on a value in their way (#SPILL!) or reading by references known only when they run,
+    // then every formula after those. The rest keep their results, errors still reported.
+    const dirty = new Uint8Array(dependents.length);
+    const queue: number[] = [];
+    const mark = (node: number) => {
+      if (dirty[node]) return;
+      dirty[node] = 1;
+      queue.push(node);
+    };
+    const touches = (sheet: string, box: CellBox) =>
+      changed.some((each) => each.sheet === sheet && overlaps(each.box, box));
+    const before = formulas.map((formula) => store.previous?.(formula.stored));
+    formulas.forEach((formula, id) => {
+      const { sheet } = formula.stored;
+      const result = before[id];
+      if (
+        result === undefined ||
+        touches(sheet, formula.area ?? own(formula.stored)) ||
+        (result instanceof XError && result.code === "#SPILL!") ||
+        calls(formula.node, RUNTIME_REFERENCES) ||
+        reads[id]!.some((read) => touches(read.sheet, read.box))
+      )
+        mark(id);
+    });
+    while (queue.length) for (const next of dependents[queue.pop()!]!) mark(next);
+    formulas.forEach((formula, id) => {
+      // One on a cycle is left to be shown and reported as one again.
+      if (dirty[id] || !ordered.has(id)) return;
+      state[id] = 2;
+      record(formula, before[id]!, formula.area ?? undefined);
+    });
+  }
   for (const id of sequence) if (state[id] === 0) compute(id);
   // Excel shows a circular reference as 0 and flags it; so does the report.
   for (const [id, formula] of formulas.entries()) {

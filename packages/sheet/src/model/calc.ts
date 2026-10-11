@@ -4,11 +4,12 @@ import {
   type CalcLimits,
   type CalcReport,
   type CellStore,
+  type ChangedBox,
   type StoredFormula,
 } from "../engine/calculate.ts";
 import { XError, type Scalar } from "../engine/evaluate.ts";
 import { renderFormula } from "./formula.ts";
-import { liveSheets, positions, type SheetDoc } from "./model.ts";
+import { liveSheets, positions, type Cell, type SheetDoc } from "./model.ts";
 
 /**
  * What every replica of a live sheet calculates from, so a browser and the
@@ -63,11 +64,35 @@ const stream = (seed: number) => {
 
 const key = (sheet: string, row: string, col: string) => `${sheet}\u0000${row}\u0000${col}`;
 
-/** Calculates every formula of a live sheet document. Nothing is written to the document. */
+/** What a calculation leaves for the next to start from: what it read, and what it wrote. */
+interface CalcState {
+  readonly context: CalcContext;
+  readonly volatile: boolean;
+  /** Sheets, names and every sheet's rows and columns, as JSON: what positions follow from. */
+  readonly structure: string;
+  /** Each row's cells as JSON, by sheet and row ID. */
+  readonly rows: ReadonlyMap<string, string>;
+  readonly results: ReadonlyMap<string, Scalar>;
+  readonly areas: ReadonlyMap<string, CellBox>;
+  readonly spilled: ReadonlySet<string>;
+}
+const states = new WeakMap<SheetValues, CalcState>();
+
+/** What of a cell a calculation reads: not its style. */
+const content = (cell: Cell | undefined) => JSON.stringify([cell?.v, cell?.f, cell?.array]);
+
+/**
+ * Calculates every formula of a live sheet document. Nothing is written to the document.
+ * Given the values calculated before, as `follows.previous`, it calculates only what the
+ * difference reaches: a change to cell contents, in the same rows, columns, sheets and names,
+ * and no new moment for a sheet reading it. Anything else is calculated whole. Passing
+ * `follows` at all keeps what the next calculation needs to follow this one.
+ */
 export function calculateSheet(
   doc: SheetDoc,
   context: CalcContext,
   limits: CalcLimits = LIVE_CALC,
+  follows?: { readonly previous: SheetValues | null },
 ): SheetValues {
   const sheetIds = liveSheets(doc);
   const byName = new Map(sheetIds.map((id) => [doc.sheet[id]!.name.toLowerCase(), id]));
@@ -82,9 +107,80 @@ export function calculateSheet(
     const c = colsOf(sheet).ids[column - 1];
     return r && c ? { sheet, r, c } : null;
   };
-  const results = new Map<string, Scalar>();
-  const areas = new Map<string, CellBox>();
-  const spilled = new Set<string>();
+  const tracked = follows !== undefined;
+  const structure = tracked
+    ? JSON.stringify([
+        doc.sheets,
+        doc.names,
+        sheetIds.map((id) => [id, doc.sheet[id]!.name, doc.sheet[id]!.rows, doc.sheet[id]!.cols]),
+      ])
+    : "";
+  const rowJson = new Map<string, string>();
+  if (tracked)
+    for (const id of sheetIds)
+      for (const [r, row] of Object.entries(doc.sheet[id]!.cells))
+        rowJson.set(`${id}\u0000${r}`, JSON.stringify(row));
+  const before = follows?.previous ? states.get(follows.previous) : undefined;
+  const follow =
+    before &&
+    before.structure === structure &&
+    !(
+      before.volatile &&
+      (before.context.now !== context.now || before.context.seed !== context.seed)
+    )
+      ? before
+      : undefined;
+  const results = new Map<string, Scalar>(follow?.results);
+  const areas = new Map<string, CellBox>(follow?.areas);
+  const spilled = new Set<string>(follow?.spilled);
+  /** Forgets what a formula's cell spilled into, and the values it wrote there. */
+  const dropArea = (id: string, r: string, c: string) => {
+    const at = key(id, r, c);
+    const area = areas.get(at);
+    if (!area) return null;
+    areas.delete(at);
+    for (const sr of rowsOf(id).ids.slice(area.top - 1, area.bottom))
+      for (const sc of colsOf(id).ids.slice(area.left - 1, area.right)) {
+        const filled = key(id, sr, sc);
+        if (spilled.delete(filled)) results.delete(filled);
+      }
+    return area;
+  };
+  // The cells whose content changed, and what they had spilled into, which is gone with them.
+  const changed: ChangedBox[] | null = follow ? [] : null;
+  if (follow && changed)
+    for (const rowKey of new Set([...follow.rows.keys(), ...rowJson.keys()])) {
+      if (follow.rows.get(rowKey) === rowJson.get(rowKey)) continue;
+      const [id, r] = rowKey.split("\u0000") as [string, string];
+      const sheet = doc.sheet[id]!;
+      const was = JSON.parse(follow.rows.get(rowKey) ?? "{}") as Record<string, Cell>;
+      const now = sheet.cells[r] ?? {};
+      for (const c of new Set([...Object.keys(was), ...Object.keys(now)])) {
+        if (content(was[c]) === content(now[c])) continue;
+        const [top, left] = [rowsOf(id).at(r), colsOf(id).at(c)];
+        if (top === undefined || left === undefined) continue;
+        results.delete(key(id, r, c));
+        changed.push({ sheet: sheet.name, box: { top, left, bottom: top, right: left } });
+        const area = dropArea(id, r, c);
+        if (area) changed.push({ sheet: sheet.name, box: area });
+      }
+    }
+  // A cell changed inside another formula's spill takes that spill apart too: what was typed
+  // there blocks it, which only a formula spilling afresh tells from its own values.
+  if (changed)
+    for (const [owner, area] of areas) {
+      const [id, r, c] = owner.split("\u0000") as [string, string, string];
+      const name = doc.sheet[id]?.name;
+      const hit = changed.some(
+        (each) =>
+          each.sheet === name &&
+          each.box.top <= area.bottom &&
+          each.box.bottom >= area.top &&
+          each.box.left <= area.right &&
+          each.box.right >= area.left,
+      );
+      if (name && hit && dropArea(id, r, c)) changed.push({ sheet: name, box: area });
+    }
   const formulaIds = new Map<StoredFormula, { sheet: string; r: string; c: string }>();
   let volatile = false;
 
@@ -207,7 +303,13 @@ export function calculateSheet(
     },
     setCircular: (formula) => {
       const at = formulaIds.get(formula)!;
+      // Shown as 0, it fills nothing.
+      dropArea(at.sheet, at.r, at.c);
       results.set(key(at.sheet, at.r, at.c), 0);
+    },
+    previous: (formula) => {
+      const at = formulaIds.get(formula)!;
+      return follow?.results.get(key(at.sheet, at.r, at.c));
     },
     volatile: (formula) => {
       const at = formulaIds.get(formula)!;
@@ -224,8 +326,8 @@ export function calculateSheet(
     },
   };
 
-  const report = calculate(store, limits);
-  return {
+  const report = calculate(store, limits, changed);
+  const values: SheetValues = {
     context,
     report,
     volatile,
@@ -242,4 +344,7 @@ export function calculateSheet(
       return { rows, cols };
     },
   };
+  if (tracked)
+    states.set(values, { context, volatile, structure, rows: rowJson, results, areas, spilled });
+  return values;
 }
