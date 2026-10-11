@@ -1139,9 +1139,14 @@ export function SheetGrid({
         className="relative"
         style={{ width: headerWidth + cols.total, height: headerHeight + rows.total }}
       >
-        <div className="sticky top-0 z-30" style={{ height: headerHeight + frozenHeight }}>
+        {/* The header layers are opaque, outline gutters included, so scrolled cells and
+            charts pass under them rather than showing through. */}
+        <div
+          className="bg-background sticky top-0 z-30"
+          style={{ height: headerHeight + frozenHeight }}
+        >
           <div
-            className="sticky left-0 z-10"
+            className="bg-background sticky left-0 z-10"
             style={{ width: headerWidth + frozenWidth, height: headerHeight + frozenHeight }}
           >
             <div
@@ -1193,7 +1198,7 @@ export function SheetGrid({
           {frozenRows ? pane("top", { first: 0, last: frozenRows - 1 }, visibleCols) : null}
         </div>
         <div
-          className="sticky left-0 z-20"
+          className="bg-background sticky left-0 z-20"
           style={{
             width: headerWidth + frozenWidth,
             height: rows.total,
