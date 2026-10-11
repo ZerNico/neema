@@ -523,6 +523,12 @@ describe("the sheet grid", () => {
     expect(
       (screen.getByRole("textbox", { name: "Cell content" }) as HTMLTextAreaElement).value,
     ).toBe("");
+    // Over a range it clears every cell, as the Delete key does.
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Cell content" }), { key: "Escape" });
+    fireEvent.keyDown(grid, { key: "ArrowDown", shiftKey: true });
+    fireEvent.keyDown(grid, { key: "Backspace" });
+    expect(sent.at(-1)).toEqual({ kind: "clear" });
+    expect(screen.queryByRole("textbox", { name: "Cell content" })).toBeNull();
   });
 
   it("completes functions, points at cells for references, and cycles $ with F4", () => {

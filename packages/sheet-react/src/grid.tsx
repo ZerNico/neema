@@ -708,7 +708,10 @@ export function SheetGrid({
       onCommand?.({ kind: "autosum" });
       return;
     }
-    if (writable && event.key === "Delete") {
+    // Over a range, Backspace clears every cell as Delete does, Excel for Mac's delete key.
+    const range =
+      !!box && (box.top !== box.bottom || box.left !== box.right || !!selection?.more?.length);
+    if (writable && (event.key === "Delete" || (event.key === "Backspace" && range))) {
       event.preventDefault();
       onCommand?.({ kind: "clear" });
       return;
