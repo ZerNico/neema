@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
-import viteReact from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig, type Plugin } from "vite";
 import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
@@ -68,6 +69,9 @@ export default defineConfig({
       ],
     }),
     viteReact(),
+    // React Compiler memoizes components and hooks, so a parent's render leaves unchanged
+    // children alone. The preset runs only on modules with components or hooks in them.
+    babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
 });

@@ -59,6 +59,22 @@ className={buttonVariants({...})}>`.
 - `Button` already has an `xs` size (24px tall). Reach for it before writing `h-6` and a padding
   override; five call sites in the folder strip had hand-rolled it while the size went unused.
 
+## React Compiler
+
+The build and the UI tests compile components with React Compiler (`reactCompilerPreset` through
+`@rolldown/plugin-babel`, since `@vitejs/plugin-react` 6 has no Babel). Test files themselves are left
+out: their harnesses rerender with fakes that read mutable state, which a memoized harness never reads
+again. Oxlint runs the compiler's own rules, so code it would refuse fails lint first. Two traps it does
+not catch:
+
+- A memo that recomputes on a counter (`revision`, `version`) while reading a mutable object is
+  recompiled on what it reads, so the counter stops reaching it. Give the changing value to React as
+  state, as `CodeViewer` keeps shiki's result, or mark the function `"use no memo"` with the reason, as
+  the desktop work approvals do.
+- The compiler skips a function only for `eslint-disable` comments on `react-hooks` rules; an
+  `oxlint-disable` one does not stop it. Dependencies left out on purpose are then filled in. A
+  snapshot taken once belongs in state keyed by what starts it, as the chat's stream seed is.
+
 ## Page chrome and layout
 
 - Browser and Electron share a client-rendered SPA. The root document is a generic shell, not a
