@@ -268,13 +268,18 @@ function pass(store: CellStore, limits: CalcLimits) {
     ids.set(cellKey(sheet, row, column), id);
     const columns = byColumn.get(sheet) ?? new Map<number, number[]>();
     byColumn.set(sheet, columns);
-    columns.set(column, [...(columns.get(column) ?? []), id]);
+    const inColumn = columns.get(column);
+    if (inColumn) inColumn.push(id);
+    else columns.set(column, [id]);
     if (formula.area) {
       areas.push({ sheet, box: formula.area, id });
       const areaColumns = areasByColumn.get(sheet) ?? new Map<number, number[]>();
       areasByColumn.set(sheet, areaColumns);
-      for (let at = formula.area.left; at <= formula.area.right; at++)
-        areaColumns.set(at, [...(areaColumns.get(at) ?? []), areas.length - 1]);
+      for (let at = formula.area.left; at <= formula.area.right; at++) {
+        const owners = areaColumns.get(at);
+        if (owners) owners.push(areas.length - 1);
+        else areaColumns.set(at, [areas.length - 1]);
+      }
     }
   });
   for (const columns of byColumn.values())

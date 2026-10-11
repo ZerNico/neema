@@ -228,7 +228,9 @@ export function groupBy(
   if (subtotals)
     source.rows.forEach((key, at) => {
       const first = keyOf([key[0] ?? null]);
-      byFirst.set(first, [...(byFirst.get(first) ?? []), at]);
+      const group = byFirst.get(first);
+      if (group) group.push(at);
+      else byFirst.set(first, [at]);
     });
   const detail = sortBy(
     distinct(source.rows).map((key) => [...key, ...summaryOf(byKey.get(keyOf(key))!)]),
