@@ -138,6 +138,27 @@ describe("calculation over any storage", () => {
     expect(sheet.at("C1")).toBe(11);
   });
 
+  it("takes the statistics of a column longer than a call takes arguments", () => {
+    const cells: Record<string, Scalar | `=${string}`> = {
+      B1: "=MEDIAN(A1:A150000)",
+      B2: "=MAX(A1:A150000)",
+      B3: "=SKEW(A1:A150000)",
+      C1: "=MEDIAN(5,1,3)",
+      C2: "=MEDIAN(1,2,3,4)",
+      C3: '=MEDIAN("x")',
+    };
+    for (let row = 1; row <= 150_000; row++) cells[`A${row}`] = row;
+    const sheet = memoryStore(cells);
+    calculate(sheet.store, { ...limits, links: 1_000_000 });
+    expect([sheet.at("B1"), sheet.at("B2")]).toEqual([75_000.5, 150_000]);
+    expect(sheet.at("B3")).toBeCloseTo(0, 9);
+    expect([sheet.at("C1"), sheet.at("C2"), sheet.at("C3")]).toEqual([
+      3,
+      2.5,
+      new XError("#VALUE!"),
+    ]);
+  });
+
   it("spills, is blocked by a value in the way, and spills again once it is gone", () => {
     const sheet = memoryStore({ A1: "=SEQUENCE(3)", A3: "in the way" });
     const blocked = calculate(sheet.store, limits);

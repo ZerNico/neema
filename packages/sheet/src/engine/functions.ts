@@ -129,8 +129,16 @@ const libraryStat =
   (args, call) => {
     const values = numbersOf(args, call, lenient);
     if (values instanceof XError) return values;
-    return fromLibrary(libraryFunction(name)!(...values));
+    // As one array: spread into arguments, a long column overflows the stack.
+    return fromLibrary(libraryFunction(name)!(values));
   };
+/** The middle number, or the mean of the middle two; formula.js's spreads its input. */
+const median = (values: number[]) => {
+  if (!values.length) return NUM;
+  const sorted = values.toSorted((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+};
 
 function variance(values: number[], sample: boolean) {
   if (values.length < (sample ? 2 : 1)) return DIV0;
@@ -192,8 +200,8 @@ const AGGREGATES: Record<number, (values: number[], k?: number) => Value> = {
   9: sum,
   10: (values) => variance(values, true),
   11: (values) => variance(values, false),
-  12: (values) => fromLibrary(library.MEDIAN(...values)),
-  13: (values) => fromLibrary(library.MODE.SNGL(...values)),
+  12: median,
+  13: (values) => fromLibrary(library.MODE.SNGL(values)),
   14: (values, k) => fromLibrary(library.LARGE(values, k)),
   15: (values, k) => fromLibrary(library.SMALL(values, k)),
   16: (values, k) => fromLibrary(library.PERCENTILE.INC(values, k)),
@@ -777,7 +785,13 @@ export const FUNCTIONS: Record<string, Fn> = {
   VARP: { kinds: "|r", run: onNumbers((values) => variance(values, false)) },
   VARA: { kinds: "|r", run: onNumbers((values) => variance(values, true), true) },
   VARPA: { kinds: "|r", run: onNumbers((values) => variance(values, false), true) },
-  MEDIAN: { kinds: "|r", run: libraryStat("MEDIAN") },
+  MEDIAN: {
+    kinds: "|r",
+    run: (args, call) => {
+      const values = numbersOf(args, call);
+      return values instanceof XError ? values : median(values);
+    },
+  },
   MODE: { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.MULT": { kinds: "|r", run: libraryStat("MODE.MULT") },
