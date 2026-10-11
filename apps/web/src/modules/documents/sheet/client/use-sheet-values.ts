@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CalcContext, SheetValues } from "@chat/sheet/model/calc";
 import type { SheetDoc } from "@chat/sheet/model";
-import { calculateForWire, valuesOf, type CalcRequest, type CalcResult } from "./calc-protocol.ts";
+import { calculateForWire, valuesOf, type CalcPost, type CalcResult } from "./calc-protocol.ts";
 
 /**
  * A sheet's values, calculated in a worker so typing never waits on a big
@@ -30,7 +30,11 @@ export function useSheetValues(
   const inline = typeof Worker === "undefined";
   useEffect(() => {
     if (!doc || !context || inline) return;
-    const request: CalcRequest = { generation: ++generation.current, doc, context };
+    const request: CalcPost = {
+      generation: ++generation.current,
+      doc: JSON.stringify(doc),
+      context,
+    };
     worker.current?.postMessage(request);
   }, [doc, context, inline]);
   return useMemo(() => {

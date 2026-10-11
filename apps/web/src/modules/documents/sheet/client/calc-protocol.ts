@@ -7,6 +7,16 @@ export interface CalcRequest {
   readonly doc: SheetDoc;
   readonly context: CalcContext;
 }
+/**
+ * A request as posted to the worker: the document as its JSON, which the page
+ * writes in a quarter of the time a structured copy takes, the worker reading
+ * it on its own thread. A document is JSON already; the server stores it so.
+ */
+export interface CalcPost {
+  readonly generation: number;
+  readonly doc: string;
+  readonly context: CalcContext;
+}
 /** An error crosses to the page as its code; a class would not survive the copy. */
 export type WireScalar = number | string | boolean | null | { readonly e: string };
 export interface CalcResult {

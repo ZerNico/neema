@@ -1,18 +1,18 @@
-import { calculateForWire, type CalcRequest } from "./calc-protocol.ts";
+import { calculateForWire, type CalcPost } from "./calc-protocol.ts";
 
 // Requests arrive faster than a big sheet calculates; only the newest is worth doing.
-let latest: CalcRequest | null = null;
+let latest: CalcPost | null = null;
 let busy = false;
 const drain = () => {
   busy = true;
   while (latest) {
     const request = latest;
     latest = null;
-    postMessage(calculateForWire(request));
+    postMessage(calculateForWire({ ...request, doc: JSON.parse(request.doc) }));
   }
   busy = false;
 };
-addEventListener("message", (event: MessageEvent<CalcRequest>) => {
+addEventListener("message", (event: MessageEvent<CalcPost>) => {
   latest = event.data;
   if (!busy) setTimeout(drain, 0);
 });
