@@ -158,7 +158,10 @@ false`), so a page body is written against data already there. This includes loc
 - On a narrow screen the same rail covers the page below the header and slides in from the right,
   rather than rising as a bottom sheet, so the corner toggle and its right-panel icon mean the same
   thing at every width. Until someone drags the rail's edge its width is a share of the window; a
-  dragged width is kept.
+  dragged width is kept. It stops where the sidebar and a readable page would no longer fit, and
+  dragged well past that it takes the whole row: the page beside it turns invisible, keeping its
+  state, until the edge is dragged back, the strip's full-width button is pressed again, or the
+  rail closes. That state is never stored, so a reload brings the page back.
 - A `restorable` request's tab outlives navigation and restarts: its id and title, never its body,
   are stored per account in `localStorage` (`detail-panel-tabs.ts`). A restored tab shows a pending
   body until the owner of its kind refreshes it, and owners refresh every tab of their kind, not

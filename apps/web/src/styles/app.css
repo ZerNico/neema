@@ -284,6 +284,11 @@ html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-conten
   width: calc(100% - var(--detail-panel-inset, 0px));
 }
 
+/* A full-width rail hides the page, header included. */
+html[data-panel-expanded] .desktop-titlebar-content {
+  visibility: hidden;
+}
+
 /* Sits above the header or the open panel's strip, whichever reaches the corner,
    and stops before the window controls overlay like they do. */
 .desktop-titlebar-corner {

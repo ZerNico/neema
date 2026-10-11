@@ -12,6 +12,12 @@ export const DETAIL_PANEL_STEP = 24;
  */
 const DETAIL_PANEL_LEAVES = 640;
 
+/**
+ * Dragged this far past its widest, the rail snaps to the whole row and the
+ * page beside it steps aside, until the edge is dragged back or the rail closes.
+ */
+export const DETAIL_PANEL_SNAP = 96;
+
 /** The rail may grow until only that is left. */
 export const detailPanelMax = (viewport: number) =>
   Math.max(DETAIL_PANEL_MIN, Math.round(viewport - DETAIL_PANEL_LEAVES));
@@ -28,6 +34,8 @@ export const defaultDetailPanelWidth = (viewport: number) =>
 
 const listeners = new Set<() => void>();
 let override: number | null = null;
+// Not stored: a reload brings the page back beside the rail.
+let expanded = false;
 
 const read = (): number => {
   if (override !== null) return override;
@@ -35,6 +43,16 @@ const read = (): number => {
   if (!Number.isFinite(stored) || stored <= 0) return defaultDetailPanelWidth(window.innerWidth);
   return clampDetailPanelWidth(stored, window.innerWidth);
 };
+
+const readExpanded = () => expanded;
+const serverExpanded = () => false;
+
+/** Whether the rail takes the whole row. */
+export function setDetailPanelExpanded(next: boolean) {
+  if (expanded === next) return;
+  expanded = next;
+  emit();
+}
 
 const emit = () => {
   for (const listener of listeners) listener();
@@ -81,10 +99,22 @@ const subscribe = (listener: () => void) => {
 export function useDetailPanelWidth() {
   // Client-only: the panel mounts below the app's client boundary.
   const width = useSyncExternalStore(subscribe, read, read);
+  const isExpanded = useSyncExternalStore(subscribe, readExpanded, serverExpanded);
+  // Past the widest by the snap distance takes the whole row; short of it, the
+  // dragged width. A snap forgets the drag's last width, so leaving it returns
+  // to the width kept before.
   const resize = useCallback((next: number, persist = true) => {
+    if (next > detailPanelMax(window.innerWidth) + DETAIL_PANEL_SNAP) {
+      if (persist) override = null;
+      expanded = true;
+      emit();
+      return;
+    }
+    expanded = false;
     setDetailPanelWidth(clampDetailPanelWidth(next, window.innerWidth), persist);
   }, []);
   const reset = useCallback(() => {
+    expanded = false;
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -93,5 +123,5 @@ export function useDetailPanelWidth() {
     override = null;
     emit();
   }, []);
-  return { width, resize, reset };
+  return { width, expanded: isExpanded, resize, reset };
 }

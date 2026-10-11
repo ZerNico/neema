@@ -300,12 +300,18 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
   fireEvent.pointerUp(handle, { clientX: 700, pointerId: 1 });
   expect(document.documentElement).not.toHaveAttribute("data-panel-resizing");
 
-  // The ceiling leaves the sidebar and a readable chat beside it, and the
-  // floor keeps the header and a line of Markdown readable.
+  // The ceiling leaves the sidebar and a readable chat beside it; dragged well
+  // past it, the rail takes the whole row and the page steps aside. The floor
+  // keeps the header and a line of Markdown readable.
+  const html = document.documentElement;
   fireEvent.pointerDown(handle, { button: 0, clientX: 700, pointerId: 1 });
-  fireEvent.pointerMove(handle, { clientX: -4000, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 800 + opening - detailPanelMax(1_600), pointerId: 1 });
   await width(`${detailPanelMax(1_600)}px`);
+  expect(html).not.toHaveAttribute("data-panel-expanded");
+  fireEvent.pointerMove(handle, { clientX: -4000, pointerId: 1 });
+  await waitFor(() => expect(html).toHaveAttribute("data-panel-expanded"));
   fireEvent.pointerMove(handle, { clientX: 4000, pointerId: 1 });
+  await waitFor(() => expect(html).not.toHaveAttribute("data-panel-expanded"));
   await width("320px");
   fireEvent.pointerUp(handle, { clientX: 4000, pointerId: 1 });
 
@@ -323,6 +329,27 @@ it("resizes the desktop rail by drag and keyboard, within limits, and remembers 
   fireEvent.doubleClick(screen.getByRole("separator", { name: "Resize panel" }));
   await waitFor(() => expect(reopened.style.width).toBe(`${opening}px`));
   Object.defineProperty(window, "innerWidth", { value: viewport, configurable: true });
+});
+
+it("takes the whole row at full width, and gives the page back", async () => {
+  render(<Harness />);
+  act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
+  const html = document.documentElement;
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  await waitFor(() => expect(html).toHaveAttribute("data-panel-expanded"));
+  fireEvent.click(screen.getByRole("button", { name: "Exit full width" }));
+  await waitFor(() => expect(html).not.toHaveAttribute("data-panel-expanded"));
+  // From the keyboard: one step past the widest, and one back.
+  const handle = screen.getByRole("separator", { name: "Resize panel" });
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  fireEvent.keyDown(handle, { key: "ArrowRight" });
+  await waitFor(() => expect(html).not.toHaveAttribute("data-panel-expanded"));
+  // Closing the rail gives the page back too, so it never reopens over a hidden page.
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  act(() => panel.hide());
+  await waitFor(() => expect(html).not.toHaveAttribute("data-panel-expanded"));
+  act(() => panel.show());
+  expect(screen.getByRole("button", { name: "Full width" })).toBeInTheDocument();
 });
 
 it("hides the desktop rail on Escape", () => {
