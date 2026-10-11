@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { and, eq, gt } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -183,6 +183,31 @@ const methodsFor = (
     apiKey: Boolean(manifest.apiKey && row.allowApiKeys),
     open: null,
   };
+};
+
+/**
+ * Whether the way a connection was made is still one people may use. Only a
+ * type whose config decides its ways (MCP) can close one under a connection;
+ * the fingerprint names where credentials go, so it cannot tell.
+ */
+const wayOpen = (
+  manifest: IntegrationManifest,
+  adapter: IntegrationAdapter,
+  row: IntegrationConfigRow,
+  config: Readonly<Record<string, string>>,
+  kind: IntegrationConnectionRow["authKind"],
+) => {
+  if (!adapter.connectMethods) return true;
+  const methods = methodsFor(
+    manifest,
+    adapter,
+    row,
+    config,
+    Boolean(row.sharedCredentialCiphertext),
+  );
+  if (kind === "oauth") return methods.oauth;
+  if (kind === "api_key") return methods.apiKey;
+  return methods.open === kind;
 };
 
 /**
@@ -569,7 +594,8 @@ export class IntegrationService extends Context.Service<
             !enabled ||
             enabled.fingerprint !== setup.fingerprint ||
             enabled.row.revision !== setup.revision ||
-            current.configFingerprint !== setup.fingerprint
+            current.configFingerprint !== setup.fingerprint ||
+            !wayOpen(enabled.manifest, adapter, enabled.row, enabled.config, current.authKind)
           )
             return yield* new IntegrationRequestFailed({ status: null, message: UNAVAILABLE });
           // The admin's key, read fresh: replacing it applies to the next call.
@@ -608,7 +634,8 @@ export class IntegrationService extends Context.Service<
         if (
           !connection ||
           connection.status !== "active" ||
-          connection.configFingerprint !== fingerprint
+          connection.configFingerprint !== fingerprint ||
+          !wayOpen(manifest, adapter, row, config, connection.authKind)
         )
           return yield* new IntegrationNotAvailable({ integrationId });
         const session: ConnectedSession = {
@@ -647,6 +674,12 @@ export class IntegrationService extends Context.Service<
           if ("error" in normalized) continue;
           if (row.connection.status !== "active") continue;
           if (row.connection.configFingerprint !== normalized.fingerprint) continue;
+          const manifest = findIntegrationType(row.config.kind);
+          if (
+            !manifest ||
+            !wayOpen(manifest, adapter, row.config, normalized.config, row.connection.authKind)
+          )
+            continue;
           usable.set(row.config.id, { connection: row.connection, config: row.config });
         }
         return usable;
@@ -706,23 +739,23 @@ export class IntegrationService extends Context.Service<
           normalized.config,
           Boolean(row.sharedCredentialCiphertext),
         );
-        if (methods.open) {
-          const shared = methods.open === "shared" ? yield* repo.sharedCredential(row) : null;
-          if (methods.open === "shared" && !shared)
+        if (methods.open === "shared") {
+          const shared = yield* repo.sharedCredential(row);
+          if (!shared)
             return yield* new IntegrationRejected({ reason: "Enter the shared key first." });
-          const credential: Credential = shared
-            ? { kind: "api_key", values: shared }
-            : { kind: "none" };
+          const credential: Credential = { kind: "api_key", values: shared };
           return { row, adapter, catalog, session: probe(normalized.config, credential) };
         }
-        const connectFirst = new IntegrationRejected({
+        // The reviewer's own account first: it may see tools nobody sees without one.
+        const own = userId
+          ? yield* sessionFor(userId, integrationId).pipe(Effect.option)
+          : Option.none();
+        if (Option.isSome(own)) return { row, adapter, catalog, session: own.value };
+        if (methods.open === "none")
+          return { row, adapter, catalog, session: probe(normalized.config, { kind: "none" }) };
+        return yield* new IntegrationRejected({
           reason: `Turn ${row.name} on and connect your own account in Settings, then check again.`,
         });
-        if (!userId) return yield* connectFirst;
-        const session = yield* sessionFor(userId, integrationId).pipe(
-          Effect.mapError(() => connectFirst),
-        );
-        return { row, adapter, catalog, session };
       });
 
       const checkCatalog = Effect.fn("IntegrationService.checkCatalog")(function* (
@@ -983,10 +1016,14 @@ export class IntegrationService extends Context.Service<
             // still shows (and can be removed) even when nothing new may start.
             if (!open && !entry.connection) continue;
             const connection = entry.connection;
+            const readsOnly = connection
+              ? connection.authKind === "shared"
+              : methods.open === "shared" && !methods.oauth && !methods.apiKey;
             const stale =
               connection !== null &&
               configured &&
-              connection.configFingerprint !== normalized.fingerprint;
+              (connection.configFingerprint !== normalized.fingerprint ||
+                !wayOpen(manifest, adapter, entry.config, normalized.config, connection.authKind));
             result.push({
               id: entry.config.id,
               kind: entry.config.kind,
@@ -995,7 +1032,7 @@ export class IntegrationService extends Context.Service<
               methods,
               // A shared key only ever reads, so its other tools are not anyone's to set.
               tools: (yield* toolsOf(manifest, adapter, entry.config.id))
-                .filter((tool) => methods.open !== "shared" || tool.access === "read")
+                .filter((tool) => !readsOnly || tool.access === "read")
                 .map((tool) => ({
                   name: tool.name,
                   title: tool.title,
@@ -1124,7 +1161,7 @@ export class IntegrationService extends Context.Service<
           const shared = open === "shared" ? yield* repo.sharedCredential(row) : null;
           if (open === "shared" && !shared)
             return yield* new IntegrationRejected({ reason: "The shared key is not set up." });
-          const { accountLabel } = yield* verified(
+          const verifiedOpen = yield* verified(
             adapter,
             config,
             shared ? { kind: "api_key", values: shared } : { kind: "none" },
@@ -1134,7 +1171,7 @@ export class IntegrationService extends Context.Service<
             integrationId,
             authKind: open,
             credentials: { kind: "none" },
-            accountLabel,
+            accountLabel: shared ? "Shared key" : verifiedOpen.accountLabel,
             fingerprint,
           });
           yield* changed(userId);

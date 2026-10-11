@@ -87,15 +87,29 @@ export interface IntegrationAllowance {
  * person pastes to connect without OAuth. The kind picks the control and,
  * for a person's credential, the check made before the service is asked.
  */
+export interface FieldCondition {
+  readonly key: string;
+  readonly values: ReadonlyArray<string>;
+}
+
 export interface IntegrationField {
   readonly key: string;
   readonly label: string;
-  /** `secret` is never shown again once saved. */
-  readonly kind: "url" | "text" | "email" | "secret" | "select";
-  /** The choices of a `select`; its value is one of their `value`s. */
-  readonly options?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
-  /** Shown only while another field holds one of these values. */
-  readonly when?: { readonly key: string; readonly values: ReadonlyArray<string> };
+  /**
+   * `secret` is never shown again once saved. `choice` holds one of `options`,
+   * `choices` any of them, space-separated.
+   */
+  readonly kind: "url" | "text" | "email" | "secret" | "choice" | "choices";
+  readonly options?: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly description?: string;
+  }>;
+  /**
+   * Shown only while another field holds one of these values; a list means any
+   * of them. A field whose condition names a hidden field is hidden too.
+   */
+  readonly when?: FieldCondition | ReadonlyArray<FieldCondition>;
   readonly placeholder?: string;
   readonly description?: string;
   readonly required: boolean;
@@ -145,6 +159,8 @@ export interface IntegrationManifest {
   readonly oauth: {
     readonly setup: OAuthSetup;
     readonly when?: NonNullable<IntegrationField["when"]>;
+    /** The app registers itself when it can, so the admin's own client waits behind a switch. */
+    readonly optionalClient?: boolean;
   } | null;
   /**
    * Present when a person can connect by pasting an API key instead of

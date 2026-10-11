@@ -20,7 +20,8 @@ import {
   summarizeArguments,
   type McpToolEntry,
 } from "../catalog.ts";
-import { MCP_AUTH, mcpAuthOf } from "../manifest.ts";
+import { fieldValues } from "../../fields.ts";
+import { MCP_ANONYMOUS, MCP_WAYS, mcpWaysOf } from "../manifest.ts";
 import { mcpOAuth } from "./auth.ts";
 import { connect, REQUEST_OPTIONS, toFailure, type Connection, type Elicit } from "./client.ts";
 import { promptOf, resultOf } from "./elicitation.ts";
@@ -250,14 +251,10 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
 });
 
 /** Whose sign-in an account label names, for Settings; never a secret. */
-const accountLabel = (
-  session: IntegrationSession,
-  credential: { kind: string; accessToken?: string },
-) => {
-  if (credential.kind === "none")
-    return mcpAuthOf(session.config) === "shared" ? "Shared key" : "No sign-in needed";
-  if (credential.kind === "api_key")
-    return mcpAuthOf(session.config) === "shared" ? "Shared key" : "Personal token";
+const accountLabel = (credential: { kind: string; accessToken?: string }) => {
+  if (credential.kind === "none") return "No sign-in needed";
+  // The service names a shared key itself; a key here is the person's own.
+  if (credential.kind === "api_key") return "Personal token";
   // An access token is often a JWT naming the person; only read for display.
   const payload = credential.accessToken?.split(".")[1];
   if (payload) {
@@ -289,30 +286,41 @@ export const mcpAdapter: IntegrationAdapter = {
     if (url.username || url.password)
       return { error: "Leave credentials out of the address; choose a sign-in instead." };
     url.hash = "";
-    const auth = MCP_AUTH.find((mode) => mode === config.auth);
-    if (!auth) return { error: "Choose how people sign in." };
+    const ticked = fieldValues(config.ways).filter(Boolean);
+    if (!ticked.length) return { error: "Choose at least one way people connect." };
+    if (!ticked.every((value) => MCP_WAYS.some((way) => way === value)))
+      return { error: "Choose how people connect." };
+    const anonymous = MCP_ANONYMOUS.find((value) => value === config.anonymous);
+    if (ticked.includes("anonymous") && !anonymous)
+      return { error: "Choose how people connect without an account." };
     const header = (config.header ?? "").trim();
     if (header && !HEADER.test(header))
       return { error: "The header name has characters a header cannot have." };
     const scopes = (config.scopes ?? "").trim().replace(/\s+/g, " ");
     if (scopes.length > 500) return { error: "The scopes are too long." };
-    const normalized: Record<string, string> = { url: url.toString(), auth };
-    if (header && (auth === "token" || auth === "shared")) normalized.header = header;
-    if (scopes && auth === "oauth") normalized.scopes = scopes;
-    // Another address or way in means every saved credential names something else.
+    const normalized: Record<string, string> = {
+      url: url.toString(),
+      ways: MCP_WAYS.filter((way) => ticked.includes(way)).join(" "),
+    };
+    if (anonymous && ticked.includes("anonymous")) normalized.anonymous = anonymous;
+    const ways = mcpWaysOf(normalized);
+    if (header && (ways.token || ways.anonymous === "shared")) normalized.header = header;
+    if (scopes && ways.oauth) normalized.scopes = scopes;
+    // Where credentials go, not which ways are open: offering one more way keeps
+    // everyone connected, and a connection whose way closed is judged by its kind.
     return {
       config: normalized,
-      fingerprint: `${normalized.url} ${auth} ${normalized.header ?? ""}`,
+      fingerprint: `${normalized.url} ${normalized.header ?? ""}`,
     };
   },
   oauth: null,
   discoveredOAuth: mcpOAuth,
   connectMethods: (config) => {
-    const auth = mcpAuthOf(config);
+    const ways = mcpWaysOf(config);
     return {
-      oauth: auth === "oauth",
-      apiKey: auth === "token",
-      open: auth === "none" ? "none" : auth === "shared" ? "shared" : null,
+      oauth: ways.oauth,
+      apiKey: ways.token,
+      open: ways.anonymous === "open" ? "none" : ways.anonymous === "shared" ? "shared" : null,
     };
   },
   verify: (session) =>
@@ -330,7 +338,7 @@ export const mcpAdapter: IntegrationAdapter = {
           try: (signal) => connection.client.listTools(undefined, { signal, timeout: 30_000 }),
           catch: (error) => failed("verify", connection, error),
         });
-        return { accountLabel: accountLabel(session, credential) };
+        return { accountLabel: accountLabel(credential) };
       }),
     ),
   scopeOptions: null,

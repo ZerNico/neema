@@ -120,7 +120,7 @@ const begin = (options: {
     mcpOAuth.begin({
       config: {
         url: `${base}/mcp`,
-        auth: "oauth",
+        ways: "oauth",
         ...(options.scopes ? { scopes: options.scopes } : {}),
       },
       integrationId: "mcp",

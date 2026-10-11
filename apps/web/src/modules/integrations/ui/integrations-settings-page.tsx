@@ -18,7 +18,8 @@ import {
 import { FieldLabel } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
 import { findIntegrationType } from "../catalog.ts";
-import { myIntegrationsQuery } from "../client/queries.ts";
+import { connectUrl, myIntegrationsQuery } from "../client/queries.ts";
+import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import type { UserIntegration } from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
 import { ApiKeyDialog, ConnectActions, SignInButton, TurnOnButton } from "./connect-actions.tsx";
@@ -240,6 +241,12 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
   const canConnect = integration.available;
   // A lapsed sign-in gets one way back in; the other method and Disconnect wait in the menu.
   const reconnectWithOAuth = needsReauth && canConnect && integration.methods.oauth;
+  // Used without an account, it can take one of the person's own for more.
+  const withoutAccount =
+    canConnect &&
+    !needsReauth &&
+    (connection?.authKind === "none" || connection?.authKind === "shared");
+  const desktop = useDesktop();
 
   return (
     <ListRow>
@@ -261,7 +268,9 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
                 : connection?.authKind === "shared"
                   ? "Everyone here uses one key, so chats only read."
                   : connection?.authKind === "none"
-                    ? `${integration.name} needs no account.`
+                    ? integration.methods.apiKey || integration.methods.oauth
+                      ? "Used without an account."
+                      : `${integration.name} needs no account.`
                     : connection
                       ? `Chats use ${integration.name} as this account.`
                       : integration.methods.open
@@ -301,9 +310,18 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            {reconnectWithOAuth && integration.methods.apiKey ? (
+            {(reconnectWithOAuth || withoutAccount) && integration.methods.apiKey ? (
               <DropdownMenuItem onClick={() => setKeyOpen(true)}>
                 Use {findIntegrationType(integration.kind)?.apiKey?.noun ?? "an API key"} instead
+              </DropdownMenuItem>
+            ) : null}
+            {withoutAccount && integration.methods.oauth ? (
+              <DropdownMenuItem
+                render={
+                  <a href={connectUrl(integration.id)} target={desktop ? "_blank" : undefined} />
+                }
+              >
+                Sign in with {integration.name}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem

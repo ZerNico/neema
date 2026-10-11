@@ -38,18 +38,23 @@ export function ConnectActions({
   const service = manifest.toolSource === "catalog" ? integration.name : manifest.name;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {/* One primary: no account first, then a sign-in, a token last. */}
       {integration.methods.open ? <TurnOnButton integration={integration} /> : null}
       {integration.methods.apiKey ? (
         <Button
           size="sm"
-          variant={integration.methods.oauth ? "outline" : "default"}
+          variant={integration.methods.oauth || integration.methods.open ? "outline" : "default"}
           onClick={() => setKeyOpen(true)}
         >
           Use {manifest.apiKey?.noun ?? "an API key"}
         </Button>
       ) : null}
       {integration.methods.oauth ? (
-        <SignInButton integration={integration} returnTo={returnTo}>
+        <SignInButton
+          integration={integration}
+          returnTo={returnTo}
+          variant={integration.methods.open ? "outline" : "default"}
+        >
           {reconnect ? "Reconnect" : `Sign in with ${service}`}
         </SignInButton>
       ) : null}
@@ -94,16 +99,19 @@ export function TurnOnButton({
 export function SignInButton({
   integration,
   returnTo,
+  variant = "default",
   children,
 }: {
   integration: UserIntegration;
   returnTo?: string | undefined;
+  variant?: "default" | "outline";
   children: ReactNode;
 }) {
   const desktop = useDesktop();
   return (
     <Button
       size="sm"
+      variant={variant}
       // In the desktop app a new-window link goes to the system browser,
       // which is where the sign-in has to happen; a browser tab just goes.
       render={

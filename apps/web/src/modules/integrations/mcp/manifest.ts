@@ -1,12 +1,33 @@
+import { fieldValues } from "../fields.ts";
 import type { IntegrationManifest } from "../manifest.ts";
 import { McpLogo } from "./logo.tsx";
 
-/** How people reach the server; the admin picks one per integration. */
-export const MCP_AUTH = ["oauth", "token", "none", "shared"] as const;
-export type McpAuth = (typeof MCP_AUTH)[number];
+/** The ways in an admin may tick; several may stand side by side, like a public server with private extras. */
+export const MCP_WAYS = ["oauth", "token", "anonymous"] as const;
+/** How the server is reached without an account: as nobody, or with the admin's key. */
+export const MCP_ANONYMOUS = ["open", "shared"] as const;
 
-export const mcpAuthOf = (config: Readonly<Record<string, string>>): McpAuth =>
-  MCP_AUTH.find((mode) => mode === config.auth) ?? "oauth";
+export interface McpWays {
+  readonly oauth: boolean;
+  readonly token: boolean;
+  readonly anonymous: (typeof MCP_ANONYMOUS)[number] | "off";
+}
+
+export const mcpWaysOf = (config: Readonly<Record<string, string>>): McpWays => {
+  const ticked = fieldValues(config.ways ?? "oauth");
+  return {
+    oauth: ticked.includes("oauth"),
+    token: ticked.includes("token"),
+    anonymous: ticked.includes("anonymous")
+      ? (MCP_ANONYMOUS.find((value) => value === config.anonymous) ?? "open")
+      : "off",
+  };
+};
+
+const OAUTH = { key: "ways", values: ["oauth"] };
+const TOKEN = { key: "ways", values: ["token"] };
+const ANONYMOUS = { key: "ways", values: ["anonymous"] };
+const SHARED = { key: "anonymous", values: ["shared"] };
 
 /**
  * Any remote MCP server. Its tools are not known here: each integration lists
@@ -27,15 +48,33 @@ export const mcpManifest = {
       required: true,
     },
     {
-      key: "auth",
-      label: "Sign-in",
-      kind: "select",
+      key: "ways",
+      label: "How people connect",
+      kind: "choices",
       required: true,
       options: [
-        { value: "oauth", label: "Each person signs in" },
-        { value: "token", label: "Each person pastes a token" },
-        { value: "none", label: "No sign-in" },
-        { value: "shared", label: "One key for everyone, read-only" },
+        { value: "oauth", label: "Sign in", description: "With their own account on the server." },
+        { value: "token", label: "Personal token", description: "Pasted from their own account." },
+        {
+          value: "anonymous",
+          label: "Without an account",
+          description: "For servers anyone can use.",
+        },
+      ],
+    },
+    {
+      key: "anonymous",
+      label: "Without an account",
+      kind: "choice",
+      required: true,
+      when: ANONYMOUS,
+      options: [
+        { value: "open", label: "No key", description: "The server needs nothing." },
+        {
+          value: "shared",
+          label: "One shared key",
+          description: "Everyone uses your key, so chats only read.",
+        },
       ],
     },
     {
@@ -45,7 +84,7 @@ export const mcpManifest = {
       placeholder: "Authorization",
       description: "Where the token goes. Authorization sends it as a bearer token.",
       required: false,
-      when: { key: "auth", values: ["token", "shared"] },
+      when: [TOKEN, SHARED],
     },
     {
       key: "scopes",
@@ -53,31 +92,31 @@ export const mcpManifest = {
       kind: "text",
       placeholder: "Leave empty to ask for what the server needs",
       required: false,
-      when: { key: "auth", values: ["oauth"] },
+      when: OAUTH,
     },
   ],
   oauth: {
-    when: { key: "auth", values: ["oauth"] },
+    when: OAUTH,
+    optionalClient: true,
     setup: {
       // Each server signs in somewhere else, so there is no one console to name.
       console: null,
       steps: [
-        { text: "Usually nothing to do: this app registers itself with the server’s sign-in." },
         {
-          text: "If the sign-in only accepts registered apps, register one with the redirect URI above and paste its client ID and secret.",
+          text: "Register the app with this redirect URI, then paste its client ID and secret.",
         },
       ],
     },
   },
   apiKey: {
     noun: "a token",
-    when: { key: "auth", values: ["token"] },
+    when: TOKEN,
     fields: [{ key: "token", label: "Token", kind: "secret", required: true }],
     helpUrl: () => null,
   },
   sharedCredential: {
     fields: [{ key: "token", label: "Shared key", kind: "secret", required: true }],
-    when: { key: "auth", values: ["shared"] },
+    when: SHARED,
   },
   toolSource: "catalog",
   tools: [],

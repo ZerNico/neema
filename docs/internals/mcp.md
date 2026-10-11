@@ -71,16 +71,23 @@ choose; their choice sticks across later listings.
 
 ## Ways in
 
-The admin picks one per integration, and it is part of the fingerprint, so changing it asks
-everyone to reconnect:
+The admin ticks any of three ways in: signing in, pasting a token, or going without an account,
+which is either open to anyone or one key for everyone. Several may stand at once, since many
+public servers take a token for private data or higher limits. Each person picks one; Settings lets someone using it without
+an account add their own later.
 
-- **Each person signs in** (OAuth, below).
-- **Each person pastes a token**, sent as a bearer token or in a header the admin names.
-- **No sign-in**: a person still turns it on, which gives them their own tool permissions.
+- **Signing in** is OAuth, below. **A token** goes as a bearer token or in a header the admin
+  names.
+- **Open**: a person still turns it on, which gives them their own tool permissions.
 - **One key for everyone**: the admin's key, encrypted on the integration. Every call acts
   as the admin's account for whoever is chatting, which breaks the rule that authority
-  belongs to the sender, so only `read` tools are offered and `consentFor` refuses
-  anything else (`shared`). The check is in the tool layer, not only the UI.
+  belongs to the sender, so a connection on it is offered only `read` tools and `consentFor`
+  refuses anything else (`shared`). The check is in the tool layer, not only the UI.
+
+The fingerprint names where credentials go (the address and the header), not which ways are
+open, so opening another way asks nobody to reconnect and keeps the review. A connection
+whose way the admin closed reads as needing to reconnect, judged by its kind wherever a
+session or credential is handed out.
 
 ## Sign-in follows the 2026-07-28 authorization spec
 

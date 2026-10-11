@@ -8,7 +8,7 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import {
   InputGroup,
   InputGroupAddon,
@@ -60,55 +60,60 @@ export function OAuthSetupGuide({
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
-      <Disclosure open={open} onOpenChange={setOpen}>
-        <DisclosureTrigger className={cn(disclosureTriggerClassName, focusRingClassName)}>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            className={cn(disclosureChevronMotionClassName, "size-4", open && "rotate-180")}
-          />
-          How to set up OAuth
-        </DisclosureTrigger>
-        <DisclosureContent>
-          <ol className={cn(disclosureBodyRailClassName, "list-decimal space-y-2 pl-8")}>
-            {setup.console ? (
-              <li>
-                Open the{" "}
-                {consoleUrl ? (
-                  <a
-                    href={consoleUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-foreground underline underline-offset-4"
-                  >
-                    {setup.console.label}
-                  </a>
-                ) : (
-                  setup.console.label
-                )}
-                .
-              </li>
-            ) : null}
-            {setup.steps.map((step) => (
-              <li key={step.text}>
-                {step.text}
-                {step.values ? (
-                  <span className="mt-1.5 flex flex-wrap gap-1.5">
-                    {step.values.map((value) => (
-                      <code
-                        key={value}
-                        className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground select-all"
-                      >
-                        {value}
-                      </code>
-                    ))}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        </DisclosureContent>
-      </Disclosure>
+      {/* One step with nowhere to go reads as a note, not as instructions to open. */}
+      {!setup.console && setup.steps.length === 1 ? (
+        <FieldDescription>{setup.steps[0]!.text}</FieldDescription>
+      ) : (
+        <Disclosure open={open} onOpenChange={setOpen}>
+          <DisclosureTrigger className={cn(disclosureTriggerClassName, focusRingClassName)}>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              strokeWidth={2}
+              className={cn(disclosureChevronMotionClassName, "size-4", open && "rotate-180")}
+            />
+            How to set up OAuth
+          </DisclosureTrigger>
+          <DisclosureContent>
+            <ol className={cn(disclosureBodyRailClassName, "list-decimal space-y-2 pl-8")}>
+              {setup.console ? (
+                <li>
+                  Open the{" "}
+                  {consoleUrl ? (
+                    <a
+                      href={consoleUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-foreground underline underline-offset-4"
+                    >
+                      {setup.console.label}
+                    </a>
+                  ) : (
+                    setup.console.label
+                  )}
+                  .
+                </li>
+              ) : null}
+              {setup.steps.map((step) => (
+                <li key={step.text}>
+                  {step.text}
+                  {step.values ? (
+                    <span className="mt-1.5 flex flex-wrap gap-1.5">
+                      {step.values.map((value) => (
+                        <code
+                          key={value}
+                          className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground select-all"
+                        >
+                          {value}
+                        </code>
+                      ))}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </DisclosureContent>
+        </Disclosure>
+      )}
     </Field>
   );
 }

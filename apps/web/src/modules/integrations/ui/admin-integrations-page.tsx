@@ -30,6 +30,7 @@ import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
 import { Switch } from "~/ui/primitives/switch";
 import { findIntegrationType, INTEGRATION_TYPES } from "../catalog.ts";
 import { adminIntegrationsQuery } from "../client/queries.ts";
+import type { IntegrationField } from "../manifest.ts";
 import type { AdminIntegration } from "../schema.ts";
 import {
   createIntegration,
@@ -307,10 +308,14 @@ function IntegrationConfigDialog({
     fieldDefaults(manifest.adminFields, row.config),
   );
   const [shared, setShared] = useState<Record<string, string>>({});
-  const showOAuth = Boolean(manifest.oauth && fieldShown(manifest.oauth, config));
+  const fields = manifest.adminFields;
+  const shownFields = fields.filter((field) => fieldShown(field, config, fields));
+  const showOAuth = Boolean(manifest.oauth && fieldShown(manifest.oauth, config, fields));
   const showSharedKey = Boolean(
-    manifest.sharedCredential && fieldShown(manifest.sharedCredential, config),
+    manifest.sharedCredential && fieldShown(manifest.sharedCredential, config, fields),
   );
+  const optionalClient = Boolean(manifest.oauth?.optionalClient);
+  const [ownClient, setOwnClient] = useState(!optionalClient || Boolean(row.oauthClientId));
   const [enabled, setEnabled] = useState(row.enabled);
   const [clientId, setClientId] = useState(row.oauthClientId ?? "");
   const [secret, setSecret] = useState("");
@@ -327,8 +332,13 @@ function IntegrationConfigDialog({
           name: name.trim(),
           enabled,
           config,
-          oauthClientId: clientId.trim(),
-          ...(secret.trim() ? { oauthClientSecret: secret.trim() } : {}),
+          // Switching the admin's own client off forgets it, secret included.
+          ...(ownClient
+            ? {
+                oauthClientId: clientId.trim(),
+                ...(secret.trim() ? { oauthClientSecret: secret.trim() } : {}),
+              }
+            : { oauthClientId: "", oauthClientSecret: "" }),
           allowApiKeys,
           // Only what was typed: an untouched shared key stays as stored.
           ...(showSharedKey && Object.values(shared).some((value) => value.trim())
@@ -369,6 +379,56 @@ function IntegrationConfigDialog({
     )
       remove.mutate();
   };
+
+  const fieldControl = (field: IntegrationField) => (
+    <IntegrationFieldControl
+      key={field.key}
+      id={`${fieldId}-${field.key}`}
+      field={field}
+      value={config[field.key] ?? ""}
+      onChange={(value) => setConfig((current) => ({ ...current, [field.key]: value }))}
+      disabled={save.isPending}
+    />
+  );
+  const oauthFields = manifest.oauth ? (
+    <>
+      <OAuthSetupGuide
+        id={`${fieldId}-redirect`}
+        setup={manifest.oauth.setup}
+        redirectUri={redirectUri}
+        config={config}
+        configured={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
+      />
+      <Field>
+        <FieldLabel htmlFor={`${fieldId}-client`}>
+          OAuth client ID <OptionalMark />
+        </FieldLabel>
+        <Input
+          id={`${fieldId}-client`}
+          value={clientId}
+          onChange={(event) => setClientId(event.target.value)}
+          disabled={save.isPending}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${fieldId}-secret`}>
+          OAuth client secret <OptionalMark />
+        </FieldLabel>
+        <Input
+          id={`${fieldId}-secret`}
+          type="password"
+          autoComplete="off"
+          placeholder={row.oauthSecretConfigured ? "Unchanged" : undefined}
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+          disabled={save.isPending}
+        />
+        {row.oauthSecretConfigured ? (
+          <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
+        ) : null}
+      </Field>
+    </>
+  ) : null;
 
   return (
     <Dialog
@@ -419,18 +479,7 @@ function IntegrationConfigDialog({
                 Turning it off stops chat tools and syncing; connections are kept.
               </FieldDescription>
             </Field>
-            {manifest.adminFields
-              .filter((field) => fieldShown(field, config))
-              .map((field) => (
-                <IntegrationFieldControl
-                  key={field.key}
-                  id={`${fieldId}-${field.key}`}
-                  field={field}
-                  value={config[field.key] ?? ""}
-                  onChange={(value) => setConfig((current) => ({ ...current, [field.key]: value }))}
-                  disabled={save.isPending}
-                />
-              ))}
+            {shownFields.map(fieldControl)}
             {showSharedKey && manifest.sharedCredential
               ? manifest.sharedCredential.fields.map((field) => (
                   <IntegrationFieldControl
@@ -452,45 +501,23 @@ function IntegrationConfigDialog({
                   </IntegrationFieldControl>
                 ))
               : null}
-            {manifest.oauth && showOAuth ? (
-              <>
-                <OAuthSetupGuide
-                  id={`${fieldId}-redirect`}
-                  setup={manifest.oauth.setup}
-                  redirectUri={redirectUri}
-                  config={config}
-                  configured={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
-                />
-                <Field>
-                  <FieldLabel htmlFor={`${fieldId}-client`}>
-                    OAuth client ID <OptionalMark />
-                  </FieldLabel>
-                  <Input
-                    id={`${fieldId}-client`}
-                    value={clientId}
-                    onChange={(event) => setClientId(event.target.value)}
+            {showOAuth && optionalClient ? (
+              <Field>
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel htmlFor={`${fieldId}-own-client`}>Registered app</FieldLabel>
+                  <Switch
+                    id={`${fieldId}-own-client`}
+                    checked={ownClient}
+                    onCheckedChange={setOwnClient}
                     disabled={save.isPending}
                   />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${fieldId}-secret`}>
-                    OAuth client secret <OptionalMark />
-                  </FieldLabel>
-                  <Input
-                    id={`${fieldId}-secret`}
-                    type="password"
-                    autoComplete="off"
-                    placeholder={row.oauthSecretConfigured ? "Unchanged" : undefined}
-                    value={secret}
-                    onChange={(event) => setSecret(event.target.value)}
-                    disabled={save.isPending}
-                  />
-                  {row.oauthSecretConfigured ? (
-                    <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
-                  ) : null}
-                </Field>
-              </>
+                </div>
+                <FieldDescription>
+                  For a sign-in that only accepts apps registered with it.
+                </FieldDescription>
+              </Field>
             ) : null}
+            {showOAuth && ownClient ? oauthFields : null}
             {manifest.apiKey && !manifest.apiKey.when ? (
               <Field>
                 <div className="flex items-center justify-between gap-3">

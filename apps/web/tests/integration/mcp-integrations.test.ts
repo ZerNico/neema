@@ -309,7 +309,7 @@ const waitForPending = (userId: string) =>
 describe("an MCP server set up by an admin", () => {
   it("offers nothing until reviewed, then exactly what was approved", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs", { url: `${base}/mcp`, ways: "anonymous", anonymous: "open" });
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(admin)));
     expect(listed.find((row) => row.id === id)).toMatchObject({
       available: true,
@@ -339,7 +339,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("refuses an approval of a listing the admin did not see", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs stale", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs stale", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     await check(id, admin);
     const refused = await run(
       Effect.flatMap(IntegrationService, (s) =>
@@ -351,7 +355,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("withholds a tool the server changed until it is approved again", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs drift", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs drift", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const first = await check(id, admin);
     await approve(admin, id, first.version!, [
       { mcpName: "search", enabled: true, access: "read" },
@@ -382,7 +390,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("never lets a slower, older check undo what a newer one found", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs race", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs race", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const first = await check(id, admin);
     await approve(admin, id, first.version!, [
       { mcpName: "search", enabled: true, access: "read" },
@@ -411,7 +423,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("forgets what was approved when the admin moves it to another server", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs moved", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs moved", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const first = await check(id, admin);
     await approve(admin, id, first.version!, [
       { mcpName: "search", enabled: true, access: "read" },
@@ -430,7 +446,7 @@ describe("an MCP server set up by an admin", () => {
           id,
           name: "Docs moved",
           enabled: true,
-          config: { url: `${base}/elsewhere`, auth: "none" },
+          config: { url: `${base}/elsewhere`, ways: "anonymous", anonymous: "open" },
           oauthClientId: "",
           allowApiKeys: true,
         }),
@@ -447,9 +463,66 @@ describe("an MCP server set up by an admin", () => {
     expect(await offeredNames(admin, conversationId)).toEqual([]);
   });
 
+  it("takes a token beside open use, and closing one way leaves the other connected", async () => {
+    const admin = await newUser();
+    const person = await newUser();
+    const save = (ways: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id,
+            name: "Docs either",
+            enabled: true,
+            config: { url: `${base}/mcp`, ways, anonymous: "open" },
+            oauthClientId: "",
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    const id = await setUp("Docs either", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
+    const adminChat = await newConversation(admin);
+    const personChat = await newConversation(person);
+
+    // Offering tokens too asks nobody to reconnect and keeps the review.
+    await save("token anonymous");
+    const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
+    expect(listed.find((row) => row.id === id)?.methods).toEqual({
+      oauth: false,
+      apiKey: true,
+      open: "none",
+    });
+    expect(await offeredNames(admin, adminChat)).toEqual(["search"]);
+    await run(
+      Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token: "t" })),
+    );
+    expect(await offeredNames(person, personChat)).toEqual(["search"]);
+
+    // Closing tokens again stops only the token.
+    await save("anonymous");
+    expect(await offeredNames(person, personChat)).toEqual([]);
+    const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
+    expect(after.find((row) => row.id === id)?.connection).toMatchObject({
+      authKind: "api_key",
+      status: "needs_reauth",
+    });
+    expect(await offeredNames(admin, adminChat)).toEqual(["search"]);
+  });
+
   it("never hands a session made for one address the credential saved for the next", async () => {
     const person = await newUser();
-    const id = await setUp("Docs tokens", { url: `${base}/mcp`, auth: "token" });
+    const id = await setUp("Docs tokens", {
+      url: `${base}/mcp`,
+      ways: "token",
+    });
     const connect = (token: string) =>
       run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token })));
     await connect("first");
@@ -460,7 +533,7 @@ describe("an MCP server set up by an admin", () => {
           id,
           name: "Docs tokens",
           enabled: true,
-          config: { url: `${base}/elsewhere`, auth: "token" },
+          config: { url: `${base}/elsewhere`, ways: "token" },
           oauthClientId: "",
           allowApiKeys: true,
         }),
@@ -475,7 +548,10 @@ describe("an MCP server set up by an admin", () => {
   });
 
   it("pins the admin's client to one issuer, beside the registrations, for one revision", async () => {
-    const id = await setUp("Docs pinned", { url: `${base}/mcp`, auth: "oauth" });
+    const id = await setUp("Docs pinned", {
+      url: `${base}/mcp`,
+      ways: "oauth",
+    });
     const save = (clientId: string) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
@@ -483,7 +559,7 @@ describe("an MCP server set up by an admin", () => {
             id,
             name: "Docs pinned",
             enabled: true,
-            config: { url: `${base}/mcp`, auth: "oauth" },
+            config: { url: `${base}/mcp`, ways: "oauth" },
             oauthClientId: clientId,
             allowApiKeys: true,
           }),
@@ -543,7 +619,10 @@ describe("an MCP server set up by an admin", () => {
   });
 
   it("keeps every client registered with an issuer, so each sign-in finds its own secret", async () => {
-    const id = await setUp("Docs registrations", { url: `${base}/mcp`, auth: "oauth" });
+    const id = await setUp("Docs registrations", {
+      url: `${base}/mcp`,
+      ways: "oauth",
+    });
     const client = (clientId: string, redirectUri = "https://chat.example.com/cb") => ({
       clientId,
       clientSecret: `${clientId}-secret`,
@@ -579,7 +658,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("starts review over when a server moves away and back, as the save finds it", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs two saves", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs two saves", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, null);
     await approve(admin, id, catalog.version!, [
       { mcpName: "search", enabled: true, access: "read" },
@@ -591,7 +674,7 @@ describe("an MCP server set up by an admin", () => {
             id,
             name: "Docs two saves",
             enabled: true,
-            config: { url, auth: "none" },
+            config: { url, ways: "anonymous", anonymous: "open" },
             oauthClientId: "",
             allowApiKeys: true,
           }),
@@ -611,7 +694,11 @@ describe("an MCP server set up by an admin", () => {
   it("approves only the listing a review showed, once, whatever the tools look like", async () => {
     const admin = await newUser();
     const other = await newUser();
-    const id = await setUp("Docs one review", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs one review", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const shown = await check(id, admin);
     // A background check finding the same tools keeps the review valid.
     expect((await check(id, admin)).version).toBe(shown.version);
@@ -638,7 +725,7 @@ describe("an MCP server set up by an admin", () => {
           id,
           name: "Docs one review",
           enabled: true,
-          config: { url: `${base}/elsewhere`, auth: "none" },
+          config: { url: `${base}/elsewhere`, ways: "anonymous", anonymous: "open" },
           oauthClientId: "",
           allowApiKeys: true,
         }),
@@ -650,7 +737,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("does not let an approval read before a move land after it", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs approve race", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs approve race", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     await check(id, admin);
     const read = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
     await run(
@@ -659,7 +750,7 @@ describe("an MCP server set up by an admin", () => {
           id,
           name: "Docs approve race",
           enabled: true,
-          config: { url: `${base}/elsewhere`, auth: "none" },
+          config: { url: `${base}/elsewhere`, ways: "anonymous", anonymous: "open" },
           oauthClientId: "",
           allowApiKeys: true,
         }),
@@ -683,7 +774,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("calls a read straight away and asks before a destructive call, showing every argument", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs calls", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs calls", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     await approve(admin, id, catalog.version!, [
       { mcpName: "search", enabled: true, access: "read" },
@@ -725,7 +820,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("puts everything a call sends to the person when the short list would hide some", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs long", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs long", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     await approve(admin, id, catalog.version!, [
       { mcpName: "delete_page", enabled: true, access: "destructive" },
@@ -752,7 +851,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("does not run a call whose tool the admin took off while it waited", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs revoked", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs revoked", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     const both = [
       { mcpName: "search", enabled: true, access: "read" },
@@ -788,7 +891,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("checks a change queued behind another only once its turn comes", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs queued", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs queued", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     const release = { mcpName: "release", enabled: true, access: "write" } as const;
     await approve(admin, id, catalog.version!, [
@@ -842,7 +949,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("puts a server's question to the person mid-call, and declines it in a scheduled run", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs release", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs release", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     await approve(admin, id, catalog.version!, [
       { mcpName: "release", enabled: true, access: "write" },
@@ -887,7 +998,11 @@ describe("an MCP server set up by an admin", () => {
 
   it("asks one question at a time, and an answer to an earlier one cannot answer the next", async () => {
     const admin = await newUser();
-    const id = await setUp("Docs provision", { url: `${base}/mcp`, auth: "none" });
+    const id = await setUp("Docs provision", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
     const catalog = await check(id, admin);
     await approve(admin, id, catalog.version!, [
       { mcpName: "provision", enabled: true, access: "write" },
@@ -943,7 +1058,7 @@ describe("an MCP server set up by an admin", () => {
 
   it("remembers the scopes a call lacked, so the next sign-in asks for them", async () => {
     const admin = await newUser();
-    const config = { url: `${base}/scoped`, auth: "oauth" };
+    const config = { url: `${base}/scoped`, ways: "oauth" };
     const id = await setUp("Docs scoped", config);
     const normalized = mcpAdapter.normalizeConfig(config);
     if ("error" in normalized) throw new Error(normalized.error);
@@ -1011,7 +1126,7 @@ describe("an MCP server set up by an admin", () => {
     const admin = await newUser();
     const id = await setUp(
       "Docs shared",
-      { url: `${base}/keyed`, auth: "shared", header: "X-Api-Key" },
+      { url: `${base}/keyed`, ways: "anonymous", anonymous: "shared", header: "X-Api-Key" },
       "admin-key",
     );
     const catalog = await check(id, null);
@@ -1051,7 +1166,12 @@ describe("an MCP server set up by an admin", () => {
           id,
           name: "Docs shared",
           enabled: true,
-          config: { url: `${base}/keyed`, auth: "shared", header: "X-Api-Key" },
+          config: {
+            url: `${base}/keyed`,
+            ways: "anonymous",
+            anonymous: "shared",
+            header: "X-Api-Key",
+          },
           oauthClientId: "",
           allowApiKeys: true,
           sharedCredential: { token: "revoked-key" },

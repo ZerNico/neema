@@ -42,7 +42,7 @@ const row = (approved: McpToolEntry[], latest: McpToolEntry[]): AdminIntegration
   kind: "mcp",
   name: "Docs",
   enabled: true,
-  config: { url: "https://mcp.example.com/mcp", auth: "none" },
+  config: { url: "https://mcp.example.com/mcp", ways: "anonymous", anonymous: "open" },
   oauthClientId: null,
   oauthSecretConfigured: false,
   allowApiKeys: true,

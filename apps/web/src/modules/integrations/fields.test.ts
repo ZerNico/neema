@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFields } from "./fields.ts";
+import { fieldShown, readFields } from "./fields.ts";
 import type { IntegrationField } from "./manifest.ts";
 
 const fields: ReadonlyArray<IntegrationField> = [
@@ -23,5 +23,48 @@ describe("readFields", () => {
     expect(readFields(fields, { email: "a@example.com", token: "t", site: "ftp://x" })).toEqual({
       error: "The Site is not a web address.",
     });
+  });
+});
+
+describe("choices", () => {
+  const ways: ReadonlyArray<IntegrationField> = [
+    {
+      key: "ways",
+      label: "Ways",
+      kind: "choices",
+      required: true,
+      options: [
+        { value: "oauth", label: "Sign in" },
+        { value: "anonymous", label: "Without an account" },
+      ],
+    },
+    {
+      key: "anonymous",
+      label: "Without an account",
+      kind: "choice",
+      required: true,
+      when: { key: "ways", values: ["anonymous"] },
+      options: [
+        { value: "open", label: "No key" },
+        { value: "shared", label: "Shared key" },
+      ],
+    },
+  ];
+  const sharedKey = { when: { key: "anonymous", values: ["shared"] } };
+
+  it("keeps options in their declared order and refuses ones not declared", () => {
+    expect(readFields(ways.slice(0, 1), { ways: " anonymous  oauth " })).toEqual({
+      values: { ways: "oauth anonymous" },
+    });
+    expect(readFields(ways.slice(0, 1), { ways: "oauth magic" })).toHaveProperty("error");
+  });
+
+  it("matches a condition against any ticked option, and not through a hidden field", () => {
+    expect(fieldShown(ways[1]!, { ways: "oauth anonymous" }, ways)).toBe(true);
+    expect(fieldShown(sharedKey, { ways: "oauth anonymous", anonymous: "shared" }, ways)).toBe(
+      true,
+    );
+    // The leftover choice of an unticked way shows nothing.
+    expect(fieldShown(sharedKey, { ways: "oauth", anonymous: "shared" }, ways)).toBe(false);
   });
 });

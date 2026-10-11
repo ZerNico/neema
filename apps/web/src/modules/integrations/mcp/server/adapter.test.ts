@@ -449,26 +449,50 @@ describe("an MCP server through the adapter", () => {
 });
 
 describe("admin config", () => {
-  it("normalizes the address and makes the way in part of the fingerprint", () => {
+  it("fingerprints where credentials go, not which ways are open", () => {
     expect(
       mcpAdapter.normalizeConfig({
         url: "https://mcp.example.com/mcp#x",
-        auth: "token",
+        ways: "token",
         header: "X-Api-Key",
         scopes: "a",
       }),
     ).toEqual({
-      config: { url: "https://mcp.example.com/mcp", auth: "token", header: "X-Api-Key" },
-      fingerprint: "https://mcp.example.com/mcp token X-Api-Key",
+      config: {
+        url: "https://mcp.example.com/mcp",
+        ways: "token",
+        header: "X-Api-Key",
+      },
+      fingerprint: "https://mcp.example.com/mcp X-Api-Key",
     });
-    expect(
-      mcpAdapter.normalizeConfig({ url: "https://mcp.example.com/mcp", auth: "oauth" }),
-    ).toMatchObject({ fingerprint: "https://mcp.example.com/mcp oauth " });
+    // Opening a public server to tokens too keeps everyone's connection.
+    const open = mcpAdapter.normalizeConfig({
+      url: "https://mcp.example.com/mcp",
+      ways: "anonymous",
+      anonymous: "open",
+    });
+    const both = mcpAdapter.normalizeConfig({
+      url: "https://mcp.example.com/mcp",
+      ways: "oauth token anonymous",
+      anonymous: "open",
+    });
+    expect("fingerprint" in open && "fingerprint" in both && open.fingerprint).toBe(
+      "fingerprint" in both && both.fingerprint,
+    );
+    expect(mcpAdapter.connectMethods!("config" in both ? both.config : {})).toEqual({
+      oauth: true,
+      apiKey: true,
+      open: "none",
+    });
     for (const bad of [
-      { url: "https://user:pw@mcp.example.com", auth: "none" },
-      { url: "ftp://mcp.example.com", auth: "none" },
-      { url: "https://mcp.example.com", auth: "token", header: "Bad Header" },
-      { url: "https://mcp.example.com", auth: "magic" },
+      { url: "https://user:pw@mcp.example.com", ways: "anonymous", anonymous: "open" },
+      { url: "ftp://mcp.example.com", ways: "anonymous", anonymous: "open" },
+      { url: "https://mcp.example.com", ways: "token", header: "Bad Header" },
+      { url: "https://mcp.example.com", ways: "magic" },
+      // Without an account, but not saying how.
+      { url: "https://mcp.example.com", ways: "anonymous" },
+      // No way in at all.
+      { url: "https://mcp.example.com", ways: "" },
     ])
       expect(mcpAdapter.normalizeConfig(bad)).toHaveProperty("error");
   });
