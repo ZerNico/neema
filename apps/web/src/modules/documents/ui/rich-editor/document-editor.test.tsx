@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Editor } from "@tiptap/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import {
 } from "../../../../../tests/fixtures/document-server.ts";
 import { DocumentSync } from "../../client/document-sync.ts";
 import { outbox } from "../../client/outbox.ts";
-import { toMarkdown } from "../../editor/markdown.ts";
+import { parseMarkdown, toMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 import DocumentEditor from "./document-editor.tsx";
 import { sortColumn } from "./table-sort.ts";
@@ -15,11 +16,19 @@ import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
 import { browserEditorExtensions, browserEditorProps } from "./editor-extensions.ts";
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
-import { addDocumentImage } from "../../server/document-functions.ts";
+import {
+  addDocumentImage,
+  getDocumentVersion,
+  getDocumentVersions,
+} from "../../server/document-functions.ts";
 
 // The network boundary for images: the upload and the claim the editor calls.
 vi.mock("~/modules/attachments/server/functions.ts", () => ({ uploadAttachment: vi.fn() }));
-vi.mock("../../server/document-functions.ts", () => ({ addDocumentImage: vi.fn() }));
+vi.mock("../../server/document-functions.ts", () => ({
+  addDocumentImage: vi.fn(),
+  getDocumentVersions: vi.fn(),
+  getDocumentVersion: vi.fn(),
+}));
 
 beforeAll(() => {
   // jsdom lays nothing out; ProseMirror measures the selection to scroll it into view.
@@ -77,7 +86,10 @@ type Replica = Awaited<ReturnType<typeof replica>>;
 
 const mount = (sync: Replica, { readOnly = false }: { readOnly?: boolean } = {}) =>
   render(
-    <DocumentEditor documentId={sync.id} sync={sync} readOnly={readOnly} toolbarSlot={slot()} />,
+    // Version history reads through queries, as the app's provider serves them.
+    <QueryClientProvider client={new QueryClient()}>
+      <DocumentEditor documentId={sync.id} sync={sync} readOnly={readOnly} toolbarSlot={slot()} />
+    </QueryClientProvider>,
   );
 
 /** Text inside a link, as a click on it would land. */
@@ -514,6 +526,35 @@ describe("document editor", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("previews an earlier version and restores it as one undoable edit", async () => {
+    const sync = await replica("Plan v2, revised");
+    mount(sync);
+    const editor = await editorOf();
+    vi.mocked(getDocumentVersions).mockResolvedValue([
+      { revision: 7, at: "2026-10-11T12:00:00.000Z", author: { kind: "person", name: "Ada" } },
+      { revision: 4, at: "2026-10-11T11:00:00.000Z", author: { kind: "assistant" } },
+      { revision: 0, at: "2026-10-11T10:00:00.000Z", author: null },
+    ]);
+    vi.mocked(getDocumentVersion).mockResolvedValue(
+      JSON.stringify(parseMarkdown("Plan v1").toJSON()),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Version history" }));
+    // It opens on the version before the current one.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Version preview")).toHaveTextContent("Plan v1"),
+    );
+    expect(vi.mocked(getDocumentVersion).mock.calls[0]![0]).toEqual({
+      data: { documentId: sync.id, revision: 4 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+    await waitFor(() => expect(server.content(sync.id)).toBe("Plan v1"));
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(sync.markdown()).toBe("Plan v2, revised");
   });
 
   it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {

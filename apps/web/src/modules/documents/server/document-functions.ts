@@ -9,6 +9,7 @@ import {
   DeleteCommentInput,
   DocumentIdInput,
   DocumentImageInput,
+  DocumentVersionInput,
   ProjectDocumentsInput,
   PushDocumentInput,
   RenameDocumentInput,
@@ -45,6 +46,32 @@ export const getDocument = createServerFn({ method: "GET" })
       publicResult(
         Effect.flatMap(DocumentService, (service) =>
           service.get(context.session.user.id, data.documentId),
+        ),
+      ),
+    ),
+  );
+/** A text document's versions, newest first, for someone who may edit it. */
+export const getDocumentVersions = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentIdInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.versions(context.session.user.id, data.documentId),
+        ),
+      ),
+    ),
+  );
+/** The document as it was at one of its versions, as tree JSON text; null when no longer kept. */
+export const getDocumentVersion = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentVersionInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.versionAt(context.session.user.id, data.documentId, data.revision),
         ),
       ),
     ),

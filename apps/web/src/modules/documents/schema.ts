@@ -39,6 +39,10 @@ export const RenameDocumentInput = Schema.Struct({
   title: DocumentTitle,
 });
 /** An upload a document's editor puts into its text. */
+export const DocumentVersionInput = Schema.Struct({
+  documentId: ResourceId,
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
 export const DocumentImageInput = Schema.Struct({
   documentId: ResourceId,
   attachmentId: ResourceId,

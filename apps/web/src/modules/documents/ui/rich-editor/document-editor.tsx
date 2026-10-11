@@ -53,6 +53,7 @@ export default function DocumentEditor({
   return (
     <RichEditor
       editor={sync.editor}
+      documentId={documentId}
       readOnly={readOnly}
       toolbarSlot={toolbarSlot}
       discussion={discussion}
@@ -62,11 +63,13 @@ export default function DocumentEditor({
 
 function RichEditor({
   editor,
+  documentId,
   readOnly,
   toolbarSlot,
   discussion,
 }: {
   editor: Editor;
+  documentId: string;
   readOnly: boolean;
   toolbarSlot: HTMLElement | null;
   discussion: DocumentDiscussion | undefined;
@@ -78,7 +81,7 @@ function RichEditor({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {toolbarSlot && !readOnly
-        ? createPortal(<DocumentToolbar editor={editor} />, toolbarSlot)
+        ? createPortal(<DocumentToolbar editor={editor} documentId={documentId} />, toolbarSlot)
         : null}
       <DocumentFindBar editor={editor} />
       {/* Room above the first line for another person's cursor label. */}

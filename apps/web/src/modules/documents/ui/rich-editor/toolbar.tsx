@@ -4,6 +4,7 @@ import {
   CommentAdd01Icon,
   FunctionOfXIcon,
   SearchReplaceIcon,
+  Clock01Icon,
   TextNumberSignIcon,
   UserIcon,
   CheckListIcon,
@@ -75,6 +76,7 @@ import { OutlineMenu } from "./outline-menu.tsx";
 import { Ribbon, type RibbonTab } from "../ribbon.tsx";
 import { isoDay } from "./dates.ts";
 import { pickImages } from "./image-upload.ts";
+import { VersionHistoryDialog } from "./version-history.tsx";
 
 type Chain = ReturnType<Editor["chain"]>;
 type Icon = HugeiconsIconProps["icon"];
@@ -236,10 +238,11 @@ const insert = (content: Parameters<Chain["insertContent"]>[0]) => (chain: Chain
  * The document's ribbon, as the sheet's. Every control is a command on the
  * shared tree, so what it does syncs like typing.
  */
-export function DocumentToolbar({ editor }: { editor: Editor }) {
+export function DocumentToolbar({ editor, documentId }: { editor: Editor; documentId: string }) {
   const state = useToolbarState(editor);
   const wordCount = useWordCountShown();
   const [linkAnchor, setLinkAnchor] = useState<Element | null>(null);
+  const [history, setHistory] = useState(false);
   const format = (
     label: string,
     icon: Icon,
@@ -432,6 +435,18 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
             />
           ),
         },
+        {
+          id: "history",
+          label: "History",
+          controls: (
+            <Action
+              icon={Clock01Icon}
+              label="Version history"
+              disabled={false}
+              onPress={() => setHistory(true)}
+            />
+          ),
+        },
       ],
     },
     {
@@ -482,6 +497,15 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
         }
       />
       <LinkPopover editor={editor} anchor={linkAnchor} onClose={() => setLinkAnchor(null)} />
+      {/* Mounted while open: its queries belong to the history, not the toolbar. */}
+      {history ? (
+        <VersionHistoryDialog
+          editor={editor}
+          documentId={documentId}
+          open
+          onOpenChange={setHistory}
+        />
+      ) : null}
     </>
   );
 }

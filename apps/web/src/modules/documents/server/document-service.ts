@@ -55,6 +55,7 @@ import {
   type PushDocumentResult,
 } from "../schema.ts";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
+import { groupVersions, type DocumentVersion } from "./versions.ts";
 import {
   commentDeletion,
   documentLocks,
@@ -291,6 +292,13 @@ export class DocumentService extends Context.Service<
       DocumentError | E,
       R
     >;
+    /** A text document's versions, newest first, for anyone who may edit it; null otherwise. */
+    versions(userId: string, documentId: string): Effect.Effect<DocumentVersion[] | null>;
+    /**
+     * The document as it was at a listed version, as tree JSON text, for
+     * anyone who may edit it; null when that revision is no longer kept.
+     */
+    versionAt(userId: string, documentId: string, revision: number): Effect.Effect<string | null>;
     /** The live tree, for rendering what the model reads. Null when not this person's. */
     read(
       userId: string,
@@ -1383,6 +1391,36 @@ export class DocumentService extends Context.Service<
           return documentImagePath(input.documentId, input.attachmentId);
         }),
         create,
+        versions: Effect.fn("DocumentService.versions")(function* (userId, documentId) {
+          if (!(yield* policy.can(userId, "documents"))) return null;
+          const loaded = yield* exclusive(documentId)(load(userId, documentId)).pipe(
+            Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
+          );
+          if (!loaded?.document.canEdit) return null;
+          const { entry } = loaded;
+          const authors = yield* documents.stepAuthors(documentId, entry.snapshotRevision);
+          const oldest = entry.steps[0]?.createdAt ?? Date.now();
+          return groupVersions(authors, {
+            revision: entry.snapshotRevision,
+            at: new Date(oldest),
+          });
+        }),
+        versionAt: Effect.fn("DocumentService.versionAt")(function* (userId, documentId, revision) {
+          if (!(yield* policy.can(userId, "documents"))) return null;
+          return yield* exclusive(documentId)(
+            Effect.gen(function* () {
+              const { entry, document } = yield* load(userId, documentId);
+              if (!document.canEdit) return null;
+              const count = revision - entry.snapshotRevision;
+              if (!Number.isInteger(count) || count < 0 || count > entry.steps.length) return null;
+              const { doc } = yield* applySteps(
+                entry.snapshot,
+                entry.steps.slice(0, count).map((step) => step.json),
+              ).pipe(Effect.orDie);
+              return JSON.stringify(doc.toJSON());
+            }),
+          ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+        }),
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {
           if (!(yield* policy.can(userId, "documents"))) return null;
           return yield* exclusive(documentId)(

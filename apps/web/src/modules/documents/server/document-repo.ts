@@ -97,6 +97,21 @@ export class DocumentRepo extends Context.Service<
     /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
     /**
+     * Who wrote each kept step after `afterRevision`, and when, in revision
+     * order: a person by name, the assistant, or no one (the server's own repairs).
+     */
+    stepAuthors(
+      documentId: string,
+      afterRevision: number,
+    ): Effect.Effect<
+      ReadonlyArray<{
+        revision: number;
+        origin: "user" | "model";
+        userName: string | null;
+        createdAt: Date;
+      }>
+    >;
+    /**
      * Locks the document row alone, for someone allowed to edit it. A
      * person's batches arrive several times a second, and the conversation
      * lock would queue them ahead of chat writes; a model write already holds
@@ -288,6 +303,25 @@ export class DocumentRepo extends Context.Service<
                 };
               }),
             )
+            .pipe(Effect.orDie);
+        }),
+        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(function* (documentId, afterRevision) {
+          return yield* db
+            .select({
+              revision: documentSteps.revision,
+              origin: documentSteps.origin,
+              userName: user.name,
+              createdAt: documentSteps.createdAt,
+            })
+            .from(documentSteps)
+            .leftJoin(user, eq(user.id, documentSteps.userId))
+            .where(
+              and(
+                eq(documentSteps.documentId, documentId),
+                gt(documentSteps.revision, afterRevision),
+              ),
+            )
+            .orderBy(asc(documentSteps.revision))
             .pipe(Effect.orDie);
         }),
         lock: Effect.fn("DocumentRepo.lock")(function* (tx, userId, documentId) {
