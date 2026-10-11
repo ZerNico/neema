@@ -163,6 +163,9 @@ const pickedOf = (key: string): Picked =>
     ? { kind: "image", id: key.slice("image:".length) }
     : { kind: "chart", id: key.slice("chart:".length) };
 
+const NO_ROWS: ReadonlySet<string> = new Set();
+const NO_LOOKS: ReturnType<typeof conditionalLooks> = new Map();
+
 const sameSelection = (a: SheetSelection, b: SheetSelection) =>
   a.anchor.r === b.anchor.r &&
   a.anchor.c === b.anchor.c &&
@@ -252,6 +255,23 @@ export default function SheetPanelBody({
     [revision, moment],
   );
   const values = useSheetValues(doc, calcContext);
+  // Read from the document and its values alone, so kept across what changes neither:
+  // a key moving the selection, typing in a cell, someone else's cursor.
+  const hiddenByFilter = useMemo(
+    () => (doc && values && sheet ? filteredRows(doc, values, sheet) : NO_ROWS),
+    [doc, values, sheet],
+  );
+  const looks = useMemo(
+    () => (doc && values && sheet ? conditionalLooks(doc, values, sheet) : NO_LOOKS),
+    [doc, values, sheet],
+  );
+  const findQuery = finding?.query ?? null;
+  const matches = useMemo(() => {
+    if (!doc || !values || !sheet || findQuery === null) return [];
+    const [rows, cols] = [positions(doc.sheet[sheet]!.rows), positions(doc.sheet[sheet]!.cols)];
+    const locale = sheetLocale(doc.settings.locale);
+    return findMatches({ doc, values, sheet, locale, rows, cols }, findQuery);
+  }, [doc, values, sheet, findQuery]);
   if (!doc || !values || !sheet || !state)
     return <Spinner aria-label="Connecting to sheet" className="text-muted-foreground" />;
 
@@ -340,9 +360,6 @@ export default function SheetPanelBody({
     }
     run(ops);
   };
-  const matches = finding
-    ? findMatches({ doc, values, sheet, locale, rows, cols }, finding.query)
-    : [];
   const goTo = (index: number) => {
     if (!finding || !matches.length) return;
     const next = ((index % matches.length) + matches.length) % matches.length;
@@ -570,7 +587,6 @@ export default function SheetPanelBody({
   const headRule = validationAt(doc, sheet, head.r, head.c);
   const sheetFilter = doc.sheet[sheet]!.filter;
   const filterAt = sheetFilter ? filterSpan(doc, sheet, sheetFilter) : null;
-  const hiddenByFilter = filteredRows(doc, values, sheet);
   // The Sort dialog's columns: the selection's, named by its first row's text.
   const sortColumns = selectedBoxColumns().map((c) => ({
     id: c,
@@ -997,7 +1013,7 @@ export default function SheetPanelBody({
                 onCommit={commit}
                 onCommitSelection={(text) => run(enterSelection(context, text))}
                 hiddenRows={hiddenByFilter}
-                looks={conditionalLooks(doc, values, sheet)}
+                looks={looks}
                 cellList={
                   headRule?.rule.kind === "list" ? listChoices(doc, values, headRule.rule) : null
                 }
