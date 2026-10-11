@@ -67,6 +67,8 @@ const TAGS: Record<string, string> = {
   horizontalRule: "hr",
   blockMath: "math",
   pending: "pending",
+  callout: "callout",
+  details: "details",
 };
 
 /** A heading's level as a tag number; anything a stray client set is read as 2. */
@@ -114,6 +116,14 @@ const render = (node: Node, seen: SeenBlock[]): string => {
         return `${head(extra)}>${inline(only)}</${tag}>`;
       }
       return `${head(extra)}>${children(node, seen)}</${tag}>`;
+    }
+    case "callout":
+      return `${head({ kind: node.attrs.kind as string })}>${children(node, seen)}</${tag}>`;
+    case "details": {
+      // The title as inline Markdown, then what folds away under it.
+      const summary = node.firstChild!;
+      const content = node.lastChild!;
+      return `${head()}><summary>${inline(summary)}</summary>${children(content, seen)}</${tag}>`;
     }
     case "orderedList":
       return `${head({ start: node.attrs.start === 1 ? null : (node.attrs.start as number) })}>${children(node, seen)}</${tag}>`;

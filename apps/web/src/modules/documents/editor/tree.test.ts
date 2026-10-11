@@ -321,3 +321,16 @@ describe("streamed text", () => {
     expect(tr.doc.eq(next)).toBe(true);
   });
 });
+
+describe("new blocks in the model's view", () => {
+  it("names a callout's kind and a collapsible section's title, each with an id", () => {
+    const doc = withIds(
+      "> [!TIP]\n> Save often.\n\n<details>\n<summary>Details</summary>\n\nHidden^[A note.]\n\n</details>",
+    );
+    const { xml, seen } = blockView(doc, { budget: 5_000 });
+    expect(xml).toBe(
+      '<callout id="b1" kind="tip"><p id="b2">Save often.</p></callout>\n<details id="b3"><summary>Details</summary><p id="b4">Hidden^[A note.]</p></details>',
+    );
+    expect(seen.map((block) => block.id)).toEqual(["b1", "b2", "b3", "b4"]);
+  });
+});

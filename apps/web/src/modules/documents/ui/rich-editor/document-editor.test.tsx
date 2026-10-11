@@ -445,13 +445,53 @@ describe("document editor", () => {
     fireEvent.click(screen.getByRole("tab", { name: "View" }));
     fireEvent.click(await screen.findByRole("button", { name: "Outline" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Risks" }));
-    await waitFor(() =>
-      expect(editor.state.selection.$from.parent.textContent).toBe("Risks"),
-    );
+    await waitFor(() => expect(editor.state.selection.$from.parent.textContent).toBe("Risks"));
     // Hidden from the View tab, and remembered on this device.
     fireEvent.click(screen.getByRole("button", { name: "Word count" }));
     expect(screen.queryByRole("status", { name: "Word count" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Word count" }));
+  });
+
+  it("inserts callouts, footnotes and foldable sections, folding only for this reader", async () => {
+    const sync = await replica("Back up first");
+    mount(sync);
+    const editor = await editorOf();
+    act(() => {
+      editor.commands.setTextSelection(3);
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Callout" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Warning" }));
+    await waitFor(() => expect(sync.markdown()).toBe("> [!WARNING]\n> Back up first"));
+
+    act(() => {
+      editor.commands.setTextSelection(editor.state.doc.content.size - 2);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Footnote" }));
+    const note = await screen.findByRole("textbox", { name: "Footnote" });
+    fireEvent.change(note, { target: { value: "Per the runbook." } });
+    fireEvent.keyDown(note, { key: "Enter" });
+    await waitFor(() =>
+      expect(sync.markdown()).toBe(
+        "> [!WARNING]\n> Back up first[^1]\n\n[^1]: Per the runbook.",
+      ),
+    );
+
+    act(() => {
+      editor.commands.focus("end");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Collapsible section" }));
+    act(() => {
+      editor.commands.insertContent("Steps");
+    });
+    await waitFor(() => expect(sync.markdown()).toContain("<summary>Steps</summary>"));
+    const before = sync.markdown();
+    fireEvent.click(screen.getByRole("button", { name: "Fold section" }));
+    expect(screen.getByRole("button", { name: "Unfold section" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(sync.markdown()).toBe(before);
   });
 
   it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {

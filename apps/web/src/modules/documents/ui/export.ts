@@ -48,6 +48,17 @@ a { color: inherit; }
 figure.diagram { margin: 0 0 9pt; text-align: center; break-inside: avoid; white-space: normal; }
 figure.diagram svg { max-width: 100%; height: auto; }
 .formula { margin: 0 0 9pt; text-align: center; break-inside: avoid; }
+h4, h5, h6 { font-size: 11pt; line-height: 1.25; margin: 12pt 0 4pt; break-after: avoid; }
+[data-callout] { margin: 0 0 9pt; padding: 6pt 10pt; border-left: 3pt solid #888; background: #f4f4f5; break-inside: avoid; }
+[data-callout="note"] { border-color: #2563eb; } [data-callout="tip"] { border-color: #16a34a; }
+[data-callout="important"] { border-color: #7c3aed; } [data-callout="warning"] { border-color: #d97706; }
+[data-callout="caution"] { border-color: #dc2626; }
+[data-callout] > :last-child { margin-bottom: 0; }
+details { margin: 0 0 9pt; } summary { font-weight: 600; margin: 0 0 4pt; list-style: none; }
+body { counter-reset: footnote; }
+sup[data-footnote] { counter-increment: footnote; }
+sup[data-footnote]::after { content: counter(footnote); font-size: 0.75em; }
+ol.footnotes { margin: 18pt 0 0; padding: 8pt 0 0 18pt; border-top: 0.75pt solid #d4d4d8; font-size: 9.5pt; }
 `;
 
 /**
@@ -90,6 +101,18 @@ export const printDocument = (editor: Editor, title: string) => {
         throwOnError: false,
       });
       if (display) formula.className = "formula";
+    }
+    // Footnotes print as numbers in the text and their notes at the end, as a word processor's do.
+    const notes = [...page.querySelectorAll<HTMLElement>("sup[data-footnote]")];
+    if (notes.length) {
+      const list = page.createElement("ol");
+      list.className = "footnotes";
+      for (const note of notes) {
+        const item = page.createElement("li");
+        item.textContent = note.dataset.note ?? "";
+        list.append(item);
+      }
+      page.body.append(list);
     }
     // Diagrams print as the editor drew them, matched to their source.
     const drawn = new Map<string, string>();

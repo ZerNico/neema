@@ -577,6 +577,91 @@ html[data-panel-resizing] webview {
       @apply bg-warning/40;
     }
   }
+  /* A callout: a note, tip or warning set apart, its kind named above its text. */
+  .rich-editor [data-callout] {
+    @apply bg-muted/40 rounded-xl border-l-4 px-4 py-3;
+    & > * + * {
+      @apply mt-2;
+    }
+    &::before {
+      @apply mb-1 block text-xs font-semibold tracking-wide uppercase;
+    }
+    &[data-callout="note"] {
+      @apply border-chart-1;
+      &::before {
+        @apply text-chart-1;
+        content: "Note";
+      }
+    }
+    &[data-callout="tip"] {
+      @apply border-success;
+      &::before {
+        @apply text-success;
+        content: "Tip";
+      }
+    }
+    &[data-callout="important"] {
+      @apply border-chart-4;
+      &::before {
+        @apply text-chart-4;
+        content: "Important";
+      }
+    }
+    &[data-callout="warning"] {
+      @apply border-warning;
+      &::before {
+        @apply text-warning;
+        content: "Warning";
+      }
+    }
+    &[data-callout="caution"] {
+      @apply border-destructive;
+      &::before {
+        @apply text-destructive;
+        content: "Caution";
+      }
+    }
+  }
+  /* A collapsible section: a fold chevron before its title; folded, only the title shows. */
+  .rich-editor [data-details] {
+    @apply relative pl-6;
+    & summary {
+      @apply block font-medium;
+      &.is-empty::before {
+        @apply text-muted-foreground pointer-events-none float-left h-0 font-normal;
+        content: attr(data-placeholder);
+      }
+    }
+    & [data-details-content] {
+      @apply mt-1;
+      & > * + * {
+        @apply mt-3;
+      }
+    }
+    &[data-open="false"] [data-details-content] {
+      @apply hidden;
+    }
+  }
+  .rich-editor .details-toggle {
+    @apply text-muted-foreground hover:text-foreground absolute top-1 left-0 flex size-5 items-center justify-center rounded-sm;
+    &::before {
+      @apply size-1.5 rotate-45 border-r-2 border-b-2 border-current transition-transform motion-reduce:transition-none;
+      content: "";
+    }
+    &[aria-expanded="false"]::before {
+      @apply -rotate-45;
+    }
+  }
+  /* Footnotes number themselves by their order in the text. */
+  .rich-editor {
+    counter-reset: footnote;
+    & [data-footnote] {
+      counter-increment: footnote;
+    }
+    & .footnote-number::after {
+      content: counter(footnote);
+    }
+  }
   /* Find's matches, in a colour apart from comments'; the current one stands out more. */
   .rich-editor .find-match {
     @apply bg-chart-1/20 rounded-[2px];

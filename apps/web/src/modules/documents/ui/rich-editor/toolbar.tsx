@@ -14,6 +14,16 @@ import {
   Heading01Icon,
   Heading02Icon,
   Heading03Icon,
+  Heading04Icon,
+  Heading05Icon,
+  Heading06Icon,
+  InformationSquareIcon,
+  ArrowRight01Icon,
+  TextFootnoteIcon,
+  BulbIcon,
+  AlertDiamondIcon,
+  Alert02Icon,
+  StopIcon,
   LeftToRightListBulletIcon,
   LeftToRightListNumberIcon,
   Link01Icon,
@@ -53,6 +63,9 @@ import { LinkPopover } from "./link-popover.tsx";
 import { insertFormula } from "./math-item.ts";
 import { NodeSelection } from "@tiptap/pm/state";
 import { startComment } from "./comment-start.ts";
+import { insertDetails, insertFootnote, setCallout } from "./block-items.ts";
+import { ToolbarMenu } from "../ribbon-controls.tsx";
+import type { CalloutKind } from "../../editor/blocks.ts";
 import { setFindOpen } from "./find.ts";
 import { setWordCountShown, useWordCountShown } from "./document-stats.ts";
 import { OutlineMenu } from "./outline-menu.tsx";
@@ -71,14 +84,26 @@ const BLOCKS = [
   { value: "h1", label: "Heading 1", icon: Heading01Icon },
   { value: "h2", label: "Heading 2", icon: Heading02Icon },
   { value: "h3", label: "Heading 3", icon: Heading03Icon },
+  { value: "h4", label: "Heading 4", icon: Heading04Icon },
+  { value: "h5", label: "Heading 5", icon: Heading05Icon },
+  { value: "h6", label: "Heading 6", icon: Heading06Icon },
 ] as const;
 type Block = (typeof BLOCKS)[number]["value"];
+
+/** Callouts by kind, as GitHub names its alerts. */
+const CALLOUTS: ReadonlyArray<{ kind: CalloutKind; label: string; icon: Icon }> = [
+  { kind: "note", label: "Note", icon: InformationSquareIcon },
+  { kind: "tip", label: "Tip", icon: BulbIcon },
+  { kind: "important", label: "Important", icon: AlertDiamondIcon },
+  { kind: "warning", label: "Warning", icon: Alert02Icon },
+  { kind: "caution", label: "Caution", icon: StopIcon },
+];
 
 const setBlock = (editor: Editor, block: Block) =>
   run(editor, (chain) =>
     block === "paragraph"
       ? chain.setParagraph()
-      : chain.setHeading({ level: Number(block.slice(1)) as 1 | 2 | 3 }),
+      : chain.setHeading({ level: Number(block.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6 }),
   );
 
 function Hint({ label, shortcut }: { label: string; shortcut?: string | undefined }) {
@@ -174,13 +199,11 @@ const useToolbarState = (editor: Editor) =>
   useEditorState({
     editor,
     selector: ({ editor: current }) => ({
-      block: (current.isActive("heading", { level: 1 })
-        ? "h1"
-        : current.isActive("heading", { level: 2 })
-          ? "h2"
-          : current.isActive("heading", { level: 3 })
-            ? "h3"
-            : "paragraph") as Block,
+      block: (BLOCKS.find(
+        (item) =>
+          item.value !== "paragraph" &&
+          current.isActive("heading", { level: Number(item.value.slice(1)) }),
+      )?.value ?? "paragraph") as Block,
       bold: current.isActive("bold"),
       italic: current.isActive("italic"),
       strike: current.isActive("strike"),
@@ -345,6 +368,29 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
                 ]),
               )}
               {action("Mention someone", UserIcon, insert("@"))}
+            </>
+          ),
+        },
+        {
+          id: "sections",
+          label: "Sections",
+          controls: (
+            <>
+              <ToolbarMenu label="Callout" icon={InformationSquareIcon}>
+                <DropdownMenuContent align="start" className="w-44">
+                  {CALLOUTS.map((callout) => (
+                    <DropdownMenuItem
+                      key={callout.kind}
+                      onClick={() => run(editor, setCallout(callout.kind))}
+                    >
+                      <HugeiconsIcon icon={callout.icon} strokeWidth={2} />
+                      {callout.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </ToolbarMenu>
+              {action("Collapsible section", ArrowRight01Icon, insertDetails)}
+              {action("Footnote", TextFootnoteIcon, insertFootnote)}
             </>
           ),
         },

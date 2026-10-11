@@ -3,6 +3,7 @@ import { MarkdownManager } from "@tiptap/markdown";
 import { Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
+import { footnoteDefinitions, numberFootnotes } from "./blocks.ts";
 import { plainChips } from "./chips.ts";
 import { documentExtensions, fenceFor } from "./extensions.ts";
 import { escapeMathDollars, markMathBeforeDigits } from "./math.ts";
@@ -97,19 +98,47 @@ const serialize = (json: JSONContent) =>
  */
 export const toModelMarkdown = (node: Node) => serialize(node.toJSON());
 
-/** The Markdown a tree reads as for people, for Copy and export. */
-export const toMarkdown = (node: Node) => toModelMarkdown(plainChips(node));
+/**
+ * The Markdown a tree reads as for people, for Copy and export: footnotes as
+ * numbered references with their definitions at the end, as GitHub draws them.
+ */
+export const toMarkdown = (node: Node) => {
+  const { json, notes } = numberFootnotes(plainChips(node).toJSON() as JSONContent);
+  const markdown = serialize(json);
+  if (!notes.length) return markdown;
+  const definitions = notes.map((note, index) => `[^${index + 1}]: ${note}`).join("\n");
+  return markdown ? `${markdown}\n\n${definitions}` : definitions;
+};
+
+/** A footnote's definition: its label, then its note, lines indented under it continuing it. */
+const DEFINITION = /^\[\^([^\]\s]+)\]:[ \t]+(.*(?:\n(?: {2,}|\t).*)*)\n?/gm;
+
+/**
+ * Markdown parsed with its footnotes' definitions taken out first, so a
+ * reference anywhere before or after finds its note and none is left as a
+ * stray paragraph.
+ */
+const parse = (markdown: string) => {
+  footnoteDefinitions.clear();
+  const body = markdown.replace(DEFINITION, (_line, label: string, note: string) => {
+    footnoteDefinitions.set(label, note.replace(/\s*\n\s*/g, " ").trim());
+    return "";
+  });
+  try {
+    // Where definitions stood, blank lines would read as empty paragraphs.
+    return manager.parse(body === markdown ? body : body.replace(/\n{3,}/g, "\n\n").trimEnd());
+  } finally {
+    footnoteDefinitions.clear();
+  }
+};
 
 /** A document tree from Markdown; empty Markdown is an empty document. */
 export const parseMarkdown = (markdown: string) =>
-  Node.fromJSON(
-    documentSchema,
-    markdown.trim() ? manager.parse(markdown) : { type: "doc", content: [] },
-  );
+  Node.fromJSON(documentSchema, markdown.trim() ? parse(markdown) : { type: "doc", content: [] });
 
 /** Markdown in the canonical form the editor would write it back as. */
 export const normalizeMarkdown = (markdown: string) =>
-  markdown.trim() ? serialize(manager.parse(markdown)) : "";
+  markdown.trim() ? serialize(parse(markdown)) : "";
 
 /**
  * Makes `tr`'s document equal `next` by replacing only the range where the

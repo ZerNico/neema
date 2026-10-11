@@ -13,6 +13,7 @@ import { UniqueID } from "@tiptap/extension-unique-id";
 import { Markdown } from "@tiptap/markdown";
 import { StarterKit } from "@tiptap/starter-kit";
 import { BLOCK_ID, BLOCK_TYPES, newBlockId } from "./block-ids.ts";
+import { Callout, Details, DetailsContent, DetailsSummary, Footnote } from "./blocks.ts";
 import { DateChip, PersonMention } from "./chips.ts";
 import { DocumentBlockMath, DocumentInlineMath } from "./math.ts";
 import { CommentMark } from "./comments.ts";
@@ -151,6 +152,11 @@ export const documentExtensions: AnyExtension[] = [
   DocumentBlockMath,
   DateChip,
   PersonMention,
+  Callout,
+  Details,
+  DetailsSummary,
+  DetailsContent,
+  Footnote,
   CommentMark,
   // Steps received from the server already carry the IDs their sender gave.
   UniqueID.configure({

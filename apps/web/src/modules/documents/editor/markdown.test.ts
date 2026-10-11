@@ -180,3 +180,42 @@ describe("document Markdown", () => {
     expect(toMarkdown(emptied.doc)).toBe("");
   });
 });
+
+describe("callouts, collapsible sections and footnotes", () => {
+  it("write a callout as GitHub's alert and read it back, blocks and kind kept", () => {
+    const markdown = "> [!WARNING]\n> Back up first.\n>\n> - one\n> - two";
+    const doc = parseMarkdown(markdown);
+    expect(doc.firstChild!.type.name).toBe("callout");
+    expect(doc.firstChild!.attrs.kind).toBe("warning");
+    expect(toMarkdown(doc)).toBe(markdown);
+    // A plain quote stays a quote.
+    expect(parseMarkdown("> just a quote").firstChild!.type.name).toBe("blockquote");
+  });
+
+  it("write a collapsible section as <details> and read it back, nested ones too", () => {
+    const markdown =
+      "<details>\n<summary>More **info**</summary>\n\nOuter text\n\n<details>\n<summary>Inner</summary>\n\nInner text\n\n</details>\n\n</details>";
+    const doc = parseMarkdown(markdown);
+    const section = doc.firstChild!;
+    expect(section.type.name).toBe("details");
+    expect(section.firstChild!.textContent).toBe("More info");
+    expect(section.lastChild!.lastChild!.type.name).toBe("details");
+    expect(toMarkdown(doc)).toBe(markdown);
+  });
+
+  it("write footnotes inline for the model and numbered for people, reading both", () => {
+    const doc = parseMarkdown("Shipped^[Per the 3\\] release notes.] on time^[Ask Ada.].");
+    expect(toModelMarkdown(doc)).toBe("Shipped^[Per the 3\\] release notes.] on time^[Ask Ada.].");
+    const people = toMarkdown(doc);
+    expect(people).toBe(
+      "Shipped[^1] on time[^2].\n\n[^1]: Per the 3] release notes.\n[^2]: Ask Ada.",
+    );
+    expect(toModelMarkdown(parseMarkdown(people))).toBe(toModelMarkdown(doc));
+  });
+
+  it("leave a reference with no definition as text, as a chat citation pasted in", () => {
+    const doc = parseMarkdown("As reported[^3].");
+    expect(doc.firstChild!.childCount).toBe(1);
+    expect(toMarkdown(doc)).toBe("As reported\\[^3\\].");
+  });
+});

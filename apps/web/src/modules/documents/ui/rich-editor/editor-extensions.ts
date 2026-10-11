@@ -9,6 +9,7 @@ import { DocumentPending } from "./pending-item.tsx";
 import { CodeBlockView } from "./code-block-view.tsx";
 import { DocumentTaskItem } from "./task-item.tsx";
 import { BrowserBlockMath, BrowserInlineMath } from "./math-item.ts";
+import { BrowserDetails, BrowserFootnote } from "./block-items.ts";
 import { DocumentFind } from "./find.ts";
 import { openLink } from "./links.ts";
 
@@ -26,13 +27,20 @@ export const browserEditorExtensions = [
         dateChip: DocumentDateChip,
         mention: DocumentMention,
         inlineMath: BrowserInlineMath,
+        details: BrowserDetails,
+        footnote: BrowserFootnote,
         blockMath: BrowserBlockMath,
         codeBlock: DocumentCodeBlock.extend({
           addNodeView: () => ReactNodeViewRenderer(CodeBlockView),
         }),
       })[extension.name] ?? extension,
   ),
-  Placeholder.configure({ placeholder: "Write, or type / for blocks" }),
+  Placeholder.configure({
+    // An empty document invites writing; an empty section title names what goes there.
+    placeholder: ({ node }) =>
+      node.type.name === "detailsSummary" ? "Section title" : "Write, or type / for blocks",
+    includeChildren: true,
+  }),
   SlashCommand,
   DocumentFind,
   SizeCap,

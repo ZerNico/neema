@@ -19,6 +19,8 @@ export const BLOCK_TYPES = [
   "horizontalRule",
   "blockMath",
   "pending",
+  "callout",
+  "details",
 ] as const;
 const blockTypes = new Set<string>(BLOCK_TYPES);
 export const isBlock = (node: Node) => blockTypes.has(node.type.name);
