@@ -2,7 +2,7 @@ import { Clock, Context, Duration, Effect, Layer, PubSub, Schedule, Schema, Stre
 import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { uuidv7 } from "uuidv7";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -42,7 +42,10 @@ import {
   DOCUMENT_LIMITS,
   DocumentNotAvailable,
   DocumentRejected,
+  documentImagePath,
+  IMAGE_REFUSED,
   PushDocumentInput,
+  type DocumentImageInput,
   ResolveThreadInput,
   type ApplyDocumentResult,
   type DocumentComment,
@@ -382,6 +385,12 @@ export class DocumentService extends Context.Service<
       live: LiveEdit,
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<void, DocumentError | E, R>;
+    /**
+     * Claims one of the editor's own image uploads for the document and
+     * returns the address its readers load it from. Anything else is refused
+     * alike, so the refusal says nothing about the attachment.
+     */
+    addImage(userId: string, input: DocumentImageInput): Effect.Effect<string, DocumentError>;
     /** A person's editor: steps on a revision and/or its cursor. */
     push(
       userId: string,
@@ -419,6 +428,7 @@ export class DocumentService extends Context.Service<
       const db = yield* Db;
       const policy = yield* FeaturePolicy;
       const documents = yield* DocumentRepo;
+      const attachments = yield* AttachmentRepo;
       const bus = yield* SyncBus;
       const scope = yield* Effect.scope;
       // One process owns every document's live state (see docs/internals/documents.md).
@@ -1356,6 +1366,21 @@ export class DocumentService extends Context.Service<
           );
           yield* documentChanged(userId, renamed);
           return renamed;
+        }),
+        addImage: Effect.fn("DocumentService.addImage")(function* (userId, input) {
+          const claimed = yield* transaction((tx) =>
+            Effect.gen(function* () {
+              yield* requireDocuments(userId, tx);
+              // The row lock holds off a delete until the claim commits.
+              const document = yield* documents.lock(tx, userId, input.documentId);
+              return (
+                document.kind === "text" &&
+                (yield* attachments.claimForDocument(tx, { userId, ...input }))
+              );
+            }),
+          );
+          if (!claimed) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+          return documentImagePath(input.documentId, input.attachmentId);
         }),
         create,
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {

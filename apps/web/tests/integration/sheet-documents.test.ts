@@ -7,6 +7,7 @@ import type { SheetOp } from "@chat/sheet/model/ops";
 import { conversations, projectMembers, projects, user } from "~/db/schema/index.ts";
 import type { SheetFrame } from "~/modules/documents/sheet/schema.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -30,7 +31,7 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 8 })),
   );
-  const core = Layer.mergeAll(DocumentRepo.layer, TestBus).pipe(
+  const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, TestBus).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(infrastructure),
   );

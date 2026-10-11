@@ -13,6 +13,7 @@ import {
   user,
 } from "~/db/schema/index.ts";
 import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
@@ -44,7 +45,7 @@ beforeAll(async () => {
   const infrastructure = Db.layer.pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 8 })),
   );
-  const core = Layer.mergeAll(DocumentRepo.layer, TestBus).pipe(
+  const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, TestBus).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
     Layer.provideMerge(infrastructure),
   );

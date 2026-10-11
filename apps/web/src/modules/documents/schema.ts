@@ -38,6 +38,17 @@ export const RenameDocumentInput = Schema.Struct({
   documentId: ResourceId,
   title: DocumentTitle,
 });
+/** An upload a document's editor puts into its text. */
+export const DocumentImageInput = Schema.Struct({
+  documentId: ResourceId,
+  attachmentId: ResourceId,
+});
+export type DocumentImageInput = typeof DocumentImageInput.Type;
+/** Where a document's claimed image is served, to that document's readers only. */
+export const documentImagePath = (documentId: string, attachmentId: string) =>
+  `/api/documents/${encodeURIComponent(documentId)}/images/${encodeURIComponent(attachmentId)}`;
+/** One answer for every refused claim, so it never tells whether the upload exists. */
+export const IMAGE_REFUSED = "That file can’t go in this document";
 /** Exactly one owner: a chat, or a project. */
 export const CreateDocumentInput = Schema.Struct({
   conversationId: Schema.optionalKey(ResourceId),

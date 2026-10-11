@@ -8,6 +8,7 @@ import {
   CreateProjectDocumentInput,
   DeleteCommentInput,
   DocumentIdInput,
+  DocumentImageInput,
   ProjectDocumentsInput,
   PushDocumentInput,
   RenameDocumentInput,
@@ -111,6 +112,19 @@ export const renameDocument = createServerFn({ method: "POST" })
       publicResult(
         Effect.flatMap(DocumentService, (service) =>
           service.rename(context.session.user.id, data.documentId, data.title.trim()),
+        ),
+      ),
+    ),
+  );
+/** Puts the editor's own image upload in the document; answers with the address to show it at. */
+export const addDocumentImage = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentImageInput))
+  .handler(({ context, data }) =>
+    runtime.runPromise(
+      publicResult(
+        Effect.flatMap(DocumentService, (service) =>
+          service.addImage(context.session.user.id, data),
         ),
       ),
     ),

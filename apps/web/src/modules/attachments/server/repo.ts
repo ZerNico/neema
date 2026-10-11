@@ -11,6 +11,7 @@ import {
   conversationQueueEntryAttachments,
   conversationWorkingFiles,
   conversations,
+  documentImages,
   messageAttachments,
   messages,
 } from "~/db/schema/index.ts";
@@ -77,13 +78,13 @@ const withBlobColumns = {
 // must not be dressed up as a user-level conflict.
 
 /**
- * No owner of either kind: not a transcript message's file and not a queued
- * message's. Every "is this upload still free" question reads this, so a
- * queued file is never swept, deleted as abandoned, or claimed a second time.
+ * No owner of any kind: not a transcript message's file, a queued message's,
+ * a kept working file's or a document's image. Every "is this upload still
+ * free" question reads this, so an owned file is never swept, deleted as
+ * abandoned, or claimed a second time. Once an owner row cascades away with
+ * its chat, answer or document, the sweep takes the attachment and its bytes.
  */
-// A kept working file is the third owner kind: once its row cascades away with
-// the chat or its answer, the sweep takes the attachment and its bytes.
-const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id})`;
+const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id}) and not exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`;
 
 /** Whose files these are: a transcript message, or a queued message. */
 type AttachmentOwner = { kind: "message"; id: string } | { kind: "queue"; id: string };
@@ -281,6 +282,20 @@ export class AttachmentRepo extends Context.Service<
       engine: string;
       pages: Record<number, string>;
     }): Effect.Effect<void>;
+    /**
+     * Gives a document one of this person's free image uploads. False, and
+     * nothing written, for anything else: someone else's, already owned, not
+     * an image, or unknown all answer alike.
+     */
+    claimForDocument(
+      tx: DbTx,
+      input: { userId: string; documentId: string; attachmentId: string },
+    ): Effect.Effect<boolean>;
+    /** A document's claimed image with its blob; null when the document holds no such image. */
+    findDocumentImage(
+      documentId: string,
+      attachmentId: string,
+    ): Effect.Effect<AttachmentWithBlob | null>;
     /** Unclaimed uploads older than the cutoff (tab closed before sending). */
     sweepUnclaimed(olderThan: Date): Effect.Effect<ReadonlyArray<string>>;
     /**
@@ -947,6 +962,52 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
       });
 
+      const claimForDocument = Effect.fn("AttachmentRepo.claimForDocument")(function* (
+        tx: DbTx,
+        input: { userId: string; documentId: string; attachmentId: string },
+      ) {
+        // The blob lock is what keeps two owner tables from both claiming one
+        // upload; the unique index only covers this table.
+        yield* lockAttachmentBlobs(tx, [input.attachmentId]).pipe(Effect.orDie);
+        const [free] = yield* tx
+          .select({ mediaType: attachmentBlobs.mediaType })
+          .from(attachments)
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(
+            and(
+              eq(attachments.id, input.attachmentId),
+              eq(attachments.userId, input.userId),
+              unclaimed,
+            ),
+          )
+          .pipe(Effect.orDie);
+        if (!free || attachmentKind(free.mediaType) !== "image") return false;
+        yield* tx
+          .insert(documentImages)
+          .values({ documentId: input.documentId, attachmentId: input.attachmentId })
+          .pipe(Effect.orDie);
+        return true;
+      });
+
+      const findDocumentImage = Effect.fn("AttachmentRepo.findDocumentImage")(function* (
+        documentId: string,
+        attachmentId: string,
+      ) {
+        const [row] = yield* db
+          .select(withBlobColumns)
+          .from(documentImages)
+          .innerJoin(attachments, eq(attachments.id, documentImages.attachmentId))
+          .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachments.blobId))
+          .where(
+            and(
+              eq(documentImages.documentId, documentId),
+              eq(documentImages.attachmentId, attachmentId),
+            ),
+          )
+          .pipe(Effect.orDie);
+        return row ?? null;
+      });
+
       const sweepUnclaimed = Effect.fn("AttachmentRepo.sweepUnclaimed")(function* (
         olderThan: Date,
       ) {
@@ -990,6 +1051,8 @@ export class AttachmentRepo extends Context.Service<
         cacheParsedText,
         scannedPages,
         saveScannedPages,
+        claimForDocument,
+        findDocumentImage,
         sweepUnclaimed,
       });
     }),

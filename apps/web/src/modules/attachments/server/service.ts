@@ -61,6 +61,14 @@ export class AttachmentService extends Context.Service<
       AttachmentNotAvailable
     >;
     /**
+     * A document's image, for a reader the document has already admitted:
+     * the claim, not the uploader, decides which bytes this may return.
+     */
+    readDocumentImage(input: {
+      documentId: string;
+      attachmentId: string;
+    }): Effect.Effect<AttachmentBytes, AttachmentNotAvailable>;
+    /**
      * Removes bytes whose last row a committed transaction just deleted.
      * Callers pass the keys those repo methods returned.
      */
@@ -184,6 +192,23 @@ export class AttachmentService extends Context.Service<
         } satisfies AttachmentBytes;
       });
 
+      const readDocumentImage = Effect.fn("AttachmentService.readDocumentImage")(function* (input: {
+        documentId: string;
+        attachmentId: string;
+      }) {
+        const image = yield* repo.findDocumentImage(input.documentId, input.attachmentId);
+        if (!image) return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentId });
+        return {
+          fileName: image.fileName,
+          mediaType: image.mediaType,
+          size: image.size,
+          bytes: yield* store.get(image.storageKey).pipe(
+            Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
+            Effect.orDie,
+          ),
+        } satisfies AttachmentBytes;
+      });
+
       const purgeUserFiles = Effect.fn("AttachmentService.purgeUserFiles")(function* (
         userId: string,
       ) {
@@ -226,7 +251,15 @@ export class AttachmentService extends Context.Service<
         Effect.forkScoped,
       );
 
-      return AttachmentService.of({ upload, remove, read, open, deleteBlobs, purgeUserFiles });
+      return AttachmentService.of({
+        upload,
+        remove,
+        read,
+        open,
+        readDocumentImage,
+        deleteBlobs,
+        purgeUserFiles,
+      });
     }),
   );
 }
