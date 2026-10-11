@@ -32,6 +32,7 @@ import { presenceUser } from "../presence-user.ts";
 import { detachedThreads, quoteRange } from "../editor/comments.ts";
 import { squareTables } from "../editor/tables.ts";
 import { embedAttrs } from "../editor/sheet-embed.ts";
+import { CALLOUT_KINDS } from "../editor/blocks.ts";
 import {
   documentSchema,
   parseMarkdown,
@@ -139,7 +140,11 @@ const decode =
       Effect.mapError(() => new DocumentRejected({ reason })),
     );
 /** Steps rebuilt from JSON and applied in order; any that does not fit the schema refuses all. */
-const applySteps = (doc: Node, json: ReadonlyArray<Record<string, unknown>>) =>
+const applySteps = (
+  doc: Node,
+  json: ReadonlyArray<Record<string, unknown>>,
+  { checked = false }: { checked?: boolean } = {},
+) =>
   Effect.try({
     try: () => {
       let next = doc;
@@ -150,6 +155,10 @@ const applySteps = (doc: Node, json: ReadonlyArray<Record<string, unknown>>) =>
         next = result.doc;
         return step;
       });
+      // A step checks content only where its slice meets the tree, so an empty
+      // collapsible section or a callout holding bare text applied. New steps
+      // check the whole result once per batch; stored ones replay as they were.
+      if (checked && next.childCount) next.check();
       return { doc: next, steps };
     },
     catch: () => new DocumentRejected({ reason: "invalid document step" }),
@@ -213,6 +222,8 @@ const wellTyped = (node: Node) => {
     // A sheet and exactly one of a range and a chart; the sheet is checked when read, not here.
     case "sheetEmbed":
       return embedAttrs(node.attrs) !== null;
+    case "callout":
+      return (CALLOUT_KINDS as ReadonlyArray<unknown>).includes(node.attrs.kind);
     default:
       return true;
   }
@@ -1030,7 +1041,7 @@ export class DocumentService extends Context.Service<
               try: () => parsed.steps!.map((step) => JSON.parse(step) as Record<string, unknown>),
               catch: () => new DocumentRejected({ reason: "invalid document step" }),
             });
-            const { doc, steps } = yield* applySteps(entry.doc, json);
+            const { doc, steps } = yield* applySteps(entry.doc, json, { checked: true });
             const author: Author = { origin: "user", userId, clientId: parsed.clientId };
             const stored = yield* transaction((tx) =>
               Effect.gen(function* () {

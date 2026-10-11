@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { user } from "~/db/schema/index.ts";
@@ -89,7 +89,6 @@ const projectDocument = async () => {
   return { owner, editor, viewer, projectId: project.id, documentId: document.id };
 };
 
-
 /** A person typing `text` at `from`, one step per character. */
 const typing = (text: string, from: number) =>
   [...text].map((character, at) =>
@@ -138,6 +137,29 @@ describe("a document's version history", () => {
       Effect.flatMap(DocumentService, (s) => s.versionAt(editor, documentId, before!.revision)),
     );
     expect(textOf(earlier)).toBe("");
+  });
+
+  it("refuses a person's step that builds a malformed block", async () => {
+    const { editor, documentId } = await projectDocument();
+    const before = await run(Effect.flatMap(DocumentService, (s) => s.get(editor, documentId)));
+    // A collapsible section with neither title nor body, which once crashed the model's view.
+    const empty = JSON.stringify({
+      stepType: "replace",
+      from: 0,
+      to: 0,
+      slice: { content: [{ type: "details" }] },
+    });
+    const pushed = await runtime.runPromiseExit(
+      Effect.flatMap(DocumentService, (s) =>
+        s.push(editor, {
+          documentId,
+          clientId: "typist",
+          revision: before!.revision,
+          steps: [empty],
+        }),
+      ),
+    );
+    expect(Exit.isFailure(pushed)).toBe(true);
   });
 
   it("is an editor's only, and keeps nothing it does not hold", async () => {
