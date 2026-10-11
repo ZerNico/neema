@@ -32,9 +32,38 @@ describe("the sheet's toolbar", () => {
     expect(commands).toEqual([
       { kind: "format", patch: { bold: null } },
       { kind: "format", patch: { underline: true } },
-      { kind: "borders", border: "outer" },
+      { kind: "borders", border: "outer", line: { style: "thin" } },
       { kind: "format", patch: { numberFormat: "0.00%" } },
       { kind: "decimals", delta: 1 },
+    ]);
+  });
+
+  it("draws borders in the line and colour picked, and Excel's thick and double ones", async () => {
+    const commands: ToolbarCommand[] = [];
+    render(
+      <SheetToolbar
+        style={{}}
+        canUndo={false}
+        canRedo={false}
+        readOnly={false}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onCommand={(command) => commands.push(command)}
+        preview={() => ""}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Borders" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Line style" }));
+    // The menu stays open while its line and colour are picked, as Excel's does.
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Dashed" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Line colour" }));
+    fireEvent.click(await screen.findByRole("button", { name: "#C00000" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bottom border" }));
+    fireEvent.click(screen.getByRole("button", { name: "Borders" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Bottom double border" }));
+    expect(commands).toEqual([
+      { kind: "borders", border: "bottom", line: { style: "dashed", color: "#C00000" } },
+      { kind: "borders", border: "bottom", line: { style: "double", color: "#C00000" } },
     ]);
   });
 });

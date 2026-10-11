@@ -3,14 +3,6 @@ import {
   AlignBottomIcon,
   AlignTopIcon,
   AlignVerticalCenterIcon,
-  BorderAll01Icon,
-  BorderBottomIcon,
-  BorderFullIcon,
-  BorderInnerIcon,
-  BorderLeftIcon,
-  BorderNone01Icon,
-  BorderRightIcon,
-  BorderTopIcon,
   ChartColumnIcon,
   Link01Icon,
   PivotIcon,
@@ -52,6 +44,7 @@ import type {
   MergeKind,
 } from "@chat/sheet-react/format-commands";
 import type { StylePatch } from "@chat/sheet/model/ops";
+import type { BorderLine } from "@chat/sheet/model/style";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -63,12 +56,13 @@ import { Tabs, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { Action, Format } from "../../ui/rich-editor/toolbar.tsx";
 import { CHART_KINDS } from "./chart-kinds.ts";
+import { BorderMenu } from "./border-menu.tsx";
 import { ColorMenu, ToolbarMenu } from "./toolbar-controls.tsx";
 
 /** What the toolbar asks of the sheet; the panel turns each into operations on the selection. */
 export type ToolbarCommand =
   | { readonly kind: "format"; readonly patch: StylePatch }
-  | { readonly kind: "borders"; readonly border: BorderKind }
+  | { readonly kind: "borders"; readonly border: BorderKind; readonly line: BorderLine }
   | { readonly kind: "decimals"; readonly delta: 1 | -1 }
   | { readonly kind: "autosum"; readonly fn: AutoSumKind }
   | { readonly kind: "merge"; readonly merge: MergeKind }
@@ -122,17 +116,6 @@ const VERTICAL = [
   { value: "center", label: "Middle", icon: AlignVerticalCenterIcon },
   { value: "bottom", label: "Bottom", icon: AlignBottomIcon },
 ] as const;
-const BORDERS: ReadonlyArray<{ border: BorderKind; label: string; icon: typeof BorderAll01Icon }> =
-  [
-    { border: "all", label: "All borders", icon: BorderAll01Icon },
-    { border: "outer", label: "Outside borders", icon: BorderFullIcon },
-    { border: "inner", label: "Inside borders", icon: BorderInnerIcon },
-    { border: "top", label: "Top border", icon: BorderTopIcon },
-    { border: "bottom", label: "Bottom border", icon: BorderBottomIcon },
-    { border: "left", label: "Left border", icon: BorderLeftIcon },
-    { border: "right", label: "Right border", icon: BorderRightIcon },
-    { border: "none", label: "No border", icon: BorderNone01Icon },
-  ];
 const SUMS: ReadonlyArray<{ fn: AutoSumKind; label: string }> = [
   { fn: "SUM", label: "Sum" },
   { fn: "AVERAGE", label: "Average" },
@@ -387,19 +370,7 @@ export function SheetToolbar({
               resetLabel="No fill"
               onChange={(color) => format({ fill: color })}
             />
-            <ToolbarMenu label="Borders" icon={BorderAll01Icon}>
-              <DropdownMenuContent align="start" className="w-48">
-                {BORDERS.map((each) => (
-                  <DropdownMenuItem
-                    key={each.border}
-                    onClick={() => onCommand({ kind: "borders", border: each.border })}
-                  >
-                    <HugeiconsIcon icon={each.icon} strokeWidth={2} />
-                    {each.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </ToolbarMenu>
+            <BorderMenu onBorder={(border, line) => onCommand({ kind: "borders", border, line })} />
           </>
         ),
       },

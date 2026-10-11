@@ -591,7 +591,7 @@ export default function SheetPanelBody({
     if (command.kind === "format")
       run(eachRange(context, (each) => formatSelection(each, command.patch)));
     else if (command.kind === "borders")
-      run(eachRange(context, (each) => borderSelection(each, command.border)));
+      run(eachRange(context, (each) => borderSelection(each, command.border, command.line)));
     else if (command.kind === "decimals")
       run(eachRange(context, (each) => decimalsSelection(each, command.delta)));
     else if (command.kind === "autosum") run(autoSum(context, command.fn));
