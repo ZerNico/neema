@@ -219,3 +219,23 @@ describe("callouts, collapsible sections and footnotes", () => {
     expect(toMarkdown(doc)).toBe("As reported\\[^3\\].");
   });
 });
+
+describe("underline and highlight", () => {
+  it("write as the tags GitHub draws and read back, formatting inside kept", () => {
+    const markdown = "Read <u>the **whole** brief</u> and <mark>this line</mark>.";
+    const doc = parseMarkdown(markdown);
+    const marks = new Set<string>();
+    doc.descendants((node) => {
+      for (const mark of node.marks) marks.add(mark.type.name);
+      return true;
+    });
+    expect([...marks].toSorted()).toEqual(["bold", "highlight", "underline"]);
+    expect(toMarkdown(doc)).toBe(markdown);
+  });
+
+  it("never read plus signs as underline, as upstream's ++text++ did", () => {
+    const doc = parseMarkdown("C++ and C++ are fine");
+    expect(doc.firstChild!.textContent).toBe("C++ and C++ are fine");
+    expect(doc.firstChild!.firstChild!.marks).toEqual([]);
+  });
+});

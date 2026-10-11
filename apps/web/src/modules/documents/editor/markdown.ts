@@ -1,5 +1,6 @@
 import { getSchema, type JSONContent } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
+import { isolatedMarked } from "./isolated-marked.ts";
 import { Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
@@ -9,7 +10,7 @@ import { documentExtensions, fenceFor } from "./extensions.ts";
 import { escapeMathDollars, markMathBeforeDigits } from "./math.ts";
 
 export const documentSchema = getSchema(documentExtensions);
-const manager = new MarkdownManager({ extensions: documentExtensions });
+const manager = new MarkdownManager({ extensions: documentExtensions, marked: isolatedMarked() });
 
 type EncodeText = (text: string, node: unknown, parent: unknown) => string;
 const upstreamEncode = Reflect.get(manager, "encodeTextForMarkdown") as EncodeText;

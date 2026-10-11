@@ -662,6 +662,10 @@ html[data-panel-resizing] webview {
       content: counter(footnote);
     }
   }
+  /* Highlighted text, as a highlighter marks it; comments are told apart by their underline. */
+  .rich-editor mark {
+    @apply bg-warning/35 text-foreground rounded-[2px];
+  }
   /* Find's matches, in a colour apart from comments'; the current one stands out more. */
   .rich-editor .find-match {
     @apply bg-chart-1/20 rounded-[2px];

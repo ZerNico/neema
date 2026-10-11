@@ -38,6 +38,8 @@ import {
   TextBoldIcon,
   TextIcon,
   TextItalicIcon,
+  TextUnderlineIcon,
+  HighlighterIcon,
   TextStrikethroughIcon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -206,6 +208,8 @@ const useToolbarState = (editor: Editor) =>
       )?.value ?? "paragraph") as Block,
       bold: current.isActive("bold"),
       italic: current.isActive("italic"),
+      underline: current.isActive("underline"),
+      highlight: current.isActive("highlight"),
       strike: current.isActive("strike"),
       code: current.isActive("code"),
       link: current.isActive("link"),
@@ -272,6 +276,14 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
               <TextStyleMenu editor={editor} block={state.block} />
               {format("Bold", TextBoldIcon, state.bold, (c) => c.toggleBold(), "⌘B")}
               {format("Italic", TextItalicIcon, state.italic, (c) => c.toggleItalic(), "⌘I")}
+              {format(
+                "Underline",
+                TextUnderlineIcon,
+                state.underline,
+                (c) => c.toggleUnderline(),
+                "⌘U",
+              )}
+              {format("Highlight", HighlighterIcon, state.highlight, (c) => c.toggleHighlight())}
               {format(
                 "Strikethrough",
                 TextStrikethroughIcon,

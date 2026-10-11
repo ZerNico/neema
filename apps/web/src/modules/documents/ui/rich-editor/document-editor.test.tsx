@@ -494,6 +494,24 @@ describe("document editor", () => {
     expect(sync.markdown()).toBe(before);
   });
 
+  it("underlines and highlights from the ribbon, written as <u> and <mark>", async () => {
+    const sync = await replica("Read the brief");
+    mount(sync);
+    const editor = await editorOf();
+    act(() => {
+      editor.commands.setTextSelection({ from: 6, to: 9 });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Underline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    await waitFor(() =>
+      expect(server.content(sync.id)).toBe("Read <u><mark>the</mark></u> brief"),
+    );
+    expect(screen.getByRole("button", { name: "Underline" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {
     const sync = await replica("Plan the launch");
     mount(sync);
