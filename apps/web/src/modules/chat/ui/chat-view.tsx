@@ -60,6 +60,7 @@ import {
   sendMessage,
   stopGeneration,
   updateWorkSettings,
+  type getConversationWithMessages,
 } from "../server/functions.ts";
 import type { ConversationMode, PermissionLevel } from "../schema.ts";
 import { HeaderContent } from "~/ui/header-slot.tsx";
@@ -227,6 +228,68 @@ const placed = (message: DisplayMessage, index: number, id: string) => ({
 /** Shared, so a conversation with nothing forgotten keeps its memos stable. */
 const NO_IDS: ReadonlySet<string> = new Set();
 
+/** A conversation's loaded messages and their rows, as the chat shows them. */
+type ConversationData = Awaited<ReturnType<typeof getConversationWithMessages>>;
+
+/** What a streaming answer starts from: its chunks so far, over its durable rows. */
+function streamSeed(
+  streamingMessage: ConversationData["messages"][number],
+  data: ConversationData,
+) {
+  const text = data.pendingChunks
+    .filter((c) => c.kind === "text")
+    .map((c) => c.delta)
+    .join("");
+  const reasoningChunks = data.pendingChunks.filter((c) => c.kind === "reasoning");
+  const reasoning = reasoningChunks.map((c) => c.delta).join("");
+  const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
+  // Seed tool activity from durable rows; live envelopes upsert on top.
+  const durableTools = data.toolCalls
+    .filter((t) => t.messageId === streamingMessage.id)
+    .map(timedActivity);
+  // Starts can land between snapshots. Replay explicit anchors for every
+  // family; terminal durable activities ignore older progress in the reducer.
+  // A deck edit still being written replays too, until its call starts.
+  const tools = data.pendingChunks.reduce<ToolActivity[]>(
+    (current, chunk) =>
+      chunk.kind === "tool" ||
+      (chunk.kind === "writing" &&
+        !isStaleWriting(chunk.delta, streamingMessage.generationId ?? null))
+        ? applyToolActivityChunk(current, chunk.kind, chunk.delta, epoch(chunk.createdAt))
+        : current,
+    durableTools,
+  );
+  // Seed durable activity first; replayed chunks then idempotently overlay
+  // any terminal marker that landed after the query snapshot.
+  const durableCompactions = data.compactionEvents
+    .filter((event) => event.messageId === streamingMessage.id)
+    .map(toCompactionActivity);
+  const compactions = data.pendingChunks
+    .filter((c) => c.kind === "compaction")
+    .reduce<CompactionActivity[]>(
+      (current, c) => applyCompactionChunk(current, c.delta),
+      durableCompactions,
+    );
+  return {
+    steers: data.pendingChunks
+      .filter((chunk) => chunk.kind === "steer")
+      .reduce<AssistantSteer[]>((steers, chunk) => applySteerChunk(steers, chunk.delta), []),
+    files: data.pendingChunks
+      .filter((chunk) => chunk.kind === "file")
+      .reduce<AssistantFile[]>(
+        (files, chunk) => applyFileChunk(files, chunk.delta),
+        [...(streamingMessage.assistantOutput?.files ?? [])],
+      ),
+    text,
+    reasoning,
+    reasoningSeen: reasoningChunks.length > 0,
+    tools,
+    compactions,
+    lookups: lookupsOf(streamingMessage.assistantOutput),
+    lastSeq,
+  };
+}
+
 export function ChatView({
   conversationId,
   anchorFirstTurn = false,
@@ -340,63 +403,22 @@ export function ChatView({
   if (streamingMessage && streamingMessage.id !== overlayId) {
     setOverlayId(streamingMessage.id);
   }
-  // oxlint-disable react/memo-dependencies, react-hooks/exhaustive-deps -- pendingChunks are a snapshot for this streaming generation
-  const initialStream = useMemo(() => {
-    if (!streamingMessage) return null;
-    const text = data.pendingChunks
-      .filter((c) => c.kind === "text")
-      .map((c) => c.delta)
-      .join("");
-    const reasoningChunks = data.pendingChunks.filter((c) => c.kind === "reasoning");
-    const reasoning = reasoningChunks.map((c) => c.delta).join("");
-    const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
-    // Seed tool activity from durable rows; live envelopes upsert on top.
-    const durableTools = data.toolCalls
-      .filter((t) => t.messageId === streamingMessage.id)
-      .map(timedActivity);
-    // Starts can land between snapshots. Replay explicit anchors for every
-    // family; terminal durable activities ignore older progress in the reducer.
-    // A deck edit still being written replays too, until its call starts.
-    const tools = data.pendingChunks.reduce<ToolActivity[]>(
-      (current, chunk) =>
-        chunk.kind === "tool" ||
-        (chunk.kind === "writing" &&
-          !isStaleWriting(chunk.delta, streamingMessage.generationId ?? null))
-          ? applyToolActivityChunk(current, chunk.kind, chunk.delta, epoch(chunk.createdAt))
-          : current,
-      durableTools,
+  // The stream starts from the chunks there were when its generation (or a retry) began, a
+  // snapshot taken once: chunks arriving later reach it live, not by seeding it again.
+  const streamKey = streamingMessage
+    ? `${streamingMessage.id}\n${streamingMessage.generationId ?? ""}\n${retryEpoch}`
+    : null;
+  const [seeded, setSeeded] = useState<{
+    key: string;
+    seed: ReturnType<typeof streamSeed>;
+  } | null>(null);
+  if (streamKey !== (seeded?.key ?? null))
+    setSeeded(
+      streamingMessage && streamKey
+        ? { key: streamKey, seed: streamSeed(streamingMessage, data) }
+        : null,
     );
-    // Seed durable activity first; replayed chunks then idempotently overlay
-    // any terminal marker that landed after the query snapshot.
-    const durableCompactions = data.compactionEvents
-      .filter((event) => event.messageId === streamingMessage.id)
-      .map(toCompactionActivity);
-    const compactions = data.pendingChunks
-      .filter((c) => c.kind === "compaction")
-      .reduce<CompactionActivity[]>(
-        (current, c) => applyCompactionChunk(current, c.delta),
-        durableCompactions,
-      );
-    return {
-      steers: data.pendingChunks
-        .filter((chunk) => chunk.kind === "steer")
-        .reduce<AssistantSteer[]>((steers, chunk) => applySteerChunk(steers, chunk.delta), []),
-      files: data.pendingChunks
-        .filter((chunk) => chunk.kind === "file")
-        .reduce<AssistantFile[]>(
-          (files, chunk) => applyFileChunk(files, chunk.delta),
-          [...(streamingMessage.assistantOutput?.files ?? [])],
-        ),
-      text,
-      reasoning,
-      reasoningSeen: reasoningChunks.length > 0,
-      tools,
-      compactions,
-      lookups: lookupsOf(streamingMessage.assistantOutput),
-      lastSeq,
-    };
-  }, [streamingMessage?.id, streamingMessage?.generationId, retryEpoch]);
-  // oxlint-enable react/memo-dependencies, react-hooks/exhaustive-deps
+  const initialStream = streamKey !== null && seeded?.key === streamKey ? seeded.seed : null;
 
   // A sync refresh can see the terminal row before SSE has delivered its last
   // chunks and done marker. Keep that subscription alive so the sticky overlay
