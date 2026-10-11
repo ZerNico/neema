@@ -669,6 +669,28 @@ describe("images", () => {
     );
   });
 
+  it("shows a footnote changed by someone else while it is typed, never overwriting it unseen", async () => {
+    const sync = await replica("Shipped^[Original.] today");
+    mount(sync);
+    const editor = await editorOf();
+    fireEvent.click(await screen.findByRole("button", { name: "Footnote: Original." }));
+    const field = await screen.findByRole("textbox", { name: "Footnote" });
+    fireEvent.change(field, { target: { value: "Original, plus mine." } });
+    // A collaborator's change to the same note arrives.
+    act(() => {
+      let at = -1;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "footnote") at = pos;
+      });
+      editor.view.dispatch(
+        editor.state.tr.setNodeMarkup(at, undefined, { note: "Original, plus theirs." }),
+      );
+    });
+    expect(await screen.findByText("Original, plus theirs.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use theirs" }));
+    expect(screen.getByRole("textbox", { name: "Footnote" })).toHaveValue("Original, plus theirs.");
+  });
+
   it("never claims an upload that lands after the editor has closed", async () => {
     const sync = await replica("Before after");
     const view = mount(sync);

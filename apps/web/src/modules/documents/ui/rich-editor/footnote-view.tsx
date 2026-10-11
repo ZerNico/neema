@@ -1,6 +1,7 @@
 import { Selection } from "@tiptap/pm/state";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { useState } from "react";
+import { Button } from "~/ui/primitives/button";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { Textarea } from "~/ui/primitives/textarea";
 import { cn } from "~/ui/utils";
@@ -17,6 +18,8 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
   const [open, setOpen] = useState(note === "");
   // Null until the person types, so a collaborator's change shows and closing untouched writes nothing.
   const [typed, setTyped] = useState<string | null>(null);
+  // The note as it was when typing began: a different note now is someone else's change.
+  const [base, setBase] = useState<string | null>(null);
   // Opens as it becomes selected, as a formula does, not again while it stays selected.
   const [wasSelected, setWasSelected] = useState(false);
   if (selected !== wasSelected) {
@@ -28,11 +31,13 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
   }
   const editing = open && editor.isEditable;
   const value = typed ?? note;
+  const changedMeanwhile = typed !== null && base !== null && note !== base;
 
   const finish = () => {
     const next = value.trim();
     setOpen(false);
     setTyped(null);
+    setBase(null);
     if (!editor.isEditable) return;
     const pos = getPos();
     if (typeof pos !== "number") return;
@@ -77,7 +82,10 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
               aria-label="Footnote"
               value={value}
               placeholder="The note, as it appears at the foot of the page"
-              onChange={(event) => setTyped(event.target.value)}
+              onChange={(event) => {
+                if (typed === null) setBase(note);
+                setTyped(event.target.value);
+              }}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || event.shiftKey) return;
                 event.preventDefault();
@@ -87,6 +95,24 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
           ) : (
             <p className="text-sm">{note}</p>
           )}
+          {editing && changedMeanwhile ? (
+            // Closing keeps what this person typed; they see the other version first.
+            <div role="status" className="mt-2 flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Someone changed this note meanwhile:</span>
+              <span>{note}</span>
+              <Button
+                size="xs"
+                variant="outline"
+                className="self-start"
+                onClick={() => {
+                  setTyped(null);
+                  setBase(null);
+                }}
+              >
+                Use theirs
+              </Button>
+            </div>
+          ) : null}
         </PopoverContent>
       </Popover>
     </NodeViewWrapper>
