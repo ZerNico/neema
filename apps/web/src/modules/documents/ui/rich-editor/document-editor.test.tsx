@@ -14,6 +14,12 @@ import { sortColumn } from "./table-sort.ts";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
 import { browserEditorExtensions, browserEditorProps } from "./editor-extensions.ts";
+import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
+import { addDocumentImage } from "../../server/document-functions.ts";
+
+// The network boundary for images: the upload and the claim the editor calls.
+vi.mock("~/modules/attachments/server/functions.ts", () => ({ uploadAttachment: vi.fn() }));
+vi.mock("../../server/document-functions.ts", () => ({ addDocumentImage: vi.fn() }));
 
 beforeAll(() => {
   // jsdom lays nothing out; ProseMirror measures the selection to scroll it into view.
@@ -70,7 +76,9 @@ const replica = async (markdown = "", documentId?: string) => {
 type Replica = Awaited<ReturnType<typeof replica>>;
 
 const mount = (sync: Replica, { readOnly = false }: { readOnly?: boolean } = {}) =>
-  render(<DocumentEditor sync={sync} readOnly={readOnly} toolbarSlot={slot()} />);
+  render(
+    <DocumentEditor documentId={sync.id} sync={sync} readOnly={readOnly} toolbarSlot={slot()} />,
+  );
 
 /** Text inside a link, as a click on it would land. */
 const anchor = (href: string) => {
@@ -221,10 +229,10 @@ describe("document editor", () => {
     const sync = await replica("- [ ] ship");
     const toolbar = slot();
     const { rerender } = render(
-      <DocumentEditor sync={sync} readOnly={false} toolbarSlot={toolbar} />,
+      <DocumentEditor documentId={sync.id} sync={sync} readOnly={false} toolbarSlot={toolbar} />,
     );
     await editorOf();
-    rerender(<DocumentEditor sync={sync} readOnly toolbarSlot={toolbar} />);
+    rerender(<DocumentEditor documentId={sync.id} sync={sync} readOnly toolbarSlot={toolbar} />);
     fireEvent.click(screen.getByRole("checkbox"));
     expect(sync.markdown()).toBe("- [ ] ship");
   });
@@ -301,10 +309,10 @@ describe("document editor", () => {
     render(
       <>
         <section aria-label="First">
-          <DocumentEditor sync={one} readOnly={false} toolbarSlot={slot()} />
+          <DocumentEditor documentId={one.id} sync={one} readOnly={false} toolbarSlot={slot()} />
         </section>
         <section aria-label="Second">
-          <DocumentEditor sync={two} readOnly={false} toolbarSlot={slot()} />
+          <DocumentEditor documentId={two.id} sync={two} readOnly={false} toolbarSlot={slot()} />
         </section>
       </>,
     );
@@ -365,11 +373,11 @@ describe("document editor", () => {
     const toolbar = slot();
     const sync = await replica("Plan");
     const { rerender } = render(
-      <DocumentEditor sync={sync} readOnly={false} toolbarSlot={toolbar} />,
+      <DocumentEditor documentId={sync.id} sync={sync} readOnly={false} toolbarSlot={toolbar} />,
     );
     await editorOf();
     expect(within(toolbar).getByRole("toolbar", { name: "History" })).toBeInTheDocument();
-    rerender(<DocumentEditor sync={sync} readOnly toolbarSlot={toolbar} />);
+    rerender(<DocumentEditor documentId={sync.id} sync={sync} readOnly toolbarSlot={toolbar} />);
     expect(within(toolbar).queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
@@ -472,9 +480,7 @@ describe("document editor", () => {
     fireEvent.change(note, { target: { value: "Per the runbook." } });
     fireEvent.keyDown(note, { key: "Enter" });
     await waitFor(() =>
-      expect(sync.markdown()).toBe(
-        "> [!WARNING]\n> Back up first[^1]\n\n[^1]: Per the runbook.",
-      ),
+      expect(sync.markdown()).toBe("> [!WARNING]\n> Back up first[^1]\n\n[^1]: Per the runbook."),
     );
 
     act(() => {
@@ -503,9 +509,7 @@ describe("document editor", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
     fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
-    await waitFor(() =>
-      expect(server.content(sync.id)).toBe("Read <u><mark>the</mark></u> brief"),
-    );
+    await waitFor(() => expect(server.content(sync.id)).toBe("Read <u><mark>the</mark></u> brief"));
     expect(screen.getByRole("button", { name: "Underline" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -556,5 +560,57 @@ describe("document editor", () => {
     expect(linkTarget("javascript:alert(1)")).toBeNull();
     expect(linkTarget("data:text/html,x")).toBeNull();
     expect(linkTarget("   ")).toBeNull();
+  });
+});
+
+describe("images", () => {
+  it("uploads the picked file, claims it and puts the image where the selection was", async () => {
+    const sync = await replica("Before after");
+    mount(sync);
+    const editor = await editorOf();
+    vi.mocked(uploadAttachment).mockResolvedValue({
+      id: "attachment-1",
+      fileName: "chart.png",
+      size: 11,
+      mediaType: "image/png",
+      kind: "image",
+    });
+    vi.mocked(addDocumentImage).mockImplementation(
+      async ({ data }) => `/api/documents/${data.documentId}/images/${data.attachmentId}`,
+    );
+    // The picker the button opens, caught instead of shown.
+    const opened = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    act(() => {
+      editor.commands.setTextSelection(8);
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Image" }));
+    const picker = opened.mock.contexts[0] as HTMLInputElement;
+    opened.mockRestore();
+    expect(picker.accept).toBe("image/jpeg,image/png,image/gif,image/webp");
+    // Typed before the upload lands: the image still goes where the selection was.
+    act(() => {
+      editor.commands.insertContentAt(1, "Draft: ");
+    });
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "chart.png", {
+      type: "image/png",
+    });
+    fireEvent.change(picker, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(sync.markdown()).toBe(
+        `Draft: Before ![chart.png](/api/documents/${sync.id}/images/attachment-1)after`,
+      ),
+    );
+    const sent = vi.mocked(uploadAttachment).mock.calls[0]![0]!.data as FormData;
+    expect(sent.get("file")).toBe(file);
+    expect(vi.mocked(addDocumentImage)).toHaveBeenCalledWith({
+      data: { documentId: sync.id, attachmentId: "attachment-1" },
+    });
+    expect(screen.getByRole("textbox", { name: "Document" }).querySelector("img")).toHaveAttribute(
+      "src",
+      `/api/documents/${sync.id}/images/attachment-1`,
+    );
   });
 });

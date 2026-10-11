@@ -11,12 +11,13 @@ import { DocumentTaskItem } from "./task-item.tsx";
 import { BrowserBlockMath, BrowserInlineMath } from "./math-item.ts";
 import { BrowserDetails, BrowserFootnote } from "./block-items.ts";
 import { DocumentFind } from "./find.ts";
+import { ImageUpload } from "./image-upload.ts";
 import { openLink } from "./links.ts";
 
 /**
  * The browser's editor: the shared schema, with tasks drawn by the app's
  * checkbox, Mermaid blocks as diagrams, formulas through KaTeX and planned sections as placeholders (rendering only, the schema is
- * unchanged), the `/` menu, find and the size cap. The connection adds collaboration and other people's cursors.
+ * unchanged), the `/` menu, find, image uploads and the size cap. The connection adds collaboration and other people's cursors.
  */
 export const browserEditorExtensions = [
   ...documentExtensions.map(
@@ -43,6 +44,7 @@ export const browserEditorExtensions = [
   }),
   SlashCommand,
   DocumentFind,
+  ImageUpload,
   SizeCap,
 ];
 

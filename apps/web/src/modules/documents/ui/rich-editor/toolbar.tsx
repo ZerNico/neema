@@ -40,6 +40,7 @@ import {
   TextItalicIcon,
   TextUnderlineIcon,
   HighlighterIcon,
+  Image01Icon,
   TextStrikethroughIcon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -73,6 +74,7 @@ import { setWordCountShown, useWordCountShown } from "./document-stats.ts";
 import { OutlineMenu } from "./outline-menu.tsx";
 import { Ribbon, type RibbonTab } from "../ribbon.tsx";
 import { isoDay } from "./dates.ts";
+import { pickImages } from "./image-upload.ts";
 
 type Chain = ReturnType<Editor["chain"]>;
 type Icon = HugeiconsIconProps["icon"];
@@ -370,6 +372,12 @@ export function DocumentToolbar({ editor }: { editor: Editor }) {
           label: "Blocks",
           controls: (
             <>
+              <Action
+                icon={Image01Icon}
+                label="Image"
+                disabled={false}
+                onPress={() => pickImages(editor)}
+              />
               {action("Divider", MinusSignIcon, (c) => c.setHorizontalRule())}
               {action(
                 "Date",

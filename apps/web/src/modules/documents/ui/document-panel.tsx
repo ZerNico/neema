@@ -206,6 +206,7 @@ export function DocumentPanelBody({
                 <div className="absolute inset-0">
                   <DocumentEditor
                     key={controller.documentId}
+                    documentId={controller.documentId}
                     sync={controller.sync}
                     readOnly={!controller.document?.canEdit}
                     toolbarSlot={toolbarSlot}

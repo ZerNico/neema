@@ -59,6 +59,7 @@ body { counter-reset: footnote; }
 sup[data-footnote] { counter-increment: footnote; }
 sup[data-footnote]::after { content: counter(footnote); font-size: 0.75em; }
 mark { background: #fef08a; color: inherit; }
+img { max-width: 100%; height: auto; vertical-align: bottom; }
 ol.footnotes { margin: 18pt 0 0; padding: 8pt 0 0 18pt; border-top: 0.75pt solid #d4d4d8; font-size: 9.5pt; }
 `;
 

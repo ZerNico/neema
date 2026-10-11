@@ -18,6 +18,7 @@ import {
   InformationSquareIcon,
   ArrowRight01Icon,
   TextFootnoteIcon,
+  Image01Icon,
 } from "@hugeicons/core-free-icons";
 import { Extension, type Editor, type Range } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
@@ -27,6 +28,7 @@ import { isRemoteChange } from "../../editor/remote.ts";
 import { insertDetails, insertFootnote, setCallout } from "./block-items.ts";
 import { isoDay } from "./dates.ts";
 import { editorHooks } from "./editor-hooks.ts";
+import { canAddImages, pickImages } from "./image-upload.ts";
 import { mountAtCaret } from "./suggestion-mount.ts";
 import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 
@@ -138,6 +140,16 @@ export const SLASH_ITEMS: SlashItem[] = [
     icon: TextFootnoteIcon,
     keywords: "note reference source",
     run: (e, r) => insertFootnote(blocks(e, r)).run(),
+  },
+  {
+    title: "Image",
+    icon: Image01Icon,
+    keywords: "picture photo upload",
+    available: canAddImages,
+    run: (e, r) => {
+      blocks(e, r).run();
+      pickImages(e);
+    },
   },
   {
     title: "Divider",

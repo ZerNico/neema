@@ -11,6 +11,7 @@ import { CommentCard } from "./comment-card.tsx";
 import { DocumentFindBar } from "./find-bar.tsx";
 import { WordCount } from "./word-count.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
+import { setImageTarget } from "./image-upload.ts";
 
 /** The connection's editor; the connection itself stays with the caller. */
 export interface DocumentEditorSync {
@@ -22,12 +23,15 @@ export interface DocumentEditorSync {
  * the first open document, not the chat.
  */
 export default function DocumentEditor({
+  documentId,
   sync,
   readOnly,
   toolbarSlot,
   hooks,
   discussion,
 }: {
+  /** Where images put into the text are claimed. */
+  documentId: string;
   sync: DocumentEditorSync;
   readOnly: boolean;
   /** The panel's actions row, where the formatting controls sit. */
@@ -40,6 +44,12 @@ export default function DocumentEditor({
   useEffect(() => {
     if (hooks) setEditorHooks(sync.editor, hooks);
   }, [hooks, sync.editor]);
+  // Only an editor uploads; a reader's paste, drop and menus offer no images.
+  useEffect(() => {
+    if (readOnly) return;
+    setImageTarget(sync.editor, documentId);
+    return () => setImageTarget(sync.editor, null);
+  }, [documentId, readOnly, sync.editor]);
   return (
     <RichEditor
       editor={sync.editor}
