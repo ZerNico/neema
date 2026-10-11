@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
+import { GridCell } from "./grid-cell.tsx";
 import { columnLetters } from "@chat/sheet/a1";
 import type { SheetLocale } from "@chat/sheet/locales";
 import type { Sheet } from "@chat/sheet/model";
 import type { SheetValues } from "@chat/sheet/model/calc";
 import type { CellLook } from "@chat/sheet/model/conditional";
 import { cellStyle } from "@chat/sheet/model/style";
-import { cellCss, cellDisplay } from "./display.ts";
 import { key, type mergeIndex } from "./grid-navigation.ts";
 import { textWidth, type AxisLayout } from "./layout.ts";
 
@@ -66,21 +66,6 @@ export function drawPane(
     const span = merges.spans.get(key(row, col));
     const r = rows.ids[row]!;
     const c = cols.ids[col]!;
-    const cell = sheetCells[r]?.[c];
-    const look = looks.get(`${r}|${c}`);
-    // Conditional formats show over the cell's own style, as Excel draws them.
-    const own = cellStyle(cell?.s);
-    const style = look
-      ? {
-          ...own,
-          ...(look.fill ? { fill: look.fill } : {}),
-          ...(look.fontColor ? { fontColor: look.fontColor } : {}),
-          ...(look.bold ? { bold: true } : {}),
-          ...(look.italic ? { italic: true } : {}),
-        }
-      : own;
-    const value = values.value(sheet, r, c);
-    const shown = cellDisplay(value, style, locale);
     const bottom = span ? span.bottom : row;
     const right = span ? span.right : col;
     const active = main && head?.row === row && head.col === col;
@@ -102,60 +87,25 @@ export function drawPane(
         />,
       );
     cells.push(
-      <div
+      <GridCell
         key={key(row, col)}
         id={active ? `${gridId}-active` : undefined}
-        role={main ? "gridcell" : undefined}
-        aria-rowindex={main ? row + 1 : undefined}
-        aria-colindex={main ? col + 1 : undefined}
-        aria-selected={active || undefined}
-        className={`border-border text-foreground absolute flex border-b px-1 text-sm leading-tight whitespace-pre ${spills ? "overflow-visible" : "overflow-hidden border-r"}`}
-        style={{
-          top: rows.starts[row],
-          left: cols.starts[col],
-          height: rows.starts[bottom + 1]! - rows.starts[row]!,
-          width: cols.starts[right + 1]! - cols.starts[col]!,
-          alignItems:
-            style.vertical === "top"
-              ? "flex-start"
-              : style.vertical === "center"
-                ? "center"
-                : "flex-end",
-          justifyContent:
-            shown.align === "right"
-              ? "flex-end"
-              : shown.align === "center"
-                ? "center"
-                : "flex-start",
-          textAlign: shown.align,
-          // Its fill and borders stay in its own column; only its text runs on, above the spill.
-          zIndex: spills ? 2 : span ? 1 : undefined,
-          ...cellCss(style),
-          fontSize: (style.fontSize ? (style.fontSize * 4) / 3 : 14) * zoom,
-          ...(shown.color ? { color: shown.color } : {}),
-        }}
-      >
-        {look?.bar ? (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-xs opacity-60"
-            style={{
-              width: `calc(${look.bar.fraction * 100}% - 4px)`,
-              // The rule's own colour, which is the sheet's data.
-              background: `linear-gradient(to right, ${look.bar.color}, color-mix(in oklab, ${look.bar.color} 30%, transparent))`,
-            }}
-          />
-        ) : null}
-        <span
-          className={
-            own.link
-              ? `relative underline underline-offset-2${style.fontColor || shown.color ? "" : " text-primary"}`
-              : "relative"
-          }
-        >
-          {shown.text}
-        </span>
-      </div>,
+        main={main}
+        active={active}
+        row={row}
+        col={col}
+        top={rows.starts[row]!}
+        left={cols.starts[col]!}
+        height={rows.starts[bottom + 1]! - rows.starts[row]!}
+        width={cols.starts[right + 1]! - cols.starts[col]!}
+        value={values.value(sheet, r, c)}
+        styleKey={sheetCells[r]?.[c]?.s}
+        look={looks.get(`${r}|${c}`)}
+        locale={locale}
+        zoom={zoom}
+        spills={spills}
+        merged={!!span}
+      />,
     );
   };
   for (let row = rowRange.first; row <= rowRange.last; row++)
