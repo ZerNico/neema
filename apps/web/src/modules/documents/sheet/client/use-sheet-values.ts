@@ -28,18 +28,27 @@ export function useSheetValues(
     };
   }, []);
   const inline = typeof Worker === "undefined";
+  // What the values are calculated for. A new revision's moment and seed change only what
+  // NOW, TODAY and RAND return, so while the last result read neither, a new context alone
+  // (all a confirmed edit of one's own brings) is not calculated again. A new document is.
+  const [target, setTarget] = useState({ doc, context });
+  const reads = inline || result === null || result.volatile;
+  if (target.doc !== doc || (target.context !== context && (target.context === null || reads)))
+    setTarget({ doc, context });
   useEffect(() => {
-    if (!doc || !context || inline) return;
+    if (!target.doc || !target.context || inline) return;
     const request: CalcPost = {
       generation: ++generation.current,
-      doc: JSON.stringify(doc),
-      context,
+      doc: JSON.stringify(target.doc),
+      context: target.context,
     };
     worker.current?.postMessage(request);
-  }, [doc, context, inline]);
+  }, [target, inline]);
   return useMemo(() => {
-    if (!doc || !context) return null;
-    if (inline) return valuesOf(doc, context, calculateForWire({ generation: 0, doc, context }));
-    return valuesOf(doc, context, result);
-  }, [doc, context, inline, result]);
+    const { doc: shown, context: at } = target;
+    if (!shown || !at) return null;
+    if (inline)
+      return valuesOf(shown, at, calculateForWire({ generation: 0, doc: shown, context: at }));
+    return valuesOf(shown, at, result);
+  }, [target, inline, result]);
 }

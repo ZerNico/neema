@@ -27,6 +27,11 @@ export interface CalcContext {
 export interface SheetValues {
   readonly context: CalcContext;
   readonly report: CalcReport;
+  /**
+   * Whether any formula read the moment or drew a random number. Without, the
+   * values follow from the document alone, whatever the context.
+   */
+  readonly volatile: boolean;
   /** A cell's value: what was typed, or a formula's or a spill's result. */
   value(sheet: string, row: string, col: string): Scalar;
   /** The cells a dynamic formula spills into, by ID, or null. */
@@ -81,6 +86,7 @@ export function calculateSheet(
   const areas = new Map<string, CellBox>();
   const spilled = new Set<string>();
   const formulaIds = new Map<StoredFormula, { sheet: string; r: string; c: string }>();
+  let volatile = false;
 
   const store: CellStore = {
     sheets: sheetIds.map((id) => doc.sheet[id]!.name),
@@ -206,8 +212,14 @@ export function calculateSheet(
     volatile: (formula) => {
       const at = formulaIds.get(formula)!;
       return {
-        now: context.now,
-        random: (call) => stream(hash(`${context.seed}|${at.sheet}|${at.r}|${at.c}|${call}`)),
+        get now() {
+          volatile = true;
+          return context.now;
+        },
+        random: (call) => {
+          volatile = true;
+          return stream(hash(`${context.seed}|${at.sheet}|${at.r}|${at.c}|${call}`));
+        },
       };
     },
   };
@@ -216,6 +228,7 @@ export function calculateSheet(
   return {
     context,
     report,
+    volatile,
     value: (sheet, row, col) => {
       const known = results.get(key(sheet, row, col));
       if (known !== undefined) return known;

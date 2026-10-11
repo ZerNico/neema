@@ -24,6 +24,8 @@ export interface CalcResult {
   /** Every formula's result and every spilled value, by sheet, row and column ID. */
   readonly results: ReadonlyArray<readonly [string, WireScalar]>;
   readonly spills: ReadonlyArray<readonly [string, readonly string[], readonly string[]]>;
+  /** Whether any formula read the moment or drew a random number; see SheetValues. */
+  readonly volatile: boolean;
 }
 
 export const cellKey = (sheet: string, row: string, col: string) =>
@@ -51,7 +53,7 @@ export function calculateForWire(request: CalcRequest): CalcResult {
             if (sr !== r || sc !== c)
               results.push([cellKey(sheet, sr, sc), toWire(values.value(sheet, sr, sc))]);
       }
-  return { generation: request.generation, results, spills };
+  return { generation: request.generation, results, spills, volatile: values.volatile };
 }
 
 const EMPTY_REPORT = { formulas: 0, errors: [], errorCount: 0, unsupported: [] };
@@ -82,6 +84,7 @@ export function valuesOf(
   return {
     context,
     report: EMPTY_REPORT,
+    volatile: result?.volatile ?? false,
     value: (sheet, r, c) => {
       const cell = doc.sheet[sheet]?.cells[r]?.[c];
       const key = cellKey(sheet, r, c);
