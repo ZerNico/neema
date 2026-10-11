@@ -11,6 +11,7 @@ import { outbox } from "../../client/outbox.ts";
 import { parseMarkdown, toMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 import DocumentEditor from "./document-editor.tsx";
+import { addImages } from "./image-upload.ts";
 import { sortColumn } from "./table-sort.ts";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
@@ -666,6 +667,24 @@ describe("images", () => {
       "src",
       `/api/documents/${sync.id}/images/attachment-1`,
     );
+  });
+
+  it("never claims an upload that lands after the editor has closed", async () => {
+    const sync = await replica("Before after");
+    const view = mount(sync);
+    const editor = await editorOf();
+    let land: (value: Awaited<ReturnType<typeof uploadAttachment>>) => void = () => {};
+    vi.mocked(uploadAttachment).mockReturnValue(new Promise((resolve) => (land = resolve)));
+    vi.mocked(addDocumentImage).mockClear();
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "chart.png", {
+      type: "image/png",
+    });
+    const adding = addImages(editor, [file], 1);
+    view.unmount();
+    land({ id: "late", fileName: "chart.png", size: 4, mediaType: "image/png", kind: "image" });
+    await adding;
+    // Left unclaimed, the sweep takes it; claimed, it would be kept for the document's life.
+    expect(vi.mocked(addDocumentImage)).not.toHaveBeenCalled();
   });
 });
 

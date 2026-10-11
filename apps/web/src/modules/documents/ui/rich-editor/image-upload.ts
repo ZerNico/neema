@@ -26,10 +26,17 @@ const pendingKey = new PluginKey<Pending>("imageUploads");
 const setPending = (editor: Editor, meta: PendingMeta) =>
   editor.view.dispatch(editor.state.tr.setMeta(pendingKey, meta).setMeta("addToHistory", false));
 
-const upload = async (documentId: string, file: File) => {
+/**
+ * Uploads one image and claims it for the document, unless the editor has
+ * gone or moved to another document meanwhile: a claim is kept for the
+ * document's life, so one whose image can never be inserted would be kept
+ * for nothing. An unclaimed upload is swept. Null when it is not claimed.
+ */
+const upload = async (editor: Editor, documentId: string, file: File) => {
   const data = new FormData();
   data.set("file", file);
   const attachment = await uploadAttachment({ data });
+  if (editor.isDestroyed || targets.get(editor) !== documentId) return null;
   const src = await addDocumentImage({ data: { documentId, attachmentId: attachment.id } });
   return { src, alt: file.name };
 };
@@ -44,11 +51,15 @@ export const addImages = async (editor: Editor, files: ReadonlyArray<File>, at: 
   if (!documentId || images.length === 0) return;
   const id = Symbol("upload");
   setPending(editor, { add: id, at });
-  const results = await Promise.allSettled(images.map((file) => upload(documentId, file)));
+  const results = await Promise.allSettled(
+    images.map((file) => upload(editor, documentId, file)),
+  );
   if (editor.isDestroyed) return;
   const position = pendingKey.getState(editor.state)?.get(id);
   setPending(editor, { remove: id });
-  const added = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  const added = results.flatMap((result) =>
+    result.status === "fulfilled" && result.value ? [result.value] : [],
+  );
   if (position !== undefined && added.length > 0)
     editor.commands.insertContentAt(
       position,
