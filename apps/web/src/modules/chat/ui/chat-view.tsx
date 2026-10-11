@@ -9,20 +9,12 @@ import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/
 import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
-import { DocumentToolName, projectDocumentResult } from "~/modules/documents/tool-schema.ts";
-
-import { AgentDraftToolName, projectAgentDraftResult } from "~/modules/agents/tool-schema.ts";
-import {
-  ScheduleDraftToolName,
-  projectScheduleDraftResult,
-} from "~/modules/schedules/tool-schema.ts";
 
 import { applyFileChunk, learnServerClock } from "../client/use-message-stream.ts";
 import { lookupsOf, mergeLookups, NO_LOOKUPS, type AssistantFile } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
 
-import { Schema } from "effect";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -34,7 +26,7 @@ import {
 } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { projectQuery } from "~/modules/projects/client/queries.ts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
 import { withHistory } from "./conversation-window.ts";
@@ -92,6 +84,8 @@ import { agentIcon } from "./agent-icons.ts";
 import { greetingFor } from "./greeting.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
+import { useMessageRows } from "./use-message-rows.ts";
+import { ownsDocument, useDiscoveredArtifacts } from "./use-discovered-artifacts.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -109,7 +103,6 @@ import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { uuidv7 } from "uuidv7";
-import type { MessageAttachment } from "~/modules/attachments/schema.ts";
 import { type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -122,7 +115,6 @@ import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
 import {
   GenuiActionsContext,
-  type SavedUiState,
   type UiMapLookup,
   type UiStateSave,
 } from "~/modules/genui/ui/context.ts";
@@ -306,9 +298,13 @@ export function ChatView({
   const isMobile = useIsMobile();
   // Opening a chat should leave the caret ready to type. Not on a phone: that
   // would raise the keyboard over the conversation the user came to read.
-  useEffect(() => {
-    if (!isMobile) composer.current?.focus();
-  }, [conversationId, isMobile]);
+  useEffect(
+    () => {
+      if (!isMobile) composer.current?.focus();
+    },
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- again for each chat opened
+    [conversationId, isMobile],
+  );
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -434,92 +430,17 @@ export function ChatView({
     subscribedMessage?.status,
   );
 
-  // A draft of this conversation, from any of the three paths that can reveal
-  // one. References whose owning conversation is not this one are branch copies.
-  const discoveredDrafts = useMemo(() => {
-    const ids = new Set(data.agentDrafts.map((draft) => draft.id));
-    const mine = (result: { draftId?: string; draftConversationId?: string }) => {
-      if (result.draftId && result.draftConversationId === conversationId) ids.add(result.draftId);
-    };
-    for (const row of data.toolCalls)
-      if (Schema.is(AgentDraftToolName)(row.toolName)) mine(projectAgentDraftResult(row.result));
-    for (const activity of stream.tools)
-      if (activity.family === "agent-draft" && activity.result) mine(activity.result);
-    return ids;
-  }, [conversationId, data.agentDrafts, data.toolCalls, stream.tools]);
-  const discoveredScheduleDrafts = useMemo(() => {
-    const ids = new Set((data.scheduleDrafts ?? []).map((draft) => draft.id));
-    const mine = (result: { draftId?: string; draftConversationId?: string }) => {
-      if (result.draftId && result.draftConversationId === conversationId) ids.add(result.draftId);
-    };
-    for (const row of data.toolCalls)
-      if (Schema.is(ScheduleDraftToolName)(row.toolName))
-        mine(projectScheduleDraftResult(row.result));
-    for (const activity of stream.tools)
-      if (activity.family === "schedule-draft" && activity.result) mine(activity.result);
-    return ids;
-  }, [conversationId, data.scheduleDrafts, data.toolCalls, stream.tools]);
   // The chat's own documents, and its project's while the person may still use it.
   const projectId = data.project?.role ? data.project.id : null;
-  const discoveredDocuments = useMemo(() => {
-    const ids = new Set((data.documents ?? []).map((document) => document.id));
-    const mine = (result: DocumentOwnerFields) => {
-      if (result.documentId && ownsDocument(result, conversationId, projectId))
-        ids.add(result.documentId);
-    };
-    for (const row of data.toolCalls)
-      if (Schema.is(DocumentToolName)(row.toolName)) mine(projectDocumentResult(row.result));
-    for (const activity of stream.tools)
-      if (activity.family === "document" && activity.result) mine(activity.result);
-    return ids;
-  }, [conversationId, data.documents, data.toolCalls, projectId, stream.tools]);
-  // What the answer being watched just created, as opposed to what the page
-  // loaded with: only these open their panel by themselves. A phone shows the
-  // panel as a sheet over the answer, so it never opens one on its own there.
-  const liveCreated = useMemo(() => {
-    const loaded = new Set([
-      ...data.agentDrafts.map((draft) => draft.id),
-      ...(data.scheduleDrafts ?? []).map((draft) => draft.id),
-      ...(data.documents ?? []).map((document) => document.id),
-    ]);
-    const fresh = {
-      agent: new Set<string>(),
-      schedule: new Set<string>(),
-      document: new Set<string>(),
-    };
-    if (isMobile) return fresh;
-    const add = (target: Set<string>, id: string | undefined, owner: string | undefined) => {
-      if (id && owner === conversationId && !loaded.has(id)) target.add(id);
-    };
-    // A streamed creation makes the document before its call returns, so the
-    // detail already lists it; one the answer streaming now made still opens.
-    const writing = streamingMessage?.id;
-    if (writing)
-      for (const document of data.documents ?? [])
-        if (document.messageId === writing) fresh.document.add(document.id);
-    for (const activity of stream.tools) {
-      if (activity.family === "agent-draft" && activity.result)
-        add(fresh.agent, activity.result.draftId, activity.result.draftConversationId);
-      else if (activity.family === "schedule-draft" && activity.result)
-        add(fresh.schedule, activity.result.draftId, activity.result.draftConversationId);
-      else if (
-        activity.family === "document" &&
-        activity.result &&
-        ownsDocument(activity.result, conversationId, projectId)
-      )
-        add(fresh.document, activity.result.documentId, conversationId);
-    }
-    return fresh;
-  }, [
-    conversationId,
-    data.agentDrafts,
-    data.documents,
-    data.scheduleDrafts,
-    isMobile,
-    projectId,
-    stream.tools,
-    streamingMessage?.id,
-  ]);
+  const { discoveredDrafts, discoveredScheduleDrafts, discoveredDocuments, liveCreated } =
+    useDiscoveredArtifacts({
+      data,
+      conversationId,
+      projectId,
+      tools: stream.tools,
+      streamingId: streamingMessage?.id,
+      isMobile,
+    });
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
     mutationFn: (permissionLevel: PermissionLevel) =>
@@ -608,8 +529,12 @@ export function ChatView({
     documentIds.includes(selectedPanelId.slice("document:".length))
       ? selectedPanelId.slice("document:".length)
       : undefined;
+  // Read by sends after their awaits, when this render's value may be stale: the latest
+  // committed one.
   const openDocument = useRef<string | undefined>(undefined);
-  openDocument.current = openDocumentId;
+  useLayoutEffect(() => {
+    openDocument.current = openDocumentId;
+  }, [openDocumentId]);
   const documentFocus = (asked?: AskTarget & { documentId: string }) => {
     const id = asked?.documentId ?? openDocument.current;
     if (!id) return {};
@@ -1029,23 +954,18 @@ export function ChatView({
     },
     [generationDisabled, sendAsk],
   );
-  // React Query keeps mutateAsync stable; React Compiler rejects that redundant dependency.
-  // oxlint-disable react-hooks/exhaustive-deps
   const respondToQuestion = useCallback(
     async (callId: string, response: QuestionResponse) => {
       if (actionsDisabled || !effectiveModelId || answerInFlight.current) {
         throw new Error("Question response unavailable");
       }
       answerInFlight.current = true;
-      try {
-        return await mutateAnswer({ callId, response });
-      } finally {
+      return mutateAnswer({ callId, response }).finally(() => {
         answerInFlight.current = false;
-      }
+      });
     },
-    [actionsDisabled, effectiveModelId],
+    [actionsDisabled, effectiveModelId, mutateAnswer],
   );
-  // oxlint-enable react-hooks/exhaustive-deps
   // Steers sit just after the answer they went into; "what came last" means
   // the last turn message, so questions on a steered answer stay answerable.
   const turnMessages = useMemo(
@@ -1180,69 +1100,19 @@ export function ChatView({
     },
   });
 
-  const machinesByMessage = useMemo(
-    () =>
-      new Map(
-        (data.generations ?? []).map((row) => [row.messageId, row.desktopMachine?.id ?? null]),
-      ),
-    [data.generations],
-  );
-  const attachmentsByMessage = useMemo(() => {
-    const grouped = new Map<string, MessageAttachment[]>();
-    for (const attachment of data.attachments) {
-      const list = grouped.get(attachment.messageId);
-      if (list) list.push(attachment);
-      else grouped.set(attachment.messageId, [attachment]);
-    }
-    return grouped;
-  }, [data.attachments]);
-
-  // A steer belongs to the answer it was delivered into and is drawn inside
-  // it, so it never becomes a transcript row of its own.
-  const steersByAnswer = useMemo(() => {
-    const grouped = new Map<string, AssistantSteer[]>();
-    for (const message of data.messages) {
-      if (!message.steeredIntoMessageId) continue;
-      const list = grouped.get(message.steeredIntoMessageId) ?? [];
-      list.push({
-        id: message.id,
-        content: message.content,
-        // Rows from before positions were recorded read as arriving first.
-        textOffset: message.steerTextOffset ?? 0,
-        turnIndex: message.steerTurnIndex ?? -1,
-        attachments: attachmentsByMessage.get(message.id) ?? [],
-      });
-      grouped.set(message.steeredIntoMessageId, list);
-    }
-    return grouped;
-  }, [attachmentsByMessage, data.messages]);
-
-  // Grouped once per query result, since the display map below runs on every
-  // stream chunk and must not rescan the flat list per message.
-  const uiStatesByMessage = useMemo(() => {
-    const grouped = new Map<string, Map<number, SavedUiState>>();
-    for (const row of data.uiStates) {
-      const states = grouped.get(row.messageId) ?? new Map<number, SavedUiState>();
-      states.set(row.ordinal, {
-        sourceHash: row.sourceHash,
-        state: JSON.stringify(row.state),
-        digest: row.digest ?? null,
-      });
-      grouped.set(row.messageId, states);
-    }
-    return grouped;
-  }, [data.uiStates]);
-
-  const toolCallsByMessage = useMemo(() => {
-    const grouped = new Map<string, ToolActivity[]>();
-    for (const row of data.toolCalls) {
-      const activity = timedActivity(row);
-      const list = grouped.get(row.messageId);
-      if (list) list.push(activity);
-      else grouped.set(row.messageId, [activity]);
-    }
-    return grouped;
-  }, [data.toolCalls]);
+  const {
+    machinesByMessage,
+    attachmentsByMessage,
+    steersByAnswer,
+    uiStatesByMessage,
+    toolCallsByMessage,
+    compactionsByMessage,
+    nextAssistantAfter,
+    modelByMessage,
+    collectionsByUserMessage,
+    skillsByUserMessage,
+    workspaceFilesByUserMessage,
+  } = useMessageRows(data);
 
   // Associate in raw order, then filter display rows before computing day headings.
   // Raw messages remain authoritative for retry, edit, branching and history.
@@ -1263,37 +1133,6 @@ export function ChatView({
         data.messages.filter((message) => questionResponses.hiddenMessageIds.has(message.id)),
       ),
     [data.messages, questionResponses],
-  );
-
-  const compactionsByMessage = useMemo(() => {
-    const grouped = new Map<string, CompactionActivity[]>();
-    for (const row of data.compactionEvents) {
-      const activity = toCompactionActivity(row);
-      const list = grouped.get(row.messageId);
-      if (list) list.push(activity);
-      else grouped.set(row.messageId, [activity]);
-    }
-    return grouped;
-  }, [data.compactionEvents]);
-
-  // messageId -> id of the next assistant message after it, in one pass.
-  const nextAssistantAfter = useMemo(() => {
-    const next = new Map<string, string>();
-    for (let i = data.messages.length - 1; i >= 0; i--) {
-      const message = data.messages[i]!;
-      const following = data.messages[i + 1];
-      const inherited = following ? next.get(following.id) : undefined;
-      const value = following?.role === "assistant" ? following.id : inherited;
-      if (value !== undefined) next.set(message.id, value);
-    }
-    return next;
-  }, [data.messages]);
-
-  // Which model wrote each answer, null once its row is gone. The retry menu
-  // marks it, and a retry that omits a model reuses it server-side.
-  const modelByMessage = useMemo(
-    () => new Map(data.messages.map((m) => [m.id, m.modelId])),
-    [data.messages],
   );
 
   const confirmEdit = useCallback(
@@ -1400,56 +1239,6 @@ export function ChatView({
   // stream and edit state are layered below so every unrelated row keeps its
   // object identity across stream chunks and local editor updates.
 
-  // Collections belong to the turn that added them: the user message directly
-  // before each answer. That is where the composer showed them, so that is
-  // where they stay.
-  const collectionsByUserMessage = useMemo(() => {
-    const byAssistant = new Map(
-      (data.generations ?? []).map((row) => [row.messageId, row.collectionIds] as const),
-    );
-    const result = new Map<string, ReadonlyArray<string>>();
-    let previousUser: string | null = null;
-    for (const message of data.messages) {
-      if (message.role === "user") previousUser = message.id;
-      else if (message.role === "assistant" && previousUser) {
-        const ids = byAssistant.get(message.id);
-        if (ids && ids.length > 0) result.set(previousUser, ids);
-      }
-    }
-    return result;
-  }, [data.generations, data.messages]);
-  const skillsByUserMessage = useMemo(() => {
-    const byAssistant = new Map(
-      (data.generations ?? []).map((row) => [row.messageId, row.skills ?? []] as const),
-    );
-    const result = new Map<string, ReadonlyArray<{ id: string; name: string }>>();
-    let previousUser: string | null = null;
-    for (const message of data.messages) {
-      if (message.role === "user") previousUser = message.id;
-      else if (message.role === "assistant" && previousUser) {
-        const skills = byAssistant.get(message.id);
-        if (skills?.length) result.set(previousUser, skills);
-      }
-    }
-    return result;
-  }, [data.generations, data.messages]);
-  // Workspace imports belong to the send that claimed them: the user message
-  // before the attempt. Names only; the workspace path is this machine's.
-  const workspaceFilesByUserMessage = useMemo(() => {
-    const byAssistant = new Map(
-      (data.generations ?? []).map((row) => [row.messageId, row.workspaceFiles ?? []] as const),
-    );
-    const result = new Map<string, ReadonlyArray<string>>();
-    let previousUser: string | null = null;
-    for (const message of data.messages) {
-      if (message.role === "user") previousUser = message.id;
-      else if (message.role === "assistant" && previousUser) {
-        const files = byAssistant.get(message.id);
-        if (files && files.length > 0) result.set(previousUser, files);
-      }
-    }
-    return result;
-  }, [data.generations, data.messages]);
   // The server keeps root names only, so display resolves them against this
   // machine's live workspace and grants. Unresolved names drop out; grouping
   // then falls back to the path's first segment.
@@ -1654,110 +1443,83 @@ export function ChatView({
   ]);
 
   const liveId = streamingMessage?.id ?? (stream.status === "streaming" ? overlayId : null);
-  const display = useMemo(
-    () =>
-      baseDisplay.map((base): DisplayMessage => {
-        let projected = base;
-        const resolved = base.questionActions?.resolved;
-        if (resolved && activeEditingMessage?.id === resolved.messageId) {
-          projected = {
-            ...projected,
-            questionActions: {
-              ...base.questionActions,
-              resolved: {
-                ...resolved,
-                editState: {
-                  onSave: saveQuestionEdit,
-                  onCancel: closeEdit,
-                  disabled: generationDisabled || !effectiveModelId,
-                },
-              },
+  const display = useMemo(() => {
+    const edit: RowEdit | null = activeEditingMessage
+      ? {
+          messageId: activeEditingMessage.id,
+          question: {
+            onSave: saveQuestionEdit,
+            onCancel: closeEdit,
+            disabled: generationDisabled || !effectiveModelId,
+          },
+          message: {
+            initialDraft: activeEditingMessage.content,
+            researchEnabled: editResearchEnabled,
+            onResearchEnabledChange: setEditResearchEnabled,
+            onSave: (draft) => void saveEdit(draft),
+            onCancel: closeEdit,
+            saveDisabled: editPending || work.readOnly,
+            controlsDisabled: editPending,
+            modelId: effectiveModelId,
+            onModelChange: changeModel,
+            searchEnabled,
+            onSearchEnabledChange: setSearchEnabled,
+            reasoningEffort,
+            onReasoningEffortChange: setReasoningEffort,
+            attachments: editUploads,
+            skills: {
+              items: editableSkills.data ?? [],
+              selectedIds: editSkillIds,
+              onChange: setEditSkillIds,
             },
-          };
+            context: editContext,
+          },
         }
-
-        if (activeEditingMessage?.id === base.id) {
-          projected = {
-            ...projected,
-            editState: {
-              initialDraft: activeEditingMessage.content,
-              researchEnabled: editResearchEnabled,
-              onResearchEnabledChange: setEditResearchEnabled,
-              onSave: (draft) => void saveEdit(draft),
-              onCancel: closeEdit,
-              saveDisabled: editPending || work.readOnly,
-              controlsDisabled: editPending,
-              modelId: effectiveModelId,
-              onModelChange: changeModel,
-              searchEnabled,
-              onSearchEnabledChange: setSearchEnabled,
-              reasoningEffort,
-              onReasoningEffortChange: setReasoningEffort,
-              attachments: editUploads,
-              skills: {
-                items: editableSkills.data ?? [],
-                selectedIds: editSkillIds,
-                onChange: setEditSkillIds,
-              },
-              context: editContext,
-            },
-          };
-        }
-
-        if (base.id !== liveId) return projected;
-
-        // Overlay live stream state onto only the active assistant row. Its
-        // text is read by the row itself (`liveStream`), so pacing ticks never
-        // rebuild this list.
-        return {
-          ...projected,
+      : null;
+    const live: LiveRow | null = liveId
+      ? {
+          messageId: liveId,
           files: stream.files,
-          toolActivities: stream.tools.length > 0 ? stream.tools : base.toolActivities,
-          compactionActivities: stream.compactions,
-          // The stream has them the moment they are taken in; the rows arrive
-          // with the next refetch. Same ids, so each is drawn once.
-          steers: [
-            ...(projected.steers ?? []),
-            ...stream.steers.filter(
-              (steer) => !projected.steers?.some((known) => known.id === steer.id),
-            ),
-          ],
-          liveStream: { text: stream.live, status: stream.status },
+          tools: stream.tools,
+          compactions: stream.compactions,
+          steers: stream.steers,
+          text: stream.live,
+          status: stream.status,
           reading: stream.reading,
-          uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, stream.lookups),
-        };
-      }),
-    [
-      activeEditingMessage,
-      baseDisplay,
-      changeModel,
-      closeEdit,
-      editPending,
-      editUploads,
-      effectiveModelId,
-      liveId,
-      generationDisabled,
-      work.readOnly,
-      saveQuestionEdit,
-      saveEdit,
-      editSkillIds,
-      editContext,
-      editableSkills.data,
-      searchEnabled,
-      setSearchEnabled,
-      reasoningEffort,
-      setReasoningEffort,
-      editResearchEnabled,
-      stream.compactions,
-      stream.files,
-      stream.lookups,
-      stream.live,
-      stream.reading,
-      stream.status,
-      stream.steers,
-      stream.tools,
-    ],
-  );
+          lookups: stream.lookups,
+        }
+      : null;
+    return baseDisplay.map((base) => projectRow(base, edit, live));
+  }, [
+    activeEditingMessage,
+    baseDisplay,
+    changeModel,
+    closeEdit,
+    editPending,
+    editUploads,
+    effectiveModelId,
+    liveId,
+    generationDisabled,
+    work.readOnly,
+    saveQuestionEdit,
+    saveEdit,
+    editSkillIds,
+    editContext,
+    editableSkills.data,
+    searchEnabled,
+    setSearchEnabled,
+    reasoningEffort,
+    setReasoningEffort,
+    editResearchEnabled,
+    stream.compactions,
+    stream.files,
+    stream.lookups,
+    stream.live,
+    stream.reading,
+    stream.status,
+    stream.steers,
+    stream.tools,
+  ]);
 
   // A card lives on the tool row that made it. Only what no row names yet is
   // placed by hand, in its own answer.
@@ -2013,19 +1775,67 @@ export function ChatView({
 // How long the composer takes to travel from the middle of the column down to
 // the bottom. Navigation waits this out, so a fast first response cannot swap
 // the route in mid-slide, which would read as a jump rather than a move.
-interface DocumentOwnerFields {
-  documentId?: string;
-  documentConversationId?: string;
-  documentProjectId?: string;
+/** The edit in progress, drawn on the row it edits. */
+interface RowEdit {
+  readonly messageId: string;
+  /** For a structured answer being edited, on the question row it answered. */
+  readonly question: NonNullable<
+    NonNullable<NonNullable<DisplayMessage["questionActions"]>["resolved"]>["editState"]
+  >;
+  readonly message: NonNullable<DisplayMessage["editState"]>;
 }
-/** A tool row's document is live here when this chat or its current project owns it. */
-const ownsDocument = (
-  result: DocumentOwnerFields,
-  conversationId: string,
-  projectId: string | null,
-) =>
-  result.documentConversationId === conversationId ||
-  (projectId !== null && result.documentProjectId === projectId);
+/** What the answer being written shows from its stream until its rows arrive. */
+interface LiveRow {
+  readonly messageId: string;
+  readonly files: NonNullable<DisplayMessage["files"]>;
+  readonly tools: NonNullable<DisplayMessage["toolActivities"]>;
+  readonly compactions: NonNullable<DisplayMessage["compactionActivities"]>;
+  readonly steers: NonNullable<DisplayMessage["steers"]>;
+  readonly text: NonNullable<DisplayMessage["liveStream"]>["text"];
+  readonly status: NonNullable<DisplayMessage["liveStream"]>["status"];
+  readonly reading: Exclude<DisplayMessage["reading"], undefined>;
+  readonly lookups: Parameters<typeof mergeLookups>[1];
+}
+
+/**
+ * A row as shown: the edit in progress over the row it edits, and the live stream over the
+ * answer being written. Any other row is the very row given, so it does not draw again.
+ */
+function projectRow(
+  base: DisplayMessage,
+  edit: RowEdit | null,
+  live: LiveRow | null,
+): DisplayMessage {
+  let projected = base;
+  const resolved = base.questionActions?.resolved;
+  if (resolved && edit?.messageId === resolved.messageId)
+    projected = {
+      ...projected,
+      questionActions: {
+        ...base.questionActions,
+        resolved: { ...resolved, editState: edit.question },
+      },
+    };
+  if (edit?.messageId === base.id) projected = { ...projected, editState: edit.message };
+  if (base.id !== live?.messageId) return projected;
+  // Overlay live stream state onto only the active assistant row. Its text is read by the row
+  // itself (`liveStream`), so pacing ticks never rebuild this list.
+  return {
+    ...projected,
+    files: live.files,
+    toolActivities: live.tools.length > 0 ? live.tools : base.toolActivities,
+    compactionActivities: live.compactions,
+    // The stream has them the moment they are taken in; the rows arrive with the next
+    // refetch. Same ids, so each is drawn once.
+    steers: [
+      ...(projected.steers ?? []),
+      ...live.steers.filter((steer) => !projected.steers?.some((known) => known.id === steer.id)),
+    ],
+    liveStream: { text: live.text, status: live.status },
+    reading: live.reading,
+    uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, live.lookups),
+  };
+}
 
 const SLIDE_MS = 380;
 
