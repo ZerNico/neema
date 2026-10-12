@@ -34,6 +34,7 @@ import { makeExecutions } from "./executions.ts";
 import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
+import * as diff from "./diff.ts";
 import { Sandbox } from "./sandbox.ts";
 
 /**
@@ -753,6 +754,123 @@ describe("once a folder is attached", () => {
     expect(await readFile(join(root, "literal.txt"), "utf8")).toBe(
       text.split("TARGET").join(replacement),
     );
+  });
+
+  it.each([false, true])(
+    "refuses projected output over the byte limit before replacement or diff (all: %s)",
+    async (all) => {
+      const path = join(root, "expansion.txt");
+      const original = all ? "aa" : "a";
+      await writeFile(path, original);
+      const after = "é".repeat(all ? 500_001 : 1_000_001);
+      const construct = vi.spyOn(String.prototype, all ? "replaceAll" : "replace");
+      const preview = vi.spyOn(diff, "unifiedDiff");
+      try {
+        expect(
+          await failureOf(
+            handlers.editFile({
+              conversationId: CONVERSATION,
+              callId: "size",
+              path,
+              old: "a",
+              new: after,
+              all,
+            }),
+          ),
+        ).toBe("too-large");
+        expect(construct.mock.calls.some(([old]) => old === "a")).toBe(false);
+        expect(preview).not.toHaveBeenCalled();
+        expect(await readFile(path, "utf8")).toBe(original);
+      } finally {
+        construct.mockRestore();
+        preview.mockRestore();
+        await rm(path);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "accepts the exact decimal byte boundary including multibyte text (all: %s)",
+    async (all) => {
+      expect(LIMITS.writeBytes).toBe(2_000_000);
+      const path = join(root, "exact-edit.txt");
+      await writeFile(path, all ? "aa" : "a");
+      const after = "é".repeat(all ? 500_000 : 1_000_000);
+      try {
+        const receipt = await Effect.runPromise(
+          handlers.editFile({
+            conversationId: CONVERSATION,
+            callId: "exact",
+            path,
+            old: "a",
+            new: after,
+            all,
+          }),
+        );
+        expect(receipt.replacements).toBe(all ? 2 : 1);
+        expect((await readFile(path)).byteLength).toBe(LIMITS.writeBytes);
+      } finally {
+        await rm(path);
+      }
+    },
+  );
+
+  it("refuses an edit exactly one UTF-8 byte over the limit", async () => {
+    const path = join(root, "one-byte-over.txt");
+    await writeFile(path, "za");
+    try {
+      expect(
+        await failureOf(
+          handlers.editFile({
+            conversationId: CONVERSATION,
+            callId: "one-byte-over",
+            path,
+            old: "a",
+            new: "é".repeat(1_000_000),
+            all: false,
+          }),
+        ),
+      ).toBe("too-large");
+      expect(await readFile(path, "utf8")).toBe("za");
+    } finally {
+      await rm(path);
+    }
+  });
+
+  it("counts nonoverlapping matches and refuses UTF-8 expansion from malformed source", async () => {
+    const path = join(root, "malformed-edit.txt");
+    const source = Buffer.concat([Buffer.from("TARGET"), Buffer.alloc(666_665, 0xff)]);
+    await writeFile(path, source);
+    try {
+      expect(
+        await failureOf(
+          handlers.editFile({
+            conversationId: CONVERSATION,
+            callId: "malformed",
+            path,
+            old: "TARGET",
+            new: "long replacement",
+            all: false,
+          }),
+        ),
+      ).toBe("too-large");
+      expect(await readFile(path)).toEqual(source);
+      await writeFile(path, "aaaaa");
+      const receipt = await Effect.runPromise(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "nonoverlap",
+          path,
+          old: "aa",
+          new: "é",
+          all: true,
+        }),
+      );
+      expect(receipt.replacements).toBe(2);
+      expect(await readFile(path, "utf8")).toBe("ééa");
+    } finally {
+      await rm(path);
+    }
   });
 
   it("replays a real edit after renderer replacement without editing the file again", async () => {

@@ -15,6 +15,8 @@ import {
   type SearchMatch,
 } from "@chat/desktop-rpc";
 import { unifiedDiff } from "./diff.ts";
+import { literalReplacementSize } from "./literal-replacement.ts";
+import { withRegexMatcher, type RegexMatcher } from "./regex-matcher.ts";
 import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { exists, folderName, resolveAmongRoots, resolveInFolder } from "./folders.ts";
@@ -579,10 +581,17 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
+          const projected = literalReplacementSize(text, before, after, all ?? false);
+          if (projected.bytes > LIMITS.writeBytes) {
+            return yield* new DesktopError({
+              reason: "too-large",
+              message: `${target.relative} would be too large to write.`,
+            });
+          }
           const next = all
             ? text.replaceAll(before, () => after)
             : text.replace(before, () => after);
-          const replacements = all ? text.split(before).length - 1 : 1;
+          const replacements = projected.replacements;
           yield* Effect.tryPromise({
             try: () => writeFile(target.absolute, next, "utf8"),
             catch: () =>
@@ -708,79 +717,83 @@ export const makeHandlers = (shell: Shell) =>
       searchFiles: ({ conversationId, pattern, glob }) =>
         Effect.gen(function* () {
           const roots = yield* rootsFor(conversationId);
-          const regex = yield* Effect.try({
-            try: () => new RegExp(pattern),
-            catch: () =>
-              new DesktopError({
-                reason: "bad-pattern",
-                message: `${pattern} is not a valid regular expression.`,
-              }),
-          });
-          const matches: SearchMatch[] = [];
-          let filesSearched = 0;
-          let truncated = false;
-          for (const { root } of roots) {
-            if (matches.length >= LIMITS.matches) {
-              truncated = true;
-              break;
-            }
-            const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
-            if (resolved._tag === "Failure") continue;
-            if (yield* Effect.promise(ripgrepAvailable)) {
-              const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
-              for (const hit of fast.matches) {
-                if (matches.length >= LIMITS.matches) {
-                  truncated = true;
-                  break;
-                }
-                // rg reports root-relative paths; the model's address is the
-                // absolute one.
-                matches.push({ ...hit, path: join(resolved.success.absolute, hit.path) });
-              }
-              filesSearched += fast.filesSearched;
-              truncated ||= fast.truncated;
-              continue;
-            }
-            const matcher = glob
-              ? yield* Effect.try({
-                  try: () => globToRegExp(glob),
-                  catch: () =>
-                    new DesktopError({ reason: "bad-pattern", message: `Could not read ${glob}.` }),
-                })
-              : null;
-            const walked = yield* Effect.promise(() =>
-              walkFiles(resolved.success.absolute, WALK_LIMIT, (rel) =>
-                matcher ? matcher.test(rel) : true,
-              ),
-            );
-            truncated ||= walked.truncated;
-            for (const file of walked.files) {
-              if (matches.length >= LIMITS.matches) {
-                truncated = true;
-                break;
-              }
-              const loaded = yield* readPrefix(file.absolute, LIMITS.readBytes, file.relative).pipe(
-                Effect.result,
-              );
-              if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
-              filesSearched += 1;
-              const lines = loaded.success.toString("utf8").split("\n");
-              for (let index = 0; index < lines.length; index += 1) {
-                const line = lines[index]!;
-                if (!regex.test(line)) continue;
-                matches.push({
-                  path: file.absolute,
-                  line: index + 1,
-                  text: line.length > LIMITS.matchChars ? line.slice(0, LIMITS.matchChars) : line,
-                });
-                if (matches.length >= LIMITS.matches) {
-                  truncated = true;
-                  break;
-                }
-              }
-            }
+          const fastBackend = yield* Effect.promise(ripgrepAvailable);
+          if (fastBackend) {
+            yield* Effect.try({
+              try: () => new RegExp(pattern),
+              catch: () =>
+                new DesktopError({
+                  reason: "bad-pattern",
+                  message: `${pattern} is not a valid regular expression.`,
+                }),
+            });
           }
-          return { pattern, matches, filesSearched, truncated };
+          const search = (match: RegexMatcher | null) =>
+            Effect.gen(function* () {
+              const matches: SearchMatch[] = [];
+              let filesSearched = 0;
+              let truncated = false;
+              for (const { root } of roots) {
+                if (matches.length >= LIMITS.matches) {
+                  truncated = true;
+                  break;
+                }
+                const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
+                if (resolved._tag === "Failure") continue;
+                if (!match) {
+                  const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
+                  for (const hit of fast.matches) {
+                    if (matches.length >= LIMITS.matches) {
+                      truncated = true;
+                      break;
+                    }
+                    // rg reports root-relative paths; the model's address is the
+                    // absolute one.
+                    matches.push({ ...hit, path: join(resolved.success.absolute, hit.path) });
+                  }
+                  filesSearched += fast.filesSearched;
+                  truncated ||= fast.truncated;
+                  continue;
+                }
+                const matcher = glob
+                  ? yield* Effect.try({
+                      try: () => globToRegExp(glob),
+                      catch: () =>
+                        new DesktopError({
+                          reason: "bad-pattern",
+                          message: `Could not read ${glob}.`,
+                        }),
+                    })
+                  : null;
+                const walked = yield* Effect.promise(() =>
+                  walkFiles(resolved.success.absolute, WALK_LIMIT, (rel) =>
+                    matcher ? matcher.test(rel) : true,
+                  ),
+                );
+                truncated ||= walked.truncated;
+                for (const file of walked.files) {
+                  if (matches.length >= LIMITS.matches) {
+                    truncated = true;
+                    break;
+                  }
+                  const loaded = yield* readPrefix(
+                    file.absolute,
+                    LIMITS.readBytes,
+                    file.relative,
+                  ).pipe(Effect.result);
+                  if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
+                  filesSearched += 1;
+                  const found = yield* match(
+                    loaded.success.toString("utf8"),
+                    LIMITS.matches - matches.length,
+                  );
+                  matches.push(...found.matches.map((hit) => ({ ...hit, path: file.absolute })));
+                  truncated ||= found.truncated;
+                }
+              }
+              return { pattern, matches, filesSearched, truncated };
+            });
+          return yield* fastBackend ? search(null) : withRegexMatcher(pattern, search);
         }),
 
       writeFile: ({ conversationId, path, text }) =>

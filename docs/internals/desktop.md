@@ -591,8 +591,12 @@ the desktop host.
 
 Search uses installed ripgrep when available and the JavaScript walker
 otherwise; no additional native binary is bundled, and the handler picks the
-backend once per call. Both skip symlink traversal, include hidden files other
-than `.git`, and honour `.gitignore` even outside a checkout. They are not
+backend once per call. The fallback tests lines in a dedicated worker with a
+parent-owned 30-second deadline. Cancellation, failure and completion await
+that exact worker’s termination, so the content-search regexp’s backtracking
+cannot block Electron’s main thread. Its worker source is embedded in the main
+bundle and needs no packaged worker entry point. Both skip symlink traversal,
+include hidden files other than `.git`, and honour `.gitignore` even outside a checkout. They are not
 identical: rg also reads `.ignore`, `.rgignore` and repository excludes, gives
 a deeper `.gitignore` precedence where the walker ORs them, and has its own
 glob and regex dialects. rg runs with `--no-config` so a user's
@@ -602,6 +606,11 @@ summary is a partial answer and only a run with none is a failure, with a bad
 pattern or glob told apart by rg's message.
 
 Edits require an exact, unique match unless `all` is set. Replacement text is
-literal, including dollar-substitution tokens. `diff` supplies a bounded unified
+literal, including dollar-substitution tokens. Before constructing output,
+the handler counts nonoverlapping replacements and measures their projected
+UTF-8 bytes, including surrogate pairs at edit boundaries. Both original and
+resulting files must fit the same decimal 2,000,000-byte write limit. Refusal
+leaves the source unchanged and performs no replacement construction, write or
+diff. `diff` supplies a bounded unified
 preview; expensive or oversized previews are marked truncated rather than
 blocking indefinitely. A preview limit does not change the applied replacement.
