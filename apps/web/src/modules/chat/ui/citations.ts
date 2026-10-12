@@ -106,8 +106,11 @@ export function selectAnswerSources(
 /** Deduplicates sources by citation index, lowest first. */
 export function collectSources(activities: ReadonlyArray<ToolActivity>): ToolSource[] {
   return mergeSources(
-    activities.flatMap((activity) =>
-      activity.family === "web" || activity.family === "research" || activity.family === "knowledge"
+    activities.flatMap<ToolSource>((activity) =>
+      activity.family === "web" ||
+      activity.family === "research" ||
+      activity.family === "knowledge" ||
+      activity.family === "integration"
         ? (activity.sources ?? [])
         : [],
     ),

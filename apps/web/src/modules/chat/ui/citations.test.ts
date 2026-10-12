@@ -6,7 +6,13 @@ import {
   selectAnswerSources,
 } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
-import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
+import {
+  integrationActivityFromRow,
+  type ToolActivity,
+  type ToolSource,
+} from "../client/use-message-stream.ts";
+import { projectIntegrationToolResult } from "~/modules/integrations/tool-schema.ts";
+import { toActivity } from "./stored-activities.ts";
 
 const source = (index: number, url: string): ToolSource => ({
   kind: "web" as const,
@@ -107,6 +113,96 @@ describe("answer evidence selection", () => {
 
   it("counts prose in blockquotes/lists and ignores half-streamed markers", () => {
     expect([...citedSourceIndexes("> Claim[^2]\n\n- Another[^3]\n\nHalf[^4")]).toEqual([2, 3]);
+  });
+});
+
+const integrationProjection = (read = true) =>
+  projectIntegrationToolResult({
+    name: "int_outline__search_documents",
+    integrationId: "outline",
+    tool: "search_documents",
+    label: "Search documents",
+    access: "read",
+    summary: null,
+    raw: { ok: true },
+    isFailure: false,
+    sources: [
+      {
+        kind: "integration",
+        index: 2,
+        integrationId: "outline",
+        url: "https://outline.test/document",
+        title: "Service document",
+        snippet: "",
+        read,
+      },
+    ],
+  });
+
+const storedIntegration = (id: string, read = true) =>
+  toActivity({
+    id,
+    toolName: "int_outline__search_documents",
+    arguments: {},
+    result: integrationProjection(read),
+    status: "complete",
+    turnIndex: 0,
+    callIndex: 0,
+    textOffset: 0,
+    error: null,
+  });
+
+describe("integration citation projections", () => {
+  it.each(["live", "reload", "branch"])("resolves integration-only citations on %s", (path) => {
+    // Branches copy the durable projection with a fresh row id.
+    const activity =
+      path === "live"
+        ? integrationActivityFromRow("live-call", integrationProjection())
+        : storedIntegration(path === "reload" ? "stored-call" : "branched-call");
+    const own = collectSources([activity]);
+    expect(own.map((item) => item.index)).toEqual([2]);
+    const selected = selectAnswerSources("Claim[^2].", own, () => undefined);
+    expect(prepareCitedMarkdown("Claim[^2].", selected)).toBe(
+      "Claim[^2].\n\n[^2]: https://outline.test/document",
+    );
+  });
+
+  it("merges integration with web evidence by numeric index without dropping markers", () => {
+    const own = collectSources([
+      storedIntegration("first"),
+      webActivity("web", [source(1, "https://web.test/page")]),
+      storedIntegration("duplicate"),
+    ]);
+    expect(own.map((item) => item.index)).toEqual([1, 2]);
+    const selected = selectAnswerSources("Web[^1]. Service[^2].", own, () => undefined);
+    const markdown = prepareCitedMarkdown("Web[^1]. Service[^2].", selected);
+    expect(markdown).toContain("Web[^1]. Service[^2].");
+    expect(markdown).toContain("[^1]: https://web.test/page");
+    expect(markdown).toContain("[^2]: https://outline.test/document");
+  });
+
+  it("inherits integration evidence only when cited on a subsequent turn", () => {
+    const own = collectSources([storedIntegration("earlier")]);
+    const inherited = inheritSources([own, []])[1]!;
+    const selected = selectAnswerSources("Prior finding[^2].", [], inherited);
+    expect(selected.map((item) => item.index)).toEqual([2]);
+    expect(prepareCitedMarkdown("Prior finding[^2].", selected)).toContain(
+      "[^2]: https://outline.test/document",
+    );
+    expect(selectAnswerSources("No earlier citations.", [], inherited)).toEqual([]);
+  });
+
+  it("keeps read evidence and requires citations for snippet-only integration sources", () => {
+    expect(
+      selectAnswerSources(
+        "No citation.",
+        collectSources([storedIntegration("read")]),
+        () => undefined,
+      ),
+    ).toHaveLength(1);
+    const snippet = collectSources([storedIntegration("snippet", false)]);
+    expect(selectAnswerSources("No citation.", snippet, () => undefined)).toEqual([]);
+    expect(selectAnswerSources("Claim[^2].", snippet, () => undefined)).toHaveLength(1);
   });
 });
 
