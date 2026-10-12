@@ -5,6 +5,11 @@ import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
   BROWSER_ALLOW_SITE,
+  BROWSER_ACT,
+  BROWSER_BEGIN,
+  BROWSER_END,
+  BROWSER_CANCEL,
+  BROWSER_NAVIGATE,
   BROWSER_DRIVE,
   BROWSER_FAVICON,
   BROWSER_LIFECYCLE,
@@ -132,18 +137,47 @@ describe("restricted bundled preloads", () => {
     expect(icons).toEqual([{ webContentsId: 7, dataUrl: "data:image/png;base64,AQ" }]);
     // The model's browser surface goes to its own channels, with plain values only.
     const agent = browser.agent!;
-    await agent.snapshot(7, { screenshot: true });
+    await agent.begin("call-1", "c1", 1000);
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_BEGIN, {
+      callId: "call-1",
+      conversationId: "c1",
+      deadline: 1000,
+    });
+    await agent.navigate(7, { url: "https://a.test/" }, "call-1");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_NAVIGATE, {
+      webContentsId: 7,
+      target: { url: "https://a.test/" },
+      callId: "call-1",
+    });
+    await agent.snapshot(7, { screenshot: true }, "call-1");
     expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_SNAPSHOT, {
       webContentsId: 7,
       screenshot: true,
+      callId: "call-1",
     });
-    await agent.drive(7, { conversationId: "c1", allow: ["https://a.test/"] });
+    await agent.drive(7, { conversationId: "c1", allow: ["https://a.test/"] }, "call-1");
     expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_DRIVE, {
       webContentsId: 7,
       driving: { conversationId: "c1", allow: ["https://a.test/"] },
+      callId: "call-1",
     });
-    await agent.drive(7, null);
-    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_DRIVE, { webContentsId: 7, driving: null });
+    await agent.drive(7, null, "call-1");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_DRIVE, {
+      webContentsId: 7,
+      driving: null,
+      callId: "call-1",
+    });
+    const action = { kind: "evaluate", callId: "stable-action", expression: "1" } as const;
+    await agent.act(7, action, "call-1");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_ACT, {
+      webContentsId: 7,
+      action,
+      callId: "call-1",
+    });
+    await agent.cancel("call-1");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_CANCEL, { callId: "call-1" });
+    await agent.end("call-1");
+    expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_END, { callId: "call-1" });
     await agent.allowSite("c1", "https://a.test/", "always");
     expect(ipc.invoke).toHaveBeenLastCalledWith(BROWSER_ALLOW_SITE, {
       conversationId: "c1",

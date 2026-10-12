@@ -1,6 +1,10 @@
 import { ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import {
   BROWSER_ACT,
+  BROWSER_BEGIN,
+  BROWSER_END,
+  BROWSER_CANCEL,
+  BROWSER_NAVIGATE,
   BROWSER_SAVE,
   BROWSER_ALLOW_SITE,
   BROWSER_ALLOWED_SITES,
@@ -16,6 +20,9 @@ import { isSafeExternalUrl } from "../config.ts";
 import type { attachBrowserGuests } from "./guests.ts";
 import {
   decodeAct,
+  decodeBegin,
+  decodeCallId,
+  decodeNavigate,
   decodeSave,
   decodeDrive,
   decodeLifecycle,
@@ -38,6 +45,22 @@ export function registerBrowserIpc(access: {
   grants(event: IpcMainInvokeEvent): { grants: SiteGrants; origin: string };
   page(event: IpcMainInvokeEvent): void;
 }) {
+  ipcMain.handle(BROWSER_BEGIN, (event, payload: unknown) => {
+    const guests = access.guests(event);
+    const { callId, conversationId, deadline } = decodeBegin(payload);
+    return guests.begin(callId, conversationId, deadline);
+  });
+  ipcMain.handle(BROWSER_END, (event, payload: unknown) =>
+    access.guests(event).end(decodeCallId(payload)),
+  );
+  ipcMain.handle(BROWSER_CANCEL, (event, payload: unknown) =>
+    access.guests(event).cancel(decodeCallId(payload)),
+  );
+  ipcMain.handle(BROWSER_NAVIGATE, (event, payload: unknown) => {
+    const guests = access.guests(event);
+    const { webContentsId, target, callId } = decodeNavigate(payload);
+    return guests.navigate(webContentsId, target, callId);
+  });
   ipcMain.handle(BROWSER_LIFECYCLE, (event, payload: unknown) => {
     const guests = access.guests(event);
     const { webContentsId, state } = decodeLifecycle(payload);
@@ -45,28 +68,28 @@ export function registerBrowserIpc(access: {
   });
   ipcMain.handle(BROWSER_SNAPSHOT, (event, payload: unknown) => {
     const guests = access.guests(event);
-    const { webContentsId, screenshot } = decodeSnapshot(payload);
-    return guests.snapshot(webContentsId, { screenshot });
+    const { webContentsId, screenshot, callId } = decodeSnapshot(payload);
+    return guests.snapshot(webContentsId, { screenshot }, callId);
   });
   ipcMain.handle(BROWSER_WAIT_FOR, (event, payload: unknown) => {
     const guests = access.guests(event);
-    const { webContentsId, condition } = decodeWaitFor(payload);
-    return guests.waitFor(webContentsId, condition);
+    const { webContentsId, condition, callId } = decodeWaitFor(payload);
+    return guests.waitFor(webContentsId, condition, callId);
   });
   ipcMain.handle(BROWSER_ACT, (event, payload: unknown) => {
     const guests = access.guests(event);
-    const { webContentsId, action } = decodeAct(payload);
-    return guests.act(webContentsId, action);
+    const { webContentsId, action, callId } = decodeAct(payload);
+    return guests.act(webContentsId, action, callId);
   });
   ipcMain.handle(BROWSER_SAVE, (event, payload: unknown) => {
     const guests = access.guests(event);
-    const { webContentsId, urls } = decodeSave(payload);
-    return guests.save(webContentsId, urls);
+    const { webContentsId, urls, callId } = decodeSave(payload);
+    return guests.save(webContentsId, urls, callId);
   });
   ipcMain.handle(BROWSER_DRIVE, (event, payload: unknown) => {
     const guests = access.guests(event);
-    const { webContentsId, driving } = decodeDrive(payload);
-    return guests.drive(webContentsId, driving);
+    const { webContentsId, driving, callId } = decodeDrive(payload);
+    return guests.drive(webContentsId, driving, callId);
   });
   ipcMain.handle(BROWSER_SITE_ALLOWED, (event, payload: unknown) => {
     const { grants, origin } = access.grants(event);

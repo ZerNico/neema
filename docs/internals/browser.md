@@ -34,8 +34,10 @@ Node and `webSecurity`, whatever the markup asked for. Guests may only navigate 
 - **Mouse buttons:** Electron's input events know only left, middle and right, so a
   listener in an isolated world, injected at each `dom-ready`, maps buttons 4 and 5 to back
   and forward. It shares the page's DOM but none of its scripts.
-- **Popups:** refused, and sent back to the page, which opens one as a tab beside its source
-  when that chat is on screen and in the system browser otherwise.
+- **Popups:** native windows are refused. While a model call drives the source, main checks
+  its site gate before forwarding the address, so a refused popup reaches neither a replacement
+  guest nor the system browser. Approved popups and ordinary human browsing still open a tab
+  beside their source when that chat is on screen and the system browser otherwise.
 
 ## One profile per server
 
@@ -49,7 +51,9 @@ preload cannot load Node, so the hash is computed in main (`browser/profile.ts`)
 preload only builds names from it.
 
 The `browser` bridge is optional and independent of `PROTOCOL_VERSION`, like `network`.
-An older shell has none, and the site then offers no browser.
+An older shell has none, and the site then offers no browser. A shell whose model bridge lacks
+call admission, cancellation or main-owned navigation keeps human browsing but offers no
+model browser tools.
 
 ## Pages live outside the routes
 
@@ -97,8 +101,13 @@ the page's own geometry, since the page is drawn above everything in the panel.
 
 A tab shows the page's favicon. Main sees each guest's favicon URL, fetches it in the
 page's own session (so logged-in and intranet sites work) and hands the page a small
-`data:` image. The site's CSP admits no other image origin, and the server's
-`/api/favicon` proxy would neither reach those sites nor stay private. A tab's spinner
+`data:` image. Receiving stops at 64 KiB or five seconds, and a newer icon, guest destruction
+or host navigation cancels the old receive. Each request keeps the authority it started with.
+A model-origin receive ends with its drive or call, including cancellation and expiry. Its
+manual redirects check that original authority before contact, never treating a released drive
+as human authority. A genuinely human-origin request stays human if a model drive starts later.
+The site's CSP admits no other image origin,
+and the server's `/api/favicon` proxy would neither reach those sites nor stay private. A tab's spinner
 and the stop/reload button follow loading only once it has stayed off a moment, because
 pages like Google stop and start several times as they finish.
 
@@ -163,7 +172,9 @@ out of its replies too.
   pixels with `scrollBy`, and reports how far down it ended up. Never wheel events: those
   scroll whatever is under the pointer. Clicking and typing scroll their element into view.
 - **Waiting:** `browser_wait_for` checks fixed code in an isolated world, with the text as a
-  JSON literal. Nothing from the page or the model runs.
+  JSON literal. Nothing from the page or the model runs. Each awaited probe is bounded by
+  the remaining wait and call deadline, not just the interval between probes. An unresolved
+  read-only probe releases its wait without terminating or replacing the person's page.
 
 ### Sites
 
@@ -206,24 +217,35 @@ argument, and a key press is dispatched as key events inside the page, doing wha
 scale. References and that scale are dropped on every main-frame navigation, and a stale one
 says "take a new snapshot" rather than clicking whatever is there now.
 
-- **Replays:** each action remembers its call id per tab in main, so a replayed call returns
-  the first result instead of acting twice. An action that failed to reach the page is
-  forgotten, so its replay may try again.
-- **One at a time:** a tab runs one call at a time. An action is several protocol steps, and two
-  interleaved would type into each other's fields; they would also share the tab's one gate.
+- **Call lifetime:** main admits a fresh execution identity with one chat and a deadline at
+  most five minutes away. Every model IPC carries that identity. Main checks it before
+  dispatch and after awaited protocol steps, and cancellation or expiry revokes later work.
+  Ended identities stay refused for the maximum lifetime of a queued request. The ledger is
+  bounded and refuses new starts while a cancellation it could not store might arrive late.
+- **Replays:** an action's stable call id is separate from its execution identity. A replay
+  gets fresh lifetime authority but returns the first action result instead of acting twice.
+  Retired IPC identities cannot start again. An action that failed to reach the page is
+  forgotten, so a replay may try again.
+- **One at a time:** the renderer serializes calls per tab. It checks cancellation at dequeue,
+  before revealing or waking a tab, after drive acquisition and before dispatch. A cancelled
+  queued call cannot later act when its predecessor releases the tab. Awaited IPC is bounded
+  too, so an unresponsive wait cannot retain the queue.
 - **Driving:** every action runs driven, through the same navigation gate as a page load, with
   the site the page is already on allowed too: being there was allowed one way or another
   (once, from the user's text, or by the person). A click that leads somewhere unapproved is
-  stopped and reported, so the model has to ask. The gate comes off whatever happens, but only
-  once main is done acting, since an action still running after Stop may yet navigate. An
-  action's result is kept as soon as main returns it, so a slow load afterwards never makes a
-  click that happened look like one that did not, which the model would repeat.
+  stopped and reported, so the model has to ask. Release is scoped to the owning call, so an
+  old cleanup cannot release a newer drive. Stop revokes new dispatch immediately. The
+  renderer waits briefly for already-submitted work before releasing the gate, not forever
+  at the expense of human browsing. An action's result is kept as soon as main returns it,
+  so a slow load afterwards never makes a click that happened look like one that did not.
 - **Code:** `browser_evaluate` runs the model's expression in an isolated world, with a
   10-second limit and a capped JSON result labelled as data. It sees the DOM but none of the
   page's scripts. At the limit, if the page cannot answer a trivial expression, its thread is
   busy and the script is terminated through the DevTools protocol, since a loop would keep the
   tab from every later call. Otherwise the code is only waiting and is left alone: terminating
-  then would end the page's own next script instead.
+  then would end the page's own next script instead. Call cancellation does not undo submitted
+  JavaScript or prevent all of its later effects. Retiring arbitrary evaluation while
+  preserving the person's page state remains unresolved, not an enforcement guarantee.
 - **Approvals:** click, type, press, select and evaluate are the `"browser-action"` kind with
   change semantics. They ask under manual and automatic approval, and run under "reads and
   changes" or after "Let it use the browser for this chat". Scrolling is a read. The card shows
@@ -245,14 +267,29 @@ says "take a new snapshot" rather than clicking whatever is there now.
 `browser_save` is how the model saves files it finds: given their addresses, main fetches them
 with the tab's own session and lands them in the chat's workspace. From main no page's
 cross-origin rules apply, and files behind the user's logins come too. It runs driven, through
-the same gate as navigation: the tab's site and the chat's allowed sites are fetched at once, and
-for any other the call asks the user mid-call and fetches what they allow. Clicking download
-links one by one was the alternative, and cross-site links navigate instead of downloading.
+the same gate as navigation. Native `net.request` uses the guest's session with credentials
+included. Electron's `session.fetch` rejects manual redirects, so the request's redirect event
+returns headers without calling `followRedirect`. The caller authorizes and issues each next
+request itself, at most eight redirects. A blocked destination is reported separately from
+the original file address, so approval grants the destination and retries the original.
+Receiving enforces the byte cap against actual streamed chunks, even without a truthful
+Content-Length. The native producer also checks bytes before queuing them, since its response
+emitter has no backpressure API. Aborting cancels both the native request and its body.
+Drive release, cancellation, expiry and guest or host teardown abort the save.
+The signal reaches workspace writing and the check immediately before publishing each final
+name, including collision retries. A link already submitted may commit. This is prevention
+of not-yet-submitted publication, never rollback of a file already saved.
 
 A file a driven page downloads (a link the model clicks, or one `browser_evaluate` starts) lands
 in the chat's Work workspace, never in a dialog over the app, and the call reports where. Main
 claims a download for the chat while its call drives the tab and afterwards until the person
 next clicks or types in that tab (ten minutes at most), since a click starts one a moment later
-and a script may after it returned; releasing the tab waits for downloads under way. Downloads the person starts keep the Save dialog. This is how t3code lets
-an agent save what it finds; our version writes into the workspace, where files and commands
-can use it.
+and a script may after it returned. Normal release waits at most thirty seconds for downloads
+under way. Explicit cancellation and expiry cancel owned items and revoke that lingering
+ownership. A revoked drive may remain until cleanup to gate navigation, but a download arriving
+then is cancelled before receiving or landing. Admission checks its call deadline even before
+the expiry timer runs. Normal successful release and end keep the bounded linger, which is
+separate from active call authority. At most four model downloads run at once, each for at most a minute, with declared
+and received-byte progress checks. Completion reads the exact owned temp through a bounded
+file handle before landing, then removes only that temp. Cancelled items also clean up a late
+terminal report. Downloads the person starts keep the Save dialog.

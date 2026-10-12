@@ -292,8 +292,8 @@ export const browserTabs = {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    if (ready(tabs)) return Promise.resolve(true);
     if (signal?.aborted) return Promise.resolve(false);
+    if (ready(tabs)) return Promise.resolve(true);
     return new Promise((resolve) => {
       const finish = (value: boolean) => {
         clearTimeout(timer);

@@ -8,7 +8,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserToolName } from "../tool-schema.ts";
 import { browserTabs, type WebviewElement } from "./browser-store.ts";
-import { describeTarget, executeBrowserTool } from "./execute-browser.ts";
+import { cancelBrowserCall, describeTarget, executeBrowserTool } from "./execute-browser.ts";
 
 const browser = {
   partition: "persist:browser-0123456789abcdef",
@@ -26,15 +26,32 @@ const saved: string[] = [];
 let actionResult: BrowserActionResult = { ok: true };
 let snapshot: BrowserSnapshot;
 const agent = {
+  begin: vi.fn(async (_executionId: string, _chat: string, _deadline: number) => {}),
+  cancel: vi.fn(async () => {}),
+  end: vi.fn(async () => {}),
+  navigate: vi.fn(
+    async (guest: number, target: { url: string } | { action: "back" | "forward" | "reload" }) => {
+      const tab = [...browserTabs.all().values()].find(
+        (candidate) => candidate.webContentsId === guest,
+      );
+      if (!tab) return;
+      const view = browserTabs.webview(tab.id);
+      if ("url" in target) await view?.loadURL(target.url);
+      else if (target.action === "back") view?.goBack();
+      else if (target.action === "forward") view?.goForward();
+      else view?.reload();
+    },
+  ),
   snapshot: vi.fn(async () => snapshot),
   waitFor: vi.fn(async () => ({ met: true, url: "https://a.test/" })),
-  act: vi.fn(async (_id: number, _action: BrowserAction) => actionResult),
-  save: vi.fn(async (_id: number, urls: ReadonlyArray<string>) =>
-    urls.map((url) =>
-      url.includes("other.test") && !allowedHosts.has("other.test")
-        ? { url, error: "That site is not allowed in this chat.", blocked: true as const }
-        : { url, path: `/work/${url.split("/").at(-1)}` },
-    ),
+  act: vi.fn(async (_id: number, _action: BrowserAction, _executionId: string) => actionResult),
+  save: vi.fn(
+    async (_id: number, urls: ReadonlyArray<string>): ReturnType<DesktopBrowserAgent["save"]> =>
+      urls.map((url) =>
+        url.includes("other.test") && !allowedHosts.has("other.test")
+          ? { url, error: "That site is not allowed in this chat.", blocked: true as const }
+          : { url, path: `/work/${url.split("/").at(-1)}` },
+      ),
   ),
   drive: vi.fn(async (_id: number, driving: unknown) => ({
     blocked: driving ? null : blocked,
@@ -76,6 +93,7 @@ const run = (
     callId?: string;
     meta?: { temporary?: boolean };
     askSite?: (url: string) => Promise<boolean>;
+    remainingMs?: number;
   } = {},
 ) =>
   executeBrowserTool(
@@ -88,7 +106,7 @@ const run = (
       args,
       meta: extra.meta,
     },
-    60_000,
+    extra.remainingMs ?? 60_000,
     {
       browser,
       agent,
@@ -121,6 +139,153 @@ afterEach(() => {
 const own = () => [...browserTabs.all().values()].filter((tab) => tab.owner === "c1");
 
 describe("browser tools in the page", () => {
+  it("cancels both executions of an overlapping replay without dispatching its queued copy", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<BrowserActionResult>();
+    agent.act.mockImplementationOnce(() => {
+      started.resolve();
+      return response.promise;
+    });
+    const first = run(
+      "browser_evaluate",
+      { tab: "t1", expression: "1" },
+      { callId: "same-action" },
+    );
+    await started.promise;
+    const second = run(
+      "browser_evaluate",
+      { tab: "t1", expression: "1" },
+      { callId: "same-action" },
+    );
+    await vi.waitFor(() => expect(agent.begin).toHaveBeenCalledTimes(3));
+    const identities = agent.begin.mock.calls.slice(-2).map(([id]) => id);
+    expect(new Set(identities).size).toBe(2);
+    cancelBrowserCall("same-action");
+    expect(await first).toMatchObject({ ok: false });
+    expect(await second).toMatchObject({ ok: false });
+    for (const identity of identities) expect(agent.cancel).toHaveBeenCalledWith(identity);
+    expect(agent.act).toHaveBeenCalledOnce();
+    response.resolve({ ok: true });
+  });
+
+  it("asks about a refused redirect destination and retries its original file address", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    const url = "https://a.test/file";
+    agent.save.mockResolvedValueOnce([
+      { url, error: "Not allowed", blocked: true, blockedUrl: "https://b.test/file" },
+    ]);
+    agent.save.mockResolvedValueOnce([{ url, path: "/work/file" }]);
+    const askSite = vi.fn(async () => true);
+    expect(await run("browser_save", { tab: "t1", urls: [url] }, { askSite })).toMatchObject({
+      ok: true,
+    });
+    expect(askSite).toHaveBeenCalledExactlyOnceWith("https://b.test/file");
+    expect(agent.save.mock.calls.map(([, urls]) => urls)).toEqual([[url], [url]]);
+    expect(agent.drive).toHaveBeenCalledWith(
+      expect.any(Number),
+      {
+        conversationId: "c1",
+        allow: ["https://a.test/", url, "https://b.test/file"],
+      },
+      expect.any(String),
+    );
+  });
+
+  it("does not dispatch, wake or reveal a canceled queued navigation", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    const release = Promise.withResolvers<BrowserActionResult>();
+    const started = Promise.withResolvers<void>();
+    agent.act.mockImplementationOnce(() => {
+      started.resolve();
+      return release.promise;
+    });
+    const first = run("browser_evaluate", { tab: "t1", expression: "1" }, { callId: "holding" });
+    await started.promise;
+    const [tab] = own();
+    const revealAt = tab!.revealAt;
+    agent.navigate.mockClear();
+    const queued = run(
+      "browser_navigate",
+      { tab: "t1", url: "https://b.test/" },
+      { callId: "queued" },
+    );
+    await vi.waitFor(() => expect(agent.begin).toHaveBeenCalledTimes(3));
+    cancelBrowserCall("queued");
+    expect(await queued).toMatchObject({ ok: false });
+    release.resolve({ ok: true });
+    await first;
+    expect(agent.navigate).not.toHaveBeenCalled();
+    expect(browserTabs.get(tab!.id)?.revealAt).toBe(revealAt);
+    expect(agent.cancel).toHaveBeenCalledWith(agent.begin.mock.calls[2]![0]);
+    expect(
+      await run("browser_evaluate", { tab: "t1", expression: "1" }, { callId: "later" }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("checks cancellation after awaited drive acquisition before acting", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    const acquired = Promise.withResolvers<{ blocked: string | null; saved: string[] }>();
+    const started = Promise.withResolvers<void>();
+    agent.drive.mockImplementationOnce(() => {
+      started.resolve();
+      return acquired.promise;
+    });
+    const pending = run(
+      "browser_evaluate",
+      { tab: "t1", expression: "1" },
+      { callId: "acquiring" },
+    );
+    await started.promise;
+    cancelBrowserCall("acquiring");
+    expect(await pending).toMatchObject({ ok: false });
+    acquired.resolve({ blocked: null, saved: [] });
+    expect(agent.act).not.toHaveBeenCalled();
+  });
+
+  it("a stalled wait cannot retain the queue after cancellation", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    const started = Promise.withResolvers<void>();
+    agent.waitFor.mockImplementationOnce(() => {
+      started.resolve();
+      return new Promise(() => {});
+    });
+    const pending = run("browser_wait_for", { tab: "t1", text: "ready" }, { callId: "wait" });
+    await started.promise;
+    cancelBrowserCall("wait");
+    expect(await pending).toMatchObject({ ok: false });
+    expect(
+      await run("browser_evaluate", { tab: "t1", expression: "1" }, { callId: "after-wait" }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("an expired queued action never dispatches when its predecessor releases", async () => {
+    await run("browser_open", { url: "https://a.test/" });
+    vi.useFakeTimers();
+    try {
+      const release = Promise.withResolvers<BrowserActionResult>();
+      const started = Promise.withResolvers<void>();
+      agent.act.mockImplementationOnce(() => {
+        started.resolve();
+        return release.promise;
+      });
+      const holding = run("browser_evaluate", { tab: "t1", expression: "1" }, { callId: "hold" });
+      await started.promise;
+      const queued = run(
+        "browser_evaluate",
+        { tab: "t1", expression: "1" },
+        { callId: "expired", remainingMs: 1010 },
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await queued).toMatchObject({ ok: false });
+      release.resolve({ ok: true });
+      await holding;
+      expect(agent.act.mock.calls.map(([, action]) => action.callId)).toEqual(["hold"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens a page in a new labelled tab of the chat, driven, and asks the panel to show it", async () => {
     const result = await run("browser_open", { url: "https://a.test/" });
     expect(result).toMatchObject({ ok: true, summary: "Opened a.test" });
@@ -131,11 +296,16 @@ describe("browser tools in the page", () => {
       partition: browser.partition,
     });
     expect(tab!.revealAt).toBeGreaterThan(0);
-    expect(agent.drive).toHaveBeenNthCalledWith(1, tab!.webContentsId, {
-      conversationId: "c1",
-      allow: ["https://a.test/"],
-    });
-    expect(agent.drive).toHaveBeenLastCalledWith(tab!.webContentsId, null);
+    expect(agent.drive).toHaveBeenNthCalledWith(
+      1,
+      tab!.webContentsId,
+      {
+        conversationId: "c1",
+        allow: ["https://a.test/"],
+      },
+      expect.any(String),
+    );
+    expect(agent.drive).toHaveBeenLastCalledWith(tab!.webContentsId, null, expect.any(String));
   });
 
   it("finds the tab a replayed call already opened instead of opening another", async () => {
@@ -215,16 +385,24 @@ describe("browser tools in the page", () => {
   it("takes a screenshot to share it, and scrolls by pixels, saying where it ended up", async () => {
     await run("browser_open", { url: "https://a.test/" });
     await run("browser_snapshot", { tab: "t1", share: true });
-    expect(agent.snapshot).toHaveBeenLastCalledWith(expect.any(Number), { screenshot: true });
+    expect(agent.snapshot).toHaveBeenLastCalledWith(
+      expect.any(Number),
+      { screenshot: true },
+      expect.any(String),
+    );
 
     actionResult = { ok: true, value: "800 of 4000" };
     const scrolled = await run("browser_scroll", { tab: "t1", deltaY: 800 }, { callId: "s1" });
-    expect(agent.act).toHaveBeenLastCalledWith(expect.any(Number), {
-      kind: "scroll",
-      callId: "s1",
-      deltaX: 0,
-      deltaY: 800,
-    });
+    expect(agent.act).toHaveBeenLastCalledWith(
+      expect.any(Number),
+      {
+        kind: "scroll",
+        callId: "s1",
+        deltaX: 0,
+        deltaY: 800,
+      },
+      expect.any(String),
+    );
     expect(scrolled.detail).toContain("Now 800 of 4000 pixels down.");
     expect(await run("browser_scroll", { tab: "t1" }, { callId: "s2" })).toMatchObject({
       ok: false,
@@ -335,18 +513,26 @@ describe("browser tools in the page", () => {
     });
     const result = await run("browser_click", { tab: "t1", ref: "e1" }, { callId: "click-1" });
     expect(result).toMatchObject({ ok: true, summary: "Clicked on the page" });
-    expect(agent.act).toHaveBeenLastCalledWith(tab!.webContentsId, {
-      kind: "click",
-      callId: "click-1",
-      ref: "e1",
-    });
+    expect(agent.act).toHaveBeenLastCalledWith(
+      tab!.webContentsId,
+      {
+        kind: "click",
+        callId: "click-1",
+        ref: "e1",
+      },
+      expect.any(String),
+    );
     expect(drivingDuringAction).toEqual({ messageId: "m1", generationId: "g1" });
     expect(browserTabs.get(tab!.id)?.driving).toBeNull();
     // The site the page is on was allowed somehow; a click may stay on it.
-    expect(agent.drive).toHaveBeenCalledWith(tab!.webContentsId, {
-      conversationId: "c1",
-      allow: ["https://a.test/"],
-    });
+    expect(agent.drive).toHaveBeenCalledWith(
+      tab!.webContentsId,
+      {
+        conversationId: "c1",
+        allow: ["https://a.test/"],
+      },
+      expect.any(String),
+    );
   });
 
   it("types a secret only when it is marked, and never echoes it", async () => {
@@ -360,15 +546,19 @@ describe("browser tools in the page", () => {
       { tab: "t1", ref: "e2", text: "hunter2", sensitive: true },
       { callId: "type-2" },
     );
-    expect(agent.act).toHaveBeenLastCalledWith(expect.any(Number), {
-      kind: "type",
-      callId: "type-2",
-      ref: "e2",
-      text: "hunter2",
-      clear: false,
-      submit: false,
-      secret: true,
-    });
+    expect(agent.act).toHaveBeenLastCalledWith(
+      expect.any(Number),
+      {
+        kind: "type",
+        callId: "type-2",
+        ref: "e2",
+        text: "hunter2",
+        clear: false,
+        submit: false,
+        secret: true,
+      },
+      expect.any(String),
+    );
     expect(typed.summary).toBe("Filled in a field, hidden");
     expect(JSON.stringify(typed)).not.toContain("hunter2");
   });
@@ -416,7 +606,7 @@ describe("browser tools in the page", () => {
     agent.act.mockRejectedValueOnce(new Error("Invalid browser action."));
     const result = await run("browser_click", { tab: "t1", ref: "e1" }, { callId: "boom" });
     expect(result).toMatchObject({ ok: false, summary: "The browser couldn’t do that" });
-    expect(agent.drive).toHaveBeenLastCalledWith(tab!.webContentsId, null);
+    expect(agent.drive).toHaveBeenLastCalledWith(tab!.webContentsId, null, expect.any(String));
     expect(browserTabs.get(tab!.id)?.driving).toBeNull();
   });
 
@@ -447,10 +637,14 @@ describe("browser tools in the page", () => {
     const askSite = vi.fn(async () => true);
     const result = await run("browser_click", { tab: "t1", ref: "e1" }, { callId: "go", askSite });
     expect(askSite).toHaveBeenCalledWith("https://b.test/next");
-    expect(agent.drive).toHaveBeenCalledWith(tab!.webContentsId, {
-      conversationId: "c1",
-      allow: ["https://b.test/next"],
-    });
+    expect(agent.drive).toHaveBeenCalledWith(
+      tab!.webContentsId,
+      {
+        conversationId: "c1",
+        allow: ["https://b.test/next"],
+      },
+      expect.any(String),
+    );
     expect(browserTabs.get(tab!.id)?.url).toBe("https://b.test/next");
     expect(result).toMatchObject({ ok: true, summary: "Clicked on the page" });
 

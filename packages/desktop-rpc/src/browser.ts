@@ -12,6 +12,10 @@ export const BROWSER_WAIT_FOR = "chat-desktop:browser-wait-for" as const;
 export const BROWSER_DRIVE = "chat-desktop:browser-drive" as const;
 export const BROWSER_ACT = "chat-desktop:browser-act" as const;
 export const BROWSER_SAVE = "chat-desktop:browser-save" as const;
+export const BROWSER_BEGIN = "chat-desktop:browser-begin" as const;
+export const BROWSER_END = "chat-desktop:browser-end" as const;
+export const BROWSER_CANCEL = "chat-desktop:browser-cancel" as const;
+export const BROWSER_NAVIGATE = "chat-desktop:browser-navigate" as const;
 export const BROWSER_SITE_ALLOWED = "chat-desktop:browser-site-allowed" as const;
 export const BROWSER_ALLOW_SITE = "chat-desktop:browser-allow-site" as const;
 export const BROWSER_ALLOWED_SITES = "chat-desktop:browser-allowed-sites" as const;
@@ -109,10 +113,23 @@ export type BrowserActionResult =
  * what withholds the tools.
  */
 export interface DesktopBrowserAgent {
-  snapshot(webContentsId: number, options: { screenshot: boolean }): Promise<BrowserSnapshot>;
+  begin(callId: string, conversationId: string, deadline: number): Promise<void>;
+  end(callId: string): Promise<void>;
+  cancel(callId: string): Promise<void>;
+  navigate(
+    webContentsId: number,
+    target: { url: string } | { action: "back" | "forward" | "reload" },
+    callId: string,
+  ): Promise<void>;
+  snapshot(
+    webContentsId: number,
+    options: { screenshot: boolean },
+    callId: string,
+  ): Promise<BrowserSnapshot>;
   waitFor(
     webContentsId: number,
     condition: { text?: string; urlIncludes?: string; timeoutMs: number },
+    callId: string,
   ): Promise<{ met: boolean; url: string }>;
   /**
    * Marks a tab as driven for one call, or clears it with null. While driven, a
@@ -123,8 +140,10 @@ export interface DesktopBrowserAgent {
   drive(
     webContentsId: number,
     driving: { conversationId: string; allow: ReadonlyArray<string> } | null,
+    callId: string,
   ): Promise<{ blocked: string | null; saved: ReadonlyArray<string> }>;
-  act(webContentsId: number, action: BrowserAction): Promise<BrowserActionResult>;
+  /** Execution identity is separate from action.callId, which remains its stable replay key. */
+  act(webContentsId: number, action: BrowserAction, callId: string): Promise<BrowserActionResult>;
   /**
    * Fetches files with the tab's own session into the driving chat's workspace,
    * each where it landed or why not. Only addresses the tab's gate lets through.
@@ -132,6 +151,7 @@ export interface DesktopBrowserAgent {
   save(
     webContentsId: number,
     urls: ReadonlyArray<string>,
+    callId: string,
   ): Promise<
     ReadonlyArray<{
       url: string;
@@ -139,6 +159,8 @@ export interface DesktopBrowserAgent {
       error?: string;
       /** Its site is not allowed for the chat; the caller may ask the user and try again. */
       blocked?: true;
+      /** A redirect destination refused before contact. */
+      blockedUrl?: string;
     }>
   >;
   siteAllowed(conversationId: string, url: string): Promise<boolean>;
@@ -174,5 +196,16 @@ export function readDesktopBrowser(): DesktopBrowser | null {
     typeof browser.openExternal !== "function"
   )
     return null;
-  return browser as DesktopBrowser;
+  const admitted = browser as DesktopBrowser;
+  if (
+    admitted.agent &&
+    (typeof admitted.agent.begin !== "function" ||
+      typeof admitted.agent.end !== "function" ||
+      typeof admitted.agent.cancel !== "function" ||
+      typeof admitted.agent.navigate !== "function")
+  ) {
+    const { agent: _agent, ...humanBrowser } = admitted;
+    return humanBrowser;
+  }
+  return admitted;
 }

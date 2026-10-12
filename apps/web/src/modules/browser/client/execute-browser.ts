@@ -39,8 +39,23 @@ const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // One call at a time per tab: an action is several protocol steps, and two
 // interleaved would type into each other's fields and share one gate in main.
 const tabTurns = new Map<string, Promise<void>>();
-const inTurn = <T>(tabId: string, work: () => Promise<T>): Promise<T> => {
-  const next = (tabTurns.get(tabId) ?? Promise.resolve()).then(work);
+const bounded = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> => {
+  if (signal.aborted) {
+    void promise.catch(() => {});
+    return Promise.reject(new Error("The browser call ended."));
+  }
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("The browser call ended."));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+};
+
+const inTurn = <T>(tabId: string, work: () => Promise<T>, signal: AbortSignal): Promise<T> => {
+  const next = (tabTurns.get(tabId) ?? Promise.resolve()).then(() => {
+    signal.throwIfAborted();
+    return work();
+  });
   const tail = next.then(
     () => {},
     () => {},
@@ -49,14 +64,16 @@ const inTurn = <T>(tabId: string, work: () => Promise<T>): Promise<T> => {
   void tail.then(() => {
     if (tabTurns.get(tabId) === tail) tabTurns.delete(tabId);
   });
-  return next;
+  return bounded(next, signal);
 };
 
 // One per call in flight, so Stop or an expired call ends its waits at once.
-const running = new Map<string, AbortController>();
+const running = new Map<string, Set<AbortController>>();
 
-/** Ends a browser call's waits; the page stops loading and the tab is released. */
-export const cancelBrowserCall = (callId: string) => running.get(callId)?.abort();
+/** Ends every local execution of a call, including overlapping replay deliveries. */
+export const cancelBrowserCall = (callId: string) => {
+  for (const controller of running.get(callId) ?? []) controller.abort();
+};
 
 // Per tab, what each reference of its last outline stood for, and at which
 // address, so an approval card can say what a call means to touch.
@@ -119,6 +136,7 @@ const resolveTab = (owner: string, label: string): BrowserTab | string => {
  * puts on its chat. Resolves with the page's guest id, or null in time.
  */
 const wake = async (id: string, signal: AbortSignal): Promise<number | null> => {
+  signal.throwIfAborted();
   const tab = browserTabs.get(id);
   if (tab && !tab.live) browserTabs.update(id, { live: true });
   const ready = await browserTabs.until(
@@ -154,14 +172,6 @@ const blockedResult = (site: string) =>
 
 // How many sites in a row one call may ask about, as a page redirects on.
 const FOLLOW_MAX = 3;
-
-// A failed load still settles: the page shows the error, and the result says where it is.
-const loadIn = async (tab: BrowserTab, url: string) => {
-  await browserTabs
-    .webview(tab.id)
-    ?.loadURL(url)
-    .catch(() => {});
-};
 
 // Downloads the call caused, told to the model and in the transcript's line.
 const withSaved = (result: DesktopToolResult, saved: ReadonlyArray<string>): DesktopToolResult => {
@@ -202,9 +212,26 @@ export async function executeBrowserTool(
   { browser, agent, askSite, saveToWorkspace }: BrowserDeps,
 ): Promise<DesktopToolResult> {
   const controller = new AbortController();
-  running.set(call.callId, controller);
-  const deadline = setTimeout(() => controller.abort(), Math.max(0, remainingMs - 1_000));
+  const executions = running.get(call.callId) ?? new Set<AbortController>();
+  running.set(call.callId, executions.add(controller));
+  // A replay keeps its action id, but never revives a retired IPC execution.
+  const executionId = crypto.randomUUID();
+  const deadlineAt = Date.now() + Math.max(0, Math.min(remainingMs - 1_000, 5 * 60_000 - 1_000));
+  const deadline = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
   const { signal } = controller;
+  const check = () => {
+    if (Date.now() >= deadlineAt) controller.abort();
+    signal.throwIfAborted();
+  };
+  const cancelMain = () => {
+    void agent.cancel(executionId).catch(() => {});
+  };
+  signal.addEventListener("abort", cancelMain, { once: true });
+  const loadIn = async (_tab: BrowserTab, url: string, guest: number) => {
+    check();
+    await bounded(agent.navigate(guest, { url }, executionId), signal);
+    check();
+  };
   const owner = call.conversationId;
   const args = call.args;
   // The server knows whether the chat is temporary even when no view of it is
@@ -227,15 +254,26 @@ export async function executeBrowserTool(
     allow: string[],
     work: (keep: (value: T) => void) => Promise<void>,
   ): Promise<{ blocked: string | null; value: T | null }> => {
-    await agent.drive(webContentsId, { conversationId: owner, allow });
+    check();
+    try {
+      await bounded(
+        agent.drive(webContentsId, { conversationId: owner, allow }, executionId),
+        signal,
+      );
+      check();
+    } catch (error) {
+      void agent.drive(webContentsId, null, executionId).catch(() => {});
+      throw error;
+    }
     const answer = { messageId: call.messageId, generationId: call.generationId };
     browserTabs.update(tab.id, { driving: answer, usedBy: answer });
     let value: T | null = null;
     let finished = false;
     let blocked: string | null = null;
     let loadTimer: ReturnType<typeof setTimeout> | undefined;
+    check();
     const acting = work((result) => {
-      value = result;
+      if (!signal.aborted) value = result;
     }).finally(() => {
       finished = true;
     });
@@ -249,8 +287,8 @@ export async function executeBrowserTool(
       ]);
     } finally {
       clearTimeout(loadTimer);
-      // Main may still be acting after Stop or the deadline, and a submit it
-      // sends may yet navigate: the gate stays on until it is done.
+      // Submitted JavaScript may still run. This grace preserves its gate,
+      // but main cancellation already stops new dispatch and save publication.
       if (!finished) await Promise.race([acting.catch(() => {}), pause(RELEASE_GRACE_MS)]);
       // Still in use while the answer runs; without a hold to end that, now.
       browserTabs.update(tab.id, {
@@ -259,7 +297,7 @@ export async function executeBrowserTool(
       });
       if (signal.aborted) browserTabs.webview(tab.id)?.stop();
       // Always released, or the person's own browsing in the tab stays gated.
-      blocked = await agent.drive(webContentsId, null).then(
+      blocked = await agent.drive(webContentsId, null, executionId).then(
         (released) => {
           savedFiles.push(...released.saved);
           return released.blocked;
@@ -267,6 +305,7 @@ export async function executeBrowserTool(
         () => null,
       );
     }
+    check();
     return { blocked, value };
   };
 
@@ -288,7 +327,10 @@ export async function executeBrowserTool(
         `You didn’t allow ${site}`,
         `The page went on to ${site}, and the user did not allow it. That is an answer: do not try to reach it another way.`,
       );
-    const { blocked } = await driven(tab, webContentsId, [stopped], () => loadIn(tab, stopped));
+    check();
+    const { blocked } = await driven(tab, webContentsId, [stopped], () =>
+      loadIn(tab, stopped, webContentsId),
+    );
     return follow(tab, webContentsId, blocked, asked + 1);
   };
 
@@ -299,14 +341,24 @@ export async function executeBrowserTool(
   ): Promise<DesktopToolResult> => {
     const target = resolveTab(owner, str(args.tab));
     if (typeof target === "string") return desktopFailure("Couldn’t tell which tab", target);
-    return inTurn(target.id, async () => {
-      if (reveal) browserTabs.reveal(target.id);
-      const guest = await wake(target.id, signal);
-      return guest === null ? unreachable : work(now(target), guest);
-    });
+    check();
+    return inTurn(
+      target.id,
+      async () => {
+        check();
+        if (reveal) browserTabs.reveal(target.id);
+        const guest = await wake(target.id, signal);
+        check();
+        return guest === null ? unreachable : work(now(target), guest);
+      },
+      signal,
+    );
   };
 
   try {
+    check();
+    await bounded(agent.begin(executionId, owner, deadlineAt), signal);
+    check();
     const reply = await (async (): Promise<DesktopToolResult> => {
       switch (call.name) {
         case "browser_tabs": {
@@ -328,6 +380,7 @@ export async function executeBrowserTool(
           if (hostOf(url) === null)
             return desktopFailure("No address to open", "Give an absolute http(s) address as url.");
           // A replayed call finds the tab it already opened rather than opening another.
+          check();
           const tab =
             ownTabs(owner).find((candidate) => candidate.openedBy === call.callId) ??
             browserTabs.open({
@@ -336,20 +389,26 @@ export async function executeBrowserTool(
               url: "about:blank",
               openedBy: call.callId,
             });
-          return await inTurn(tab.id, async () => {
-            browserTabs.reveal(tab.id);
-            const guest = await wake(tab.id, signal);
-            if (guest === null) return unreachable;
-            const { blocked } = await driven(tab, guest, [url], () => loadIn(tab, url));
-            const refused = await follow(tab, guest, blocked);
-            if (refused) return refused;
-            const opened = now(tab);
-            return done(
-              `Opened ${hostOf(opened.url) ?? url}`,
-              `${describeTab(opened)}\n\nRead it with browser_snapshot.`,
-              pageOf(opened),
-            );
-          });
+          return await inTurn(
+            tab.id,
+            async () => {
+              check();
+              browserTabs.reveal(tab.id);
+              const guest = await wake(tab.id, signal);
+              check();
+              if (guest === null) return unreachable;
+              const { blocked } = await driven(tab, guest, [url], () => loadIn(tab, url, guest));
+              const refused = await follow(tab, guest, blocked);
+              if (refused) return refused;
+              const opened = now(tab);
+              return done(
+                `Opened ${hostOf(opened.url) ?? url}`,
+                `${describeTab(opened)}\n\nRead it with browser_snapshot.`,
+                pageOf(opened),
+              );
+            },
+            signal,
+          );
         }
 
         case "browser_navigate": {
@@ -365,11 +424,12 @@ export async function executeBrowserTool(
           return await withTab(
             async (target, guest) => {
               const { blocked } = await driven(target, guest, url ? [url] : [], async () => {
-                if (url) return loadIn(target, url);
-                const webview = browserTabs.webview(target.id);
-                if (action === "back") webview?.goBack();
-                else if (action === "forward") webview?.goForward();
-                else webview?.reload();
+                check();
+                if (url) return loadIn(target, url, guest);
+                const navigation =
+                  action === "back" ? "back" : action === "forward" ? "forward" : "reload";
+                await bounded(agent.navigate(guest, { action: navigation }, executionId), signal);
+                check();
                 await settle(target.id, signal);
               });
               const refused = await follow(target, guest, blocked);
@@ -394,7 +454,12 @@ export async function executeBrowserTool(
             );
             // Sharing or saving a screenshot takes one; the server shares it.
             const wanted = args.screenshot === true || args.share === true || args.save === true;
-            const snapshot = await agent.snapshot(guest, { screenshot: wanted });
+            check();
+            const snapshot = await bounded(
+              agent.snapshot(guest, { screenshot: wanted }, executionId),
+              signal,
+            );
+            check();
             rememberOutline(target, now(target).url, snapshot.text);
             const note =
               wanted && !snapshot.screenshot
@@ -458,7 +523,9 @@ export async function executeBrowserTool(
               guest,
               [target.url],
               async (keep) => {
-                keep(await agent.act(guest, action));
+                check();
+                keep(await bounded(agent.act(guest, action, executionId), signal));
+                check();
                 // A click or a key may start a navigation; let it finish first.
                 if (action.kind !== "evaluate" && action.kind !== "scroll")
                   await settle(target.id, signal, 400);
@@ -504,22 +571,41 @@ export async function executeBrowserTool(
             // other site is asked about once, and what the user allows is fetched.
             const saveAll = async (allow: string[], wanted: string[]) =>
               (
-                await driven<ReadonlyArray<SaveOutcome>>(target, guest, allow, async (keep) =>
-                  keep(await agent.save(guest, wanted)),
-                )
+                await driven<ReadonlyArray<SaveOutcome>>(target, guest, allow, async (keep) => {
+                  check();
+                  keep(await bounded(agent.save(guest, wanted, executionId), signal));
+                  check();
+                })
               ).value ?? [];
             const first = await saveAll([target.url], urls);
             const asked = new Map<string, boolean>();
             for (const outcome of first) {
-              const host = hostOf(outcome.url);
+              check();
+              const destination = outcome.blockedUrl ?? outcome.url;
+              const host = hostOf(destination);
               if (!outcome.blocked || !askSite || !host || asked.has(host)) continue;
               // oxlint-disable-next-line eslint/no-await-in-loop -- one question at a time
-              asked.set(host, await Promise.race([askSite(outcome.url), ended.then(() => false)]));
+              asked.set(host, await Promise.race([askSite(destination), ended.then(() => false)]));
+              check();
             }
-            const retry = first
-              .filter((outcome) => outcome.blocked && asked.get(hostOf(outcome.url) ?? ""))
-              .map((outcome) => outcome.url);
-            const second = retry.length > 0 ? await saveAll([target.url, ...retry], retry) : [];
+            const approved = first.filter(
+              (outcome) =>
+                outcome.blocked && asked.get(hostOf(outcome.blockedUrl ?? outcome.url) ?? ""),
+            );
+            const retry = approved.map((outcome) => outcome.url);
+            const second =
+              retry.length > 0
+                ? await saveAll(
+                    [
+                      target.url,
+                      ...approved.flatMap((outcome) => [
+                        outcome.url,
+                        outcome.blockedUrl ?? outcome.url,
+                      ]),
+                    ],
+                    retry,
+                  )
+                : [];
             const outcomes = urls.map(
               (url) =>
                 second.find((outcome) => outcome.url === url) ??
@@ -542,7 +628,7 @@ export async function executeBrowserTool(
             );
             const lines = [
               failed.length > 0
-                ? `Not saved:\n${failed.map((outcome) => `${outcome.url}: ${outcome.blocked && asked.get(hostOf(outcome.url) ?? "") === false ? "the user did not allow that site" : (outcome.error ?? "unknown")}`).join("\n")}`
+                ? `Not saved:\n${failed.map((outcome) => `${outcome.url}: ${outcome.blocked && asked.get(hostOf(outcome.blockedUrl ?? outcome.url) ?? "") === false ? "the user did not allow that site" : (outcome.error ?? "unknown")}`).join("\n")}`
                 : "",
               saved.length > 0
                 ? `Saved in this chat's workspace, ${folder}:\n${saved.map((path) => path.slice(folder.length + 1)).join("\n")}`
@@ -566,11 +652,20 @@ export async function executeBrowserTool(
           return await withTab(async (target, guest) => {
             const asked = typeof args.timeoutMs === "number" ? args.timeoutMs : WAIT_DEFAULT_MS;
             const timeoutMs = Math.min(Math.max(asked, 0), WAIT_MAX_MS, remainingMs - 2_000);
-            const result = await agent.waitFor(guest, {
-              ...(text ? { text } : {}),
-              ...(urlIncludes ? { urlIncludes } : {}),
-              timeoutMs,
-            });
+            check();
+            const result = await bounded(
+              agent.waitFor(
+                guest,
+                {
+                  ...(text ? { text } : {}),
+                  ...(urlIncludes ? { urlIncludes } : {}),
+                  timeoutMs: Math.max(0, Math.min(timeoutMs, deadlineAt - Date.now())),
+                },
+                executionId,
+              ),
+              signal,
+            );
+            check();
             return result.met
               ? done("The page is ready", `Condition met.\n${result.url}`, pageOf(now(target)))
               : desktopFailure(
@@ -589,7 +684,10 @@ export async function executeBrowserTool(
     );
   } finally {
     clearTimeout(deadline);
-    running.delete(call.callId);
+    signal.removeEventListener("abort", cancelMain);
+    executions.delete(controller);
+    if (executions.size === 0) running.delete(call.callId);
+    void agent.end(executionId).catch(() => {});
   }
 }
 

@@ -61,20 +61,42 @@ it("decodes the page's other requests, refusing what main could not use", () => 
   });
   expect(() => decodeLifecycle({ webContentsId: 3, state: "discarded" })).toThrow("state");
   expect(() => decodeSnapshot({ webContentsId: "3" })).toThrow("tab");
-  expect(decodeWaitFor({ webContentsId: 1, text: "Done" })).toEqual({
+  expect(decodeWaitFor({ webContentsId: 1, callId: "c", text: "Done" })).toEqual({
     webContentsId: 1,
+    callId: "c",
     condition: { text: "Done", timeoutMs: 0 },
   });
-  expect(() => decodeWaitFor({ webContentsId: 1, text: "x".repeat(5000) })).toThrow("text");
-  expect(decodeDrive({ webContentsId: 1, driving: null })).toEqual({
+  expect(() => decodeWaitFor({ webContentsId: 1, callId: "c", text: "x".repeat(5000) })).toThrow(
+    "text",
+  );
+  expect(decodeDrive({ webContentsId: 1, callId: "c", driving: null })).toEqual({
     webContentsId: 1,
+    callId: "c",
     driving: null,
   });
   expect(
-    decodeDrive({ webContentsId: 1, driving: { conversationId: "c", allow: ["https://a.test"] } }),
-  ).toEqual({ webContentsId: 1, driving: { conversationId: "c", allow: ["https://a.test"] } });
-  expect(() => decodeDrive({ webContentsId: 1, driving: { allow: [] } })).toThrow("chat");
+    decodeDrive({
+      webContentsId: 1,
+      callId: "c",
+      driving: { conversationId: "c", allow: ["https://a.test"] },
+    }),
+  ).toEqual({
+    webContentsId: 1,
+    callId: "c",
+    driving: { conversationId: "c", allow: ["https://a.test"] },
+  });
+  expect(() => decodeDrive({ webContentsId: 1, callId: "c", driving: { allow: [] } })).toThrow(
+    "chat",
+  );
+  expect(() => decodeSnapshot({ webContentsId: 1 })).toThrow("call");
   expect(() => decodeAct({ webContentsId: 1, action: { kind: "click" } })).toThrow("action");
+  const action = { kind: "evaluate", callId: "stable", expression: "1" };
+  expect(() => decodeAct({ webContentsId: 1, action })).toThrow("call");
+  expect(decodeAct({ webContentsId: 1, action, callId: "execution" })).toEqual({
+    webContentsId: 1,
+    action,
+    callId: "execution",
+  });
   expect(() =>
     decodeSiteGrant({ conversationId: "c", url: "https://a.test", scope: "forever" }),
   ).toThrow("scope");

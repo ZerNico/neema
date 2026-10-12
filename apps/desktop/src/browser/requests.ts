@@ -37,15 +37,52 @@ export function decodeLifecycle(payload: unknown) {
   return { webContentsId: tab(input), state };
 }
 
+export function decodeCallId(payload: unknown) {
+  const id = text(record(payload).callId, 200);
+  if (!id) throw new Error("Invalid browser call.");
+  return id;
+}
+
+export function decodeBegin(payload: unknown) {
+  const input = record(payload);
+  if (typeof input.deadline !== "number" || !Number.isFinite(input.deadline))
+    throw new Error("Invalid browser call deadline.");
+  return {
+    callId: decodeCallId(payload),
+    conversationId: required(input.conversationId, "chat"),
+    deadline: input.deadline,
+  };
+}
+
+export function decodeNavigate(payload: unknown) {
+  const input = record(payload);
+  const target = record(input.target);
+  const action = target.action;
+  if (typeof target.url === "string" && /^https?:\/\//i.test(target.url))
+    return {
+      webContentsId: tab(input),
+      callId: decodeCallId(payload),
+      target: { url: required(target.url, "address") },
+    };
+  if (action !== "back" && action !== "forward" && action !== "reload")
+    throw new Error("Invalid browser navigation.");
+  return { webContentsId: tab(input), callId: decodeCallId(payload), target: { action } as const };
+}
+
 export function decodeSnapshot(payload: unknown) {
   const input = record(payload);
-  return { webContentsId: tab(input), screenshot: input.screenshot === true };
+  return {
+    webContentsId: tab(input),
+    screenshot: input.screenshot === true,
+    callId: decodeCallId(payload),
+  };
 }
 
 export function decodeWaitFor(payload: unknown) {
   const input = record(payload);
   return {
     webContentsId: tab(input),
+    callId: decodeCallId(payload),
     condition: {
       ...(input.text === undefined ? {} : { text: required(input.text, "text") }),
       ...(input.urlIncludes === undefined
@@ -60,7 +97,7 @@ export function decodeAct(payload: unknown) {
   const input = record(payload);
   const action = decodeAction(input.action);
   if (!action) throw new Error("Invalid browser action.");
-  return { webContentsId: tab(input), action };
+  return { webContentsId: tab(input), action, callId: decodeCallId(payload) };
 }
 
 const SAVE_MAX = 50;
@@ -71,6 +108,7 @@ export function decodeSave(payload: unknown) {
   if (urls.length === 0 || urls.length > SAVE_MAX) throw new Error("Invalid file list.");
   return {
     webContentsId: tab(input),
+    callId: decodeCallId(payload),
     urls: urls.map((url) => {
       const address = required(url, "address");
       if (!/^https?:\/\//i.test(address)) throw new Error("Invalid address.");
@@ -84,6 +122,7 @@ export function decodeDrive(payload: unknown) {
   const driving = record(input.driving);
   return {
     webContentsId: tab(input),
+    callId: decodeCallId(payload),
     driving:
       input.driving === null
         ? null

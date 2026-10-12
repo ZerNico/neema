@@ -384,10 +384,10 @@ const openMainWindow = (origin: string) => {
       () => toOrigin(window.webContents.getURL()) === origin,
       (conversationId, url) => siteGrants?.allowed(origin, conversationId, url) ?? false,
       // A file the model's page downloaded, into that chat's workspace on this machine.
-      (conversationId, fileName, bytes) =>
+      (conversationId, fileName, bytes, signal) =>
         runtime.runPromise(
           Effect.flatMap(WorkspaceRegistry, (workspaces) =>
-            Effect.map(workspaces.landFile(conversationId, fileName, bytes), (landed) =>
+            Effect.map(workspaces.landFile(conversationId, fileName, bytes, signal), (landed) =>
               join(workspaces.path(conversationId), landed.name),
             ),
           ),

@@ -12,10 +12,10 @@ import {
   type Session,
   type WebContents,
 } from "electron";
-import { randomUUID } from "node:crypto";
-import { readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { abortable, browserCalls, type BrowserCallContext } from "./calls.ts";
+import { DOWNLOAD_MAX, receiveDownload } from "./download.ts";
+import { fetchAllowed, receiveBytes } from "./receive.ts";
+import { fetchManual } from "./fetch.ts";
 import {
   BROWSER_FAVICON,
   BROWSER_OPEN_TAB,
@@ -27,7 +27,7 @@ import {
 } from "@chat/desktop-rpc";
 import { perform, type Cdp } from "./perform.ts";
 import { isSafeExternalUrl } from "../config.ts";
-import { faviconDataUrl, inlineFavicon } from "./favicon.ts";
+import { FAVICON_MAX_BYTES, faviconDataUrl, inlineFavicon } from "./favicon.ts";
 import { admitWebview } from "./guest-policy.ts";
 import { isBrowserPartition } from "./partitions.ts";
 import { blockedSite, type Driving } from "./gate.ts";
@@ -80,13 +80,16 @@ const within = <T>(promise: Promise<T>, ms: number) => {
 const capture = async (
   guest: WebContents,
   cdp: Cdp,
+  call: BrowserCallContext,
   tries = CAPTURE_TRIES,
 ): Promise<NativeImage | null> => {
-  const image = await within(guest.capturePage(), CAPTURE_MS);
+  call.check();
+  const image = await abortable(within(guest.capturePage(), CAPTURE_MS), call.signal);
+  call.check();
   if (image && !image.isEmpty()) return image;
   if (tries > 1) {
-    await pause(CAPTURE_RETRY_MS);
-    return capture(guest, cdp, tries - 1);
+    await abortable(pause(CAPTURE_RETRY_MS), call.signal);
+    return capture(guest, cdp, call, tries - 1);
   }
   const shot = await within(
     cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }),
@@ -96,10 +99,14 @@ const capture = async (
   return fallback && !fallback.isEmpty() ? fallback : null;
 };
 
-const cdpOf = (guest: WebContents): Cdp => ({
-  send: (method, params) => {
+const cdpOf = (guest: WebContents, call?: BrowserCallContext): Cdp => ({
+  send: async (method, params) => {
+    call?.check();
     if (!guest.debugger.isAttached()) guest.debugger.attach("1.3");
-    return guest.debugger.sendCommand(method, params);
+    const pending = guest.debugger.sendCommand(method, params);
+    const result = await (call ? abortable(pending, call.signal) : pending);
+    call?.check();
+    return result;
   },
 });
 const MOUSE_NAVIGATION = `addEventListener("mouseup", (event) => {
@@ -157,9 +164,42 @@ export function attachBrowserGuests(
   /** Whether a site is allowed for the model in a chat (`site-grants.ts`). */
   siteAllowed: (conversationId: string, url: string) => boolean,
   /** Puts a downloaded file into a chat's workspace; resolves to where it landed. */
-  land: (conversationId: string, fileName: string, bytes: Uint8Array) => Promise<string>,
+  land: (
+    conversationId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    signal?: AbortSignal,
+  ) => Promise<string>,
 ) {
   const host = window.webContents;
+  const calls = browserCalls((callId) => cancelOwned(callId));
+  const callTabs = new Map<string, number>();
+  const downloads = new Map<AbortController, { id: number; callId: string }>();
+  const icons = new Map<number, AbortController>();
+  const retireGuest = (id: number) => {
+    for (const [callId, tab] of callTabs)
+      if (tab === id) {
+        calls.end(callId);
+        callTabs.delete(callId);
+      }
+    for (const [controller, download] of downloads) if (download.id === id) controller.abort();
+    driven.get(id)?.controller.abort();
+    icons.get(id)?.abort();
+    icons.delete(id);
+  };
+  const retireHost = () => {
+    calls.clear();
+    callTabs.clear();
+    for (const controller of downloads.keys()) controller.abort();
+    for (const controller of icons.values()) controller.abort();
+    for (const driving of driven.values()) driving.controller.abort();
+    driven.clear();
+    lingering.clear();
+  };
+  window.once("closed", retireHost);
+  host.on("did-start-navigation", (_event, _url, _inPlace, mainFrame) => {
+    if (mainFrame) retireHost();
+  });
   const guests = new Set<number>();
   // Downloads a page started while the model drove it, per tab, and the
   // workspace paths of those finished but not yet reported to a call.
@@ -167,11 +207,22 @@ export function attachBrowserGuests(
   const saved = new Map<number, string[]>();
   // The model's page keeps downloading for it after a call: a click starts one a
   // moment later, a script after it returned. Until the person uses the tab.
-  const lingering = new Map<number, { conversationId: string; until: number }>();
+  const lingering = new Map<number, { conversationId: string; callId: string; until: number }>();
   const downloadSessions = new WeakSet<Session>();
   const frozen = new Set<number>();
   // Tabs the model is acting through right now, and the first address it was stopped at.
-  const driven = new Map<number, Driving & { blocked: string | null }>();
+  const driven = new Map<
+    number,
+    Driving & { blocked: string | null; callId: string; controller: AbortController }
+  >();
+  const cancelOwned = (callId: string) => {
+    callTabs.delete(callId);
+    for (const [controller, download] of downloads)
+      if (download.callId === callId) controller.abort();
+    for (const [id, recent] of lingering) if (recent.callId === callId) lingering.delete(id);
+    for (const driving of driven.values())
+      if (driving.callId === callId) driving.controller.abort();
+  };
   // Per tab, how many page pixels one pixel of its last screenshot covers.
   const screenshotScale = new Map<number, number>();
   const acted = new Map<string, Promise<BrowserActionResult>>();
@@ -197,26 +248,37 @@ export function attachBrowserGuests(
     const id = source.id;
     if (!guests.has(id)) return;
     const recent = lingering.get(id);
-    const conversationId =
-      driven.get(id)?.conversationId ??
-      (recent && recent.until > Date.now() ? recent.conversationId : null);
-    if (!conversationId) return;
-    const temporary = join(tmpdir(), `neema-download-${randomUUID()}`);
-    item.setSavePath(temporary);
-    const name = basename(item.getFilename()) || "download";
-    const finished = new Promise<boolean>((resolve) =>
-      item.once("done", (_done, state) => resolve(state === "completed")),
+    const driving = driven.get(id);
+    const owning = driving ?? (recent && recent.until > Date.now() ? recent : null);
+    if (!owning) return;
+    // A retained drive still gates navigation, but revoked work cannot publish.
+    if (driving) {
+      try {
+        driving.controller.signal.throwIfAborted();
+        calls.get(driving.callId);
+      } catch {
+        item.cancel();
+        return;
+      }
+    }
+    if (downloads.size >= DOWNLOAD_MAX) {
+      item.cancel();
+      return;
+    }
+    const controller = new AbortController();
+    downloads.set(controller, { id, callId: owning.callId });
+    const finished = receiveDownload(
+      item,
+      async (name, bytes, signal) => {
+        signal.throwIfAborted();
+        const path = await land(owning.conversationId, name, bytes, signal);
+        if (!signal.aborted && guests.has(id)) saved.set(id, [...(saved.get(id) ?? []), path]);
+      },
+      controller.signal,
     )
-      .then(async (completed) => {
-        if (!completed) return;
-        const bytes = await readFile(temporary);
-        if (bytes.length === 0 || bytes.length > LIMITS.importBytes) return;
-        const path = await land(conversationId, name, bytes);
-        saved.set(id, [...(saved.get(id) ?? []), path]);
-      })
       .catch(() => {})
       .finally(() => {
-        void rm(temporary, { force: true });
+        downloads.delete(controller);
         downloading.get(id)?.delete(finished);
       });
     const pending = downloading.get(id) ?? new Set<Promise<void>>();
@@ -249,7 +311,9 @@ export function attachBrowserGuests(
     guests.add(guest.id);
     const id = guest.id;
     guest.once("destroyed", () => {
+      retireGuest(id);
       guests.delete(id);
+      downloading.delete(id);
       frozen.delete(id);
       lingering.delete(id);
       saved.delete(id);
@@ -272,6 +336,11 @@ export function attachBrowserGuests(
     // A popup would be a window with nothing around it; the page gets it as a
     // tab instead, and anything that is not a web address goes nowhere.
     guest.setWindowOpenHandler(({ url }) => {
+      const driving = driven.get(id);
+      if (driving && blockedSite(driving, url, siteAllowed)) {
+        driving.blocked ??= url;
+        return { action: "deny" };
+      }
       if (isSafeExternalUrl(url) && !host.isDestroyed())
         host.send(BROWSER_OPEN_TAB, { webContentsId: guest.id, url });
       return { action: "deny" };
@@ -292,26 +361,65 @@ export function attachBrowserGuests(
     // its icon; only the latest request for a page may answer.
     let latest = 0;
     guest.on("page-favicon-updated", (_icon, favicons) => {
+      icons.get(id)?.abort();
+      icons.delete(id);
+      const request = ++latest;
       const url = favicons[0];
       if (!url) return;
-      const request = ++latest;
+      // Redirects keep their original authority even after the drive ends.
+      const driving = driven.get(id);
+      let call: BrowserCallContext | undefined;
+      if (driving) {
+        try {
+          driving.controller.signal.throwIfAborted();
+          call = calls.get(driving.callId);
+        } catch {
+          return;
+        }
+      }
       const send = (dataUrl: string | null) => {
-        if (dataUrl && request === latest && !host.isDestroyed() && !guest.isDestroyed())
+        if (
+          dataUrl &&
+          request === latest &&
+          !host.isDestroyed() &&
+          !guest.isDestroyed() &&
+          !call?.signal.aborted &&
+          !driving?.controller.signal.aborted
+        )
           host.send(BROWSER_FAVICON, { webContentsId: guest.id, dataUrl });
       };
       if (url.startsWith("data:")) return send(inlineFavicon(url));
       if (!isSafeExternalUrl(url)) return;
-      void guest.session
-        .fetch(url)
-        .then(async (response) =>
-          response.ok
-            ? faviconDataUrl(
-                response.headers.get("content-type"),
-                new Uint8Array(await response.arrayBuffer()),
-              )
-            : null,
-        )
-        .then(send, () => {});
+      const controller = new AbortController();
+      icons.set(id, controller);
+      const signal = AbortSignal.any([
+        controller.signal,
+        AbortSignal.timeout(5_000),
+        ...(call && driving ? [call.signal, driving.controller.signal] : []),
+      ]);
+      void fetchAllowed(
+        url,
+        (address, receiving) => fetchManual(guest.session, address, receiving, FAVICON_MAX_BYTES),
+        (address) => {
+          call?.check();
+          return !driving || !blockedSite(driving, address, siteAllowed);
+        },
+        signal,
+      )
+        .then(async (response) => {
+          if (!response.ok) {
+            void response.body?.cancel().catch(() => {});
+            return null;
+          }
+          return faviconDataUrl(
+            response.headers.get("content-type"),
+            await receiveBytes(response, FAVICON_MAX_BYTES, signal),
+          );
+        })
+        .then(send, () => {})
+        .finally(() => {
+          if (icons.get(id) === controller) icons.delete(id);
+        });
     });
     guest.on("context-menu", (_menu, params) => {
       Menu.buildFromTemplate(contextMenu(guest, params)).popup({ window });
@@ -330,10 +438,64 @@ export function attachBrowserGuests(
     return guest;
   };
 
+  const requireCall = (id: number, callId: string) => {
+    requireGuest(id);
+    const call = calls.get(callId);
+    const bound = callTabs.get(callId);
+    if (bound !== undefined && bound !== id) throw new Error("The browser call changed tabs.");
+    callTabs.set(callId, id);
+    return call;
+  };
+  const requireDrive = (id: number, callId: string) => {
+    const call = requireCall(id, callId);
+    const driving = driven.get(id);
+    if (!driving || driving.callId !== callId) throw new Error("This call is not driving the tab.");
+    driving.controller.signal.throwIfAborted();
+    return call;
+  };
+
   return {
-    snapshot: async (id: number, options: { screenshot: boolean }): Promise<BrowserSnapshot> => {
+    begin: calls.begin,
+    end: (callId: string) => {
+      calls.end(callId);
+      callTabs.delete(callId);
+    },
+    cancel: (callId: string) => {
+      calls.end(callId);
+      callTabs.delete(callId);
+      cancelOwned(callId);
+    },
+    navigate: async (
+      id: number,
+      target: { url: string } | { action: "back" | "forward" | "reload" },
+      callId: string,
+    ) => {
+      const call = requireDrive(id, callId);
       const guest = requireGuest(id);
-      const cdp = cdpOf(guest);
+      call.check();
+      if ("url" in target) {
+        if (!isSafeExternalUrl(target.url)) throw new Error("Not a web address.");
+        if (blockedSite(driven.get(id)!, target.url, siteAllowed)) {
+          driven.get(id)!.blocked ??= target.url;
+          return;
+        }
+        await abortable(
+          guest.loadURL(target.url).catch(() => {}),
+          call.signal,
+        );
+        call.check();
+      } else if (target.action === "back") guest.navigationHistory.goBack();
+      else if (target.action === "forward") guest.navigationHistory.goForward();
+      else guest.reload();
+    },
+    snapshot: async (
+      id: number,
+      options: { screenshot: boolean },
+      callId: string,
+    ): Promise<BrowserSnapshot> => {
+      const call = requireCall(id, callId);
+      const guest = requireGuest(id);
+      const cdp = cdpOf(guest, call);
       const { nodes } = await cdp.send<{ nodes: AxNode[] }>("Accessibility.getFullAXTree");
       const outline = serializeAxTree(nodes, { secrets: secrets.get(id) ?? new Set() });
       references.set(id, outline.refs);
@@ -341,7 +503,8 @@ export function attachBrowserGuests(
       if (options.screenshot) {
         // When no try yields a picture, the caller says so rather than
         // sending an empty one.
-        const image = await capture(guest, cdp);
+        const image = await capture(guest, cdp, call);
+        call.check();
         if (image && !image.isEmpty()) {
           const fitted =
             image.getSize().width > SCREENSHOT_MAX_WIDTH
@@ -366,39 +529,70 @@ export function attachBrowserGuests(
     waitFor: async (
       id: number,
       condition: { text?: string; urlIncludes?: string; timeoutMs: number },
+      callId: string,
     ) => {
+      const call = requireCall(id, callId);
       const guest = requireGuest(id);
       // Fixed code with the text as a JSON literal: nothing the page or the
       // model wrote ever runs.
       const probe = condition.text
         ? `document.body ? document.body.innerText.includes(${JSON.stringify(condition.text)}) : false`
         : "true";
-      const deadline = Date.now() + Math.min(Math.max(condition.timeoutMs, 0), WAIT_MAX_MS);
+      const deadline = Math.min(
+        call.deadline,
+        Date.now() + Math.min(Math.max(condition.timeoutMs, 0), WAIT_MAX_MS),
+      );
       for (;;) {
+        call.check();
         if (guest.isDestroyed()) return { met: false, url: "" };
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return { met: false, url: guest.getURL() };
         const urlMet = !condition.urlIncludes || guest.getURL().includes(condition.urlIncludes);
         const textMet =
           urlMet &&
-          // oxlint-disable-next-line eslint/no-await-in-loop -- one probe at a time, by design
-          (await guest
-            .executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{ code: probe }])
-            .then((value: unknown) => value === true)
-            .catch(() => false));
+          (!condition.text ||
+            // oxlint-disable-next-line eslint/no-await-in-loop -- each probe bounded by the remaining wait budget
+            (await abortable(
+              within(
+                guest.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{ code: probe }]),
+                remaining,
+              ),
+              call.signal,
+            )) === true);
+        call.check();
         if (urlMet && textMet) return { met: true, url: guest.getURL() };
         if (Date.now() >= deadline) return { met: false, url: guest.getURL() };
-        // oxlint-disable-next-line eslint/no-await-in-loop -- one probe at a time, by design
-        await pause(WAIT_STEP_MS);
+        // oxlint-disable-next-line eslint/no-await-in-loop -- bounded pause between probes
+        await abortable(pause(Math.min(WAIT_STEP_MS, deadline - Date.now())), call.signal);
       }
     },
-    act: (id: number, action: BrowserAction): Promise<BrowserActionResult> => {
+    act: (id: number, action: BrowserAction, callId: string): Promise<BrowserActionResult> => {
+      const owning = requireDrive(id, callId);
+      const driving = driven.get(id)!;
+      const call = {
+        ...owning,
+        signal: AbortSignal.any([owning.signal, driving.controller.signal]),
+        check: () => {
+          requireDrive(id, callId);
+          if (driven.get(id) !== driving) throw new Error("The drive ended.");
+        },
+      };
       const guest = requireGuest(id);
       const key = `${id}:${action.callId}`;
       const earlier = acted.get(key);
       if (earlier) return earlier;
       const result = perform(
         {
-          cdp: cdpOf(guest),
-          evaluate: (code) => guest.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{ code }], true),
+          cdp: cdpOf(guest, call),
+          evaluate: async (code) => {
+            requireDrive(id, callId);
+            const value = await abortable(
+              guest.executeJavaScriptInIsolatedWorld(AGENT_WORLD, [{ code }], true),
+              call.signal,
+            );
+            call.check();
+            return value;
+          },
           node: (ref) => references.get(id)?.get(ref) ?? null,
           screenshotScale: screenshotScale.get(id),
           typedSecret: (node) => {
@@ -416,45 +610,60 @@ export function attachBrowserGuests(
       return result;
     },
     // Only while a call drives the tab, and only where its gate would let the page go.
-    save: async (id: number, urls: ReadonlyArray<string>) => {
+    save: async (id: number, urls: ReadonlyArray<string>, callId: string) => {
+      const call = requireDrive(id, callId);
       const guest = requireGuest(id);
-      const driving = driven.get(id);
-      if (!driving) throw new Error("Saving needs a call driving the tab.");
-      const allowed = urls.filter((url) => !blockedSite(driving, url, siteAllowed));
-      const outcomes = await saveFiles(
-        allowed,
-        (url, signal) => guest.session.fetch(url, { signal }),
-        (fileName, bytes) => land(driving.conversationId, fileName, bytes),
-      );
-      return urls.map(
-        (url) =>
-          outcomes.find((outcome) => outcome.url === url) ?? {
-            url,
-            error: "That site is not allowed in this chat.",
-            blocked: true as const,
-          },
+      const driving = driven.get(id)!;
+      const signal = AbortSignal.any([call.signal, driving.controller.signal]);
+      return saveFiles(
+        urls,
+        (url, receiving) => {
+          requireDrive(id, callId);
+          return fetchManual(guest.session, url, receiving, LIMITS.importBytes);
+        },
+        (fileName, bytes, receiving) => {
+          requireDrive(id, callId);
+          receiving.throwIfAborted();
+          return land(driving.conversationId, fileName, bytes, receiving);
+        },
+        { signal, allowed: (url) => !blockedSite(driving, url, siteAllowed) },
       );
     },
     drive: async (
       id: number,
       driving: { conversationId: string; allow: ReadonlyArray<string> } | null,
+      callId: string,
     ) => {
       requireGuest(id);
       const previous = driven.get(id);
       if (driving) {
+        const call = requireCall(id, callId);
+        if (call.conversationId !== driving.conversationId)
+          throw new Error("The browser call changed chats.");
+        if (previous) throw new Error("A call is already driving this tab.");
         driven.set(id, {
           conversationId: driving.conversationId,
+          callId,
+          controller: new AbortController(),
           allow: new Set(driving.allow.map(siteOf).filter((site) => site !== null)),
           blocked: null,
         });
         return { blocked: null, saved: [] };
       }
+      if (!previous) return { blocked: null, saved: [] };
+      if (previous.callId !== callId) throw new Error("That drive belongs to another call.");
+      previous.controller.abort(new Error("The drive ended."));
       driven.delete(id);
-      if (previous)
+      try {
+        calls.get(callId);
         lingering.set(id, {
           conversationId: previous.conversationId,
+          callId,
           until: Date.now() + DOWNLOAD_LINGER_MS,
         });
+      } catch {
+        lingering.delete(id);
+      }
       // Downloads under way finish into the workspace before the call reports.
       await within(Promise.all(downloading.get(id) ?? []), DOWNLOAD_WAIT_MS);
       const landed = saved.get(id) ?? [];

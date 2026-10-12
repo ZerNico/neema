@@ -78,6 +78,7 @@ export interface Workspaces {
     conversationId: string,
     fileName: string,
     bytes: Uint8Array,
+    signal?: AbortSignal,
   ): Effect.Effect<StagedFileReceipt, DesktopError>;
   discardStagedFile(
     conversationId: string,
@@ -115,17 +116,24 @@ const landFile = async (
   target: string,
   fileName: string,
   write: (tmp: string) => Promise<number>,
+  signal?: AbortSignal,
 ): Promise<StagedFileReceipt> => {
+  signal?.throwIfAborted();
   await mkdir(target, { recursive: true });
+  signal?.throwIfAborted();
   const tmp = join(target, `.tmp-${randomSuffix()}`);
   try {
     const bytes = await write(tmp);
+    signal?.throwIfAborted();
     const name = sanitizeName(fileName);
     const ext = extname(name);
     const stem = name.slice(0, name.length - ext.length);
     for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS; attempt += 1) {
       const candidate = attempt === 0 ? name : `${stem}-${attempt}${ext}`;
       try {
+        // A submitted link may commit. Cancellation only prevents publication
+        // that has not yet been submitted, never rolls back an existing file.
+        signal?.throwIfAborted();
         await link(tmp, join(target, candidate));
         return { name: candidate, bytes };
       } catch (cause) {
@@ -344,14 +352,21 @@ const makeWorkspaces = (root: string): Workspaces => {
           cause instanceof DesktopError ? cause : failed("Could not stage that file."),
       }),
 
-    landFile: (conversationId, fileName, bytes) =>
+    landFile: (conversationId, fileName, bytes, signal) =>
       Effect.tryPromise({
         try: () =>
           serialized(`workspace:${workspaceId(conversationId)}`, () =>
-            landFile(dir(conversationId), fileName, async (tmp) => {
-              await writeFile(tmp, bytes, { flag: "wx" });
-              return bytes.length;
-            }),
+            landFile(
+              dir(conversationId),
+              fileName,
+              async (tmp) => {
+                signal?.throwIfAborted();
+                await writeFile(tmp, bytes, { flag: "wx", signal });
+                signal?.throwIfAborted();
+                return bytes.length;
+              },
+              signal,
+            ),
           ),
         catch: (cause) =>
           cause instanceof DesktopError ? cause : failed("Could not save that file."),
@@ -638,8 +653,8 @@ export class WorkspaceRegistry extends Context.Service<WorkspaceRegistry, Worksp
           forOrigin().stageFile(conversationId, submissionId, fileName, bytes),
         stageFileFromPath: (conversationId, submissionId, fileName, sourcePath) =>
           forOrigin().stageFileFromPath(conversationId, submissionId, fileName, sourcePath),
-        landFile: (conversationId, fileName, bytes) =>
-          forOrigin().landFile(conversationId, fileName, bytes),
+        landFile: (conversationId, fileName, bytes, signal) =>
+          forOrigin().landFile(conversationId, fileName, bytes, signal),
         discardStagedFile: (conversationId, submissionId, name) =>
           forOrigin().discardStagedFile(conversationId, submissionId, name),
         discardSubmission: (conversationId, submissionId) =>

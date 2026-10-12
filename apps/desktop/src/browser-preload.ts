@@ -1,6 +1,10 @@
 import type { IpcRenderer } from "electron";
 import {
   BROWSER_ACT,
+  BROWSER_BEGIN,
+  BROWSER_END,
+  BROWSER_CANCEL,
+  BROWSER_NAVIGATE,
   BROWSER_SAVE,
   BROWSER_ALLOW_SITE,
   BROWSER_ALLOWED_SITES,
@@ -48,16 +52,25 @@ export const makeBrowserBridge = (
     },
     openExternal: (url) => ipc.invoke(BROWSER_OPEN_EXTERNAL, url),
     agent: {
-      snapshot: (webContentsId, options) =>
-        ipc.invoke(BROWSER_SNAPSHOT, { webContentsId, screenshot: options.screenshot }),
-      waitFor: (webContentsId, condition) =>
-        ipc.invoke(BROWSER_WAIT_FOR, { webContentsId, ...condition }),
-      act: (webContentsId, action) => ipc.invoke(BROWSER_ACT, { webContentsId, action }),
-      save: (webContentsId, urls) => ipc.invoke(BROWSER_SAVE, { webContentsId, urls: [...urls] }),
-      drive: (webContentsId, driving) =>
+      begin: (callId, conversationId, deadline) =>
+        ipc.invoke(BROWSER_BEGIN, { callId, conversationId, deadline }),
+      end: (callId) => ipc.invoke(BROWSER_END, { callId }),
+      cancel: (callId) => ipc.invoke(BROWSER_CANCEL, { callId }),
+      navigate: (webContentsId, target, callId) =>
+        ipc.invoke(BROWSER_NAVIGATE, { webContentsId, target, callId }),
+      snapshot: (webContentsId, options, callId) =>
+        ipc.invoke(BROWSER_SNAPSHOT, { webContentsId, screenshot: options.screenshot, callId }),
+      waitFor: (webContentsId, condition, callId) =>
+        ipc.invoke(BROWSER_WAIT_FOR, { webContentsId, ...condition, callId }),
+      act: (webContentsId, action, callId) =>
+        ipc.invoke(BROWSER_ACT, { webContentsId, action, callId }),
+      save: (webContentsId, urls, callId) =>
+        ipc.invoke(BROWSER_SAVE, { webContentsId, urls: [...urls], callId }),
+      drive: (webContentsId, driving, callId) =>
         ipc.invoke(BROWSER_DRIVE, {
           webContentsId,
           driving: driving && { conversationId: driving.conversationId, allow: [...driving.allow] },
+          callId,
         }),
       siteAllowed: (conversationId, url) =>
         ipc.invoke(BROWSER_SITE_ALLOWED, { conversationId, url }),
