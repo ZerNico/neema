@@ -54,6 +54,13 @@ export interface ProjectFileRead {
 }
 
 const SWEEP_EVERY = Duration.hours(1);
+const lockProject = (tx: DbTx, projectId: string) =>
+  tx
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .for("update")
+    .pipe(Effect.orDie);
 
 const summaryOf = (row: {
   id: string;
@@ -297,6 +304,14 @@ export class ProjectFileService extends Context.Service<
           return rows.map(summaryOf);
         });
 
+      const admitWrite = (writer: FileWriter, projectId: string) =>
+        transaction((tx) =>
+          Effect.gen(function* () {
+            if (writer.origin === "model") yield* writer.guard(tx);
+            yield* requireRole(tx, writer.userId, projectId, true);
+          }),
+        );
+
       /** Registers bytes under the project owner; returns the blob and any key to discard. */
       const storeBytes = (ownerId: string, bytes: Uint8Array) =>
         Effect.gen(function* () {
@@ -321,6 +336,7 @@ export class ProjectFileService extends Context.Service<
           return yield* new ProjectRejected({ reason: "the file is empty" });
         if (input.bytes.length > PROJECT_FILE_LIMITS.fileBytes)
           return yield* new ProjectRejected({ reason: "the file is larger than 50 MB" });
+        yield* admitWrite(writer, input.projectId);
         const name = sanitizeFileName(input.name);
         // Any file is kept; its bytes decide only how it is read and served.
         const kind = classifyFile(name, "", input.bytes);
@@ -334,17 +350,43 @@ export class ProjectFileService extends Context.Service<
         const { maxProjectBytes } = yield* settings();
         const result = yield* transaction((tx) =>
           Effect.gen(function* () {
+            // Blob ownership and version authorship take these FK locks on insert.
+            // Take them before conversation/project locks, not behind account deletion.
+            yield* tx
+              .select({ id: user.id })
+              .from(user)
+              .where(inArray(user.id, [...new Set([project.ownerId, writer.userId])].toSorted()))
+              .orderBy(asc(user.id))
+              .for("key share")
+              .pipe(Effect.orDie);
             // Conversation before project, the order every attempt takes them in.
             if (writer.origin === "model") yield* writer.guard(tx);
-            // Shared with deletion, which takes the row for update.
-            const [locked] = yield* tx
-              .select({ id: projects.id })
-              .from(projects)
-              .where(eq(projects.id, input.projectId))
-              .for("share")
-              .pipe(Effect.orDie);
+            // Serialize the whole project's quota before registering any blobs.
+            const [locked] = yield* lockProject(tx, input.projectId);
             if (!locked) return yield* new ProjectNotAvailable({ projectId: input.projectId });
             yield* requireRole(tx, writer.userId, input.projectId, true);
+            const [existingBlob] = yield* tx
+              .select({ id: attachmentBlobs.id })
+              .from(attachmentBlobs)
+              .where(
+                and(
+                  eq(attachmentBlobs.userId, project.ownerId),
+                  eq(attachmentBlobs.sha256, stored.sha256),
+                ),
+              )
+              .pipe(Effect.orDie);
+            const retained = yield* tx
+              .select({ blobId: projectFileVersions.blobId })
+              .from(projectFileVersions)
+              .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
+              .where(eq(projectFiles.projectId, input.projectId))
+              .pipe(Effect.orDie);
+            // Upsert locks the incoming blob too. Order it with retention's locks,
+            // since different projects can replace each other's shared bytes.
+            yield* lockBlobs(tx, [
+              ...retained.map((row) => row.blobId),
+              ...(existingBlob ? [existingBlob.id] : []),
+            ]).pipe(Effect.orDie);
             const [blob] = yield* tx
               .insert(attachmentBlobs)
               .values({
@@ -401,17 +443,7 @@ export class ProjectFileService extends Context.Service<
                 .pipe(Effect.orDie);
             }
             const [last] = yield* tx
-              .select({
-                id: projectFileVersions.id,
-                number: projectFileVersions.number,
-                blobId: projectFileVersions.blobId,
-                pinned: projectFileVersions.pinned,
-                origin: projectFileVersions.origin,
-                createdByUserId: projectFileVersions.createdByUserId,
-                generationId: projectFileVersions.generationId,
-                // The database's clock, like every other age check.
-                recent: sql<boolean>`${projectFileVersions.createdAt} > now() - make_interval(mins => ${PROJECT_FILE_LIMITS.coalesceMinutes})`,
-              })
+              .select({ number: projectFileVersions.number })
               .from(projectFileVersions)
               .where(eq(projectFileVersions.fileId, fileId))
               .orderBy(desc(projectFileVersions.number))
@@ -422,45 +454,21 @@ export class ProjectFileService extends Context.Service<
               return yield* new ProjectRejected({
                 reason: `the file changed since version ${input.basedOnVersion}; it is at version ${current} now`,
               });
-            // A writer saving again straight away replaces their own last
-            // version: three runs of a tool in one answer leave one version.
-            const sameWriter =
-              last &&
-              !last.pinned &&
-              last.origin === writer.origin &&
-              last.createdByUserId === writer.userId &&
-              (writer.origin === "user" || last.generationId === writer.generationId);
-            let orphans: string[] = [];
-            if (sameWriter && last.recent) {
-              yield* lockBlobs(tx, [last.blobId]).pipe(Effect.orDie);
-              yield* tx
-                .update(projectFileVersions)
-                .set({
-                  blobId: blob!.id,
-                  size: input.bytes.length,
-                  mediaType: kind.mediaType,
-                  createdAt: sql`now()`,
-                })
-                .where(eq(projectFileVersions.id, last.id))
-                .pipe(Effect.orDie);
-              if (last.blobId !== blob!.id)
-                orphans = yield* collectOrphanedBlobs(tx, [last.blobId]).pipe(Effect.orDie);
-            } else {
-              yield* tx
-                .insert(projectFileVersions)
-                .values({
-                  id: uuidv7(),
-                  fileId,
-                  number: current + 1,
-                  blobId: blob!.id,
-                  size: input.bytes.length,
-                  mediaType: kind.mediaType,
-                  origin: writer.origin,
-                  createdByUserId: writer.userId,
-                  generationId: writer.origin === "model" ? writer.generationId : null,
-                })
-                .pipe(Effect.orDie);
-            }
+            // Published IDs always name the same bytes, including repeated model saves.
+            yield* tx
+              .insert(projectFileVersions)
+              .values({
+                id: uuidv7(),
+                fileId,
+                number: current + 1,
+                blobId: blob!.id,
+                size: blob!.size,
+                mediaType: kind.mediaType,
+                origin: writer.origin,
+                createdByUserId: writer.userId,
+                generationId: writer.origin === "model" ? writer.generationId : null,
+              })
+              .pipe(Effect.orDie);
             yield* tx
               .update(projectFiles)
               .set({ name, updatedAt: new Date() })
@@ -468,7 +476,7 @@ export class ProjectFileService extends Context.Service<
               .pipe(Effect.orDie);
             const pruned = yield* prune(tx, input.projectId, maxProjectBytes);
             const [summary] = yield* summaries(tx, input.projectId, [fileId]);
-            return { summary: summary!, discard: [...unused, ...orphans, ...pruned] };
+            return { summary: summary!, discard: [...unused, ...pruned] };
           }),
         );
         // On failure the bytes stay a candidate, and the reconciler removes
@@ -519,7 +527,9 @@ export class ProjectFileService extends Context.Service<
           )
           .pipe(Effect.orDie);
         for (const { projectId } of due) {
-          const discard = yield* transaction((tx) => prune(tx, projectId, maxProjectBytes)).pipe(
+          const discard = yield* transaction((tx) =>
+            lockProject(tx, projectId).pipe(Effect.andThen(prune(tx, projectId, maxProjectBytes))),
+          ).pipe(
             // Over its cap already: the sweep only drops history, never refuses.
             Effect.catchTag("ProjectRejected", () => Effect.succeed([] as string[])),
           );
@@ -621,6 +631,7 @@ export class ProjectFileService extends Context.Service<
         }),
         write: writeVersion,
         saveAttachment: Effect.fn("ProjectFileService.saveAttachment")(function* (writer, input) {
+          yield* admitWrite(writer, input.projectId);
           const requested =
             "id" in input.attachment ? input.attachment.id : input.attachment.reference;
           const resolved = input.conversationId
@@ -665,6 +676,7 @@ export class ProjectFileService extends Context.Service<
           function* (userId, versionId, basedOnVersion) {
             const row = yield* versionRow(versionId);
             if (!row) return yield* new ProjectRejected({ reason: "that version is gone" });
+            yield* admitWrite({ origin: "user", userId }, row.projectId);
             const bytes = yield* blobBytes(row.version.blobId);
             if (!bytes) return yield* new ProjectRejected({ reason: "that version is gone" });
             // A restore is a new version like any other, so history stays in order.
@@ -685,8 +697,15 @@ export class ProjectFileService extends Context.Service<
           if (!row) return yield* new ProjectRejected({ reason: "that version is gone" });
           yield* transaction((tx) =>
             Effect.gen(function* () {
+              yield* lockProject(tx, row.projectId);
               yield* requireRole(tx, userId, row.projectId, true);
-              if (input.pinned && !row.version.pinned) {
+              const [current] = yield* tx
+                .select({ pinned: projectFileVersions.pinned })
+                .from(projectFileVersions)
+                .where(eq(projectFileVersions.id, versionId))
+                .pipe(Effect.orDie);
+              if (!current) return yield* new ProjectRejected({ reason: "that version is gone" });
+              if (input.pinned && !current.pinned) {
                 const [count] = yield* tx
                   .select({ value: sql<number>`count(*)::int` })
                   .from(projectFileVersions)
@@ -719,6 +738,7 @@ export class ProjectFileService extends Context.Service<
           if (!file) return;
           const discard = yield* transaction((tx) =>
             Effect.gen(function* () {
+              yield* lockProject(tx, file.projectId);
               yield* requireRole(tx, userId, file.projectId, true);
               const versions = yield* tx
                 .select({ blobId: projectFileVersions.blobId })

@@ -254,6 +254,8 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
         reason: "upload a PDF or text document",
       });
 
+    if (input.association) yield* repo.admitAssociation(input.association);
+
     // Hashed here, over the bytes we actually received: a client-supplied
     // hash would be both untrustworthy and a free existence oracle.
     const sha256 = sha256Hex(input.bytes);

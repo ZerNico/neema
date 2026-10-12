@@ -23,7 +23,7 @@ import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 
 export interface AttachmentAssociation {
-  /** May refuse with a rejection; the upload then never stores bytes for this row. */
+  /** Checked before storing bytes, then authoritatively again while registering them. */
   before(tx: DbTx): Effect.Effect<void, AttachmentRejected>;
   after(tx: DbTx, attachment: Attachment): Effect.Effect<void>;
 }
@@ -165,6 +165,7 @@ const deleteAttachmentRows = (
 export class AttachmentRepo extends Context.Service<
   AttachmentRepo,
   {
+    admitAssociation(association: AttachmentAssociation): Effect.Effect<void, AttachmentRejected>;
     /**
      * Records an upload. The blob is deduped per user (same bytes twice = one
      * blob), the attachment row is always fresh so the response cannot reveal
@@ -1091,6 +1092,10 @@ export class AttachmentRepo extends Context.Service<
       });
 
       return AttachmentRepo.of({
+        admitAssociation: (association) =>
+          db
+            .transaction((tx) => association.before(tx))
+            .pipe(Effect.catchTag("SqlError", Effect.die)),
         create,
         findBlob,
         findForAccess,

@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
+import { Client } from "pg";
 import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Option, Redacted, Stream } from "effect";
 import { strToU8, zipSync } from "fflate";
@@ -11,10 +12,12 @@ import {
   attachmentBlobs,
   blobCleanupIntents,
   conversations,
+  conversationQueueEntries,
   messageAttachments,
   messages,
   projectFileVersions,
   projectFiles,
+  projects,
   user,
 } from "~/db/schema/index.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -34,9 +37,31 @@ import { FakeDocumentParser } from "./unused-services.ts";
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "project-files-it-"));
 
 let database: TestDatabase;
-type Services = Db | ProjectService | ProjectFileService | AttachmentService | BlobStore;
+type Services =
+  | Db
+  | ProjectService
+  | ProjectFileService
+  | AttachmentService
+  | AttachmentRepo
+  | BlobStore;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
+const puts: string[] = [];
+let beforePut: (() => Promise<void>) | undefined;
+const ObservedBlobs = Layer.effect(
+  BlobStore,
+  Effect.map(BlobStore, (store) =>
+    BlobStore.of({
+      ...store,
+      put: (key, bytes) =>
+        Effect.gen(function* () {
+          puts.push(key);
+          if (beforePut) yield* Effect.promise(beforePut);
+          yield* store.put(key, bytes);
+        }),
+    }),
+  ),
+).pipe(Layer.provide(fsBlobStoreLayer));
 const TestBus = Layer.succeed(SyncBus, {
   publish: () => Effect.void,
   publishGlobal: () => Effect.void,
@@ -52,7 +77,7 @@ beforeAll(async () => {
   const repos = Layer.mergeAll(
     AttachmentRepo.layer,
     TestBus,
-    fsBlobStoreLayer,
+    ObservedBlobs,
     FakeDocumentParser,
   ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
   const attachments = AttachmentService.layer.pipe(Layer.provideMerge(repos));
@@ -106,6 +131,40 @@ const versionRows = (fileId: string) =>
       .where(eq(projectFileVersions.fileId, fileId))
       .orderBy(projectFileVersions.number),
   );
+
+const heldRow = async (
+  table: "projects" | "attachment_blobs",
+  id: string,
+  mode: "share" | "update" = "update",
+) => {
+  const client = new Client({ connectionString: database.url });
+  await client.connect();
+  await client.query("begin");
+  await client.query(`select id from ${table} where id = $1 for ${mode}`, [id]);
+  const { pid } = (await client.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!;
+  return {
+    wait: async (count: number) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Wait on actual database blockers, not elapsed time.
+        const result = await client.query<{ count: number }>(
+          `with recursive waiters(pid) as (
+            select pid from pg_stat_activity where datname = current_database() and $1::int = any(pg_blocking_pids(pid))
+            union
+            select a.pid from pg_stat_activity a join waiters w on w.pid = any(pg_blocking_pids(a.pid)) where a.datname = current_database()
+          ) select count(*)::int as count from waiters`,
+          [pid],
+        );
+        if (result.rows[0]!.count >= count) return;
+      }
+      throw new Error("Writes did not reach the held project lock");
+    },
+    release: async () => {
+      await client.query("commit");
+      await client.end();
+    },
+  };
+};
 
 describe("project files", () => {
   it("lets editors write, members read and download, and nobody else in", async () => {
@@ -190,7 +249,7 @@ describe("project files", () => {
     });
   });
 
-  it("collapses a writer's quick saves into one version and frees the bytes it replaced", async () => {
+  it("advances same-user tokens and keeps published IDs immutable across saves and restores", async () => {
     const { owner, projectId } = await setup();
     const file = await files((s) =>
       s.write(person(owner), { projectId, name: "deck.txt", bytes: text("draft one") }),
@@ -202,17 +261,31 @@ describe("project files", () => {
         fileId: file.id,
         name: "deck.txt",
         bytes: text("draft two"),
+        basedOnVersion: 1,
       }),
     );
-    expect(again.version).toBe(1);
-    expect(await versionRows(file.id)).toHaveLength(1);
-    // The first draft's bytes lost their last owner, so their blob row went with them.
-    expect(
-      await db((d) =>
-        d.select().from(attachmentBlobs).where(eq(attachmentBlobs.id, draft!.blobId)),
+    expect(again.version).toBe(2);
+    expect(await versionRows(file.id)).toHaveLength(2);
+    expect((await files((s) => s.download(owner, draft!.id)))!.bytes).toEqual(text("draft one"));
+    await expect(
+      files((s) =>
+        s.write(person(owner), {
+          projectId,
+          fileId: file.id,
+          name: "deck.txt",
+          bytes: text("stale tab"),
+          basedOnVersion: 1,
+        }),
       ),
-    ).toEqual([]);
-    // Another writer, or a pinned last version, keeps history.
+    ).rejects.toMatchObject({ _tag: "ProjectRejected" });
+    const restored = await files((s) => s.restore(owner, draft!.id, 2));
+    expect(restored.version).toBe(3);
+    await expect(files((s) => s.restore(owner, draft!.id, 2))).rejects.toMatchObject({
+      _tag: "ProjectRejected",
+    });
+    expect((await files((s) => s.download(owner, again.versionId)))!.bytes).toEqual(
+      text("draft two"),
+    );
     const model: FileWriter = {
       origin: "model",
       userId: owner,
@@ -222,11 +295,37 @@ describe("project files", () => {
     const byModel = await files((s) =>
       s.write(model, { projectId, fileId: file.id, name: "deck.txt", bytes: text("model draft") }),
     );
-    expect(byModel.version).toBe(2);
+    expect(byModel.version).toBe(4);
+    const nextModel = await files((s) =>
+      s.write(model, {
+        projectId,
+        fileId: file.id,
+        name: "deck.txt",
+        bytes: text("another model draft"),
+        basedOnVersion: 4,
+      }),
+    );
+    expect(nextModel.version).toBe(5);
+    await expect(
+      files((s) =>
+        s.write(model, {
+          projectId,
+          fileId: file.id,
+          name: "deck.txt",
+          bytes: text("stale model draft"),
+          basedOnVersion: 4,
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "ProjectRejected" });
+    expect((await files((s) => s.download(owner, byModel.versionId)))!.bytes).toEqual(
+      text("model draft"),
+    );
   });
 
   it("writes nothing for a model whose answer no longer owns the chat", async () => {
     const { owner, projectId } = await setup();
+    const before = puts.length;
+    const intentsBefore = await db((d) => d.select().from(blobCleanupIntents));
     const stale: FileWriter = {
       origin: "model",
       userId: owner,
@@ -236,6 +335,55 @@ describe("project files", () => {
     await expect(
       files((s) => s.write(stale, { projectId, name: "stopped.txt", bytes: text("late") })),
     ).rejects.toThrow();
+    expect((await files((s) => s.list(owner, projectId))).files).toEqual([]);
+    expect(puts.length).toBe(before);
+    expect(await db((d) => d.select().from(blobCleanupIntents))).toEqual(intentsBefore);
+  });
+
+  it("rejects unauthorized writers before storing but retains candidates for revocation during I/O", async () => {
+    const { owner, editor, viewer, projectId } = await setup();
+    const stranger = await createUser();
+    const before = puts.length;
+    for (const writerId of [viewer, stranger]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each denial must precede physical storage.
+      await expect(
+        files((s) =>
+          s.write(person(writerId), {
+            projectId,
+            name: "denied.txt",
+            bytes: text("denied"),
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+    expect(puts.length).toBe(before);
+    beforePut = () =>
+      run(
+        Effect.flatMap(ProjectService, (s) =>
+          s.changeMembers(owner, projectId, { action: "removeUser", userId: editor }),
+        ),
+      );
+    try {
+      await expect(
+        files((s) =>
+          s.write(person(editor), {
+            projectId,
+            name: "revoked.txt",
+            bytes: text(`revoked ${uuidv7()}`),
+          }),
+        ),
+      ).rejects.toMatchObject({ _tag: "ProjectNotAvailable" });
+    } finally {
+      beforePut = undefined;
+    }
+    expect(puts.length).toBe(before + 1);
+    const key = puts.at(-1)!;
+    expect(
+      await db((d) =>
+        d.select().from(blobCleanupIntents).where(eq(blobCleanupIntents.storageKey, key)),
+      ),
+    ).toMatchObject([{ kind: "candidate" }]);
+    expect(await run(Effect.flatMap(BlobStore, (s) => s.exists(key)))).toBe(true);
     expect((await files((s) => s.list(owner, projectId))).files).toEqual([]);
   });
 
@@ -308,6 +456,184 @@ describe("project files", () => {
     }
   });
 
+  it("takes account foreign-key locks before an editor waits on the project", async () => {
+    const { owner, editor, projectId } = await setup();
+    const held = await heldRow("projects", projectId);
+    const account = new Client({ connectionString: database.url });
+    await account.connect();
+    await account.query("begin");
+    const writing = Promise.allSettled([
+      files((s) =>
+        s.write(person(editor), { projectId, name: "editor.txt", bytes: text("editor") }),
+      ),
+    ]);
+    let locking: Promise<unknown> | undefined;
+    try {
+      await held.wait(1);
+      locking = account.query('select id from "user" where id = $1 for update', [owner]);
+      await held.wait(2);
+    } finally {
+      await held.release();
+      await locking;
+      await account.query("rollback");
+      await account.end();
+      await writing;
+    }
+    expect(await writing).toMatchObject([{ status: "fulfilled" }]);
+  });
+
+  it("orders incoming dedup and pruned blob locks across projects", async () => {
+    const owner = await createUser();
+    const entries = [];
+    for (const content of ["a", "b"]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Seed two separate projects with one blob each.
+      const project = await run(
+        Effect.flatMap(ProjectService, (s) => s.create(owner, { name: content })),
+      );
+      // oxlint-disable-next-line eslint/no-await-in-loop -- The published version supplies its real blob identity.
+      const file = await files((s) =>
+        s.write(person(owner), { projectId: project.id, name: "data.txt", bytes: text(content) }),
+      );
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each write must finish before its immutable version is read.
+      const [version] = await versionRows(file.id);
+      entries.push({ projectId: project.id, fileId: file.id, blobId: version!.blobId, content });
+      // Keep both blobs independently owned: this probes lock ordering, not byte deletion.
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two normal uploads retain the seeded blobs.
+      await run(
+        Effect.flatMap(AttachmentService, (s) =>
+          s.upload({
+            userId: owner,
+            fileName: `${content}.txt`,
+            declaredMediaType: "text/plain",
+            bytes: text(content),
+          }),
+        ),
+      );
+    }
+    const [lower, higher] = entries.toSorted((a, b) => a.blobId.localeCompare(b.blobId));
+    await files((s) => s.updateSettings(1));
+    try {
+      const held = await heldRow("attachment_blobs", lower!.blobId);
+      const first = Promise.allSettled([
+        files((s) =>
+          s.write(person(owner), {
+            projectId: higher!.projectId,
+            fileId: higher!.fileId,
+            name: "data.txt",
+            bytes: text(lower!.content),
+            basedOnVersion: 1,
+          }),
+        ),
+      ]);
+      let second: typeof first | undefined;
+      try {
+        await held.wait(1);
+        second = Promise.allSettled([
+          files((s) =>
+            s.write(person(owner), {
+              projectId: lower!.projectId,
+              fileId: lower!.fileId,
+              name: "data.txt",
+              bytes: text(higher!.content),
+              basedOnVersion: 1,
+            }),
+          ),
+        ]);
+        await held.wait(2);
+      } finally {
+        await held.release();
+        await first;
+        await second;
+      }
+      expect(await first).toMatchObject([{ status: "fulfilled" }]);
+      expect(await second).toMatchObject([{ status: "fulfilled" }]);
+      expect(await files((s) => s.list(owner, lower!.projectId))).toMatchObject({ usedBytes: 1 });
+      expect(await files((s) => s.list(owner, higher!.projectId))).toMatchObject({ usedBytes: 1 });
+    } finally {
+      await files((s) => s.updateSettings(PROJECT_FILE_LIMITS.defaultProjectBytes));
+    }
+  });
+
+  it("serializes distinct writers at the project byte quota", async () => {
+    const { owner, editor, projectId } = await setup();
+    await files((s) => s.updateSettings(150));
+    try {
+      const held = await heldRow("projects", projectId);
+      const pending = Promise.allSettled([
+        files((s) =>
+          s.write(person(owner), { projectId, name: "a.txt", bytes: text("a".repeat(100)) }),
+        ),
+        files((s) =>
+          s.write(person(editor), { projectId, name: "b.txt", bytes: text("b".repeat(100)) }),
+        ),
+      ]);
+      try {
+        await held.wait(2);
+      } finally {
+        await held.release();
+        await pending;
+      }
+      const results = await pending;
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(await files((s) => s.list(owner, projectId))).toMatchObject({ usedBytes: 100 });
+    } finally {
+      await files((s) => s.updateSettings(PROJECT_FILE_LIMITS.defaultProjectBytes));
+    }
+  });
+
+  it("serializes distinct creates at the project file-count quota", async () => {
+    const { owner, editor, projectId } = await setup();
+    const first = await files((s) =>
+      s.write(person(owner), { projectId, name: "seed.txt", bytes: text("seed") }),
+    );
+    const [version] = await versionRows(first.id);
+    await db((d) =>
+      d.transaction((tx) =>
+        Effect.gen(function* () {
+          const rows = Array.from(
+            { length: PROJECT_FILE_LIMITS.filesPerProject - 2 },
+            (_, index) => ({
+              id: uuidv7(),
+              projectId,
+              name: `seed-${index}.txt`,
+            }),
+          );
+          yield* tx.insert(projectFiles).values(rows);
+          yield* tx.insert(projectFileVersions).values(
+            rows.map((row) => ({
+              id: uuidv7(),
+              fileId: row.id,
+              number: 1,
+              blobId: version!.blobId,
+              size: 4,
+              mediaType: "text/plain",
+              origin: "user" as const,
+              createdByUserId: owner,
+            })),
+          );
+        }),
+      ),
+    );
+    const held = await heldRow("projects", projectId);
+    let pending: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      pending = Promise.allSettled([
+        files((s) => s.write(person(owner), { projectId, name: "a.txt", bytes: text("unique a") })),
+        files((s) =>
+          s.write(person(editor), { projectId, name: "b.txt", bytes: text("unique b") }),
+        ),
+      ]);
+      await held.wait(2);
+    } finally {
+      await held.release();
+    }
+    expect((await pending!).filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect((await files((s) => s.list(owner, projectId))).files).toHaveLength(
+      PROJECT_FILE_LIMITS.filesPerProject,
+    );
+  });
+
   it("reads an Office file's text for the model", async () => {
     const { owner, viewer, projectId } = await setup();
     const deck = zipSync({
@@ -319,6 +645,114 @@ describe("project files", () => {
     const read = await files((s) => s.read(viewer, projectId, { name: "Launch.pptx" }));
     expect(read.content).toBe("## Slide 1\nAutumn launch");
     expect(read.file.mediaType).toContain("presentationml");
+  });
+
+  it("keeps validated attachment types across durable reads, queue transfer and branching", async () => {
+    const { owner, editor, projectId } = await setup();
+    const bytes = text(`export ${uuidv7()}`);
+    const opaque = await files((s) =>
+      s.write(person(editor), { projectId, name: "export.bin", bytes }),
+    );
+    expect(opaque.mediaType).toBe("application/octet-stream");
+    const uploaded = await run(
+      Effect.flatMap(AttachmentService, (s) =>
+        s.upload({
+          userId: owner,
+          fileName: "export.txt",
+          declaredMediaType: "text/plain",
+          allowedKinds: ["text"],
+          bytes,
+        }),
+      ),
+    );
+    expect(uploaded).toMatchObject({ mediaType: "text/plain", kind: "text", size: bytes.length });
+    const opened = await run(
+      Effect.flatMap(AttachmentService, (s) =>
+        s.open({ userId: owner, attachmentId: uploaded.id }),
+      ),
+    );
+    expect(opened).toMatchObject({ mediaType: "text/plain", size: bytes.length });
+    expect(await run(opened.bytes)).toEqual(bytes);
+    const repo = await run(AttachmentRepo);
+    expect(await run(repo.listWithBlobsByIds(owner, [uploaded.id]))).toMatchObject([
+      { id: uploaded.id, mediaType: "text/plain", size: bytes.length },
+    ]);
+    const chatId = uuidv7(),
+      branchId = uuidv7(),
+      queueId = uuidv7();
+    const messageId = uuidv7(),
+      copiedMessageId = uuidv7();
+    await db((d) =>
+      d.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(conversations).values([
+            { id: chatId, userId: owner },
+            { id: branchId, userId: owner },
+          ]);
+          yield* tx.insert(conversationQueueEntries).values({
+            id: queueId,
+            conversationId: chatId,
+            userId: owner,
+            content: "read export",
+            input: { modelId: "fixture", searchEnabled: false, researchEnabled: false },
+          });
+          yield* repo.reconcileQueueEntry(tx, {
+            userId: owner,
+            queueEntryId: queueId,
+            attachmentIds: [uploaded.id],
+          });
+        }),
+      ),
+    );
+    expect(await run(repo.listForQueueEntries([queueId]))).toMatchObject([
+      { id: uploaded.id, mediaType: "text/plain", kind: "text", size: bytes.length },
+    ]);
+    const cloned = await db((d) =>
+      d.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(messages).values([
+            { id: messageId, conversationId: chatId, role: "user", content: "read export" },
+            { id: copiedMessageId, conversationId: branchId, role: "user", content: "read export" },
+          ]);
+          yield* repo.transferQueueEntry(tx, { queueEntryId: queueId, messageId });
+          return yield* repo.cloneForMessages(tx, {
+            userId: owner,
+            messages: [{ sourceMessageId: messageId, targetMessageId: copiedMessageId }],
+          });
+        }),
+      ),
+    );
+    expect(await run(repo.listForQueueEntries([queueId]))).toEqual([]);
+    expect(await run(repo.listForMessages([messageId]))).toMatchObject([
+      { id: uploaded.id, mediaType: "text/plain", kind: "text" },
+    ]);
+    const copiedId = cloned.get(uploaded.id)!;
+    expect(copiedId).not.toBe(uploaded.id);
+    expect(await run(repo.listForMessages([copiedMessageId]))).toMatchObject([
+      { id: copiedId, mediaType: "text/plain", kind: "text" },
+    ]);
+    expect(await run(repo.listForConversation(owner, branchId))).toMatchObject([
+      { id: copiedId, mediaType: "text/plain", kind: "text" },
+    ]);
+    expect(await run(repo.listWithBlobsForMessages([copiedMessageId]))).toMatchObject([
+      { id: copiedId, mediaType: "text/plain" },
+    ]);
+    expect(
+      await run(
+        Effect.flatMap(AttachmentService, (s) => s.open({ userId: owner, attachmentId: copiedId })),
+      ),
+    ).toMatchObject({ mediaType: "text/plain" });
+    expect(
+      await db((d) =>
+        d
+          .select({ type: attachmentBlobs.mediaType })
+          .from(attachmentBlobs)
+          .where(eq(attachmentBlobs.userId, owner)),
+      ),
+    ).toEqual([{ type: "application/octet-stream" }]);
+    expect((await files((s) => s.download(owner, opaque.versionId)))!.mediaType).toBe(
+      "application/octet-stream",
+    );
   });
 
   it("saves a person's attachment, but a model only one from its own chat", async () => {
@@ -366,6 +800,43 @@ describe("project files", () => {
     const intents = await db((d) => d.select().from(blobCleanupIntents));
     expect(intents.length).toBeGreaterThan(0);
     void version;
+  });
+
+  it("retries deletion when a newly attached chat holds a conversation lock", async () => {
+    const { owner, editor, projectId } = await setup();
+    const held = await heldRow("projects", projectId, "share");
+    const writer = new Client({ connectionString: database.url });
+    await writer.connect();
+    const deleting = run(Effect.flatMap(ProjectService, (s) => s.remove(owner, projectId)));
+    let writing: Promise<unknown> | undefined;
+    const chatId = uuidv7();
+    try {
+      await held.wait(1);
+      await db((d) => d.insert(conversations).values({ id: chatId, userId: editor, projectId }));
+      await writer.query("begin");
+      await writer.query("select id from conversations where id = $1 for update", [chatId]);
+      writing = writer.query("select id from projects where id = $1 for share", [projectId]);
+    } finally {
+      await held.release();
+    }
+    try {
+      await writing;
+      await writer.query("commit");
+      await deleting;
+      expect(
+        await db((d) =>
+          d
+            .select({ projectId: conversations.projectId })
+            .from(conversations)
+            .where(eq(conversations.id, chatId)),
+        ),
+      ).toEqual([{ projectId: null }]);
+      expect(await db((d) => d.select().from(projects).where(eq(projects.id, projectId)))).toEqual(
+        [],
+      );
+    } finally {
+      await writer.end();
+    }
   });
 
   it("hands a tool only files from this chat or its project, by id or name", async () => {

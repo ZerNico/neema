@@ -96,7 +96,7 @@ export class ProjectService extends Context.Service<
     get(userId: string, projectId: string): Effect.Effect<ProjectDetail, ProjectNotAvailable>;
     create(userId: string, input: CreateProjectInput): Effect.Effect<ProjectDetail, ProjectError>;
     update(userId: string, input: UpdateProjectInput): Effect.Effect<ProjectDetail, ProjectError>;
-    remove(userId: string, projectId: string): Effect.Effect<void, ProjectNotAvailable>;
+    remove(userId: string, projectId: string): Effect.Effect<void, ProjectError>;
     members(userId: string, projectId: string): Effect.Effect<ProjectMembers, ProjectNotAvailable>;
     /** Owners manage everyone; any member may remove themselves, which is leaving. */
     changeMembers(
@@ -222,13 +222,43 @@ export class ProjectService extends Context.Service<
         const members = yield* audience(projectId);
         const moved = yield* transaction((tx) =>
           Effect.gen(function* () {
-            const role = yield* projectRole(tx, userId, projectId);
-            if (role !== "owner") return null;
+            yield* tx
+              .select({ id: user.id })
+              .from(user)
+              .where(eq(user.id, userId))
+              .for("no key update")
+              .pipe(Effect.orDie);
+            if ((yield* projectRole(tx, userId, projectId)) !== "owner") return null;
+            yield* tx
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(eq(conversations.projectId, projectId))
+              .orderBy(asc(conversations.id))
+              .for("update")
+              .pipe(Effect.orDie);
+            yield* tx
+              .select({ id: projects.id })
+              .from(projects)
+              .where(eq(projects.id, projectId))
+              .for("update")
+              .pipe(Effect.orDie);
+            if ((yield* projectRole(tx, userId, projectId)) !== "owner") return null;
+            // The project lock blocks new FK attachments. A chat attached while we
+            // waited may hold its own lock and wait on this project: retry, never wait backwards.
+            const attached = yield* tx
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(eq(conversations.projectId, projectId))
+              .pipe(Effect.orDie);
             const chats = yield* tx
               .select({ id: conversations.id, userId: conversations.userId })
               .from(conversations)
               .where(eq(conversations.projectId, projectId))
+              .orderBy(asc(conversations.id))
+              .for("update", { skipLocked: true })
               .pipe(Effect.orDie);
+            if (chats.length !== attached.length)
+              return yield* Effect.fail({ _tag: "ProjectDeleteBusy" as const });
             // Its files' bytes are left to the cleanup ledger: the orphan check
             // records them in this transaction, and the reconciler deletes them.
             const blobIds = (yield* tx
@@ -243,6 +273,13 @@ export class ProjectService extends Context.Service<
             yield* collectOrphanedBlobs(tx, blobIds).pipe(Effect.orDie);
             return chats;
           }),
+        ).pipe(
+          Effect.retry({ times: 4, while: (error) => error._tag === "ProjectDeleteBusy" }),
+          Effect.catchTag("ProjectDeleteBusy", () =>
+            Effect.fail(
+              new ProjectRejected({ reason: "the project changed; try deleting it again" }),
+            ),
+          ),
         );
         if (!moved) return yield* new ProjectNotAvailable({ projectId });
         yield* Effect.forEach(

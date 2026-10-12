@@ -32,7 +32,10 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   other people, so the block steers answers but grants nothing; see `system-prompt.ts`.
 - A branch keeps the project while its owner may still use it, and leaves it otherwise.
 - Deleting a project deletes its documents, files and memory; its chats become ordinary
-  chats and keep their messages.
+  chats and keep their messages. Deletion locks the owner's account, then attached chats in ID
+  order, then the project and its blobs. The project lock blocks new foreign-key attachments.
+  Chats attached while deletion waited are locked without waiting or the transaction retries,
+  so it never waits for a chat while holding the project.
 
 ## Documents and memory
 
@@ -59,14 +62,19 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   `project_file_versions`; the current version is the highest number. Any type is kept and
   classified by its bytes like every other file ([files](files.md)).
 - A save names the version it started from and is refused when the file moved on, so
-  nobody's version lands unseen on top of a newer one. The same writer saving again within
-  ten minutes (the same answer, for the model) replaces their own unpinned last version
-  instead of stacking near-identical ones.
+  nobody's version lands unseen on top of a newer one. Every accepted save or restore advances
+  that number, even repeated saves by one person or one answer. A kept version ID always
+  addresses the same bytes.
 - Retention: older unpinned versions go after 30 days or past 25 per file; up to 10 pins
   per file are kept until unpinned. Past the admin's per-project cap the oldest unpinned
   history goes first, and a save that still does not fit is refused. The current version
-  of every file is never pruned. Each write prunes in its own transaction; an hourly sweep
-  catches projects nobody wrote to.
+  of every file is never pruned. Writes, pins, removals and retention take the same exclusive
+  project lock before reading quotas or changing versions, after any generation's conversation
+  lock and before blob locks. A write takes account key-share locks for the owner and author
+  before those locks, since registering blobs and versions would otherwise take them later.
+  Each write prunes in its own transaction. An hourly sweep
+  catches projects nobody wrote to. Edit authority and the generation fence are checked before
+  storing bytes, then checked again in the registering transaction. Blob I/O holds no transaction.
 - Bytes are `attachment_blobs` registered under the project owner, deduplicated with the
   owner's own files. A version is one more owner in the orphan check, so dropping a
   version, a file or the project records cleanup intents in the same transaction and the
