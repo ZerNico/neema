@@ -26,6 +26,7 @@ export const GridCell = memo(function GridCell({
   zoom,
   spills,
   merged,
+  linked,
 }: {
   id: string | undefined;
   /** Only the scrolling pane's cells are named for assistive tech; frozen ones repeat them. */
@@ -45,6 +46,8 @@ export const GridCell = memo(function GridCell({
   /** Its text runs on over the empty cells to its right. */
   spills: boolean;
   merged: boolean;
+  /** Its formula's HYPERLINK gives it an address to open. */
+  linked: boolean;
 }) {
   // Conditional formats show over the cell's own style, as Excel draws them.
   const own = cellStyle(styleKey);
@@ -100,7 +103,7 @@ export const GridCell = memo(function GridCell({
       ) : null}
       <span
         className={
-          own.link
+          own.link || linked
             ? `relative underline underline-offset-2${style.fontColor || shown.color ? "" : " text-primary"}`
             : "relative"
         }

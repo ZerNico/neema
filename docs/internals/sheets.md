@@ -196,11 +196,28 @@ browser workers and the Excel file tools); this page records the decisions behin
 
 ## Showing it
 
-- `@chat/sheet-react` draws only the grid, from the document and the values: cells in view,
-  frozen panes drawn again over the scrolling ones on the same coordinates, other people's
-  selections, comment marks and overlays such as charts. Selection, editing and commands are
-  reported up; the app draws the formula bar, toolbar, menus, tabs, threads and find bar, and
-  turns commands into operations (`commands.ts`, pure and tested without React).
+- `@chat/sheet-react` draws the grid from the document and values. Its window holds pixels,
+  not row indexes, so each render uses the current layout and zoom. A layout effect measures
+  before paint, including after a sheet switch. Scroll hysteresis retains a buffered window.
+  Instant reveals record their destination synchronously, while smooth reveals follow actual
+  scroll positions so still-visible rows remain drawn. Browser scroll anchoring is off.
+- Cells, row headers and the frozen left pane use memoized 16-row bands keyed by their row
+  index. Only entering bands mount on a window shift. Zero-height bands draw nothing. The
+  pane assigns merges to one band, transferring those anchored above the window to its first
+  visible band. Occupied columns are indexed per calculation and layout, including calculated
+  spill results without stored cells. Bands binary-search that index for a left spill origin,
+  rather than walking empty columns. Text stops at occupied cells, merges or the frozen boundary.
+  Hidden columns contribute no width and do not block text.
+- The active coordinate has one named gridcell and one active id, even outside the window or
+  under a spill or merge. Frozen copies are unnamed and have no active id. The pane containing
+  the editor stays accessible. Bands deliberately have no `role=row`: the existing grid lacks
+  ARIA row grouping, so this is not a claim of complete grid accessibility or RTL support.
+- Filter buttons sit outside bands so a surviving menu anchor is not remounted with a band.
+  Header resizing captures the pointer on the scroller and keeps the starting axis, id and
+  zoom, so it survives a header leaving the window. Editors, comment anchors, selections,
+  charts and images stay in content coordinates outside bands.
+  Selection, editing and commands are reported up. The app draws the formula bar, toolbar,
+  menus, tabs, threads and find bar, and turns commands into operations (`commands.ts`).
 - A tab shows the server's document with its own unsent changes replayed on top
   (`client/sheet-sync.ts`); its own change coming back through the feed, or an acknowledgement,
   retires it. Unsent changes are kept on the device one per key, by client and number, and

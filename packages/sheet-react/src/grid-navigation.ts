@@ -133,6 +133,7 @@ export function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols:
   const colAt = new Map(cols.ids.map((id, index) => [id, index]));
   const spans = new Map<string, { top: number; left: number; bottom: number; right: number }>();
   const covered = new Set<string>();
+  const byRow = new Map<number, { top: number; left: number; bottom: number; right: number }[]>();
   for (const merge of doc.sheet[sheet]!.merges) {
     const [top, bottom, left, right] = [
       rowAt.get(merge.r1),
@@ -142,10 +143,15 @@ export function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols:
     ];
     if (top === undefined || bottom === undefined || left === undefined || right === undefined)
       continue;
-    spans.set(key(top, left), { top, left, bottom, right });
-    for (let row = top; row <= bottom; row++)
+    const span = { top, left, bottom, right };
+    spans.set(key(top, left), span);
+    for (let row = top; row <= bottom; row++) {
+      const inRow = byRow.get(row) ?? [];
+      inRow.push(span);
+      byRow.set(row, inRow);
       for (let col: number = left; col <= right; col++)
         if (row !== top || col !== left) covered.add(key(row, col));
+    }
   }
-  return { spans, covered };
+  return { spans, covered, byRow };
 }

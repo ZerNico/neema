@@ -1,7 +1,6 @@
 import { cellStyle } from "@chat/sheet/model/style";
 import {
   useCallback,
-  useEffect,
   useEffectEvent,
   useId,
   useLayoutEffect,
@@ -18,7 +17,8 @@ import type { SheetValues } from "@chat/sheet/model/calc";
 import type { Axis, SheetDoc } from "@chat/sheet/model";
 import type { CellLook } from "@chat/sheet/model/conditional";
 import { collapsedOf, outlineDepth, placeGroups } from "@chat/sheet/model/outline";
-import { cellDisplay, safeLink } from "./display.ts";
+import { cellDisplay, mergeAnchor, safeLink } from "./display.ts";
+import { occupiedColumns } from "./grid-spill.ts";
 import {
   HEADER_COLUMN_PX,
   HEADER_ROW_PX,
@@ -30,7 +30,13 @@ import {
 } from "./layout.ts";
 import type { OverlayCommand } from "./overlay-place.ts";
 import { OutlineLevels, OutlineMarks } from "./grid-outline.tsx";
-import { drawPane, type PaneDrawing } from "./grid-cells.tsx";
+import {
+  bandRange,
+  FilterButtons,
+  PaneCells,
+  rowHeaderBands,
+  type PaneDrawing,
+} from "./grid-cells.tsx";
 import {
   adding,
   autofit,
@@ -268,13 +274,14 @@ export function SheetGrid({
       width: element.clientWidth || FALLBACK.width,
       height: element.clientHeight || FALLBACK.height,
     };
-    // A resize or scroll that moved nothing keeps the grid as drawn.
+    // The grid is drawn a viewport beyond each edge, so a scroll that stays within half of
+    // that keeps it as drawn: most scroll events render nothing, and none reaches blank cells.
     setViewport((current) =>
       current &&
-      current.top === next.top &&
-      current.left === next.left &&
       current.width === next.width &&
-      current.height === next.height
+      current.height === next.height &&
+      Math.abs(current.top - next.top) < next.height / 2 &&
+      Math.abs(current.left - next.left) < next.width / 4
         ? current
         : next,
     );
@@ -286,13 +293,9 @@ export function SheetGrid({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [measure]);
-  const frame = useRef(0);
-  const onScroll = useCallback(() => {
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(measure);
-  }, [measure]);
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  }, [measure, sheet]);
+  // Measured as it scrolls, not a frame later: the content has already moved.
+  const onScroll = measure;
 
   const rowIndex = useMemo(() => new Map(rows.ids.map((id, index) => [id, index])), [rows]);
   const colIndex = useMemo(() => new Map(cols.ids.map((id, index) => [id, index])), [cols]);
@@ -363,6 +366,8 @@ export function SheetGrid({
       else {
         element.scrollTop = y;
         element.scrollLeft = x;
+        // Instant jumps draw before paint. Smooth scrolling follows the actual scroll events.
+        setViewport({ top: y, left: x, width, height });
       }
     },
     [
@@ -383,7 +388,7 @@ export function SheetGrid({
   const headRow = head?.row;
   const headCol = head?.col;
   const revealHead = useEffectEvent((row: number, col: number) => reveal(row, col));
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (headRow !== undefined && headCol !== undefined) revealHead(headRow, headCol);
   }, [headRow, headCol]);
 
@@ -662,7 +667,11 @@ export function SheetGrid({
     if (editing) commit(0, 0);
     // Cmd or Ctrl and a click opens a cell's link, as in Excel.
     if (event.metaKey || event.ctrlKey) {
-      const link = safeLink(cellStyle(data.cells[rows.ids[at.row]!]?.[cols.ids[at.col]!]?.s).link);
+      const { r, c } = mergeAnchor(data, { r: rows.ids[at.row]!, c: cols.ids[at.col]! });
+      // A link set on the cell comes before one its formula's HYPERLINK gives it.
+      const link = safeLink(
+        cellStyle(data.cells[r]?.[c]?.s).link ?? values.link(sheet, r, c) ?? undefined,
+      );
       if (link) {
         event.preventDefault();
         window.open(link, "_blank", "noopener,noreferrer");
@@ -692,86 +701,130 @@ export function SheetGrid({
     pointDrag.current = null;
   };
 
-  // A header edge dragged: the size follows the pointer, and is reported once let go.
-  const [resizing, setResizing] = useState<{
+  // Pointer capture belongs to the scroller, which survives the header's band unmounting.
+  const resizeDrag = useRef<{
     axis: Axis;
+    id: string;
     index: number;
     start: number;
     size: number;
+    zoom: number;
+    pointerId: number;
   } | null>(null);
-  const resizeHandle = (axis: Axis, index: number) =>
-    writable && onResize ? (
-      <div
-        aria-hidden
-        className={
-          axis === "columns"
-            ? "absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
-            : "absolute -bottom-1 left-0 z-10 h-2 w-full cursor-row-resize"
-        }
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          const size = autofit(
-            { cells: data.cells, values, sheet, locale },
-            axis,
-            (axis === "columns" ? cols : rows).ids[index]!,
-          );
-          if (size !== null) onResize(axis, (axis === "columns" ? cols : rows).ids[index]!, size);
-        }}
-        onPointerDown={(event) => {
-          event.stopPropagation();
-          event.preventDefault();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          const layout = axis === "columns" ? cols : rows;
-          setResizing({
-            axis,
-            index,
-            start: axis === "columns" ? event.clientX : event.clientY,
-            size: layout.size(index),
-          });
-        }}
-        onPointerMove={(event) => {
-          if (!resizing) return;
-          const delta =
-            (resizing.axis === "columns" ? event.clientX : event.clientY) - resizing.start;
-          setResizing({
-            ...resizing,
-            start: resizing.start + delta,
-            size: Math.max(4, resizing.size + delta),
-          });
-        }}
-        onPointerUp={() => {
-          if (!resizing) return;
-          const layout = resizing.axis === "columns" ? cols : rows;
-          onResize(resizing.axis, layout.ids[resizing.index]!, Math.round(resizing.size / zoom));
-          setResizing(null);
-        }}
-      />
-    ) : null;
-
-  const visibleRows = measured ? visibleRange(rows, viewport.top, viewport.height) : NONE_VISIBLE;
-  const visibleCols = measured ? visibleRange(cols, viewport.left, viewport.width) : NONE_VISIBLE;
-  const drawing: PaneDrawing = {
-    gridId,
-    sheet,
-    cells: data.cells,
-    values,
-    locale,
-    looks,
-    rows,
-    cols,
-    rowIndex,
-    colIndex,
-    merges,
-    head,
-    zoom,
-    filterButtons,
-    onFilterButton,
+  const [resizing, setResizing] = useState<{ axis: Axis; index: number; size: number } | null>(
+    null,
+  );
+  const headerTarget = (target: EventTarget) => {
+    if (!(target instanceof Element)) return null;
+    const header = target.closest<HTMLElement>("[data-sheet-axis]");
+    const axis = header?.dataset.sheetAxis;
+    if (axis !== "rows" && axis !== "columns") return null;
+    return {
+      axis,
+      index: Number(header!.dataset.sheetIndex),
+      edge: !!target.closest("[data-sheet-resize]"),
+    } as const;
   };
+  const moveResize = (event: PointerEvent) => {
+    const drag = resizeDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    const pointer = drag.axis === "columns" ? event.clientX : event.clientY;
+    setResizing({
+      axis: drag.axis,
+      index: drag.index,
+      size: Math.max(4, drag.size + pointer - drag.start),
+    });
+  };
+  const endResize = (event: PointerEvent, cancel: boolean) => {
+    const drag = resizeDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    if (!cancel && writable) {
+      const pointer = drag.axis === "columns" ? event.clientX : event.clientY;
+      onResize?.(
+        drag.axis,
+        drag.id,
+        Math.round(Math.max(4, drag.size + pointer - drag.start) / drag.zoom),
+      );
+    }
+    resizeDrag.current = null;
+    setResizing(null);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const visibleRows = measured
+    ? bandRange(visibleRange(rows, viewport.top - viewport.height, viewport.height * 3), rows)
+    : NONE_VISIBLE;
+  const visibleCols = measured
+    ? visibleRange(cols, viewport.left - viewport.width / 2, viewport.width * 2)
+    : NONE_VISIBLE;
+  const occupied = useMemo(
+    () => occupiedColumns(sheet, data.cells, values, rows, cols),
+    [sheet, data.cells, values, rows, cols],
+  );
+  const drawing: PaneDrawing = useMemo(
+    () => ({
+      gridId,
+      sheet,
+      cells: data.cells,
+      values,
+      locale,
+      looks,
+      rows,
+      cols,
+      merges,
+      zoom,
+      frozenCols,
+      occupied,
+    }),
+    [
+      gridId,
+      sheet,
+      data.cells,
+      values,
+      locale,
+      looks,
+      rows,
+      cols,
+      merges,
+      zoom,
+      frozenCols,
+      occupied,
+    ],
+  );
   const paneCells = (
     rowRange: { first: number; last: number },
     colRange: { first: number; last: number },
     main: boolean,
-  ) => drawPane(drawing, rowRange, colRange, main);
+  ) => (
+    <PaneCells
+      drawing={drawing}
+      first={rowRange.first}
+      last={rowRange.last}
+      colFirst={colRange.first}
+      colLast={colRange.last}
+      main={main}
+      activeRow={main ? (head?.row ?? -1) : -1}
+      activeCol={main ? (head?.col ?? -1) : -1}
+    />
+  );
+  const paneFilters = (
+    rowRange: { first: number; last: number },
+    colRange: { first: number; last: number },
+  ) => (
+    <FilterButtons
+      rows={rows}
+      cols={cols}
+      rowIndex={rowIndex}
+      colIndex={colIndex}
+      rowRange={rowRange}
+      colRange={colRange}
+      filterButtons={filterButtons}
+      onFilterButton={onFilterButton}
+    />
+  );
   const cells = paneCells(visibleRows, visibleCols, true);
 
   /**
@@ -830,40 +883,24 @@ export function SheetGrid({
           width: cols.size(col),
           height: HEADER_ROW_PX,
         }}
-        onPointerDown={(event) => startHeaderSelect(event, "columns", col)}
+        data-sheet-axis="columns"
+        data-sheet-index={col}
       >
         {columnLetters(col + 1)}
-        {resizeHandle("columns", col)}
-      </div>
-    );
-  };
-  /** A row's header; `offset` places it in the corner, below the column headers. */
-  const rowHeader = (row: number, offset = 0) => {
-    const inSelection = box && row >= box.top && row <= box.bottom;
-    if (!rows.size(row)) return null;
-    return (
-      <div
-        key={row}
-        role="rowheader"
-        className={`border-border text-muted-foreground absolute flex items-center justify-center border-r border-b text-xs ${inSelection ? "bg-accent text-accent-foreground" : "bg-muted"}`}
-        style={{
-          top: offset + rows.starts[row]!,
-          left: rowGutter,
-          height: rows.size(row),
-          width: HEADER_COLUMN_PX,
-        }}
-        onPointerDown={(event) => startHeaderSelect(event, "rows", row)}
-      >
-        {row + 1}
-        {resizeHandle("rows", row)}
+        {writable && onResize ? (
+          <div
+            aria-hidden
+            data-sheet-resize=""
+            className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
+          />
+        ) : null}
       </div>
     );
   };
   const columnHeaders: ReactNode[] = [];
   for (let col = visibleCols.first; col <= visibleCols.last; col++)
     columnHeaders.push(columnHeader(col));
-  const rowHeaders: ReactNode[] = [];
-  for (let row = visibleRows.first; row <= visibleRows.last; row++) rowHeaders.push(rowHeader(row));
+  const rowHeaders = rowHeaderBands(rows, visibleRows, box, rowGutter, 0, writable && !!onResize);
 
   // The active cell's list, open below it; the picked choice moves with the arrow keys.
   const [listOpen, setListOpen] = useState<{ at: string; picked: number } | null>(null);
@@ -1081,6 +1118,7 @@ export function SheetGrid({
       {...handlers}
     >
       {paneCells(rowRange, colRange, false)}
+      {paneFilters(rowRange, colRange)}
       {others}
       {moreBoxes}
       {selectionBox}
@@ -1091,6 +1129,7 @@ export function SheetGrid({
   return (
     <div
       ref={scroller}
+      style={{ overflowAnchor: "none" }}
       role="grid"
       aria-label={label}
       aria-rowcount={rows.ids.length}
@@ -1100,6 +1139,46 @@ export function SheetGrid({
       tabIndex={0}
       onScroll={onScroll}
       onKeyDown={onKeyDown}
+      onPointerDownCapture={(event) => {
+        const header = headerTarget(event.target);
+        if (!header) return;
+        if (!header.edge) {
+          startHeaderSelect(event, header.axis, header.index);
+          return;
+        }
+        if (!writable || !onResize || event.button !== 0) return;
+        event.stopPropagation();
+        event.preventDefault();
+        const layout = header.axis === "columns" ? cols : rows;
+        const drag = {
+          axis: header.axis,
+          index: header.index,
+          id: layout.ids[header.index]!,
+          start: header.axis === "columns" ? event.clientX : event.clientY,
+          size: layout.size(header.index),
+          zoom,
+          pointerId: event.pointerId,
+        };
+        resizeDrag.current = drag;
+        setResizing(drag);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }}
+      onPointerMoveCapture={moveResize}
+      onPointerUpCapture={(event) => endResize(event, false)}
+      onPointerCancelCapture={(event) => endResize(event, true)}
+      onLostPointerCapture={() => {
+        resizeDrag.current = null;
+        setResizing(null);
+      }}
+      onDoubleClickCapture={(event) => {
+        const header = headerTarget(event.target);
+        if (!header?.edge) return;
+        event.stopPropagation();
+        if (!writable || !onResize) return;
+        const id = (header.axis === "columns" ? cols : rows).ids[header.index]!;
+        const size = autofit({ cells: data.cells, values, sheet, locale }, header.axis, id);
+        if (size !== null) onResize(header.axis, id, size);
+      }}
       onDoubleClick={(event) => {
         if (event.target instanceof HTMLTextAreaElement) return;
         beginEdit(null);
@@ -1179,7 +1258,14 @@ export function SheetGrid({
               />
             ) : null}
             {Array.from({ length: frozenCols }, (_, col) => columnHeader(col))}
-            {Array.from({ length: frozenRows }, (_, row) => rowHeader(row, headerHeight))}
+            {rowHeaderBands(
+              rows,
+              { first: 0, last: frozenRows - 1 },
+              box,
+              rowGutter,
+              headerHeight,
+              writable && !!onResize,
+            )}
             {frozenRows && frozenCols
               ? pane(
                   "corner",
@@ -1233,6 +1319,7 @@ export function SheetGrid({
           onPointerCancel={stopDragging}
         >
           {cells}
+          {paneFilters(visibleRows, visibleCols)}
           {others}
           {anchorBox}
           {moreBoxes}

@@ -123,6 +123,27 @@ describe("the sheet grid", () => {
     expect(spill.style.backgroundColor).toBe("");
   });
 
+  it("draws a viewport ahead and redraws only after scrolling half of one", () => {
+    let doc = emptyDoc();
+    doc = apply(doc, {
+      op: "set",
+      sh: "s1",
+      cells: [set(doc, 60, 1, "ahead"), set(doc, 90, 1, "further"), set(doc, 130, 1, "far")],
+    });
+    render(<Harness doc={doc} />);
+    const grid = screen.getByRole("grid");
+    // jsdom has no layout: the grid assumes a 640-pixel viewport, rows 20 pixels high.
+    expect(cellText(60, 1)).toBe("ahead");
+    expect(cellText(90, 1)).toBeUndefined();
+    grid.scrollTop = 300;
+    fireEvent.scroll(grid);
+    expect(cellText(90, 1)).toBeUndefined();
+    grid.scrollTop = 700;
+    fireEvent.scroll(grid);
+    expect(cellText(90, 1)).toBe("further");
+    expect(cellText(130, 1)).toBeUndefined();
+  });
+
   it("draws a merged range once, over the cells it covers", () => {
     let doc = emptyDoc();
     doc = apply(
@@ -223,6 +244,35 @@ describe("the sheet grid", () => {
       fireEvent.pointerDown(content, { clientX: 10, clientY: 5, button: 0, metaKey: true });
       fireEvent.pointerDown(content, { clientX: 70, clientY: 5, button: 0, metaKey: true });
       expect(opened).toEqual(["https://example.com/"]);
+    } finally {
+      window.open = open;
+    }
+  });
+
+  it("opens a formula's HYPERLINK on Cmd+click like a cell's link, never a script address", () => {
+    let doc = emptyDoc();
+    doc = apply(doc, {
+      op: "set",
+      sh: "s1",
+      cells: [
+        set(doc, 1, 1, '=HYPERLINK("https://example.com/a","Site")'),
+        set(doc, 1, 2, '=HYPERLINK("javascript:alert(1)","Bad")'),
+      ],
+    });
+    const opened: string[] = [];
+    const open = window.open;
+    window.open = (url) => {
+      opened.push(String(url));
+      return null;
+    };
+    try {
+      render(<Harness doc={doc} />);
+      expect(screen.getByText("Site").className).toContain("underline");
+      expect(screen.getByText("Bad").className).not.toContain("underline");
+      const content = screen.getByRole("grid").firstElementChild!.lastElementChild!;
+      fireEvent.pointerDown(content, { clientX: 10, clientY: 5, button: 0, metaKey: true });
+      fireEvent.pointerDown(content, { clientX: 70, clientY: 5, button: 0, metaKey: true });
+      expect(opened).toEqual(["https://example.com/a"]);
     } finally {
       window.open = open;
     }
