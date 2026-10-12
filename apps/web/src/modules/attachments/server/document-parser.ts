@@ -10,6 +10,7 @@ import {
   localReader,
   MISTRAL_OCR_MODEL,
   mistralReader,
+  mistralEndpoint,
   modelReader,
   type ScanFailure,
   type ScanReader,
@@ -184,7 +185,7 @@ export class DocumentParser extends Context.Service<
           }
           case "mistral": {
             // The endpoint is part of the identity: another service may read differently.
-            const id = `${MISTRAL_OCR_MODEL}@${new URL(scans.baseUrl).host}`;
+            const id = `${MISTRAL_OCR_MODEL}@${mistralEndpoint(scans.baseUrl)}`;
             if (!secret)
               return { id, unavailable: "no Mistral key is configured" } satisfies Engine;
             return {
@@ -220,6 +221,7 @@ export class DocumentParser extends Context.Service<
                 providers: providerRepo,
                 analytics,
                 modelId: scans.modelId,
+                approved: scans.approved,
               }),
             } satisfies Engine;
           }

@@ -43,13 +43,21 @@ structured result, never from counting markers.
 The admin chooses in Documents: not at all, on this server (PP-OCRv6 through our own port of
 RapidOCR's processing on ONNX Runtime, measured against RapidOCR), Mistral OCR, or a vision model.
 Mistral OCR takes a base URL, so any service speaking its API works (its EU endpoint, a
-reseller); the host is part of the engine's fingerprint, and the model id stays pinned.
+reseller). The normalized request endpoint, including scheme, host, port and path, is part of the
+engine's fingerprint, and the model id stays pinned.
 Only scanned pages leave the server, never the whole file: Mistral gets a PDF of just those pages,
 a vision model one rendered image a page. The admin page confirms choosing an outside reader,
 naming every path pages arrive from; the server function takes the choice as given. A vision
-model is approved as its connection (provider, base URL, model key) is at that moment; an edit to
-any of them stops sending until an admin saves again, as semantic search does, and the
-connection is part of the engine's fingerprint, so a re-approved one reads pages again.
+model is approved as its connection (provider, base URL, model key) is at that moment. An edit to
+any of them stops sending until an admin saves again, as semantic search does. Each page carries
+that approval into the gateway, which checks the same resolved connection it uses for dispatch,
+after rendering and any queue wait. A mismatch sends nothing and publishes no text for that page.
+Already-read pages keep their usage and approved cache identity. The connection is part of the
+engine's fingerprint, so a re-approved one reads pages again.
+
+Mistral response bodies are byte-bounded while streaming, including errors and decompressed bodies
+without a length header. Overflow cancels the body before JSON parsing. Results must contain at most
+the batch's four pages, with unique in-range integer indices and bounded Markdown strings.
 
 The local model files are fetched when the option is saved, never shipped: pinned to a revision of
 PaddlePaddle's own repositories and to a sha256, which is the trust anchor, since the hub redirects

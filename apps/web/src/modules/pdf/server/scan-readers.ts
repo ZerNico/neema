@@ -1,9 +1,10 @@
-import { Effect, Redacted } from "effect";
+import { Effect, Option, Redacted, Schema } from "effect";
 import { Prompt } from "effect/unstable/ai";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import type { ScanModelConnection } from "~/modules/tools/schema.ts";
 import { parseRetryAfter } from "~/server/retry-after.ts";
 import { stripControlCharacters } from "../classify.ts";
 import { PDF_RASTER, scanJobTimeoutMs } from "../limits.ts";
@@ -87,7 +88,66 @@ export const mistralBaseUrl = (raw: string | undefined) => {
     return null;
   }
 };
+export const mistralEndpoint = (baseUrl: string) => {
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/ocr`;
+  url.hash = "";
+  return url.toString();
+};
 const MISTRAL_TIMEOUT_MS = 120_000;
+const MISTRAL_RESPONSE_BYTES = 1024 * 1024;
+const MISTRAL_ERROR_BYTES = 16 * 1024;
+const MistralPages = Schema.Struct({
+  pages: Schema.Array(
+    Schema.Struct({
+      index: Schema.Int.check(
+        Schema.isBetween({ minimum: 0, maximum: PDF_RASTER.pagesPerJob - 1 }),
+      ),
+      // Allow Markdown overhead before the shared per-page publication cap.
+      markdown: Schema.String.check(Schema.isMaxLength(PAGE_TEXT_CHARS * 4)),
+    }),
+  ).check(Schema.isMaxLength(PDF_RASTER.pagesPerJob)),
+});
+const MistralErrorDetail = Schema.Struct({
+  message: Schema.optionalKey(Schema.String),
+  detail: Schema.optionalKey(Schema.String),
+});
+
+const mistralOverflow = {
+  reason: "The OCR service response exceeded the byte limit",
+  transient: false,
+} satisfies ScanFailure;
+
+/** Count decoded response bytes too: Content-Length may describe compressed bytes or be absent. */
+export const readMistralBody = async (response: Response, maxBytes: number) => {
+  const length = response.headers.get("content-length");
+  if (length !== null && /^\d+$/.test(length) && Number(length) > maxBytes) {
+    await response.body?.cancel();
+    throw mistralOverflow;
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      if (part.value.byteLength === 0) continue;
+      bytes += part.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        throw mistralOverflow;
+      }
+      parts.push(decoder.decode(part.value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return parts.join("");
+  } finally {
+    reader.releaseLock();
+  }
+};
 
 const mistralFailure = (status: number, detail: string, retryAfter: string | null): ScanFailure => {
   const suffix = detail ? `: ${detail}` : "";
@@ -120,10 +180,11 @@ export const mistralOcr = (input: {
   readonly baseUrl: string;
   readonly key: Redacted.Redacted<string>;
   readonly pdf: Uint8Array;
+  readonly pageCount?: number;
 }) =>
   Effect.tryPromise({
     try: async (signal) => {
-      const response = await fetch(`${input.baseUrl}/ocr`, {
+      const response = await fetch(mistralEndpoint(input.baseUrl), {
         method: "POST",
         headers: {
           authorization: `Bearer ${Redacted.value(input.key)}`,
@@ -139,12 +200,15 @@ export const mistralOcr = (input: {
         }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(MISTRAL_TIMEOUT_MS)]),
       });
-      const text = await response.text();
+      const text = await readMistralBody(
+        response,
+        response.ok ? MISTRAL_RESPONSE_BYTES : MISTRAL_ERROR_BYTES,
+      );
       if (!response.ok) {
         let detail = text;
         try {
-          const body = JSON.parse(text) as { message?: unknown; detail?: unknown };
-          detail = String(body.message ?? body.detail ?? text);
+          const body = Schema.decodeUnknownOption(MistralErrorDetail)(JSON.parse(text));
+          if (Option.isSome(body)) detail = body.value.message ?? body.value.detail ?? text;
         } catch {
           // Not JSON; keep the text.
         }
@@ -154,25 +218,27 @@ export const mistralOcr = (input: {
           response.headers.get("retry-after"),
         );
       }
-      let body: {
-        pages?: Array<{ index?: unknown; markdown?: unknown }>;
-      };
+      const invalid = {
+        reason: "The OCR service answered with something other than OCR results",
+        transient: false,
+      } satisfies ScanFailure;
+      let json: unknown;
       try {
-        body = JSON.parse(text);
+        json = JSON.parse(text);
       } catch {
-        // An answer we cannot read will not read better on a retry.
-        throw {
-          reason: "The OCR service answered with something other than OCR results",
-          transient: false,
-        } satisfies ScanFailure;
+        throw invalid;
       }
-      return {
-        pages: (body.pages ?? []).flatMap((page) =>
-          typeof page.index === "number" && typeof page.markdown === "string"
-            ? [{ index: page.index, markdown: page.markdown }]
-            : [],
-        ),
-      };
+      const body = Schema.decodeUnknownOption(MistralPages)(json);
+      if (Option.isNone(body)) throw invalid;
+      const pages = body.value.pages;
+      const pageCount = input.pageCount ?? PDF_RASTER.pagesPerJob;
+      if (
+        pages.length > pageCount ||
+        pages.some((page) => page.index >= pageCount) ||
+        new Set(pages.map((page) => page.index)).size !== pages.length
+      )
+        throw invalid;
+      return { pages };
     },
     catch: (error): ScanFailure =>
       error && typeof error === "object" && "transient" in error
@@ -204,7 +270,12 @@ export const mistralReader =
           }),
         catch: workerFailure,
       });
-      const result = yield* mistralOcr({ baseUrl: deps.baseUrl, key: deps.key, pdf });
+      const result = yield* mistralOcr({
+        baseUrl: deps.baseUrl,
+        key: deps.key,
+        pdf,
+        pageCount: pages.length,
+      });
       const owner = runOptions.owner;
       // Recorded so readings show in analytics; a price written here would go stale, so the cost is unknown.
       if (owner)
@@ -250,6 +321,7 @@ export const modelReader =
     readonly providers: ProviderRepo["Service"];
     readonly analytics: AnalyticsRepo["Service"];
     readonly modelId: string;
+    readonly approved: ScanModelConnection;
   }): ScanReader =>
   ({ bytes, pages, runOptions }) =>
     Effect.gen(function* () {
@@ -271,6 +343,7 @@ export const modelReader =
           deps.gateway
             .generateText({
               modelId: deps.modelId,
+              expectedConnection: deps.approved,
               maxOutputTokens: 8000,
               prompt: Prompt.make([
                 {

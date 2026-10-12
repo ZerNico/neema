@@ -29,6 +29,7 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
+import type { ScanModelConnection } from "~/modules/tools/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import { decodeAwsKeys } from "../aws-keys.ts";
 import {
@@ -456,6 +457,8 @@ export class AiGateway extends Context.Service<
     generateText(input: {
       modelId: string;
       prompt: Prompt.Prompt;
+      /** OCR consent, checked against the connection used for this request. */
+      expectedConnection?: ScanModelConnection;
       /** Bounds the side generation; omitted leaves the provider default. */
       maxOutputTokens?: number;
       /**
@@ -543,6 +546,7 @@ export class AiGateway extends Context.Service<
           maxOutputTokens?: number;
           reasoningEffort?: ReasoningEffort | null;
           cacheKey?: string;
+          expectedConnection?: ScanModelConnection;
         },
         imageOutput = false,
       ) {
@@ -550,6 +554,24 @@ export class AiGateway extends Context.Service<
         if (!model) return yield* new ModelNotFound({ modelId });
         const provider = yield* repo.getProviderWithKey(model.providerId);
         if (!provider) return yield* new ModelNotFound({ modelId });
+        const approved = config?.expectedConnection;
+        // Check the rows used below, not a preflight followed by another mutable lookup.
+        if (
+          approved &&
+          (!model.enabled ||
+            !provider.enabled ||
+            model.type !== "chat" ||
+            model.access !== "public" ||
+            !model.capabilities.vision ||
+            approved.providerId !== provider.id ||
+            approved.baseUrl !== provider.baseUrl.replace(/\/$/, "") ||
+            approved.modelKey !== model.modelKey)
+        )
+          return yield* new ProviderUnreachable({
+            providerId: provider.id,
+            message: "the OCR model connection changed; approval required",
+            diagnostic: { kind: "InvalidRequestError" },
+          });
         const connection = yield* connect(provider, modelId);
         // Stored, so the next call starts there and the admin sees the switch.
         const onChatFallback = Effect.suspend(() =>
@@ -638,6 +660,7 @@ export class AiGateway extends Context.Service<
       const generateText = Effect.fn("AiGateway.generateText")(function* (input: {
         modelId: string;
         prompt: Prompt.Prompt;
+        expectedConnection?: ScanModelConnection;
         maxOutputTokens?: number;
         sameAs?: SideGenerationRequest;
       }) {
@@ -648,6 +671,9 @@ export class AiGateway extends Context.Service<
             : { maxOutputTokens: input.maxOutputTokens }),
           ...(same?.reasoningEffort === undefined ? {} : { reasoningEffort: same.reasoningEffort }),
           ...(same?.cacheKey === undefined ? {} : { cacheKey: same.cacheKey }),
+          ...(input.expectedConnection === undefined
+            ? {}
+            : { expectedConnection: input.expectedConnection }),
         });
         const prompt = input.prompt;
         // Without a toolkit the request carries no tools. With one, its calls
