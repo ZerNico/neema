@@ -8,6 +8,7 @@ import type { JsonValue } from "~/db/schema/providers.ts";
 import type { CustomToolDetail } from "../schema.ts";
 import {
   checkCustomTool,
+  getCustomTool,
   deleteCustomTool,
   saveCustomTool,
   setCustomToolEnabled,
@@ -15,6 +16,16 @@ import {
 } from "../server/functions.ts";
 import { getResourceSharing } from "~/modules/sharing/server/functions.ts";
 import { CustomToolEditorPage } from "./custom-tool-editor-page.tsx";
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
 
 const navigate = vi.fn();
 const confirm = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -181,6 +192,7 @@ describe("CustomToolEditorPage", () => {
       expect(navigate).toHaveBeenCalledWith({
         to: "/admin/custom-tools/$toolId",
         params: { toolId: "created" },
+        ignoreBlocker: true,
       }),
     );
   });
@@ -386,6 +398,128 @@ describe("CustomToolEditorPage", () => {
     expect(await blocker.current!.shouldBlockFn()).toBe(true);
     expect(confirm).toHaveBeenLastCalledWith(
       expect.objectContaining({ title: "Discard unsaved changes?" }),
+    );
+  });
+
+  it("adopts a clean remote version but preserves dirty edits with a reload choice", async () => {
+    const client = renderEditor(detail());
+    await act(async () =>
+      client.setQueryData(
+        ["admin", "custom-tools", "t1"],
+        detail({ version: "v2", source: "Remote A" }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByLabelText("Source")).toHaveValue("Remote A"));
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Local B" } });
+    await act(async () =>
+      client.setQueryData(
+        ["admin", "custom-tools", "t1"],
+        detail({ version: "v3", source: "Remote C" }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Reload module" })).toBeEnabled();
+    expect(screen.getByLabelText("Source")).toHaveValue("Local B");
+    fireEvent.click(screen.getByRole("button", { name: "Reload module" }));
+    await waitFor(() => expect(screen.getByLabelText("Source")).toHaveValue("Remote C"));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("refreshes the remote version after a save conflict before offering reload", async () => {
+    vi.mocked(saveCustomTool).mockRejectedValueOnce(new Error("This module changed elsewhere."));
+    vi.mocked(getCustomTool).mockResolvedValue(
+      detail({ version: "v2", source: "Remote A" }) as never,
+    );
+    renderEditor(detail());
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Local B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(getCustomTool).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reload module" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Source")).toHaveValue("Local B");
+    fireEvent.click(screen.getByRole("button", { name: "Reload module" }));
+    await waitFor(() => expect(screen.getByLabelText("Source")).toHaveValue("Remote A"));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("accepts a saved baseline and version without replacing a later dirty buffer", async () => {
+    const pending = deferred<ReturnType<typeof detail>>();
+    const accepted = detail({ version: "v2", source: "Submitted A" });
+    vi.mocked(saveCustomTool).mockReturnValueOnce(pending.promise as never);
+    vi.mocked(getCustomTool).mockResolvedValue(accepted as never);
+    renderEditor(detail());
+    const source = screen.getByLabelText("Source");
+    fireEvent.change(source, { target: { value: "Submitted A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(saveCustomTool).toHaveBeenCalledOnce());
+    fireEvent.change(source, { target: { value: "Later B" } });
+    await act(async () => pending.resolve(accepted));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Saved" })).toBeEnabled());
+    expect(source).toHaveValue("Later B");
+    expect(blocker.current?.enableBeforeUnload).toBe(true);
+    confirm.mockResolvedValueOnce(false);
+    expect(await blocker.current!.shouldBlockFn()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Saved" }));
+    await waitFor(() =>
+      expect(saveCustomTool).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({ source: "Later B", expectedVersion: "v2" }),
+      }),
+    );
+  });
+
+  it.each(["Source", "Identifier", "Package"])(
+    "discards stale Verify success after editing %s",
+    async (field) => {
+      const pending = deferred<{ functions: (typeof functionManifest)[] }>();
+      vi.mocked(checkCustomTool).mockReturnValueOnce(pending.promise as never);
+      renderEditor(detail());
+      if (field === "Package")
+        fireEvent.click(screen.getByRole("button", { name: "Add dependency" }));
+      fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+      await waitFor(() => expect(checkCustomTool).toHaveBeenCalledOnce());
+      fireEvent.change(screen.getByLabelText(field), {
+        target: { value: field === "Identifier" ? "new_slug" : "New input" },
+      });
+      await act(async () => pending.resolve({ functions: [functionManifest] }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Verify" })).not.toHaveAttribute("aria-busy"),
+      );
+      expect(screen.getByRole("button", { name: "Debug" })).toBeDisabled();
+      expect(otherStatus()).toBeNull();
+    },
+  );
+
+  it("rechecks Verify ownership after asynchronous error decoding", async () => {
+    const pending = deferred<never>();
+    const body = deferred<string>();
+    const response = new Response("", { status: 400 });
+    const text = vi.spyOn(response, "text").mockReturnValue(body.promise);
+    vi.mocked(checkCustomTool).mockReturnValueOnce(pending.promise as never);
+    renderEditor(detail());
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await waitFor(() => expect(checkCustomTool).toHaveBeenCalledOnce());
+    await act(async () => pending.reject(response));
+    await waitFor(() => expect(text).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Later B" } });
+    await act(async () => body.resolve("Old build problem"));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Verify" })).not.toHaveAttribute("aria-busy"),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Debug" })).toBeDisabled();
+  });
+
+  it("associates Identifier help and its current error with the input", () => {
+    renderEditor(detail());
+    const slug = screen.getByLabelText("Identifier");
+    expect(slug).toHaveAccessibleDescription(
+      "Renaming changes the functions offered from the next message on.",
+    );
+    fireEvent.change(slug, { target: { value: "Bad_" } });
+    expect(slug).toHaveAccessibleDescription(/single underscores/);
+    fireEvent.change(slug, { target: { value: "valid_slug" } });
+    expect(slug).toHaveAccessibleDescription(
+      "Renaming changes the functions offered from the next message on.",
     );
   });
 

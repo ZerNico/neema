@@ -59,8 +59,10 @@ export interface AttachmentUploads {
    */
   submit(send: (attachmentIds: ReadonlyArray<string>) => void): void;
   cancelQueue(): void;
-  /** Forgets every chip without deleting anything (the message claimed them). */
-  markClaimed(): void;
+  /** Holds submitted fresh uploads until their claim settles. */
+  beginSubmission(attachmentIds: ReadonlyArray<string>): () => void;
+  /** Forgets only the submitted chips without deleting their claimed files. */
+  markClaimed(attachmentIds: ReadonlyArray<string>): void;
   /** Drops every chip, deleting the ones no message claimed. */
   reset(): void;
   dismissNotice(): void;
@@ -111,6 +113,8 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
   const cancelled = useRef(new Set<string>());
   const objectUrls = useRef(new Set<string>());
   const pendingSend = useRef<((attachmentIds: ReadonlyArray<string>) => void) | null>(null);
+  const retained = useRef(new Map<string, { count: number; claimed: boolean }>());
+  const mounted = useRef(true);
 
   // Callers pass fresh closures every render; the callbacks below read them
   // through this ref so they can stay stable.
@@ -234,7 +238,12 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
       if (item.status === "uploading") cancelled.current.add(localId);
       // An existing attachment is claimed by the message being edited; the save
       // releases it by omitting it from the replacement set.
-      if (item.status === "complete" && item.attachment && !item.existing) {
+      if (
+        item.status === "complete" &&
+        item.attachment &&
+        !item.existing &&
+        !retained.current.has(item.attachment.id)
+      ) {
         destroy(item.attachment.id);
       }
       releaseUrl(item.previewUrl);
@@ -249,7 +258,13 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
     (deleteUnclaimed: boolean) => {
       for (const item of itemsRef.current) {
         if (item.status === "uploading") cancelled.current.add(item.localId);
-        if (deleteUnclaimed && item.status === "complete" && item.attachment && !item.existing) {
+        if (
+          deleteUnclaimed &&
+          item.status === "complete" &&
+          item.attachment &&
+          !item.existing &&
+          !retained.current.has(item.attachment.id)
+        ) {
           destroy(item.attachment.id);
         }
         releaseUrl(item.previewUrl);
@@ -292,15 +307,23 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
     send(itemsRef.current.flatMap((item) => (item.attachment ? [item.attachment.id] : [])));
   }, []);
 
-  // Unmount: object URLs would otherwise be retained for the page's lifetime.
-  // Uploads in flight are left alone; the orphan sweep collects them.
-  useEffect(
-    () => () => {
-      for (const url of objectUrls.current) URL.revokeObjectURL(url);
-      objectUrls.current.clear();
-    },
-    [],
-  );
+  useEffect(() => {
+    mounted.current = true;
+    const cancelledUploads = cancelled.current;
+    const submittedUploads = retained.current;
+    const previews = objectUrls.current;
+    return () => {
+      mounted.current = false;
+      pendingSend.current = null;
+      for (const item of itemsRef.current) {
+        if (item.status === "uploading") cancelledUploads.add(item.localId);
+        if (item.attachment && !item.existing && !submittedUploads.has(item.attachment.id))
+          destroy(item.attachment.id);
+      }
+      for (const url of previews) URL.revokeObjectURL(url);
+      previews.clear();
+    };
+  }, [destroy]);
 
   return {
     items,
@@ -315,7 +338,53 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
     seed,
     submit,
     cancelQueue,
-    markClaimed: useCallback(() => dropAll(false), [dropAll]),
+    beginSubmission: useCallback(
+      (submittedIds: ReadonlyArray<string>) => {
+        const submitted = new Set(submittedIds);
+        const fresh = itemsRef.current.flatMap((item) =>
+          item.attachment && !item.existing && submitted.has(item.attachment.id)
+            ? [item.attachment.id]
+            : [],
+        );
+        for (const id of fresh) {
+          const held = retained.current.get(id) ?? { count: 0, claimed: false };
+          held.count++;
+          retained.current.set(id, held);
+        }
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          for (const id of fresh) {
+            const held = retained.current.get(id)!;
+            if (--held.count > 0) continue;
+            retained.current.delete(id);
+            if (
+              !held.claimed &&
+              (!mounted.current || !itemsRef.current.some((item) => item.attachment?.id === id))
+            )
+              destroy(id);
+          }
+        };
+      },
+      [destroy],
+    ),
+    markClaimed: useCallback(
+      (submittedIds: ReadonlyArray<string>) => {
+        const claimed = new Set(submittedIds);
+        for (const id of claimed) {
+          const held = retained.current.get(id);
+          if (held) held.claimed = true;
+        }
+        const remaining = itemsRef.current.filter((item) => {
+          if (!item.attachment || !claimed.has(item.attachment.id)) return true;
+          releaseUrl(item.previewUrl);
+          return false;
+        });
+        commit(remaining);
+      },
+      [commit, releaseUrl],
+    ),
     reset: useCallback(() => dropAll(true), [dropAll]),
     dismissNotice: useCallback(() => setNotice(null), []),
   };

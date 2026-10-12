@@ -130,10 +130,90 @@ describe("useAttachmentUploads", () => {
     act(() => result.current.addFiles([textFile()]));
     await waitFor(() => expect(result.current.uploading).toBe(false));
 
-    act(() => result.current.markClaimed());
+    act(() => result.current.markClaimed(["a-new"]));
 
     expect(destroy).not.toHaveBeenCalled();
     expect(result.current.items).toEqual([]);
+  });
+
+  it("acknowledges only submitted attachment IDs and preserves later chips", async () => {
+    let count = 0;
+    const { result, destroy } = setup(() => Promise.resolve(dto({ id: `a-${++count}` })));
+    act(() => result.current.addFiles([textFile("a.txt")]));
+    await waitFor(() => expect(result.current.uploading).toBe(false));
+    const submittedIds = result.current.attachmentIds;
+    act(() => result.current.addFiles([textFile("b.txt")]));
+    await waitFor(() => expect(result.current.uploading).toBe(false));
+    act(() => result.current.markClaimed(submittedIds));
+    expect(result.current.attachmentIds).toEqual(["a-2"]);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each(["remove", "reset", "seed", "unmount"])(
+    "holds removed submitted bytes across %s until acceptance or rejection",
+    async (removal) => {
+      for (const accepted of [true, false]) {
+        const { result, destroy, unmount } = setup(() => Promise.resolve(dto({ id: "A" })));
+        act(() => result.current.addFiles([textFile()]));
+        await waitFor(() => expect(result.current.uploading).toBe(false));
+        let release!: () => void;
+        act(() => {
+          release = result.current.beginSubmission(["A"]);
+        });
+        const claim = result.current.markClaimed;
+        act(() => {
+          if (removal === "remove") result.current.remove(result.current.items[0]!.localId);
+          else if (removal === "reset") result.current.reset();
+          else if (removal === "seed") result.current.seed([dto({ id: "existing" })]);
+          else unmount();
+        });
+        expect(destroy).not.toHaveBeenCalled();
+        act(() => {
+          if (accepted) claim(["A"]);
+          release();
+          release();
+        });
+        if (accepted) expect(destroy).not.toHaveBeenCalled();
+        else expect(destroy).toHaveBeenCalledExactlyOnceWith("A");
+        unmount();
+      }
+    },
+  );
+
+  it("releases a failed visible upload for retry and leaves later files independent", async () => {
+    const { result, destroy } = setup((file) => Promise.resolve(dto({ id: file.name })));
+    act(() => result.current.addFiles([textFile("A")]));
+    await waitFor(() => expect(result.current.uploading).toBe(false));
+    let release!: () => void;
+    act(() => {
+      release = result.current.beginSubmission(["A"]);
+    });
+    act(() => result.current.addFiles([textFile("B")]));
+    await waitFor(() => expect(result.current.uploading).toBe(false));
+    act(() => result.current.remove(result.current.items[1]!.localId));
+    expect(destroy).toHaveBeenCalledExactlyOnceWith("B");
+    act(() => release());
+    expect(result.current.attachmentIds).toEqual(["A"]);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    act(() => result.current.remove(result.current.items[0]!.localId));
+    expect(destroy).toHaveBeenLastCalledWith("A");
+  });
+
+  it("retains submitted bytes until every pending owner releases them", async () => {
+    const { result, destroy } = setup(() => Promise.resolve(dto({ id: "A" })));
+    act(() => result.current.addFiles([textFile()]));
+    await waitFor(() => expect(result.current.uploading).toBe(false));
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    act(() => {
+      releaseA = result.current.beginSubmission(["A"]);
+      releaseB = result.current.beginSubmission(["A"]);
+      result.current.reset();
+      releaseA();
+    });
+    expect(destroy).not.toHaveBeenCalled();
+    act(() => releaseB());
+    expect(destroy).toHaveBeenCalledExactlyOnceWith("A");
   });
 
   it("revokes image previews when the chip goes away", async () => {

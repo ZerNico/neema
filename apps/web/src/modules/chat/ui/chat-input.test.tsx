@@ -1117,6 +1117,7 @@ describe("queueing behind a live response", () => {
       promote: vi.fn(),
       commit: vi.fn(),
       rollback: vi.fn(),
+      beginSubmission: vi.fn(() => vi.fn()),
       markClaimed: vi.fn(),
       reset: vi.fn(),
       dismissNotice: vi.fn(),

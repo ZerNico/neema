@@ -37,7 +37,9 @@ export interface WorkspaceImports {
   promote(reservationId: string): Promise<PromotionReceipt>;
   commit(reservationId: string): Promise<void>;
   rollback(reservationId: string): Promise<void>;
-  markClaimed(): void;
+  /** Holds later imports outside this batch until dispatch settles. */
+  beginSubmission(fileNames: ReadonlyArray<string>): () => void;
+  markClaimed(fileNames: ReadonlyArray<string>): void;
   reset(): void;
   dismissNotice(): void;
 }
@@ -54,6 +56,15 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
   const cancelled = useRef(new Set<string>());
   const pendingSend = useRef<((fileNames: ReadonlyArray<string>) => void) | null>(null);
   const promoted = useRef(false);
+  const submissionIdRef = useRef(submissionId);
+  const mounted = useRef(true);
+  const pendingBatch = useRef<{
+    promise: Promise<void>;
+    release: () => void;
+    items: ReadonlyArray<WorkspaceImport>;
+    submissionId: string;
+    claimed: boolean;
+  } | null>(null);
 
   const commitItems = useCallback((next: ReadonlyArray<WorkspaceImport>) => {
     itemsRef.current = next;
@@ -96,14 +107,15 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
   );
 
   useEffect(() => {
-    const ownedSubmissionId = submissionId;
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       for (const item of itemsRef.current)
         // oxlint-disable-next-line react-hooks/exhaustive-deps -- one Set for the hook's life, read as it is at unmount
         if (item.status === "importing") cancelled.current.add(item.localId);
-      if (!promoted.current) discardSubmission(ownedSubmissionId);
+      if (!promoted.current && !pendingBatch.current) discardSubmission(submissionIdRef.current);
     };
-  }, [discardSubmission, submissionId]);
+  }, [discardSubmission]);
 
   const drainQueue = useCallback(() => {
     const send = pendingSend.current;
@@ -127,7 +139,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
         setNotice(`You can add at most ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
       if (accepted.length === 0) return;
 
-      const ownedSubmissionId = submissionId;
+      const waitForBatch = pendingBatch.current?.promise;
       const added = accepted.map((file): WorkspaceImport => {
         const oversized = file.size > LIMITS.importPathBytes;
         return {
@@ -147,13 +159,18 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
       added.forEach((item, index) => {
         if (item.status === "error") return;
         const file = accepted[index]!;
-        const stage = Effect.runPromise(
-          stageDroppedFile(file, {
-            conversationId,
-            submissionId: ownedSubmissionId,
-            fileName: file.name,
-          }),
-        ).then(async (receipt) => {
+        let ownedSubmissionId = submissionIdRef.current;
+        const stage = (async () => {
+          if (waitForBatch) await waitForBatch;
+          ownedSubmissionId = submissionIdRef.current;
+          if (cancelled.current.has(item.localId)) return null;
+          const receipt = await Effect.runPromise(
+            stageDroppedFile(file, {
+              conversationId,
+              submissionId: ownedSubmissionId,
+              fileName: file.name,
+            }),
+          );
           if (receipt) return receipt;
           if (file.size > LIMITS.importBytes)
             throw new Error(`Too large. The limit is ${formatFileSize(LIMITS.importBytes)}.`);
@@ -165,13 +182,14 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
               base64: await readBase64(file),
             }),
           );
-        });
+        })();
         void stage.then(
           (receipt) => {
             if (cancelled.current.delete(item.localId)) {
-              discardFile(ownedSubmissionId, receipt.name);
+              if (receipt) discardFile(ownedSubmissionId, receipt.name);
               return;
             }
+            if (!receipt) return;
             patch(item.localId, { status: "complete", storedName: receipt.name });
             drainQueue();
           },
@@ -186,7 +204,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
         );
       });
     },
-    [commitItems, conversationId, discardFile, drainQueue, patch, submissionId],
+    [commitItems, conversationId, discardFile, drainQueue, patch],
   );
 
   const remove = useCallback(
@@ -194,24 +212,32 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
       const item = itemsRef.current.find((candidate) => candidate.localId === localId);
       if (!item) return;
       if (item.status === "importing") cancelled.current.add(localId);
-      if (item.status === "complete" && item.storedName) discardFile(submissionId, item.storedName);
+      if (
+        item.status === "complete" &&
+        item.storedName &&
+        !pendingBatch.current?.items.includes(item)
+      )
+        discardFile(submissionIdRef.current, item.storedName);
       commitItems(itemsRef.current.filter((candidate) => candidate.localId !== localId));
       drainQueue();
     },
-    [commitItems, discardFile, drainQueue, submissionId],
+    [commitItems, discardFile, drainQueue],
   );
 
   const reset = useCallback(() => {
     for (const item of itemsRef.current)
       if (item.status === "importing") cancelled.current.add(item.localId);
-    discardSubmission(submissionId);
+    if (!pendingBatch.current) discardSubmission(submissionIdRef.current);
     commitItems([]);
     pendingSend.current = null;
     setQueued(false);
     setNotice(null);
-    promoted.current = false;
-    setSubmissionId(crypto.randomUUID());
-  }, [commitItems, discardSubmission, submissionId]);
+    if (!pendingBatch.current) {
+      promoted.current = false;
+      submissionIdRef.current = crypto.randomUUID();
+      setSubmissionId(submissionIdRef.current);
+    }
+  }, [commitItems, discardSubmission]);
 
   const fileNames = useMemo(
     () => items.flatMap((item) => (item.storedName ? [item.storedName] : [])),
@@ -270,14 +296,58 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
       },
       [conversationId],
     ),
-    markClaimed: useCallback(() => {
-      commitItems([]);
-      pendingSend.current = null;
-      setQueued(false);
-      setNotice(null);
-      promoted.current = false;
-      setSubmissionId(crypto.randomUUID());
-    }, [commitItems]),
+    beginSubmission: useCallback(
+      (submittedNames: ReadonlyArray<string>) => {
+        if (pendingBatch.current) throw new Error("A workspace submission is already pending.");
+        const names = new Set(submittedNames);
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const batch = {
+          promise,
+          release,
+          items: itemsRef.current.filter((item) => item.storedName && names.has(item.storedName)),
+          submissionId: submissionIdRef.current,
+          claimed: false,
+        };
+        pendingBatch.current = batch;
+        return () => {
+          if (pendingBatch.current !== batch) return;
+          if (!batch.claimed) {
+            for (const item of batch.items)
+              if (
+                item.storedName &&
+                !itemsRef.current.some((current) => current.localId === item.localId)
+              )
+                discardFile(batch.submissionId, item.storedName);
+          }
+          if (!mounted.current && !batch.claimed && !promoted.current)
+            discardSubmission(batch.submissionId);
+          pendingBatch.current = null;
+          batch.release();
+        };
+      },
+      [discardFile, discardSubmission],
+    ),
+    markClaimed: useCallback(
+      (submittedNames: ReadonlyArray<string>) => {
+        const names = new Set(submittedNames);
+        const batch = pendingBatch.current;
+        const claimed = new Set(
+          batch?.items.map((item) => item.localId) ??
+            itemsRef.current
+              .filter((item) => item.storedName && names.has(item.storedName))
+              .map((item) => item.localId),
+        );
+        commitItems(itemsRef.current.filter((item) => !claimed.has(item.localId)));
+        if (batch) batch.claimed = true;
+        promoted.current = false;
+        submissionIdRef.current = crypto.randomUUID();
+        setSubmissionId(submissionIdRef.current);
+      },
+      [commitItems],
+    ),
     reset,
     dismissNotice: useCallback(() => setNotice(null), []),
   };

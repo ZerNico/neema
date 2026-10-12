@@ -5,7 +5,7 @@ import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { ChatInput } from "./chat-input.tsx";
@@ -177,6 +177,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     initialSkillId ? [initialSkillId] : [],
   );
   const [draft, setDraft] = useState("");
+  const draftRevision = useRef(0);
+  const updateDraft = useCallback((value: string) => {
+    draftRevision.current++;
+    setDraft(value);
+  }, []);
+  const dispatching = useRef(false);
+  const [requestPending, setRequestPending] = useState(false);
   // What a prefill links to (an agent or schedule to edit), shown as chips and
   // written back into the text on send.
   const [references, setReferences] = useState<MessageReference[]>([]);
@@ -186,6 +193,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // The queued message open for editing. Its row stays in the queue, and its
   // files stay claimed by it, until the replacement commits.
   const [editingId, setEditingId] = useState<string | null>(null);
+  const editSession = useRef(0);
   const queueCollapse = collapseMotion(useAppReducedMotion());
   const textareaRef = useRef<ComposerFieldHandle>(null);
   const touched = useRef(false);
@@ -204,7 +212,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     () => ({
       seedDraft: (text) => {
         touched.current = true;
-        setDraft(text);
+        updateDraft(text);
         textareaRef.current?.focus();
       },
       prefillDraft: (text) => {
@@ -213,22 +221,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // Someone may already have typed before the prefill arrived.
         const typed = textareaRef.current?.value();
         if (typed) {
-          setDraft(typed);
+          updateDraft(typed);
           return;
         }
         const prefill = extractReferences(text);
-        setDraft(prefill.text);
+        updateDraft(prefill.text);
         setReferences(prefill.references);
       },
       offerDraft: (text) => {
         touched.current = true;
         const typed = textareaRef.current?.value() ?? "";
-        setDraft(typed.trim() ? `${typed.trimEnd()}\n${text}` : text);
+        updateDraft(typed.trim() ? `${typed.trimEnd()}\n${text}` : text);
         textareaRef.current?.focus();
       },
       focus: () => textareaRef.current?.focus(),
     }),
-    [],
+    [updateDraft],
   );
 
   // Text and selections stay editable while uploads settle; dispatch the current request.
@@ -262,7 +270,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   });
 
   const clearDraft = () => {
-    setDraft("");
+    updateDraft("");
     setReferences([]);
     setSkillIds([]);
     setResearchEnabled(false);
@@ -281,11 +289,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const entry = queue?.entries.find((item) => item.id === entryId);
     if (!entry || !queue || editBlocked) return;
     touched.current = true;
+    editSession.current++;
     setEditingId(entry.id);
     // Stored with references restored to markup, like any sent message; the
     // composer shows them as tags again.
     const seeded = extractReferences(entry.content);
-    setDraft(seeded.text);
+    updateDraft(seeded.text);
     setReferences(seeded.references);
     setSkillIds([...(entry.input.skillIds ?? [])]);
     setResearchEnabled(entry.input.researchEnabled);
@@ -297,6 +306,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   };
 
   const cancelEdit = () => {
+    editSession.current++;
     setEditingId(null);
     clearDraft();
     // Deletes uploads added during the edit; the seeded ones stay queued.
@@ -305,16 +315,22 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   };
 
   const send = () => {
-    if (sendDisabled || !modelId || blockedReason) return;
+    if (dispatching.current || sendDisabled || !modelId || blockedReason) return;
     touched.current = true;
     const submitted = requestRef.current;
+    const submittedEditSession = editSession.current;
     // Both rows can be settling at once in a browser work chat that lost its
     // desktop window mid-session; the imports queue only ever runs in-app.
-    (workspaceImports ?? attachments).submit((claimed: ReadonlyArray<string>) => {
-      const workspaceFiles = workspaceImports ? claimed : [];
-      const sendRest = (attachmentIds: ReadonlyArray<string>) => {
+    attachments.submit((attachmentIds) => {
+      const sendRest = (workspaceFiles: ReadonlyArray<string>) => {
         const current = requestRef.current;
-        if (submitted.blockedReason || submitted.disabled || !submitted.modelId) return;
+        if (
+          dispatching.current ||
+          submitted.blockedReason ||
+          submitted.disabled ||
+          !submitted.modelId
+        )
+          return;
         const content = restoreReferences(current.draft.trim(), current.references);
         if (!content && attachmentIds.length === 0 && workspaceFiles.length === 0) return;
         const submission = [
@@ -328,32 +344,54 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         // Workspace files never queue (their send reserves the turn), and the
         // input keeps Stop for such a draft, so they always go out as a send.
         const editing = submitted.editingId;
-        const request =
-          editing && submitted.onReplace
+        const submittedRevision = draftRevision.current;
+        dispatching.current = true;
+        setRequestPending(true);
+        let releaseImports: (() => void) | undefined;
+        let releaseAttachments: (() => void) | undefined;
+        const finish = () => {
+          releaseAttachments?.();
+          releaseImports?.();
+          dispatching.current = false;
+          setRequestPending(false);
+        };
+        try {
+          releaseAttachments = attachments.beginSubmission(attachmentIds);
+          releaseImports = workspaceImports?.beginSubmission(workspaceFiles);
+        } catch {
+          finish();
+          return;
+        }
+        const request = Promise.resolve().then(() => {
+          return editing && submitted.onReplace
             ? submitted.onReplace(editing, ...submission)
             : submitted.onQueue && workspaceFiles.length === 0
               ? submitted.onQueue(...submission)
               : workspaceImports
                 ? submitted.onSend(...submission, workspaceFiles, workspaceImports)
                 : submitted.onSend(...submission);
-        void request.then(
-          () => {
-            clearDraft();
-            // A message or a queued one owns them now; dropping the chips must
-            // not delete them.
-            attachments.markClaimed();
-            workspaceImports?.markClaimed();
-            if (editing) {
-              setEditingId(null);
-              queue?.onEditEnd();
-            }
-            textareaRef.current?.focus();
-          },
-          () => {},
-        );
+        });
+        void request.then(() => {
+          if (draftRevision.current === submittedRevision) {
+            updateDraft("");
+            setReferences((value) => (value === current.references ? [] : value));
+            setSkillIds((value) => (value === current.skillIds ? [] : value));
+            setResearchEnabled((value) => (value === submitted.researchEnabled ? false : value));
+          }
+          attachments.markClaimed(attachmentIds);
+          workspaceImports?.markClaimed(workspaceFiles);
+          // Reopening even the same entry starts a new borrowed-settings session.
+          if (editing && editSession.current === submittedEditSession) {
+            editSession.current++;
+            setEditingId(null);
+            queue?.onEditEnd();
+          }
+          finish();
+          textareaRef.current?.focus();
+        }, finish);
       };
-      if (workspaceImports) attachments.submit(sendRest);
-      else sendRest(claimed);
+      if (workspaceImports) workspaceImports.submit(sendRest);
+      else sendRest([]);
     });
   };
 
@@ -392,7 +430,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         value={draft}
         onValueChange={(value) => {
           touched.current = true;
-          setDraft(value);
+          updateDraft(value);
         }}
         onSubmit={send}
         {...(onStop ? { onStop } : {})}
@@ -405,7 +443,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onCancel: cancelEdit,
             }
           : {})}
-        disabled={sendDisabled}
+        disabled={sendDisabled || requestPending}
         textareaDisabled={textareaDisabled ?? disabled}
         controlsDisabled={controlsDisabled ?? sendDisabled}
         modelId={modelId}

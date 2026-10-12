@@ -49,6 +49,7 @@ const idleUploads = (): AttachmentUploads => ({
   seed: vi.fn(),
   submit: (send) => send([]),
   cancelQueue: vi.fn(),
+  beginSubmission: vi.fn(() => vi.fn()),
   markClaimed: vi.fn(),
   reset: vi.fn(),
   dismissNotice: vi.fn(),

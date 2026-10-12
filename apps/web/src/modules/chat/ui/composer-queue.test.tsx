@@ -150,6 +150,39 @@ async function replaceSkill(textbox: HTMLElement) {
 }
 
 describe("upload-queued composer requests", () => {
+  it.each(["accept", "reject"])(
+    "holds removed fresh files during a normal send until %s",
+    async (outcome) => {
+      const pending = deferred<void>();
+      const { upload, onSend, textbox } = setup(vi.fn().mockReturnValueOnce(pending.promise));
+      await act(async () => upload.resolve(attachment));
+      await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+      fireEvent.click(screen.getByRole("button", { name: "Remove notes.txt" }));
+      expect(deleteAttachment).not.toHaveBeenCalled();
+      setComposerText(textbox, "Later draft");
+      await act(async () =>
+        outcome === "accept" ? pending.resolve() : pending.reject(new Error("Refused")),
+      );
+      if (outcome === "reject")
+        await waitFor(() =>
+          expect(deleteAttachment).toHaveBeenCalledWith({ data: { attachmentId: attachment.id } }),
+        );
+      else expect(deleteAttachment).not.toHaveBeenCalled();
+      expect(composerText(textbox)).toBe("Later draft");
+    },
+  );
+
+  it("does not consume retyped equal text after a normal send", async () => {
+    const pending = deferred<void>();
+    const { upload, onSend, textbox } = setup(vi.fn().mockReturnValueOnce(pending.promise));
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    const submitted = composerText(textbox);
+    setComposerText(textbox, "Different next draft");
+    setComposerText(textbox, submitted);
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe(submitted);
+  });
   it("sends the current text and replacement skill exactly once", async () => {
     const { upload, onSend, textbox } = setup();
     await replaceSkill(textbox);
@@ -164,6 +197,21 @@ describe("upload-queued composer requests", () => {
     );
     expect(composerText(textbox)).toBe("");
     expect(screen.queryByText("notes.txt")).not.toBeInTheDocument();
+  });
+
+  it("keeps the submitted skill selected in a later draft that still uses its tag", async () => {
+    const pending = deferred<void>();
+    const { upload, onSend, textbox } = setup(vi.fn().mockReturnValueOnce(pending.promise));
+    await act(async () => upload.resolve(attachment));
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    setComposerText(textbox, `${REVIEW} Later B`);
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe(`${REVIEW} Later B`);
+    expect(composerTagCount(textbox)).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenLastCalledWith(`${REVIEW} Later B`, [], false, ["review"]),
+    );
   });
 
   it("does not send a removed skill when nothing replaces it", async () => {
@@ -224,10 +272,8 @@ describe("upload-queued composer requests", () => {
   });
 });
 
-const openEdit = async () => {
-  fireEvent.click(
-    screen.getByRole("button", { name: "More actions: Summarise the attached notes" }),
-  );
+const openEdit = async (content = "Summarise the attached notes") => {
+  fireEvent.click(screen.getByRole("button", { name: `More actions: ${content}` }));
   fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
 };
 
@@ -240,7 +286,7 @@ describe("editing a queued message", () => {
     input: { researchEnabled: true, skillIds: ["rewrite"] },
   };
 
-  function renderEditing() {
+  function renderEditing(entry = queued, otherEntries: (typeof queued)[] = []) {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
@@ -272,7 +318,7 @@ describe("editing a queued message", () => {
       enabled: false,
     });
     const queue = {
-      entries: [queued],
+      entries: [entry, ...otherEntries],
       steeringIds: new Set<string>(),
       paused: null,
       onSteer: vi.fn(),
@@ -303,6 +349,209 @@ describe("editing a queued message", () => {
     );
     return { queue, onSend, onQueue, textbox: screen.getByRole("textbox") };
   }
+
+  it.each(["different entry", "same entry"])(
+    "preserves a newer queued edit session for the %s after stale acceptance",
+    async (target) => {
+      const first = {
+        ...queued,
+        content: "First queued message",
+        attachments: [],
+        input: { researchEnabled: false, skillIds: ["review"] },
+      };
+      const second = {
+        ...queued,
+        id: "entry-2",
+        content: "Second queued message",
+        attachments: [],
+      };
+      const reopened = target === "same entry" ? first : second;
+      const { queue, onQueue, onSend, textbox } = renderEditing(first, [second]);
+      const pending = deferred<void>();
+      const replacement = deferred<void>();
+      queue.onReplace.mockReturnValueOnce(pending.promise).mockReturnValueOnce(replacement.promise);
+      await openEdit(first.content);
+      setComposerText(textbox, "Accepted first edit");
+      fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+      await waitFor(() => expect(queue.onReplace).toHaveBeenCalledOnce());
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+      fireEvent.keyDown(textbox, { key: "Escape" });
+      expect(composerText(textbox)).toBe("");
+      expect(queue.onEditEnd).toHaveBeenCalledOnce();
+      await openEdit(reopened.content);
+      expect(queue.onEditStart).toHaveBeenLastCalledWith(reopened);
+      const reopenedText = composerText(textbox);
+      expect(reopenedText).toContain(reopened.content);
+      expect(screen.getByRole("button", { name: "Save queued message" })).toBeDisabled();
+      await act(async () => pending.resolve());
+      expect(composerText(textbox)).toBe(reopenedText);
+      expect(queue.onEditEnd).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Save queued message" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+      await waitFor(() =>
+        expect(queue.onReplace).toHaveBeenLastCalledWith(
+          reopened.id,
+          reopenedText.trim(),
+          [],
+          reopened.input.researchEnabled,
+          reopened.input.skillIds,
+        ),
+      );
+      expect(queue.onReplace).toHaveBeenCalledTimes(2);
+      expect(onQueue).not.toHaveBeenCalled();
+      expect(onSend).not.toHaveBeenCalled();
+      await act(async () => replacement.resolve());
+      expect(queue.onEditEnd).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("ends the unchanged queued edit session when its replacement accepts", async () => {
+    const { queue, onQueue, textbox } = renderEditing();
+    const pending = deferred<void>();
+    queue.onReplace.mockReturnValueOnce(pending.promise);
+    await openEdit();
+    fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+    await waitFor(() => expect(queue.onReplace).toHaveBeenCalledOnce());
+    expect(queue.onEditEnd).not.toHaveBeenCalled();
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe("");
+    expect(screen.queryByRole("button", { name: "Save queued message" })).toBeNull();
+    expect(queue.onEditEnd).toHaveBeenCalledOnce();
+    expect(onQueue).not.toHaveBeenCalled();
+  });
+
+  it.each(["accept", "reject"])(
+    "retains removed fresh files through queued replacement %s",
+    async (outcome) => {
+      const { queue } = renderEditing();
+      const pending = deferred<void>();
+      queue.onReplace.mockReturnValueOnce(pending.promise);
+      await openEdit();
+      vi.mocked(uploadAttachment).mockResolvedValueOnce({
+        ...attachment,
+        id: "fresh",
+        fileName: "fresh.txt",
+      });
+      fireEvent.change(document.querySelector('input[type="file"]')!, {
+        target: { files: [new File(["fresh"], "fresh.txt", { type: "text/plain" })] },
+      });
+      await screen.findByRole("button", { name: "Remove fresh.txt" });
+      fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+      await waitFor(() => expect(queue.onReplace).toHaveBeenCalledOnce());
+      expect(queue.onReplace.mock.calls[0]![2]).toEqual([attachment.id, "fresh"]);
+      fireEvent.click(screen.getByRole("button", { name: "Remove fresh.txt" }));
+      expect(deleteAttachment).not.toHaveBeenCalled();
+      await act(async () =>
+        outcome === "accept" ? pending.resolve() : pending.reject(new Error("Refused")),
+      );
+      if (outcome === "reject")
+        await waitFor(() =>
+          expect(deleteAttachment).toHaveBeenCalledWith({ data: { attachmentId: "fresh" } }),
+        );
+      else expect(deleteAttachment).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves a newly retyped equal-valued draft after an earlier queue accepts", async () => {
+    const { onQueue, textbox } = renderEditing();
+    const pending = deferred<void>();
+    onQueue.mockReturnValueOnce(pending.promise);
+    setComposerText(textbox, "Continue");
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() => expect(onQueue).toHaveBeenCalledOnce());
+    setComposerText(textbox, "");
+    setComposerText(textbox, "Different next draft");
+    setComposerText(textbox, "Continue");
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe("Continue");
+    expect(onQueue).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() => expect(onQueue).toHaveBeenCalledTimes(2));
+    expect(onQueue).toHaveBeenLastCalledWith("Continue", [], false, []);
+  });
+
+  it("preserves the later draft when an earlier queue request succeeds", async () => {
+    const { onQueue, textbox } = renderEditing();
+    const pending = deferred<void>();
+    onQueue.mockReturnValueOnce(pending.promise);
+    setComposerText(textbox, "Submitted A");
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() => expect(onQueue).toHaveBeenCalledOnce());
+    setComposerText(textbox, "Later B");
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe("Later B");
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() => expect(onQueue).toHaveBeenLastCalledWith("Later B", [], false, []));
+  });
+
+  it("shares a synchronous latch between button and repeated Enter, then releases it on failure", async () => {
+    const { onQueue, textbox } = renderEditing();
+    const pending = deferred<void>();
+    onQueue.mockReturnValueOnce(pending.promise);
+    setComposerText(textbox, "Submitted A");
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+      fireEvent.keyDown(textbox, { key: "Enter" });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+    });
+    await waitFor(() => expect(onQueue).toHaveBeenCalledOnce());
+    await act(async () => pending.reject(new Error("Offline")));
+    expect(composerText(textbox)).toBe("Submitted A");
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    await waitFor(() => expect(onQueue).toHaveBeenCalledTimes(2));
+  });
+
+  it("preserves later text, skill selection and attachment while acknowledging a replacement", async () => {
+    const { queue, textbox } = renderEditing();
+    const pending = deferred<void>();
+    queue.onReplace.mockReturnValueOnce(pending.promise);
+    await openEdit();
+    setComposerText(textbox, "Submitted A");
+    fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+    await waitFor(() => expect(queue.onReplace).toHaveBeenCalledOnce());
+    await replaceSkill(textbox);
+    vi.mocked(uploadAttachment).mockResolvedValueOnce({
+      ...attachment,
+      id: "later-file",
+      fileName: "later.txt",
+    });
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["later"], "later.txt", { type: "text/plain" })] },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remove later.txt" })).toBeInTheDocument(),
+    );
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe(`Updated draft ${REWRITE}`);
+    expect(composerTagCount(textbox)).toBe(1);
+    expect(screen.getByRole("button", { name: "Remove later.txt" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove notes.txt" })).toBeNull();
+    expect(queue.onEditEnd).toHaveBeenCalledOnce();
+    expect(deleteAttachment).not.toHaveBeenCalled();
+  });
+
+  it("preserves a submitted reference still used by a later replacement draft", async () => {
+    const { queue, onQueue, textbox } = renderEditing({
+      ...queued,
+      content: "Submitted [plan](/agents/plan)",
+    });
+    const pending = deferred<void>();
+    queue.onReplace.mockReturnValueOnce(pending.promise);
+    fireEvent.click(
+      screen.getByRole("button", { name: "More actions: Submitted [plan](/agents/plan)" }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    setComposerText(textbox, "Submitted plan");
+    fireEvent.click(screen.getByRole("button", { name: "Save queued message" }));
+    await waitFor(() => expect(queue.onReplace).toHaveBeenCalledOnce());
+    setComposerText(textbox, "Later plan");
+    await act(async () => pending.resolve());
+    expect(composerText(textbox)).toBe("Later plan");
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() =>
+      expect(onQueue).toHaveBeenLastCalledWith("Later [plan](/agents/plan)", [], true, []),
+    );
+  });
 
   it("reopens the entry with its files and settings, and saves it in place", async () => {
     const { queue, onSend, onQueue, textbox } = renderEditing();

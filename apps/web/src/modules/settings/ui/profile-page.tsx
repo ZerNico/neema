@@ -62,7 +62,9 @@ function ProfileForms({
       queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
         current ? { ...current, name } : current,
       );
+      const currentName = nameForm.state.values.name;
       nameForm.reset({ name });
+      if (currentName !== value.name) nameForm.setFieldValue("name", currentName);
       // The shell observes this cache, so the patch above updates it immediately;
       // refetch in the background to reconcile with the authoritative session.
       void queryClient.invalidateQueries({

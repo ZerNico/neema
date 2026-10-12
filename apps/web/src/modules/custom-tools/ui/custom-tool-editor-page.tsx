@@ -14,7 +14,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { Schema } from "effect";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PreviewAction } from "~/modules/attachments/ui/preview-action.tsx";
 import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
@@ -193,9 +193,7 @@ export function CustomToolEditorPage({ toolId }: { toolId?: string }) {
 
 function ExistingToolEditor({ toolId }: { toolId: string }) {
   const { data: tool } = useSuspenseQuery(customToolQuery(toolId));
-  // Keyed by version: a save replaces the row, and the editor restarts from
-  // it rather than reconciling field by field.
-  return <ToolEditor key={`${tool.id}:${tool.version}`} tool={tool} />;
+  return <ToolEditor key={tool.id} tool={tool} />;
 }
 
 function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
@@ -237,6 +235,58 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   const [problems, setProblems] = useState<ReadonlyArray<BuildProblem> | null>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [saved, setSaved] = useState(() => ({
+    slug,
+    name,
+    description,
+    source,
+    dependencies,
+    version: tool?.version,
+  }));
+  const [remoteVersion, setRemoteVersion] = useState(tool?.version);
+  const buildRevision = useRef(0);
+  const buildInputs = useRef({ slug, source, dependencies });
+  const [conflict, setConflict] = useState(false);
+  const dirty =
+    slug !== saved.slug ||
+    name !== saved.name ||
+    description !== saved.description ||
+    source !== saved.source ||
+    JSON.stringify(dependencies) !== JSON.stringify(saved.dependencies);
+
+  const adopt = useCallback((next: CustomToolDetail) => {
+    setName(next.name);
+    setSlugEdit(next.slug);
+    setDescription(next.description);
+    setSource(next.source);
+    setDependencies([...next.dependencies]);
+    setSaved({ ...next, dependencies: [...next.dependencies] });
+    setPreview({ functions: next.functions });
+    setFunctionKey(next.functions[0]?.key ?? "");
+    setProblems(null);
+    setTestOutcome(null);
+    setConflict(false);
+  }, []);
+  if (tool && tool.version !== remoteVersion) {
+    setRemoteVersion(tool.version);
+    if (tool.version !== saved.version) {
+      if (dirty) setConflict(true);
+      else adopt(tool);
+    }
+  }
+
+  // Remote adoption also invalidates a Verify still awaiting its response.
+  useEffect(() => {
+    const previous = buildInputs.current;
+    if (
+      previous.slug !== slug ||
+      previous.source !== source ||
+      previous.dependencies !== dependencies
+    ) {
+      buildRevision.current++;
+      buildInputs.current = { slug, source, dependencies };
+    }
+  }, [slug, source, dependencies]);
 
   // Line-bearing problems become editor diagnostics; the rest stay in the list.
   useEffect(() => {
@@ -252,6 +302,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   }, [view, problems]);
 
   const invalidatePreview = () => {
+    buildRevision.current++;
     setPreview(null);
     setFunctionKey("");
     setTestOutcome(null);
@@ -267,42 +318,69 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   };
 
   const check = useMutation({
-    mutationFn: () => settled(checkCustomTool({ data: { slug, source, dependencies } })),
-    onSuccess: (result) => {
+    mutationFn: (submitted: {
+      slug: string;
+      source: string;
+      dependencies: CustomToolDependency[];
+      revision: number;
+    }) =>
+      settled(
+        checkCustomTool({
+          data: {
+            slug: submitted.slug,
+            source: submitted.source,
+            dependencies: submitted.dependencies,
+          },
+        }),
+      ),
+    onSuccess: (result, submitted) => {
+      if (submitted.revision !== buildRevision.current) return;
       setPreview(result);
       setFunctionKey(result.functions[0]?.key ?? "");
       setTestOutcome(null);
       setProblems([]);
     },
-    onError: async (error) => setProblems(parseBuildProblems(await errorMessage(error))),
+    onError: async (error, submitted) => {
+      const message = await errorMessage(error);
+      if (submitted.revision === buildRevision.current) setProblems(parseBuildProblems(message));
+    },
   });
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: (submitted: typeof saved & { revision: number }) => {
       setSlugTaken(null);
-      const shared = { name, description, source, dependencies };
+      const { version, revision: _revision, ...input } = submitted;
       return settled(
         saveCustomTool({
-          data: tool
-            ? { toolId: tool.id, expectedVersion: tool.version, slug, ...shared }
-            : { slug, ...shared },
+          data: tool ? { toolId: tool.id, expectedVersion: version!, ...input } : input,
         }),
       );
     },
-    onSuccess: async (saved) => {
-      // A new module's own page is the confirmation.
+    onSuccess: async (accepted, submitted) => {
+      const { revision: _revision, ...baseline } = submitted;
+      setSaved({ ...baseline, version: accepted.version });
+      setConflict(false);
       if (tool) markSaved();
       await invalidateLists(queryClient);
       if (!tool)
-        await navigate({ to: "/admin/custom-tools/$toolId", params: { toolId: saved.id } });
+        await navigate({
+          to: "/admin/custom-tools/$toolId",
+          params: { toolId: accepted.id },
+          ignoreBlocker: true,
+        });
     },
-    onError: async (error) => {
+    onError: async (error, submitted) => {
       const message = await errorMessage(error);
-      // Two refusals have a place of their own; a build refusal on Save lands
-      // where Check would have put it.
-      if (/already in use/i.test(message)) setSlugTaken(slug);
-      else if (/changed elsewhere/i.test(message))
+      if (/changed elsewhere/i.test(message)) {
+        if (tool)
+          await queryClient.invalidateQueries({
+            queryKey: customToolQuery(tool.id).queryKey,
+            exact: true,
+          });
+        setConflict(true);
         toast.error("This module changed elsewhere. Reload it before saving.");
-      else setProblems(parseBuildProblems(message));
+      } else if (/already in use/i.test(message)) setSlugTaken(submitted.slug);
+      else if (submitted.revision === buildRevision.current)
+        setProblems(parseBuildProblems(message));
     },
   });
   const toggle = useMutation({
@@ -360,25 +438,15 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   });
 
   const canSave = Object.keys(identity).length === 0 && slugTaken !== slug;
-  // A stored module is dirty when any saved field differs; a new one, once
-  // anything has been typed beyond the template.
-  const dirty = tool
-    ? slug !== tool.slug ||
-      name !== tool.name ||
-      description !== tool.description ||
-      source !== tool.source ||
-      JSON.stringify(dependencies) !== JSON.stringify(tool.dependencies)
-    : name !== "" || description !== "" || source !== TEMPLATE_SOURCE || dependencies.length > 0;
   useBlocker({
     shouldBlockFn: async () =>
       dirty &&
-      !save.isSuccess &&
       !(await confirm({
         title: "Discard unsaved changes?",
         description: "Your module has not been saved.",
         confirmLabel: "Discard changes",
       })),
-    enableBeforeUnload: dirty && !save.isSuccess,
+    enableBeforeUnload: dirty,
   });
   const selectedFunction = preview?.functions.find((fn) => fn.key === functionKey) ?? null;
   const argumentsText =
@@ -447,7 +515,17 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
           <PendingButton
             size="sm"
             pending={save.isPending}
-            onClick={() => save.mutate()}
+            onClick={() =>
+              save.mutate({
+                slug,
+                name,
+                description,
+                source,
+                dependencies,
+                version: saved.version,
+                revision: buildRevision.current,
+              })
+            }
             disabled={!canSave || (!!tool && !dirty)}
           >
             <SaveLabel justSaved={justSaved}>{tool ? "Save changes" : "Create module"}</SaveLabel>
@@ -455,6 +533,27 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
         </>
       }
     >
+      {conflict && tool ? (
+        <div role="alert" className="flex items-center gap-3">
+          <p className="text-muted-foreground text-sm">This module changed elsewhere.</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (
+                await confirm({
+                  title: "Discard unsaved changes?",
+                  description: "Your module has not been saved.",
+                  confirmLabel: "Reload module",
+                })
+              )
+                adopt(tool);
+            }}
+          >
+            Reload module
+          </Button>
+        </div>
+      ) : null}
       <Section title="Module">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field data-invalid={(nameTouched && identity.name) || undefined}>
@@ -487,11 +586,12 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               }}
               placeholder="weather_tools"
               aria-invalid={(slug.length > 0 && !!slugError) || undefined}
+              aria-describedby={`${id}-slug-description`}
             />
             {slug.length > 0 && slugError ? (
-              <FieldError errors={[{ message: slugError }]} />
+              <FieldError id={`${id}-slug-description`} errors={[{ message: slugError }]} />
             ) : (
-              <FieldDescription>
+              <FieldDescription id={`${id}-slug-description`}>
                 {tool
                   ? "Renaming changes the functions offered from the next message on."
                   : "Names the functions for the model."}
@@ -598,7 +698,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               size="sm"
               variant="outline"
               pending={check.isPending}
-              onClick={() => check.mutate()}
+              onClick={() =>
+                check.mutate({ slug, source, dependencies, revision: buildRevision.current })
+              }
               disabled={!!identity.slug}
             >
               Verify
@@ -639,8 +741,8 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             <DialogHeader>
               <DialogTitle>Debug</DialogTitle>
               <DialogDescription>
-                Runs the verified build on the server with the arguments below. Files it returns
-                preview here and are not stored.
+                Rebuilds the current source and runs it on the server. Returned files are not
+                stored.
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-3">

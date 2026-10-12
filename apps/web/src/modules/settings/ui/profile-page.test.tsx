@@ -146,6 +146,30 @@ describe("ProfilePage", () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 
+  it("acknowledges the saved name without overwriting a later edit", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<{ error: null }>();
+    updateUserMock.mockReturnValueOnce(pending.promise as never);
+    updateUserMock.mockResolvedValueOnce({ error: null } as never);
+    const client = renderPage();
+    const input = screen.getByLabelText("Display name");
+    await user.clear(input);
+    await user.type(input, "Submitted A{Enter}");
+    await waitFor(() => expect(updateUserMock).toHaveBeenCalledWith({ name: "Submitted A" }));
+    await user.clear(input);
+    await user.type(input, "Later B");
+    pending.resolve({ error: null });
+    await waitFor(() =>
+      expect(client.getQueryData(sessionUserQuery.queryKey)).toMatchObject({ name: "Submitted A" }),
+    );
+    expect(input).toHaveValue("Later B");
+    const save = screen.getByRole("button", { name: /^(Save|Saved)$/ });
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    await waitFor(() => expect(updateUserMock).toHaveBeenLastCalledWith({ name: "Later B" }));
+    await waitFor(() => expect(save).toBeDisabled());
+  });
+
   it("renders the admin badge in sentence case", () => {
     renderPage();
     expect(screen.getByText("Admin")).toBeInTheDocument();

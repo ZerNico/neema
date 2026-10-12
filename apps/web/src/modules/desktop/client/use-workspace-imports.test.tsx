@@ -179,6 +179,138 @@ describe("useWorkspaceImports", () => {
     });
   });
 
+  it("keeps later imports outside the submitted staging batch and settles exact identities", async () => {
+    const { result } = renderHook(() => useWorkspaceImports(CONVERSATION));
+    act(() => result.current.addFiles([file("a.txt")]));
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    const submitted = result.current;
+    let release!: () => void;
+    act(() => {
+      release = submitted.beginSubmission(["a.txt"]);
+    });
+    act(() => result.current.addFiles([file("b.txt")]));
+    expect(result.current.items).toHaveLength(2);
+    expect(shell.stageFile).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await submitted.promote(RESERVATION);
+      await submitted.commit(RESERVATION);
+    });
+    act(() => {
+      submitted.markClaimed(["a.txt"]);
+      release();
+    });
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    expect(result.current.fileNames).toEqual(["b.txt"]);
+    expect(shell.stageFile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fileName: "b.txt", submissionId: result.current.submissionId }),
+    );
+    expect(result.current.submissionId).not.toBe(submitted.submissionId);
+    expect(shell.discardSubmission).not.toHaveBeenCalled();
+  });
+
+  it("releases later imports for retry when a dispatch fails", async () => {
+    const { result } = renderHook(() => useWorkspaceImports(CONVERSATION));
+    act(() => result.current.addFiles([file("a.txt")]));
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    const submissionId = result.current.submissionId;
+    let release!: () => void;
+    act(() => {
+      release = result.current.beginSubmission(["a.txt"]);
+    });
+    act(() => result.current.addFiles([file("b.txt")]));
+    act(() => release());
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    expect(result.current.fileNames).toEqual(["a.txt", "b.txt"]);
+    expect(result.current.submissionId).toBe(submissionId);
+    expect(shell.stageFile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fileName: "b.txt", submissionId }),
+    );
+  });
+
+  it.each([true, false])(
+    "holds a removed submitted file until acceptance is known (%s)",
+    async (accepted) => {
+      const { result } = renderHook(() => useWorkspaceImports(CONVERSATION));
+      act(() => result.current.addFiles([file("a.txt")]));
+      await waitFor(() => expect(result.current.importing).toBe(false));
+      const submitted = result.current;
+      let release!: () => void;
+      act(() => {
+        release = submitted.beginSubmission(["a.txt"]);
+      });
+      act(() => result.current.remove(submitted.items[0]!.localId));
+      expect(shell.discardStagedFile).not.toHaveBeenCalled();
+      act(() => {
+        if (accepted) submitted.markClaimed(["a.txt"]);
+        release();
+      });
+      if (accepted) expect(shell.discardStagedFile).not.toHaveBeenCalled();
+      else
+        expect(shell.discardStagedFile).toHaveBeenCalledWith({
+          conversationId: CONVERSATION,
+          submissionId: submitted.submissionId,
+          name: "a.txt",
+        });
+    },
+  );
+
+  it("does not stage a later import removed while waiting for the submitted batch", async () => {
+    const { result } = renderHook(() => useWorkspaceImports(CONVERSATION));
+    act(() => result.current.addFiles([file("a.txt")]));
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    let release!: () => void;
+    act(() => {
+      release = result.current.beginSubmission(["a.txt"]);
+    });
+    act(() => result.current.addFiles([file("b.txt")]));
+    act(() => result.current.remove(result.current.items[1]!.localId));
+    await act(async () => release());
+    expect(shell.stageFile).toHaveBeenCalledTimes(1);
+    expect(result.current.fileNames).toEqual(["a.txt"]);
+  });
+
+  it("defers unmount cleanup until a failed submitted batch releases", async () => {
+    const { result, unmount } = renderHook(() => useWorkspaceImports(CONVERSATION));
+    act(() => result.current.addFiles([file("a.txt")]));
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    const submitted = result.current;
+    let release!: () => void;
+    act(() => {
+      release = submitted.beginSubmission(["a.txt"]);
+    });
+    unmount();
+    expect(shell.discardSubmission).not.toHaveBeenCalled();
+    act(() => release());
+    expect(shell.discardSubmission).toHaveBeenCalledWith({
+      conversationId: CONVERSATION,
+      submissionId: submitted.submissionId,
+    });
+  });
+
+  it("does not discard a reset batch before its pending promotion settles", async () => {
+    const { result, unmount } = renderHook(() => useWorkspaceImports(CONVERSATION));
+    act(() => result.current.addFiles([file("a.txt")]));
+    await waitFor(() => expect(result.current.importing).toBe(false));
+    const submitted = result.current;
+    let release!: () => void;
+    act(() => {
+      release = submitted.beginSubmission(["a.txt"]);
+    });
+    await act(async () => {
+      await submitted.promote(RESERVATION);
+    });
+    act(() => result.current.reset());
+    unmount();
+    expect(shell.discardSubmission).not.toHaveBeenCalled();
+    await act(async () => {
+      await submitted.commit(RESERVATION);
+      submitted.markClaimed(["a.txt"]);
+      release();
+    });
+    expect(shell.discardSubmission).not.toHaveBeenCalled();
+    expect(shell.discardStagedFile).not.toHaveBeenCalled();
+  });
+
   it("promotes, commits, rolls back, and clears claimed chips through transaction RPCs", async () => {
     const { result } = renderHook(() => useWorkspaceImports(CONVERSATION));
     act(() => result.current.addFiles([file("a.txt")]));
@@ -194,7 +326,7 @@ describe("useWorkspaceImports", () => {
       await result.current.promote(RESERVATION);
       await result.current.commit(RESERVATION);
     });
-    act(() => result.current.markClaimed());
+    act(() => result.current.markClaimed(["a.txt"]));
 
     expect(shell.promoteSubmission).toHaveBeenCalledWith({
       conversationId: CONVERSATION,

@@ -348,6 +348,7 @@ export function ChatView({
   const seedEditUploads = editUploads.seed;
   const resetEditUploads = editUploads.reset;
   const submitEditUploads = editUploads.submit;
+  const beginEditSubmission = editUploads.beginSubmission;
   const editUploadCount = editUploads.items.length;
   // Seeded from the edited message, like the uploads above: an edit changes the
   // message's own skills and collections, never the composer's live selection.
@@ -844,30 +845,33 @@ export function ChatView({
         reasoningEffort?: ReasoningEffort | null;
         researchEnabled?: boolean;
         attachmentIds: ReadonlyArray<string>;
+        releaseUploads?: () => void;
         skillIds?: ReadonlyArray<string>;
         collectionIds?: ReadonlyArray<string>;
       } & (
         | { content: string; questionResponse?: never }
         | { questionResponse: QuestionResponse; content?: never }
       ),
-    ) =>
-      editMessage({
+    ) => {
+      const { releaseUploads: _releaseUploads, ...editFields } = input;
+      return editMessage({
         data: {
           conversationId,
           researchEnabled: false,
-          ...input,
+          ...editFields,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
-      }),
+      });
+    },
     onSuccess: async (_result, input) => {
       if (input.questionResponse) {
         await refreshQuestionState();
       } else {
+        // Claim before refreshing: a failed refresh cannot undo server acceptance.
+        editUploads.markClaimed(input.attachmentIds);
         await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        // Only ordinary edits claim uploads and consume the composer's search mode.
-        editUploads.markClaimed();
         setEditSkillIds([]);
         settleEditContext();
         resetSearchEnabled();
@@ -881,6 +885,7 @@ export function ChatView({
       toast.error("Could not save your answers.");
       await refreshQuestionState();
     },
+    onSettled: (_result, _error, input) => input.releaseUploads?.(),
   });
 
   const mutateRetry = retryMutation.mutate;
@@ -1214,6 +1219,7 @@ export function ChatView({
           reasoningEffort,
           researchEnabled: editResearchEnabled,
           attachmentIds,
+          releaseUploads: beginEditSubmission(attachmentIds),
           skillIds: editSkillIds,
           collectionIds: editContext.sendFields.collectionIds,
         });
@@ -1230,6 +1236,7 @@ export function ChatView({
       reasoningEffort,
       editResearchEnabled,
       submitEditUploads,
+      beginEditSubmission,
       editSkillIds,
       editContext,
     ],

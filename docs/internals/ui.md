@@ -306,13 +306,25 @@ false`), so a page body is written against data already there. This includes loc
   before send, structured answer, retry, edit, branch or save, never Stop. A document or draft
   belongs to its creating answer, so rewinding that answer removes it; its card stays at the
   creating tool call's text offset, or at the end of that answer while no tool row names it yet,
-  and the transcript has no footer. The manual agent editor similarly pins its dirty
-  baseline rather than treating a background refetch as permission to overwrite newer settings.
+  and the transcript has no footer. Editors keep the saved baseline separate from the editable
+  buffer. A save acknowledges the submitted values, not later edits, and a background refetch
+  is not permission to overwrite a dirty buffer. Uploaded files settle by submitted identity,
+  not their current path. A skill save returns its accepted revision and resolved file metadata
+  from that transaction, never a later current-revision readback that might name another file.
+  Verify results and errors belong to the source revision checked, including errors whose response
+  body finishes decoding after an edit.
 - Upload-queued composer sends sample in two moments, on purpose. What the person decided by
   pressing Submit (`onSend`, the research offer, the blocked/disabled state, the model) is frozen at the
   click; what they can still edit while uploads settle (draft text, skill chips) is read at dispatch.
-  `Composer` keeps one effect-updated request ref for both and copies it at the click; see
-  `docs/internals/desktop.md` for the mode-fixed rule this serves.
+  A synchronous submission latch covers both the button and Enter. Acceptance clears only the
+  submitted edit revision, not a later draft that happens to contain the same text, and its
+  accepted file identities. A queued replacement ends only its original edit session, not a
+  later edit of another entry or a reopened edit of the same entry. Fresh uploads are retained
+  by exact ID before dispatch. Removing
+  a chip, resetting or unmounting cannot delete an upload while its claim is pending. Success
+  releases it as claimed, failure permits cleanup if it is no longer in the draft. Workspace
+  imports hold the submitted staging batch until dispatch settles, so later files cannot enter
+  its whole-directory promotion. See [desktop](desktop.md) for the mode-fixed rule.
 - A file an answer produced, a model's image or a custom tool's return, sits at the text offset
   where it appeared (`assistant-body.ts` orders it with the tool rows): images inline, anything
   else as the same `AttachmentChip` a sent message uses, opening the shared preview dialog. The
