@@ -89,7 +89,10 @@ export const graphCall = <A>(
     const credential = yield* session.credential;
     // The manifest offers no API key; Graph only takes OAuth tokens.
     if (credential.kind !== "oauth")
-      return yield* new IntegrationAuthFailed({ integrationId: "outlook" });
+      return yield* new IntegrationAuthFailed({
+        integrationId: "outlook",
+        ...(credential.identity ? { credential: credential.identity } : {}),
+      });
     const token = credential.accessToken;
     const once = Effect.tryPromise({
       try: (signal) =>
@@ -121,7 +124,10 @@ export const graphCall = <A>(
       response = yield* once;
     }
     if (response.status === 401)
-      return yield* new IntegrationAuthFailed({ integrationId: "outlook" });
+      return yield* new IntegrationAuthFailed({
+        integrationId: "outlook",
+        ...(credential.identity ? { credential: credential.identity } : {}),
+      });
     // Sending and other actions answer 202 or 204 with no body.
     const raw = yield* Effect.tryPromise({
       try: () => response.text(),

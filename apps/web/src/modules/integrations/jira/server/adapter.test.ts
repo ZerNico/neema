@@ -390,6 +390,87 @@ describe("a connection limited to some projects", () => {
     expect(create.scope).toEqual(["OPS"]);
   });
 
+  it("rechecks project scope after a queued change acquires the permit", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const queued = Promise.withResolvers<void>();
+    let checks = 0;
+    let scope: ReadonlyArray<string> = ["PROJ"];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/issue") && init?.method === "POST") {
+          entered.resolve();
+          await release.promise;
+        }
+        return jira(input, init);
+      }),
+    );
+    const connected: ConnectedSession = {
+      ...sessionWith(apiKey),
+      scope: Effect.sync(() => scope),
+      connectionId: "c",
+      accountEpoch: "epoch",
+      configIdentity: "config",
+      integration: { id: "jira", kind: "jira", name: "Jira" },
+      adapter: jiraAdapter,
+    };
+    const tools = prepareIntegrationTools({
+      offered: [
+        {
+          integrationId: "jira",
+          session: connected,
+          scope: ["PROJ"],
+          unattended: null,
+          permissions: { create_issue: "allow" },
+        },
+      ],
+      indexer: createSourceIndexer([]),
+      approvals: {
+        request: () => Effect.succeed("allow"),
+        decide: () => Effect.succeed(false),
+        get: () => Effect.succeed(null),
+        pending: () => Effect.succeed([]),
+      },
+      owner: { userId: "u1", conversationId: "c1", messageId: "m1" },
+      permissionsFor: () =>
+        Effect.sync(() => {
+          if (++checks === 5) queued.resolve();
+          return { permissions: { create_issue: "allow" as const }, allowedInChat: [] };
+        }),
+      sessionFor: () => Effect.succeed(connected),
+      rowIdFor: () => Effect.succeed("row"),
+      reportAuthFailure: () => Effect.void,
+      allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
+    })!;
+    const create = tools.group.handlers.int_jira__create_issue as (
+      args: unknown,
+      context: { toolCallId: string },
+    ) => Effect.Effect<IntegrationModelResult>;
+    const args = {
+      project: "PROJ",
+      type: "Task",
+      summary: "Fix login",
+      priority: "High",
+    };
+    const first = run(create(args, { toolCallId: "first" }));
+    let second: Promise<IntegrationModelResult> | undefined;
+    try {
+      await entered.promise;
+      second = run(create(args, { toolCallId: "second" }));
+      await queued.promise;
+      scope = [];
+      release.resolve();
+      expect(await first).toMatchObject({ ok: true });
+      expect(await second).toMatchObject({ ok: false, refused: true });
+      expect(sent("POST", "/issue")).toHaveLength(1);
+    } finally {
+      release.resolve();
+      await first;
+      await second;
+    }
+  });
+
   it("refuses a change outside them in the tool layer, before anyone is asked", async () => {
     const request = vi.fn(() => Effect.succeed("allow" as const));
     const approvals: IntegrationApprovals["Service"] = {
@@ -401,6 +482,8 @@ describe("a connection limited to some projects", () => {
     const connected: ConnectedSession = {
       ...sessionWith(apiKey, ["OPS"]),
       connectionId: "c",
+      accountEpoch: "epoch",
+      configIdentity: "config",
       integration: { id: "jira", kind: "jira", name: "Jira" },
       adapter: jiraAdapter,
     };

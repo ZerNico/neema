@@ -1,7 +1,7 @@
 import { and, eq, gt } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { integrationConnections, verification } from "~/db/schema/index.ts";
+import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
@@ -27,6 +27,7 @@ import {
 } from "./oauth.ts";
 import {
   IntegrationRepo,
+  integrationUsableBy,
   type IntegrationConfigRow,
   type IntegrationConnectionRow,
   type SaveConfig,
@@ -48,6 +49,8 @@ interface OAuthStateValue {
 
 export interface ConnectedSession extends IntegrationSession {
   readonly connectionId: string;
+  readonly accountEpoch: string;
+  readonly configIdentity: string;
   /** Which integration this is: its id, the type it runs on and its name. */
   readonly integration: { readonly id: string; readonly kind: string; readonly name: string };
   readonly adapter: IntegrationAdapter;
@@ -84,6 +87,25 @@ type RefreshResult =
   | { kind: "credential"; credential: Credential }
   | { kind: "revoked" }
   | { kind: "failed"; message: string };
+
+const configIdentity = (row: IntegrationConfigRow, adapter: IntegrationAdapter) => {
+  const normalized = adapter.normalizeConfig(row.config);
+  if ("error" in normalized) return null;
+  return sha256(
+    JSON.stringify({
+      kind: row.kind,
+      config: Object.entries(normalized.config).toSorted(([a], [b]) => a.localeCompare(b)),
+      oauthClientId: row.oauthClientId,
+      oauthClientSecretCiphertext: row.oauthClientSecretCiphertext,
+    }),
+  );
+};
+
+const credentialIdentity = (row: IntegrationConnectionRow) => ({
+  connectionId: row.id,
+  accountEpoch: row.accountEpoch,
+  credentialRevision: row.credentialRevision,
+});
 
 const oauthReady = (row: IntegrationConfigRow | null) =>
   Boolean(row?.oauthClientId && row.oauthClientSecretCiphertext);
@@ -185,7 +207,10 @@ export class IntegrationService extends Context.Service<
       integrationId: string,
     ): Effect.Effect<ConnectedSession, IntegrationNotAvailable>;
     /** Marks a connection whose credentials the service refused. */
-    reportAuthFailure(connection: { userId: string; connectionId: string }): Effect.Effect<void>;
+    reportAuthFailure(input: {
+      userId: string;
+      failure: IntegrationAuthFailed;
+    }): Effect.Effect<void>;
     /**
      * Connected, usable integrations and whether this chat offers them: the
      * chat's own choice, else the agent's attachments, else the connection's
@@ -249,30 +274,61 @@ export class IntegrationService extends Context.Service<
       });
 
       const refresh = (
-        connectionId: string,
+        connection: IntegrationConnectionRow,
         row: IntegrationConfigRow,
         adapter: IntegrationAdapter,
       ) =>
         Effect.gen(function* () {
+          const connectionId = connection.id;
           const oauth = adapter.oauth;
-          const clientSecret = yield* repo.clientSecret(row);
           // The lock makes concurrent callers (a chat and a sync, say) take
           // turns: the first rotates the refresh token, the rest find a fresh
           // access token instead of spending a refresh token already used.
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                // Config before connection, matching admin saves. No token touches
+                // a captured endpoint until both locked identities still agree.
+                const [config] = yield* tx
+                  .select()
+                  .from(integrationConfigs)
+                  .where(
+                    and(
+                      eq(integrationConfigs.id, row.id),
+                      eq(integrationConfigs.enabled, true),
+                      integrationUsableBy(connection.userId),
+                    ),
+                  )
+                  .for("share");
+                if (!config || configIdentity(config, adapter) !== configIdentity(row, adapter))
+                  return {
+                    kind: "failed",
+                    message: "This integration is no longer available.",
+                  } satisfies RefreshResult;
                 const [locked] = yield* tx
                   .select()
                   .from(integrationConnections)
                   .where(eq(integrationConnections.id, connectionId))
                   .for("update");
-                if (!locked) return { kind: "revoked" } satisfies RefreshResult;
+                if (
+                  !locked ||
+                  locked.status !== "active" ||
+                  locked.accountEpoch !== connection.accountEpoch ||
+                  locked.configFingerprint !== connection.configFingerprint
+                )
+                  return {
+                    kind: "failed",
+                    message: "This integration is no longer connected.",
+                  } satisfies RefreshResult;
                 const stored = yield* repo.decrypt(locked);
                 if (stored?.kind === "api_key")
                   return {
                     kind: "credential",
-                    credential: { kind: "api_key", values: stored.values },
+                    credential: {
+                      kind: "api_key",
+                      values: stored.values,
+                      identity: credentialIdentity(locked),
+                    },
                   } satisfies RefreshResult;
                 if (
                   stored &&
@@ -280,7 +336,11 @@ export class IntegrationService extends Context.Service<
                 )
                   return {
                     kind: "credential",
-                    credential: { kind: "oauth", accessToken: stored.accessToken },
+                    credential: {
+                      kind: "oauth",
+                      accessToken: stored.accessToken,
+                      identity: credentialIdentity(locked),
+                    },
                   } satisfies RefreshResult;
                 if (!stored?.refreshToken || !oauth || !row.oauthClientId) {
                   yield* tx
@@ -289,6 +349,7 @@ export class IntegrationService extends Context.Service<
                     .where(eq(integrationConnections.id, connectionId));
                   return { kind: "revoked" } satisfies RefreshResult;
                 }
+                const clientSecret = yield* repo.clientSecret(config);
                 const outcome = yield* requestTokens({
                   endpoint: oauth.tokenUrl(row.config),
                   clientId: row.oauthClientId,
@@ -318,13 +379,22 @@ export class IntegrationService extends Context.Service<
                   refreshToken: outcome.tokens.refreshToken ?? stored.refreshToken,
                   expiresAt: outcome.tokens.expiresAt,
                 };
+                const credentialRevision = uuidv7();
                 yield* tx
                   .update(integrationConnections)
-                  .set({ credentialsCiphertext: yield* repo.encrypt(next), updatedAt: new Date() })
+                  .set({
+                    credentialsCiphertext: yield* repo.encrypt(next),
+                    credentialRevision,
+                    updatedAt: new Date(),
+                  })
                   .where(eq(integrationConnections.id, connectionId));
                 return {
                   kind: "credential",
-                  credential: { kind: "oauth", accessToken: next.accessToken },
+                  credential: {
+                    kind: "oauth",
+                    accessToken: next.accessToken,
+                    identity: { ...credentialIdentity(locked), credentialRevision },
+                  },
                 } satisfies RefreshResult;
               }),
             )
@@ -339,25 +409,46 @@ export class IntegrationService extends Context.Service<
       ): Effect.Effect<Credential, IntegrationAuthFailed | IntegrationRequestFailed> =>
         Effect.gen(function* () {
           const current = yield* repo.getConnectionById(connection.id);
-          if (!current || current.status !== "active")
-            return yield* new IntegrationAuthFailed({ integrationId: row.id });
+          if (
+            !current ||
+            current.status !== "active" ||
+            current.accountEpoch !== connection.accountEpoch
+          )
+            return yield* new IntegrationRequestFailed({
+              status: null,
+              message: "This integration is no longer connected.",
+            });
           const enabled = yield* available(connection.userId, row.id).pipe(
             Effect.orElseSucceed(() => null),
           );
-          if (!enabled || current.configFingerprint !== enabled.fingerprint)
+          if (
+            !enabled ||
+            current.configFingerprint !== enabled.fingerprint ||
+            current.configFingerprint !== connection.configFingerprint ||
+            configIdentity(enabled.row, adapter) !== configIdentity(row, adapter)
+          )
             return yield* new IntegrationRequestFailed({
               status: null,
               message: "This integration is no longer available.",
             });
           const stored = yield* repo.decrypt(current);
-          if (stored?.kind === "api_key") return { kind: "api_key", values: stored.values };
+          if (stored?.kind === "api_key")
+            return {
+              kind: "api_key",
+              values: stored.values,
+              identity: credentialIdentity(current),
+            };
           if (
             stored &&
             (stored.expiresAt === null || stored.expiresAt - REFRESH_MARGIN_MS > Date.now())
           )
-            return { kind: "oauth", accessToken: stored.accessToken };
+            return {
+              kind: "oauth",
+              accessToken: stored.accessToken,
+              identity: credentialIdentity(current),
+            };
           // Expired or unreadable: refreshing decides under the row lock.
-          const result = yield* refresh(connection.id, row, adapter);
+          const result = yield* refresh(connection, row, adapter);
           if (result.kind === "credential") return result.credential;
           if (result.kind === "revoked") {
             yield* changed(connection.userId);
@@ -383,6 +474,8 @@ export class IntegrationService extends Context.Service<
           return yield* new IntegrationNotAvailable({ integrationId });
         const session: ConnectedSession = {
           connectionId: connection.id,
+          accountEpoch: connection.accountEpoch,
+          configIdentity: configIdentity(row, adapter)!,
           integration: { id: row.id, kind: row.kind, name: row.name },
           adapter,
           config,
@@ -838,7 +931,8 @@ export class IntegrationService extends Context.Service<
         session: (userId, integrationId) => sessionFor(userId, integrationId),
 
         reportAuthFailure: Effect.fn("IntegrationService.reportAuthFailure")(function* (input) {
-          yield* repo.markNeedsReauth(input.connectionId);
+          if (!input.failure.credential) return;
+          yield* repo.markNeedsReauth(input.failure.credential);
           yield* changed(input.userId);
         }),
       });

@@ -12,10 +12,17 @@ export class IntegrationRejected extends Schema.TaggedError<IntegrationRejected>
   { reason: Schema.String },
 ) {}
 
-/** The service refused the credentials; the connection needs reconnecting. */
+export const CredentialIdentity = Schema.Struct({
+  connectionId: Schema.String,
+  accountEpoch: Schema.String,
+  credentialRevision: Schema.String,
+});
+export type CredentialIdentity = typeof CredentialIdentity.Type;
+
+/** A provider refusal names the exact request credential, never a session's last token. */
 export class IntegrationAuthFailed extends Schema.TaggedError<IntegrationAuthFailed>()(
   "IntegrationAuthFailed",
-  { integrationId: Schema.String },
+  { integrationId: Schema.String, credential: Schema.optionalKey(CredentialIdentity) },
 ) {}
 
 /** Any other failure talking to the service. The message is safe to show. */

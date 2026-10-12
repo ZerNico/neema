@@ -1506,10 +1506,10 @@ export class StreamEngine extends Context.Service<
                   Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
                     Effect.map((row) => row?.rowId),
                   ),
-                reportAuthFailure: (session) =>
+                reportAuthFailure: (_session, failure) =>
                   integrations.reportAuthFailure({
                     userId: input.userId,
-                    connectionId: session.connectionId,
+                    failure,
                   }),
                 allowanceUses: {
                   reserve: (integrationId, allowance) =>

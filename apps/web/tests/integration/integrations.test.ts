@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { PgClient } from "@effect/sql-pg";
-import { count, eq } from "drizzle-orm";
+import { Client } from "pg";
+import { count, eq, sql } from "drizzle-orm";
 import { Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,7 +21,8 @@ import {
   user,
 } from "~/db/schema/index.ts";
 import { outlineAdapter } from "~/modules/integrations/outline/server/adapter.ts";
-import type { IntegrationRejected } from "~/modules/integrations/errors.ts";
+import { IntegrationAuthFailed, type IntegrationRejected } from "~/modules/integrations/errors.ts";
+import { outlineCall } from "~/modules/integrations/outline/server/client.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -43,7 +45,8 @@ type Services =
   | IntegrationRepo
   | IntegrationService
   | IntegrationApprovals
-  | KnowledgeSourceService;
+  | KnowledgeSourceService
+  | KnowledgeRepo;
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
@@ -79,6 +82,7 @@ const deleted: Record<string, unknown>[] = [];
 // Outline declares no allowances, so nothing here ever reserves one.
 const unlimited = { reserve: () => Effect.succeed(true), release: () => Effect.void };
 const created: Record<string, unknown>[] = [];
+let beforeApiResponse: ((request: IncomingMessage) => Promise<void>) | null = null;
 
 const readBody = (request: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -121,6 +125,7 @@ const startOutline = () =>
           expires_in: 3600,
         });
       }
+      if (beforeApiResponse) await beforeApiResponse(request);
       const token = request.headers.authorization?.replace(/^Bearer /, "") ?? "";
       if (!validTokens.has(token))
         return json(401, { ok: false, error: "authentication_required" });
@@ -421,6 +426,9 @@ describe("connections", () => {
         }),
       ),
     );
+    const [beforeConnection] = await insert((db) =>
+      db.select().from(integrationConnections).where(eq(integrationConnections.userId, userId)),
+    );
     const before = tokenCalls.length;
     const session = await run(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
@@ -431,8 +439,235 @@ describe("connections", () => {
         { concurrency: "unbounded" },
       ),
     );
-    expect(tokens).toEqual(Array.from({ length: 5 }, () => ({ kind: "oauth", accessToken: "a2" })));
+    const [afterConnection] = await insert((db) =>
+      db.select().from(integrationConnections).where(eq(integrationConnections.userId, userId)),
+    );
+    expect(afterConnection!.accountEpoch).toBe(beforeConnection!.accountEpoch);
+    expect(afterConnection!.credentialRevision).not.toBe(beforeConnection!.credentialRevision);
+    expect(tokens).toEqual(
+      Array.from({ length: 5 }, () => ({
+        kind: "oauth",
+        accessToken: "a2",
+        identity: {
+          connectionId: afterConnection!.id,
+          accountEpoch: afterConnection!.accountEpoch,
+          credentialRevision: afterConnection!.credentialRevision,
+        },
+      })),
+    );
     expect(tokenCalls.slice(before)).toEqual(["refresh_token"]);
+  });
+
+  it("validates reconnect identity after waiting for the refresh lock before contacting OAuth", async () => {
+    const userId = await newUser();
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        repo.saveConnection({
+          userId,
+          integrationId: "outline",
+          authKind: "oauth",
+          credentials: {
+            kind: "oauth",
+            accessToken: "expired",
+            refreshToken: "never-send",
+            expiresAt: Date.now() - 1,
+          },
+          accountLabel: "ada",
+          fingerprint: baseUrl,
+        }),
+      ),
+    );
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const blocker = new Client({ connectionString: database.url });
+    await blocker.connect();
+    await blocker.query("begin");
+    const backend = await blocker.query<{ pid: number }>("select pg_backend_pid() as pid");
+    const pid = backend.rows[0]!.pid;
+    await blocker.query("select id from integration_configs where id = 'outline' for update");
+    const before = tokenCalls.length;
+    const credential = runtime.runPromiseExit(session.credential);
+    try {
+      await run(
+        Effect.promise(() =>
+          blocker.query<{ waiting: boolean }>(
+            `select exists (select 1 from pg_stat_activity where datname = current_database()
+         and $1 = any(pg_blocking_pids(pid))) as waiting`,
+            [pid],
+          ),
+        ).pipe(Effect.repeat({ until: (result) => result.rows[0]!.waiting })),
+      );
+      await run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.saveConnection({
+            userId,
+            integrationId: "outline",
+            authKind: "oauth",
+            credentials: {
+              kind: "oauth",
+              accessToken: "replacement",
+              refreshToken: "replacement-secret",
+              expiresAt: Date.now() - 1,
+            },
+            accountLabel: "replacement",
+            fingerprint: baseUrl,
+          }),
+        ),
+      );
+      await blocker.query("commit");
+      expect(Exit.isFailure(await credential)).toBe(true);
+      expect(tokenCalls.length).toBe(before);
+      expect((await outlineFor(userId))?.connection?.status).toBe("active");
+    } finally {
+      await blocker.query("rollback");
+      await blocker.end();
+      await credential;
+    }
+  });
+
+  it.each([false, true])(
+    "rejects a retained session after reconnect (expired: %s)",
+    async (expired) => {
+      const userId = await newUser();
+      await connectKey(userId);
+      const session = await run(
+        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      );
+      const before = tokenCalls.length;
+      const replacement = await run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.saveConnection({
+            userId,
+            integrationId: "outline",
+            authKind: "oauth",
+            credentials: {
+              kind: "oauth",
+              accessToken: "replacement",
+              refreshToken: "must-not-be-used",
+              expiresAt: expired ? Date.now() - 1 : null,
+            },
+            accountLabel: "another account",
+            fingerprint: baseUrl,
+          }),
+        ),
+      );
+      expect(replacement.id).toBe(session.connectionId);
+      expect(replacement.accountEpoch).not.toBe(session.accountEpoch);
+      expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
+      expect(tokenCalls.length).toBe(before);
+      expect((await outlineFor(userId))?.connection?.status).toBe("active");
+    },
+  );
+
+  it.each(["reconnect", "refresh"] as const)(
+    "does not let a delayed 401 disable a %s successor",
+    async (change) => {
+      const userId = await newUser();
+      const oldToken = `refused-${uuidv7()}`;
+      const refreshToken = uuidv7();
+      await run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.saveConnection({
+            userId,
+            integrationId: "outline",
+            authKind: "oauth",
+            credentials: { kind: "oauth", accessToken: oldToken, refreshToken, expiresAt: null },
+            accountLabel: "ada",
+            fingerprint: baseUrl,
+          }),
+        ),
+      );
+      const session = await run(
+        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      );
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      beforeApiResponse = async (request) => {
+        if (request.headers.authorization === `Bearer ${oldToken}`) {
+          entered.resolve();
+          await release.promise;
+        }
+      };
+      const request = run(Effect.flip(outlineCall(session, "auth.info", {})));
+      try {
+        await entered.promise;
+        if (change === "reconnect") await connectKey(userId);
+        else {
+          refreshTokens.set(refreshToken, { access: `fresh-${userId}`, refresh: uuidv7() });
+          await run(
+            Effect.gen(function* () {
+              const repo = yield* IntegrationRepo;
+              const connection = (yield* repo.getConnection(userId, "outline"))!;
+              const credentials = yield* repo.decrypt(connection);
+              if (credentials?.kind !== "oauth") throw new Error("OAuth fixture missing");
+              yield* (yield* Db)
+                .update(integrationConnections)
+                .set({
+                  credentialsCiphertext: yield* repo.encrypt({
+                    ...credentials,
+                    expiresAt: Date.now() - 1,
+                  }),
+                })
+                .where(eq(integrationConnections.id, connection.id));
+            }),
+          );
+          await run(session.credential);
+        }
+        release.resolve();
+        const failure = await request;
+        expect(failure).toBeInstanceOf(IntegrationAuthFailed);
+        if (failure._tag !== "IntegrationAuthFailed") throw new Error("Expected provider refusal");
+        expect(failure.credential?.accountEpoch).toBe(session.accountEpoch);
+        await run(
+          Effect.flatMap(IntegrationService, (s) => s.reportAuthFailure({ userId, failure })),
+        );
+        expect((await outlineFor(userId))?.connection?.status).toBe("active");
+        const current = await run(
+          Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+        );
+        expect(await run(outlineCall(current, "auth.info", {}))).toBeDefined();
+      } finally {
+        release.resolve();
+        beforeApiResponse = null;
+        await request;
+      }
+    },
+  );
+
+  it("marks the current request revision despite a preference update, but ignores probes", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const credential = await run(session.credential);
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.updatePreferences(userId, "outline", { offerByDefault: false }),
+      ),
+    );
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.reportAuthFailure({
+          userId,
+          failure: new IntegrationAuthFailed({ integrationId: "outline" }),
+        }),
+      ),
+    );
+    expect((await outlineFor(userId))?.connection?.status).toBe("active");
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.reportAuthFailure({
+          userId,
+          failure: new IntegrationAuthFailed({
+            integrationId: "outline",
+            credential: credential.identity!,
+          }),
+        }),
+      ),
+    );
+    expect((await outlineFor(userId))?.connection?.status).toBe("needs_reauth");
   });
 
   it("marks a connection whose refresh the service refuses for reconnecting", async () => {
@@ -487,6 +722,66 @@ describe("connections", () => {
 });
 
 describe("what a chat is offered", () => {
+  it("writes first-turn choices on the supplied transaction, all or nothing", async () => {
+    const userId = await newUser();
+    const conversationId = uuidv7();
+    const missing = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* IntegrationRepo;
+        return yield* Effect.result(
+          db.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.insert(conversations).values({ id: conversationId, userId });
+              yield* repo.setConversationChoices(tx, userId, conversationId, [
+                { integrationId: "outline", enabled: true },
+                { integrationId: "missing", enabled: false },
+              ]);
+            }),
+          ),
+        );
+      }),
+    );
+    expect(missing).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "IntegrationNotAvailable", integrationId: "missing" },
+    });
+    expect(
+      await insert((db) =>
+        db.select().from(conversations).where(eq(conversations.id, conversationId)),
+      ),
+    ).toEqual([]);
+    expect(
+      await insert((db) =>
+        db
+          .select()
+          .from(conversationIntegrations)
+          .where(eq(conversationIntegrations.conversationId, conversationId)),
+      ),
+    ).toEqual([]);
+    await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* IntegrationRepo;
+        yield* db.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(conversations).values({ id: conversationId, userId });
+            yield* repo.setConversationChoices(tx, userId, conversationId, [
+              { integrationId: "outline", enabled: false },
+            ]);
+          }),
+        );
+      }),
+    );
+    const choices = await insert((db) =>
+      db
+        .select()
+        .from(conversationIntegrations)
+        .where(eq(conversationIntegrations.conversationId, conversationId)),
+    );
+    expect(choices).toMatchObject([{ integrationId: "outline", enabled: false }]);
+  });
+
   it("follows the connection default, then the chat's own choice, then a fire's grants", async () => {
     const userId = await newUser();
     await connectKey(userId);
@@ -654,7 +949,7 @@ describe("approvals", () => {
     expect(late).toBe(false);
   });
 
-  it.each(["block", "disable", "allow", "unprompted"] as const)(
+  it.each(["block", "disable", "reconnect", "client", "allow", "unprompted"] as const)(
     "checks a tool call after %s before publishing",
     async (change) => {
       await configure();
@@ -678,8 +973,8 @@ describe("approvals", () => {
             sessionFor: (integrationId) =>
               service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
             rowIdFor: () => Effect.succeed("pending-call"),
-            reportAuthFailure: (session) =>
-              service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+            reportAuthFailure: (_session, failure) =>
+              service.reportAuthFailure({ userId, failure }),
             allowanceUses: unlimited,
           });
           const handler = prepared?.group.handlers.int_outline__create_document as
@@ -700,6 +995,17 @@ describe("approvals", () => {
           if (change === "block")
             yield* service.updatePreferences(userId, "outline", {
               toolPermissions: { create_document: "block" },
+            });
+          if (change === "reconnect")
+            yield* service.connectApiKey(userId, "outline", { key: "ol_api_good" });
+          if (change === "client")
+            yield* service.saveConfig({
+              id: "outline",
+              name: "Outline",
+              enabled: true,
+              config: { baseUrl },
+              oauthClientId: "changed-client",
+              allowApiKeys: true,
             });
           if (change === "disable")
             yield* service.saveConfig({
@@ -744,8 +1050,7 @@ describe("prepared calls", () => {
         sessionFor: (integrationId) =>
           service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
         rowIdFor: () => Effect.succeed("pending-call"),
-        reportAuthFailure: (session) =>
-          service.reportAuthFailure({ userId, connectionId: session.connectionId }),
+        reportAuthFailure: (_session, failure) => service.reportAuthFailure({ userId, failure }),
         allowanceUses: unlimited,
       });
       return prepared?.group.handlers[`int_outline__${tool}`] as (
@@ -762,6 +1067,88 @@ describe("prepared calls", () => {
     await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
     return { userId, conversationId };
   };
+
+  it.each(["block", "reconnect", "unchanged"] as const)(
+    "rechecks queued mutations after %s and leaves reads concurrent",
+    async (change) => {
+      const { userId, conversationId } = await setup();
+      await run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.updatePreferences(userId, "outline", {
+            toolPermissions: { create_document: "allow" },
+          }),
+        ),
+      );
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const queued = Promise.withResolvers<void>();
+      let writes = 0;
+      beforeApiResponse = async (request) => {
+        if (request.url === "/api/documents.create" && ++writes === 1) {
+          entered.resolve();
+          await release.promise;
+        }
+      };
+      try {
+        await run(
+          Effect.gen(function* () {
+            const service = yield* IntegrationService;
+            const offered = yield* service.resolveOffer({ userId, conversationId, grants: null });
+            let checks = 0;
+            const prepared = prepareIntegrationTools({
+              offered,
+              indexer: createSourceIndexer([]),
+              approvals: yield* IntegrationApprovals,
+              owner: { userId, conversationId, messageId: "answer" },
+              permissionsFor: (id) =>
+                service.permissionsFor(userId, conversationId, id).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      if (++checks === 5) queued.resolve();
+                    }),
+                  ),
+                ),
+              sessionFor: (id) =>
+                service.session(userId, id).pipe(Effect.orElseSucceed(() => null)),
+              rowIdFor: () => Effect.succeed("pending-call"),
+              reportAuthFailure: (_session, failure) =>
+                service.reportAuthFailure({ userId, failure }),
+              allowanceUses: unlimited,
+            })!;
+            type Handler = (
+              args: Record<string, unknown>,
+              context: { toolCallId: string },
+            ) => Effect.Effect<IntegrationModelResult>;
+            const create = prepared.group.handlers.int_outline__create_document as Handler;
+            const one = yield* Effect.forkChild(
+              create({ title: "One", collectionId: "c1" }, { toolCallId: "one" }),
+            );
+            yield* Effect.promise(() => entered.promise);
+            const two = yield* Effect.forkChild(
+              create({ title: "Two", collectionId: "c1" }, { toolCallId: "two" }),
+            );
+            // Three consent reads admit the first call. Two more finish the second's preparation.
+            yield* Effect.promise(() => queued.promise);
+            const read = prepared.group.handlers.int_outline__read_document as Handler;
+            expect((yield* read({ id: "d1" }, { toolCallId: "read" })).ok).toBe(true);
+            if (change === "block")
+              yield* service.updatePreferences(userId, "outline", {
+                toolPermissions: { create_document: "block" },
+              });
+            if (change === "reconnect")
+              yield* service.connectApiKey(userId, "outline", { key: "ol_api_good" });
+            release.resolve();
+            expect((yield* Fiber.join(one)).ok).toBe(true);
+            expect((yield* Fiber.join(two)).ok).toBe(change === "unchanged");
+          }),
+        );
+        expect(writes).toBe(change === "unchanged" ? 2 : 1);
+      } finally {
+        release.resolve();
+        beforeApiResponse = null;
+      }
+    },
+  );
 
   it("explains a malformed call without asking anyone", async () => {
     const { userId, conversationId } = await setup();
@@ -898,6 +1285,235 @@ describe("knowledge sync", () => {
     mode: "all" | "selected",
     rules: Array<{ nodeId: string; title: string; mode: "include" | "exclude" }> = [],
   ) => ({ nodeId: "collection:c1", title: "Handbook", mode, rules });
+
+  it.each(["edit", "remove", "expire"] as const)(
+    "fences a parked source worker after %s",
+    async (change) => {
+      await configure();
+      const userId = await newUser();
+      await connectKey(userId);
+      const collectionId = await collectionFor(userId);
+      const source = await sources((s) =>
+        s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+      );
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      beforeApiResponse = async (request) => {
+        if (request.url === "/api/documents.list") {
+          entered.resolve();
+          await release.promise;
+        }
+      };
+      const worker = sources((s) => s.tick);
+      try {
+        await entered.promise;
+        if (change === "edit")
+          await sources((s) =>
+            s.save(userId, {
+              sourceId: source.id,
+              collectionId,
+              integrationId: "outline",
+              root: handbook("selected"),
+            }),
+          );
+        if (change === "remove") await sources((s) => s.remove(userId, source.id));
+        if (change === "expire")
+          await insert((db) =>
+            db
+              .update(knowledgeSources)
+              .set({ leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+              .where(eq(knowledgeSources.id, source.id)),
+          );
+        release.resolve();
+        await worker;
+        expect(await mirrored(collectionId)).toEqual([]);
+        expect(await versions(collectionId)).toBe(0);
+        const [current] = await insert((db) =>
+          db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id)),
+        );
+        if (change === "remove") expect(current).toBeUndefined();
+        else expect(current?.cursor).toBeNull();
+        if (change === "edit") expect(current).toMatchObject({ leaseToken: null, status: "idle" });
+      } finally {
+        release.resolve();
+        beforeApiResponse = null;
+        await worker;
+      }
+    },
+  );
+
+  it("keeps a successor's publication when an expired parked worker resumes", async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    const collectionId = await collectionFor(userId);
+    const source = await sources((s) =>
+      s.save(userId, {
+        collectionId,
+        integrationId: "outline",
+        root: handbook("all"),
+      }),
+    );
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let parked = false;
+    beforeApiResponse = async (request) => {
+      if (request.url === "/api/documents.list" && !parked) {
+        parked = true;
+        entered.resolve();
+        await release.promise;
+      }
+    };
+    const predecessor = sources((s) => s.tick);
+    try {
+      await entered.promise;
+      const [claimed] = await insert((db) =>
+        db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id)),
+      );
+      expect(claimed!.leaseToken).not.toBeNull();
+      await insert((db) =>
+        db
+          .update(knowledgeSources)
+          .set({
+            leaseUntil: sql`clock_timestamp() - interval '1 second'`,
+            nextSyncAt: sql`clock_timestamp()`,
+          })
+          .where(eq(knowledgeSources.id, source.id)),
+      );
+      await sources((s) => s.tick);
+      const savedVersions = await versions(collectionId);
+      expect(savedVersions).toBe(3);
+      const [successor] = await insert((db) =>
+        db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id)),
+      );
+      expect(successor!.leaseToken).toBeNull();
+      expect(successor!.cursor).not.toBeNull();
+      release.resolve();
+      await predecessor;
+      expect(await versions(collectionId)).toBe(savedVersions);
+      const [settled] = await insert((db) =>
+        db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id)),
+      );
+      expect(settled).toEqual(successor);
+      expect(await mirrored(collectionId)).toEqual(["document:d1", "document:d2", "document:d3"]);
+    } finally {
+      release.resolve();
+      beforeApiResponse = null;
+      await predecessor;
+    }
+  });
+
+  it.each(["token", "expiry", "integration"] as const)(
+    "fences source add, replace, equality and delete with stale %s",
+    async (change) => {
+      const userId = await newUser();
+      const collectionId = await collectionFor(userId);
+      const sourceId = uuidv7();
+      const leaseToken = uuidv7();
+      await insert((db) =>
+        db.insert(knowledgeSources).values({
+          id: sourceId,
+          collectionId,
+          integrationId: "outline",
+          root: handbook("all"),
+          leaseToken,
+          leaseUntil: sql`clock_timestamp() + interval '1 hour'`,
+        }),
+      );
+      const fence = { sourceId, collectionId, integrationId: "outline", leaseToken };
+      const initial = {
+        fence,
+        externalId: "document:one",
+        externalUrl: "https://source.invalid/one",
+        externalUpdatedAt: new Date("2026-10-01"),
+        title: "One",
+        content: "Original",
+      };
+      const published = (await run(
+        Effect.flatMap(KnowledgeRepo, (repo) => repo.publishSourceNote(userId, initial)),
+      ))!;
+      expect(published).not.toBeNull();
+      const equal = await run(
+        Effect.flatMap(KnowledgeRepo, (repo) =>
+          repo.publishSourceNote(userId, {
+            ...initial,
+            documentId: published.documentId,
+            externalUrl: "https://source.invalid/new",
+            externalUpdatedAt: new Date("2026-10-02"),
+          }),
+        ),
+      );
+      expect(equal).toEqual(published);
+      const [before] = await insert((db) =>
+        db.select().from(knowledgeDocuments).where(eq(knowledgeDocuments.id, published.documentId)),
+      );
+      expect(before).toMatchObject({
+        sourceId,
+        externalId: initial.externalId,
+        externalUrl: "https://source.invalid/new",
+      });
+      expect(await versions(collectionId)).toBe(1);
+      if (change === "token")
+        await insert((db) =>
+          db
+            .update(knowledgeSources)
+            .set({ leaseToken: uuidv7() })
+            .where(eq(knowledgeSources.id, sourceId)),
+        );
+      if (change === "expiry")
+        await insert((db) =>
+          db
+            .update(knowledgeSources)
+            .set({ leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+            .where(eq(knowledgeSources.id, sourceId)),
+        );
+      const stale = change === "integration" ? { ...fence, integrationId: "jira" } : fence;
+      for (const content of ["Original", "Replacement"])
+        expect(
+          await run(
+            Effect.flatMap(KnowledgeRepo, (repo) =>
+              repo.publishSourceNote(userId, {
+                ...initial,
+                fence: stale,
+                documentId: published.documentId,
+                content,
+              }),
+            ),
+          ),
+        ).toBeNull();
+      expect(
+        await run(
+          Effect.flatMap(KnowledgeRepo, (repo) =>
+            repo.publishSourceNote(userId, {
+              ...initial,
+              fence: stale,
+              externalId: "document:two",
+            }),
+          ),
+        ),
+      ).toBeNull();
+      expect(
+        await run(
+          Effect.flatMap(KnowledgeRepo, (repo) =>
+            repo.deleteSourceDocument(userId, stale, {
+              documentId: published.documentId,
+              externalId: initial.externalId,
+            }),
+          ),
+        ),
+      ).toBe(false);
+      expect(await versions(collectionId)).toBe(1);
+      const [after] = await insert((db) =>
+        db.select().from(knowledgeDocuments).where(eq(knowledgeDocuments.id, published.documentId)),
+      );
+      expect(after).toEqual(before);
+      expect(
+        await run(Effect.flatMap(KnowledgeRepo, (repo) => repo.removeSource(userId, sourceId))),
+      ).toBe(true);
+      expect(await versions(collectionId)).toBe(0);
+      expect(await mirrored(collectionId)).toEqual([]);
+    },
+  );
 
   it("takes everything under a root except what is left out, and follows edits", async () => {
     const userId = await newUser();

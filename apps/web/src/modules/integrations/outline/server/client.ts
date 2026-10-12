@@ -81,7 +81,10 @@ export const outlineCall = <A>(
         new IntegrationRequestFailed({ status: null, message: "Outline could not be reached." }),
     });
     if (response.status === 401)
-      return yield* new IntegrationAuthFailed({ integrationId: "outline" });
+      return yield* new IntegrationAuthFailed({
+        integrationId: "outline",
+        ...(credential.identity ? { credential: credential.identity } : {}),
+      });
     const json: unknown = yield* Effect.tryPromise({
       try: () => response.json(),
       catch: () =>

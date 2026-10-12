@@ -2199,8 +2199,8 @@ describe("knowledge ingestion", () => {
     );
     const attachmentId = uuidv7();
     await exec(
-      `insert into attachments (id, user_id, blob_id, file_name)
-       values ('${attachmentId}', '${owner}', '${blobId}', 'terms.txt')`,
+      `insert into attachments (id, user_id, blob_id, file_name, media_type)
+       values ('${attachmentId}', '${owner}', '${blobId}', 'terms.txt', 'text/plain')`,
     );
     await run(
       Effect.flatMap(KnowledgeRepo, (repo) =>

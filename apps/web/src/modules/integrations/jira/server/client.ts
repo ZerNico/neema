@@ -80,14 +80,18 @@ const fetchJson = (url: string, init: RequestInit) =>
       new IntegrationRequestFailed({ status: null, message: "Jira could not be reached." }),
   });
 
-const cloudIdFor = (site: string, token: string) =>
+const cloudIdFor = (site: string, credential: Extract<Credential, { kind: "oauth" }>) =>
   Effect.gen(function* () {
     const cached = cloudIds.get(site);
     if (cached) return cached;
     const response = yield* fetchJson(`${GATEWAY}/oauth/token/accessible-resources`, {
-      headers: { accept: "application/json", authorization: `Bearer ${token}` },
+      headers: { accept: "application/json", authorization: `Bearer ${credential.accessToken}` },
     });
-    if (response.status === 401) return yield* new IntegrationAuthFailed({ integrationId: "jira" });
+    if (response.status === 401)
+      return yield* new IntegrationAuthFailed({
+        integrationId: "jira",
+        ...(credential.identity ? { credential: credential.identity } : {}),
+      });
     const resources = yield* Effect.tryPromise({
       try: () => response.json() as Promise<Array<{ id: string; url: string }>>,
       catch: () =>
@@ -116,7 +120,7 @@ const cloudIdFor = (site: string, token: string) =>
 const route = (site: string, credential: Credential) =>
   Effect.gen(function* () {
     if (credential.kind === "oauth") {
-      const cloudId = yield* cloudIdFor(site, credential.accessToken);
+      const cloudId = yield* cloudIdFor(site, credential);
       return {
         base: `${GATEWAY}/ex/jira/${cloudId}/rest/api/3`,
         authorization: `Bearer ${credential.accessToken}`,
@@ -171,7 +175,8 @@ export const jiraCall = <A>(
   body?: unknown,
 ): Effect.Effect<A, IntegrationAuthFailed | IntegrationRequestFailed> =>
   Effect.gen(function* () {
-    const { base, authorization } = yield* route(siteOf(session.config), yield* session.credential);
+    const credential = yield* session.credential;
+    const { base, authorization } = yield* route(siteOf(session.config), credential);
     const once = fetchJson(`${base}${path}`, {
       method,
       headers: {
@@ -187,7 +192,11 @@ export const jiraCall = <A>(
       yield* Effect.sleep(Duration.millis(wait));
       response = yield* once;
     }
-    if (response.status === 401) return yield* new IntegrationAuthFailed({ integrationId: "jira" });
+    if (response.status === 401)
+      return yield* new IntegrationAuthFailed({
+        integrationId: "jira",
+        ...(credential.identity ? { credential: credential.identity } : {}),
+      });
     // Updates, assignments and transitions answer 204 with no body.
     const raw = yield* Effect.tryPromise({
       try: () => response.text(),

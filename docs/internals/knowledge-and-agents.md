@@ -142,9 +142,14 @@ whatever agent the conversation is associated with.
   agent's own skills and collections stay chips; a sent message shows as chips only the picks
   its text does not name.
 
+- File classification belongs to each validated resource, not to the first filename that
+  stored its bytes. Knowledge publication preserves the supplied media type while using the
+  locked blob’s size and identity. Byte deduplication with an opaque attachment therefore
+  cannot turn a text document opaque or stop its extraction.
 - A collection can also mirror part of a connected service through a knowledge source.
-  Its documents are ordinary note versions marked with their source and are read-only here;
-  the sync, its ownership and its sharing consequence are in
+  Source provenance and note versions commit together under the source’s live lease fence,
+  including identical-content metadata updates. These documents are read-only here.
+  The source’s lifecycle, ownership and sharing consequence are in
   [integrations](integrations.md#knowledge-sources).
 
 ## Retrieval and direct context

@@ -2,6 +2,7 @@ import type { Effect, Schema } from "effect";
 import type { Reach } from "../consent.ts";
 import type { IntegrationToolDefinition } from "../manifest.ts";
 import type {
+  CredentialIdentity,
   IntegrationAuthFailed,
   IntegrationRejected,
   IntegrationRequestFailed,
@@ -15,9 +16,10 @@ export type AdapterFailure = IntegrationAuthFailed | IntegrationRequestFailed | 
  * manifest's API key fields as they were checked. Only the adapter knows how
  * the service wants either sent.
  */
-export type Credential =
+export type Credential = (
   | { readonly kind: "oauth"; readonly accessToken: string }
-  | { readonly kind: "api_key"; readonly values: Readonly<Record<string, string>> };
+  | { readonly kind: "api_key"; readonly values: Readonly<Record<string, string>> }
+) & { readonly identity?: CredentialIdentity };
 
 /** What a handler gets: the admin's config and a usable credential on demand. */
 export interface IntegrationSession {

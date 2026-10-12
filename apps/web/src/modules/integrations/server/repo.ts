@@ -1,4 +1,6 @@
-import { and, count, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, inArray, sql, type SQL } from "drizzle-orm";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -144,7 +146,13 @@ export class IntegrationRepo extends Context.Service<
       },
     ): Effect.Effect<IntegrationConnectionRow | null>;
     removeConnection(userId: string, integrationId: string): Effect.Effect<void>;
-    markNeedsReauth(connectionId: string): Effect.Effect<void>;
+    markNeedsReauth(credential: CredentialIdentity): Effect.Effect<void>;
+    setConversationChoices(
+      tx: DbTx,
+      userId: string,
+      conversationId: string,
+      choices: ReadonlyArray<{ integrationId: string; enabled: boolean }>,
+    ): Effect.Effect<void, IntegrationNotAvailable>;
     /** Null when the stored document is not one this version reads; the person reconnects. */
     decrypt(row: IntegrationConnectionRow): Effect.Effect<StoredCredentials | null>;
     encrypt(credentials: StoredCredentials): Effect.Effect<string>;
@@ -412,6 +420,8 @@ export class IntegrationRepo extends Context.Service<
                 accountLabel: input.accountLabel,
                 configFingerprint: input.fingerprint,
                 status: "active",
+                accountEpoch: uuidv7(),
+                credentialRevision: uuidv7(),
                 updatedAt: now,
               },
             })
@@ -475,13 +485,57 @@ export class IntegrationRepo extends Context.Service<
           },
         ),
 
-        markNeedsReauth: Effect.fn("IntegrationRepo.markNeedsReauth")(function* (connectionId) {
+        markNeedsReauth: Effect.fn("IntegrationRepo.markNeedsReauth")(function* (credential) {
           yield* db
             .update(integrationConnections)
             .set({ status: "needs_reauth", updatedAt: new Date() })
-            .where(eq(integrationConnections.id, connectionId))
+            .where(
+              and(
+                eq(integrationConnections.id, credential.connectionId),
+                eq(integrationConnections.accountEpoch, credential.accountEpoch),
+                eq(integrationConnections.credentialRevision, credential.credentialRevision),
+              ),
+            )
             .pipe(Effect.orDie);
         }),
+
+        setConversationChoices: Effect.fn("IntegrationRepo.setConversationChoices")(
+          function* (tx, userId, conversationId, choices) {
+            if (choices.length === 0) return;
+            const ids = [...new Set(choices.map((choice) => choice.integrationId))].toSorted();
+            const configs = yield* tx
+              .select({ id: integrationConfigs.id })
+              .from(integrationConfigs)
+              .where(inArray(integrationConfigs.id, ids))
+              .orderBy(asc(integrationConfigs.id))
+              .for("share")
+              .pipe(Effect.orDie);
+            const missing = ids.find((id) => !configs.some((config) => config.id === id));
+            if (missing) return yield* new IntegrationNotAvailable({ integrationId: missing });
+            const [owned] = yield* tx
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(ownedConversationById(conversationId, userId))
+              .pipe(Effect.orDie);
+            if (!owned) return yield* new IntegrationNotAvailable({ integrationId: ids[0]! });
+            for (const choice of choices)
+              yield* tx
+                .insert(conversationIntegrations)
+                .values({
+                  conversationId,
+                  integrationId: choice.integrationId,
+                  enabled: choice.enabled,
+                })
+                .onConflictDoUpdate({
+                  target: [
+                    conversationIntegrations.conversationId,
+                    conversationIntegrations.integrationId,
+                  ],
+                  set: { enabled: choice.enabled, updatedAt: new Date() },
+                })
+                .pipe(Effect.orDie);
+          },
+        ),
 
         decrypt,
         encrypt: (credentials) => cipher.encrypt(JSON.stringify(credentials)),

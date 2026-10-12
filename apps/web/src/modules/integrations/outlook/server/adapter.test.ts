@@ -108,6 +108,8 @@ const session: ConnectedSession = {
   credential: Effect.succeed({ kind: "oauth", accessToken: "token" }),
   scope: Effect.succeed(null),
   connectionId: "connection",
+  accountEpoch: "epoch",
+  configIdentity: "config",
   integration: { id: "outlook", kind: "outlook", name: "Outlook" },
   adapter: outlookAdapter,
 };
@@ -281,6 +283,72 @@ describe("sending under a schedule's allowance", () => {
     expect(results.filter((result) => result.ok)).toHaveLength(3);
     expect(results.find((result) => !result.ok)?.error).toMatch(/at most 3 times/);
     expect(sent).toHaveLength(3);
+  });
+
+  it("does not reserve an allowance for a queued send whose consent was revoked", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const queued = Promise.withResolvers<void>();
+    let checks = 0;
+    let blocked = false;
+    const reserve = vi.fn(() => Effect.succeed(true));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/sendMail")) {
+          entered.resolve();
+          await release.promise;
+        }
+        return graph(input, init);
+      }),
+    );
+    const prepared = prepareIntegrationTools({
+      offered: [
+        {
+          integrationId: "outlook",
+          session,
+          scope: null,
+          unattended: { access: "write", allowances: { send: ["ana@example.com"] } },
+          permissions: {},
+        },
+      ],
+      indexer: createSourceIndexer([]),
+      approvals,
+      owner: { userId: "u1", conversationId: "c1", messageId: "m1" },
+      permissionsFor: () =>
+        Effect.sync(() => {
+          if (++checks === 5) queued.resolve();
+          return {
+            permissions: { send_mail: blocked ? ("block" as const) : ("allow" as const) },
+            allowedInChat: [],
+          };
+        }),
+      sessionFor: () => Effect.succeed(session),
+      rowIdFor: () => Effect.succeed("row"),
+      reportAuthFailure: () => Effect.void,
+      allowanceUses: { reserve, release: () => Effect.void },
+    })!;
+    const send = prepared.group.handlers.int_outlook__send_mail as (
+      args: Record<string, unknown>,
+      context: { toolCallId: string },
+    ) => Effect.Effect<IntegrationModelResult>;
+    const first = Effect.runPromise(send(compose(["ana@example.com"]), { toolCallId: "first" }));
+    let second: Promise<IntegrationModelResult> | undefined;
+    try {
+      await entered.promise;
+      second = Effect.runPromise(send(compose(["ana@example.com"]), { toolCallId: "second" }));
+      await queued.promise;
+      blocked = true;
+      release.resolve();
+      expect(await first).toMatchObject({ ok: true });
+      expect(await second).toMatchObject({ ok: false, refused: true });
+      expect(reserve).toHaveBeenCalledOnce();
+      expect(sent).toHaveLength(1);
+    } finally {
+      release.resolve();
+      await first;
+      await second;
+    }
   });
 
   it("gives a use back only when the send certainly failed", async () => {

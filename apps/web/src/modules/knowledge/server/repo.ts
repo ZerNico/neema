@@ -27,6 +27,72 @@ import { readEmbeddingTarget, type EmbeddingTarget } from "./embedding-connectio
 
 type VersionRow = typeof knowledgeDocumentVersions.$inferSelect;
 
+export interface SourceFence {
+  sourceId: string;
+  collectionId: string;
+  integrationId: string;
+  leaseToken: string;
+}
+
+/** Call after locking the collection, before any source-owned content mutation. */
+export const lockKnowledgeSource = (tx: DbTx, fence: SourceFence) =>
+  Effect.gen(function* () {
+    const [source] = yield* tx
+      .select({ id: knowledgeSources.id })
+      .from(knowledgeSources)
+      .where(
+        and(
+          eq(knowledgeSources.id, fence.sourceId),
+          eq(knowledgeSources.collectionId, fence.collectionId),
+          eq(knowledgeSources.integrationId, fence.integrationId),
+          eq(knowledgeSources.leaseToken, fence.leaseToken),
+        ),
+      )
+      .for("update");
+    if (!source) return false;
+    // Evaluate time after lock waits, not at the transaction's start.
+    const [live] = yield* tx
+      .select({ id: knowledgeSources.id })
+      .from(knowledgeSources)
+      .where(
+        and(
+          eq(knowledgeSources.id, source.id),
+          sql`${knowledgeSources.leaseUntil} > clock_timestamp()`,
+        ),
+      );
+    return Boolean(live);
+  });
+
+// Collection and source are locked by the caller. Documents precede blobs,
+// as in ordinary deletion, and the whole source disappears in one commit.
+const deleteSourceRows = (tx: DbTx, documentIds: ReadonlyArray<string>, fence?: SourceFence) =>
+  Effect.gen(function* () {
+    if (documentIds.length === 0) return true;
+    yield* tx
+      .select({ id: knowledgeDocuments.id })
+      .from(knowledgeDocuments)
+      .where(inArray(knowledgeDocuments.id, [...documentIds]))
+      .orderBy(asc(knowledgeDocuments.id))
+      .for("update");
+    const versions = yield* tx
+      .select({ blobId: knowledgeDocumentVersions.blobId })
+      .from(knowledgeDocumentVersions)
+      .where(inArray(knowledgeDocumentVersions.documentId, [...documentIds]));
+    const blobIds = [
+      ...new Set(versions.flatMap((version) => (version.blobId ? [version.blobId] : []))),
+    ];
+    yield* lockBlobs(tx, blobIds);
+    if (fence && !(yield* lockKnowledgeSource(tx, fence))) return false;
+    yield* tx
+      .update(knowledgeDocuments)
+      .set({ currentVersionId: null })
+      .where(inArray(knowledgeDocuments.id, [...documentIds]));
+    yield* tx.delete(knowledgeDocuments).where(inArray(knowledgeDocuments.id, [...documentIds]));
+    yield* collectOrphanedBlobs(tx, blobIds);
+    yield* notifyOnCommit(tx, { scope: "global", event: { type: "knowledge.index.changed" } });
+    return true;
+  });
+
 export interface VersionBodyReference {
   collectionId: string;
   documentId: string;
@@ -224,6 +290,27 @@ export class KnowledgeRepo extends Context.Service<
       userId: string,
       input: { collectionId: string; documentId: string; title: string; content: string },
     ): Effect.Effect<{ documentId: string; versionId: string } | null>;
+    publishSourceNote(
+      userId: string,
+      input: {
+        fence: SourceFence;
+        documentId?: string;
+        externalId: string;
+        externalUrl: string;
+        externalUpdatedAt: Date;
+        title: string;
+        content: string;
+      },
+    ): Effect.Effect<{ documentId: string; versionId: string } | null>;
+    deleteSourceDocument(
+      userId: string,
+      fence: SourceFence,
+      document: {
+        documentId: string;
+        externalId: string;
+      },
+    ): Effect.Effect<boolean>;
+    removeSource(userId: string, sourceId: string): Effect.Effect<boolean>;
     retryDocument(userId: string, documentId: string): Effect.Effect<boolean>;
     deleteDocument(userId: string, documentId: string): Effect.Effect<ReadonlyArray<string>>;
 
@@ -642,6 +729,12 @@ export class KnowledgeRepo extends Context.Service<
           documentId?: string;
           title: string;
           kind: "file" | "note";
+          source?: {
+            fence: SourceFence;
+            externalId: string;
+            externalUrl: string;
+            externalUpdatedAt: Date;
+          };
           version: {
             blobId?: string;
             fileName?: string;
@@ -662,7 +755,21 @@ export class KnowledgeRepo extends Context.Service<
                 .limit(1)
                 .for("update");
               if (owned.length === 0) return null;
+              if (
+                input.source &&
+                (input.source.fence.collectionId !== input.collectionId ||
+                  !(yield* lockKnowledgeSource(tx, input.source.fence)))
+              )
+                return null;
 
+              const provenance = input.source
+                ? {
+                    sourceId: input.source.fence.sourceId,
+                    externalId: input.source.externalId,
+                    externalUrl: input.source.externalUrl,
+                    externalUpdatedAt: input.source.externalUpdatedAt,
+                  }
+                : {};
               let documentId: string;
               if (input.documentId) {
                 const [existing] = yield* tx
@@ -672,12 +779,35 @@ export class KnowledgeRepo extends Context.Service<
                     and(
                       eq(knowledgeDocuments.id, input.documentId),
                       eq(knowledgeDocuments.collectionId, input.collectionId),
+                      input.source
+                        ? and(
+                            eq(knowledgeDocuments.sourceId, input.source.fence.sourceId),
+                            eq(knowledgeDocuments.externalId, input.source.externalId),
+                          )
+                        : isNull(knowledgeDocuments.sourceId),
                     ),
                   )
                   .for("update");
                 if (!existing) return null;
                 documentId = existing.id;
               } else {
+                if (input.source) {
+                  const [mirrored] = yield* tx
+                    .select({ id: knowledgeDocuments.id })
+                    .from(knowledgeDocuments)
+                    .innerJoin(
+                      knowledgeSources,
+                      eq(knowledgeSources.id, knowledgeDocuments.sourceId),
+                    )
+                    .where(
+                      and(
+                        eq(knowledgeDocuments.collectionId, input.collectionId),
+                        eq(knowledgeSources.integrationId, input.source.fence.integrationId),
+                        eq(knowledgeDocuments.externalId, input.source.externalId),
+                      ),
+                    );
+                  if (mirrored) return null;
+                }
                 const [existing] = yield* tx
                   .select({ total: count() })
                   .from(knowledgeDocuments)
@@ -712,6 +842,9 @@ export class KnowledgeRepo extends Context.Service<
                     .orderBy(desc(knowledgeDocumentVersions.revision))
                     .limit(1)
                 : [];
+              // Document and blob waits can outlive the lease checked above.
+              if (input.source && !(yield* lockKnowledgeSource(tx, input.source.fence)))
+                return null;
               // The document lock serializes simultaneous saves. Compare the
               // latest submission, not only published content: repeating a
               // pending or failed save is neither a new version nor a retry.
@@ -724,8 +857,14 @@ export class KnowledgeRepo extends Context.Service<
                 latest.mediaType === (content.mediaType ?? null) &&
                 latest.byteSize === (content.byteSize ?? null) &&
                 latest.noteContent === (content.noteContent ?? null)
-              )
+              ) {
+                if (input.source)
+                  yield* tx
+                    .update(knowledgeDocuments)
+                    .set({ ...provenance, updatedAt: new Date() })
+                    .where(eq(knowledgeDocuments.id, documentId));
                 return { documentId, versionId: latest.id };
+              }
               const versionId = uuidv7();
               if (!input.documentId)
                 yield* tx.insert(knowledgeDocuments).values({
@@ -733,11 +872,12 @@ export class KnowledgeRepo extends Context.Service<
                   collectionId: input.collectionId,
                   title: input.title,
                   kind: input.kind,
+                  ...provenance,
                 });
               else
                 yield* tx
                   .update(knowledgeDocuments)
-                  .set({ updatedAt: new Date() })
+                  .set({ ...provenance, updatedAt: new Date() })
                   .where(eq(knowledgeDocuments.id, documentId));
               yield* tx.insert(knowledgeDocumentVersions).values({
                 id: versionId,
@@ -1993,6 +2133,86 @@ export class KnowledgeRepo extends Context.Service<
             kind: "note",
             version: { noteContent: input.content },
           }),
+        publishSourceNote: (userId, input) =>
+          insertDocument(userId, {
+            collectionId: input.fence.collectionId,
+            ...(input.documentId ? { documentId: input.documentId } : {}),
+            title: input.title,
+            kind: "note",
+            version: { noteContent: input.content },
+            source: {
+              fence: input.fence,
+              externalId: input.externalId,
+              externalUrl: input.externalUrl,
+              externalUpdatedAt: input.externalUpdatedAt,
+            },
+          }),
+        deleteSourceDocument: (userId, fence, document) =>
+          db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const [collection] = yield* tx
+                  .select({ id: knowledgeCollections.id })
+                  .from(knowledgeCollections)
+                  .where(ownedCollection(userId, fence.collectionId))
+                  .for("update");
+                if (!collection || !(yield* lockKnowledgeSource(tx, fence))) return false;
+                const [current] = yield* tx
+                  .select({ id: knowledgeDocuments.id })
+                  .from(knowledgeDocuments)
+                  .where(
+                    and(
+                      eq(knowledgeDocuments.id, document.documentId),
+                      eq(knowledgeDocuments.collectionId, fence.collectionId),
+                      eq(knowledgeDocuments.sourceId, fence.sourceId),
+                      eq(knowledgeDocuments.externalId, document.externalId),
+                    ),
+                  );
+                if (!current) return false;
+                return yield* deleteSourceRows(tx, [current.id], fence);
+              }),
+            )
+            .pipe(Effect.orDie),
+        removeSource: (userId, sourceId) =>
+          db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const [collection] = yield* tx
+                  .select({ id: knowledgeCollections.id })
+                  .from(knowledgeCollections)
+                  .innerJoin(
+                    knowledgeSources,
+                    eq(knowledgeSources.collectionId, knowledgeCollections.id),
+                  )
+                  .where(
+                    and(eq(knowledgeSources.id, sourceId), eq(knowledgeCollections.userId, userId)),
+                  )
+                  .for("update", { of: knowledgeCollections });
+                if (!collection) return false;
+                const [source] = yield* tx
+                  .select({ id: knowledgeSources.id })
+                  .from(knowledgeSources)
+                  .where(
+                    and(
+                      eq(knowledgeSources.id, sourceId),
+                      eq(knowledgeSources.collectionId, collection.id),
+                    ),
+                  )
+                  .for("update");
+                if (!source) return false;
+                const documents = yield* tx
+                  .select({ id: knowledgeDocuments.id })
+                  .from(knowledgeDocuments)
+                  .where(eq(knowledgeDocuments.sourceId, sourceId));
+                yield* deleteSourceRows(
+                  tx,
+                  documents.map((document) => document.id),
+                );
+                yield* tx.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId));
+                return true;
+              }),
+            )
+            .pipe(Effect.orDie),
         retryDocument: (userId, documentId) =>
           db
             .transaction((tx) =>

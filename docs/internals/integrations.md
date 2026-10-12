@@ -55,9 +55,11 @@ A handler does not run a call, it **prepares** one: it checks the arguments, rea
 service whatever the call will touch, and returns a summary for the approval card with an
 `execute` effect, and, for a call that would contact people, its **reach**: the
 allowance it falls under and the exact addresses, read from the service where the call names
-a stored item. Approval decides on that prepared call and the same one executes, so what
-a person approved is what runs, never a second read made after the wait. What a result
-means is stated, not guessed: a source says whether it was read in full, and a write names
+a stored item. Approval decides on that prepared call and its captured connection identity.
+A reconnect or relevant configuration change refuses it rather than rebuilding it under
+another account. An external service may still expose mutable stored items, as with the
+saved-draft send limitation below. What a result means is stated, not guessed: a source
+says whether it was read in full, and a write names
 the page it produced as `link`.
 
 Tools are `int_<integration>__<tool>`, family `integration`. As with custom tools, the
@@ -99,11 +101,20 @@ route for services we will not write an adapter for.
 - The adapter's config fingerprint (Outline: the normalized base URL) is stored with each
   connection. A different fingerprint reads as `needs_reauth`, and saving a new one marks
   every connection so, since the credentials name another server.
-- OAuth tokens are refreshed a minute before expiry under `SELECT … FOR UPDATE` on the
-  connection. The lock makes concurrent callers take turns: the first rotates the refresh
-  token, the rest find a fresh access token instead of spending a used refresh token. A
-  refused refresh (`invalid_grant` and kin) marks the connection `needs_reauth`; a network
-  failure does not.
+- A reconnect changes `account_epoch` and `credential_revision`, even on the same server
+  and connection row. Refresh changes only the revision. A session captures the epoch and
+  an identity of normalized config, type and OAuth client credentials. Each credential read
+  requires those identities still to match, so an old endpoint cannot receive a replacement
+  account’s token. Preferences and generic `updated_at` are not credential identity.
+- OAuth tokens are refreshed a minute before expiry. Refresh locks the configuration
+  `FOR SHARE`, then the connection `FOR UPDATE`, matching admin saves, and validates captured
+  config and epoch inside both locks before contacting OAuth. Concurrent callers take turns:
+  the first rotates the token and revision, the rest find the fresh credential. A refused
+  refresh marks the locked connection `needs_reauth`. A network failure does not.
+- Each HTTP request retains its own immutable connection, epoch and revision snapshot. A
+  provider 401 carries that snapshot, and the status update compares all three. A delayed
+  failure cannot disable a reconnect or refresh successor. Verification probes have no stored
+  identity and cannot mark a current connection. No session-wide last-token state is used.
 - The admin's base URL is exempt from `url-safety.ts`, like the SearXNG base URL:
   self-hosted Outline is usually on a private network. Requests go only to that origin
   with `redirect: "manual"`, so a redirect elsewhere is refused rather than followed with
@@ -151,11 +162,13 @@ write, the same event inviting people is not. That effective access is what the 
 card, "Always allow in this chat", the streamed and stored tool row, reload and branch all
 see. Settings lists tools under an allowance as their own group, so allowing every change at
 once does not also let mail go out unasked; allowing that group does.
-Consent is checked both before an approval wait and immediately before execution; an
-approval cannot override a newly blocked or unavailable integration. Execution also resolves
-the current connection and requires the same connection row as the offer. A newly required
-approval cannot be silently skipped by a call that was offered as allowed. Credential refresh
-checks availability again, without treating an admin disable as bad credentials.
+Consent is checked before approval and at admission. Preparation and approval wait outside
+an answer’s per-integration mutation permit. Changing calls acquire it before final live
+consent, captured epoch/config identity, scope and allowance reservation, then hold it through
+execution. A queued change therefore sees revocation before sending or consuming an allowance.
+Reads remain concurrent. An approval cannot override a newly blocked or unavailable integration,
+and a newly required approval cannot be skipped by a call offered as allowed. Credential
+refresh checks availability again without treating an admin disable as bad credentials.
 
 Cheap checks run before preparing: a blocked tool or a scheduled run without the grant is
 refused without touching the service, and a malformed call is explained without asking
@@ -199,12 +212,14 @@ domain in IDNA, no `*`. An address is authorized as written: when it is a distri
 everyone on it is reached, and that is the owner's choice. The owner's own address counts
 like any other.
 
-Checked equals sent. For a saved draft (including replies, whose recipients Outlook fills
-in), preparing reads the draft's To and Cc from the service, not from the model's arguments,
-and refuses a draft with Bcc: Bcc is never sent from here. Executing first writes exactly the
-checked To and Cc back with Bcc emptied, then sends the draft by id, so attachments and
-threading stay and a recipient added in the meantime is dropped. Changing calls on one
-connection run one at a time within an answer, so nothing edits the draft between the two.
+Direct-send requests contain the checked recipients. Saved drafts, including replies, have
+a remaining race: preparation reads To/Cc and refuses initial Bcc, then execution writes the
+checked To/Cc with Bcc emptied and sends by id. Attachments and threading stay, but another
+mailbox writer can change recipients between PATCH and send. The answer-local mutation permit
+does not exclude Outlook or another answer, so it cannot guarantee exact checked reach.
+Remediation requires a proven atomic provider contract or an immutable snapshot-send design
+that preserves body, inline and ordinary attachments, threading, concurrent edits, the original
+draft and uncertain-send behavior. A later GET or an unproven `If-Match` is not that contract.
 
 The cap is counted in `integration_allowance_uses`, keyed by the answer's message, by one
 insert-or-increment that only succeeds below the cap, taken right before the call goes out.
@@ -273,9 +288,18 @@ itself reported, so neither clock has to agree with the other, read back with a 
 overlap for pages saved mid-listing. A selection edit clears it, and a full listing still
 runs daily.
 
-The sync is claimed like schedules: due by database clock, `SKIP LOCKED`, a lease, and the
-next sync set inside the claim, so downtime collapses into one sync. Changed documents go
-through the ordinary note path, which versions, dedupes an unchanged body and indexes it.
+The sync is claimed by database clock with `SKIP LOCKED`, a lease, and the next sync set
+inside the claim, so downtime collapses into one sync. Claim, edit, publication and removal
+lock collection before source. Every source content mutation and final cursor/status write
+requires the current source, collection, integration and lease token, with expiry checked by
+`clock_timestamp()` after lock waits. Editing selection revokes the token and resets the
+cursor together. A stale worker cannot add, replace, delete or restore its old cursor.
+
+Source-note publication commits provenance, document/version, embedding job and extraction
+notification together. Even identical content validates the fence and updates source metadata
+without making a version. Source removal deletes its documents and row in one transaction,
+using ordinary knowledge blob cleanup. There is no committed provenance-free note in between.
+Existing ambiguous orphan notes are not repaired by guessing from titles.
 Each sync compares against the source's full current listing, so a page deleted,
 archived or unpublished there, or moved out of the selection, is deleted here through the
 knowledge repo. A root the service answers 404 or 403 for is treated as empty: its pages go,
