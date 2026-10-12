@@ -162,7 +162,7 @@ const LIST_TIMEOUT_MS = 2 * 60_000;
  */
 const failed = (integrationId: string, connection: Connection, error: unknown) => {
   connection.forget();
-  return toFailure(integrationId, error, connection.challenge());
+  return toFailure(integrationId, error, connection.challenge(), connection.identity);
 };
 
 const callTool = (

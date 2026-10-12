@@ -9,7 +9,7 @@ import {
   McpServer,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Exit, Option } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CallContext, Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { ElicitationAnswer, ElicitationPrompt } from "../../schema.ts";
@@ -437,6 +437,18 @@ describe("an MCP server through the adapter", () => {
         ),
       );
       expect(JSON.stringify(refused)).toContain("IntegrationAuthFailed");
+    });
+
+    it("names the refused request's own credential, so only that one is marked", async () => {
+      const good = await list(sessionAt("/secure", { kind: "api_key", values: { token: "good" } }));
+      const identity = { connectionId: "c", accountEpoch: "epoch", credentialRevision: "old" };
+      const bad = sessionAt("/secure", { kind: "api_key", values: { token: "bad" }, identity });
+      const called = await run(bad, byName(good.entries, "search"), { q: "x" });
+      const listed = await Effect.runPromiseExit(mcpAdapter.catalog!.list(bad, "mcp", []));
+      const failureOf = (exit: Exit.Exit<unknown, unknown>) =>
+        Exit.isFailure(exit) ? Option.getOrNull(Cause.findErrorOption(exit.cause)) : null;
+      for (const failure of [failureOf(called), failureOf(listed)])
+        expect(failure).toMatchObject({ _tag: "IntegrationAuthFailed", credential: identity });
     });
 
     it("verifies a connection by listing with it", async () => {

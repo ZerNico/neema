@@ -10,7 +10,11 @@ import {
 } from "@modelcontextprotocol/client";
 import { createHash } from "node:crypto";
 import { Effect } from "effect";
-import { IntegrationAuthFailed, IntegrationRequestFailed } from "../../errors.ts";
+import {
+  IntegrationAuthFailed,
+  IntegrationRequestFailed,
+  type CredentialIdentity,
+} from "../../errors.ts";
 import type { AdapterFailure, Credential } from "../../server/adapter.ts";
 import { scopedFetch, type AuthChallenge } from "./http.ts";
 
@@ -68,6 +72,8 @@ export interface Connection {
   readonly transport: () => StreamableHTTPClientTransport | null;
   /** The server's last `WWW-Authenticate` challenge, for a refusal the SDK words vaguely. */
   readonly challenge: () => AuthChallenge | null;
+  /** The credential this connection sends, so a refusal names it and no later one. */
+  readonly identity: CredentialIdentity | undefined;
 }
 
 const httpStatus = (error: unknown) => (error instanceof SdkHttpError ? error.status : null);
@@ -77,9 +83,11 @@ export const toFailure = (
   integrationId: string,
   error: unknown,
   challenge: AuthChallenge | null,
+  credential: CredentialIdentity | undefined,
 ): AdapterFailure => {
   const status = challenge?.status ?? httpStatus(error);
-  if (status === 401) return new IntegrationAuthFailed({ integrationId });
+  if (status === 401)
+    return new IntegrationAuthFailed({ integrationId, ...(credential ? { credential } : {}) });
   if (status === 403 && challenge?.error === "insufficient_scope")
     return new IntegrationRequestFailed({
       status: 403,
@@ -191,7 +199,9 @@ export const connect = (input: {
           if (known) eras.delete(key);
           return Effect.fail(error);
         }),
-        Effect.mapError((error) => toFailure(input.integrationId, error, challenge)),
+        Effect.mapError((error) =>
+          toFailure(input.integrationId, error, challenge, input.credential.identity),
+        ),
         // A handshake that opened a session and then failed still ends it.
         Effect.onError(() => Effect.promise(() => release(client, current))),
       );
@@ -199,6 +209,7 @@ export const connect = (input: {
       return {
         client,
         challenge: () => challenge,
+        identity: input.credential.identity,
         forget: () => void eras.delete(key),
         transport: () => current,
       } satisfies Connection;
