@@ -9,6 +9,10 @@ import {
   conversations as conversationsTable,
   conversationWorkingFiles,
   messageAttachments,
+  messageToolCalls,
+  messageCompactionEvents,
+  researchRuns,
+  researchTasks,
   messages,
   models,
 } from "~/db/schema/index.ts";
@@ -48,6 +52,10 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { hashSource } from "~/modules/genui/fences.ts";
+import {
+  loadConversationDetail,
+  loadConversationHistory,
+} from "~/modules/chat/server/conversation-detail.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
@@ -63,7 +71,15 @@ const FakeKnowledge = Layer.mergeAll(
 );
 
 let database: TestDatabase;
-type Services = ChatRepo | ChatService | CustomToolRepo | AttachmentRepo | SyncBus | Db;
+type Services =
+  | ChatRepo
+  | ChatService
+  | CustomToolRepo
+  | AttachmentRepo
+  | AgentRepo
+  | ScheduleRepo
+  | SyncBus
+  | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** messages.model_id / conversations.model_id are real FKs. */
 let modelId: string;
@@ -177,6 +193,9 @@ const makeUser = Effect.fn("test.makeUser")(function* () {
   const userId = uuidv7();
   yield* db.execute(
     `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+  );
+  yield* db.execute(
+    `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
   );
   return userId;
 });
@@ -1135,6 +1154,183 @@ describe("deleted chats", () => {
         "conversation.purged",
       ].map((type) => ({ type, conversationId: result.id })),
     );
+  });
+});
+
+describe("research snapshots in branches", () => {
+  it("copies every terminal run with independent root, task and activity identities", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [
+          { user: "Investigate twice", assistant: "Both findings" },
+          { user: "Next", assistant: "Later" },
+        ]);
+        const answer = source.messages[1]!;
+        const sourceIds: string[] = [];
+        for (let ordinal = 0; ordinal < 2; ordinal += 1) {
+          const runId = uuidv7();
+          const taskId = uuidv7();
+          const rootId = uuidv7();
+          sourceIds.push(runId, taskId, rootId);
+          const progress = {
+            runId,
+            phase: "complete" as const,
+            tasks: [
+              { id: taskId, ordinal: 0, title: `Task ${ordinal}`, status: "complete" as const },
+            ],
+            limitations: [],
+            usageComplete: true,
+          };
+          yield* db.insert(messageToolCalls).values({
+            id: rootId,
+            messageId: answer.id,
+            turnIndex: ordinal,
+            callIndex: 0,
+            providerCallId: `root-${ordinal}`,
+            toolName: "deep_research",
+            arguments: {},
+            status: "complete",
+            result: { ok: true, progress },
+          });
+          yield* db.insert(researchRuns).values({
+            id: runId,
+            userId,
+            conversationId: source.conversation.id,
+            messageId: answer.id,
+            generationId: answer.generationId!,
+            // The second run predates the root FK, but its displayed root still names it.
+            toolCallId: ordinal === 0 ? rootId : null,
+            status: "terminal",
+            modelId,
+            modelName: "M",
+            progress,
+          });
+          yield* db.insert(researchTasks).values({
+            id: taskId,
+            runId,
+            ordinal: 0,
+            title: `Task ${ordinal}`,
+            assignment: "private brief",
+            status: "complete",
+            report: "private report",
+          });
+          yield* db.insert(messageToolCalls).values({
+            id: uuidv7(),
+            messageId: answer.id,
+            researchRunId: runId,
+            researchTaskId: taskId,
+            turnIndex: ordinal,
+            callIndex: 1,
+            providerCallId: `child-${ordinal}`,
+            toolName: "web_search",
+            arguments: {},
+            status: "complete",
+            result: { sources: [] },
+          });
+          yield* db.insert(messageCompactionEvents).values({
+            id: uuidv7(),
+            messageId: answer.id,
+            researchRunId: runId,
+            researchTaskId: taskId,
+            beforeTurnIndex: ordinal,
+            passIndex: 0,
+            scope: "active_rounds",
+            status: "complete",
+            outcome: "summary",
+            summary: `private summary ${ordinal}`,
+          });
+        }
+        yield* db.insert(messageCompactionEvents).values([
+          {
+            id: uuidv7(),
+            messageId: answer.id,
+            researchRunId: uuidv7(),
+            beforeTurnIndex: 2,
+            passIndex: 0,
+            scope: "active_rounds",
+            status: "complete",
+            summary: "orphan private summary",
+          },
+          {
+            id: uuidv7(),
+            messageId: answer.id,
+            beforeTurnIndex: 3,
+            passIndex: 0,
+            scope: "history",
+            status: "complete",
+            summary: "ordinary summary",
+          },
+        ]);
+        const copy = yield* repo.cloneConversationPrefix({
+          userId,
+          sourceConversationId: source.conversation.id,
+          throughMessageId: source.messages[3]!.id,
+        });
+        const copiedMessages = yield* repo.listMessages(copy.id);
+        const copiedAnswer = copiedMessages[1]!;
+        const runs = yield* db
+          .select()
+          .from(researchRuns)
+          .where(eq(researchRuns.messageId, copiedAnswer.id));
+        const calls = yield* repo.listToolCalls([copiedAnswer.id]);
+        const events = yield* repo.listCompactionEvents([copiedAnswer.id]);
+        const detail = yield* loadConversationDetail(userId, copy.id);
+        const history = yield* loadConversationHistory(userId, copy.id, copiedMessages[2]!.id);
+        const relations = [];
+        for (const snapshot of runs) {
+          const root = calls.find((call) => call.id === snapshot.toolCallId);
+          const tasks = yield* db
+            .select()
+            .from(researchTasks)
+            .where(eq(researchTasks.runId, snapshot.id));
+          const child = calls.find((call) => call.researchRunId === snapshot.id);
+          const compaction = events.find((event) => event.researchRunId === snapshot.id);
+          relations.push({
+            fresh: [snapshot.id, snapshot.toolCallId, tasks[0]?.id].every(
+              (id) => id && !sourceIds.includes(id),
+            ),
+            snapshot: snapshot.snapshot,
+            status: snapshot.status,
+            owner: snapshot.owner,
+            progress: snapshot.progress,
+            rootProgress:
+              root?.result && typeof root.result === "object" && !Array.isArray(root.result)
+                ? root.result.progress
+                : null,
+            taskId: tasks[0]?.id,
+            childTaskId: child?.researchTaskId,
+            eventTaskId: compaction?.researchTaskId,
+          });
+        }
+        return { relations, events, display: [detail.compactionEvents, history.compactionEvents] };
+      }),
+    );
+    expect(result.relations).toHaveLength(2);
+    for (const relation of result.relations) {
+      expect(relation).toMatchObject({
+        fresh: true,
+        snapshot: true,
+        status: "terminal",
+        owner: null,
+      });
+      expect(relation.rootProgress).toEqual(relation.progress);
+      expect(relation.progress.tasks[0]?.id).toBe(relation.taskId);
+      expect(relation.childTaskId).toBe(relation.taskId);
+      expect(relation.eventTaskId).toBe(relation.taskId);
+    }
+    expect(result.events).toHaveLength(3);
+    for (const events of result.display) {
+      expect(events).toHaveLength(3);
+      expect(events.filter((event) => event.researchRunId).map((event) => event.summary)).toEqual([
+        null,
+        null,
+      ]);
+      expect(events.find((event) => !event.researchRunId)?.summary).toBe("ordinary summary");
+      expect(JSON.stringify(events)).not.toContain("private summary");
+    }
   });
 });
 

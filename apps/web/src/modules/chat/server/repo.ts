@@ -2924,55 +2924,108 @@ export class ChatRepo extends Context.Service<
                   )
                   .pipe(Effect.orDie);
 
-                const runIds = new Map<string, string>();
-                const taskIds = new Map<string, string>();
-                const clonedProgress = new Map<string, unknown>();
-                for (const message of prefix) {
-                  const run = (yield* tx
-                    .select()
-                    .from(researchRuns)
-                    .where(eq(researchRuns.messageId, message.id))
-                    .orderBy(asc(researchRuns.createdAt))
-                    .pipe(Effect.orDie))[0];
-                  if (!run || run.status !== "terminal") continue;
-                  const id = uuidv7();
-                  runIds.set(run.id, id);
-                  const tasks = yield* tx
-                    .select()
-                    .from(researchTasks)
-                    .where(eq(researchTasks.runId, run.id))
-                    .pipe(Effect.orDie);
-                  for (const task of tasks) taskIds.set(task.id, uuidv7());
-                  const progress = projectResearchProgress({
-                    ...run.progress,
-                    runId: id,
-                    tasks: run.progress.tasks.map((task) => ({
-                      ...task,
-                      id: taskIds.get(task.id)!,
-                    })),
-                  });
-                  clonedProgress.set(run.id, progress);
+                const toolCalls = yield* tx
+                  .select()
+                  .from(messageToolCalls)
+                  .where(inArray(messageToolCalls.messageId, [...clonedIds.keys()]))
+                  .pipe(Effect.orDie);
+                const toolIds = new Map(toolCalls.map((call) => [call.id, uuidv7()] as const));
+                const runs = yield* tx
+                  .select()
+                  .from(researchRuns)
+                  .where(
+                    and(
+                      inArray(researchRuns.messageId, [...clonedIds.keys()]),
+                      eq(researchRuns.status, "terminal"),
+                    ),
+                  )
+                  .orderBy(asc(researchRuns.createdAt))
+                  .pipe(Effect.orDie);
+                const runIds = new Map(runs.map((run) => [run.id, uuidv7()] as const));
+                const tasks = runs.length
+                  ? yield* tx
+                      .select()
+                      .from(researchTasks)
+                      .where(inArray(researchTasks.runId, [...runIds.keys()]))
+                      .pipe(Effect.orDie)
+                  : [];
+                const taskIds = new Map(tasks.map((task) => [task.id, uuidv7()] as const));
+                // Older progress may have a display task with no retained task row.
+                for (const run of runs)
+                  for (const task of run.progress.tasks)
+                    if (!taskIds.has(task.id)) taskIds.set(task.id, uuidv7());
+                const clonedProgress = new Map(
+                  runs.map(
+                    (run) =>
+                      [
+                        run.id,
+                        projectResearchProgress({
+                          ...run.progress,
+                          runId: runIds.get(run.id)!,
+                          tasks: run.progress.tasks.map((task) => ({
+                            ...task,
+                            id: taskIds.get(task.id)!,
+                          })),
+                        }),
+                      ] as const,
+                  ),
+                );
+                const rootRuns = new Map(
+                  runs.flatMap((run) =>
+                    run.toolCallId ? [[run.toolCallId, run.id] as const] : [],
+                  ),
+                );
+                const unlinkedRuns = new Set(
+                  runs.filter((run) => !run.toolCallId).map((run) => run.id),
+                );
+                for (const call of toolCalls) {
+                  if (
+                    rootRuns.has(call.id) ||
+                    call.toolName !== "deep_research" ||
+                    !call.result ||
+                    typeof call.result !== "object" ||
+                    Array.isArray(call.result)
+                  )
+                    continue;
+                  const progress = call.result.progress;
+                  if (
+                    progress &&
+                    typeof progress === "object" &&
+                    !Array.isArray(progress) &&
+                    typeof progress.runId === "string" &&
+                    unlinkedRuns.delete(progress.runId)
+                  )
+                    rootRuns.set(call.id, progress.runId);
+                }
+                if (runs.length)
                   yield* tx
                     .insert(researchRuns)
-                    .values({
-                      ...run,
-                      id,
-                      conversationId: branch.id,
-                      messageId: clonedIds.get(message.id)!,
-                      owner: null,
-                      cancelRequested: false,
-                      snapshot: true,
-                      progress,
-                    })
+                    .values(
+                      runs.map((run) => ({
+                        ...run,
+                        id: runIds.get(run.id)!,
+                        conversationId: branch.id,
+                        messageId: clonedIds.get(run.messageId)!,
+                        // Roots are inserted below; this FK must not name the source.
+                        toolCallId: null,
+                        owner: null,
+                        cancelRequested: false,
+                        snapshot: true,
+                        progress: clonedProgress.get(run.id)!,
+                      })),
+                    )
                     .pipe(Effect.orDie);
-                  if (tasks.length)
-                    yield* tx
-                      .insert(researchTasks)
-                      .values(
-                        tasks.map((task) => ({ ...task, id: taskIds.get(task.id)!, runId: id })),
-                      )
-                      .pipe(Effect.orDie);
-                }
+                if (tasks.length)
+                  yield* tx
+                    .insert(researchTasks)
+                    .values(
+                      tasks.map((task) => ({
+                        ...task,
+                        id: taskIds.get(task.id)!,
+                        runId: runIds.get(task.runId)!,
+                      })),
+                    )
+                    .pipe(Effect.orDie);
 
                 const attachmentIds = yield* attachments.cloneForMessages(tx, {
                   userId: input.userId,
@@ -2984,35 +3037,40 @@ export class ChatRepo extends Context.Service<
 
                 // Tool calls are part of the answer, not of its generation:
                 // the sources panel and the citation numbering both read them.
-                const toolCalls = yield* tx
-                  .select()
-                  .from(messageToolCalls)
-                  .where(inArray(messageToolCalls.messageId, [...clonedIds.keys()]))
-                  .pipe(Effect.orDie);
                 if (toolCalls.length > 0) {
                   yield* tx
                     .insert(messageToolCalls)
                     .values(
                       toolCalls.map((call) => ({
                         ...call,
-                        id: runIds.get(call.id) ?? uuidv7(),
+                        id: toolIds.get(call.id)!,
                         researchRunId: call.researchRunId
                           ? (runIds.get(call.researchRunId) ?? null)
                           : null,
                         researchTaskId: call.researchTaskId
                           ? (taskIds.get(call.researchTaskId) ?? null)
                           : null,
-                        result: clonedProgress.has(call.id)
-                          ? ({
-                              ...(call.result as object),
-                              progress: clonedProgress.get(call.id),
-                            } as JsonValue)
+                        result: rootRuns.has(call.id)
+                          ? (JSON.parse(
+                              JSON.stringify({
+                                ...(call.result as object),
+                                progress: clonedProgress.get(rootRuns.get(call.id)!),
+                              }),
+                            ) as JsonValue)
                           : withClonedFileIds(call.toolName, call.result, attachmentIds),
                         messageId: clonedIds.get(call.messageId)!,
                       })),
                     )
                     .pipe(Effect.orDie);
                 }
+
+                for (const [toolCallId, runId] of rootRuns)
+                  if (toolIds.has(toolCallId))
+                    yield* tx
+                      .update(researchRuns)
+                      .set({ toolCallId: toolIds.get(toolCallId)! })
+                      .where(eq(researchRuns.id, runIds.get(runId)!))
+                      .pipe(Effect.orDie);
 
                 // A branch shows the same answers as the reader left them.
                 const uiStates = yield* tx
@@ -3150,11 +3208,14 @@ export class ChatRepo extends Context.Service<
                 // performed it. Clone every visible event in the copied prefix;
                 // checkpoint linkage survives only when that semantic
                 // checkpoint was itself valid for (and cloned into) the branch.
-                const compactionEvents = yield* tx
+                const compactionEvents = (yield* tx
                   .select()
                   .from(messageCompactionEvents)
                   .where(inArray(messageCompactionEvents.messageId, [...clonedIds.keys()]))
-                  .pipe(Effect.orDie);
+                  .pipe(Effect.orDie)).filter(
+                  (event) => !event.researchRunId || runIds.has(event.researchRunId),
+                );
+                // An orphan research event has no cloned scope. Omit it, never turn its private body into a chat summary.
                 if (compactionEvents.length > 0) {
                   yield* tx
                     .insert(messageCompactionEvents)
@@ -3164,7 +3225,7 @@ export class ChatRepo extends Context.Service<
                         id: uuidv7(),
                         messageId: clonedIds.get(event.messageId)!,
                         researchRunId: event.researchRunId
-                          ? (runIds.get(event.researchRunId) ?? null)
+                          ? runIds.get(event.researchRunId)!
                           : null,
                         researchTaskId: event.researchTaskId
                           ? (taskIds.get(event.researchTaskId) ?? null)

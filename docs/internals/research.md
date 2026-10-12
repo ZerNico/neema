@@ -58,4 +58,4 @@ Deep research is a tool the model calls on an ordinary turn (`research/tool.ts`)
 
 ## Usage and ledger
 
-- Research calls checkpoint observed usage; finalization appends one idempotent aggregate chat ledger row keyed by run id, beside the host generation's own row. Compaction uses its own call ID for a separate ledger row, excluded from the chat aggregate. Missing usage means incomplete/unknown cost, not zero. Branch copies terminal display snapshots with fresh IDs only, never calls or ledger entries.
+- Research calls checkpoint observed usage; finalization appends one idempotent aggregate chat ledger row keyed by run id, beside the host generation's own row. Compaction uses its own call ID for a separate ledger row, excluded from the chat aggregate. Missing usage means incomplete/unknown cost, not zero. A branch copies every terminal run’s display snapshot in its prefix with independent fresh run, tool-call and task IDs. Root progress, root links, child activity and research-scoped compaction keep those identities. Research compaction with no mapped run is omitted, never downgraded to an ordinary summary. Calls and ledger entries are not copied.
