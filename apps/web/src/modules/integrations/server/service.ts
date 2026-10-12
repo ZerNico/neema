@@ -3,7 +3,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { Context, Effect, Layer, Option } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
-import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
+import { eligibleAdmin } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
@@ -866,12 +866,11 @@ export class IntegrationService extends Context.Service<
               new Date(Date.now() + CATALOG_RETRY_MS),
             )
             .pipe(Effect.andThen(Effect.fail(new IntegrationRejected({ reason }))));
-        // The sweep lists as the last reviewer only while that account may act at all,
-        // as an admin's own request must be.
+        // The sweep lists as the last reviewer only while that account may act and
+        // is still an admin, as an admin's own request must be.
         const reviewer = asUserId ? null : (current?.reviewedBy ?? null);
         const eligible =
-          reviewer !== null &&
-          (yield* accountEligible(reviewer).pipe(Effect.provideService(Db, db)));
+          reviewer !== null && (yield* eligibleAdmin(reviewer).pipe(Effect.provideService(Db, db)));
         const context = yield* catalogSession(
           integrationId,
           asUserId ?? (eligible ? reviewer : null),

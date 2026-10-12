@@ -412,32 +412,54 @@ describe("an MCP server set up by an admin", () => {
     }
   });
 
-  it("lists in the background as the reviewer only while their account may still act", async () => {
-    const admin = await newUser();
-    await run(
-      Effect.flatMap(Db, (db) =>
-        db.insert(userApprovals).values({ userId: admin, status: "approved" }),
-      ),
-    );
-    const id = await setUp("Docs reviewer", { url: `${base}/mcp`, ways: "token" });
-    await run(
-      Effect.flatMap(IntegrationService, (s) => s.connectApiKey(admin, id, { token: "t" })),
-    );
-    const first = await check(id, admin);
-    await approve(admin, id, first.version!, [
-      { mcpName: "search", enabled: true, access: "read" },
-    ]);
-    expect((await check(id, null)).checkError).toBeNull();
+  describe("lists in the background as the reviewer", () => {
+    /** An approved admin who connected a token and reviewed a token-only server. */
+    const reviewed = async (name: string) => {
+      const admin = await newUser();
+      await run(
+        Effect.flatMap(Db, (db) =>
+          Effect.all([
+            db.insert(userApprovals).values({ userId: admin, status: "approved" }),
+            db.update(user).set({ role: "admin" }).where(eq(user.id, admin)),
+          ]),
+        ),
+      );
+      const id = await setUp(name, { url: `${base}/mcp`, ways: "token" });
+      await run(
+        Effect.flatMap(IntegrationService, (s) => s.connectApiKey(admin, id, { token: "t" })),
+      );
+      const first = await check(id, admin);
+      await approve(admin, id, first.version!, [
+        { mcpName: "search", enabled: true, access: "read" },
+      ]);
+      expect((await check(id, null)).checkError).toBeNull();
+      return { admin, id };
+    };
+    /** A sweep's check, which with nobody to list as fails on a token-only server. */
+    const sweepListsAsNobody = async (id: string) => {
+      const swept = await runtime.runPromiseExit(
+        Effect.flatMap(IntegrationService, (s) => s.checkCatalog(id, null)),
+      );
+      expect(Exit.isFailure(swept)).toBe(true);
+      const catalog = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+      expect(catalog?.checkError).toMatch(/connect your own account/);
+    };
 
-    await run(
-      Effect.flatMap(Db, (db) => db.update(user).set({ banned: true }).where(eq(user.id, admin))),
-    );
-    const swept = await runtime.runPromiseExit(
-      Effect.flatMap(IntegrationService, (s) => s.checkCatalog(id, null)),
-    );
-    expect(Exit.isFailure(swept)).toBe(true);
-    const catalog = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
-    expect(catalog?.checkError).toMatch(/connect your own account/);
+    it("not once their account may no longer act", async () => {
+      const { admin, id } = await reviewed("Docs reviewer");
+      await run(
+        Effect.flatMap(Db, (db) => db.update(user).set({ banned: true }).where(eq(user.id, admin))),
+      );
+      await sweepListsAsNobody(id);
+    });
+
+    it("not once they are no longer an admin", async () => {
+      const { admin, id } = await reviewed("Docs demoted reviewer");
+      await run(
+        Effect.flatMap(Db, (db) => db.update(user).set({ role: "user" }).where(eq(user.id, admin))),
+      );
+      await sweepListsAsNobody(id);
+    });
   });
 
   it("never lets a slower, older check undo what a newer one found", async () => {

@@ -36,7 +36,8 @@ export const reconcileApproval = (tx: DbClient, userId: string) =>
     .pipe(Effect.orDie);
 
 /** Hold the user's row through acceptance. Approval writers take the same lock,
- * and native ban, update and delete already lock it. No session or role bypass. */
+ * and native ban, update and delete already lock it. No session or role bypass.
+ * Returns whether the account holds the admin role, read with the rest. */
 export const requireEligibleAccount = Effect.fn("auth.requireEligibleAccount")(function* (
   tx: DbTx,
   userId: string,
@@ -48,6 +49,7 @@ export const requireEligibleAccount = Effect.fn("auth.requireEligibleAccount")(f
     .select({
       status: userApprovals.status,
       activeBan: sql<boolean>`${user.banned} and (${user.banExpires} is null or ${user.banExpires} > clock_timestamp())`,
+      role: user.role,
     })
     .from(user)
     .innerJoin(userApprovals, eq(userApprovals.userId, user.id))
@@ -56,6 +58,7 @@ export const requireEligibleAccount = Effect.fn("auth.requireEligibleAccount")(f
   if (row?.status !== "approved")
     return yield* new AccountIneligible({ userId, reason: "unapproved" });
   if (row.activeBan) return yield* new AccountIneligible({ userId, reason: "banned" });
+  return { admin: row.role === "admin" };
 });
 
 /** A short preflight, not a substitute for the check in the acceptance transaction. */
@@ -63,6 +66,17 @@ export const accountEligible = Effect.fn("auth.accountEligible")(function* (user
   const db = yield* Db;
   return yield* db
     .transaction((tx) => requireEligibleAccount(tx, userId).pipe(Effect.as(true)))
+    .pipe(
+      Effect.catchTag("AccountIneligible", () => Effect.succeed(false)),
+      Effect.orDie,
+    );
+});
+
+/** Like `accountEligible`, and the account still holds the admin role. */
+export const eligibleAdmin = Effect.fn("auth.eligibleAdmin")(function* (userId: string) {
+  const db = yield* Db;
+  return yield* db
+    .transaction((tx) => requireEligibleAccount(tx, userId).pipe(Effect.map(({ admin }) => admin)))
     .pipe(
       Effect.catchTag("AccountIneligible", () => Effect.succeed(false)),
       Effect.orDie,

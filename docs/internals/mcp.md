@@ -45,9 +45,10 @@ never puts back a listing a newer one replaced. Each check sets the next one
 from the server's `ttlMs` hint, between an hour and a day. A check the admin asks for runs as
 them. A background check runs as the admin who last reviewed, since listing may show what
 only an account can see. That uses their personal connection unattended, so it does so only
-while their account is eligible (approved and not banned), the rule `requireAdmin` applies to
-the admin's own requests. Otherwise it lists as nobody. An open or shared-key server needs
-nobody.
+while the database still holds what `requireAdmin` asks of their own requests: an eligible
+account (approved and not banned) with the admin role, read together in one query. Otherwise
+it lists as nobody, which can make approved tools that only the reviewer could see look
+withdrawn until an admin checks again. An open or shared-key server needs nobody.
 
 ## One server per revision
 
