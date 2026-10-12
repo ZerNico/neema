@@ -100,7 +100,7 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
         <p className="text-muted-foreground text-sm">You can use skills, but cannot create them.</p>
       </Page>
     );
-  if (metadata.isError || detail.isError)
+  if ((metadata.isError && !metadata.data) || (detail.isError && !detail.data))
     return (
       <Page title="Skill" backTo="/skills" backLabel="Skills">
         <ErrorState
@@ -193,24 +193,32 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           ...(initial ? { skillId: initial.id, expectedRevision: revision! } : {}),
         },
       }),
-    onSuccess: async (id, submitted) => {
-      // A new skill's own page is the confirmation.
-      if (initial) markSaved();
-      // An upload is spent once saved: from now on the file is its stored hash.
-      let stored = submitted;
-      if (initial && submitted.some((file) => isBinarySkillFile(file) && file.binary.uploadId)) {
-        const fresh = await queryClient.fetchQuery({ ...skillDetailQuery(id), staleTime: 0 });
-        const byPath = new Map(fresh.files.map((file) => [file.path, file]));
-        const settle = (file: SkillFile) =>
-          isBinarySkillFile(file) && file.binary.uploadId ? (byPath.get(file.path) ?? file) : file;
-        stored = submitted.map(settle);
-        setFiles((current) => current.map(settle));
+    onSuccess: async (accepted, submitted) => {
+      const byPath = new Map(accepted.files.map((file) => [file.path, file]));
+      const uploads = new Map<string, SkillBinaryFile>();
+      for (const file of submitted) {
+        if (!isBinarySkillFile(file) || !file.binary.uploadId) continue;
+        const stored = byPath.get(file.path);
+        if (stored && isBinarySkillFile(stored)) uploads.set(file.binary.uploadId, stored);
       }
-      setSaved(JSON.stringify(stored));
-      setRevision((current) => (current ?? 0) + 1);
+      setSaved(JSON.stringify(submitted.map((file) => byPath.get(file.path)!)));
+      setRevision(accepted.revision);
+      setFiles((current) =>
+        current.map((file) => {
+          if (!isBinarySkillFile(file) || !file.binary.uploadId) return file;
+          const stored = uploads.get(file.binary.uploadId);
+          return stored ? { ...file, binary: stored.binary } : file;
+        }),
+      );
+      // Stored identities arrive with the save, before any latest-detail refresh.
+      if (initial) markSaved();
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       if (!initial)
-        await navigate({ to: "/skills/$skillId", params: { skillId: id }, ignoreBlocker: true });
+        await navigate({
+          to: "/skills/$skillId",
+          params: { skillId: accepted.id },
+          ignoreBlocker: true,
+        });
     },
     onError: () =>
       toast.error(

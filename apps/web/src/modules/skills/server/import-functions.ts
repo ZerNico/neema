@@ -96,10 +96,12 @@ export const importReviewedSkill = createServerFn({ method: "POST" })
     const selected = await reReview(context.session.user.id, data);
     return runtime.runPromise(
       Effect.flatMap(SkillService, (service) =>
-        service.save(context.session.user.id, {
-          files: selected.package.files,
-          source: selected.source,
-        }),
+        service
+          .save(context.session.user.id, {
+            files: selected.package.files,
+            source: selected.source,
+          })
+          .pipe(Effect.map((saved) => saved.id)),
       ),
     );
   });
@@ -181,7 +183,7 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
         selected: data.choices.find((choice) => choice.path === change.path)!.selected,
       })),
     );
-    const id = await runtime.runPromise(
+    const saved = await runtime.runPromise(
       Effect.flatMap(SkillService, (service) =>
         service.save(userId, {
           skillId: data.skillId,
@@ -193,9 +195,9 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
       ),
     );
     return {
-      id,
-      files: files.map(withoutBytes),
-      revision: data.expectedRevision + 1,
+      id: saved.id,
+      files: saved.files,
+      revision: saved.revision,
       source: selected.source,
     };
   });

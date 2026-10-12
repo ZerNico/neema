@@ -125,35 +125,34 @@ export const resolveSkillManifest = (
     return ids.map((id) => result.find((entry) => entry.skillId === id)!);
   });
 
+const unusedRevision = and(
+  sql`not (${skills.deletedAt} is null and ${skillRevisions.revision} = ${skills.revision})`,
+  sql`not exists(select 1 from ${messageSkills} where ${messageSkills.revisionId} = ${skillRevisions.id})`,
+  sql`not exists(select 1 from skill_revisions baseline_owner where baseline_owner.baseline_revision_id = ${skillRevisions.id} and baseline_owner.id <> ${skillRevisions.id})`,
+);
+const COLLECTION_BATCH = 20;
+
 const collectUnused = (tx: DbTx, skillId: string) =>
   Effect.gen(function* () {
-    const keys: string[] = [];
-    // First release superseded local revisions, then their now-unused baselines.
-    for (let pass = 0; pass < 2; pass++) {
-      const unused = yield* tx
-        .select({ id: skillRevisions.id })
-        .from(skillRevisions)
-        .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
-        .where(
-          and(
-            eq(skills.id, skillId),
-            sql`not (${skills.deletedAt} is null and ${skillRevisions.revision} = ${skills.revision})`,
-            sql`not exists(select 1 from ${messageSkills} where ${messageSkills.revisionId} = ${skillRevisions.id})`,
-            sql`not exists(select 1 from skill_revisions baseline_owner where baseline_owner.baseline_revision_id = ${skillRevisions.id} and baseline_owner.id <> ${skillRevisions.id})`,
-          ),
-        );
-      if (!unused.length) break;
-      const ids = unused.map((row) => row.id);
-      const blobs = yield* tx
-        .select({ id: skillFiles.blobId })
-        .from(skillFiles)
-        .where(inArray(skillFiles.revisionId, ids));
-      const blobIds = blobs.map((blob) => blob.id);
-      yield* lockBlobs(tx, blobIds);
-      yield* tx.delete(skillRevisions).where(inArray(skillRevisions.id, ids));
-      keys.push(...(yield* collectOrphanedBlobs(tx, blobIds)));
-    }
-    return keys;
+    // Baselines released by this deletion wait for another transaction, so
+    // collection never takes a smaller blob lock after retaining a larger one.
+    const unused = yield* tx
+      .select({ id: skillRevisions.id })
+      .from(skillRevisions)
+      .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
+      .where(and(eq(skills.id, skillId), unusedRevision))
+      .orderBy(asc(skillRevisions.id))
+      .limit(COLLECTION_BATCH);
+    if (!unused.length) return [];
+    const ids = unused.map((row) => row.id);
+    const blobs = yield* tx
+      .select({ id: skillFiles.blobId })
+      .from(skillFiles)
+      .where(inArray(skillFiles.revisionId, ids));
+    const blobIds = blobs.map((blob) => blob.id);
+    yield* lockBlobs(tx, blobIds);
+    yield* tx.delete(skillRevisions).where(inArray(skillRevisions.id, ids));
+    return yield* collectOrphanedBlobs(tx, blobIds);
   });
 
 export class SkillRepo extends Context.Service<
@@ -182,10 +181,18 @@ export class SkillRepo extends Context.Service<
       userId: string,
       input: SaveRevision,
     ): Effect.Effect<
-      { skillId: string; revisionId: string; unusedKeys: string[]; orphanKeys: string[] },
+      {
+        skillId: string;
+        revisionId: string;
+        revision: number;
+        unusedKeys: string[];
+        orphanKeys: string[];
+      },
       SkillConflict | SkillNotAvailable | SkillRejected
     >;
     remove(userId: string, skillId: string): Effect.Effect<string[], SkillNotAvailable>;
+    /** Reclaims bounded batches after history releases its last revision pin. */
+    sweepUnused(): Effect.Effect<string[]>;
   }
 >()("chat/skills/SkillRepo") {
   static readonly layer = Layer.effect(
@@ -522,8 +529,9 @@ export class SkillRepo extends Context.Service<
                     mediaType: file.mediaType,
                   });
                 }
-                const orphanKeys = yield* collectUnused(tx, skillId);
-                return { skillId, revisionId, unusedKeys, orphanKeys };
+                // Publication already holds incoming blob locks. Collect old revisions
+                // in the sweep's own transaction, before any blobs have been locked.
+                return { skillId, revisionId, revision, unusedKeys, orphanKeys: [] };
               }),
             )
             .pipe(
@@ -531,10 +539,48 @@ export class SkillRepo extends Context.Service<
               Effect.catchTag("EffectDrizzleQueryError", Effect.die),
             );
         }),
+        sweepUnused: Effect.fn("SkillRepo.sweepUnused")(function* () {
+          const due = yield* db
+            .selectDistinct({ id: skills.id, userId: skills.userId })
+            .from(skills)
+            .innerJoin(skillRevisions, eq(skillRevisions.skillId, skills.id))
+            .where(unusedRevision)
+            .orderBy(asc(skills.id))
+            .limit(20)
+            .pipe(Effect.orDie);
+          const keys: string[] = [];
+          for (const skill of due) {
+            const discarded = yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  // Same account -> skill -> blob order as save; manifests share the skill lock.
+                  yield* tx
+                    .select({ id: user.id })
+                    .from(user)
+                    .where(eq(user.id, skill.userId))
+                    .for("update");
+                  const [row] = yield* tx
+                    .select({ id: skills.id })
+                    .from(skills)
+                    .where(eq(skills.id, skill.id))
+                    .for("update");
+                  return row ? yield* collectUnused(tx, skill.id) : [];
+                }),
+              )
+              .pipe(Effect.orDie);
+            keys.push(...discarded);
+          }
+          return keys;
+        }),
         remove: Effect.fn("SkillRepo.remove")(function* (userId, skillId) {
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* tx
+                  .select({ id: user.id })
+                  .from(user)
+                  .where(eq(user.id, userId))
+                  .for("update");
                 const [row] = yield* tx
                   .select()
                   .from(skills)

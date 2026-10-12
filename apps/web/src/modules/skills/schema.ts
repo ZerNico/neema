@@ -27,6 +27,12 @@ export interface SkillDetail extends SkillSummary {
   source: SkillSource | null;
   revisionId: string;
 }
+export interface SkillSaveResult {
+  id: string;
+  revision: number;
+  /** Resolved files from this accepted save, never a later detail read. */
+  files: SkillFile[];
+}
 export interface SkillManifestEntry {
   skillId: string;
   revisionId: string;

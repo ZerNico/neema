@@ -37,7 +37,10 @@ declared type, and only the kinds we understand are shown or handed to a model.
   `attachments/server/repo.ts` reads all four, so an owned upload is never swept, deleted as
   abandoned or claimed again, and every claim takes the blob lock first, since the owner tables
   share no unique index. An owner that cascades away leaves its attachment to the unclaimed
-  sweep. A document's images are claimed attachments, served to that document's readers at
+  sweep. Sweeping takes at most ten batches of 100 uploads, each in an independent transaction.
+  The cutoff stays fixed and deletion rechecks claims after sorted blob locks, so a large backlog
+  makes progress without one large transaction or oversized parameter lists.
+  A document's images are claimed attachments, served to that document's readers at
   `/api/documents/:id/images/:attachmentId` without caching, and kept until the document goes,
   even once taken out of its text. Their bytes are the document owner's (the project's owner
   or the chat's), as a project file's are, so they outlive any member who added them and go

@@ -85,6 +85,9 @@ const withBlobColumns = {
  * abandoned, or claimed a second time. Once an owner row cascades away with
  * its chat, answer or document, the sweep takes the attachment and its bytes.
  */
+const UNCLAIMED_BATCH = 100;
+const UNCLAIMED_BATCHES = 10;
+
 const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id}) and not exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`;
 
 /** Whose files these are: a transcript message, or a queued message. */
@@ -1074,21 +1077,30 @@ export class AttachmentRepo extends Context.Service<
       const sweepUnclaimed = Effect.fn("AttachmentRepo.sweepUnclaimed")(function* (
         olderThan: Date,
       ) {
-        return yield* db
-          .transaction((tx) =>
-            Effect.gen(function* () {
-              const stale = yield* tx
-                .select({ id: attachments.id })
-                .from(attachments)
-                .where(and(unclaimed, lt(attachments.createdAt, olderThan)));
-              return yield* deleteAttachmentRows(
-                tx,
-                stale.map((row) => row.id),
-                true,
-              );
-            }),
-          )
-          .pipe(Effect.orDie);
+        const keys: string[] = [];
+        for (let batch = 0; batch < UNCLAIMED_BATCHES; batch++) {
+          const result = yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const stale = yield* tx
+                  .select({ id: attachments.id })
+                  .from(attachments)
+                  .where(and(unclaimed, lt(attachments.createdAt, olderThan)))
+                  .orderBy(asc(attachments.id))
+                  .limit(UNCLAIMED_BATCH);
+                const discard = yield* deleteAttachmentRows(
+                  tx,
+                  stale.map((row) => row.id),
+                  true,
+                );
+                return { discard, count: stale.length };
+              }),
+            )
+            .pipe(Effect.orDie);
+          keys.push(...result.discard);
+          if (result.count < UNCLAIMED_BATCH) break;
+        }
+        return keys;
       });
 
       return AttachmentRepo.of({

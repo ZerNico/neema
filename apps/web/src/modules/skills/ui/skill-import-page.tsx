@@ -173,7 +173,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                 contentHash: reviewed.contentHash,
               },
             })
-          : await saveSkill({ data: { files: await uploadBinaries(review.files) } }),
+          : (await saveSkill({ data: { files: await uploadBinaries(review.files) } })).id,
       );
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       toast.success(`Imported “${review.metadata.name}”.`);

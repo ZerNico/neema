@@ -1631,7 +1631,7 @@ describe("knowledge-backed generations", () => {
 
   it("shares one skill session and budget across research workers without leaking bodies outward", async () => {
     const owner = await createUser();
-    const id = await run(
+    const { id } = await run(
       Effect.flatMap(SkillService, (service) =>
         service.save(owner, {
           files: [
@@ -1876,7 +1876,7 @@ const saveGuidance = (owner: string, body: string, skillId?: string) =>
         ],
         ...(skillId ? { skillId, expectedRevision: 1 } : {}),
       }),
-    ),
+    ).pipe(Effect.map((accepted) => accepted.id)),
   );
 const skillConfig = async (messageId: string) =>
   (

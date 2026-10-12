@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Semaphore } from "effect";
+import { Context, Duration, Effect, Layer, Schedule, Semaphore } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { BlobStore, blobStorageKey } from "~/modules/attachments/server/blob-store.ts";
@@ -8,7 +8,7 @@ import type { SkillSource } from "~/db/schema/skills.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { isBinarySkillFile, validateSkillPackage, type SkillFile } from "../package.ts";
 import { decodeStoredFile, skillContentHash, verifyStoredFile } from "./content-hash.ts";
-import type { SkillDetail, SkillSummary } from "../schema.ts";
+import type { SkillDetail, SkillSaveResult, SkillSummary } from "../schema.ts";
 import { SkillRepo, type SaveRevision, type StoredSkillFile } from "./repo.ts";
 
 export type SkillSaveInput = {
@@ -52,7 +52,7 @@ export class SkillService extends Context.Service<
     save(
       userId: string,
       input: SkillSaveInput,
-    ): Effect.Effect<string, SkillRejected | SkillConflict | SkillNotAvailable>;
+    ): Effect.Effect<SkillSaveResult, SkillRejected | SkillConflict | SkillNotAvailable>;
     remove(userId: string, skillId: string): Effect.Effect<void, SkillNotAvailable>;
   }
 >()("chat/skills/SkillService") {
@@ -66,6 +66,12 @@ export class SkillService extends Context.Service<
       const bus = yield* SyncBus;
       // Bound in-flight candidate bytes as well as committed per-account quotas.
       const saves = yield* Semaphore.make(2);
+      yield* repo.sweepUnused().pipe(
+        Effect.flatMap((keys) => attachments.deleteBlobs(keys)),
+        Effect.catchCause((cause) => Effect.logError("skill revision sweep failed", cause)),
+        Effect.repeat(Schedule.spaced(Duration.minutes(5))),
+        Effect.forkScoped,
+      );
       // Owner access is checked again after the reads, not only before them.
       // Binary files are described, never loaded: their bytes stay out of JSON.
       const readRevision = Effect.fn("SkillService.readRevision")(function* (
@@ -280,7 +286,7 @@ export class SkillService extends Context.Service<
                   Effect.ignore,
                 );
               yield* bus.publishGlobal({ type: "resources.changed" });
-              return result.skillId;
+              return { id: result.skillId, revision: result.revision, files: validated.files };
             }),
           ),
         remove: Effect.fn("SkillService.remove")(function* (userId, skillId) {
