@@ -190,6 +190,16 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
+/** Saves a connection under the integration's current revision, as a sign-in that just began would. */
+const saveAtCurrent = (
+  repo: IntegrationRepo["Service"],
+  input: Omit<Parameters<IntegrationRepo["Service"]["saveConnection"]>[0], "revision">,
+) =>
+  repo.getConfig(input.integrationId).pipe(
+    Effect.flatMap((row) => repo.saveConnection({ ...input, revision: row!.revision })),
+    Effect.flatMap((saved) => (saved ? Effect.succeed(saved) : Effect.die("setup moved"))),
+  );
+
 const newUser = () =>
   run(
     Effect.gen(function* () {
@@ -1098,7 +1108,7 @@ describe("an MCP server set up by an admin", () => {
     if ("error" in normalized) throw new Error(normalized.error);
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.saveConnection({
+        saveAtCurrent(repo, {
           userId: admin,
           integrationId: id,
           authKind: "oauth",
@@ -1169,7 +1179,7 @@ describe("an MCP server set up by an admin", () => {
     const connect = (accessToken: string) =>
       run(
         Effect.flatMap(IntegrationRepo, (repo) =>
-          repo.saveConnection({
+          saveAtCurrent(repo, {
             userId: person,
             integrationId: id,
             authKind: "oauth",

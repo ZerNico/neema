@@ -169,14 +169,19 @@ export class IntegrationRepo extends Context.Service<
       integrationId: string,
     ): Effect.Effect<IntegrationConnectionRow | null>;
     getConnectionById(id: string): Effect.Effect<IntegrationConnectionRow | null>;
+    /**
+     * Null when the integration is no longer at `revision`: the credentials
+     * were issued or verified under another setup, and nothing is written.
+     */
     saveConnection(input: {
       userId: string;
       integrationId: string;
+      revision: number;
       authKind: AuthKind;
       credentials: StoredCredentials;
       accountLabel: string;
       fingerprint: string;
-    }): Effect.Effect<IntegrationConnectionRow>;
+    }): Effect.Effect<IntegrationConnectionRow | null>;
     updatePreferences(
       userId: string,
       integrationId: string,
@@ -571,17 +576,33 @@ export class IntegrationRepo extends Context.Service<
         saveConnection: Effect.fn("IntegrationRepo.saveConnection")(function* (input) {
           const credentialsCiphertext = yield* cipher.encrypt(JSON.stringify(input.credentials));
           const now = new Date();
+          // Selected from the integration's row at the revision the credentials
+          // were issued under, so a setup changed meanwhile writes nothing. Key share
+          // waits out a save in flight (it locks for update) but not a refresh.
           const rows = yield* db
             .insert(integrationConnections)
-            .values({
-              id: uuidv7(),
-              userId: input.userId,
-              integrationId: input.integrationId,
-              authKind: input.authKind,
-              credentialsCiphertext,
-              accountLabel: input.accountLabel,
-              configFingerprint: input.fingerprint,
-            })
+            .select((qb) =>
+              qb
+                .select({
+                  id: sql<string>`${uuidv7()}`.as("id"),
+                  userId: sql<string>`${input.userId}`.as("user_id"),
+                  integrationId: integrationConfigs.id,
+                  authKind: sql<AuthKind>`${input.authKind}`.as("auth_kind"),
+                  credentialsCiphertext: sql<string>`${credentialsCiphertext}`.as(
+                    "credentials_ciphertext",
+                  ),
+                  accountLabel: sql<string>`${input.accountLabel}`.as("account_label"),
+                  configFingerprint: sql<string>`${input.fingerprint}`.as("config_fingerprint"),
+                })
+                .from(integrationConfigs)
+                .where(
+                  and(
+                    eq(integrationConfigs.id, input.integrationId),
+                    eq(integrationConfigs.revision, input.revision),
+                  ),
+                )
+                .for("key share"),
+            )
             .onConflictDoUpdate({
               target: [integrationConnections.userId, integrationConnections.integrationId],
               // Reconnecting keeps the person's preferences; only the
@@ -599,6 +620,8 @@ export class IntegrationRepo extends Context.Service<
             })
             .returning()
             .pipe(Effect.orDie);
+          const saved = rows[0];
+          if (!saved) return null;
           // Sources that paused while the owner was disconnected resume within a
           // tick instead of waiting out their hourly slot.
           yield* db
@@ -611,7 +634,7 @@ export class IntegrationRepo extends Context.Service<
               ),
             )
             .pipe(Effect.orDie);
-          return rows[0]!;
+          return saved;
         }),
 
         updatePreferences: Effect.fn("IntegrationRepo.updatePreferences")(

@@ -83,6 +83,8 @@ const deleted: Record<string, unknown>[] = [];
 const unlimited = { reserve: () => Effect.succeed(true), release: () => Effect.void };
 const created: Record<string, unknown>[] = [];
 let beforeApiResponse: ((request: IncomingMessage) => Promise<void>) | null = null;
+/** Runs while a code is being exchanged, before the token endpoint answers. */
+let duringCodeExchange: (() => Promise<void>) | null = null;
 
 const readBody = (request: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -105,6 +107,7 @@ const startOutline = () =>
         if (form.get("grant_type") === "authorization_code") {
           if (form.get("code") !== "good-code" || !form.get("code_verifier"))
             return json(400, { error: "invalid_grant" });
+          if (duringCodeExchange) await duringCodeExchange();
           validTokens.add("a-code");
           return json(200, { access_token: "a-code", refresh_token: "r-code", expires_in: 3600 });
         }
@@ -233,6 +236,16 @@ const connectKey = (userId: string) =>
     ),
   );
 
+/** Saves a connection under the integration's current revision, as a sign-in that just began would. */
+const saveAtCurrent = (
+  repo: IntegrationRepo["Service"],
+  input: Omit<Parameters<IntegrationRepo["Service"]["saveConnection"]>[0], "revision">,
+) =>
+  repo.getConfig(input.integrationId).pipe(
+    Effect.flatMap((row) => repo.saveConnection({ ...input, revision: row!.revision })),
+    Effect.flatMap((saved) => (saved ? Effect.succeed(saved) : Effect.die("setup moved"))),
+  );
+
 const insert = <A>(f: (db: Db["Service"]) => Effect.Effect<A, unknown>) =>
   run(Effect.flatMap(Db, f));
 
@@ -291,7 +304,7 @@ describe("connections", () => {
     );
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.saveConnection({
+        saveAtCurrent(repo, {
           userId,
           integrationId: "jira",
           authKind: "api_key",
@@ -449,6 +462,52 @@ describe("connections", () => {
     }
   });
 
+  it("saves no sign-in whose client the admin replaced while the code was exchanged", async () => {
+    const userId = await newUser();
+    const started = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.beginOAuth(userId, "outline", "https://chat.example.com"),
+      ),
+    );
+    // Same server, another client: the revision moves, the fingerprint does not.
+    duringCodeExchange = async () => {
+      duringCodeExchange = null;
+      await run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id: "outline",
+            name: "Outline",
+            enabled: true,
+            config: { baseUrl },
+            oauthClientId: "another-client",
+            oauthClientSecret: "another-secret",
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    };
+    try {
+      const refused = await run(
+        Effect.flatMap(IntegrationService, (s) =>
+          Effect.flip(
+            s.completeOAuth(userId, "outline", {
+              code: "good-code",
+              state: started.state,
+              cookieState: started.state,
+              iss: null,
+            }),
+          ),
+        ),
+      );
+      expect(duringCodeExchange).toBeNull();
+      expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
+      expect((await outlineFor(userId))?.connection).toBeNull();
+    } finally {
+      duringCodeExchange = null;
+      await configure();
+    }
+  });
+
   it("gives a session made before a move away and back no credential", async () => {
     const userId = await newUser();
     await connectKey(userId);
@@ -487,7 +546,7 @@ describe("connections", () => {
     const userId = await newUser();
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.saveConnection({
+        saveAtCurrent(repo, {
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -538,7 +597,7 @@ describe("connections", () => {
     const userId = await newUser();
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.saveConnection({
+        saveAtCurrent(repo, {
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -561,7 +620,10 @@ describe("connections", () => {
     await blocker.query("begin");
     const backend = await blocker.query<{ pid: number }>("select pg_backend_pid() as pid");
     const pid = backend.rows[0]!.pid;
-    await blocker.query("select id from integration_configs where id = 'outline' for update");
+    // Holds the refresh at its share lock; a reconnect only needs key share.
+    await blocker.query(
+      "select id from integration_configs where id = 'outline' for no key update",
+    );
     const before = tokenCalls.length;
     const credential = runtime.runPromiseExit(session.credential);
     try {
@@ -576,7 +638,7 @@ describe("connections", () => {
       );
       await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
-          repo.saveConnection({
+          saveAtCurrent(repo, {
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -613,7 +675,7 @@ describe("connections", () => {
       const before = tokenCalls.length;
       const replacement = await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
-          repo.saveConnection({
+          saveAtCurrent(repo, {
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -644,7 +706,7 @@ describe("connections", () => {
       const refreshToken = uuidv7();
       await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
-          repo.saveConnection({
+          saveAtCurrent(repo, {
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -750,7 +812,7 @@ describe("connections", () => {
     const userId = await newUser();
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
-        repo.saveConnection({
+        saveAtCurrent(repo, {
           userId,
           integrationId: "outline",
           authKind: "oauth",

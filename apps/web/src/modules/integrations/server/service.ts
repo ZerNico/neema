@@ -52,6 +52,15 @@ import {
 const CATALOG_RETRY_MS = 60 * 60_000;
 const CATALOG_RECHECK_MS = 24 * 60 * 60_000;
 
+const signInOutdated = () =>
+  new IntegrationRejected({
+    reason: "This integration’s setup changed during the sign-in. Start again from Settings.",
+  });
+const connectOutdated = () =>
+  new IntegrationRejected({
+    reason: "This integration’s setup changed while connecting. Try again.",
+  });
+
 const failureReason = (error: { _tag: string }) =>
   error._tag === "IntegrationAuthFailed"
     ? "The server refused the sign-in used to list its tools."
@@ -1176,14 +1185,16 @@ export class IntegrationService extends Context.Service<
             if ("error" in read) return yield* new IntegrationRejected({ reason: read.error });
             const { values } = read;
             const { accountLabel } = yield* verified(adapter, config, { kind: "api_key", values });
-            yield* repo.saveConnection({
+            const saved = yield* repo.saveConnection({
               userId,
               integrationId,
+              revision: row.revision,
               authKind: "api_key",
               credentials: { kind: "api_key", values },
               accountLabel,
               fingerprint,
             });
+            if (!saved) return yield* connectOutdated();
             yield* changed(userId);
           },
         ),
@@ -1254,14 +1265,16 @@ export class IntegrationService extends Context.Service<
             config,
             shared ? { kind: "api_key", values: shared } : { kind: "none" },
           );
-          yield* repo.saveConnection({
+          const saved = yield* repo.saveConnection({
             userId,
             integrationId,
+            revision: row.revision,
             authKind: open,
             credentials: { kind: "none" },
             accountLabel: shared ? "Shared key" : verifiedOpen.accountLabel,
             fingerprint,
           });
+          if (!saved) return yield* connectOutdated();
           yield* changed(userId);
         }),
 
@@ -1375,11 +1388,7 @@ export class IntegrationService extends Context.Service<
             if (!stored || stored.userId !== userId || stored.integrationId !== integrationId)
               return yield* expired;
             const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
-            if (stored.revision !== row.revision)
-              return yield* new IntegrationRejected({
-                reason:
-                  "This integration’s setup changed during the sign-in. Start again from Settings.",
-              });
+            if (stored.revision !== row.revision) return yield* signInOutdated();
             if (stored.server && adapter.discoveredOAuth) {
               const tokens = yield* adapter.discoveredOAuth.complete({
                 server: stored.server,
@@ -1393,14 +1402,18 @@ export class IntegrationService extends Context.Service<
                 kind: "oauth",
                 accessToken: tokens.accessToken,
               });
+              // The exchange took time: a save meanwhile may have moved the
+              // integration to another client or server, so the write checks again.
               const saved = yield* repo.saveConnection({
                 userId,
                 integrationId,
+                revision: stored.revision,
                 authKind: "oauth",
                 credentials: { kind: "oauth", ...tokens, server: stored.server },
                 accountLabel,
                 fingerprint,
               });
+              if (!saved) return yield* signInOutdated();
               yield* repo.clearRequiredScopes(saved.id);
               yield* changed(userId);
               return { returnTo: stored.returnTo ?? null };
@@ -1429,14 +1442,16 @@ export class IntegrationService extends Context.Service<
               kind: "oauth",
               accessToken: outcome.tokens.accessToken,
             });
-            yield* repo.saveConnection({
+            const saved = yield* repo.saveConnection({
               userId,
               integrationId,
+              revision: stored.revision,
               authKind: "oauth",
               credentials: { kind: "oauth", ...outcome.tokens },
               accountLabel,
               fingerprint,
             });
+            if (!saved) return yield* signInOutdated();
             yield* changed(userId);
             return { returnTo: stored.returnTo ?? null };
           },

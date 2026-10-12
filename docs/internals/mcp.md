@@ -60,9 +60,10 @@ So `integration_configs` keeps the adapter's fingerprint of its setup and a `rev
 save locks the row, compares the stored fingerprint and client ID with the new ones, and
 bumps the revision when either changed; only then does it reset the catalog and the issuer
 pin. Everything started under a revision carries it, and every write it makes requires it
-in the same statement: recording a check, pinning an issuer, completing a sign-in, and
-handing a session its credential, which a refresh checks again with the integration's row
-and then the connection's locked. This applies to every integration type, not only MCP, and
+in the same statement: recording a check, pinning an issuer, saving a connection (a sign-in
+whose code exchange outlived a save fails like one that found the save first), and handing
+a session its credential, which a refresh checks again with the integration's row and then
+the connection's locked. This applies to every integration type, not only MCP, and
 sits beside the per-credential identity in [integrations](integrations.md): the revision
 names the server, the account epoch and credential revision name whose token it is.
 
