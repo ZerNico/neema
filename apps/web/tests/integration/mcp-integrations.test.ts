@@ -287,7 +287,10 @@ const toolsFor = (
         rowIdFor: (providerCallId) => Effect.succeed(`row-${providerCallId}-${conversationId}`),
         reportAuthFailure: (_session, failure) => service.reportAuthFailure({ userId, failure }),
         reportMissingScopes: (session, scopes) =>
-          service.reportMissingScopes({ userId, connectionId: session.connectionId }, scopes),
+          service.reportMissingScopes(
+            { userId, connectionId: session.connectionId, accountEpoch: session.accountEpoch },
+            scopes,
+          ),
         allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
       });
     }),
@@ -1094,11 +1097,15 @@ describe("an MCP server set up by an admin", () => {
 
     // A server naming new scopes on every refusal stops adding past the limit.
     const connectionId = listed.find((row) => row.id === id)!.connection!.id;
+    const held = await run(
+      Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(connectionId)),
+    );
+    const connection = { connectionId, accountEpoch: held!.accountEpoch };
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         Effect.forEach(
           Array.from({ length: 30 }, (_, batch) => [`s${batch}a`, `s${batch}b`]),
-          (scopes) => repo.addRequiredScopes(connectionId, scopes),
+          (scopes) => repo.addRequiredScopes(connection, scopes),
         ),
       ),
     );
@@ -1112,7 +1119,7 @@ describe("an MCP server set up by an admin", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         repo.addRequiredScopes(
-          connectionId,
+          connection,
           Array.from({ length: 60 }, (_, index) => `many${String(index).padStart(2, "0")}`),
         ),
       ),
@@ -1122,6 +1129,43 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(first?.requiredScopes).toHaveLength(50);
     expect(capped?.requiredScopes).toEqual(expect.arrayContaining(["docs:read", "docs:write"]));
+  });
+
+  it("drops a lacking-scope report from a sign-in a reconnect replaced", async () => {
+    const person = await newUser();
+    const config = { url: `${base}/scoped`, ways: "oauth" };
+    const id = await setUp("Docs rescoped", config);
+    const normalized = mcpAdapter.normalizeConfig(config);
+    if ("error" in normalized) throw new Error(normalized.error);
+    const connect = (accessToken: string) =>
+      run(
+        Effect.flatMap(IntegrationRepo, (repo) =>
+          repo.saveConnection({
+            userId: person,
+            integrationId: id,
+            authKind: "oauth",
+            credentials: { kind: "oauth", accessToken, refreshToken: null, expiresAt: null },
+            accountLabel: "ada",
+            fingerprint: normalized.fingerprint,
+          }),
+        ),
+      );
+    await connect("narrow");
+    const stale = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    // The person signs in again with more access before the old call's refusal lands.
+    await connect("wide");
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.reportMissingScopes(
+          { userId: person, connectionId: stale.connectionId, accountEpoch: stale.accountEpoch },
+          ["docs:write"],
+        ),
+      ),
+    );
+    const current = await run(
+      Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(stale.connectionId)),
+    );
+    expect(current?.requiredScopes ?? null).toBeNull();
   });
 
   it("with one key for everyone, only reads are ever offered", async () => {

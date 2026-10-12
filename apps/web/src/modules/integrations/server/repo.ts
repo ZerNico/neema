@@ -222,8 +222,14 @@ export class IntegrationRepo extends Context.Service<
     sharedCredential(row: IntegrationConfigRow): Effect.Effect<Record<string, string> | null>;
     /** Clears the scopes calls were refused for, once a sign-in asked for them. */
     clearRequiredScopes(connectionId: string): Effect.Effect<void>;
-    /** Adds scopes a call was refused for to what the next sign-in asks for. */
-    addRequiredScopes(connectionId: string, scopes: ReadonlyArray<string>): Effect.Effect<void>;
+    /**
+     * Adds scopes a call was refused for to what the next sign-in asks for,
+     * only while the connection is still the sign-in that call used.
+     */
+    addRequiredScopes(
+      connection: { connectionId: string; accountEpoch: string },
+      scopes: ReadonlyArray<string>,
+    ): Effect.Effect<void>;
     catalog(integrationId: string): Effect.Effect<ToolCatalogRow | null>;
     /** Makes a catalog due for a check now, creating it on first use. */
     scheduleCatalogCheck(integrationId: string): Effect.Effect<void>;
@@ -813,7 +819,7 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         addRequiredScopes: Effect.fn("IntegrationRepo.addRequiredScopes")(
-          function* (connectionId, scopes) {
+          function* (connection, scopes) {
             // A union in one statement, so two refused calls at once both count. Past
             // MAX_REQUIRED_SCOPES in all, what was asked for before stands: a server
             // naming new scopes on every refusal cannot grow the row or the sign-in URL.
@@ -822,7 +828,12 @@ export class IntegrationRepo extends Context.Service<
               .set({
                 requiredScopes: sql`coalesce((select case when count(*) <= ${MAX_REQUIRED_SCOPES} then jsonb_agg(listed.scope order by listed.scope) end from (select distinct scope from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes.slice(0, MAX_REQUIRED_SCOPES))}::jsonb) as joined(scope)) as listed), ${integrationConnections.requiredScopes})`,
               })
-              .where(eq(integrationConnections.id, connectionId))
+              .where(
+                and(
+                  eq(integrationConnections.id, connection.connectionId),
+                  eq(integrationConnections.accountEpoch, connection.accountEpoch),
+                ),
+              )
               .pipe(Effect.orDie);
           },
         ),

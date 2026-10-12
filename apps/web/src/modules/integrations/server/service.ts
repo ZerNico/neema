@@ -377,7 +377,7 @@ export class IntegrationService extends Context.Service<
     }): Effect.Effect<void>;
     /** Records scopes a call lacked, so Settings offers to grant them. */
     reportMissingScopes(
-      connection: { userId: string; connectionId: string },
+      connection: { userId: string; connectionId: string; accountEpoch: string },
       scopes: ReadonlyArray<string>,
     ): Effect.Effect<void>;
     /**
@@ -1495,7 +1495,7 @@ export class IntegrationService extends Context.Service<
           function* (input, scopes) {
             const words = scopes.filter((scope) => /^[\x21\x23-\x5B\x5D-\x7E]{1,200}$/.test(scope));
             if (words.length === 0) return;
-            yield* repo.addRequiredScopes(input.connectionId, words);
+            yield* repo.addRequiredScopes(input, words);
             yield* changed(input.userId);
           },
         ),

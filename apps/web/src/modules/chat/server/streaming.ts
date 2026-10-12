@@ -1512,7 +1512,11 @@ export class StreamEngine extends Context.Service<
                   }),
                 reportMissingScopes: (session, scopes) =>
                   integrations.reportMissingScopes(
-                    { userId: input.userId, connectionId: session.connectionId },
+                    {
+                      userId: input.userId,
+                      connectionId: session.connectionId,
+                      accountEpoch: session.accountEpoch,
+                    },
                     scopes,
                   ),
                 allowanceUses: {
@@ -3832,7 +3836,10 @@ export class StreamEngine extends Context.Service<
                             }
                             // The result already names each file; mark the ones that did not arrive.
                             const returned = part.result as { ok?: unknown; result?: unknown };
-                            const output = returned.result as { files?: unknown } | null | undefined;
+                            const output = returned.result as
+                              | { files?: unknown }
+                              | null
+                              | undefined;
                             if (
                               undelivered.size &&
                               returned.ok === true &&
