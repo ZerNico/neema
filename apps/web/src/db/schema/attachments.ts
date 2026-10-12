@@ -29,7 +29,7 @@ export const attachmentBlobs = pgTable(
     // opaque key in the BlobStore (filesystem today, S3 later)
     storageKey: text("storage_key").notNull(),
     size: integer().notNull(),
-    // normalized from the magic bytes, not from the upload's Content-Type
+    // First writer's validated type. Resource rows keep their own classification.
     mediaType: text("media_type").notNull(),
     // Lazy cache of a PDF's text as a chat prompt inlines it, so a long
     // conversation does not re-read the same document on every generation.
@@ -94,6 +94,7 @@ export const attachments = pgTable(
       .notNull()
       .references(() => attachmentBlobs.id, { onDelete: "cascade" }),
     fileName: text("file_name").notNull(),
+    mediaType: text("media_type").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

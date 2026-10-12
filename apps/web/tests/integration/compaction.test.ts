@@ -1053,6 +1053,7 @@ const attachDocument = Effect.fn("test.attachDocument")(function* (
     userId,
     blobId,
     fileName: mediaType === "application/pdf" ? "document.pdf" : "document.txt",
+    mediaType,
   });
   yield* db.insert(messageAttachments).values({ messageId, attachmentId, position: 0 });
   return storageKey;

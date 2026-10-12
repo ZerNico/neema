@@ -15,6 +15,13 @@ declared type, and only the kinds we understand are shown or handed to a model.
   are each caller's rule. A `file` is stored with a descriptive type from its name
   (`fileMediaType`), which can never name one of the readable kinds, so a `.png` that does
   not sniff as PNG stays a `file`.
+- Deduplication shares bytes, not a resource's classification. Each attachment stores the
+  server-validated type for its name and input, including when a project blob already stores
+  those bytes as an opaque file. Reads, message and queue listings, and branch copies keep that
+  attachment type. Blob hash and size remain authoritative. Knowledge and project versions and
+  skill files also retain their own classification rather than changing the shared blob's
+  first-writer type. Existing attachments inherit their blob's recorded type on migration,
+  because their original validated classification cannot be recovered reliably.
 - A `file` is always a download. Every route that serves stored bytes (attachments, project
   versions, knowledge versions, skill files) answers through `fileResponse`
   (`server/file-response.ts`): `nosniff`, a `file` sent as `application/octet-stream` whatever

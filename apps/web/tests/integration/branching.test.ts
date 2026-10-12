@@ -272,9 +272,13 @@ const attach = Effect.fn("test.attach")(function* (
   });
   for (const file of files) {
     const attachmentId = uuidv7();
-    yield* db
-      .insert(attachments)
-      .values({ id: attachmentId, userId, blobId, fileName: file.fileName });
+    yield* db.insert(attachments).values({
+      id: attachmentId,
+      userId,
+      blobId,
+      fileName: file.fileName,
+      mediaType: "image/png",
+    });
     yield* db
       .insert(messageAttachments)
       .values({ messageId, attachmentId, position: file.position });
@@ -558,9 +562,13 @@ describe("branching a conversation", () => {
         });
         // A draft the answer left unpublished: the source chat's alone.
         const keptAttachment = uuidv7();
-        yield* db
-          .insert(attachments)
-          .values({ id: keptAttachment, userId, blobId, fileName: "draft.pptx" });
+        yield* db.insert(attachments).values({
+          id: keptAttachment,
+          userId,
+          blobId,
+          fileName: "draft.pptx",
+          mediaType: "image/png",
+        });
         yield* db.insert(conversationWorkingFiles).values({
           workingFileId: uuidv7(),
           messageId: answer.id,

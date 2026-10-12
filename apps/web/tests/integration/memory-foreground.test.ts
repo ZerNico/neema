@@ -569,6 +569,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
           userId,
           blobId,
           fileName: "notes.txt",
+          mediaType: "text/plain",
         });
         yield* db.insert(messageAttachments).values({
           messageId: turn.userMessage.id,

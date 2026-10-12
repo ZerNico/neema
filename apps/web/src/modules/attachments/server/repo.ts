@@ -69,7 +69,7 @@ const withBlobColumns = {
   storageKey: attachmentBlobs.storageKey,
   sha256: attachmentBlobs.sha256,
   size: attachmentBlobs.size,
-  mediaType: attachmentBlobs.mediaType,
+  mediaType: attachments.mediaType,
   parsedText: attachmentBlobs.parsedText,
   parsedWith: attachmentBlobs.parsedWith,
 };
@@ -386,6 +386,7 @@ export class AttachmentRepo extends Context.Service<
                   userId: input.userId,
                   blobId: blob.id,
                   fileName: input.fileName,
+                  mediaType: input.mediaType,
                 })
                 .returning();
               const row = rows[0]!;
@@ -396,7 +397,7 @@ export class AttachmentRepo extends Context.Service<
                     id: row.id,
                     fileName: row.fileName,
                     size: blob.size,
-                    mediaType: blob.mediaType,
+                    mediaType: input.mediaType,
                   }),
                 );
               return {
@@ -404,7 +405,7 @@ export class AttachmentRepo extends Context.Service<
                   id: row.id,
                   fileName: row.fileName,
                   size: blob.size,
-                  mediaType: blob.mediaType,
+                  mediaType: input.mediaType,
                 }),
                 deduped: blob.id !== id,
                 unusedStorageKey: blob.storageKey === input.storageKey ? null : input.storageKey,
@@ -625,7 +626,7 @@ export class AttachmentRepo extends Context.Service<
             id: attachments.id,
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
-            mediaType: attachmentBlobs.mediaType,
+            mediaType: attachments.mediaType,
             queueEntryId: conversationQueueEntryAttachments.queueEntryId,
             position: conversationQueueEntryAttachments.position,
           })
@@ -667,6 +668,7 @@ export class AttachmentRepo extends Context.Service<
             kind: messageAttachments.kind,
             blobId: attachments.blobId,
             fileName: attachments.fileName,
+            mediaType: attachments.mediaType,
           })
           .from(messageAttachments)
           .innerJoin(attachments, eq(attachments.id, messageAttachments.attachmentId))
@@ -695,6 +697,7 @@ export class AttachmentRepo extends Context.Service<
           userId: input.userId,
           blobId: row.blobId,
           fileName: row.fileName,
+          mediaType: row.mediaType,
           messageId: targetOf.get(row.messageId)!,
           position: row.position,
           kind: row.kind,
@@ -703,7 +706,13 @@ export class AttachmentRepo extends Context.Service<
         yield* tx
           .insert(attachments)
           .values(
-            rows.map(({ id, userId, blobId, fileName }) => ({ id, userId, blobId, fileName })),
+            rows.map(({ id, userId, blobId, fileName, mediaType }) => ({
+              id,
+              userId,
+              blobId,
+              fileName,
+              mediaType,
+            })),
           )
           .pipe(Effect.orDie);
         yield* tx
@@ -759,7 +768,7 @@ export class AttachmentRepo extends Context.Service<
             id: attachments.id,
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
-            mediaType: attachmentBlobs.mediaType,
+            mediaType: attachments.mediaType,
             messageId: messageAttachments.messageId,
             position: messageAttachments.position,
           })
@@ -790,7 +799,7 @@ export class AttachmentRepo extends Context.Service<
             id: attachments.id,
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
-            mediaType: attachmentBlobs.mediaType,
+            mediaType: attachments.mediaType,
           })
           .from(messageAttachments)
           .innerJoin(messages, eq(messages.id, messageAttachments.messageId))

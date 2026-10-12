@@ -466,6 +466,7 @@ describe("loadConversationDetail windows", () => {
           userId,
           blobId,
           fileName: `file-${i}.txt`,
+          mediaType: "text/plain",
         }));
         yield* db.insert(attachments).values(files);
         const linkedMessages = [

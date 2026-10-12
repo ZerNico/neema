@@ -53,7 +53,7 @@ export const makeToolFileResolver = (input: {
       .select({
         id: attachments.id,
         name: attachments.fileName,
-        mediaType: attachmentBlobs.mediaType,
+        mediaType: attachments.mediaType,
         storageKey: attachmentBlobs.storageKey,
       })
       .from(attachments)

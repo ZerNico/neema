@@ -690,7 +690,9 @@ export class KnowledgeRepo extends Context.Service<
               if (content.blobId) {
                 const [blob] = yield* lockBlobs(tx, [content.blobId]);
                 if (!blob || blob.userId !== userId) return null;
-                content = { ...content, mediaType: blob.mediaType, byteSize: blob.size };
+                // Classification belongs to this validated resource, not the first
+                // name that stored these bytes. Size still belongs to the blob.
+                content = { ...content, byteSize: blob.size };
               }
               const [latest] = input.documentId
                 ? yield* tx
@@ -2153,7 +2155,7 @@ export class KnowledgeRepo extends Context.Service<
               status: knowledgeDocumentVersions.status,
               charCount: knowledgeDocumentVersions.charCount,
               fileName: knowledgeDocumentVersions.fileName,
-              mediaType: attachmentBlobs.mediaType,
+              mediaType: knowledgeDocumentVersions.mediaType,
               storageKey: attachmentBlobs.storageKey,
             })
             .from(knowledgeDocumentVersions)

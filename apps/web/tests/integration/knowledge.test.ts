@@ -2046,6 +2046,89 @@ describe("knowledge application boundary", () => {
 });
 
 describe("knowledge ingestion", () => {
+  it("keeps validated text classification when an opaque resource stored the bytes first", async () => {
+    const owner = await createUser();
+    const collectionId = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.createCollection(owner, { name: "Classification", description: "" }),
+      ),
+    );
+    const bytes = new TextEncoder().encode(
+      "A document may share bytes without sharing its file classification.",
+    );
+    const sha256 = uuidv7();
+    const storageKey = uuidv7();
+    blobs.set(storageKey, bytes);
+    const opaque = await run(
+      Effect.flatMap(AttachmentRepo, (repo) =>
+        repo.create({
+          userId: owner,
+          sha256,
+          storageKey,
+          size: bytes.length,
+          fileName: "export.bin",
+          mediaType: "application/octet-stream",
+        }),
+      ),
+    );
+    const text = await run(
+      Effect.flatMap(AttachmentRepo, (repo) =>
+        repo.create({
+          userId: owner,
+          sha256,
+          storageKey: uuidv7(),
+          size: bytes.length,
+          fileName: "export.txt",
+          mediaType: "text/plain",
+        }),
+      ),
+    );
+    const textFile = (await run(
+      Effect.flatMap(AttachmentRepo, (repo) => repo.findForAccess(text.attachment.id)),
+    ))!;
+    const opaqueFile = (await run(
+      Effect.flatMap(AttachmentRepo, (repo) => repo.findForAccess(opaque.attachment.id)),
+    ))!;
+    expect(textFile.attachment.blobId).toBe(opaqueFile.attachment.blobId);
+    expect(text.attachment.mediaType).toBe("text/plain");
+    const published = (await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.addFileDocument(owner, {
+          collectionId,
+          title: "Export",
+          blobId: textFile.attachment.blobId,
+          fileName: "export.txt",
+          mediaType: text.attachment.mediaType,
+          byteSize: 1,
+        }),
+      ),
+    ))!;
+    const stored = await exec(
+      `select media_type, byte_size from knowledge_document_versions where id = '${published.versionId}'`,
+    );
+    expect(stored.rows[0]).toEqual({ media_type: "text/plain", byte_size: bytes.length });
+    await drainIndexer();
+    const ready = await exec(
+      `select status, text from knowledge_document_versions where id = '${published.versionId}'`,
+    );
+    expect(ready.rows[0]).toEqual({ status: "ready", text: new TextDecoder().decode(bytes) });
+    const accessed = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.readVersionForAccess(owner, { collectionId, ...published }),
+      ),
+    );
+    expect(accessed).toMatchObject({
+      status: "ready",
+      fileName: "export.txt",
+      mediaType: "text/plain",
+      storageKey,
+    });
+    const blob = await exec(
+      `select media_type from attachment_blobs where id = '${textFile.attachment.blobId}'`,
+    );
+    expect(blob.rows[0]).toEqual({ media_type: "application/octet-stream" });
+  });
+
   it("extracts a note in the background and reports what could not be indexed", async () => {
     const owner = await createUser();
     const collectionId = await run(

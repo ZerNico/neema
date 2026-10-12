@@ -853,7 +853,7 @@ describe("knowledge-backed generations", () => {
         `insert into attachment_blobs (id,user_id,sha256,storage_key,size,media_type) values ('${blobId}','${recipient}','${blobId}','${blobId}',3,'image/png')`,
       );
       await exec(
-        `insert into attachments (id,user_id,blob_id,file_name) values ('${attachmentId}','${recipient}','${blobId}','answer.png')`,
+        `insert into attachments (id,user_id,blob_id,file_name,media_type) values ('${attachmentId}','${recipient}','${blobId}','answer.png','image/png')`,
       );
       await exec(
         `insert into message_attachments (message_id,attachment_id,position) values ('${first.assistantMessageId}','${attachmentId}',0)`,

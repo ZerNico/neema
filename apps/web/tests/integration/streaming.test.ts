@@ -5824,7 +5824,7 @@ describe("retry with a different model", () => {
       });
       yield* db
         .insert(attachments)
-        .values({ id: attachmentId, userId, blobId, fileName: "shot.png" });
+        .values({ id: attachmentId, userId, blobId, fileName: "shot.png", mediaType: "image/png" });
       yield* db.insert(messageAttachments).values({ messageId, attachmentId, position: 0 });
     });
 
