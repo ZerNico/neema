@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { useId, type ComponentProps } from "react";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
@@ -29,10 +29,19 @@ export function TextField({
   autoComplete?: string;
 }) {
   const field = useFieldContext<string>();
+  const id = useId();
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
+  const errors = field.state.meta.errors
+    .map((error) => ({
+      message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
+    }))
+    .filter((error) => error.message);
+  const descriptionId = description ? `${id}-help` : undefined;
+  const errorId = showError && errors.length > 0 ? `${id}-error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;
   return (
     <Field data-invalid={showError || undefined}>
-      <FieldLabel htmlFor={field.name}>
+      <FieldLabel htmlFor={id}>
         {label}
         {optional ? (
           <>
@@ -42,7 +51,7 @@ export function TextField({
         ) : null}
       </FieldLabel>
       <Input
-        id={field.name}
+        id={id}
         name={field.name}
         type={type}
         placeholder={placeholder}
@@ -51,15 +60,10 @@ export function TextField({
         onBlur={field.handleBlur}
         onChange={(e) => field.handleChange(e.target.value)}
         aria-invalid={showError || undefined}
+        aria-describedby={describedBy}
       />
-      {description ? <FieldDescription>{description}</FieldDescription> : null}
-      {showError ? (
-        <FieldError
-          errors={field.state.meta.errors.map((e) => ({
-            message: typeof e === "string" ? e : (e?.message ?? "Invalid"),
-          }))}
-        />
-      ) : null}
+      {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
+      {errorId ? <FieldError id={errorId} errors={errors} /> : null}
     </Field>
   );
 }
@@ -80,10 +84,19 @@ export function TextareaField({
   disabled?: boolean;
 }) {
   const field = useFieldContext<string>();
+  const id = useId();
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
+  const errors = field.state.meta.errors
+    .map((error) => ({
+      message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
+    }))
+    .filter((error) => error.message);
+  const descriptionId = description ? `${id}-help` : undefined;
+  const errorId = showError && errors.length > 0 ? `${id}-error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;
   return (
     <Field data-invalid={showError || undefined}>
-      <FieldLabel htmlFor={field.name}>
+      <FieldLabel htmlFor={id}>
         {label}
         {optional ? (
           <>
@@ -93,7 +106,7 @@ export function TextareaField({
         ) : null}
       </FieldLabel>
       <Textarea
-        id={field.name}
+        id={id}
         name={field.name}
         placeholder={placeholder}
         rows={rows}
@@ -102,15 +115,10 @@ export function TextareaField({
         onBlur={field.handleBlur}
         onChange={(event) => field.handleChange(event.target.value)}
         aria-invalid={showError || undefined}
+        aria-describedby={describedBy}
       />
-      {description ? <FieldDescription>{description}</FieldDescription> : null}
-      {showError ? (
-        <FieldError
-          errors={field.state.meta.errors.map((error) => ({
-            message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
-          }))}
-        />
-      ) : null}
+      {description ? <FieldDescription id={descriptionId}>{description}</FieldDescription> : null}
+      {errorId ? <FieldError id={errorId} errors={errors} /> : null}
     </Field>
   );
 }
