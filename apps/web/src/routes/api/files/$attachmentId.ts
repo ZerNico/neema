@@ -26,11 +26,10 @@ export const Route = createFileRoute("/api/files/$attachmentId")({
         );
         if (!file) return new Response("Not found", { status: 404 });
 
-        // Access is the owner's, or the owner's conversation's, and never
-        // revoked while the file exists; its id never names other bytes.
+        // Stable bytes do not make account or session access irrevocable.
         return fileResponse(
           { bytes: file.bytes, name: file.fileName, mediaType: file.mediaType },
-          { inline: true, cache: "immutable" },
+          { inline: true, cache: "revocable" },
         );
       },
     },
