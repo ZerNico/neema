@@ -248,6 +248,7 @@ export const conversationQueueEntries = pgTable(
     content: text().notNull(),
     /** Frozen at queue time; attempt resolution still checks live access when promoted. */
     input: jsonb().$type<QueuedTurnInput>().notNull(),
+    revision: integer().notNull().default(0),
     /** A steer is delivered at a safe model boundary only while this fence is live. */
     steerMessageId: text("steer_message_id").references(() => messages.id, {
       onDelete: "set null",

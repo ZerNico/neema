@@ -92,6 +92,13 @@ export const integrationConnections = pgTable(
     authKind: text("auth_kind", { enum: ["oauth", "api_key"] }).notNull(),
     // KeyCipher over the JSON credential (token set or key); never leaves the server.
     credentialsCiphertext: text("credentials_ciphertext").notNull(),
+    // Reconnect changes account identity. Refresh changes only the credential revision.
+    accountEpoch: text("account_epoch")
+      .notNull()
+      .default(sql`gen_random_uuid()::text`),
+    credentialRevision: text("credential_revision")
+      .notNull()
+      .default(sql`gen_random_uuid()::text`),
     accountLabel: text("account_label").notNull(),
     // The instance config the credentials were issued against. A base URL
     // change makes them meaningless, so a mismatch reads as needing reauth.
