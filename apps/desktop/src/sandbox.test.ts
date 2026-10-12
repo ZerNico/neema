@@ -1,7 +1,13 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { commandWithEnvironment, forSandboxedChild } from "./sandbox-environment.ts";
+import {
+  childEnvironment as sandboxChildEnvironment,
+  commandWithEnvironment,
+  deniedEnvironmentNames,
+  forSandboxedChild,
+} from "./sandbox-environment.ts";
+import { wrapCommandWithSandboxMacOS } from "@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js";
 
 const exec = promisify(execFile);
 const readEnvironment = "\"$NEEMA_TEST_NODE\" -p 'JSON.stringify(process.env)'";
@@ -170,6 +176,96 @@ describe.skipIf(process.platform === "win32")("literal shell execution", () => {
     });
   });
 });
+
+describe("deliberate POSIX child environment", () => {
+  const synthetic = Object.freeze({
+    PATH: "/usr/bin:/bin",
+    HOME: "/synthetic/home",
+    LANG: "C",
+    TZ: "UTC",
+    NEEMA_SYNTHETIC_TOKEN: "nonsecret-fixture",
+    JAVA_TOOL_OPTIONS: "-Dfixture=nonsecret",
+    NODE_OPTIONS: "--inspect",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_VALUE_0: "nonsecret-fixture",
+    HTTPS_PROXY: "http://ambient-fixture:1234",
+    ELECTRON_RUN_AS_NODE: "1",
+  });
+
+  it.each(["darwin", "linux"] as const)(
+    "allows only working variables on %s without mutating the parent",
+    (os) => {
+      expect(sandboxChildEnvironment(synthetic, os)).toEqual({
+        PATH: synthetic.PATH,
+        HOME: synthetic.HOME,
+        LANG: synthetic.LANG,
+        TZ: synthetic.TZ,
+      });
+      expect(deniedEnvironmentNames(synthetic)).toEqual([
+        "NEEMA_SYNTHETIC_TOKEN",
+        "JAVA_TOOL_OPTIONS",
+        "NODE_OPTIONS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_VALUE_0",
+        "HTTPS_PROXY",
+        "ELECTRON_RUN_AS_NODE",
+      ]);
+      expect(synthetic.NEEMA_SYNTHETIC_TOKEN).toBe("nonsecret-fixture");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "runs a real child without the synthetic token while preserving PATH and workspace defaults",
+    async () => {
+      const command = `${shellNodeCommand} -e 'console.log(JSON.stringify({token: process.env.NEEMA_SYNTHETIC_TOKEN ?? null, path: process.env.PATH, tmp: process.env.TMPDIR, cache: process.env.PIP_CACHE_DIR}))'`;
+      const { stdout } = await exec(
+        "/bin/sh",
+        ["-c", commandWithEnvironment(command, "/tmp/fixture", "linux")],
+        {
+          env: sandboxChildEnvironment(synthetic, "linux"),
+          timeout: 2_000,
+        },
+      );
+      expect(JSON.parse(stdout)).toEqual({
+        token: null,
+        path: synthetic.PATH,
+        tmp: "/tmp/fixture",
+        cache: "/tmp/fixture/.cache/pip",
+      });
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "preserves installed SRT's authenticated proxy and Java transport in a real sandbox child",
+    async () => {
+      const command = `${shellNodeCommand} -e 'console.log(JSON.stringify({token: process.env.NEEMA_SYNTHETIC_TOKEN ?? null, proxy: process.env.HTTPS_PROXY, java: process.env.JAVA_TOOL_OPTIONS, tmp: process.env.TMPDIR}))'`;
+      const wrapped = wrapCommandWithSandboxMacOS({
+        command: commandWithEnvironment(command, "/tmp/fixture", "darwin"),
+        needsNetworkRestriction: true,
+        httpProxyPort: 3128,
+        socksProxyPort: 1080,
+        proxyAuthToken: "nonsecret-proxy-fixture",
+        javaAgentJarPath: "/synthetic/agent.jar",
+        unsetEnvVars: deniedEnvironmentNames(synthetic),
+        readConfig: undefined,
+        writeConfig: undefined,
+      });
+      const argv = forSandboxedChild(["/bin/bash", "-c", wrapped], "/tmp/fixture", "darwin");
+      const { stdout } = await exec(argv[0]!, argv.slice(1), {
+        env: sandboxChildEnvironment(synthetic, "darwin"),
+        timeout: 2_000,
+      });
+      const result = JSON.parse(stdout);
+      expect(result.token).toBeNull();
+      expect(result.proxy).toContain("nonsecret-proxy-fixture@127.0.0.1:3128");
+      expect(result.java).toContain("-javaagent:/synthetic/agent.jar");
+      expect(result.java).not.toContain("-Dfixture=");
+      expect(result.tmp).toBe("/tmp/fixture");
+    },
+  );
+});
+
+const shellNodeCommand = `'${process.execPath.replaceAll("'", "'\\''")}'`;
 
 describe("Windows child environment", () => {
   it("replaces controlled overlays case-insensitively without changing the shell or proxies", () => {

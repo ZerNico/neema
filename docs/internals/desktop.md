@@ -391,7 +391,7 @@ the current workspace and is told to use it for inherited workspace files.
 and the sandbox's write allowance covers the workspace plus every attached
 folder, so `cd` and `cp` across roots work inside one address space. Each
 command is one fresh sandboxed process; activation, environment changes and
-`cd` do not carry into the next call. The shell inherits the desktop process's
+`cd` do not carry into the next call. The shell keeps the desktop process’s
 PATH without loading interactive shell startup files. Runtime names, versions
 and packages therefore depend on that desktop, not the server or another chat's
 machine. The model hint tells it to discover an interpreter when needed, use
@@ -451,24 +451,57 @@ are persisted as a JSON array in the local profile. Each grant affects new proxy
 connections across all its chats and connected servers,
 and can be removed in Settings › This computer. Command auto-approval never grants
 network access. The model must explicitly run or retry its command. Existing tunnels
-are not torn down by revocation. Commands from different chats run concurrently;
-start, reset and the Windows install wait for running commands to drain, while
-network policy changes serialize with initialization and each other. Once
-an approved request begins a policy change, Stop waits for persistence and the proxy
-to agree. Linux mount cleanup waits for the last command. Initialization is
-marked successful only after it succeeds.
+are not torn down by revocation. macOS and Linux commands run concurrently, with
+per-command filesystem permissions. Linux mount cleanup waits for the last command.
+Start and command admission share a lifecycle lock with reset, but waiting for
+commands to finish never holds that lock. Once an approved network change begins,
+Stop waits for persistence and the proxy to agree.
 
-Reads are deny-then-allow in srt, so the home directory is denied as a whole
-and a list of toolchain locations (version managers, package stores, caches,
-git's identity) is re-allowed inside it, with the few credential files that
-sit in those regions denied again. The rest of the disk stays readable. Each
-call adds its attached folders to both the read and the write allow lists;
-they and the chat's workspace (picked up per call through `rootsFor`) are
-the only writable places. The profile's network-grant directory stays
-write-denied, even when someone attaches its parent; local file mutations
-also refuse it and attempts to replace its ancestors. A tool installed
-somewhere unusual fails with a denial that names the path, which is
-preferred over a readable `~/.git-credentials`.
+Windows grants are session-wide NTFS permissions. One command at a time, across
+all chats, owns initialize, execution and checked reset. The command permit and
+cleanup-failure latch are process-wide, not per service. A fixed named-pipe lock
+also excludes this app’s other profiles and dev shells until cleanup finishes.
+Setup takes the same ownership. Cold readiness, setup and initialization all use
+the explicitly resolved vendored broker. The sandbox account starts that broker
+itself, so it must be readable outside any user profile: the Windows installer is
+per-machine, and a pnpm-linked checkout under a profile fails with access denied. No Windows per-execution allow grants
+are passed to SRT, which rejects them. Network updates remain live during a
+command and preserve its active filesystem policy. Waiting and preparation consume
+the existing command deadline rather than starting a new timeout at spawn.
+
+SRT is pinned and patched so native cleanup errors, invalid reports and retained
+ACLs fail instead of becoming warnings. Partial initialization also checks rollback
+before discarding ownership. The adapter waits for process cleanup and reset,
+then releases the next command. Unconfirmed cleanup disables commands and setup for
+the rest of the process and retains host ownership. This checks native-reported
+outcomes, not an independent ACL audit. Restarting is not proof of recovery, and
+crash recovery still belongs to SRT. There is no unsandboxed fallback or global ACL
+recovery sweep. Other applications using the shared `srt-sandbox` account do not
+participate in this app’s named-pipe lock.
+
+Reads are deny-then-allow in SRT, so home is denied as a whole and toolchain
+assets are re-allowed inside it. Windows is the exception. Its profile ACL already
+keeps the sandbox account out, while every SRT deny becomes an inherited ACE that
+restamps the target’s parents, and a missing target becomes a placeholder file. There
+the adapter denies only credential paths that exist inside an existing grant. The
+same ACL leaves an attached folder under the profile unusable, since Node and similar
+tools stat every ancestor. Each profile folder above an attached root therefore gets a
+read-attributes ACE for the sandbox account. It is not inherited, lists nothing and
+opens no file, so it is left in place rather than joining SRT’s checked cleanup.
+Writing a profile ACL re-propagates the whole tree, so it is written only when absent. Cargo gets binaries, registry and Git caches,
+Maven gets its repository and wrapper, and Gradle gets caches, wrappers, JDKs
+and native libraries, not their containing config directories. Pip gets its
+cache, not its user config. Conventional credential-bearing config paths and
+known cache tokens are explicitly denied even when an attached parent re-allows
+their directory. Installed SRT preserves these deeper denies. This is a named
+path policy, not discovery of arbitrary secrets stored in build assets.
+The rest of the disk stays readable. Each call adds its attached folders to
+both read and write allowances. They and the chat’s workspace, resolved per
+call through `rootsFor`, are the only writable roots. The profile’s
+network-grant directory stays write-denied even when someone attaches its
+parent. Local file mutations also refuse it and attempts to replace its
+ancestors. Unusual tool installations or credential-bearing user build config
+fail closed rather than gaining a broader home allowance.
 
 On macOS, the adapter reads only the literal words in SRT's leading `env`
 assignments, including whole-quoted assignments and unset options. Encoded proxy
@@ -477,6 +510,14 @@ prefixes silently missed them. The adapter replaces the proxy hostname
 `localhost` with `127.0.0.1` to avoid Seatbelt-denied resolution, preserving
 credentials, protocols and ports. The executable, profile and user command stay
 byte-for-byte unchanged. Linux and Windows keep their own proxy routing.
+
+The POSIX child environment keeps only PATH, HOME, user and shell identity,
+locale, timezone and terminal settings. Arbitrary launch variables and runtime
+injection options do not cross that boundary. The same excluded names are
+supplied to SRT before wrapping, since it can compose inherited Java or Git
+settings into its command. SRT’s own generated proxy authentication, trust and
+transport overlays remain in argv. Nothing sanitizes the parent desktop
+process. Windows keeps its separate fresh child-profile contract.
 
 Temporary files default to the existing workspace, and Python and XDG caches to
 its `.cache` tree. On POSIX, quoted exports run inside confinement after SRT's
@@ -492,11 +533,15 @@ it. Explicit command assignments can override defaults within the same policy.
 Temporary-file APIs own their cleanup; abandoned files remain in the workspace,
 with no additional sweeper.
 
-Owned POSIX process groups are terminated during cancellation and cleanup;
-Windows uses `taskkill /T`. Descendants that deliberately escape the process
-group, and Windows trees whose root has already exited, are not guaranteed to be
-stopped. Windows Job Objects are not implemented. Sandbox preparation must settle
-before its policy ownership can be released.
+Owned POSIX process groups are terminated during cancellation and cleanup.
+Descendants that deliberately escape their group are outside that guarantee.
+The generic Windows process owner uses `taskkill /T`, which cannot enumerate a
+tree after its root exits. SRT documents a native Job Object behind its broker,
+but the package does not include that implementation. The dedicated disposable
+Windows CI suite checks real descendant exit on normal completion, Stop and
+timeout before a new permission session. macOS unit tests cannot certify that
+native boundary. Sandbox preparation must settle before ownership is released,
+even when cancellation or the execution deadline arrives first.
 
 ## Policy is server-held; consent is local
 

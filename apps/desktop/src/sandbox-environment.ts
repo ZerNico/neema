@@ -1,6 +1,35 @@
 import { platform } from "node:os";
 import { posix, win32 } from "node:path";
 
+// SRT puts proxy credentials and transport in argv, not its POSIX spawn env.
+// Runtime injection variables and arbitrary launch settings are not child authority.
+const CHILD_ENVIRONMENT = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_COLLATE",
+  "LC_MESSAGES",
+  "LC_NUMERIC",
+  "LC_TIME",
+  "TZ",
+  "TERM",
+  "COLORTERM",
+]);
+
+export const deniedEnvironmentNames = (env: NodeJS.ProcessEnv) =>
+  Object.keys(env).filter((name) => !CHILD_ENVIRONMENT.has(name));
+
+export const childEnvironment = (env: NodeJS.ProcessEnv, os = platform()): NodeJS.ProcessEnv => {
+  // This is the Windows broker env. Its child gets SRT's fresh profile and argv overlay.
+  if (os === "win32") return { ...env };
+  return Object.fromEntries(Object.entries(env).filter(([name]) => CHILD_ENVIRONMENT.has(name)));
+};
+
 /** Quote one literal shell word, not a command to evaluate. */
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 

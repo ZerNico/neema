@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { platform, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { loadNetworkGrants, networkGrantsDirectory } from "./network-grants.ts";
@@ -24,7 +24,7 @@ const managerFor = () => ({
   checkDependenciesAsync: async () => ({ errors: [], warnings: [] }),
   updateConfig: vi.fn(),
   wrapWithSandboxArgv: vi.fn(async (command: string) => ({
-    argv: platform() === "win32" ? ["fake", "--", command] : ["fake", command],
+    argv: ["fake", command],
     env: {},
   })),
   annotateStderrWithSandboxFailures: (_command: string, stderr: string) => stderr,
@@ -40,7 +40,7 @@ const scopedSandbox = async (
 ) => {
   const scope = await Effect.runPromise(Scope.make());
   const sandbox = await Effect.runPromise(
-    makeSandbox(manager, execute, grants).pipe(Scope.provide(scope)),
+    makeSandbox(manager, execute, grants, { os: "linux" }).pipe(Scope.provide(scope)),
   );
   return { sandbox, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
 };
@@ -77,7 +77,7 @@ describe("sandbox lifetime", () => {
         ["second", "/tmp/second"],
       ] as const) {
         expect(manager.wrapWithSandboxArgv).toHaveBeenCalledWith(
-          commandWithEnvironment(command, cwd),
+          commandWithEnvironment(command, cwd, "linux"),
           undefined,
           expect.objectContaining({ filesystem: expect.objectContaining({ allowWrite: [cwd] }) }),
           undefined,
@@ -192,7 +192,7 @@ describe("sandbox lifetime", () => {
         }),
       );
       expect(manager.wrapWithSandboxArgv).toHaveBeenCalledWith(
-        commandWithEnvironment("first", input.cwd),
+        commandWithEnvironment("first", input.cwd, "linux"),
         undefined,
         expect.objectContaining({
           filesystem: expect.objectContaining({ denyWrite: [directory] }),
