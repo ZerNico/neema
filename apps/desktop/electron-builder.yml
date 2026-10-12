@@ -41,6 +41,9 @@ win:
   target: [nsis]
 
 nsis:
+  # The sandbox account starts srt-win.exe from the install directory. Under a
+  # per-user install that is the profile, which the account cannot read.
+  perMachine: true
   oneClick: false
   allowToChangeInstallationDirectory: true
 
