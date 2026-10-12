@@ -72,7 +72,7 @@ import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
 import { useConversationQueue } from "./use-conversation-queue.ts";
-import type { AssistantSteer } from "./assistant-body.ts";
+import { createsDocument, type AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { FileReferenceContext } from "./file-reference-context.ts";
@@ -409,13 +409,17 @@ export function ChatView({
     key: string;
     seed: ReturnType<typeof streamSeed>;
   } | null>(null);
+  // The stream reads its seed in this same pass, resetting to it when the key changes, so a
+  // seed only stored for the next pass would be read as none: an answer reloaded mid-stream
+  // or resumed would lose every earlier chunk the subscription then skips.
+  const freshSeed =
+    streamingMessage && streamKey !== null && seeded?.key !== streamKey
+      ? streamSeed(streamingMessage, data)
+      : null;
   if (streamKey !== (seeded?.key ?? null))
-    setSeeded(
-      streamingMessage && streamKey
-        ? { key: streamKey, seed: streamSeed(streamingMessage, data) }
-        : null,
-    );
-  const initialStream = streamKey !== null && seeded?.key === streamKey ? seeded.seed : null;
+    setSeeded(freshSeed && streamKey ? { key: streamKey, seed: freshSeed } : null);
+  const initialStream =
+    streamKey === null ? null : seeded?.key === streamKey ? seeded.seed : freshSeed;
 
   // A sync refresh can see the terminal row before SSE has delivered its last
   // chunks and done marker. Keep that subscription alive so the sticky overlay
@@ -1544,7 +1548,7 @@ export function ChatView({
   );
   const shownDocuments = shownIds(display, (activity) =>
     activity.family === "document" &&
-    activity.name === "create_document" &&
+    createsDocument(activity.name) &&
     activity.result &&
     ownsDocument(activity.result, conversationId, data.project?.role ? data.project.id : null)
       ? activity.result.documentId

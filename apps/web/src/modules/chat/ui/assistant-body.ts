@@ -79,13 +79,17 @@ export interface DocumentPart {
   named?: boolean;
 }
 
+/** Whether a document call makes one: a text document or a sheet. */
+export const createsDocument = (name: string) =>
+  name === "create_document" || name === "create_sheet";
+
 /** A call that made a document: drawn as its card, which is what the person receives. */
 export const isDocumentCard = (activity: DocumentToolActivity) =>
-  activity.name === "create_document" &&
+  createsDocument(activity.name) &&
   // A creation someone typed into as it streamed still made the document.
   (activity.result?.outcome === "created" || activity.result?.outcome === "conflict");
 
-const creating = (call: DocumentToolActivity) => call.name === "create_document";
+const creating = (call: DocumentToolActivity) => createsDocument(call.name);
 
 /**
  * One working file's run of calls: deck or workbook steps and the publish that

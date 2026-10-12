@@ -360,6 +360,38 @@ describe("projectAssistantBody steers", () => {
     expect(parts.map((part) => part.kind)).toEqual(["text"]);
   });
 
+  it("keeps a created sheet's card with the work before the steer, not at the end", () => {
+    const sheet = (
+      callId: string,
+      name: "create_sheet" | "edit_sheet",
+      textOffset: number,
+      turnIndex: number,
+    ): ToolActivity => ({
+      family: "document",
+      name,
+      callId,
+      textOffset,
+      turnIndex,
+      callIndex: 0,
+      status: "complete",
+      result: {
+        outcome: name === "create_sheet" ? "created" : "updated",
+        documentId: "map",
+        title: "Map",
+      },
+    });
+    const { parts } = projectAssistantBody({
+      content,
+      streaming: false,
+      tools: [sheet("make", "create_sheet", 0, 0), sheet("fill", "edit_sheet", offset, 1)],
+      compactions: [],
+      steers: [steer(offset)],
+    });
+    expect(
+      parts.map((part) => (part.kind === "tool" ? `card:${part.activity.callId}` : part.kind)),
+    ).toEqual(["card:make", "text", "steer", "document", "text"]);
+  });
+
   describe("working files", () => {
     const step = (
       callId: string,

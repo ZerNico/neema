@@ -1320,6 +1320,25 @@ describe("ChatView question handoff", () => {
     );
   });
 
+  it("hands the stream its seed from the first render, so a reloaded answer keeps its text", () => {
+    renderView(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        { ...message("m-answer", "assistant", ""), status: "streaming" as never },
+      ],
+      pendingChunks: [
+        { seq: 1, kind: "text", delta: "Written before the reload. " },
+        { seq: 2, kind: "text", delta: "And more." },
+      ],
+    });
+    // The stream resets to what it is given when its key changes and subscribes after the
+    // seed's last chunk: a null on any call would drop text it never replays.
+    const calls = streamProbe.mock.calls.filter(([id]) => id === "m-answer");
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, initial] of calls)
+      expect(initial).toMatchObject({ text: "Written before the reload. And more.", lastSeq: 2 });
+  });
+
   it("sends current settings without attachments and preserves unrelated composer draft", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof answerQuestion>>) => void;
     answerMock.mockImplementationOnce(
