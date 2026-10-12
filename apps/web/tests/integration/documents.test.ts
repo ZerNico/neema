@@ -44,6 +44,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "documents-it-"));
@@ -105,6 +106,7 @@ const createUser = () =>
     Effect.gen(function* () {
       const id = uuidv7();
       yield* (yield* Db).insert(user).values({ id, name: "Document owner", email: `${id}@t.io` });
+      yield* seedEligibleSession(id);
       return id;
     }),
   );
@@ -398,7 +400,7 @@ describe("person and model writing together", () => {
     const first = await openEditor(owner, created);
     const second = await openEditor(owner, created);
     const feed = await service((s) =>
-      s.subscribe(owner, created.id, { revision: 0, clientId: second.clientId }),
+      s.subscribe(owner, created.id, { sessionId: owner, revision: 0, clientId: second.clientId }),
     );
     const received = Effect.runFork(feed!.pipe(Stream.take(4), Stream.runCollect));
     // Both editors type at once, each against the same starting text.
@@ -432,7 +434,7 @@ describe("person and model writing together", () => {
     const first = await openEditor(owner, created);
     const second = await openEditor(owner, created);
     const secondFeed = await service((s) =>
-      s.subscribe(owner, created.id, { revision: 0, clientId: second.clientId }),
+      s.subscribe(owner, created.id, { sessionId: owner, revision: 0, clientId: second.clientId }),
     );
     const toSecond = Effect.runFork(secondFeed!.pipe(Stream.take(3), Stream.runCollect));
     const presence = {
@@ -450,7 +452,7 @@ describe("person and model writing together", () => {
     expect(frames[2]).toEqual({ type: "presence", clientId: first.clientId, presence: relayed });
     // A feed opening later is told about the cursor already there.
     const later = await service((s) =>
-      s.subscribe(owner, created.id, { revision: 0, clientId: null }),
+      s.subscribe(owner, created.id, { sessionId: owner, revision: 0, clientId: null }),
     );
     const opening = [
       ...(await Effect.runPromise(later!.pipe(Stream.take(3), Stream.runCollect))),
@@ -517,7 +519,7 @@ describe("person and model writing together", () => {
       try {
         const feed = await fresh.runPromise(
           Effect.flatMap(DocumentService, (s) =>
-            s.subscribe(owner, created.id, { revision: null, clientId: null }),
+            s.subscribe(owner, created.id, { sessionId: owner, revision: null, clientId: null }),
           ),
         );
         return Option.getOrThrow(await fresh.runPromise(Stream.runHead(feed!)));
@@ -622,7 +624,9 @@ describe("ownership, limits and sync", () => {
       ].map((action) => expect(action).rejects.toThrow()),
     );
     expect(
-      await service((s) => s.subscribe(stranger, created.id, { revision: null, clientId: null })),
+      await service((s) =>
+        s.subscribe(stranger, created.id, { sessionId: stranger, revision: null, clientId: null }),
+      ),
     ).toBeNull();
     expect(await get(owner, created)).toEqual(created);
     expect(await service((s) => s.list(owner, { conversationId: conversationId }))).toEqual([
@@ -741,7 +745,11 @@ describe("ownership, limits and sync", () => {
     const owner = await createUser();
     const created = await create(owner, await createConversation(owner));
     const feed = await service((s) =>
-      s.subscribe(owner, created.id, { revision: created.revision, clientId: "watcher" }),
+      s.subscribe(owner, created.id, {
+        sessionId: owner,
+        revision: created.revision,
+        clientId: "watcher",
+      }),
     );
     const received = Effect.runFork(feed!.pipe(Stream.take(3), Stream.runCollect));
     await service((s) =>

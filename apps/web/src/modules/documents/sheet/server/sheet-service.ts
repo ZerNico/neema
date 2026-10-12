@@ -8,6 +8,7 @@ import { parseChange, type SheetChange, type SheetOp } from "@chat/sheet/model/o
 import { sheetClients } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { presenceUser } from "../../presence-user.ts";
@@ -281,7 +282,7 @@ export class SheetService extends Context.Service<
     subscribe(
       userId: string,
       documentId: string,
-      options: { revision: number | null; clientId: string | null },
+      options: { sessionId: string; revision: number | null; clientId: string | null },
     ): Effect.Effect<Stream.Stream<SheetFrame> | null>;
   }
 >()("chat/documents/SheetService") {
@@ -961,17 +962,25 @@ export class SheetService extends Context.Service<
       const subscribe = Effect.fn("SheetService.subscribe")(function* (
         userId: string,
         documentId: string,
-        options: { revision: number | null; clientId: string | null },
+        options: { sessionId: string; revision: number | null; clientId: string | null },
       ) {
-        if (!(yield* policy.can(userId, "documents"))) return null;
-        const found = yield* documents.get(userId, documentId);
-        if (found?.kind !== "sheet") return null;
+        const canSubscribe = db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              if (!(yield* originatingSessionEligible(tx, options.sessionId, userId))) return false;
+              if (!(yield* policy.can(userId, "documents", tx))) return false;
+              return (yield* documents.get(userId, documentId, tx))?.kind === "sheet";
+            }),
+          )
+          .pipe(Effect.orDie);
+        if (!(yield* canSubscribe)) return null;
         const gone: Stream.Stream<SheetFrame> = Stream.make({ type: "gone" });
         const ownPresence = (frame: SheetFrame) =>
           frame.type === "presence" && frame.clientId === options.clientId;
         return Stream.unwrap(
           exclusive(documentId)(
             Effect.gen(function* () {
+              if (!(yield* canSubscribe)) return gone;
               const { entry } = yield* load(userId, documentId);
               // Subscribed before the catch-up is taken, and under the lock, so
               // no change falls between the two.
@@ -1018,7 +1027,7 @@ export class SheetService extends Context.Service<
               const revoked = Effect.gen(function* () {
                 while (true) {
                   yield* Effect.sleep(ACCESS_RECHECK);
-                  if (!(yield* documents.get(userId, documentId))) {
+                  if (!(yield* canSubscribe)) {
                     lostAccess = true;
                     return;
                   }

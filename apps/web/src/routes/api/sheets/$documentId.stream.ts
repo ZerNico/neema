@@ -27,6 +27,7 @@ export const Route = createFileRoute("/api/sheets/$documentId/stream")({
         const stream = await runtime.runPromise(
           Effect.flatMap(SheetService, (service) =>
             service.subscribe(session.user.id, params.documentId, {
+              sessionId: session.session.id,
               revision: revisionParam(url.searchParams.get("revision")),
               clientId: clientParam(url.searchParams.get("client")),
             }),

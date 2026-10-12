@@ -18,6 +18,7 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "sheet-documents-it-"));
 
@@ -62,6 +63,7 @@ const createSheet = async () => {
     Effect.gen(function* () {
       const db = yield* Db;
       yield* db.insert(user).values({ id: owner, name: "Sheet owner", email: `${owner}@t.io` });
+      yield* seedEligibleSession(owner);
       yield* db.insert(conversations).values({ id: conversationId, userId: owner });
     }),
   );
@@ -179,7 +181,7 @@ describe("live sheets", () => {
     const { owner, document } = await createSheet();
     const { doc } = await readDoc(owner, document.id);
     const feed = await sheets((s) =>
-      s.subscribe(owner, document.id, { revision: 0, clientId: "b" }),
+      s.subscribe(owner, document.id, { sessionId: owner, revision: 0, clientId: "b" }),
     );
     const received = Effect.runFork(feed!.pipe(Stream.take(3), Stream.runCollect));
     await sheets((s) =>
@@ -223,7 +225,7 @@ describe("live sheets", () => {
     try {
       const feed = await fresh.runPromise(
         Effect.flatMap(SheetService, (s) =>
-          s.subscribe(owner, document.id, { revision: null, clientId: "a" }),
+          s.subscribe(owner, document.id, { sessionId: owner, revision: null, clientId: "a" }),
         ),
       );
       const frame = Option.getOrThrow(await fresh.runPromise(Stream.runHead(feed!)));
@@ -308,7 +310,7 @@ describe("live sheets", () => {
     expect(await write(1)).toMatchObject({ result: 1, refused: null, dropped: [] });
     await write(2);
     const feed = await sheets((s) =>
-      s.subscribe(owner, document.id, { revision: 0, clientId: null }),
+      s.subscribe(owner, document.id, { sessionId: owner, revision: 0, clientId: null }),
     );
     const frame = Option.getOrThrow(await Effect.runPromise(Stream.runHead(feed!)));
     expect(frame).toMatchObject({

@@ -26,7 +26,11 @@ export async function collabEditor(run: Run, userId: string, documentId: string)
     run(
       Effect.gen(function* () {
         const service = yield* DocumentService;
-        const feed = yield* service.subscribe(userId, documentId, { revision, clientId });
+        const feed = yield* service.subscribe(userId, documentId, {
+          sessionId: userId,
+          revision,
+          clientId,
+        });
         if (!feed) return null;
         return Option.getOrThrow(yield* Stream.runHead(feed)) as DocumentFrame;
       }),

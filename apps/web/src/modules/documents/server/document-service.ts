@@ -7,6 +7,7 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { attachmentWriter } from "~/modules/attachments/server/service.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import {
@@ -457,7 +458,7 @@ export class DocumentService extends Context.Service<
     subscribe(
       userId: string,
       documentId: string,
-      options: { revision: number | null; clientId: string | null },
+      options: { sessionId: string; revision: number | null; clientId: string | null },
     ): Effect.Effect<Stream.Stream<DocumentFrame> | null>;
     /** Starts a thread on text the editor marked with its ID, or replies to one. */
     comment(userId: string, input: CommentInput): Effect.Effect<void, DocumentError>;
@@ -1075,16 +1076,25 @@ export class DocumentService extends Context.Service<
       const subscribe = Effect.fn("DocumentService.subscribe")(function* (
         userId: string,
         documentId: string,
-        options: { revision: number | null; clientId: string | null },
+        options: { sessionId: string; revision: number | null; clientId: string | null },
       ) {
-        if (!(yield* policy.can(userId, "documents"))) return null;
-        if (!(yield* documents.get(userId, documentId))) return null;
+        const canSubscribe = db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              if (!(yield* originatingSessionEligible(tx, options.sessionId, userId))) return false;
+              if (!(yield* policy.can(userId, "documents", tx))) return false;
+              return Boolean(yield* documents.get(userId, documentId, tx));
+            }),
+          )
+          .pipe(Effect.orDie);
+        if (!(yield* canSubscribe)) return null;
         const gone: Stream.Stream<DocumentFrame> = Stream.make({ type: "gone" });
         const ownPresence = (frame: DocumentFrame) =>
           frame.type === "presence" && frame.clientId === options.clientId;
         return Stream.unwrap(
           exclusive(documentId)(
             Effect.gen(function* () {
+              if (!(yield* canSubscribe)) return gone;
               const { entry } = yield* load(userId, documentId);
               // Subscribed before the catch-up is taken, and under the lock, so
               // no step falls between the two.
@@ -1121,14 +1131,14 @@ export class DocumentService extends Context.Service<
               const others: DocumentFrame[] = [...entry.presence]
                 .filter(([clientId]) => clientId !== options.clientId)
                 .map(([clientId, presence]) => ({ type: "presence", clientId, presence }));
-              // Someone removed from the project stops receiving within one check.
+              // Session, account, feature and resource revocation end the feed on recheck.
               // Only that ending says gone: a feed ended because the entry was
               // dropped and rebuilt is reconnected and caught up, never discarded.
               let lostAccess = false;
               const revoked = Effect.gen(function* () {
                 while (true) {
                   yield* Effect.sleep(ACCESS_RECHECK);
-                  if (!(yield* documents.get(userId, documentId))) {
+                  if (!(yield* canSubscribe)) {
                     lostAccess = true;
                     return;
                   }

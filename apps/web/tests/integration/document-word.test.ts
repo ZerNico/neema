@@ -31,6 +31,7 @@ import { Db } from "~/server/db.ts";
 import { Route as ExportRoute } from "~/routes/api/documents/$documentId.export.ts";
 import { Route as ImageRoute } from "~/routes/api/documents/$documentId.images.$attachmentId.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 
 vi.mock("~/modules/auth/server/auth.ts", () => ({
   sessionFromHeaders: async (headers: Headers) => {
@@ -129,6 +130,7 @@ const PNG = (() => {
 const createUser = async (name = "Member") => {
   const id = uuidv7();
   await run(Effect.flatMap(Db, (db) => db.insert(user).values({ id, name, email: `${id}@t.io` })));
+  await run(seedEligibleSession(id));
   return id;
 };
 
@@ -360,7 +362,7 @@ describe("a sheet embedded in a document", () => {
       Effect.all([
         Effect.flatMap(DocumentService, (s) => s.get(viewer, secret.id)),
         Effect.flatMap(SheetService, (s) =>
-          s.subscribe(viewer, secret.id, { revision: null, clientId: null }),
+          s.subscribe(viewer, secret.id, { sessionId: viewer, revision: null, clientId: null }),
         ),
       ]),
     );

@@ -2252,6 +2252,7 @@ describe("conversation documents", () => {
             conversationId: seed.conversation.id,
           });
           const feed = yield* service.subscribe(seed.userId, document!.id, {
+            sessionId: seed.userId,
             revision: null,
             clientId: "watcher",
           });
@@ -2833,6 +2834,7 @@ describe("conversation documents", () => {
             conversationId: seed.conversation.id,
           });
           const feed = yield* service.subscribe(seed.userId, document!.id, {
+            sessionId: seed.userId,
             revision: null,
             clientId: "watcher",
           });
@@ -2909,6 +2911,7 @@ describe("conversation documents", () => {
             conversationId: seed.conversation.id,
           });
           const feed = yield* service.subscribe(seed.userId, document!.id, {
+            sessionId: seed.userId,
             revision: null,
             clientId: "watcher",
           });

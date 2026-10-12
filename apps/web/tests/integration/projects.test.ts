@@ -29,6 +29,7 @@ import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "projects-it-"));
@@ -75,6 +76,7 @@ const createUser = async (role: "user" | "admin" = "user") => {
   await db((d) =>
     d.insert(user).values({ id, name: `User ${id.slice(-4)}`, email: `${id}@t.io`, role }),
   );
+  await run(seedEligibleSession(id));
   return id;
 };
 const email = (id: string) => `${id}@t.io`;

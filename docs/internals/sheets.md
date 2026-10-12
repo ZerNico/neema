@@ -59,7 +59,10 @@ browser workers and the Excel file tools); this page records the decisions behin
   `document_steps` row one change. `SheetService` keeps it in memory and orders writes like the
   text service, but checks no base revision: changes name IDs, so one built on any earlier
   revision applies as it is. Edits travel as JSON text (`pushSheet`), the feed at
-  `/api/sheets/:id/stream`.
+  `/api/sheets/:id/stream`. Each feed binds the originating session and effective user. Before
+  catch-up and every 30 seconds it checks that exact session’s expiry, account eligibility,
+  documents capability and resource rights. Detected revocation sends `gone`, closes the feed
+  and removes its presence. Revocation between checks can leave the feed open until the next check.
 - Each client's last applied sequence number is kept in `sheet_clients`, apart from the steps,
   so folding the log never makes an old change look new. A push applies only the run that
   follows it; a resend is acknowledged, a gap waits. A change the server will not keep (over a
