@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
 import { eq, inArray } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   attachmentBlobs,
@@ -11,6 +11,7 @@ import {
   conversations,
   documents,
   messageAttachments,
+  messageChunks,
   messageToolCalls,
   messages,
   models,
@@ -123,6 +124,97 @@ const linkBranch = Effect.fn("test.linkBranch")(function* (
     .update(conversations)
     .set({ branchedFrom: sourceId })
     .where(eq(conversations.id, conversationId));
+});
+
+describe("attempt snapshot reads", () => {
+  it.each(["detail", "history"] as const)(
+    "rereads %s when retry replaces the captured attempt",
+    async (kind) => {
+      const result = await run(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const userId = yield* makeUser();
+          const thread = yield* seedThread(userId, "Retry race");
+          const later = yield* repo.insertMessage({
+            conversationId: thread.conversationId,
+            role: "user",
+            content: "Later",
+          });
+          const captured = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          let reads = 0;
+          // Pause after the real SELECT has returned, not before the snapshot exists.
+          const observedRepo = {
+            ...repo,
+            listMessageWindow: (...args: Parameters<typeof repo.listMessageWindow>) =>
+              Effect.gen(function* () {
+                const rows = yield* repo.listMessageWindow(...args);
+                reads += 1;
+                if (reads === 1) {
+                  yield* Deferred.succeed(captured, undefined);
+                  yield* Deferred.await(release);
+                }
+                return rows;
+              }),
+          };
+          const load = Effect.gen(function* () {
+            if (kind === "detail")
+              return yield* loadConversationDetail(userId, thread.conversationId);
+            return yield* loadConversationHistory(userId, thread.conversationId, later.id);
+          });
+          const pending = yield* Effect.forkChild(
+            load.pipe(Effect.provideService(ChatRepo, observedRepo)),
+          );
+          yield* Deferred.await(captured);
+          const oldGeneration = (yield* repo.getMessage(thread.assistantId))!.generationId;
+          const retried = yield* repo.resetMessageForRetry({
+            userId,
+            messageId: thread.assistantId,
+            modelId,
+            expectedMessages: yield* repo.listMessages(thread.conversationId),
+            deleteMessageIds: [later.id],
+            invalidateCheckpointThroughMessageIds: [],
+          });
+          const current = (yield* repo.getMessage(thread.assistantId))!;
+          yield* db
+            .insert(messageChunks)
+            .values({ messageId: current.id, seq: 1, kind: "text", delta: "New attempt" });
+          yield* repo.insertToolCall({
+            id: uuidv7(),
+            messageId: current.id,
+            turnIndex: 0,
+            callIndex: 0,
+            providerCallId: "new-call",
+            toolName: "web_search",
+            arguments: { queries: ["new"] },
+          });
+          yield* Deferred.succeed(release, undefined);
+          const loaded = yield* Fiber.join(pending);
+          return { retried, oldGeneration, current, loaded, reads };
+        }),
+      );
+      expect(result.retried.claimed).toBe(true);
+      expect(result.current.generationId).not.toBe(result.oldGeneration);
+      expect(result.reads).toBeGreaterThanOrEqual(4);
+      if ("pendingChunks" in result.loaded) {
+        expect(
+          result.loaded.messages.find((message) => message.role === "assistant"),
+        ).toMatchObject({
+          generationId: result.current.generationId,
+          status: "streaming",
+          content: "",
+        });
+        expect(result.loaded.toolCalls).toHaveLength(1);
+        expect(result.loaded.toolCalls[0]?.providerCallId).toBe("new-call");
+        expect(result.loaded.pendingChunks).toMatchObject([{ seq: 1, delta: "New attempt" }]);
+      } else {
+        // Retry removed the history cursor too. Never return its former page with new rows.
+        expect(result.loaded.messages).toEqual([]);
+        expect(result.loaded.toolCalls).toEqual([]);
+      }
+    },
+  );
 });
 
 describe("loadConversationDetail", () => {

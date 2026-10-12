@@ -45,6 +45,20 @@ const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: 
   return queue[0]?.lastError ? ("failed" as const) : ("ready" as const);
 };
 
+const sameAttemptSnapshot = (before: ReadonlyArray<MessageRow>, after: ReadonlyArray<MessageRow>) =>
+  before.length === after.length &&
+  before.every((message, index) => {
+    const current = after[index]!;
+    return (
+      message.id === current.id &&
+      message.generationId === current.generationId &&
+      message.status === current.status &&
+      message.content === current.content &&
+      message.reasoning === current.reasoning &&
+      message.editedAt?.getTime() === current.editedAt?.getTime()
+    );
+  });
+
 /** Turns the first read of a chat returns, and each older page after it. */
 export const HEAD_TURNS = 30;
 export const OLDER_TURNS = 30;
@@ -113,13 +127,23 @@ export const loadConversationHistory = Effect.fn("chat.loadConversationHistory")
   beforeId: string,
 ) {
   const repo = yield* ChatRepo;
-  // Ownership first and alone, as for the detail.
-  const conversation = yield* repo.getConversation(userId, conversationId);
-  const start = yield* repo.findWindowStart(conversation.id, OLDER_TURNS, beforeId);
-  const messages = yield* repo.listMessageWindow(conversation.id, { fromId: start, beforeId });
-  const olderCursor =
-    start && (yield* repo.hasMessagesBefore(conversation.id, start)) ? start : null;
-  return { ...(yield* loadMessageRows(conversation.id, messages)), olderCursor };
+  while (true) {
+    // Ownership first and alone, as for the detail.
+    const conversation = yield* repo.getConversation(userId, conversationId);
+    const start = yield* repo.findWindowStart(conversation.id, OLDER_TURNS, beforeId);
+    const messages = yield* repo.listMessageWindow(conversation.id, { fromId: start, beforeId });
+    const olderCursor =
+      start && (yield* repo.hasMessagesBefore(conversation.id, start)) ? start : null;
+    const rows = yield* loadMessageRows(conversation.id, messages);
+    if (
+      !sameAttemptSnapshot(
+        messages,
+        yield* repo.listMessageWindow(conversation.id, { fromId: start, beforeId }),
+      )
+    )
+      continue;
+    return { ...rows, olderCursor };
+  }
 });
 
 /**
@@ -143,120 +167,132 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
 ) {
   const repo = yield* ChatRepo;
   const schedules = yield* ScheduleRepo;
-  // Ownership first and alone: an unauthorized id must fail before any of its
-  // children are read.
-  const conversation = yield* repo.getConversation(userId, conversationId);
-  yield* repo.research?.reap() ?? Effect.void;
-  const engine = yield* Effect.serviceOption(StreamEngine);
-  // Share the engine's terminal event path with live subscribers when present;
-  // a standalone detail loader still settles the database row and syncs it.
-  if (Option.isSome(engine)) yield* engine.value.reapOrphans;
-  else yield* reapGenerationsForDetail(repo);
-  // The source of a branch, for the "branched from" link. Read through the
-  // same ownership check, and null when it has been deleted since. It depends
-  // on the conversation only, so it rides with the messages.
-  const anchored = anchorId ? yield* repo.hasMessage(conversation.id, anchorId) : false;
-  const start = anchored ? anchorId! : yield* repo.findWindowStart(conversation.id, HEAD_TURNS);
-  const { messages, olderCursor, branchedFrom, schedule, latestMachineAttempt } = yield* Effect.all(
-    {
-      messages: repo.listMessageWindow(conversation.id, { fromId: start }),
-      olderCursor: start
-        ? repo
-            .hasMessagesBefore(conversation.id, start)
-            .pipe(Effect.map((older) => (older ? start : null)))
-        : Effect.succeed(null),
-      // The window may not reach the newest attempt sent from a machine,
-      // which the foreign-machine banner compares against this one.
-      latestMachineAttempt:
-        conversation.mode === "work"
-          ? repo.latestMachineAttempt(conversation.id)
-          : Effect.succeed(null),
-      branchedFrom: conversation.branchedFrom
-        ? repo.getConversation(userId, conversation.branchedFrom).pipe(
-            Effect.map((source) => ({ conversationId: source.id, title: source.title })),
-            Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
-          )
-        : Effect.succeed(null),
-      // The schedule behind this chat, for the banner link back: one that keeps
-      // running here first, else the one whose fire created it. Read optionally
-      // like branchedFrom: either may have been deleted since.
-      schedule: Effect.gen(function* () {
-        const runsHere = yield* schedules.findByChat(userId, conversation.id);
-        if (runsHere) return { scheduleId: runsHere.id, name: runsHere.name, runsHere: true };
-        const created = conversation.scheduleId
-          ? yield* schedules.get(userId, conversation.scheduleId)
-          : null;
-        return created ? { scheduleId: created.id, name: created.name, runsHere: false } : null;
-      }),
-    },
-    { concurrency: "unbounded" },
-  );
-  // The streaming answer is the newest row, so it is always in the window.
-  const streaming = messages.find((m) => m.status === "streaming");
-  const attachmentRepo = yield* AttachmentRepo;
-  const { rows, referenceAttachments, pendingChunks, defaults, queue, queueGate } =
-    yield* Effect.all(
-      {
-        rows: loadMessageRows(conversation.id, messages),
-        referenceAttachments: attachmentRepo.listForConversation(userId, conversation.id),
-        // For streaming messages the client resumes via SSE using the chunks
-        // persisted so far; ship them inline so the first paint is complete.
-        pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
-        // Only the installed agent persists between turns. Standalone knowledge
-        // is message input, not a conversation default.
-        defaults: repo.getConversationDefaults(conversation.id),
-        // Messages waiting behind the live answer. They are conversation state,
-        // not transcript rows, so every tab and device sees the same queue.
-        queue: repo.listQueue(conversation.id),
-        queueGate: repo.queueGate(conversation.id),
-      },
-      { concurrency: "unbounded" },
-    );
-  const agentRepo = yield* AgentRepo;
-  const liveAgent = defaults.agent?.agentId
-    ? yield* agentRepo.get(userId, defaults.agent.agentId)
-    : null;
-  // Named even when access was lost, so the chat can say where it was.
-  const project = conversation.projectId
-    ? yield* Effect.flatMap(Db, (db) =>
-        db
-          .select({ id: projects.id, name: projects.name, role: projectRoleSql(userId) })
-          .from(projects)
-          .where(eq(projects.id, conversation.projectId!)),
-      ).pipe(
-        Effect.orDie,
-        Effect.map(([row]) => row ?? null),
+  while (true) {
+    // Ownership first and alone: an unauthorized id must fail before any of its
+    // children are read.
+    const conversation = yield* repo.getConversation(userId, conversationId);
+    yield* repo.research?.reap() ?? Effect.void;
+    const engine = yield* Effect.serviceOption(StreamEngine);
+    // Share the engine's terminal event path with live subscribers when present;
+    // a standalone detail loader still settles the database row and syncs it.
+    if (Option.isSome(engine)) yield* engine.value.reapOrphans;
+    else yield* reapGenerationsForDetail(repo);
+    // The source of a branch, for the "branched from" link. Read through the
+    // same ownership check, and null when it has been deleted since. It depends
+    // on the conversation only, so it rides with the messages.
+    const anchored = anchorId ? yield* repo.hasMessage(conversation.id, anchorId) : false;
+    const start = anchored ? anchorId! : yield* repo.findWindowStart(conversation.id, HEAD_TURNS);
+    const { messages, olderCursor, branchedFrom, schedule, latestMachineAttempt } =
+      yield* Effect.all(
+        {
+          messages: repo.listMessageWindow(conversation.id, { fromId: start }),
+          olderCursor: start
+            ? repo
+                .hasMessagesBefore(conversation.id, start)
+                .pipe(Effect.map((older) => (older ? start : null)))
+            : Effect.succeed(null),
+          // The window may not reach the newest attempt sent from a machine,
+          // which the foreign-machine banner compares against this one.
+          latestMachineAttempt:
+            conversation.mode === "work"
+              ? repo.latestMachineAttempt(conversation.id)
+              : Effect.succeed(null),
+          branchedFrom: conversation.branchedFrom
+            ? repo.getConversation(userId, conversation.branchedFrom).pipe(
+                Effect.map((source) => ({ conversationId: source.id, title: source.title })),
+                Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
+              )
+            : Effect.succeed(null),
+          // The schedule behind this chat, for the banner link back: one that keeps
+          // running here first, else the one whose fire created it. Read optionally
+          // like branchedFrom: either may have been deleted since.
+          schedule: Effect.gen(function* () {
+            const runsHere = yield* schedules.findByChat(userId, conversation.id);
+            if (runsHere) return { scheduleId: runsHere.id, name: runsHere.name, runsHere: true };
+            const created = conversation.scheduleId
+              ? yield* schedules.get(userId, conversation.scheduleId)
+              : null;
+            return created ? { scheduleId: created.id, name: created.name, runsHere: false } : null;
+          }),
+        },
+        { concurrency: "unbounded" },
+      );
+    // The streaming answer is the newest row, so it is always in the window.
+    const streaming = messages.find((m) => m.status === "streaming");
+    const attachmentRepo = yield* AttachmentRepo;
+    const { rows, referenceAttachments, pendingChunks, defaults, queue, queueGate } =
+      yield* Effect.all(
+        {
+          rows: loadMessageRows(conversation.id, messages),
+          referenceAttachments: attachmentRepo.listForConversation(userId, conversation.id),
+          // For streaming messages the client resumes via SSE using the chunks
+          // persisted so far; ship them inline so the first paint is complete.
+          pendingChunks: !streaming ? Effect.succeed([]) : repo.chunksAfter(streaming.id, 0),
+          // Only the installed agent persists between turns. Standalone knowledge
+          // is message input, not a conversation default.
+          defaults: repo.getConversationDefaults(conversation.id),
+          // Messages waiting behind the live answer. They are conversation state,
+          // not transcript rows, so every tab and device sees the same queue.
+          queue: repo.listQueue(conversation.id),
+          queueGate: repo.queueGate(conversation.id),
+        },
+        { concurrency: "unbounded" },
+      );
+    const agentRepo = yield* AgentRepo;
+    const liveAgent = defaults.agent?.agentId
+      ? yield* agentRepo.get(userId, defaults.agent.agentId)
+      : null;
+    // Named even when access was lost, so the chat can say where it was.
+    const project = conversation.projectId
+      ? yield* Effect.flatMap(Db, (db) =>
+          db
+            .select({ id: projects.id, name: projects.name, role: projectRoleSql(userId) })
+            .from(projects)
+            .where(eq(projects.id, conversation.projectId!)),
+        ).pipe(
+          Effect.orDie,
+          Effect.map(([row]) => row ?? null),
+        )
+      : null;
+    // Retry/edit replace chunks and dependent rows atomically. Never seed them under the old attempt.
+    if (
+      !sameAttemptSnapshot(
+        messages,
+        yield* repo.listMessageWindow(conversation.id, { fromId: start }),
       )
-    : null;
-  return {
-    conversation,
-    agentDrafts: defaults.agentDrafts ?? [],
-    scheduleDrafts: defaults.scheduleDrafts ?? [],
-    documents: defaults.documents ?? [],
-    workingFiles: defaults.workingFiles ?? [],
-    ...rows,
-    referenceAttachments,
-    window: { anchorId: messages[0]?.id ?? null, olderCursor },
-    latestMachineAttempt,
-    pendingChunks,
-    // The server's clock when the snapshot was taken, for reading its times.
-    serverTime: Date.now(),
-    branchedFrom,
-    schedule,
-    agent: defaults.agent
-      ? {
-          id: defaults.agent.agentId,
-          name: liveAgent?.row.name ?? null,
-          icon: liveAgent?.row.icon ?? "robot",
-          collectionIds: liveAgent?.collectionIds ?? [],
-          skillIds: liveAgent?.skillIds ?? [],
-          // The composer's resting toggle: the agent's own default, like its model.
-          searchEnabled: liveAgent?.row.searchEnabled ?? true,
-          available: liveAgent !== null,
-        }
-      : null,
-    queue,
-    queueState: queueStateOf(queue, queueGate),
-    project: project ? { id: project.id, name: project.name, role: project.role } : null,
-  };
+    )
+      continue;
+    yield* repo.getConversation(userId, conversationId);
+    return {
+      conversation,
+      agentDrafts: defaults.agentDrafts ?? [],
+      scheduleDrafts: defaults.scheduleDrafts ?? [],
+      documents: defaults.documents ?? [],
+      workingFiles: defaults.workingFiles ?? [],
+      ...rows,
+      referenceAttachments,
+      window: { anchorId: messages[0]?.id ?? null, olderCursor },
+      latestMachineAttempt,
+      pendingChunks,
+      // The server's clock when the snapshot was taken, for reading its times.
+      serverTime: Date.now(),
+      branchedFrom,
+      schedule,
+      agent: defaults.agent
+        ? {
+            id: defaults.agent.agentId,
+            name: liveAgent?.row.name ?? null,
+            icon: liveAgent?.row.icon ?? "robot",
+            collectionIds: liveAgent?.collectionIds ?? [],
+            skillIds: liveAgent?.skillIds ?? [],
+            // The composer's resting toggle: the agent's own default, like its model.
+            searchEnabled: liveAgent?.row.searchEnabled ?? true,
+            available: liveAgent !== null,
+          }
+        : null,
+      queue,
+      queueState: queueStateOf(queue, queueGate),
+      project: project ? { id: project.id, name: project.name, role: project.role } : null,
+    };
+  }
 });

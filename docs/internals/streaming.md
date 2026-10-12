@@ -11,7 +11,9 @@ fall into.
 
 So a reload, a second tab or another browser joins a running answer where it is. The
 conversation loader ships the chunks persisted so far inline, so the first paint is
-already complete.
+already complete. Detail and history reread their message window after dependent
+reads and retry when its attempt changes, keeping tools and pending chunks with
+the captured generation. SSE retains its generation-mismatch repair.
 
 Everything else that changes, such as a renamed chat or a new message, reaches other
 tabs and instances through the sync bus, described in
