@@ -181,6 +181,14 @@ export async function sanitize(client) {
       UPDATE account SET access_token = NULL, refresh_token = NULL, id_token = NULL,
         access_token_expires_at = NULL, refresh_token_expires_at = NULL;
       UPDATE oauth_providers SET enabled = false;
+      UPDATE schedules SET paused = true, next_fire_at = NULL, updated_at = now();
+      UPDATE schedule_runs SET status = 'skipped',
+        error = 'Interrupted by development snapshot import.'
+        WHERE status IN ('pending', 'started') AND settled_at IS NULL;
+      UPDATE schedule_runs SET settled_at = now() WHERE settled_at IS NULL;
+      UPDATE conversation_queue_entries SET
+        last_error = 'Imported message. Send now or edit it to continue.';
+      UPDATE notification_settings SET email = false, updated_at = now();
       DELETE FROM blob_cleanup_intents;`);
     await client.query(
       `UPDATE messages m SET status = 'error', generation_lease_until = NULL,

@@ -116,7 +116,7 @@ export class ScheduleRepo extends Context.Service<
      */
     claimDue(
       limit: number,
-      nextFor: (row: ScheduleRow) => Date | null,
+      nextFor: (row: ScheduleRow, claimedAt: Date) => Date | null,
     ): Effect.Effect<Array<ScheduleRow & { runId: string }>>;
     /**
      * Claims the runs that have ended and marks each settled, once: a run that
@@ -292,7 +292,7 @@ export class ScheduleRepo extends Context.Service<
                 // drift, and a scheduler that quietly sees nothing is the exact
                 // failure this loop exists to prevent.
                 const due = yield* tx
-                  .select()
+                  .select({ schedule: schedules, claimedAt: sql<string>`now()::text` })
                   .from(schedules)
                   .where(
                     and(
@@ -305,8 +305,8 @@ export class ScheduleRepo extends Context.Service<
                   .limit(limit)
                   .for("update", { skipLocked: true });
                 const claimed: Array<ScheduleRow & { runId: string }> = [];
-                for (const row of due) {
-                  const next = nextFor(row);
+                for (const { schedule: row, claimedAt } of due) {
+                  const next = nextFor(row, new Date(claimedAt));
                   const [updated] = yield* tx
                     .update(schedules)
                     .set({

@@ -22,7 +22,7 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
 - `ScheduleService.tick` runs every 30 seconds (`forkScoped` in the app layer, so HMR disposal
   kills it). The claim is one transaction: due rows by database clock (`next_fire_at <=
 now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its
-  next fire after now **inside the claim**. That is the catch-up-once rule made structural:
+  next fire after that same database timestamp **inside the claim**. That is the catch-up-once rule made structural:
   forty missed fires during downtime collapse into one fire and the cadence resumes from now;
   a one-shot whose next fire is past `endAt` comes out with `nextFireAt = null` and never
   fires again. Due-ness by database clock follows the blob-ledger rule: a JS Date that drifts

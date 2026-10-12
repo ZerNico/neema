@@ -2,7 +2,7 @@ import { PgClient } from "@effect/sql-pg";
 import { eq, inArray, sql } from "drizzle-orm";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   conversations,
   groupMembers,
@@ -13,6 +13,7 @@ import {
   scheduleRuns,
   schedules,
   user,
+  userApprovals,
 } from "~/db/schema/index.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -26,7 +27,7 @@ import { ScheduleService } from "~/modules/schedules/server/service.ts";
 import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { checkScheduleResources } from "~/modules/schedules/server/validate.ts";
+import { checkScheduleResources, firstFireAt } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -67,6 +68,7 @@ const makeUser = Effect.fn("test.makeUser")(function* () {
   const db = yield* Db;
   const userId = uuidv7();
   yield* db.insert(user).values({ id: userId, name: "Owner", email: `${userId}@t.io` });
+  yield* db.insert(userApprovals).values({ userId, status: "approved" });
   return userId;
 });
 
@@ -107,6 +109,46 @@ const chat = (userId: string, scheduleId: string | null = null) =>
   });
 
 describe("schedule claims", () => {
+  it.each([-86_400_000, 86_400_000])(
+    "reschedules against the claim clock with application skew %i",
+    async (skew) => {
+      const row = await run(
+        Effect.gen(function* () {
+          const userId = yield* makeUser();
+          return yield* insert(userId, {
+            cron: "0 * * * *",
+            nextFireAt: new Date(Date.now() - 3_600_000),
+            endAt: new Date(Date.now() + 7_200_000),
+          });
+        }),
+      );
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.now() + skew);
+      try {
+        const result = await run(
+          Effect.gen(function* () {
+            const repo = yield* ScheduleRepo;
+            const claimed = yield* repo.claimDue(25, (schedule, claimedAt) =>
+              firstFireAt(schedule, claimedAt),
+            );
+            const second = yield* repo.claimDue(25, (schedule, claimedAt) =>
+              firstFireAt(schedule, claimedAt),
+            );
+            return { claimed: claimed.find((entry) => entry.id === row.id), second };
+          }),
+        );
+        expect(result.claimed).toBeDefined();
+        expect(result.claimed!.nextFireAt).toEqual(firstFireAt(row, result.claimed!.lastFiredAt!));
+        expect(result.claimed!.nextFireAt!.getTime()).toBeGreaterThan(
+          result.claimed!.lastFiredAt!.getTime(),
+        );
+        expect(result.second.some((entry) => entry.id === row.id)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("claims a due schedule exactly once and reschedules from now", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -805,6 +847,76 @@ describe("manual schedule fires", () => {
         );
         expect(settled.row).toMatchObject({ status: "error", conversationId: null });
         expect(settled.unchanged?.nextFireAt).toEqual(schedule.nextFireAt);
+      } finally {
+        await serviceRuntime.dispose();
+      }
+    },
+  );
+});
+
+describe("scheduled account eligibility", () => {
+  it.each(["pending", "rejected", "banned"] as const)(
+    "skips a %s account before invoking the fire",
+    async (state) => {
+      const { owner, schedule } = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const userId = yield* makeUser();
+          if (state === "banned")
+            yield* db.update(user).set({ banned: true }).where(eq(user.id, userId));
+          else
+            yield* db
+              .update(userApprovals)
+              .set({ status: state })
+              .where(eq(userApprovals.userId, userId));
+          return { owner: userId, schedule: yield* insert(userId) };
+        }),
+      );
+      const published = Effect.runSync(Deferred.make<void>());
+      const fire = vi.fn(() => Effect.succeed({ conversationId: null, error: "unexpected fire" }));
+      const serviceRuntime = ManagedRuntime.make(
+        ScheduleService.layer.pipe(
+          Layer.provideMerge(FeaturePolicy.layer),
+          Layer.provideMerge(Layer.succeed(ScheduleFire, ScheduleFire.of(fire))),
+          Layer.provideMerge(settlement),
+          Layer.provideMerge(
+            Layer.succeed(
+              SyncBus,
+              SyncBus.of({
+                publish: (_userId, event) =>
+                  event.type === "schedule.run.changed" && event.scheduleId === schedule.id
+                    ? Deferred.succeed(published, undefined).pipe(Effect.asVoid)
+                    : Effect.void,
+              } as SyncBus["Service"]),
+            ),
+          ),
+          Layer.provideMerge(Layer.succeed(AgentRepo, {} as AgentRepo["Service"])),
+          Layer.provideMerge(Layer.succeed(ProviderRepo, {} as ProviderRepo["Service"])),
+          Layer.provideMerge(Db.layer),
+          Layer.provideMerge(
+            PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 8 }),
+          ),
+        ),
+      );
+      try {
+        await serviceRuntime.runPromise(
+          Effect.gen(function* () {
+            yield* (yield* ScheduleService).runNow(owner, schedule.id);
+            yield* Deferred.await(published);
+          }),
+        );
+        expect(fire).not.toHaveBeenCalled();
+        const [row] = await run(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            return yield* db
+              .select()
+              .from(scheduleRuns)
+              .where(eq(scheduleRuns.scheduleId, schedule.id));
+          }),
+        );
+        expect(row).toMatchObject({ status: "skipped", conversationId: null });
+        expect(row!.settledAt).not.toBeNull();
       } finally {
         await serviceRuntime.dispose();
       }

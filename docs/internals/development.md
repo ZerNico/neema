@@ -40,9 +40,13 @@ than given a schema its code cannot run.
 
 Import restores into a fresh database and copies blobs into a fresh directory.
 Migration history must match the checkout, and every referenced blob must match its
-recorded size and digest. Sessions and OAuth tokens are cleared, OAuth providers are
-disabled, and active generation, research and indexing work is terminalized before
-activation. A non-empty snapshot without a password account is refused, since
+recorded size and digest. Sessions and OAuth tokens are cleared and OAuth providers are
+disabled. Active generation, research and indexing work is terminalized before activation.
+Schedules are paused and their outstanding deliveries settled without notifying. Queued
+messages keep their files but are held until explicitly sent or edited, and email opt-ins
+are disabled. Integration source polling is not paused, so importing connected knowledge
+sources can still make external requests when the copy starts. A non-empty snapshot
+without a password account is refused, since
 disabling OAuth would remove its sign-in path. One atomic manifest rename selects
 the new database, blobs, profile and key together. Failure before activation leaves
 the current selection intact. A successful import removes the state it supersedes;

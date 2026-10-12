@@ -208,12 +208,11 @@ export const checkScheduleResources = (
   });
 
 /** First fire after now, or null once the cadence is past `endAt`. */
-export const firstFireAt = (settings: {
-  cron: string;
-  timezone: string;
-  endAt: Date | null;
-}): Date | null => {
-  const next = nextFireAt(settings.cron, settings.timezone, new Date());
+export const firstFireAt = (
+  settings: { cron: string; timezone: string; endAt: Date | null },
+  from: Date = new Date(),
+): Date | null => {
+  const next = nextFireAt(settings.cron, settings.timezone, from);
   if (!next || (settings.endAt && next > settings.endAt)) return null;
   return next;
 };

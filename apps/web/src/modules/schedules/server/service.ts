@@ -161,8 +161,8 @@ export class ScheduleService extends Context.Service<
           // Answers the reaper ended, and turns a restart cut off, have no
           // turn left to settle them.
           yield* settlement.settle;
-          const claimed = yield* repo.claimDue(ScheduleRepo.batch, (row) =>
-            firstFireAt({ cron: row.cron, timezone: row.timezone, endAt: row.endAt }),
+          const claimed = yield* repo.claimDue(ScheduleRepo.batch, (row, claimedAt) =>
+            firstFireAt({ cron: row.cron, timezone: row.timezone, endAt: row.endAt }, claimedAt),
           );
           for (const { runId, ...row } of claimed) {
             // The pending row committed with the claim, even if this process
