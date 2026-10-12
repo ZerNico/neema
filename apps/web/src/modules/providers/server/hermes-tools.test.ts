@@ -1,12 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Schema, Stream } from "effect";
-import { Prompt, Response, Tool } from "effect/unstable/ai";
+import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { AiError, LanguageModel, Prompt, Response, Tool, Toolkit } from "effect/unstable/ai";
 import type { ChatStreamPart } from "./gateway.ts";
 import {
   hermesToolCalls,
   needsHermesTools,
   renderHermesSystemBlock,
   rewriteHermesPrompt,
+  withHermesTools,
 } from "./hermes-tools.ts";
 
 const webSearch = Tool.make("web_search", {
@@ -36,6 +37,124 @@ const text = (delta: string, metadata?: Response.TextDeltaPartMetadata): ChatStr
 const usage = new Response.Usage({ inputTokens: {}, outputTokens: {} });
 const finish = (reason: Response.FinishReason = "stop"): ChatStreamPart =>
   Response.makePart("finish", { reason, usage });
+
+const noop = Tool.make("noop", { parameters: Tool.EmptyParams, success: Schema.Boolean });
+const providerError = AiError.make({
+  module: "test",
+  method: "stream",
+  reason: new AiError.InvalidOutputError({ description: "Synthetic provider failure" }),
+});
+
+describe("Hermes toolkit execution admission", () => {
+  for (const terminal of [
+    "stop",
+    "tool-calls",
+    "length",
+    "content-filter",
+    "error",
+    "unknown",
+    "other",
+    "failure",
+    "error-part",
+    "eof",
+  ] as const) {
+    for (const intervening of [false, true]) {
+      it.effect(`${terminal} ${intervening ? "with intervening parts" : "immediately"}`, () =>
+        Effect.gen(function* () {
+          const release = yield* Deferred.make<void>();
+          const reached = yield* Deferred.make<void>();
+          let executions = 0;
+          const toolkit = yield* Toolkit.make(noop).pipe(
+            Effect.provide(
+              Toolkit.make(noop).toLayer({
+                noop: () =>
+                  Effect.sync(() => {
+                    executions++;
+                    return true;
+                  }),
+              }),
+            ),
+          );
+          const rawText = (delta: string): Response.StreamPartEncoded => ({
+            type: "text-delta",
+            id: "t1",
+            delta,
+          });
+          const tail: Stream.Stream<Response.StreamPartEncoded, AiError.AiError> =
+            Stream.fromEffect(Deferred.await(release)).pipe(
+              Stream.flatMap((): Stream.Stream<Response.StreamPartEncoded, AiError.AiError> =>
+                terminal === "failure"
+                  ? Stream.fail(providerError)
+                  : terminal === "error-part"
+                    ? Stream.make({ type: "error" as const, error: "Synthetic provider error" })
+                    : terminal === "eof"
+                      ? Stream.empty
+                      : Stream.make({ type: "finish" as const, reason: terminal, usage }),
+              ),
+            );
+          const raw = Stream.fromIterable<Response.StreamPartEncoded>([
+            { type: "text-start", id: "t1" },
+            rawText(call("noop", {})),
+            rawText(call("noop", {})),
+            ...(intervening ? [rawText("still nonterminal"), rawText("more progress")] : []),
+          ]).pipe(
+            Stream.concat(
+              Stream.fromEffect(
+                // The consumer barrier below proves the intervening part was processed.
+                intervening
+                  ? Effect.void
+                  : Deferred.succeed(reached, undefined).pipe(Effect.asVoid),
+              ).pipe(Stream.flatMap(() => tail)),
+            ),
+          );
+          const layer = withHermesTools(
+            Layer.effect(
+              LanguageModel.LanguageModel,
+              LanguageModel.make({
+                streamText: () => raw,
+                generateText: () => Effect.die("Unused test hook"),
+              }),
+            ),
+          );
+          const observed: Response.AnyPart[] = [];
+          const fiber = yield* LanguageModel.streamText({
+            prompt: "Synthetic request",
+            toolkit,
+          }).pipe(
+            Stream.runForEach((part) =>
+              Effect.gen(function* () {
+                observed.push(part);
+                if (part.type === "text-delta" && part.delta === "still nonterminal")
+                  yield* Deferred.succeed(reached, undefined);
+              }),
+            ),
+            Effect.provide(layer),
+            Effect.result,
+            Effect.forkScoped,
+          );
+          yield* Deferred.await(reached);
+          expect(executions).toBe(0);
+          expect(observed.filter((part) => part.type === "tool-call")).toHaveLength(0);
+          yield* Deferred.succeed(release, undefined);
+          const result = yield* Fiber.join(fiber);
+          expect(result._tag).toBe(terminal === "failure" ? "Failure" : "Success");
+          const successful = terminal === "stop" || terminal === "tool-calls";
+          expect(executions).toBe(successful ? 2 : 0);
+          expect(observed.filter((part) => part.type === "tool-result")).toHaveLength(
+            successful ? 2 : 0,
+          );
+          expect(observed.find((part) => part.type === "finish")?.reason).toBe(
+            successful
+              ? "tool-calls"
+              : terminal === "failure" || terminal === "error-part" || terminal === "eof"
+                ? undefined
+                : terminal,
+          );
+        }).pipe(Effect.scoped),
+      );
+    }
+  }
+});
 
 const joinedText = (parts: ChatStreamPart[]) =>
   parts.map((p) => (p.type === "text-delta" ? p.delta : "")).join("");
@@ -274,11 +393,12 @@ describe("rewriteHermesPrompt", () => {
   });
 });
 
-for (const reason of ["content-filter", "error", "unknown", "other"] as const) {
+for (const reason of ["length", "content-filter", "error", "unknown", "other"] as const) {
   it.effect(`never masks ${reason} after a parsed tool call`, () =>
     Effect.gen(function* () {
       const out = yield* run([text(call("web_search", { queries: ["test"] })), finish(reason)]);
       expect(finishReason(out)).toBe(reason);
+      expect(calls(out)).toEqual([]);
       expect(out.find((part) => part.type === "finish")?.usage).toEqual(usage);
     }),
   );

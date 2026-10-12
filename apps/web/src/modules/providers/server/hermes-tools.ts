@@ -191,7 +191,8 @@ const createHermesParser = (input: {
   let pending = "";
   let inCall = false;
   let inFence = false;
-  let calls = 0;
+  let pendingCalls: Array<Part> = [];
+  let terminal = false;
 
   const decodeCall = (raw: string): ParsedCall | null => {
     let parsed: unknown;
@@ -217,7 +218,6 @@ const createHermesParser = (input: {
   };
 
   const emitCall = (out: Array<Part>, call: ParsedCall, id: string) => {
-    calls++;
     out.push(
       Response.makePart("tool-params-start", { id, name: call.name, providerExecuted: false }),
       Response.makePart("tool-params-delta", { id, delta: JSON.stringify(call.params) }),
@@ -243,8 +243,9 @@ const createHermesParser = (input: {
           pending = pending.slice(end + CALL_CLOSE.length);
           inCall = false;
           const call = decodeCall(raw);
-          if (call) emitCall(out, call, yield* input.nextId);
-          else textDelta(out, `${CALL_OPEN}${raw}${CALL_CLOSE}`, textId, metadata);
+          if (call) {
+            if (!terminal) emitCall(pendingCalls, call, yield* input.nextId);
+          } else textDelta(out, `${CALL_OPEN}${raw}${CALL_CLOSE}`, textId, metadata);
           continue;
         }
         const fence = pending.indexOf(FENCE);
@@ -284,13 +285,19 @@ const createHermesParser = (input: {
     return out;
   };
 
-  return { push, flush, calls: () => calls };
+  const complete = (successful: boolean): Array<Part> => {
+    const out = successful && !terminal ? pendingCalls : [];
+    pendingCalls = [];
+    terminal = true;
+    return out;
+  };
+
+  return { push, flush, complete };
 };
 
 /**
- * The response half: text in, text plus `tool-call` parts out, with the
- * finish reason rewritten to `"tool-calls"` when at least one call parsed.
- * Everything that is not a text delta passes through untouched.
+ * Parsed calls stay inert until a successful terminal finish. Failures and EOF
+ * discard them, since a toolkit handler's action cannot be undone afterwards.
  */
 export const hermesToolCalls = <E, R>(
   source: Stream.Stream<Part, E, R>,
@@ -299,48 +306,49 @@ export const hermesToolCalls = <E, R>(
     readonly callable?: ReadonlySet<string>;
     readonly nextId: Effect.Effect<string>;
   },
-): Stream.Stream<Part, E, R> => {
-  const parser = createHermesParser(input);
-  let textId = "hermes-text";
+): Stream.Stream<Part, E, R> =>
+  Stream.suspend(() => {
+    const parser = createHermesParser(input);
+    let textId = "hermes-text";
 
-  const finish = (part: Response.FinishPart): Part =>
-    parser.calls() === 0 ||
-    part.reason === "tool-calls" ||
-    part.reason === "content-filter" ||
-    part.reason === "error" ||
-    part.reason === "unknown" ||
-    part.reason === "other"
-      ? part
-      : Response.makePart("finish", {
-          reason: "tool-calls",
-          usage: part.usage,
-          response: part.response,
-          metadata: part.metadata,
-        });
-
-  const transformed = source.pipe(
-    Stream.mapEffect((part): Effect.Effect<Array<Part>> => {
-      switch (part.type) {
-        case "text-delta":
-          textId = part.id;
-          return parser.push(part.delta, part.id, part.metadata);
-        case "finish":
-          return Effect.succeed([...parser.flush(textId), finish(part)]);
-        case "text-start":
-        case "text-end":
-        case "error":
-          return Effect.succeed([...parser.flush(textId), part]);
-        default:
-          // Reasoning and metadata parts may interleave with a held-back
-          // block; passing them through keeps the block intact.
-          return Effect.succeed([part]);
-      }
-    }),
-    Stream.flattenIterable,
-  );
-  const tail = Stream.suspend(() => Stream.fromIterable(parser.flush(textId)));
-  return transformed.pipe(Stream.concat(tail));
-};
+    const transformed = source.pipe(
+      Stream.mapEffect((part): Effect.Effect<Array<Part>> => {
+        switch (part.type) {
+          case "text-delta":
+            textId = part.id;
+            return parser.push(part.delta, part.id, part.metadata);
+          case "finish": {
+            const calls = parser.complete(part.reason === "stop" || part.reason === "tool-calls");
+            const finish =
+              calls.length === 0
+                ? part
+                : Response.makePart("finish", {
+                    reason: "tool-calls",
+                    usage: part.usage,
+                    response: part.response,
+                    metadata: part.metadata,
+                  });
+            return Effect.succeed([...parser.flush(textId), ...calls, finish]);
+          }
+          case "error":
+            parser.complete(false);
+            return Effect.succeed([...parser.flush(textId), part]);
+          case "text-start":
+          case "text-end":
+            return Effect.succeed([...parser.flush(textId), part]);
+          default:
+            // Reasoning and metadata may interleave with a held-back block.
+            return Effect.succeed([part]);
+        }
+      }),
+      Stream.flattenIterable,
+    );
+    const tail = Stream.suspend(() => {
+      parser.complete(false);
+      return Stream.fromIterable(parser.flush(textId));
+    });
+    return transformed.pipe(Stream.concat(tail));
+  });
 
 // `generateText` is the folded stream: one parser serves both hooks.
 const foldStreamParts = (parts: ReadonlyArray<Part>): Array<Part> => {

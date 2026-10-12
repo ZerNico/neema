@@ -45,7 +45,12 @@ Hermes polyfill and tests are unchanged. Adding a service is a preset, not a bra
 - **No truncated calls run.** Tool calls are emitted only at the end of a round, and not at all
   when it stopped on length, a content filter or an error. Arguments are assembled by index,
   then id (Ollama numbers parallel calls alike, while an id arriving after a call began is the
-  same call's), with relays' repeated argument strings ignored.
+  same call's), with relays' repeated argument strings ignored. Hermes follows the same boundary:
+  parsed text calls stay inert until an explicit successful terminal finish. Length, filter,
+  error, unknown finishes, provider failure and EOF discard them without running handlers.
+- **SSE limits are per event.** The 64 MiB cap counts wire bytes, including ignored fields and
+  line endings, before dispatch and reset. UTF-8 splits and EOF decoding do not bypass it,
+  and a transport chunk containing several bounded events is not capped as one event.
 - **Calls run against the whole toolkit.** A `oneOf` choice narrows what is advertised; a call
   to any toolkit tool still runs, which deferred tools rely on.
 - **Refusals are text**, tagged `modelClient.refusal` in part metadata.
