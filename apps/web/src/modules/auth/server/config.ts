@@ -153,6 +153,7 @@ export function createAppAuth({
     secret,
     database: drizzleAdapter(db, { provider: "pg", schema }),
     emailAndPassword: { enabled: true },
+    account: { encryptOAuthTokens: true },
     socialProviders: socialProvidersFrom(oauthProviders),
     advanced: { database: { generateId: () => uuidv7() } },
     rateLimit: { enabled: rateLimit },

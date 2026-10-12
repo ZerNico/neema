@@ -1,11 +1,13 @@
 import { createServer, type Server } from "node:http";
 import { PgClient } from "@effect/sql-pg";
+import { symmetricDecrypt } from "better-auth/crypto";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { Pool } from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { oauthProviders } from "~/db/schema/index.ts";
+import { account, oauthProviders } from "~/db/schema/index.ts";
 import { createAppAuth, type AuthOAuthProvider } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -15,6 +17,7 @@ import { createTestDatabase, type TestDatabase } from "./database.ts";
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 9).toString("base64");
 
 const origin = "http://localhost:9877";
+const authSecret = "isolated-auth-test-secret-at-least-32-characters";
 let database: TestDatabase;
 let pool: Pool;
 let db: ReturnType<typeof drizzle<typeof relations>>;
@@ -25,10 +28,47 @@ let runtime: ManagedRuntime.ManagedRuntime<OAuthRepo | Db, unknown>;
 // registration test has to serve a real one.
 let idp: Server;
 let idpOrigin: string;
+let subject = "synthetic-user";
+let tokens = { access: "synthetic-access", refresh: "synthetic-refresh" };
+let receivedRefreshTokens: string[] = [];
 
 const startIdp = () =>
   new Promise<void>((resolve) => {
     idp = createServer((request, response) => {
+      if (request.url === "/token") {
+        request.setEncoding("utf8");
+        let body = "";
+        request.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          const params = new URLSearchParams(body);
+          if (params.get("grant_type") === "refresh_token") {
+            receivedRefreshTokens.push(params.get("refresh_token") ?? "");
+          }
+          response.writeHead(200, { "content-type": "application/json" }).end(
+            JSON.stringify({
+              access_token: tokens.access,
+              refresh_token: tokens.refresh,
+              token_type: "Bearer",
+              expires_in: 3600,
+              scope: "openid email",
+            }),
+          );
+        });
+        return;
+      }
+      if (request.url === "/userinfo") {
+        response.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({
+            sub: subject,
+            email: `${subject}@example.invalid`,
+            email_verified: true,
+            name: "Synthetic User",
+          }),
+        );
+        return;
+      }
       if (request.url !== "/.well-known/openid-configuration") {
         response.writeHead(404).end();
         return;
@@ -55,7 +95,7 @@ const authWith = (providers: readonly AuthOAuthProvider[]) =>
   createAppAuth({
     db,
     baseURL: origin,
-    secret: "isolated-auth-test-secret-at-least-32-characters",
+    secret: authSecret,
     purgeUserFiles: async () => {},
     oauthProviders: providers,
   });
@@ -70,6 +110,40 @@ const signInSocial = async (auth: ReturnType<typeof createAppAuth>, provider: st
   );
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
+};
+
+const completeOAuth = async (
+  auth: ReturnType<typeof createAppAuth>,
+  provider: string,
+  sessionCookie = "",
+) => {
+  const response = await auth.handler(
+    new Request(`${origin}/api/auth/${sessionCookie ? "link-social" : "sign-in/social"}`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json", cookie: sessionCookie },
+      body: JSON.stringify({ provider, callbackURL: "/" }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  const { url } = await response.json();
+  const state = new URL(url).searchParams.get("state");
+  expect(state).toBeTruthy();
+  const cookie = response.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+  const callback = await auth.handler(
+    new Request(`${origin}/api/auth/callback/${provider}?code=synthetic-code&state=${state}`, {
+      headers: { cookie: [sessionCookie, cookie].filter(Boolean).join("; ") },
+    }),
+  );
+  expect(callback.status).toBe(302);
+  expect(callback.headers.get("location")).toBe("/");
+  return callback.headers
+    .getSetCookie()
+    .filter((value) => !value.includes("Max-Age=0"))
+    .map((value) => value.split(";")[0])
+    .join("; ");
 };
 
 const repo = <A>(f: (r: OAuthRepo["Service"]) => Effect.Effect<A>) =>
@@ -192,6 +266,75 @@ describe("OAuth provider storage", () => {
     await repo((r) => r.remove("google"));
     expect(await repo((r) => r.list())).toEqual([]);
   });
+});
+
+describe("native OAuth token storage", () => {
+  it.each(["opaque", "hex"])(
+    "encrypts %s tokens through callbacks, linking and refresh",
+    async (format) => {
+      subject = `synthetic-${format}`;
+      receivedRefreshTokens = [];
+      const providers: AuthOAuthProvider[] = ["acme", "other"].map((id) => ({
+        kind: "oidc",
+        id,
+        label: id,
+        clientId: "acme-client",
+        clientSecret: "acme-secret",
+        discoveryUrl: `${idpOrigin}/.well-known/openid-configuration`,
+        scopes: ["openid", "email"],
+      }));
+      const tokenPair = (revision: number) => ({
+        access: format === "hex" ? "ab".repeat(32) + `0${revision}` : `access-${revision}`,
+        refresh: format === "hex" ? "cd".repeat(32) + `0${revision}` : `refresh-${revision}`,
+      });
+      const stored = async (providerId: string) => {
+        const [current] = await db
+          .select()
+          .from(account)
+          .where(and(eq(account.accountId, subject), eq(account.providerId, providerId)));
+        assert(current, "OAuth callback must persist the account");
+        expect(current.accessToken).toBeTruthy();
+        expect(current.refreshToken).toBeTruthy();
+        expect(current.accessToken).not.toBe(tokens.access);
+        expect(current.refreshToken).not.toBe(tokens.refresh);
+        expect(await symmetricDecrypt({ key: authSecret, data: current.accessToken! })).toBe(
+          tokens.access,
+        );
+        expect(await symmetricDecrypt({ key: authSecret, data: current.refreshToken! })).toBe(
+          tokens.refresh,
+        );
+        return current;
+      };
+
+      let auth = authWith(providers);
+      tokens = tokenPair(1);
+      let cookie = await completeOAuth(auth, "acme");
+      const initial = await stored("acme");
+
+      tokens = tokenPair(2);
+      cookie = await completeOAuth(auth, "acme");
+      expect((await stored("acme")).id).toBe(initial.id);
+
+      tokens = tokenPair(3);
+      await completeOAuth(auth, "other", cookie);
+      const linked = await stored("other");
+      expect(linked.userId).toBe(initial.userId);
+
+      // A fresh instance has only the secret and database, not the callback's tokens.
+      auth = authWith(providers);
+      const headers = new Headers({ cookie, origin });
+      expect(
+        await auth.api.getAccessToken({ body: { accountId: linked.id }, headers }),
+      ).toMatchObject({ accessToken: tokens.access });
+      const previousRefresh = tokens.refresh;
+      tokens = tokenPair(4);
+      expect(
+        await auth.api.refreshToken({ body: { accountId: linked.id }, headers }),
+      ).toMatchObject({ accessToken: tokens.access, refreshToken: tokens.refresh });
+      expect(receivedRefreshTokens).toEqual([previousRefresh]);
+      await stored("other");
+    },
+  );
 });
 
 describe("provider registration in the auth instance", () => {

@@ -19,6 +19,14 @@ The image build passes the version and commit into the web build, and the admin 
 shows them. They are declared after dependencies install, so a new version never
 invalidates the dependency layers.
 
+## Authentication secrets
+
+Better Auth encrypts native OAuth access and refresh tokens with `AUTH_SECRET`.
+Provider and integration credentials use the separate `ENCRYPTION_KEY`. Restoring a
+database requires both original keys. Changing `AUTH_SECRET` without re-encrypting
+its tokens requires fresh OAuth authorization. Better Auth’s token-encryption option
+does not encrypt the stored OIDC ID token.
+
 ## Releases
 
 Push a tag such as `v1.2.3`, or `v1.2.3-rc.1` for a prerelease. `release.yml` then:
