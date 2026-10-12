@@ -6,7 +6,7 @@ import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { usageEvents } from "~/db/schema/index.ts";
+import { usageEvents, userApprovals } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -200,6 +200,7 @@ const makeUser = Effect.fn("test.makeUser")(function* () {
   yield* db.execute(
     `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
   );
+  yield* db.insert(userApprovals).values({ userId, status: "approved" });
   return userId;
 });
 
@@ -780,6 +781,86 @@ describe("usage aggregates", () => {
     expect(result.hour).toHaveLength(1);
   });
 
+  it.each([
+    {
+      label: "known plus null",
+      entries: [
+        { cost: 2, usageComplete: true },
+        { cost: null, usageComplete: true },
+      ],
+      cost: 2,
+      complete: false,
+    },
+    {
+      label: "known plus incomplete usage",
+      entries: [
+        { cost: 2, usageComplete: true },
+        { cost: 1, usageComplete: false },
+      ],
+      cost: 3,
+      complete: false,
+    },
+    {
+      label: "complete zero",
+      entries: [{ cost: 0, usageComplete: true }],
+      cost: 0,
+      complete: true,
+    },
+    {
+      label: "unknown only",
+      entries: [{ cost: null, usageComplete: true }],
+      cost: 0,
+      complete: false,
+    },
+    {
+      label: "complete positive",
+      entries: [{ cost: 2, usageComplete: true }],
+      cost: 2,
+      complete: true,
+    },
+  ])(
+    "preserves summary cost completeness in both grouped views: $label",
+    async ({ entries, cost, complete }) => {
+      const result = await run(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const analytics = yield* AnalyticsRepo;
+          const userId = yield* makeUser();
+          yield* db.insert(usageEvents).values(
+            entries.map((entry) => ({
+              id: uuidv7(),
+              userId,
+              modelId: null,
+              modelName: "Completeness fixture",
+              kind: "chat" as const,
+              status: "complete" as const,
+              inputTokens: 10,
+              outputTokens: 5,
+              cachedInputTokens: 0,
+              cacheWriteTokens: null,
+              reasoningTokens: 0,
+              ...entry,
+              costSource: entry.cost === null ? null : ("provider" as const),
+              createdAt: WINDOW_FROM,
+            })),
+          );
+          const scope = { from: WINDOW_FROM, to: WINDOW_TO, userId };
+          return {
+            summary: yield* analytics.summary(scope),
+            models: yield* analytics.byModel(scope),
+            users: (yield* analytics.byUser(scope)).filter((row) => row.userId === userId),
+          };
+        }),
+      );
+      const expected = { cost, costComplete: complete };
+      expect(result.summary).toMatchObject(expected);
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0]).toMatchObject(expected);
+      expect(result.users).toHaveLength(1);
+      expect(result.users[0]).toMatchObject(expected);
+    },
+  );
+
   it("groups by model and by user, ordered by tokens", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -872,7 +953,14 @@ describe("embedding ledger isolation", () => {
     expect(result.daily).toHaveLength(1);
     expect(result.daily[0]).toMatchObject({ messages: 0, attempts: 2, cost: 0.02 });
     expect(result.models).toEqual([
-      { modelName: "Embedding model", messages: 0, inputTokens: 1000, outputTokens: 0, cost: 0.02 },
+      {
+        modelName: "Embedding model",
+        messages: 0,
+        inputTokens: 1000,
+        outputTokens: 0,
+        cost: 0.02,
+        costComplete: false,
+      },
     ]);
     expect(result.events).toHaveLength(2);
     for (const event of result.events) {

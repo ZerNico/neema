@@ -62,7 +62,7 @@ export interface UsageSummary {
   cacheWriteTokens: number;
   reasoningTokens: number;
   cost: number;
-  /** False when any event in range has unknown cost, so the total is a floor. */
+  /** False when any event has unknown cost or incomplete usage, so the sum is a floor. */
   costComplete: boolean;
   activeUsers: number;
 }
@@ -86,6 +86,7 @@ export interface UsageByModel {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  costComplete: boolean;
 }
 
 export interface UsageByUser {
@@ -96,6 +97,7 @@ export interface UsageByUser {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  costComplete: boolean;
 }
 
 const inWindow = (scope: UsageScope) =>
@@ -128,6 +130,10 @@ export class AnalyticsRepo extends Context.Service<
         cost: sql<number>`coalesce(sum(${usageEvents.cost}), 0)`,
       };
 
+      const costCompleteness = {
+        costComplete: sql<boolean>`count(*) filter (where ${usageEvents.cost} is null or not ${usageEvents.usageComplete}) = 0`,
+      };
+
       // Only summary and daily need these; the grouped tables stay narrow.
       const detail = {
         attempts: sql<number>`count(*)::int`,
@@ -154,7 +160,7 @@ export class AnalyticsRepo extends Context.Service<
               titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
               compactionGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'compaction')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
-              unknownCost: sql<number>`count(*) filter (where ${usageEvents.cost} is null or not ${usageEvents.usageComplete})::int`,
+              ...costCompleteness,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
               cacheWriteTokens: sql`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`.mapWith(
                 tokenTotal,
@@ -177,7 +183,7 @@ export class AnalyticsRepo extends Context.Service<
             cacheWriteTokens: row.cacheWriteTokens,
             reasoningTokens: row.reasoningTokens,
             cost: row.cost,
-            costComplete: row.unknownCost === 0,
+            costComplete: row.costComplete,
             activeUsers: row.activeUsers,
           };
         }),
@@ -195,7 +201,7 @@ export class AnalyticsRepo extends Context.Service<
 
         byModel: Effect.fn("AnalyticsRepo.byModel")(function* (scope) {
           return yield* db
-            .select({ modelName: usageEvents.modelName, ...sums })
+            .select({ modelName: usageEvents.modelName, ...sums, ...costCompleteness })
             .from(usageEvents)
             .where(inScope(scope))
             .groupBy(usageEvents.modelName)
@@ -205,7 +211,13 @@ export class AnalyticsRepo extends Context.Service<
 
         byUser: Effect.fn("AnalyticsRepo.byUser")(function* (scope) {
           return yield* db
-            .select({ userId: user.id, name: user.name, email: user.email, ...sums })
+            .select({
+              userId: user.id,
+              name: user.name,
+              email: user.email,
+              ...sums,
+              ...costCompleteness,
+            })
             .from(usageEvents)
             .innerJoin(user, eq(user.id, usageEvents.userId))
             .where(inWindow(scope))

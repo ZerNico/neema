@@ -457,7 +457,7 @@ export function UsageOverview({
             row.modelName,
             formatCount(row.messages),
             formatTokens(row.inputTokens + row.outputTokens),
-            row.cost > 0 ? formatCost(row.cost) : "–",
+            groupedCost(row),
           ])}
         />
       </ChartCard>
@@ -513,6 +513,9 @@ export function UsageTable({
   );
 }
 
+const groupedCost = ({ cost, costComplete }: Pick<UsageByModel, "cost" | "costComplete">) =>
+  costComplete ? formatCost(cost) : cost > 0 ? `At least ${formatCost(cost)} (partial)` : "Unknown";
+
 export function UsersTable({ byUser }: { byUser: readonly UsageByUser[] }) {
   return (
     <UsageTable
@@ -521,7 +524,7 @@ export function UsersTable({ byUser }: { byUser: readonly UsageByUser[] }) {
         `${row.name} (${row.email})`,
         formatCount(row.messages),
         formatTokens(row.inputTokens + row.outputTokens),
-        row.cost > 0 ? formatCost(row.cost) : "–",
+        groupedCost(row),
       ])}
     />
   );

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -79,13 +79,21 @@ const data = {
     },
   ],
   byModel: [
-    { modelName: "Fast One", messages: 30, inputTokens: 900_000, outputTokens: 200_000, cost: 1 },
+    {
+      modelName: "Fast One",
+      messages: 30,
+      inputTokens: 900_000,
+      outputTokens: 200_000,
+      cost: 1,
+      costComplete: true,
+    },
     {
       modelName: "Slow One",
       messages: 12,
       inputTokens: 300_000,
       outputTokens: 100_000,
       cost: 0.25,
+      costComplete: true,
     },
   ],
   // Deliberately different numbers from the summary so text queries in the
@@ -99,6 +107,7 @@ const data = {
       inputTokens: 800_000,
       outputTokens: 150_000,
       cost: 0.95,
+      costComplete: true,
     },
   ],
 };
@@ -120,6 +129,38 @@ const renderPage = (override?: Partial<typeof data>) => {
 };
 
 describe("AnalyticsPage", () => {
+  it("qualifies grouped costs for models and users without confusing unknown with free", async () => {
+    const costs = [
+      { label: "Complete", cost: 1.25, costComplete: true, text: "$1.25" },
+      { label: "Partial", cost: 1.25, costComplete: false, text: "At least $1.25 (partial)" },
+      { label: "Free", cost: 0, costComplete: true, text: "$0" },
+      { label: "Unknown", cost: 0, costComplete: false, text: "Unknown" },
+    ];
+    renderPage({
+      byModel: costs.map((row) => ({
+        ...data.byModel[0]!,
+        modelName: `Model ${row.label}`,
+        cost: row.cost,
+        costComplete: row.costComplete,
+      })),
+      byUser: costs.map((row) => ({
+        ...data.byUser[0]!,
+        userId: row.label,
+        name: `User ${row.label}`,
+        cost: row.cost,
+        costComplete: row.costComplete,
+      })),
+    });
+    for (const cost of costs) {
+      for (const prefix of ["Model", "User"]) {
+        const row = await screen.findByRole("row", {
+          name: new RegExp(`^${prefix} ${cost.label} `),
+        });
+        const cells = within(row).getAllByRole("cell");
+        expect(cells.at(-1)?.textContent).toBe(cost.text);
+      }
+    }
+  });
   it("shows the KPI tiles from the summary", async () => {
     renderPage();
     // "Messages"/"42" recur in the tables below; the KPI row renders first,
