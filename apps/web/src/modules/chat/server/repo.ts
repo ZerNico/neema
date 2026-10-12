@@ -108,6 +108,12 @@ import {
   WorkDesktopRequired,
 } from "../errors.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import {
+  lockAccount,
+  requireEligibleAccount,
+  type AccountIneligible,
+} from "~/modules/auth/server/account-eligibility.ts";
+import type { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 
 export type TurnContent =
   | { content: string; questionResponse?: never }
@@ -240,6 +246,8 @@ export interface ConversationDefaults {
   readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
 }
 export type ResolveError =
+  | AccountIneligible
+  | IntegrationNotAvailable
   | AgentNotAvailable
   | WorkDesktopRequired
   | SkillNotAvailable
@@ -296,6 +304,10 @@ export type TurnFields = {
   /** Standalone collections selected for this message only. */
   collectionIds?: ReadonlyArray<string> | undefined;
   skillIds?: ReadonlyArray<string> | undefined;
+  /** Composer choices are saved with the turn, before its attempt is opened. */
+  saveIntegrationChoices?:
+    | ((tx: DbTx, conversationId: string) => Effect.Effect<void, IntegrationNotAvailable>)
+    | undefined;
   /** Absent means a plain generation; the service always supplies one. */
   resolve?: ResolveGeneration | undefined;
 };
@@ -933,6 +945,7 @@ export class ChatRepo extends Context.Service<
      * finds the entry gone rather than writing a second turn.
      */
     promoteNextQueuedTurn(input: {
+      userId: string;
       conversationId: string;
       /**
        * The head the caller validated. A removal or edit can change it before
@@ -940,6 +953,7 @@ export class ChatRepo extends Context.Service<
        * starting an entry nobody checked.
        */
       expectedEntryId: string;
+      expectedRevision: number;
       /**
        * Start that entry even if it is not first: a person pressed Send now
        * on it. Otherwise only the head starts.
@@ -949,7 +963,10 @@ export class ChatRepo extends Context.Service<
       /** A person asking explicitly may start after a stop or a failure. */
       force?: boolean | undefined;
     }): Effect.Effect<
-      | { promoted: false; reason: "busy" | "unsettled" | "question" | "empty" | "changed" }
+      | {
+          promoted: false;
+          reason: "busy" | "unsettled" | "question" | "empty" | "changed" | "held";
+        }
       | {
           promoted: true;
           entry: QueueEntry;
@@ -970,7 +987,11 @@ export class ChatRepo extends Context.Service<
       mode: "chat" | "work";
       userId?: string | undefined;
     }): Effect.Effect<Array<{ userId: string; conversationId: string }>>;
-    setQueueEntryError(entryId: string, message: string | null): Effect.Effect<void>;
+    setQueueEntryError(
+      entryId: string,
+      revision: number,
+      message: string | null,
+    ): Effect.Effect<void>;
     listQueue(conversationId: string): Effect.Effect<QueuedMessage[]>;
     /** See `readQueueGate`: whether the queue may move right now, and if not, why. */
     queueGate(conversationId: string): Effect.Effect<QueueGate>;
@@ -1008,12 +1029,13 @@ export class ChatRepo extends Context.Service<
       userId: string;
       conversationId: string;
       entryId: string;
+      expectedRevision: number;
       messageId: string;
       generationId: string;
     }): Effect.Effect<void, ConversationNotFound | QueueEntryNotFound | NoActiveGeneration>;
     /**
-     * Inside the running generation, under its fence: turns every entry aimed
-     * at it into a user message, in queue order, moving its files along.
+     * Account-first, then under the generation fence: admits matching steers
+     * with their files or holds them without failing the accepted answer.
      */
     claimSteeredEntries(input: {
       conversationId: string;
@@ -1022,7 +1044,7 @@ export class ChatRepo extends Context.Service<
       textOffset: number;
       /** The model round the steer followed. */
       turnIndex: number;
-    }): Effect.Effect<Array<SteeredMessage>>;
+    }): Effect.Effect<{ steered: Array<SteeredMessage>; held: boolean }>;
     getConversationDefaults(conversationId: string): Effect.Effect<ConversationDefaults>;
     /**
      * Private attempt execution record. Missing rows are an invariant violation;
@@ -1879,6 +1901,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* lockAccount(tx, input.userId);
                 const conversationId = input.conversation.id;
                 if (input.scheduleRunId) {
                   const [pending] = yield* tx
@@ -2081,6 +2104,8 @@ export class ChatRepo extends Context.Service<
                     ? { agent: null, mode: conversation.mode, projectId: conversation.projectId }
                     : yield* readDefaults(tx, conversation.id);
                 const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
+                if (input.saveIntegrationChoices)
+                  yield* input.saveIntegrationChoices(tx, conversation.id);
                 if (association)
                   yield* tx
                     .insert(conversationAgents)
@@ -2155,13 +2180,20 @@ export class ChatRepo extends Context.Service<
             );
         }),
 
-        setQueueEntryError: Effect.fn("ChatRepo.setQueueEntryError")(function* (entryId, message) {
-          yield* db
-            .update(conversationQueueEntries)
-            .set({ lastError: message })
-            .where(eq(conversationQueueEntries.id, entryId))
-            .pipe(Effect.orDie);
-        }),
+        setQueueEntryError: Effect.fn("ChatRepo.setQueueEntryError")(
+          function* (entryId, revision, message) {
+            yield* db
+              .update(conversationQueueEntries)
+              .set({ lastError: message })
+              .where(
+                and(
+                  eq(conversationQueueEntries.id, entryId),
+                  eq(conversationQueueEntries.revision, revision),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
 
         listQueuedConversations: Effect.fn("ChatRepo.listQueuedConversations")(function* (input) {
           // Only conversations a dispatch could start. Question-held queues
@@ -2192,12 +2224,14 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* lockAccount(tx, input.userId);
                 const [conversation] = yield* tx
                   .select()
                   .from(conversations)
                   .where(
                     and(
                       eq(conversations.id, input.conversationId),
+                      eq(conversations.userId, input.userId),
                       isNull(conversations.deletedAt),
                     ),
                   )
@@ -2228,8 +2262,10 @@ export class ChatRepo extends Context.Service<
                     promoted: false,
                     reason: input.jumpQueue ? "changed" : "empty",
                   } as const;
-                if (entry.id !== input.expectedEntryId)
+                if (entry.id !== input.expectedEntryId || entry.revision !== input.expectedRevision)
                   return { promoted: false, reason: "changed" } as const;
+                if (entry.lastError && !(input.force && input.jumpQueue))
+                  return { promoted: false, reason: "held" } as const;
 
                 const [userMessage] = yield* tx
                   .insert(messages)
@@ -2355,6 +2391,7 @@ export class ChatRepo extends Context.Service<
                   .set({
                     content: input.content,
                     input: input.input,
+                    revision: sql`${conversationQueueEntries.revision} + 1`,
                     steerMessageId: null,
                     steerGenerationId: null,
                     lastError: null,
@@ -2412,7 +2449,10 @@ export class ChatRepo extends Context.Service<
               Effect.gen(function* () {
                 yield* lockOwnedConversation(tx, input.userId, input.conversationId);
                 const [entry] = yield* tx
-                  .select({ id: conversationQueueEntries.id })
+                  .select({
+                    id: conversationQueueEntries.id,
+                    revision: conversationQueueEntries.revision,
+                  })
                   .from(conversationQueueEntries)
                   .where(
                     and(
@@ -2421,7 +2461,8 @@ export class ChatRepo extends Context.Service<
                     ),
                   )
                   .pipe(Effect.orDie);
-                if (!entry) return yield* new QueueEntryNotFound({ entryId: input.entryId });
+                if (!entry || entry.revision !== input.expectedRevision)
+                  return yield* new QueueEntryNotFound({ entryId: input.entryId });
                 const [message] = yield* tx
                   .select({ id: messages.id })
                   .from(messages)
@@ -2438,7 +2479,12 @@ export class ChatRepo extends Context.Service<
                   return yield* new NoActiveGeneration({ conversationId: input.conversationId });
                 yield* tx
                   .update(conversationQueueEntries)
-                  .set({ steerMessageId: input.messageId, steerGenerationId: input.generationId })
+                  .set({
+                    steerMessageId: input.messageId,
+                    steerGenerationId: input.generationId,
+                    revision: sql`${conversationQueueEntries.revision} + 1`,
+                    lastError: null,
+                  })
                   .where(eq(conversationQueueEntries.id, input.entryId))
                   .pipe(Effect.orDie);
               }),
@@ -2448,66 +2494,87 @@ export class ChatRepo extends Context.Service<
 
         claimSteeredEntries: Effect.fn("ChatRepo.claimSteeredEntries")(function* (input) {
           const fence = yield* GenerationFence;
-          if (!fence) return [] as Array<SteeredMessage>;
-          // Under the generation's own fence: a stopped or superseded attempt
-          // is interrupted here, leaving every entry queued with its files.
-          return yield* generationWrite((tx) =>
-            Effect.gen(function* () {
-              const entries = yield* tx
-                .select()
-                .from(conversationQueueEntries)
-                .where(
-                  and(
-                    eq(conversationQueueEntries.conversationId, input.conversationId),
-                    eq(conversationQueueEntries.steerMessageId, input.messageId),
-                    eq(conversationQueueEntries.steerGenerationId, fence.generationId),
-                  ),
-                )
-                .orderBy(asc(conversationQueueEntries.id))
-                .pipe(Effect.orDie);
-              const steered: Array<SteeredMessage> = [];
-              if (entries.length === 0) return steered;
-              // One at a time, in queue order: uuidv7 ids break the createdAt
-              // tie between steers claimed together. They sort after their
-              // answer, which began before them, and before anything later,
-              // since nothing else can join the conversation while it runs.
-              for (const entry of entries) {
-                const [message] = yield* tx
-                  .insert(messages)
-                  .values({
-                    id: uuidv7(),
-                    conversationId: input.conversationId,
-                    role: "user",
-                    status: "complete",
-                    content: entry.content,
-                    steeredIntoMessageId: input.messageId,
-                    steerTextOffset: input.textOffset,
-                    steerTurnIndex: input.turnIndex,
-                  })
-                  .returning()
+          if (!fence) return { steered: [] as Array<SteeredMessage>, held: false };
+          if (input.conversationId !== fence.conversationId || input.messageId !== fence.messageId)
+            return yield* Effect.interrupt;
+          // A steer admits fresh input, but refusal must not fail the accepted
+          // answer. Take the account lock before the generation's locks.
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const refusal = yield* requireEligibleAccount(tx, fence.userId).pipe(
+                  Effect.as(null),
+                  Effect.catchTag("AccountIneligible", Effect.succeed),
+                );
+                yield* lockGeneration(tx, fence);
+                const matching = and(
+                  eq(conversationQueueEntries.conversationId, fence.conversationId),
+                  eq(conversationQueueEntries.steerMessageId, fence.messageId),
+                  eq(conversationQueueEntries.steerGenerationId, fence.generationId),
+                  isNull(conversationQueueEntries.lastError),
+                );
+                if (refusal) {
+                  const held = yield* tx
+                    .update(conversationQueueEntries)
+                    .set({
+                      lastError:
+                        "This account can’t start messages. Try Send now after access is restored.",
+                    })
+                    .where(matching)
+                    .returning({ id: conversationQueueEntries.id })
+                    .pipe(Effect.orDie);
+                  return { steered: [] as Array<SteeredMessage>, held: held.length > 0 };
+                }
+                const entries = yield* tx
+                  .select()
+                  .from(conversationQueueEntries)
+                  .where(matching)
+                  .orderBy(asc(conversationQueueEntries.id))
                   .pipe(Effect.orDie);
-                yield* attachments.transferQueueEntry(tx, {
-                  queueEntryId: entry.id,
-                  messageId: message!.id,
-                });
-                steered.push({
-                  ...message!,
-                  queueEntryId: entry.id,
-                  ...(entry.input.openDocument ? { openDocument: entry.input.openDocument } : {}),
-                });
-              }
-              yield* tx
-                .delete(conversationQueueEntries)
-                .where(
-                  inArray(
-                    conversationQueueEntries.id,
-                    entries.map((entry) => entry.id),
-                  ),
-                )
-                .pipe(Effect.orDie);
-              return steered;
-            }),
-          );
+                const steered: Array<SteeredMessage> = [];
+                if (entries.length === 0) return { steered, held: false };
+                // One at a time, in queue order: uuidv7 ids break the createdAt
+                // tie between steers claimed together. They sort after their
+                // answer, which began before them, and before anything later,
+                // since nothing else can join the conversation while it runs.
+                for (const entry of entries) {
+                  const [message] = yield* tx
+                    .insert(messages)
+                    .values({
+                      id: uuidv7(),
+                      conversationId: input.conversationId,
+                      role: "user",
+                      status: "complete",
+                      content: entry.content,
+                      steeredIntoMessageId: input.messageId,
+                      steerTextOffset: input.textOffset,
+                      steerTurnIndex: input.turnIndex,
+                    })
+                    .returning()
+                    .pipe(Effect.orDie);
+                  yield* attachments.transferQueueEntry(tx, {
+                    queueEntryId: entry.id,
+                    messageId: message!.id,
+                  });
+                  steered.push({
+                    ...message!,
+                    queueEntryId: entry.id,
+                    ...(entry.input.openDocument ? { openDocument: entry.input.openDocument } : {}),
+                  });
+                }
+                yield* tx
+                  .delete(conversationQueueEntries)
+                  .where(
+                    inArray(
+                      conversationQueueEntries.id,
+                      entries.map((entry) => entry.id),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                return { steered, held: false };
+              }),
+            )
+            .pipe(Effect.catchTag("SqlError", Effect.die));
         }),
 
         getConversationDefaults: (conversationId) => readDefaults(db, conversationId),
@@ -3884,6 +3951,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* lockAccount(tx, input.userId);
                 const lost = { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
                 // Resolve the parent without locking a message first. Every path
                 // that changes eligibility takes the conversation lock before rows.
@@ -4071,6 +4139,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* lockAccount(tx, input.userId);
                 const lost = { claimed: false as const };
                 const target = (yield* tx
                   .select({ conversationId: messages.conversationId })
@@ -4219,6 +4288,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* lockAccount(tx, input.userId);
                 yield* rejectReservedWorkTurn(tx, input.conversationId);
                 const owned = yield* tx
                   .select({ id: conversations.id })

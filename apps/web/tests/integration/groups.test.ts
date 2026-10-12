@@ -12,7 +12,13 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { conversations, modelGroupAccess, models, providers } from "~/db/schema/index.ts";
+import {
+  conversations,
+  modelGroupAccess,
+  models,
+  providers,
+  userApprovals,
+} from "~/db/schema/index.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -167,6 +173,7 @@ const makeUser = Effect.fn("test.makeUser")(function* (role: "user" | "admin" = 
     `insert into "user" (id, name, email, role)
      values ('${userId}', 'Test', '${userId}@t.io', '${role}')` as never,
   );
+  yield* db.insert(userApprovals).values({ userId, status: "approved" });
   return userId;
 });
 

@@ -43,6 +43,10 @@ import {
   documentSteps,
   documents,
   projects,
+  integrationConfigs,
+  conversationIntegrations,
+  user,
+  userApprovals,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
@@ -533,6 +537,12 @@ const setupConversation = Effect.gen(function* () {
   // repo has no user creation, so insert the auth user row directly
   yield* db.execute(
     `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+  );
+  yield* db.execute(
+    `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
+  );
+  yield* db.execute(
+    `insert into session (id, user_id, token, expires_at) values ('${userId}', '${userId}', '${uuidv7()}', now() + interval '1 day')` as never,
   );
   const conversation = yield* repo.createConversation({ userId, modelId: null as never });
   const userMessage = yield* repo.insertMessage({
@@ -3665,6 +3675,9 @@ const seedAnswered = (originalModelId: string) =>
     yield* db.execute(
       `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
     );
+    yield* db.execute(
+      `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
+    );
     const conversation = yield* repo.createConversation({ userId, modelId: originalModelId });
     const userMessage = yield* repo.insertMessage({
       conversationId: conversation.id,
@@ -3719,12 +3732,478 @@ const queueStateOf = (seed: { userId: string; conversation: { id: string } }) =>
     Effect.map((detail) => detail.queueState),
   );
 
+describe("turn acceptance", () => {
+  it("rolls back first-turn integration choices and files when any integration is missing", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* seedAnswered(textModelId);
+        const integrationId = uuidv7();
+        yield* db
+          .insert(integrationConfigs)
+          .values({ id: integrationId, kind: "outline", name: integrationId });
+        const conversationId = uuidv7();
+        const missingId = uuidv7();
+        const file = yield* uploadText(seed.userId, "first.txt", "First turn file");
+        const callsBefore = streamPrompts.length;
+        const failure = yield* chat
+          .sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id: conversationId, mode: "chat" },
+            modelId: textModelId,
+            content: "first turn",
+            attachmentIds: [file.id],
+            searchEnabled: false,
+            researchEnabled: false,
+            integrationChoices: [
+              { integrationId, enabled: true },
+              { integrationId: missingId, enabled: false },
+            ],
+          })
+          .pipe(Effect.flip);
+        const attachmentRepo = yield* AttachmentRepo;
+        return {
+          failure,
+          conversation: yield* db
+            .select()
+            .from(conversations)
+            .where(eq(conversations.id, conversationId)),
+          choices: yield* db
+            .select()
+            .from(conversationIntegrations)
+            .where(eq(conversationIntegrations.conversationId, conversationId)),
+          messages: yield* repo.listMessages(conversationId),
+          files: yield* attachmentRepo.listWithBlobsByIds(seed.userId, [file.id]),
+          links: yield* db
+            .select()
+            .from(messageAttachments)
+            .where(eq(messageAttachments.attachmentId, file.id)),
+          calls: streamPrompts.length - callsBefore,
+          missingId,
+        };
+      }),
+    );
+    expect(result.failure).toMatchObject({
+      _tag: "IntegrationNotAvailable",
+      integrationId: result.missingId,
+    });
+    expect(result.conversation).toEqual([]);
+    expect(result.choices).toEqual([]);
+    expect(result.messages).toEqual([]);
+    expect(result.files).toHaveLength(1);
+    expect(result.links).toEqual([]);
+    expect(result.calls).toBe(0);
+  });
+
+  it("refuses a suspended sender before opening a live turn", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const seed = yield* seedAnswered(textModelId);
+        yield* db.update(user).set({ banned: true }).where(eq(user.id, seed.userId));
+        const failure = yield* chat
+          .sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "denied",
+            attachmentIds: [],
+            searchEnabled: false,
+            researchEnabled: false,
+          })
+          .pipe(Effect.flip);
+        return { failure, messages: yield* repo.listMessages(seed.conversation.id) };
+      }),
+    );
+    expect(result.failure).toMatchObject({ _tag: "AccountIneligible", reason: "banned" });
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages.some((message) => message.status === "streaming")).toBe(false);
+  });
+});
+
 describe("queued turns", () => {
   const queuedInput = () => ({
     modelId: textModelId,
     searchEnabled: false,
     researchEnabled: false,
   });
+  it("refuses a same-id replacement after validation, keeping its new files and options queued", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* seedAnswered(textModelId);
+        const firstFile = yield* uploadText(seed.userId, "first.txt", "First");
+        const nextFile = yield* uploadText(seed.userId, "next.txt", "Next");
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "first",
+          attachmentIds: [firstFile.id],
+          input: queuedInput(),
+        });
+        const validated = yield* Deferred.make<void>();
+        const proceed = yield* Deferred.make<void>();
+        const promote = repo.promoteNextQueuedTurn;
+        const paused = vi.spyOn(repo, "promoteNextQueuedTurn").mockImplementationOnce((input) =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(validated, undefined);
+            yield* Deferred.await(proceed);
+            return yield* promote(input);
+          }),
+        );
+        const pending = yield* Effect.forkChild(
+          chat.dispatchQueuedMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+          }),
+        );
+        yield* Deferred.await(validated);
+        yield* repo.replaceQueueEntry({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+          content: "replacement",
+          attachmentIds: [nextFile.id],
+          input: {
+            ...queuedInput(),
+            modelId: visionModelId,
+            reasoningEffort: null,
+            collectionIds: [],
+            skillIds: [],
+          },
+        });
+        yield* Deferred.succeed(proceed, undefined);
+        const outcome = yield* Fiber.join(pending).pipe(
+          Effect.ensuring(Effect.sync(() => paused.mockRestore())),
+        );
+        const queue = yield* repo.listQueue(seed.conversation.id);
+        yield* repo.setQueueEntryError(entry.id, entry.revision, "stale validation failed");
+        const afterError = yield* repo.listQueue(seed.conversation.id);
+        return {
+          outcome,
+          queue,
+          afterError,
+          transcript: yield* repo.listMessages(seed.conversation.id),
+          nextFileId: nextFile.id,
+        };
+      }),
+    );
+    expect(result.outcome).toEqual({ started: false });
+    expect(result.transcript).toHaveLength(2);
+    expect(result.queue).toMatchObject([
+      {
+        revision: 1,
+        content: "replacement",
+        input: { modelId: visionModelId },
+        attachments: [{ id: result.nextFileId }],
+        lastError: null,
+      },
+    ]);
+    expect(result.afterError[0]?.lastError).toBeNull();
+  });
+
+  it("annotates the selected failing entry instead of the healthy head", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* seedAnswered(textModelId);
+        const first = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "healthy",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const selected = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "invalid",
+          attachmentIds: [],
+          input: { ...queuedInput(), modelId: uuidv7() },
+        });
+        const failure = yield* chat
+          .sendQueuedNow({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            entryId: selected.id,
+          })
+          .pipe(Effect.flip);
+        const queue = yield* repo.listQueue(seed.conversation.id);
+        const ready = yield* repo.listQueuedConversations({
+          mode: "chat",
+          userId: seed.userId,
+          limit: 20,
+        });
+        return {
+          failure,
+          queue,
+          firstId: first.id,
+          selectedId: selected.id,
+          ready: ready.some((row) => row.conversationId === seed.conversation.id),
+        };
+      }),
+    );
+    expect(result.failure).toMatchObject({ _tag: "ModelNotFound" });
+    expect(result.queue.find((entry) => entry.id === result.firstId)?.lastError).toBeNull();
+    expect(result.queue.find((entry) => entry.id === result.selectedId)?.lastError).toEqual(
+      expect.any(String),
+    );
+    expect(result.ready).toBe(true);
+  });
+
+  it("holds imported files through automatic dispatch and releases only a selected Send now", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* seedAnswered(textModelId);
+        const file = yield* uploadText(seed.userId, "imported.txt", "Imported file");
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "imported",
+          attachmentIds: [file.id],
+          input: queuedInput(),
+        });
+        yield* repo.setQueueEntryError(
+          entry.id,
+          entry.revision,
+          "Imported message. Send now or edit it to continue.",
+        );
+        const automatic = yield* chat.dispatchQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+        });
+        const forcedAutomatic = yield* chat.dispatchQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          force: true,
+        });
+        const direct = yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
+          force: true,
+          resolve: plain,
+        });
+        const tail = yield* chat.queueMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "tail",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        yield* chat.replaceQueuedMessage({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: tail.entryId,
+          content: "edited tail",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const held = yield* repo.listQueue(seed.conversation.id);
+        const tailEntry = held.find((row) => row.id === tail.entryId)!;
+        yield* repo.setQueueEntryError(tailEntry.id, tailEntry.revision, "Tail stays held");
+        const beforeSend = (yield* repo.listMessages(seed.conversation.id)).length;
+        const sent = yield* chat.sendQueuedNow({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+        });
+        const answer = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
+        yield* waitForAnswer(answer.id);
+        return {
+          automatic,
+          forcedAutomatic,
+          direct,
+          held,
+          beforeSend,
+          sent,
+          queue: yield* repo.listQueue(seed.conversation.id),
+          fileId: file.id,
+        };
+      }),
+    );
+    expect(result.automatic).toEqual({ started: false });
+    expect(result.forcedAutomatic).toEqual({ started: false });
+    expect(result.direct).toEqual({ promoted: false, reason: "held" });
+    expect(result.beforeSend).toBe(2);
+    expect(result.held[0]?.attachments).toMatchObject([{ id: result.fileId }]);
+    expect(result.sent).toEqual({ started: true });
+    expect(result.queue).toMatchObject([{ content: "edited tail", lastError: "Tail stays held" }]);
+  });
+
+  it("does not let a late dispatch failure hold a newly validated steer", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const chat = yield* ChatService;
+        const seed = yield* setupConversation;
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "valid steer",
+          attachmentIds: [],
+          input: { ...queuedInput(), modelId: uuidv7() },
+        });
+        const failed = yield* Deferred.make<void>();
+        const proceed = yield* Deferred.make<void>();
+        const annotate = repo.setQueueEntryError;
+        const paused = vi
+          .spyOn(repo, "setQueueEntryError")
+          .mockImplementationOnce((entryId, revision, message) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(failed, undefined);
+              yield* Deferred.await(proceed);
+              yield* annotate(entryId, revision, message);
+            }),
+          );
+        return yield* Effect.gen(function* () {
+          const pending = yield* Effect.forkChild(
+            chat
+              .dispatchQueuedMessage({
+                userId: seed.userId,
+                conversationId: seed.conversation.id,
+              })
+              .pipe(Effect.flip),
+          );
+          yield* Deferred.await(failed);
+          const fence = {
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            generationId: seed.assistant.generationId!,
+          };
+          yield* chat.steerQueuedMessage({ ...fence, entryId: entry.id });
+          const staleSteer = yield* repo
+            .steerQueueEntry({
+              ...fence,
+              entryId: entry.id,
+              expectedRevision: entry.revision,
+            })
+            .pipe(Effect.flip);
+          yield* Deferred.succeed(proceed, undefined);
+          const failure = yield* Fiber.join(pending);
+          const queue = yield* repo.listQueue(seed.conversation.id);
+          const claimed = yield* repo
+            .claimSteeredEntries({
+              conversationId: seed.conversation.id,
+              messageId: seed.assistant.id,
+              textOffset: 0,
+              turnIndex: 0,
+            })
+            .pipe(Effect.provideService(GenerationFence, fence));
+          return { failure, queue, claimed, staleSteer };
+        }).pipe(Effect.ensuring(Effect.sync(() => paused.mockRestore())));
+      }),
+    );
+    expect(result.failure).toMatchObject({ _tag: "ModelNotFound" });
+    expect(result.staleSteer).toMatchObject({ _tag: "QueueEntryNotFound" });
+    expect(result.queue[0]?.lastError).toBeNull();
+    expect(result.queue[0]?.revision).toBe(1);
+    expect(result.claimed.steered).toHaveLength(1);
+    expect(result.claimed.steered[0]?.content).toBe("valid steer");
+  });
+
+  it("never claims a held steer until it is deliberately steered again", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const seed = yield* setupConversation;
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "imported steer",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const steer = {
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          entryId: entry.id,
+          expectedRevision: entry.revision,
+          messageId: seed.assistant.id,
+          generationId: seed.assistant.generationId!,
+        };
+        yield* repo.steerQueueEntry(steer);
+        const current = (yield* repo.listQueue(seed.conversation.id))[0]!;
+        yield* repo.setQueueEntryError(
+          entry.id,
+          current.revision,
+          "Imported message. Send now or edit it to continue.",
+        );
+        const claim = repo
+          .claimSteeredEntries({
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            textOffset: 0,
+            turnIndex: 0,
+          })
+          .pipe(Effect.provideService(GenerationFence, steer));
+        const held = yield* claim;
+        const queue = yield* repo.listQueue(seed.conversation.id);
+        yield* repo.steerQueueEntry({ ...steer, expectedRevision: queue[0]!.revision });
+        const released = yield* claim;
+        return { held, queue, released };
+      }),
+    );
+    expect(result.held).toEqual({ steered: [], held: false });
+    expect(result.queue).toHaveLength(1);
+    expect(result.released.steered).toHaveLength(1);
+    expect(result.released.steered[0]?.content).toBe("imported steer");
+  });
+
+  it.each(["unapproved", "banned"] as const)(
+    "rolls back a queued transfer for an %s account",
+    async (reason) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const chat = yield* ChatService;
+          const db = yield* Db;
+          const seed = yield* seedAnswered(textModelId);
+          const file = yield* uploadText(seed.userId, "queued.txt", "Retain me");
+          const entry = yield* repo.enqueue({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "next",
+            attachmentIds: [file.id],
+            input: queuedInput(),
+          });
+          if (reason === "unapproved")
+            yield* db
+              .update(userApprovals)
+              .set({ status: "rejected" })
+              .where(eq(userApprovals.userId, seed.userId));
+          else yield* db.update(user).set({ banned: true }).where(eq(user.id, seed.userId));
+          const failure = yield* chat
+            .dispatchQueuedMessage({ userId: seed.userId, conversationId: seed.conversation.id })
+            .pipe(Effect.flip);
+          return {
+            failure,
+            queue: yield* repo.listQueue(seed.conversation.id),
+            transcript: yield* repo.listMessages(seed.conversation.id),
+            entryId: entry.id,
+            fileId: file.id,
+          };
+        }),
+      );
+      expect(result.failure).toMatchObject({ _tag: "AccountIneligible", reason });
+      expect(result.transcript).toHaveLength(2);
+      expect(result.queue).toMatchObject([
+        { id: result.entryId, content: "next", attachments: [{ id: result.fileId }] },
+      ]);
+      expect(result.queue[0]?.lastError).toEqual(expect.any(String));
+    },
+  );
+
   it("promotes exactly the first queued turn, and only the head the caller checked", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -3751,13 +4230,17 @@ describe("queued turns", () => {
         });
         // Validated against the wrong head: nothing may start, nothing is consumed.
         const stale = yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
           conversationId: seed.conversation.id,
           expectedEntryId: second.id,
+          expectedRevision: second.revision,
           resolve: plain,
         });
         const promoted = yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
           conversationId: seed.conversation.id,
           expectedEntryId: first.id,
+          expectedRevision: first.revision,
           resolve: plain,
         });
         return { stale, promoted, queue: yield* repo.listQueue(seed.conversation.id) };
@@ -3794,7 +4277,7 @@ describe("queued turns", () => {
         const failed = yield* setupConversation;
         yield* finished(failed, "complete");
         const failedEntry = yield* queue(failed);
-        yield* repo.setQueueEntryError(failedEntry.id, "model gone");
+        yield* repo.setQueueEntryError(failedEntry.id, failedEntry.revision, "model gone");
 
         const stopped = yield* setupConversation;
         yield* finished(stopped, "aborted");
@@ -3859,8 +4342,10 @@ describe("queued turns", () => {
           input: queuedInput(),
         });
         const held = yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
           conversationId: seed.conversation.id,
           expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
           resolve: plain,
         });
         const edit = yield* chat
@@ -3915,7 +4400,8 @@ describe("queued turns", () => {
           status: "complete",
           content: "ok",
         });
-        yield* repo.setQueueEntryError((yield* queue(failed)).id, "model gone");
+        const failedEntry = yield* queue(failed);
+        yield* repo.setQueueEntryError(failedEntry.id, failedEntry.revision, "model gone");
         const stopped = yield* setupConversation;
         yield* repo.finalizeMessage({
           messageId: stopped.assistant.id,
@@ -3961,8 +4447,10 @@ describe("queued turns", () => {
           input: queuedInput(),
         });
         return yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
           conversationId: seed.conversation.id,
           expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
           resolve: plain,
         });
       }),
@@ -3997,6 +4485,7 @@ describe("queued turns", () => {
       userId: seed.userId,
       conversationId: seed.conversation.id,
       entryId: entry.id,
+      expectedRevision: entry.revision,
       messageId: seed.assistant.id,
       generationId: seed.assistant.generationId!,
     });
@@ -4028,6 +4517,167 @@ describe("queued turns", () => {
     )!;
     return { seed, file, steer, promptsBefore };
   });
+
+  it.each(["unapproved", "banned"] as const)(
+    "holds fresh steers for an %s account without failing its accepted answer",
+    async (reason) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const chat = yield* ChatService;
+          const engine = yield* StreamEngine;
+          const db = yield* Db;
+          const bus = yield* SyncBus;
+          const seed = yield* setupConversation;
+          const file = yield* uploadText(seed.userId, "held-steer.txt", "Private queued file");
+          const fence = {
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            generationId: seed.assistant.generationId!,
+          };
+          const enqueue = (content: string, attachmentIds: string[] = []) =>
+            repo.enqueue({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+              content,
+              attachmentIds,
+              input: queuedInput(),
+            });
+          const selected = yield* enqueue("Fresh suspended input", [file.id]);
+          const alreadyHeld = yield* enqueue("Already held");
+          const stale = yield* enqueue("Other generation");
+          const ordinary = yield* enqueue("Ordinary queued input");
+          for (const entry of [selected, alreadyHeld, stale])
+            yield* repo.steerQueueEntry({
+              ...fence,
+              entryId: entry.id,
+              expectedRevision: entry.revision,
+            });
+          const current = yield* repo.listQueue(seed.conversation.id);
+          yield* repo.setQueueEntryError(
+            alreadyHeld.id,
+            current.find((entry) => entry.id === alreadyHeld.id)!.revision,
+            "Keep existing hold",
+          );
+          yield* db
+            .update(conversationQueueEntries)
+            .set({ steerGenerationId: uuidv7() })
+            .where(eq(conversationQueueEntries.id, stale.id));
+          const ready = yield* Deferred.make<void>();
+          const collector = yield* Effect.forkChild(
+            bus.subscribe(seed.userId).pipe(
+              Stream.tap((event) =>
+                event.type === "sync.ready" ? Deferred.succeed(ready, undefined) : Effect.void,
+              ),
+              Stream.filter(
+                (event) =>
+                  event.type === "conversation.queue.changed" &&
+                  event.conversationId === seed.conversation.id,
+              ),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          );
+          yield* Deferred.await(ready);
+          const boundary = yield* Deferred.make<void>();
+          const proceed = yield* Deferred.make<void>();
+          const claim = repo.claimSteeredEntries;
+          const paused = vi.spyOn(repo, "claimSteeredEntries").mockImplementationOnce((input) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(boundary, undefined);
+              yield* Deferred.await(proceed);
+              return yield* claim(input);
+            }),
+          );
+          const promptsBefore = streamPrompts.length;
+          let calls = 0;
+          authoringScript = (input) => {
+            calls += 1;
+            if (calls === 1)
+              return Stream.make(
+                AiResponse.makePart("text-delta", { id: "t1", delta: firstRound }),
+              ).pipe(
+                Stream.concat(authoringTool(input, "list_agent_options", { kind: "models" })),
+              ) as Stream.Stream<ChatStreamPart>;
+            return Stream.make(
+              AiResponse.makePart("text-delta", { id: "t2", delta: secondRound }),
+              authoringFinish(),
+            ) as Stream.Stream<ChatStreamPart>;
+          };
+          return yield* Effect.gen(function* () {
+            yield* engine.startGeneration({ ...fence, modelId: textModelId, searchEnabled: false });
+            yield* Deferred.await(boundary);
+            if (reason === "banned")
+              yield* db
+                .update(user)
+                .set({ banned: true, banExpires: null })
+                .where(eq(user.id, seed.userId));
+            else
+              yield* db
+                .update(userApprovals)
+                .set({ status: "rejected" })
+                .where(eq(userApprovals.userId, seed.userId));
+            yield* Deferred.succeed(proceed, undefined);
+            yield* waitForAnswer(seed.assistant.id);
+            const events = Array.from(yield* Fiber.join(collector));
+            const final = yield* repo.getMessage(seed.assistant.id);
+            const queue = yield* repo.listQueue(seed.conversation.id);
+            const transcript = yield* repo.listMessages(seed.conversation.id);
+            yield* db.update(user).set({ banned: false }).where(eq(user.id, seed.userId));
+            yield* db
+              .update(userApprovals)
+              .set({ status: "approved" })
+              .where(eq(userApprovals.userId, seed.userId));
+            const restored = yield* chat.dispatchQueuedMessage({
+              userId: seed.userId,
+              conversationId: seed.conversation.id,
+            });
+            return {
+              final,
+              queue,
+              transcript,
+              events,
+              restored,
+              afterRestore: yield* repo.listQueue(seed.conversation.id),
+              continuation: JSON.stringify(streamPrompts[promptsBefore + 1]?.content),
+              calls: streamPrompts.length - promptsBefore,
+              selectedId: selected.id,
+              heldId: alreadyHeld.id,
+              staleId: stale.id,
+              ordinaryId: ordinary.id,
+              fileId: file.id,
+            };
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                paused.mockRestore();
+                authoringScript = null;
+              }),
+            ),
+          );
+        }),
+      );
+      expect(result.final).toMatchObject({ status: "complete", content: firstRound + secondRound });
+      expect(result.calls).toBe(2);
+      expect(result.transcript).toHaveLength(2);
+      expect(result.continuation).not.toContain("Fresh suspended input");
+      expect(result.continuation).not.toContain("Private queued file");
+      expect(result.events).toHaveLength(1);
+      expect(result.queue.find((entry) => entry.id === result.selectedId)).toMatchObject({
+        content: "Fresh suspended input",
+        lastError: "This account can’t start messages. Try Send now after access is restored.",
+        attachments: [{ id: result.fileId }],
+      });
+      expect(result.queue.find((entry) => entry.id === result.heldId)?.lastError).toBe(
+        "Keep existing hold",
+      );
+      expect(result.queue.find((entry) => entry.id === result.staleId)?.lastError).toBeNull();
+      expect(result.queue.find((entry) => entry.id === result.ordinaryId)?.lastError).toBeNull();
+      expect(result.restored).toEqual({ started: false });
+      expect(result.afterRestore).toEqual(result.queue);
+    },
+  );
 
   it("steers a queued message with a file into the running answer at a model boundary", async () => {
     const result = await runtime.runPromise(
@@ -4106,6 +4756,7 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: entry.id,
+          expectedRevision: entry.revision,
           messageId: seed.assistant.id,
           generationId: seed.assistant.generationId!,
         });
@@ -4206,6 +4857,7 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: entry.id,
+          expectedRevision: entry.revision,
           messageId: seed.assistant.id,
           generationId: seed.assistant.generationId!,
         });
@@ -4396,6 +5048,7 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: steered.id,
+          expectedRevision: steered.revision,
           messageId: seed.assistant.id,
           generationId: seed.assistant.generationId!,
         });
@@ -4411,8 +5064,10 @@ describe("queued turns", () => {
         yield* waitForAnswer(seed.assistant.id);
         const queue = yield* repo.listQueue(seed.conversation.id);
         const promoted = yield* repo.promoteNextQueuedTurn({
+          userId: seed.userId,
           conversationId: seed.conversation.id,
           expectedEntryId: queue[0]!.id,
+          expectedRevision: queue[0]!.revision,
           resolve: () => () => Effect.succeed(PLAIN_GENERATION),
         });
         return {
@@ -4504,6 +5159,71 @@ describe("queued turns", () => {
     expect(result.queue).toEqual(["queued first"]);
   }, 60_000);
 
+  it.each(["stopped", "reaped"] as const)(
+    "leaves a refused steer unchanged after its answer is %s",
+    async (state) => {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const repo = yield* ChatRepo;
+          const db = yield* Db;
+          const seed = yield* setupConversation;
+          const file = yield* uploadText(seed.userId, "unclaimed.txt", "Keep ownership");
+          const entry = yield* repo.enqueue({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "Do not claim or hold",
+            attachmentIds: [file.id],
+            input: queuedInput(),
+          });
+          const fence = {
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: seed.assistant.id,
+            generationId: seed.assistant.generationId!,
+          };
+          yield* repo.steerQueueEntry({
+            ...fence,
+            entryId: entry.id,
+            expectedRevision: entry.revision,
+          });
+          yield* db.update(user).set({ banned: true }).where(eq(user.id, seed.userId));
+          if (state === "stopped")
+            yield* repo.finalizeMessage({
+              messageId: seed.assistant.id,
+              status: "aborted",
+              content: "",
+            });
+          else {
+            yield* db
+              .update(messages)
+              .set({ generationLeaseUntil: sql`clock_timestamp() - interval '1 second'` })
+              .where(eq(messages.id, seed.assistant.id));
+            yield* repo.reapExpiredGenerations();
+          }
+          const claim = yield* Effect.exit(
+            repo
+              .claimSteeredEntries({
+                conversationId: seed.conversation.id,
+                messageId: seed.assistant.id,
+                textOffset: 0,
+                turnIndex: 0,
+              })
+              .pipe(Effect.provideService(GenerationFence, fence)),
+          );
+          return {
+            interrupted: Exit.hasInterrupts(claim),
+            queue: yield* repo.listQueue(seed.conversation.id),
+            fileId: file.id,
+          };
+        }),
+      );
+      expect(result.interrupted).toBe(true);
+      expect(result.queue).toMatchObject([
+        { content: "Do not claim or hold", lastError: null, attachments: [{ id: result.fileId }] },
+      ]);
+    },
+  );
+
   it("lets only the live generation claim a steer, leaving it queued otherwise", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -4520,6 +5240,7 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: entry.id,
+          expectedRevision: entry.revision,
           messageId: seed.assistant.id,
           generationId: seed.assistant.generationId!,
         });
@@ -4552,8 +5273,8 @@ describe("queued turns", () => {
 
     expect(result.staleInterrupted).toBe(true);
     expect(result.afterStale).toBe(1);
-    expect(result.claimed).toHaveLength(1);
-    expect(result.claimed[0]).toMatchObject({
+    expect(result.claimed.steered).toHaveLength(1);
+    expect(result.claimed.steered[0]).toMatchObject({
       content: "change course",
       steeredIntoMessageId: expect.any(String),
     });
@@ -7386,6 +8107,49 @@ describe("custom tool calls", () => {
       };
     };
 
+    const stoppedDraft = (userId: string, conversationId: string, tool: string) =>
+      Effect.gen(function* () {
+        const reached = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let calls = 0;
+        customToolRun = (input) =>
+          Effect.gen(function* () {
+            calls += 1;
+            if (calls === 2) {
+              yield* Deferred.succeed(reached, undefined);
+              yield* Deferred.await(release);
+            }
+            return yield* keeperRun!(input);
+          });
+        draftTwice(tool);
+        return yield* Effect.gen(function* () {
+          const service = yield* ChatService;
+          const { assistantMessageId } = yield* service.sendMessage({
+            userId,
+            conversation: { kind: "existing", id: conversationId },
+            modelId: textModelId,
+            content: "Draft notes.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          yield* Deferred.await(reached);
+          // Turn rows share a timestamp. Stop the accepted answer, not a guessed latest row.
+          const assistant = yield* ChatRepo.use((repo) => repo.getMessage(assistantMessageId));
+          const { stopped } = yield* service.stopGeneration({
+            userId,
+            conversationId,
+            messageId: assistantMessageId,
+            generationId: assistant!.generationId ?? undefined,
+          });
+          expect(stopped).toBe(true);
+          yield* Effect.flatMap(StreamEngine, (engine) =>
+            Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+          );
+          return assistantMessageId;
+        }).pipe(Effect.ensuring(Deferred.interrupt(release)));
+      });
+
     const retry = (userId: string, conversationId: string, messageId: string) =>
       Effect.gen(function* () {
         yield* ChatService.use((service) =>
@@ -7696,49 +8460,16 @@ describe("custom tool calls", () => {
 
     it("keeps what a stopped answer drafted", async () => {
       const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
-      let calls = 0;
-      customToolRun = (input) =>
-        Effect.gen(function* () {
-          calls += 1;
-          // The second call is where the person presses Stop.
-          if (calls === 2)
-            yield* Effect.promise(() =>
-              runtime.runPromise(
-                Effect.gen(function* () {
-                  const [latest] = yield* Effect.flatMap(Db, (db) =>
-                    db
-                      .select()
-                      .from(messages)
-                      .where(eq(messages.conversationId, conversationId))
-                      .orderBy(sql`${messages.createdAt} desc`)
-                      .limit(1),
-                  );
-                  yield* ChatService.use((service) =>
-                    service.stopGeneration({
-                      userId: seed.userId,
-                      conversationId,
-                      messageId: latest!.id,
-                      generationId: latest!.generationId ?? undefined,
-                    }),
-                  );
-                }).pipe(Effect.orDie),
-              ),
-            );
-          return yield* keeperRun!(input);
-        });
       try {
-        draftTwice(tool);
-        const stopped = await runtime.runPromise(
-          answer(seed.userId, conversationId, "Draft notes."),
-        );
+        const stopped = await runtime.runPromise(stoppedDraft(seed.userId, conversationId, tool));
         expect(
           (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(stopped))))?.status,
         ).toBe("aborted");
         const [kept, ...others] = await runtime.runPromise(keptRows(conversationId));
         expect(others).toEqual([]);
-        // The first call's draft at least; the call Stop cut short may not land.
+        // Stop interrupts the second call before it can create a new revision.
         expect(kept?.messageId).toBe(stopped);
-        expect([1, 2]).toContain(kept?.revision);
+        expect(kept?.revision).toBe(1);
       } finally {
         authoringScript = null;
         customToolRun = null;
@@ -7804,42 +8535,14 @@ describe("custom tool calls", () => {
 
     it("continues a stopped answer's draft from its last kept revision", async () => {
       const { seed, conversationId, tool } = await runtime.runPromise(keptSetup);
-      let calls = 0;
-      customToolRun = (input) =>
-        Effect.gen(function* () {
-          calls += 1;
-          if (calls === 2)
-            yield* Effect.promise(() =>
-              runtime.runPromise(
-                Effect.gen(function* () {
-                  const [latest] = yield* Effect.flatMap(Db, (db) =>
-                    db
-                      .select()
-                      .from(messages)
-                      .where(eq(messages.conversationId, conversationId))
-                      .orderBy(sql`${messages.createdAt} desc`)
-                      .limit(1),
-                  );
-                  yield* ChatService.use((service) =>
-                    service.stopGeneration({
-                      userId: seed.userId,
-                      conversationId,
-                      messageId: latest!.id,
-                      generationId: latest!.generationId ?? undefined,
-                    }),
-                  );
-                }).pipe(Effect.orDie),
-              ),
-            );
-          return yield* keeperRun!(input);
-        });
       try {
-        draftTwice(tool);
-        const stopped = await runtime.runPromise(
-          answer(seed.userId, conversationId, "Draft notes."),
-        );
+        const stopped = await runtime.runPromise(stoppedDraft(seed.userId, conversationId, tool));
+        expect(
+          (await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(stopped))))?.status,
+        ).toBe("aborted");
         const [kept] = await runtime.runPromise(keptRows(conversationId));
         expect(kept?.messageId).toBe(stopped);
+        expect(kept?.revision).toBe(1);
         customToolRun = keeperRun;
         let round = 0;
         let notice = "";

@@ -41,7 +41,7 @@ const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: 
   if (gate === "busy") return "running" as const;
   if (gate === "unsettled") return "stopped" as const;
   if (gate === "question") return "question" as const;
-  // Promotion would try it, but it already failed once; a person decides.
+  // An entry error holds every automatic promotion; a person decides.
   return queue[0]?.lastError ? ("failed" as const) : ("ready" as const);
 };
 

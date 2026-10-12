@@ -1188,8 +1188,10 @@ describe("queued message files", () => {
           input: queued(),
         });
         const outcome = yield* repo.promoteNextQueuedTurn({
+          userId,
           conversationId: conversation.id,
           expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
           // A new conversation has no finished answer to follow; a person asked.
           force: true,
           resolve: plain,

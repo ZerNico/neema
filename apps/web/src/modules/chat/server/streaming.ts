@@ -4256,7 +4256,7 @@ export class StreamEngine extends Context.Service<
             // The only safe point: every tool result of this round is terminal
             // and the model is about to be called again anyway, so nothing in
             // flight is cut short. The last round has no call after it.
-            const steered =
+            const { steered, held } =
               fence && round < roundLimit
                 ? yield* repo.claimSteeredEntries({
                     conversationId: input.conversationId,
@@ -4264,7 +4264,12 @@ export class StreamEngine extends Context.Service<
                     textOffset: assembled.length,
                     turnIndex: turn,
                   })
-                : [];
+                : { steered: [], held: false };
+            if (held)
+              yield* sync.publish(input.userId, {
+                type: "conversation.queue.changed",
+                conversationId: input.conversationId,
+              });
             // A completed response/tool batch is one atomic unit. It becomes
             // eligible for compaction only now, after every tool result is
             // terminal; no call can ever be separated from its result.

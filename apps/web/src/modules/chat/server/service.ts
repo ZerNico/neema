@@ -1,4 +1,5 @@
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
+import { requireEligibleAccount } from "~/modules/auth/server/account-eligibility.ts";
 import type { DesktopSubmission, OpenDocument } from "../schema.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
@@ -77,7 +78,7 @@ export type DesktopFolderRef = DesktopSubmission["desktopFolders"] extends
 
 // Omit on the whole input would flatten the content/question-response union;
 // keep the discriminant intact by omitting from the plain fields only.
-type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve"> &
+type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveIntegrationChoices"> &
   TurnContent & {
     /** Integration toggles made in the composer before this chat existed. */
     integrationChoices?: ReadonlyArray<{ integrationId: string; enabled: boolean }> | undefined;
@@ -146,6 +147,8 @@ const queueFailure = (error: { readonly _tag: string }) => {
     case "AttachmentUnsupported":
     case "AttachmentNotAvailable":
       return "A file in this message can’t be read by its model anymore. Edit it or remove it.";
+    case "AccountIneligible":
+      return "This account can’t start messages. Try Send now after access is restored.";
     case "ModelNotFound":
       return "This message’s model is no longer available. Edit it to pick another.";
     default:
@@ -193,6 +196,7 @@ export class ChatService extends Context.Service<
       | SkillRejected
       | KnowledgeNotAvailable
       | KnowledgeRejected
+      | ResolveError
     >;
     queueMessage(
       input: QueueSubmission,
@@ -288,6 +292,7 @@ export class ChatService extends Context.Service<
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
+      | ResolveError
     >;
     /**
      * Continues the last answer after it failed or was stopped: same message,
@@ -320,6 +325,7 @@ export class ChatService extends Context.Service<
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
+      | ResolveError
     >;
     /**
      * Forks the conversation at an assistant message into a new one holding a
@@ -374,6 +380,7 @@ export class ChatService extends Context.Service<
       | SkillRejected
       | KnowledgeNotAvailable
       | KnowledgeRejected
+      | ResolveError
     >;
     /**
      * Winds a streaming assistant message down early, keeping the partial
@@ -470,6 +477,7 @@ export class ChatService extends Context.Service<
       | KnowledgeNotAvailable
       | KnowledgeRejected
       | QuestionUnavailable
+      | ResolveError
     >;
   }
 >()("chat/chat/ChatService") {
@@ -707,6 +715,7 @@ function makeChatService() {
       ): ResolveGeneration =>
       (tx, defaults: ConversationDefaults, continuation) =>
         Effect.gen(function* () {
+          yield* requireEligibleAccount(tx, input.userId);
           // Read here like an agent, so retry and edit meet the project as it is
           // now, and a person who lost access cannot keep working in it.
           const resolvedProject = defaults.projectId
@@ -982,7 +991,7 @@ function makeChatService() {
             Effect.fail(new QueueEntryNotFound({ entryId: input.entryId })),
           ),
         );
-      yield* repo.steerQueueEntry(input);
+      yield* repo.steerQueueEntry({ ...input, expectedRevision: entry.revision });
       yield* queueChanged(input.userId, input.conversationId);
     });
 
@@ -1006,69 +1015,77 @@ function makeChatService() {
       if (conversation.mode === "work" && !input.desktop) return { started: false };
       const queue = yield* repo.listQueue(input.conversationId);
       const head = input.entryId ? queue.find((entry) => entry.id === input.entryId) : queue[0];
-      if (!head) return { started: false };
-      const { model, researchEnabled } = yield* validateGenerationOptions({
-        userId: input.userId,
-        modelId: head.input.modelId,
-        searchEnabled: head.input.searchEnabled,
-        researchEnabled: head.input.researchEnabled,
-        attachmentIds: head.attachments.map((file) => file.id),
-      });
-      const searchAvailable = yield* searchToolEnabled;
-      const outcome = yield* repo.promoteNextQueuedTurn({
-        conversationId: input.conversationId,
-        expectedEntryId: head.id,
-        ...(input.entryId ? { jumpQueue: true } : {}),
-        ...(input.force ? { force: true } : {}),
-        resolve: () =>
-          resolver({
-            attempt: "send",
-            userId: input.userId,
-            model,
-            searchAvailable,
-            searchEnabled: head.input.searchEnabled,
-            researchEnabled,
-            reasoningEffort: head.input.reasoningEffort,
-            allowStaleReasoningEffort: true,
-            collectionIds: head.input.collectionIds,
-            skillIds: head.input.skillIds,
-            // Taken from the dispatching app now, never from queue time.
-            desktopFolders: input.desktop?.desktopFolders,
-            desktopCommands: input.desktop?.desktopCommands,
-            desktopBrowser: input.desktop?.desktopBrowser,
-            fromDesktop: input.desktop?.fromDesktop,
-            desktopExecutorId: input.desktop?.desktopExecutorId,
+      if (!head || (head.lastError && !(input.force && input.entryId))) return { started: false };
+      return yield* Effect.gen(function* () {
+        const { model, researchEnabled } = yield* validateGenerationOptions({
+          userId: input.userId,
+          modelId: head.input.modelId,
+          searchEnabled: head.input.searchEnabled,
+          researchEnabled: head.input.researchEnabled,
+          attachmentIds: head.attachments.map((file) => file.id),
+        });
+        const searchAvailable = yield* searchToolEnabled;
+        const outcome = yield* repo.promoteNextQueuedTurn({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          expectedEntryId: head.id,
+          expectedRevision: head.revision,
+          ...(input.entryId ? { jumpQueue: true } : {}),
+          ...(input.force ? { force: true } : {}),
+          resolve: (entry) =>
+            resolver({
+              attempt: "send",
+              userId: input.userId,
+              model,
+              searchAvailable,
+              searchEnabled: entry.input.searchEnabled,
+              researchEnabled,
+              reasoningEffort: entry.input.reasoningEffort,
+              allowStaleReasoningEffort: true,
+              collectionIds: entry.input.collectionIds,
+              skillIds: entry.input.skillIds,
+              // Taken from the dispatching app now, never from queue time.
+              desktopFolders: input.desktop?.desktopFolders,
+              desktopCommands: input.desktop?.desktopCommands,
+              desktopBrowser: input.desktop?.desktopBrowser,
+              fromDesktop: input.desktop?.fromDesktop,
+              desktopExecutorId: input.desktop?.desktopExecutorId,
+            }),
+        });
+        // A replacement or reordered head needs fresh validation on the next dispatch.
+        if (!outcome.promoted) return { started: false };
+        yield* sync.publish(input.userId, {
+          type: "message.created",
+          conversationId: input.conversationId,
+          messageId: outcome.assistant.id,
+        });
+        yield* queueChanged(input.userId, input.conversationId);
+        yield* engine.startGeneration({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: outcome.assistant.id,
+          generationId: outcome.assistant.generationId ?? undefined,
+          modelId: outcome.entry.input.modelId,
+          searchEnabled: outcome.config.searchEnabled,
+          timeZone: outcome.entry.input.timeZone,
+          openDocument: outcome.entry.input.openDocument,
+          desktopExecutorId: input.desktop?.desktopExecutorId,
+          ...(input.desktop?.desktopFolders !== undefined
+            ? { desktopFolders: input.desktop.desktopFolders }
+            : {}),
+          deviceSessionId: input.desktop?.deviceSessionId,
+          onSettled: ({ status }) =>
+            status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
+        });
+        return { started: true };
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.gen(function* () {
+            yield* repo.setQueueEntryError(head.id, head.revision, queueFailure(error));
+            yield* queueChanged(input.userId, input.conversationId);
           }),
-      });
-      // The head moved between validation and the lock; check the new one.
-      // A chosen entry that went away is simply not started.
-      if (!outcome.promoted && outcome.reason === "changed" && !input.entryId)
-        return yield* startNextQueued(input);
-      if (!outcome.promoted) return { started: false };
-      yield* sync.publish(input.userId, {
-        type: "message.created",
-        conversationId: input.conversationId,
-        messageId: outcome.assistant.id,
-      });
-      yield* queueChanged(input.userId, input.conversationId);
-      yield* engine.startGeneration({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        messageId: outcome.assistant.id,
-        generationId: outcome.assistant.generationId ?? undefined,
-        modelId: outcome.entry.input.modelId,
-        searchEnabled: outcome.config.searchEnabled,
-        timeZone: outcome.entry.input.timeZone,
-        openDocument: outcome.entry.input.openDocument,
-        desktopExecutorId: input.desktop?.desktopExecutorId,
-        ...(input.desktop?.desktopFolders !== undefined
-          ? { desktopFolders: input.desktop.desktopFolders }
-          : {}),
-        deviceSessionId: input.desktop?.deviceSessionId,
-        onSettled: ({ status }) =>
-          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
-      });
-      return { started: true };
+        ),
+      );
     });
 
     /**
@@ -1078,16 +1095,7 @@ function makeChatService() {
      * The entry is kept, never dropped.
      */
     const dispatchQueuedMessage = (input: Parameters<typeof startNextQueued>[0]) =>
-      startNextQueued(input).pipe(
-        Effect.tapError((error) =>
-          Effect.gen(function* () {
-            if (error._tag === "ConversationNotFound") return;
-            const head = (yield* repo.listQueue(input.conversationId))[0];
-            if (head) yield* repo.setQueueEntryError(head.id, queueFailure(error));
-            yield* queueChanged(input.userId, input.conversationId);
-          }),
-        ),
-      );
+      startNextQueued(input);
 
     const sendQueuedNow = Effect.fn("ChatService.sendQueuedNow")(function* (input: {
       userId: string;
@@ -1188,6 +1196,15 @@ function makeChatService() {
         ...(input.collectionIds !== undefined ? { collectionIds: input.collectionIds } : {}),
         ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
         associateAgentId: agentId ?? undefined,
+        saveIntegrationChoices: input.integrationChoices?.length
+          ? (tx, conversationId) =>
+              integrations.setConversationChoices(
+                tx,
+                input.userId,
+                conversationId,
+                input.integrationChoices!,
+              )
+          : undefined,
         resolve: resolver({
           attempt: "send",
           userId: input.userId,
@@ -1215,15 +1232,6 @@ function makeChatService() {
           ? { ...turnFields, questionResponse: input.questionResponse }
           : { ...turnFields, content: input.content },
       );
-
-      // Saved before the generation starts, which reads them as it begins.
-      for (const choice of input.integrationChoices ?? [])
-        yield* integrations.setConversationSetting(
-          input.userId,
-          turn.conversation.id,
-          choice.integrationId,
-          { enabled: choice.enabled },
-        );
 
       return yield* startTurn({
         userId: input.userId,

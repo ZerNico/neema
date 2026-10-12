@@ -1,6 +1,9 @@
 import { notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
+import { UNAUTHENTICATED_BODY } from "~/modules/auth/identity.ts";
+import { NOT_APPROVED_BODY } from "~/modules/auth/signup.ts";
+import type { AccountIneligible } from "~/modules/auth/server/account-eligibility.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -149,6 +152,8 @@ export const sendMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
+          IntegrationNotAvailable: selectedIntegrationGone,
           AgentNotAvailable: selectedAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: selectedKnowledgeGone,
@@ -221,6 +226,8 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
+          IntegrationNotAvailable: selectedIntegrationGone,
           AgentNotAvailable: selectedAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: selectedKnowledgeGone,
@@ -316,6 +323,10 @@ const desktopDispatch = (
  * same failure reads the same wherever it surfaces.
  */
 const refuse = (status: number, message: string) => Effect.die(new Response(message, { status }));
+const accountIneligible = (error: AccountIneligible) =>
+  error.reason === "unapproved"
+    ? refuse(403, NOT_APPROVED_BODY)
+    : refuse(401, UNAUTHENTICATED_BODY);
 const missing = () => refuse(404, "Not found");
 const unknownModel = () => refuse(400, "Unknown model");
 const busy = () => refuse(409, "A response is still generating");
@@ -331,6 +342,7 @@ const attachmentGone = () => refuse(409, "An attachment is no longer available")
 // A new message picks its agent and collections now; a continuing one reuses
 // what its answers used, which may have gone since.
 const selectedAgentGone = () => refuse(404, "The selected agent is not available");
+const selectedIntegrationGone = () => refuse(404, "A selected integration is not available");
 const selectedKnowledgeGone = () => refuse(404, "A selected collection is not available");
 const chatAgentGone = () => refuse(409, "This chat’s agent is no longer available");
 const usedKnowledgeGone = () => refuse(409, "Knowledge this answer used is no longer available");
@@ -424,8 +436,11 @@ export const dispatchQueuedMessage = createServerFn({ method: "POST" })
           desktop: desktopDispatch(data, context.session.session.id),
         }),
       ).pipe(
-        Effect.catchTag("ConversationNotFound", missing),
-        // Every resolution failure reads the same to a person: the queued
+        Effect.catchTags({
+          AccountIneligible: accountIneligible,
+          ConversationNotFound: missing,
+        }),
+        // Other resolution failures read the same to a person: the queued
         // message cannot start right now and is kept for them to decide on.
         Effect.catch(() =>
           Effect.die(new Response("This message could not be started", { status: 409 })),
@@ -447,7 +462,11 @@ export const sendQueuedNow = createServerFn({ method: "POST" })
           desktop: desktopDispatch(data, context.session.session.id),
         }),
       ).pipe(
-        Effect.catchTags({ ConversationNotFound: missing, MessageNotFound: missing }),
+        Effect.catchTags({
+          AccountIneligible: accountIneligible,
+          ConversationNotFound: missing,
+          MessageNotFound: missing,
+        }),
         // The reason is already on the entry; the person sees it in the strip.
         Effect.catch(() =>
           Effect.die(new Response("This message could not be started", { status: 409 })),
@@ -484,6 +503,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
@@ -526,6 +546,7 @@ export const retryMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
@@ -567,6 +588,7 @@ export const resumeMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
@@ -635,6 +657,7 @@ export const editMessage = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.catchTags({
+          AccountIneligible: accountIneligible,
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,

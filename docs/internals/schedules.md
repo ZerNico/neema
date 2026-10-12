@@ -33,8 +33,10 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   row's database-clock lease while it works; a lapsed, unbound attempt is reconciled to
   `error`, never replayed, because replay could duplicate a turn whose outcome is uncertain.
   This also protects slow pre-turn checks and busy-chat waits across a runtime replacement.
-  Revoked schedule permission keeps the row but records a `skipped` fire without a chat;
-  future fires resume on regrant, not missed one-shots. See [feature access](feature-policy.md).
+  Revoked schedule permission keeps the row but records a `skipped` fire without a chat.
+  Account approval and active bans are checked before credentials are resolved, then again
+  under the account lock in turn acceptance. Ineligible accounts also skip the fire.
+  Future fires resume on regrant, not missed one-shots. See [feature access](feature-policy.md).
 
 ## Fires
 

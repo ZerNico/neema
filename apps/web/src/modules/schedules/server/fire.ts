@@ -102,6 +102,11 @@ export class ScheduleFire extends Context.Service<
               // An unattended fire explains itself on the run row instead of
               // failing the schedule: most causes (model gone, instance without
               // search) may fix themselves before the next fire.
+              AccountIneligible: () =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  error: "skipped: the account is not permitted to run schedules",
+                }),
               ModelNotFound: () =>
                 Effect.succeed<FireOutcome>({ conversationId: null, error: "no available model" }),
               ToolUnavailable: () =>

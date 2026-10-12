@@ -2,6 +2,7 @@ import { Context, Duration, Effect, Exit, Layer, Schedule as EffectSchedule } fr
 import { eq } from "drizzle-orm";
 import { schedules } from "~/db/schema/index.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -88,6 +89,16 @@ export class ScheduleService extends Context.Service<
           yield* Effect.forkScoped(
             repo.renewRun(runId).pipe(Effect.delay(Duration.seconds(10)), Effect.forever),
           );
+          if (!(yield* accountEligible(row.userId).pipe(Effect.provideService(Db, db)))) {
+            yield* repo.finishRun(
+              runId,
+              "skipped",
+              "the account is not permitted to run schedules",
+            );
+            yield* settlement.settle;
+            yield* runChanged(row.userId, row.id, runId);
+            return;
+          }
           if (!(yield* policy.can(row.userId, "schedules"))) {
             yield* repo.finishRun(runId, "skipped", "schedule access is not permitted");
             yield* runChanged(row.userId, row.id, runId);

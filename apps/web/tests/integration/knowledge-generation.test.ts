@@ -3,6 +3,7 @@ import { Deferred, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effec
 import { Response, type Prompt } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { userApprovals } from "~/db/schema/index.ts";
 import { SkillService } from "~/modules/skills/server/service.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
@@ -159,6 +160,9 @@ const createUser = async () => {
   const id = uuidv7();
   await exec(
     `insert into "user" (id, name, email, role) values ('${id}', 'U', '${id}@t.io', 'user')`,
+  );
+  await run(
+    Effect.flatMap(Db, (db) => db.insert(userApprovals).values({ userId: id, status: "approved" })),
   );
   return id;
 };
