@@ -1,11 +1,18 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
+import { listPendingIntegrationCalls } from "~/modules/integrations/server/functions.ts";
+import { pendingIntegrationCallsQuery } from "~/modules/integrations/client/queries.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_SESSION_CREATED_EVENT } from "~/modules/auth/ticket-events.ts";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "./use-sync.ts";
 
 vi.mock("~/modules/desktop/client/bridge.ts", () => ({ discardWorkspace: vi.fn() }));
+vi.mock("~/modules/integrations/server/functions.ts", () => ({
+  listPendingIntegrationCalls: vi.fn(),
+  listIntegrationDirectory: vi.fn().mockResolvedValue([]),
+}));
 
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
 
@@ -35,7 +42,98 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const missedPrefixes = [
+  ["drafts"],
+  ["integrations"],
+  ["admin", "integrations"],
+  ["integration-approvals"],
+  ["desktop-sessions"],
+  ["search", "recent-chats"],
+  ["search", "chats"],
+] as const;
+
+function CachedFamily({ queryKey }: { queryKey: readonly string[] }) {
+  const query = useQuery({ queryKey, queryFn: async () => "fresh", staleTime: Infinity });
+  return <output aria-label={queryKey.join("/")}>{query.data}</output>;
+}
+
 describe("useSync", () => {
+  it.each(["reopen", "sync.ready"])(
+    "repairs every missed feed-owned family on %s",
+    async (recovery) => {
+      const client = new QueryClient();
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      for (const queryKey of missedPrefixes) client.setQueryData(queryKey, "stale");
+      client.setQueryData(["unrelated"], "untouched");
+      render(
+        <QueryClientProvider client={client}>
+          <Probe />
+          {missedPrefixes.map((queryKey) => (
+            <CachedFamily key={queryKey.join("/")} queryKey={queryKey} />
+          ))}
+          <CachedFamily queryKey={["unrelated"]} />
+        </QueryClientProvider>,
+      );
+      const source = FakeEventSource.instances.at(-1)!;
+      act(() => source.emit("open"));
+      for (const queryKey of missedPrefixes)
+        expect(screen.getByLabelText(queryKey.join("/"))).toHaveTextContent("stale");
+      act(() => {
+        if (recovery === "reopen") {
+          source.emit("error");
+          source.emit("open");
+        } else source.emit("sync", { type: "sync.ready" });
+      });
+      await waitFor(() => {
+        for (const queryKey of missedPrefixes)
+          expect(screen.getByLabelText(queryKey.join("/"))).toHaveTextContent("fresh");
+      });
+      expect(screen.getByLabelText("unrelated")).toHaveTextContent("untouched");
+      expect(invalidate.mock.calls.every(([filter]) => filter?.queryKey?.length)).toBe(true);
+    },
+  );
+
+  it("discovers a missed approval in the real activity card after recovery", async () => {
+    vi.mocked(listPendingIntegrationCalls).mockResolvedValue([
+      {
+        callId: "call",
+        conversationId: "chat",
+        messageId: "message",
+        integrationId: "service",
+        tool: "read",
+        access: "read",
+        summary: null,
+        targets: [],
+        expiresAt: Date.now() + 60_000,
+      },
+    ]);
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData(pendingIntegrationCallsQuery.queryKey, []);
+    render(
+      <QueryClientProvider client={client}>
+        <Probe />
+        <IntegrationActivityBlock
+          activity={{
+            callId: "call",
+            name: "integration_service__read",
+            family: "integration",
+            status: "running",
+            integrationId: "service",
+            tool: "read",
+            label: "Read a page",
+            access: "read",
+            summary: null,
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    const source = FakeEventSource.instances.at(-1)!;
+    act(() => source.emit("open"));
+    expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
+    act(() => source.emit("sync", { type: "sync.ready" }));
+    expect(await screen.findByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(listPendingIntegrationCalls).toHaveBeenCalledOnce();
+  });
   it("refreshes work policy on conversation changes and preserves in-flight invalidations", async () => {
     const { invalidate, source } = renderSync();
     let release!: () => void;
@@ -327,6 +425,9 @@ describe("identity-gated reconnects", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(reconcile).toHaveBeenCalledTimes(2);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+    for (const queryKey of missedPrefixes) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey });
+    }
     invalidate.mockClear();
     source.emit("sync", { type: "memory.changed" });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });

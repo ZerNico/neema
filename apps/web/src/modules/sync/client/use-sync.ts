@@ -5,6 +5,37 @@ import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
 
+// Prefixes owned by the routing below. Knowledge and work use their coalesced refreshes.
+const recoveryPrefixes = [
+  ["conversations"],
+  ["conversation"],
+  ["memory"],
+  ["sidebar"],
+  ["documents"],
+  ["projects"],
+  ["agents"],
+  ["skills"],
+  ["custom-tools"],
+  ["schedules"],
+  ["schedule"],
+  ["schedule-runs"],
+  ["sharing"],
+  ["admin", "groups"],
+  ["admin", "group-members"],
+  ["admin", "group-capabilities"],
+  ["admin", "default-capabilities"],
+  ["capabilities"],
+  ["chat-models"],
+  ["admin", "models"],
+  ["drafts"],
+  ["integrations"],
+  ["admin", "integrations"],
+  ["integration-approvals"],
+  ["desktop-sessions"],
+  ["search", "recent-chats"],
+  ["search", "chats"],
+] as const;
+
 /**
  * One SSE connection per tab. Applies this user's domain events (from any
  * browser/instance) to the query cache so sidebar and open chats stay in sync.
@@ -94,26 +125,9 @@ export function useSync(
       refreshKnowledge();
       refreshWork();
       if (opened || reconcileIdentity) {
-        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        void queryClient.invalidateQueries({ queryKey: ["conversation"] });
-        void queryClient.invalidateQueries({ queryKey: ["memory"] });
-        void queryClient.invalidateQueries({ queryKey: ["sidebar"] });
-        void queryClient.invalidateQueries({ queryKey: ["documents"] });
-        void queryClient.invalidateQueries({ queryKey: ["projects"] });
-        void queryClient.invalidateQueries({ queryKey: ["agents"] });
-        void queryClient.invalidateQueries({ queryKey: ["skills"] });
-        void queryClient.invalidateQueries({ queryKey: ["custom-tools"] });
-        void queryClient.invalidateQueries({ queryKey: ["schedules"] });
-        void queryClient.invalidateQueries({ queryKey: ["schedule"] });
-        void queryClient.invalidateQueries({ queryKey: ["schedule-runs"] });
-        void queryClient.invalidateQueries({ queryKey: ["sharing"] });
-        void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
-        void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
-        void queryClient.invalidateQueries({ queryKey: ["admin", "group-capabilities"] });
-        void queryClient.invalidateQueries({ queryKey: ["admin", "default-capabilities"] });
-        void queryClient.invalidateQueries({ queryKey: ["capabilities"] });
-        void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
-        void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
+        for (const queryKey of recoveryPrefixes) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
       }
       opened = true;
     };

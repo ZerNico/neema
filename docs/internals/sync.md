@@ -25,8 +25,11 @@ reconcile on readiness after a transport gap. A sequence gap in the bounded loca
 relay also announces readiness, rather than silently stranding a slow consumer.
 Coalesced wakeups retain one dirty flag during a read or queue drain. Research
 replays durable ordered chunks; desktop and approval refetch authorized state.
-Browser recovery invalidates document details and lists as well as conversations.
-Knowledge additionally retains sparse recovery because time alone expires leases.
+After checking identity, browser recovery refreshes the explicit feed-owned query
+prefixes on SSE reopen and listener readiness, including drafts, integrations,
+approvals, device sessions and chat search. It never invalidates unrelated caches
+or replays transient notifications. Knowledge and desktop work keep their coalesced
+refreshes. Knowledge additionally retains sparse recovery because time alone expires leases.
 
 Chat finalization commits the terminal message, attempt ledger row and conversation
 activity timestamp in one fenced transaction. A failed write rolls all three back,
