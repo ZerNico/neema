@@ -1,5 +1,5 @@
 import variant from "@jitl/quickjs-wasmfile-release-sync";
-import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from "quickjs-emscripten-core";
 import { toast } from "sonner";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type { GenuiClient } from "../client/host.ts";
 import { routeKey } from "../extract.ts";
 import { hashSource, keyUiFences, scanUiFences } from "../fences.ts";
 import { flushBlockSaves } from "./pending-saves.ts";
+import { loadUiBlock } from "./load-block.ts";
 import {
   GenuiActionsContext,
   GenuiClientContext,
@@ -18,13 +19,11 @@ import {
 } from "./context.ts";
 import { mergeLookups, NO_LOOKUPS, type UiLookups } from "~/modules/chat/assistant-output.ts";
 
-// A block's first render loads the lazy renderer and runs QuickJS; under a
-// full parallel run that outlasts the one-second default wait.
-configure({ asyncUtilTimeout: 10_000 });
-
 let quickjs: QuickJSWASMModule;
 beforeAll(async () => {
-  quickjs = await newQuickJSWASMModuleFromVariant(variant);
+  // Prepare both runtimes before assertions, so the first widget does not also
+  // pay for loading the renderer's component graph under its test deadline.
+  [quickjs] = await Promise.all([newQuickJSWASMModuleFromVariant(variant), loadUiBlock()]);
 });
 
 /** The Worker's engine, run in the test's own thread. */

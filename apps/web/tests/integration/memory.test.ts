@@ -1,6 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { uuidv7 } from "uuidv7";
 import {
@@ -34,6 +35,25 @@ const deferred = () => {
     resolve = next;
   });
   return { promise, resolve };
+};
+
+const waitForBlockedSave = async (blocker: number) => {
+  const observer = new Client({ connectionString: database.url });
+  await observer.connect();
+  try {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      // oxlint-disable-next-line no-await-in-loop
+      const { rows } = await observer.query<{ pid: number }>(
+        "select pid from pg_stat_activity where datname = current_database() and $1::int = any(pg_blocking_pids(pid))",
+        [blocker],
+      );
+      if (rows.length > 0) return;
+    }
+    throw new Error("Memory save did not reach the held database lock");
+  } finally {
+    await observer.end();
+  }
 };
 
 const FakeSync = Layer.succeed(SyncBus, {
@@ -273,6 +293,7 @@ describe("saved memory repository", () => {
     const source = await createSource(userId);
     const updateStarted = deferred();
     const allowCommit = deferred();
+    let blockerPid = 0;
 
     const disable = runtime.runPromise(
       Db.use((db) =>
@@ -280,6 +301,11 @@ describe("saved memory repository", () => {
           .transaction((tx) =>
             Effect.gen(function* () {
               yield* tx.update(tools).set({ enabled: false }).where(eq(tools.name, "memory"));
+              const [backend] = yield* tx
+                .select({ pid: sql<number>`pg_backend_pid()` })
+                .from(tools)
+                .where(eq(tools.name, "memory"));
+              blockerPid = backend!.pid;
               updateStarted.resolve();
               yield* Effect.promise(() => allowCommit.promise);
             }),
@@ -301,7 +327,7 @@ describe("saved memory repository", () => {
       });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitForBlockedSave(blockerPid);
       expect(saveSettled).toBe(false);
     } finally {
       allowCommit.resolve();
@@ -317,6 +343,7 @@ describe("saved memory repository", () => {
     const source = await createSource(userId);
     const editStarted = deferred();
     const allowEditCommit = deferred();
+    let blockerPid = 0;
 
     const edit = runtime.runPromise(
       Db.use((db) =>
@@ -327,6 +354,11 @@ describe("saved memory repository", () => {
                 .update(messages)
                 .set({ content: "I now prefer detailed answers" })
                 .where(eq(messages.id, source.sourceMessageId));
+              const [backend] = yield* tx
+                .select({ pid: sql<number>`pg_backend_pid()` })
+                .from(messages)
+                .where(eq(messages.id, source.sourceMessageId));
+              blockerPid = backend!.pid;
               editStarted.resolve();
               yield* Effect.promise(() => allowEditCommit.promise);
             }),
@@ -348,7 +380,7 @@ describe("saved memory repository", () => {
       });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitForBlockedSave(blockerPid);
       expect(saveSettled).toBe(false);
     } finally {
       allowEditCommit.resolve();

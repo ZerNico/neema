@@ -606,12 +606,15 @@ const renderView = (
 };
 
 const desktopRequest = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
-// The document panel loads its editor and comments lazily. Loaded here, a test opening a document
-// waits on what it opens, not on the first transform of those modules, which compiling makes slow.
+// The panel and its connection load lazily. Load their modules here so assertions wait on
+// document state, not first-time compilation of the editor or its connection dependencies.
 beforeAll(async () => {
   await Promise.all([
     import("~/modules/documents/ui/rich-editor/document-editor.tsx"),
     import("~/modules/documents/ui/comments-popover.tsx"),
+    import("~/modules/documents/client/document-sync.ts"),
+    import("~/modules/documents/ui/rich-editor/editor-extensions.ts"),
+    import("~/modules/documents/client/outbox.ts"),
   ]);
 });
 

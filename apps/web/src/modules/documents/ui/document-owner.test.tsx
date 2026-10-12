@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, useEffect } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type SeedDocument,
   fakeDocumentServer,
@@ -81,6 +81,17 @@ const fixture = async (onGone = vi.fn()) => {
   fireEvent.click(await screen.findByRole("button", { name: "Open document: Notes" }));
   return { client, ref, onGone };
 };
+
+// Compile the lazy editor and connection before timing document behavior.
+beforeAll(async () => {
+  await Promise.all([
+    import("./rich-editor/document-editor.tsx"),
+    import("./comments-popover.tsx"),
+    import("../client/document-sync.ts"),
+    import("./rich-editor/editor-extensions.ts"),
+    import("../client/outbox.ts"),
+  ]);
+});
 
 beforeEach(freshDocumentDevice);
 beforeEach(() => {

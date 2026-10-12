@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type SeedDocument,
   fakeDocumentServer,
@@ -77,6 +77,17 @@ const fixture = async () => {
 };
 /** The editor mounts once the live document has synced. */
 const openSource = () => screen.findByRole("textbox", { name: "Document source" });
+
+// Compile the lazy editor and connection before timing document behavior.
+beforeAll(async () => {
+  await Promise.all([
+    import("./rich-editor/document-editor.tsx"),
+    import("./comments-popover.tsx"),
+    import("../client/document-sync.ts"),
+    import("./rich-editor/editor-extensions.ts"),
+    import("../client/outbox.ts"),
+  ]);
+});
 
 beforeEach(freshDocumentDevice);
 beforeEach(() => {

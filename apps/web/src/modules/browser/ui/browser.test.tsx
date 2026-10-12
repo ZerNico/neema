@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BrowserFavicon, BrowserOpenTab, DesktopBrowser } from "@chat/desktop-rpc";
 import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,6 +93,8 @@ beforeEach(() => {
   route.conversationId = "c1";
 });
 afterEach(() => {
+  // Unmounted first: a mounted panel still showing a tab could otherwise put it back.
+  cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   for (const id of browserTabs.all().keys()) browserTabs.remove(id);

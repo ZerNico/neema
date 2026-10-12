@@ -830,6 +830,11 @@ const budget = () => {
 
 describe("sheet embeds", () => {
   let sheets: ReturnType<typeof fakeSheets>;
+  // These tests wait on real sheet data and calculations, not compilation of the lazy source
+  // or picker.
+  beforeAll(async () => {
+    await Promise.all([import("./sheet-embed-live.tsx"), import("./sheet-embed-picker.tsx")]);
+  });
   beforeEach(() => {
     sheets = fakeSheets();
     // The editor's own feed is passed in; only the sheet client reads the global one.
