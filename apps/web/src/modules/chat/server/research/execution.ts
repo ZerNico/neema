@@ -1,17 +1,9 @@
-import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
-import {
-  AgentDraftToolName,
-  agentDraftFailureReason,
-  projectAgentDraftResult,
-  agentDraftResultOk,
-  redactAgentDraftPart,
-} from "~/modules/agents/tool-schema.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { eq } from "drizzle-orm";
-import { Cause, Duration, Effect, Option, Schema, Semaphore, Stream } from "effect";
+import { Cause, Duration, Effect, Schema, Semaphore, Stream } from "effect";
 import { Prompt, Response, Toolkit } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import {
@@ -26,7 +18,6 @@ import type { JsonValue } from "~/db/schema/providers.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import { ProviderUnreachable, type AiGateway } from "~/modules/providers/server/gateway.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { AskUserResult } from "~/modules/tools/ask-user-schema.ts";
 import type { Source, ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import type { KnowledgeSearchSession } from "~/modules/knowledge/server/search.ts";
@@ -58,7 +49,6 @@ import {
   researchOutputCaps,
   researchPhaseSpecs,
   type ResearchCallSpec,
-  validateResearchCitations,
 } from "./budget.ts";
 import { initialResearchProgress, type ResearchFence, type ResearchStore } from "./repo.ts";
 import { boundedSourceManifest } from "./evidence.ts";
@@ -143,8 +133,6 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   title?: string;
   emit: (event: ToolChunkEnvelope) => Effect.Effect<void>;
   emitCompaction: (event: CompactionChunkEnvelope) => Effect.Effect<void>;
-  text: (delta: string) => Effect.Effect<void>;
-  getTextOffset: () => number;
 }) {
   const { store, fence } = deps;
   const model = yield* deps.providers.getModel(deps.modelId);
@@ -366,7 +354,6 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     prompt: Prompt.Prompt;
     toolkit?: Toolkit.WithHandler<any> | undefined;
     taskId?: string;
-    finalText?: ((delta: string) => Effect.Effect<void>) | undefined;
   }) {
     if (!(yield* store.alive(fence)))
       return yield* Effect.die(new Error("Research cancelled or ownership lost"));
@@ -410,9 +397,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     });
     let metadata: unknown;
     let text = "";
-    let synthesisLine = "";
     let finishReason: string | undefined;
-    let presented = false;
     const parts: Response.AnyPart[] = [];
     const rows = new Map<string, string>();
     let callIndex = 0;
@@ -486,31 +471,8 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             );
             budget.finish(reservation, complete ? part.usage.outputTokens.total : undefined);
           }
-          if (!preliminary && part.type !== "error") parts.push(redactAgentDraftPart(part));
-          if (part.type === "text-delta") {
-            text += part.delta;
-            if (input.finalText) {
-              synthesisLine += part.delta;
-              const newline = synthesisLine.lastIndexOf("\n");
-              if (newline >= 0) {
-                const checked = validateResearchCitations(
-                  synthesisLine.slice(0, newline + 1),
-                  citationIds(),
-                );
-                if (checked.invalid)
-                  limitations.add("Unregistered final citation references were removed.");
-                yield* input.finalText!(checked.text);
-                synthesisLine = synthesisLine.slice(newline + 1);
-              }
-            }
-            // Only synthesis writes outer prose. Clarification is an internal
-            // decision: even a provider's unsolicited full answer is discarded.
-            // Validated ask_user activities below remain visible at the current offset.
-          }
-          const isAgentDraft =
-            phase === "synthesis" &&
-            (part.type === "tool-call" || part.type === "tool-result") &&
-            Schema.is(AgentDraftToolName)(part.name);
+          if (!preliminary && part.type !== "error") parts.push(part);
+          if (part.type === "text-delta") text += part.delta;
           const isSkill =
             (part.type === "tool-call" || part.type === "tool-result") &&
             Schema.is(SkillToolName)(part.name);
@@ -519,18 +481,12 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             Schema.is(KnowledgeToolName)(part.name);
           if (
             part.type === "tool-call" &&
-            (part.name === "ask_user" ||
-              part.name === "web_search" ||
-              part.name === "read_url" ||
-              (phase === "planning" && part.name === "save_memory") ||
-              isKnowledge ||
-              isAgentDraft ||
-              isSkill)
+            (part.name === "web_search" || part.name === "read_url" || isKnowledge || isSkill)
           ) {
             const rowId = uuidv7();
             rows.set(part.id, rowId);
             const index = callIndex++;
-            const textOffset = part.name === "ask_user" || isAgentDraft ? deps.getTextOffset() : 0;
+            const textOffset = 0;
             yield* store.locked(fence, (tx) =>
               tx
                 .insert(messageToolCalls)
@@ -544,47 +500,13 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
                   toolName: part.name,
-                  arguments:
-                    isSkill || isAgentDraft || part.name === "save_memory" ? {} : json(part.params),
+                  arguments: isSkill ? {} : json(part.params),
                   status: "running",
                 })
                 .pipe(Effect.orDie, Effect.asVoid),
             );
             const args = part.params as { queries?: string[]; urls?: string[] };
-            if (part.name === "ask_user")
-              yield* deps.emit({
-                v: 1,
-                family: "ask",
-                phase: "start",
-                callId: rowId,
-                name: part.name,
-                turnIndex: turnBase + reservation.ordinal,
-                callIndex: index,
-                textOffset,
-              });
-            else if (part.name === "save_memory")
-              yield* deps.emit({
-                v: 1,
-                family: "memory",
-                phase: "start",
-                callId: rowId,
-                name: part.name,
-                turnIndex: turnBase + reservation.ordinal,
-                callIndex: index,
-                textOffset,
-              });
-            else if (isAgentDraft)
-              yield* deps.emit({
-                v: 1,
-                family: "agent-draft",
-                phase: "start",
-                callId: rowId,
-                name: part.name as AgentDraftToolName,
-                turnIndex: turnBase + reservation.ordinal,
-                callIndex: index,
-                textOffset,
-              });
-            else if (isSkill) {
+            if (isSkill) {
               const params = part.params as Record<string, unknown>;
               const entry = deps.config.skills?.find(
                 (skill) => skill.skillId === params["skillId"],
@@ -640,96 +562,6 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           if (part.type === "tool-result") {
             const rowId = rows.get(part.id);
             if (!rowId) return;
-            if (isAgentDraft && Schema.is(AgentDraftToolName)(part.name)) {
-              if (preliminary) return;
-              const activity = projectAgentDraftResult(part.isFailure ? null : part.result);
-              const reason = part.isFailure
-                ? "The draft tool failed before it could respond."
-                : agentDraftFailureReason(part.result);
-              yield* store.locked(fence, (tx) =>
-                tx
-                  .update(messageToolCalls)
-                  .set({
-                    result: json(activity),
-                    status: agentDraftResultOk(activity) ? "complete" : "error",
-                    completedAt: new Date(),
-                    ...(reason ? { error: { code: "AgentDraftNotUpdated", message: reason } } : {}),
-                  })
-                  .where(eq(messageToolCalls.id, rowId))
-                  .pipe(Effect.orDie, Effect.asVoid),
-              );
-              yield* deps.emit({
-                v: 1,
-                family: "agent-draft",
-                phase: "result",
-                callId: rowId,
-                name: part.name,
-                ...activity,
-                ...(reason ? { reason } : {}),
-              });
-              return;
-            }
-            if (part.name === "ask_user") {
-              if (preliminary) return;
-              const decoded = Schema.decodeUnknownOption(AskUserResult)(part.result);
-              const result: AskUserResult =
-                !part.isFailure && Option.isSome(decoded)
-                  ? decoded.value
-                  : { v: 1, outcome: "rejected", message: "Questions could not be presented." };
-              presented ||= result.outcome === "presented";
-              yield* store.locked(fence, (tx) =>
-                tx
-                  .update(messageToolCalls)
-                  .set({
-                    result: json(result),
-                    status: result.outcome === "presented" ? "complete" : "error",
-                    completedAt: new Date(),
-                  })
-                  .where(eq(messageToolCalls.id, rowId))
-                  .pipe(Effect.orDie, Effect.asVoid),
-              );
-              yield* deps.emit({
-                v: 1,
-                family: "ask",
-                phase: "result",
-                callId: rowId,
-                name: part.name,
-                result,
-              });
-              return;
-            }
-            if (part.name === "save_memory") {
-              if (preliminary) return;
-              const decoded = Schema.decodeUnknownOption(SaveMemoryResult)(part.result);
-              const outcome = Option.isSome(decoded) ? decoded.value.outcome : "rejected";
-              const reason = Option.isSome(decoded) ? decoded.value.reason : undefined;
-              const ok = !part.isFailure && Option.isSome(decoded) && decoded.value.ok;
-              // Only the canonical memory record owns its body. Neither arguments,
-              // provider errors nor tool response prose enter research persistence.
-              yield* store.locked(fence, (tx) =>
-                tx
-                  .update(messageToolCalls)
-                  .set({
-                    result: json({ outcome, ...(reason ? { reason } : {}) }),
-                    status: ok ? "complete" : "error",
-                    completedAt: new Date(),
-                  })
-                  .where(eq(messageToolCalls.id, rowId))
-                  .pipe(Effect.orDie, Effect.asVoid),
-              );
-              yield* deps.emit({
-                v: 1,
-                family: "memory",
-                phase: "result",
-                callId: rowId,
-                name: part.name,
-                ok,
-                outcome,
-                ...(reason ? { reason } : {}),
-                ...(ok ? {} : { error: "memory was not saved" }),
-              });
-              return;
-            }
             const lineage = {
               runId: fence.runId,
               ...(input.taskId ? { taskId: input.taskId } : {}),
@@ -868,14 +700,9 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       return yield* Effect.die(new Error("Research cancelled or ownership lost"));
     if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
-    if (input.finalText && synthesisLine) {
-      const checked = validateResearchCitations(synthesisLine, citationIds());
-      if (checked.invalid) limitations.add("Unregistered final citation references were removed.");
-      yield* input.finalText!(checked.text);
-    }
     if (!finishReason)
       limitations.add("A provider call ended without a finish/usage confirmation.");
-    return { text, parts, finishReason, presented, usage, finishMetadata: metadata };
+    return { text, parts, finishReason, usage, finishMetadata: metadata };
   });
 
   const compactionPositions = new Map<
@@ -983,21 +810,11 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
   });
-  const invokeInternal = (input: {
-    spec: ResearchCallSpec;
-    prompt: Prompt.Prompt;
-    toolkit?: Toolkit.WithHandler<any> | undefined;
-    taskId?: string;
-  }) =>
-    input.spec.phase === "synthesis"
-      ? Effect.die(new Error("Final answers require the main assistant sink"))
-      : invoke(input);
-  type InvestigationPhase = "coordinator" | "worker" | "report" | "compaction";
-  const investigationSpec = <P extends InvestigationPhase>(phase: P) => ({
+  const investigationSpec = <P extends ResearchCallSpec["phase"]>(phase: P) => ({
     ...specs[phase],
     phase,
   });
-  const investigation = {
+  return {
     store,
     fence,
     model,
@@ -1025,27 +842,15 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     compactionDepsFor,
     authorize,
     invoke: (input: {
-      spec: ResearchCallSpec & { readonly phase: InvestigationPhase };
+      spec: ResearchCallSpec;
       prompt: Prompt.Prompt;
       toolkit?: Toolkit.WithHandler<any> | undefined;
       taskId?: string;
     }) =>
       ["coordinator", "worker", "report", "compaction"].includes(input.spec.phase)
-        ? invokeInternal(input)
+        ? invoke(input)
         : Effect.die(new Error("Investigation cannot execute a main assistant stage")),
-  };
-  return {
-    investigation,
-    ...investigation,
-    specs,
-    invokeInternal,
-    // The final sink is never passed into the investigation runner.
-    invokeFinal: (input: {
-      prompt: Prompt.Prompt;
-      toolkit?: Parameters<typeof invoke>[0]["toolkit"];
-    }) => invoke({ ...input, spec: specs.synthesis, finalText: deps.text }),
   };
 });
 
-export type ResearchExecution = Effect.Success<ReturnType<typeof makeResearchExecution>>;
-export type InvestigationExecution = ResearchExecution["investigation"];
+export type InvestigationExecution = Effect.Success<ReturnType<typeof makeResearchExecution>>;

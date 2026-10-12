@@ -185,10 +185,6 @@ export const prepareResearchTool = (input: {
         ...(title ? { title } : {}),
         emit: input.emit,
         emitCompaction: input.emitCompaction,
-        // The investigation is structurally barred from the answer sink
-        // (`execution.ts` dies on a synthesis stage); this makes that explicit.
-        text: () => Effect.die(new Error("deep_research does not write answer prose")),
-        getTextOffset: () => 0,
       });
       const language =
         typeof raw === "object" && raw !== null
@@ -197,7 +193,7 @@ export const prepareResearchTool = (input: {
       return yield* runResearch({
         brief,
         ...(typeof language === "string" ? { language } : {}),
-        execution: execution.investigation,
+        execution,
       });
     }).pipe(Effect.scoped);
 

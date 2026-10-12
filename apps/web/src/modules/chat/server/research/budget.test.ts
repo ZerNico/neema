@@ -11,13 +11,13 @@ const specs = researchPhaseSpecs(researchOutputCaps(undefined), 2048);
 
 describe("research execution admission", () => {
   it.each([8000, 30000, 200000])(
-    "admits exactly worker + pending reports + synthesis at the %i context boundary",
+    "admits exactly worker + pending reports at the %i context boundary",
     (context) => {
       const caps = researchOutputCaps(context);
       const budget = new ResearchBudget(0, () => 0, caps);
       const phases = researchPhaseSpecs(caps, 2048);
       expect(budget.admitTask()).toBe(true);
-      const required = caps.ordinary + 2 * caps.report + caps.synthesis;
+      const required = caps.ordinary + 2 * caps.report;
       budget.reservedOutput = RESEARCH_LIMITS.outputTokens - required + 1;
       expect(budget.admitTask()).toBe(false);
       expect(budget.pendingReports).toBe(1);
@@ -27,7 +27,6 @@ describe("research execution admission", () => {
       expect(budget.reserve(phases.worker)).toBeNull();
       expect(budget.reserve(phases.report)?.maxOutputTokens).toBe(caps.report);
       expect(budget.reserve(phases.report)?.maxOutputTokens).toBe(caps.report);
-      expect(budget.reserve(phases.synthesis)?.maxOutputTokens).toBe(caps.synthesis);
       expect(budget.reservedOutput).toBe(RESEARCH_LIMITS.outputTokens);
     },
   );
@@ -40,7 +39,7 @@ describe("research execution admission", () => {
       expect(budget.reservedOutput).toBe(spec.maxOutputTokens);
     }
   });
-  it("reserves final synthesis and one report for every admitted task", () => {
+  it("reserves one report for every admitted task", () => {
     const budget = new ResearchBudget(0, () => 0);
     for (let task = 0; task < RESEARCH_LIMITS.tasks; task++) expect(budget.admitTask()).toBe(true);
     expect(budget.admitTask()).toBe(false);
@@ -49,20 +48,39 @@ describe("research execution admission", () => {
     expect(explorationCalls).toBeGreaterThan(0);
     for (let task = 0; task < RESEARCH_LIMITS.tasks; task++)
       expect(budget.reserve(specs.report)).not.toBeNull();
-    expect(budget.reserve(specs.synthesis)).not.toBeNull();
     expect(budget.calls).toBeLessThanOrEqual(RESEARCH_LIMITS.calls);
     expect(budget.reservedOutput).toBeLessThanOrEqual(RESEARCH_LIMITS.outputTokens);
   });
   it("counts no-op turns even when output reservations are released", () => {
     const budget = new ResearchBudget(0, () => 0);
-    for (let i = 0; i < RESEARCH_LIMITS.calls - 1; i++) {
+    for (let i = 0; i < RESEARCH_LIMITS.calls; i++) {
       const reservation = budget.reserve(specs.coordinator)!;
       expect(reservation).not.toBeNull();
       budget.finish(reservation, 0);
     }
     expect(budget.reserve(specs.worker)).toBeNull();
-    expect(budget.reserve(specs.synthesis)).not.toBeNull();
     expect(budget.calls).toBe(RESEARCH_LIMITS.calls);
+  });
+  it("admits an ordinary call that exactly fits the remaining output", () => {
+    const budget = new ResearchBudget(0, () => 0);
+    budget.reservedOutput = RESEARCH_LIMITS.outputTokens - specs.coordinator.maxOutputTokens;
+    expect(budget.reserve(specs.coordinator)).not.toBeNull();
+    expect(budget.reservedOutput).toBe(RESEARCH_LIMITS.outputTokens);
+    expect(budget.reserve(specs.coordinator)).toBeNull();
+  });
+  it("keeps the final model calls for admitted task reports", () => {
+    const budget = new ResearchBudget(0, () => 0);
+    budget.calls = RESEARCH_LIMITS.calls - 2;
+    expect(budget.admitTask()).toBe(true);
+    expect(budget.admitTask()).toBe(false);
+    const worker = budget.reserve(specs.worker)!;
+    expect(worker).not.toBeNull();
+    budget.finish(worker, 0);
+    expect(budget.reserve(specs.coordinator)).toBeNull();
+    expect(budget.reserve(specs.compaction)).toBeNull();
+    expect(budget.reserve(specs.report)).not.toBeNull();
+    expect(budget.calls).toBe(RESEARCH_LIMITS.calls);
+    expect(budget.pendingReports).toBe(0);
   });
   it("retains conservative output reservations when finish usage is absent or invalid", () => {
     const budget = new ResearchBudget(0, () => 0);
@@ -87,7 +105,6 @@ describe("research execution admission", () => {
     expect(budget.reserve(specs.worker)).toBeNull();
     expect(budget.admitWeb("read", 0)).toBe(false);
     expect(budget.reserve(specs.report)).not.toBeNull();
-    expect(budget.reserve(specs.synthesis)).not.toBeNull();
   });
   it.each([12, 80, 120])(
     "uses the %i-query cap for admission, remaining allowance and headroom",
@@ -107,7 +124,6 @@ describe("research execution admission", () => {
       expect(budget.canDispatch).toBe(false);
       expect(budget.remaining().reads).toBe(RESEARCH_LIMITS.reads);
       expect(budget.reserve(specs.report)).not.toBeNull();
-      expect(budget.reserve(specs.synthesis)).not.toBeNull();
     },
   );
 
@@ -132,16 +148,14 @@ describe("research execution admission", () => {
     const small = researchOutputCaps(30_000);
     const large = researchOutputCaps(200_000);
     const unknown = researchOutputCaps(null);
-    // A small window gets an answer it can actually fit, not one that overflows.
-    expect(small.synthesis).toBe(7_500);
-    expect(small.synthesis).toBeLessThan(unknown.synthesis);
-    // A large one is not held to a small model's ceiling.
-    expect(large.synthesis).toBe(RESEARCH_LIMITS.synthesisOutput);
+    expect(researchOutputCaps(8000)).toEqual({ ordinary: 1600, report: 1600 });
+    expect(small.report).toBe(6000);
+    expect(small.report).toBeLessThan(unknown.report);
+    expect(large.report).toBe(RESEARCH_LIMITS.reportOutput);
     for (const caps of [small, large, unknown]) {
       expect(caps.ordinary).toBeLessThanOrEqual(RESEARCH_LIMITS.ordinaryOutput);
       expect(caps.report).toBeLessThanOrEqual(RESEARCH_LIMITS.reportOutput);
       const phases = researchPhaseSpecs(caps, 2048);
-      expect(phases.synthesis.maxOutputTokens).toBe(caps.synthesis);
       expect(phases.worker.maxOutputTokens).toBe(caps.ordinary);
       expect(phases.report.maxOutputTokens).toBe(caps.report);
     }
@@ -152,7 +166,6 @@ describe("research execution admission", () => {
     expect(budget.reserve(phases.worker)).toMatchObject({ maxOutputTokens: small.ordinary });
     // A report is only reservable against an admitted task.
     expect(budget.reserve(phases.report)).toMatchObject({ maxOutputTokens: small.report });
-    expect(budget.reserve(phases.synthesis)).toMatchObject({ maxOutputTokens: small.synthesis });
   });
 
   it("latches exploration off after consecutive failed searches, not scattered ones", () => {

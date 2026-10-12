@@ -4,11 +4,8 @@ export const RESEARCH_LIMITS = {
   calls: 120,
   outputTokens: 320_000,
   ordinaryOutput: 4_096,
-  // Ceilings, not fixed sizes: the real caps come from the model's context via
-  // `researchOutputCaps`, so a small model is not asked for an answer that
-  // cannot fit and a large one is not held to a small model's budget.
+  // Ceilings, not fixed sizes: report caps follow the model's context.
   reportOutput: 8_192,
-  synthesisOutput: 32_768,
   workers: 4,
   tasks: 12,
   coordinatorRounds: 5,
@@ -36,38 +33,26 @@ export const RESEARCH_LIMITS = {
 export interface ResearchOutputCaps {
   ordinary: number;
   report: number;
-  synthesis: number;
 }
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, Math.floor(value)));
 
 /**
- * Per-phase output caps for one model. A configured `contextLength` is the only
- * input; without one the shared default keeps today's behaviour. Synthesis is
- * the answer the reader actually gets, so it scales, while the exploring phases stay
- * small because their output is tool calls and a bounded report.
+ * Investigation output caps follow the model's configured context length.
+ * Without one, the shared default keeps the worker and report caps unchanged.
  */
 export const researchOutputCaps = (
   contextLength: number | null | undefined,
 ): ResearchOutputCaps => {
   const context = contextLength && contextLength > 0 ? contextLength : 64_000;
-  const synthesis = clamp(context * 0.25, 2_048, RESEARCH_LIMITS.synthesisOutput);
   return {
     ordinary: clamp(context * 0.2, 512, RESEARCH_LIMITS.ordinaryOutput),
     report: clamp(context * 0.2, 512, RESEARCH_LIMITS.reportOutput),
-    synthesis,
   };
 };
 
-export type ResearchCallPhase =
-  | "clarification"
-  | "planning"
-  | "coordinator"
-  | "worker"
-  | "report"
-  | "synthesis"
-  | "compaction";
+export type ResearchCallPhase = "coordinator" | "worker" | "report" | "compaction";
 export interface ResearchCallSpec {
   readonly phase: ResearchCallPhase;
   readonly maxOutputTokens: number;
@@ -80,12 +65,9 @@ const spec = (phase: ResearchCallPhase, maxOutputTokens: number): ResearchCallSp
 
 export function researchPhaseSpecs(caps: ResearchOutputCaps, compactionOutput: number) {
   return {
-    clarification: spec("clarification", caps.ordinary),
-    planning: spec("planning", caps.ordinary),
     coordinator: spec("coordinator", caps.ordinary),
     worker: spec("worker", caps.ordinary),
     report: spec("report", caps.report),
-    synthesis: spec("synthesis", caps.synthesis),
     compaction: spec("compaction", compactionOutput),
   };
 }
@@ -111,7 +93,6 @@ export class ResearchBudget {
   searchFailures = 0;
   /** Set once the search backend looks down for the run, not just for one query. */
   searchUnavailable = false;
-  synthesisPending = true;
   constructor(
     readonly startedAt: number,
     readonly now: () => number = Date.now,
@@ -169,13 +150,10 @@ export class ResearchBudget {
   }
   admitTask() {
     if (!this.canDispatch) return false;
-    // One exploratory call and the report must fit, leaving final synthesis untouched.
+    // One exploratory call and every pending report must fit.
     if (
-      this.calls + this.pendingReports + 3 > RESEARCH_LIMITS.calls ||
-      this.reservedOutput +
-        this.caps.ordinary +
-        (this.pendingReports + 1) * this.caps.report +
-        (this.synthesisPending ? this.caps.synthesis : 0) >
+      this.calls + this.pendingReports + 2 > RESEARCH_LIMITS.calls ||
+      this.reservedOutput + this.caps.ordinary + (this.pendingReports + 1) * this.caps.report >
         RESEARCH_LIMITS.outputTokens
     )
       return false;
@@ -185,24 +163,18 @@ export class ResearchBudget {
   }
   reserve({ phase, maxOutputTokens }: ResearchCallSpec) {
     const report = phase === "report";
-    const synthesis = phase === "synthesis";
-    if (!report && !synthesis && !this.exploring) return null;
+    if (!report && !this.exploring) return null;
     const reportsLeft = this.pendingReports - (report ? 1 : 0);
-    const finalLeft = this.synthesisPending && !synthesis ? 1 : 0;
     if (
       reportsLeft < 0 ||
-      this.calls + 1 + reportsLeft + finalLeft > RESEARCH_LIMITS.calls ||
-      this.reservedOutput +
-        maxOutputTokens +
-        reportsLeft * this.caps.report +
-        finalLeft * this.caps.synthesis >
+      this.calls + 1 + reportsLeft > RESEARCH_LIMITS.calls ||
+      this.reservedOutput + maxOutputTokens + reportsLeft * this.caps.report >
         RESEARCH_LIMITS.outputTokens
     )
       return null;
     this.calls++;
     this.reservedOutput += maxOutputTokens;
     if (report) this.pendingReports--;
-    if (synthesis) this.synthesisPending = false;
     return { ordinal: this.calls, maxOutputTokens };
   }
   finish(reservation: { maxOutputTokens: number }, observedOutput: number | undefined) {

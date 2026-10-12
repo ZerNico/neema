@@ -603,6 +603,9 @@ const seed = Effect.gen(function* () {
   yield* db.execute(
     sql`insert into "user" (id,name,email) values (${userId},'Research Test',${`${userId}@test.invalid`})`,
   );
+  yield* db.execute(
+    sql`insert into user_approvals (user_id, status) values (${userId}, 'approved')`,
+  );
   const conversation = yield* repo.createConversation({ userId, modelId });
   return { userId, conversationId: conversation.id };
 });
@@ -1165,6 +1168,49 @@ describe("durable deep research", () => {
       expect(promptText(request)).not.toContain("at most 16000 characters");
     }
     expect(requests.some((request) => phaseOf(request) === "compaction")).toBe(false);
+  });
+
+  it("validates worker report citations before persisting or returning evidence to the host", async () => {
+    finishWorkersEarly = true;
+    reportSuffix = "\nPlain reference[1], forged[^999].\n[^1]: https://forged.example/source";
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const [run] = yield* db
+          .select()
+          .from(researchRuns)
+          .where(eq(researchRuns.messageId, sent.assistantMessageId));
+        const tasks = yield* db
+          .select()
+          .from(researchTasks)
+          .where(eq(researchTasks.runId, run!.id));
+        expect(tasks).toHaveLength(2);
+        for (const task of tasks) {
+          expect(task.report).toContain("Plain reference[^1], forged[unverified source].");
+          expect(task.report).not.toContain("[^999]");
+          expect(task.report).not.toContain("https://forged.example/source");
+        }
+        expect(
+          run!.progress.limitations.some((line) => line.includes("unregistered citation")),
+        ).toBe(true);
+        const calls = yield* db
+          .select()
+          .from(researchCalls)
+          .where(eq(researchCalls.runId, run!.id));
+        expect(
+          calls.every((call) =>
+            ["coordinator", "worker", "report", "compaction"].includes(call.phase),
+          ),
+        ).toBe(true);
+      }),
+    );
+    const hostEvidence = requests.findLast((request) => phaseOf(request) === "host")!;
+    expect(promptText(hostEvidence)).toContain("Plain reference[^1], forged[unverified source].");
+    expect(promptText(hostEvidence)).not.toContain("[^999]");
+    expect(promptText(hostEvidence)).not.toContain("https://forged.example/source");
   });
 
   it("keeps length-limited task reports with an explicit model output-limit limitation", async () => {
