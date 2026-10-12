@@ -131,6 +131,9 @@ const holdNextListing = () => {
   return { arrived, release };
 };
 
+/** Runs before `/refusing` turns a call away, to land something while it is in flight. */
+let beforeRefusal: (() => Promise<void>) | null = null;
+
 /** Shared-key requests must carry the admin's key; everything else is open. */
 const serve = async (request: IncomingMessage, response: ServerResponse) => {
   const chunks: Buffer[] = [];
@@ -138,6 +141,14 @@ const serve = async (request: IncomingMessage, response: ServerResponse) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
   const body = Buffer.concat(chunks).toString("utf8");
   if (url.pathname === "/keyed" && request.headers["x-api-key"] !== "admin-key") {
+    response.writeHead(401).end();
+    return;
+  }
+  // Lists for anyone, then refuses every call's credential, as a revoked token would.
+  if (url.pathname === "/refusing" && body.includes('"tools/call"')) {
+    const hook = beforeRefusal;
+    beforeRefusal = null;
+    if (hook) await hook();
     response.writeHead(401).end();
     return;
   }
@@ -1205,6 +1216,49 @@ describe("an MCP server set up by an admin", () => {
       Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(stale.connectionId)),
     );
     expect(current?.requiredScopes ?? null).toBeNull();
+  });
+
+  it("marks the connection whose token the server refused, and not one that replaced it", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs refusing", { url: `${base}/refusing`, ways: "token" });
+    const connect = (userId: string, token: string) =>
+      run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(userId, id, { token })));
+    const statusOf = (userId: string) =>
+      run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId))).then(
+        (rows) => rows.find((row) => row.id === id)?.connection?.status,
+      );
+    await connect(admin, "revoked");
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    const conversationId = await newConversation(admin);
+    const refused = await run(
+      handlerOf(await toolsFor(admin, conversationId), `int_${id}__search`)!(
+        { q: "x" },
+        { toolCallId: "refused" },
+      ),
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/refused the saved sign-in/),
+    });
+    expect(await statusOf(admin)).toBe("needs_reauth");
+
+    // A refusal of the old token that lands after a reconnect leaves the new one alone.
+    const person = await newUser();
+    await connect(person, "old");
+    const prepared = await toolsFor(person, await newConversation(person));
+    beforeRefusal = () => connect(person, "new");
+    const late = await run(
+      handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "late" }),
+    );
+    expect(beforeRefusal).toBeNull();
+    expect(late).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/refused the saved sign-in/),
+    });
+    expect(await statusOf(person)).toBe("active");
   });
 
   it("with one key for everyone, only reads are ever offered", async () => {
