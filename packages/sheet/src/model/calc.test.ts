@@ -169,8 +169,48 @@ describe("calculating a live sheet", () => {
     ).toBe(true);
   });
 
-  it("shows #NAME? for a formula the engine cannot read", () => {
+  it("shows #NAME? for a formula the engine cannot read, and names what it lacks", () => {
     const doc = typed(emptyDoc(), { A1: "=NOSUCHFUNCTION(1)" });
     expect(valueAt(doc, "A1")).toEqual(new XError("#NAME?"));
+    expect(calculateSheet(doc, context).report.unsupported).toEqual(["NOSUCHFUNCTION"]);
+  });
+
+  it("shows a HYPERLINK's name or address and gives its cell the address", () => {
+    const doc = typed(emptyDoc(), {
+      A1: "/karriere",
+      A3: '=IF(A1="","",HYPERLINK("https://example.com"&A1))',
+      A4: '=HYPERLINK("https://example.com/kontakt","Kontakt")',
+      A5: '=IF(A2="","",HYPERLINK("https://example.com"&A2))',
+    });
+    const values = calculateSheet(doc, context);
+    const read = (address: string) => {
+      const { r, c } = at(doc, address);
+      return [values.value("s1", r, c), values.link("s1", r, c)];
+    };
+    expect(read("A3")).toEqual(["https://example.com/karriere", "https://example.com/karriere"]);
+    expect(read("A4")).toEqual(["Kontakt", "https://example.com/kontakt"]);
+    // The branch that would link never ran.
+    expect(read("A5")).toEqual(["", null]);
+    expect(read("A1")).toEqual(["/karriere", null]);
+  });
+
+  it("keeps a reused formula's link and drops one its cell no longer gives", () => {
+    let doc = typed(emptyDoc(), {
+      A1: "/a",
+      B1: '=IF(A1="","",HYPERLINK("https://example.com"&A1))',
+      C1: '=HYPERLINK("https://example.com/c")',
+    });
+    let values = calculateSheet(doc, context, undefined, { previous: null });
+    const link = (address: string) => {
+      const { r, c } = at(doc, address);
+      return values.link("s1", r, c);
+    };
+    // Unrelated to C1, so its result and link are reused.
+    doc = typed(doc, { A1: "/b" });
+    values = calculateSheet(doc, context, undefined, { previous: values });
+    expect([link("B1"), link("C1")]).toEqual(["https://example.com/b", "https://example.com/c"]);
+    doc = typed(doc, { A1: "", C1: "plain" });
+    values = calculateSheet(doc, context, undefined, { previous: values });
+    expect([link("B1"), link("C1")]).toEqual([null, null]);
   });
 });

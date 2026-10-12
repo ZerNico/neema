@@ -90,6 +90,8 @@ class Evaluation {
   readonly scope: Scope;
   /** A range met a single-value place in a dynamic formula: legacy Excel would read it differently. */
   lifted = false;
+  /** The address a HYPERLINK in the formula gave its cell, the last one evaluated. */
+  link: string | null = null;
   private depth = 0;
   private randomCalls = 0;
   private readonly locals: Array<Map<string, Value>> = [];
@@ -503,6 +505,9 @@ class Evaluation {
       reference: (text, a1) => this.indirect(text, a1),
       isFormula: (sheet, row, column) => this.scope.isFormula(sheet, row, column),
       spill: (sheet, row, column) => this.scope.spill(sheet, row, column),
+      link: (address) => {
+        this.link = address;
+      },
     };
     const fn: Fn = own ?? {
       run: (values) => runLibrary(name, implementation!, values, nodes, call),
@@ -661,7 +666,7 @@ function operate(op: string, a: Scalar, b: Scalar): Scalar {
   return arithmetic(op, a, b);
 }
 
-/** A formula's value in `mode`, and whether a dynamic formula relied on arrays to get it. */
+/** A formula's value in `mode`, whether a dynamic formula relied on arrays to get it, and its link. */
 export function evaluateFormula(node: Node, scope: Scope, mode: Mode) {
   const evaluation = new Evaluation(scope);
   const raw = evaluation.evaluate(node, mode);
@@ -671,5 +676,5 @@ export function evaluateFormula(node: Node, scope: Scope, mode: Mode) {
       : raw instanceof Grid && raw.ref && mode === "legacy"
         ? evaluation.single(raw, mode)
         : raw;
-  return { value, lifted: evaluation.lifted };
+  return { value, lifted: evaluation.lifted, link: evaluation.link };
 }

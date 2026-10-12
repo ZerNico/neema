@@ -399,5 +399,10 @@ export function sheetView(
         .map((issue) => escapeAttribute(`${issue.cell} ${issue.error}`))
         .join("; ")}</errors>`,
     );
+  // Without the names, a #NAME? from a function this engine lacks reads like a typo.
+  if (values.report.unsupported.length)
+    lines.push(
+      `<not-calculated>${escapeAttribute(values.report.unsupported.join(", "))}</not-calculated>`,
+    );
   return { xml: lines.join("\n"), next, sheet: name };
 }

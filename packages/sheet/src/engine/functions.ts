@@ -58,6 +58,8 @@ export interface Call {
   reference(text: string, a1: boolean): Grid | Areas | null;
   isFormula(sheet: string, row: number, column: number): boolean;
   spill(sheet: string, row: number, column: number): CellBox | null;
+  /** Records the address the formula's cell opens, as HYPERLINK does. */
+  link(address: string): void;
 }
 
 export interface Fn {
@@ -1427,6 +1429,15 @@ export const FUNCTIONS: Record<string, Fn> = {
       if (digits instanceof XError) return digits;
       const shown = `$${fixed(Math.abs(value), digits, true)}`;
       return roundTo(value, digits) < 0 ? `(${shown})` : shown;
+    },
+  },
+  // The cell shows the friendly name, or else the address, and opens the address.
+  HYPERLINK: {
+    run: (args, call) => {
+      const address = text(args[0]);
+      if (address instanceof XError) return address;
+      call.link(address);
+      return args.length < 2 || call.omitted(1) ? address : scalar(args[1]);
     },
   },
   CONCAT: {

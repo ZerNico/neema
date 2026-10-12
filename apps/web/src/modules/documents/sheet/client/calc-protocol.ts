@@ -24,6 +24,8 @@ export interface CalcResult {
   /** Every formula's result and every spilled value, by sheet, row and column ID. */
   readonly results: ReadonlyArray<readonly [string, WireScalar]>;
   readonly spills: ReadonlyArray<readonly [string, readonly string[], readonly string[]]>;
+  /** The address each formula's HYPERLINK gave its cell. */
+  readonly links: ReadonlyArray<readonly [string, string]>;
   /** Whether any formula read the moment or drew a random number; see SheetValues. */
   readonly volatile: boolean;
 }
@@ -44,11 +46,14 @@ export function calculateForWire(request: CalcRequest): CalcResult {
 export function wireOf(request: CalcRequest, values: SheetValues): CalcResult {
   const results: Array<readonly [string, WireScalar]> = [];
   const spills: Array<readonly [string, readonly string[], readonly string[]]> = [];
+  const links: Array<readonly [string, string]> = [];
   for (const [sheet, data] of Object.entries(request.doc.sheet))
     for (const [r, row] of Object.entries(data.cells))
       for (const [c, cell] of Object.entries(row)) {
         if (!cell.f) continue;
         results.push([cellKey(sheet, r, c), toWire(values.value(sheet, r, c))]);
+        const link = values.link(sheet, r, c);
+        if (link !== null) links.push([cellKey(sheet, r, c), link]);
         const spill = values.spill(sheet, r, c);
         if (!spill) continue;
         spills.push([cellKey(sheet, r, c), spill.rows, spill.cols]);
@@ -57,7 +62,7 @@ export function wireOf(request: CalcRequest, values: SheetValues): CalcResult {
             if (sr !== r || sc !== c)
               results.push([cellKey(sheet, sr, sc), toWire(values.value(sheet, sr, sc))]);
       }
-  return { generation: request.generation, results, spills, volatile: values.volatile };
+  return { generation: request.generation, results, spills, links, volatile: values.volatile };
 }
 
 const EMPTY_REPORT = { formulas: 0, errors: [], errorCount: 0, unsupported: [] };
@@ -79,6 +84,7 @@ export function valuesOf(
   const spills = new Map(
     (result?.spills ?? []).map(([key, rows, cols]) => [key, { rows: [...rows], cols: [...cols] }]),
   );
+  const links = new Map(result?.links ?? []);
   const spilledFrom = new Map<string, readonly [string, string, string]>();
   for (const [key, area] of spills) {
     const [sheet, r, c] = key.split("\u0000") as [string, string, string];
@@ -101,5 +107,7 @@ export function valuesOf(
     },
     spill: (sheet, r, c) =>
       doc.sheet[sheet]?.cells[r]?.[c]?.f ? (spills.get(cellKey(sheet, r, c)) ?? null) : null,
+    link: (sheet, r, c) =>
+      doc.sheet[sheet]?.cells[r]?.[c]?.f ? (links.get(cellKey(sheet, r, c)) ?? null) : null,
   };
 }

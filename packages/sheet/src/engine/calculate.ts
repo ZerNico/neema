@@ -62,6 +62,11 @@ export interface CellStore {
   setUncalculated(formula: StoredFormula, dynamic: boolean): void;
   /** Stores 0 for a formula on or behind a cycle, as Excel shows it. */
   setCircular(formula: StoredFormula): void;
+  /**
+   * The address a HYPERLINK gave an evaluated formula's cell, or null. A result
+   * reused unchanged keeps the link it had.
+   */
+  setLink?(formula: StoredFormula, link: string | null): void;
   /** Time and chance for a formula's NOW, TODAY and RAND; without it they are not calculated. */
   volatile?(formula: StoredFormula): Scope["volatile"];
   /**
@@ -619,7 +624,9 @@ function pass(store: CellStore, limits: CalcLimits, changed: readonly ChangedBox
     state[id] = 1;
     try {
       const mode: Mode = formula.kind === "cse" ? "array" : formula.kind;
-      const { value, lifted } = evaluateFormula(formula.node, scopeFor(formula), mode);
+      store.setLink?.(formula.stored, null);
+      const evaluated = evaluateFormula(formula.node, scopeFor(formula), mode);
+      const { value, lifted } = evaluated;
       const multiple = value instanceof Grid && (value.height !== 1 || value.width !== 1);
       if (formula.kind === "cse") fill(formula, value);
       else if (
@@ -630,7 +637,11 @@ function pass(store: CellStore, limits: CalcLimits, changed: readonly ChangedBox
           calls(formula.node, ARRAY_FUNCTIONS))
       )
         spill(formula, id, value);
-      else record(formula, value instanceof Grid ? (value.rows[0]?.[0] ?? null) : value);
+      else {
+        record(formula, value instanceof Grid ? (value.rows[0]?.[0] ?? null) : value);
+        // A spill has an address per value at most, so only a single result opens one.
+        if (evaluated.link !== null) store.setLink?.(formula.stored, evaluated.link);
+      }
     } catch (error) {
       if (!(error instanceof Unsupported)) throw error;
       unsupported.add(error.what);

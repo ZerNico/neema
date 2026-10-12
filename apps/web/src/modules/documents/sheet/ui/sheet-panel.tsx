@@ -41,7 +41,7 @@ import {
   type CopiedCells,
   type GridContext,
 } from "@chat/sheet-react/commands";
-import { cellDisplay, cellSource, safeLink } from "@chat/sheet-react/display";
+import { cellDisplay, cellSource, mergeAnchor, safeLink } from "@chat/sheet-react/display";
 import {
   SheetGrid,
   type CellEditing,
@@ -294,6 +294,9 @@ export default function SheetPanelBody({
   const head = active.head;
   const source = cellSource(doc, sheet, head.r, head.c, locale);
   const style = cellStyle(doc.sheet[sheet]!.cells[head.r]?.[head.c]?.s);
+  const linkAt = mergeAnchor(doc.sheet[sheet]!, head);
+  const linkStyle = cellStyle(doc.sheet[sheet]!.cells[linkAt.r]?.[linkAt.c]?.s);
+  const shownLink = safeLink(linkStyle.link ?? values.link(sheet, linkAt.r, linkAt.c) ?? undefined);
   const comments = state.comments;
   const roots = comments.filter((each) => each.id === each.threadId);
   /** Threads on this sheet with the cells they sit on, by position; a gone corner leaves the first cell. */
@@ -319,6 +322,12 @@ export default function SheetPanelBody({
     values,
     locale,
     mint: () => sync!.mint(),
+  };
+  const linkContext = {
+    ...context,
+    selection: sameSelection(active, { anchor: head, head })
+      ? { ...active, anchor: linkAt, head: linkAt }
+      : active,
   };
   const run = (ops: readonly SheetOp[]) => {
     if (!readOnly && ops.length) sync!.dispatch(ops);
@@ -639,11 +648,9 @@ export default function SheetPanelBody({
           description: "Its first row names the columns.",
         });
       else setPivoting(true);
-    } else if (command.kind === "outline")
-      onCommand({ kind: command.group ? "group" : "ungroup" });
+    } else if (command.kind === "outline") onCommand({ kind: command.group ? "group" : "ungroup" });
     else if (command.kind === "sortOrder") run(sortSelection(context, command.descending));
-    else if (command.kind === "insert")
-      run(insertAtSelection(context, command.axis, command.side));
+    else if (command.kind === "insert") run(insertAtSelection(context, command.axis, command.side));
     else if (
       command.kind === "delete" ||
       command.kind === "hide" ||
@@ -1155,12 +1162,13 @@ export default function SheetPanelBody({
                   );
                 }}
                 activeAccessory={
-                  safeLink(style.link) && sameSelection(active, { anchor: head, head }) ? (
+                  shownLink && sameSelection(active, { anchor: head, head }) ? (
                     <LinkChip
-                      link={safeLink(style.link)!}
-                      readOnly={readOnly}
+                      link={shownLink}
+                      // A formula's link changes with the formula, not here.
+                      readOnly={readOnly || !safeLink(linkStyle.link)}
                       onEdit={() => setLinking(true)}
-                      onRemove={() => run(formatSelection(context, { link: null }))}
+                      onRemove={() => run(formatSelection(linkContext, { link: null }))}
                     />
                   ) : null
                 }
@@ -1217,7 +1225,7 @@ export default function SheetPanelBody({
             ) : (
               <CellMenuItems
                 readOnly={readOnly}
-                linked={!!style.link}
+                linked={!!linkStyle.link}
                 context={context}
                 run={run}
                 onCopy={(cut) => {
@@ -1289,15 +1297,15 @@ export default function SheetPanelBody({
       ) : null}
       {linking && !readOnly ? (
         <LinkDialog
-          text={cellDisplay(values.value(sheet, head.r, head.c), style, locale).text}
-          link={style.link}
-          textEditable={!doc.sheet[sheet]!.cells[head.r]?.[head.c]?.f}
+          text={cellDisplay(values.value(sheet, linkAt.r, linkAt.c), linkStyle, locale).text}
+          link={linkStyle.link}
+          textEditable={!doc.sheet[sheet]!.cells[linkAt.r]?.[linkAt.c]?.f}
           onApply={({ text, link }) =>
             run([
               ...(text === null
                 ? []
-                : [{ op: "set" as const, sh: sheet, cells: [{ ...head, v: text || null }] }]),
-              ...formatSelection(context, { link }),
+                : [{ op: "set" as const, sh: sheet, cells: [{ ...linkAt, v: text || null }] }]),
+              ...formatSelection(linkContext, { link }),
             ])
           }
           onClose={() => setLinking(false)}

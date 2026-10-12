@@ -162,10 +162,15 @@ browser workers and the Excel file tools); this page records the decisions behin
 
 - A cell's link is a property of its style, not of its content. It then moves with every copy,
   fill, sort and paste of formats, survives Delete and retyping as Excel's hyperlinks do, and
-  undoes like any format. Clearing formats takes it off.
+  undoes like any format. Clearing formats takes it off. Within a merge, rendering, opening and
+  the link chip read its anchor. Editing or removing that chip's link writes the anchor too.
 - Only web and mail addresses are kept from the model, a paste or a file, and only those are
   opened. In an Excel file a link is a hyperlink with the Hyperlink style's look, which an import
   leaves out again so the grid draws it in the theme's own colour.
+- A formula's `HYPERLINK` gives its cell an address too, but as a result beside its value, not
+  a style: it changes with the formula and its inputs, a reused result keeps it, and only a
+  single result has one. It is drawn and opened like a cell's link, which comes first, and its
+  chip has no edit or remove, since editing it means editing the formula.
 
 ## Charts
 
@@ -232,7 +237,8 @@ browser workers and the Excel file tools); this page records the decisions behin
   only a spill's own values are ever cleared, so a typed value always blocks a spill. So does
   the grid's edge: a spill past the last row or column is `#SPILL!` until the grid grows, as at
   Excel's edge, since growing it while calculating would give each replica different IDs. A
-  formula the engine cannot read shows `#NAME?`.
+  formula the engine cannot read shows `#NAME?`, which `<errors>` does not count. The model's
+  view names those functions in `<not-calculated>`, or it reads like a typo it cannot see.
 - Without a context (the Excel file tools) `NOW`, `TODAY` and the `RAND` functions stay
   uncalculated and keep the file's value, for Excel to compute on open.
 - An open sheet calculates in a worker. Each request carries a generation and only the newest

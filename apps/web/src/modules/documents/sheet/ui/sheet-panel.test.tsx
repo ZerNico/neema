@@ -63,6 +63,122 @@ describe("an open sheet", () => {
     expect(screen.getByRole("grid", { name: "Notes" })).toBeTruthy();
   });
 
+  it.each([false, true])(
+    "shows the merged anchor’s link when a covered cell is selected (stored: %s)",
+    (stored) => {
+      let doc = emptyDoc();
+      const formula = parseFormula('HYPERLINK("https://example.com/formula", "Merged site")', {
+        doc,
+        sheet: "s1",
+      });
+      if (!("formula" in formula)) throw new Error("needs growth");
+      doc = apply(doc, {
+        op: "set",
+        sh: "s1",
+        cells: [{ r: "s1.r1", c: "s1.c1", f: formula.formula }],
+      });
+      if (stored)
+        doc = apply(doc, {
+          op: "format",
+          sh: "s1",
+          area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c1" },
+          patch: { link: "https://example.com/stored" },
+        });
+      doc = {
+        ...doc,
+        sheet: {
+          ...doc.sheet,
+          s1: {
+            ...doc.sheet.s1!,
+            merges: [{ r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c3" }],
+          },
+        },
+      };
+      render(<SheetPanelBody controller={controllerOf(doc)} canEdit={false} toolbarSlot={null} />);
+      expect(screen.getByText("Merged site").className).toContain("underline");
+      const content = screen.getByRole("grid").querySelector("[data-sheet-content]")!;
+      fireEvent.pointerDown(content, { button: 0, clientX: 70, clientY: 5 });
+      const link = stored ? "https://example.com/stored" : "https://example.com/formula";
+      expect(screen.getByRole("link", { name: link }).getAttribute("href")).toBe(link);
+    },
+  );
+
+  it("edits and removes a covered cell’s link at the merge anchor", async () => {
+    const listeners = new Map<string, (event: MessageEvent<string>) => void>();
+    const sync = new SheetSync({
+      documentId: "sheet-1",
+      clientId: "me",
+      connect: () => ({
+        addEventListener: (type, listener) => listeners.set(type, listener),
+        close: () => {},
+      }),
+      push: () => new Promise(() => {}),
+    });
+    let doc = apply(
+      emptyDoc(),
+      { op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c1", v: "Site" }] },
+      {
+        op: "format",
+        sh: "s1",
+        area: { r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c1" },
+        patch: { link: "https://example.com/old" },
+      },
+    );
+    doc = {
+      ...doc,
+      sheet: {
+        ...doc.sheet,
+        s1: { ...doc.sheet.s1!, merges: [{ r1: "s1.r1", r2: "s1.r1", c1: "s1.c1", c2: "s1.c3" }] },
+      },
+    };
+    listeners.get("reset")!(
+      new MessageEvent("reset", {
+        data: JSON.stringify({
+          type: "reset",
+          doc,
+          revision: 1,
+          moment: { now: 45_000, seed: 1 },
+          acked: null,
+        }),
+      }),
+    );
+    render(
+      <SheetPanelBody
+        controller={{
+          documentId: "sheet-1",
+          subscribe: sync.subscribe,
+          getState: sync.getState,
+          sync: () => sync,
+          flush: async () => true,
+          unpersisted: () => false,
+          selected: () => [],
+        }}
+        canEdit
+        toolbarSlot={null}
+      />,
+    );
+    const content = screen.getByRole("grid").querySelector("[data-sheet-content]")!;
+    fireEvent.pointerDown(content, { button: 0, clientX: 70, clientY: 5 });
+    fireEvent.pointerUp(content);
+    fireEvent.click(screen.getByRole("button", { name: "Edit link" }));
+    const address = await screen.findByRole("textbox", { name: "Link" });
+    expect(address).toHaveProperty("value", "https://example.com/old");
+    fireEvent.change(address, { target: { value: "https://example.com/new" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Text" }), {
+      target: { value: "Updated site" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    expect(sync.getState().doc!.sheet.s1!.cells["s1.r1"]?.["s1.c1"]).toMatchObject({
+      v: "Updated site",
+      s: JSON.stringify({ link: "https://example.com/new" }),
+    });
+    expect(sync.getState().doc!.sheet.s1!.cells["s1.r1"]?.["s1.c2"]).toBeUndefined();
+    fireEvent.click(await screen.findByRole("button", { name: "Remove link" }));
+    expect(sync.getState().doc!.sheet.s1!.cells["s1.r1"]?.["s1.c1"]?.s).toBeUndefined();
+    expect(sync.getState().doc!.sheet.s1!.cells["s1.r1"]?.["s1.c2"]).toBeUndefined();
+    sync.destroy();
+  });
+
   it("gives the sheet's menu the open sheet's values as CSV", async () => {
     let doc = emptyDoc();
     const formula = parseFormula("A1*2", { doc, sheet: "s1" });

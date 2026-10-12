@@ -25,6 +25,7 @@ describe("values sent from the calculation worker", () => {
             cells: [
               { r: "s1.r1", c: "s1.c1", f: formula("SEQUENCE(2)") },
               { r: "s1.r1", c: "s1.c2", f: formula("1/0") },
+              { r: "s1.r1", c: "s1.c3", f: formula('HYPERLINK("https://example.com","Site")') },
             ],
           },
         ],
@@ -45,6 +46,21 @@ describe("values sent from the calculation worker", () => {
       [cellKey("s1", "s1.r1", "s1.c1"), ["s1.r1", "s1.r2"], ["s1.c1"]],
     ]);
     expect(copied.generation).toBe(3);
+    // A formula's link reaches the page, and only while the cell still holds the formula.
+    const context = { revision: 1, epoch: 0, now: 45_000, seed: 1 };
+    expect(valuesOf(doc, context, copied).link("s1", "s1.r1", "s1.c3")).toBe("https://example.com");
+    expect(valuesOf(doc, context, copied).value("s1", "s1.r1", "s1.c3")).toBe("Site");
+    expect(valuesOf(doc, context, copied).link("s1", "s1.r1", "s1.c2")).toBeNull();
+    const typedOver = applyChange(
+      doc,
+      {
+        clientId: "t",
+        seq: 2,
+        ops: [{ op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c3", v: "Site" }] }],
+      },
+      2,
+    ).doc;
+    expect(valuesOf(typedOver, context, copied).link("s1", "s1.r1", "s1.c3")).toBeNull();
   });
 
   it("empties a cleared formula's cells at once, before the worker answers again", () => {

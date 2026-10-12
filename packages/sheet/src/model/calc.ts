@@ -37,6 +37,8 @@ export interface SheetValues {
   value(sheet: string, row: string, col: string): Scalar;
   /** The cells a dynamic formula spills into, by ID, or null. */
   spill(sheet: string, row: string, col: string): { rows: string[]; cols: string[] } | null;
+  /** The address a formula's HYPERLINK gave the cell, or null. */
+  link(sheet: string, row: string, col: string): string | null;
 }
 
 export const LIVE_CALC: CalcLimits = { errorsListed: 40, links: 2_000_000, spill: 200_000 };
@@ -74,6 +76,7 @@ interface CalcState {
   /** Each row's cells as JSON, by sheet and row ID. */
   readonly rows: ReadonlyMap<string, string>;
   readonly results: ReadonlyMap<string, Scalar>;
+  readonly links: ReadonlyMap<string, string>;
   readonly areas: ReadonlyMap<string, CellBox>;
   readonly spilled: ReadonlySet<string>;
 }
@@ -133,6 +136,7 @@ export function calculateSheet(
       : undefined;
   const volatileCells = new Set(follow?.volatileCells);
   const results = new Map<string, Scalar>(follow?.results);
+  const links = new Map<string, string>(follow?.links);
   const areas = new Map<string, CellBox>(follow?.areas);
   const spilled = new Set<string>(follow?.spilled);
   /** Forgets what a formula's cell spilled into, and the values it wrote there. */
@@ -162,6 +166,7 @@ export function calculateSheet(
         const [top, left] = [rowsOf(id).at(r), colsOf(id).at(c)];
         if (top === undefined || left === undefined) continue;
         results.delete(key(id, r, c));
+        links.delete(key(id, r, c));
         volatileCells.delete(key(id, r, c));
         changed.push({ sheet: sheet.name, box: { top, left, bottom: top, right: left } });
         const area = dropArea(id, r, c);
@@ -300,6 +305,11 @@ export function calculateSheet(
       spilled.delete(spilledKey);
       results.delete(spilledKey);
     },
+    setLink: (formula, link) => {
+      const at = formulaIds.get(formula)!;
+      if (link === null) links.delete(key(at.sheet, at.r, at.c));
+      else links.set(key(at.sheet, at.r, at.c), link);
+    },
     setUncalculated: () => {
       // The formula keeps the #NAME? it was given before calculating.
     },
@@ -308,6 +318,7 @@ export function calculateSheet(
       // Shown as 0, it fills nothing.
       dropArea(at.sheet, at.r, at.c);
       volatileCells.delete(key(at.sheet, at.r, at.c));
+      links.delete(key(at.sheet, at.r, at.c));
       results.set(key(at.sheet, at.r, at.c), 0);
     },
     previous: (formula) => {
@@ -350,6 +361,8 @@ export function calculateSheet(
       const cols = colsOf(sheet).ids.slice(box.left - 1, box.right);
       return { rows, cols };
     },
+    link: (sheet, row, col) =>
+      doc.sheet[sheet]?.cells[row]?.[col]?.f ? (links.get(key(sheet, row, col)) ?? null) : null,
   };
   if (tracked)
     states.set(values, {
@@ -359,6 +372,7 @@ export function calculateSheet(
       structure,
       rows: rowJson,
       results,
+      links,
       areas,
       spilled,
     });

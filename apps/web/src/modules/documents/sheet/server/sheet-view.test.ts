@@ -56,6 +56,16 @@ describe("the model's view of a sheet", () => {
     );
   });
 
+  it("names the functions it can't calculate, which <errors> does not count", () => {
+    const doc = build([
+      { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["=NOSUCHFUNCTION(1)"]] },
+    ]);
+    const xml = view(doc).xml;
+    expect(xml).toContain("1| A1 =NOSUCHFUNCTION(1) → #NAME?");
+    expect(xml).not.toContain("<errors");
+    expect(xml.endsWith("<not-calculated>NOSUCHFUNCTION</not-calculated>")).toBe(true);
+  });
+
   it("cuts a long sheet into windows that say where to go on", () => {
     const doc = build([
       {

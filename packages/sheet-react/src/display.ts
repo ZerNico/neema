@@ -4,8 +4,36 @@ import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
 import { localizeFormula } from "@chat/sheet/formula-locale";
 import { renderFormula } from "@chat/sheet/model/formula";
-import type { SheetDoc } from "@chat/sheet/model";
+import { positions, type Sheet, type SheetDoc } from "@chat/sheet/model";
+import type { CellRef } from "./selection.ts";
 import { formatValue, generalText } from "@chat/sheet/number-format";
+
+/** Covered coordinates show the merge anchor's content, including its link. */
+export function mergeAnchor(sheet: Sheet, at: CellRef): CellRef {
+  const rows = positions(sheet.rows);
+  const cols = positions(sheet.cols);
+  const row = rows.at(at.r);
+  const col = cols.at(at.c);
+  if (row === undefined || col === undefined) return at;
+  for (const span of sheet.merges) {
+    const top = rows.at(span.r1);
+    const bottom = rows.at(span.r2);
+    const left = cols.at(span.c1);
+    const right = cols.at(span.c2);
+    if (
+      top !== undefined &&
+      bottom !== undefined &&
+      left !== undefined &&
+      right !== undefined &&
+      row >= top &&
+      row <= bottom &&
+      col >= left &&
+      col <= right
+    )
+      return { r: span.r1, c: span.c1 };
+  }
+  return at;
+}
 
 /** A link a cell may open: web and mail addresses only, never script. */
 export function safeLink(text: string | undefined): string | null {
