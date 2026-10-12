@@ -76,10 +76,12 @@ const createPool = (size: number) => {
     timeoutMs: number,
     signal: AbortSignal,
     resolveFile?: FileLookup,
+    deadline?: number,
   ) =>
     pool.run<T>({
       message: request,
       timeoutMs,
+      ...(deadline === undefined ? {} : { deadline }),
       signal,
       receive: (reply, post) => {
         const response = reply as WorkerResponse;
@@ -206,6 +208,7 @@ export class CustomToolRuntime extends Context.Service<
               input.timeoutMs,
               signal,
               lookup,
+              started + input.timeoutMs,
             ),
           catch: errorMessage,
         }).pipe(

@@ -87,19 +87,18 @@ export function prepareWordTools(host: WordToolHost): { group: ToolGroup } {
   const { invalid, execute, resolve, openSource, sourceFields, beginEdit, saveDraft } =
     officeToolKit("word", host, WordError);
 
-  const inspect = execute("inspect", async (raw): Promise<WordToolResult> => {
-    const source = await openSource(raw, false);
+  const inspect = execute("inspect", async (raw, signal): Promise<WordToolResult> => {
+    const source = await openSource(raw, signal, false);
     const from =
       raw.from === undefined
         ? 0
         : typeof raw.from === "number" && Number.isSafeInteger(raw.from) && raw.from >= 0
           ? raw.from
           : invalid("from: expected a block number, 0 or more.");
-    const document = await host.runtime.run({
-      kind: "inspect",
-      bytes: source.bytes,
-      scope: { from },
-    });
+    const document = await host.runtime.run(
+      { kind: "inspect", bytes: source.bytes, scope: { from } },
+      signal,
+    );
     return {
       family: "word",
       operation: "inspect",
@@ -116,8 +115,8 @@ export function prepareWordTools(host: WordToolHost): { group: ToolGroup } {
     };
   });
 
-  const edit = execute("edit", async (raw): Promise<WordToolResult> => {
-    const { create, source, name } = await beginEdit(raw, "Document.docx");
+  const edit = execute("edit", async (raw, signal): Promise<WordToolResult> => {
+    const { create, source, name } = await beginEdit(raw, "Document.docx", signal);
     const operations = parseWordOperations(raw.operations ?? []);
     // Pictures are resolved here, within what the sender may read, and travel as bytes.
     let imageBytes = 0;
@@ -132,17 +131,19 @@ export function prepareWordTools(host: WordToolHost): { group: ToolGroup } {
       let bytes: Uint8Array;
       if (ref.kind === "working") {
         await host.workingFiles.load(ref);
+        signal.throwIfAborted();
         bytes = host.workingFiles.read(ref).bytes;
-      } else bytes = (await resolve(ref)).bytes;
+      } else bytes = (await resolve(ref, signal)).bytes;
       imageBytes += bytes.length;
       if (bytes.length > WORD_LIMITS.imageBytes || imageBytes > WORD_LIMITS.editImageBytes)
         invalid(`${field}: pictures in one edit exceed the byte limit.`);
       if (!pictureOf(bytes)) invalid(`${field}: not a PNG or JPEG picture.`);
       Object.assign(operation, { imageRef: bytes });
     }
-    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" });
-    const output = await host.runtime.run({ kind: "edit", bytes, operations });
-    const draft = saveDraft(source, output.bytes, name);
+    signal.throwIfAborted();
+    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" }, signal);
+    const output = await host.runtime.run({ kind: "edit", bytes, operations }, signal);
+    const draft = saveDraft(source, output.bytes, name, signal);
     const changes = describeWordChanges(operations);
     return {
       family: "word",

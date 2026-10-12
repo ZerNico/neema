@@ -18,9 +18,11 @@ Creation, editing, dependency installation, checking and testing all require an
 admin session. Being offered a module grants no new authority to the user: it only
 lets the model choose whether to invoke code an admin already installed.
 
-A deadline covers queueing, module initialization, argument validation, handler
-execution and result serialization. Timeout or cancellation terminates and
-replaces the worker. Termination cannot undo filesystem, network, database, or
+An invocation's deadline starts at admission and covers queueing, module initialization,
+argument validation, handler execution and result serialization. An expired queued job
+is removed without dispatch or disturbing the worker serving another job. A dispatched
+job gets only the remaining time. Timeout or cancellation of active work terminates and
+replaces its worker. Termination cannot undo filesystem, network, database, or
 subprocess side effects that already happened, and may not stop a subprocess the
 tool detached.
 

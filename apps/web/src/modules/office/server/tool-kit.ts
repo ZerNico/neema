@@ -90,10 +90,13 @@ export function officeToolKit<F extends OfficeFamily>(
 
   /** A handler whose failures become one result shape the model can act on. */
   const execute =
-    <R>(operation: string, work: (raw: Arguments) => Promise<R>) =>
+    <R>(operation: string, work: (raw: Arguments, signal: AbortSignal) => Promise<R>) =>
     (raw: unknown) =>
       Effect.tryPromise({
-        try: () => work(presentArguments(raw, invalid)),
+        try: (signal) => {
+          signal.throwIfAborted();
+          return work(presentArguments(raw, invalid), signal);
+        },
         catch: (cause) => cause,
       }).pipe(
         Effect.catch((cause) =>
@@ -114,15 +117,23 @@ export function officeToolKit<F extends OfficeFamily>(
       );
 
   /** The resolver enforces access and version pins; its reason is one the model can act on. */
-  const resolve = (ref: FileRef) =>
-    Effect.runPromise(
+  const resolve = (ref: FileRef, signal: AbortSignal) => {
+    signal.throwIfAborted();
+    return Effect.runPromise(
       host
         .resolveFile(formatFileRef(ref))
         .pipe(Effect.mapError((reason) => new ErrorClass("unavailable", reason))),
+      { signal },
     );
+  };
 
   /** The file named by exactly one of sourceRef or workingRef, checked as this family's. */
-  const openSource = async (raw: Arguments, requireFingerprint = true): Promise<OfficeSource> => {
+  const openSource = async (
+    raw: Arguments,
+    signal: AbortSignal,
+    requireFingerprint = true,
+  ): Promise<OfficeSource> => {
+    signal.throwIfAborted();
     if ((raw.sourceRef === undefined) === (raw.workingRef === undefined))
       return invalid("Provide exactly one of sourceRef or workingRef.");
     const field = raw.sourceRef !== undefined ? "sourceRef" : "workingRef";
@@ -135,6 +146,7 @@ export function officeToolKit<F extends OfficeFamily>(
       );
     if (ref.kind === "working") {
       await host.workingFiles.load(ref);
+      signal.throwIfAborted();
       const file = host.workingFiles.read(ref);
       // A draft is edited in place; an import from the user's computer opens
       // into a draft of its own. The reference says which it is, so either
@@ -153,7 +165,8 @@ export function officeToolKit<F extends OfficeFamily>(
       (typeof raw.sourceFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(raw.sourceFingerprint))
     )
       return invalid("sourceFingerprint: expected the 64-character hex fingerprint.");
-    const file = await resolve(ref);
+    const file = await resolve(ref, signal);
+    signal.throwIfAborted();
     if (!accepts(file)) invalid(`${file.name} is not ${info.file}.`);
     if (raw.sourceFingerprint !== undefined && sha256Hex(file.bytes) !== raw.sourceFingerprint)
       invalid("The source changed since its fingerprint was observed; inspect it again.");
@@ -165,7 +178,8 @@ export function officeToolKit<F extends OfficeFamily>(
    * An edit's start: exactly one of create, sourceRef or workingRef, and the
    * file's name, which a new file takes from fileName.
    */
-  const beginEdit = async (raw: Arguments, defaultName: string) => {
+  const beginEdit = async (raw: Arguments, defaultName: string, signal: AbortSignal) => {
+    signal.throwIfAborted();
     if (raw.create !== undefined && raw.create !== true && raw.create !== "true")
       invalid("create: expected true, or leave it out.");
     const create = raw.create !== undefined;
@@ -176,7 +190,7 @@ export function officeToolKit<F extends OfficeFamily>(
       1
     )
       invalid("Provide exactly one of create, sourceRef or workingRef.");
-    const source = create ? null : await openSource(raw);
+    const source = create ? null : await openSource(raw, signal);
     const name = source?.name ?? raw.fileName ?? defaultName;
     if (
       typeof name !== "string" ||
@@ -188,7 +202,14 @@ export function officeToolKit<F extends OfficeFamily>(
   };
 
   /** The edited bytes as the draft's next revision, or a new draft opened from the source. */
-  const saveDraft = (source: OfficeSource | null, bytes: Uint8Array, name: string) => {
+  const saveDraft = (
+    source: OfficeSource | null,
+    bytes: Uint8Array,
+    name: string,
+    signal: AbortSignal,
+  ) => {
+    // Lower work may already have completed when Stop wins the awaiting Effect.
+    signal.throwIfAborted();
     const file = { bytes, name, mediaType: info.mediaType, owner: family };
     const snapshot =
       source?.draft && source.ref.kind === "working"

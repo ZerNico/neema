@@ -18,6 +18,7 @@ export function createOwnerLimit(options: {
   };
   const admit = (owner: string, signal?: AbortSignal) =>
     new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(options.cancelled());
       const entry = owners.get(owner) ?? { running: 0, waiting: [] };
       owners.set(owner, entry);
       if (entry.running < options.perOwner) {
@@ -43,9 +44,11 @@ export function createOwnerLimit(options: {
       signal: AbortSignal | undefined,
       job: () => Promise<T>,
     ) {
+      if (signal?.aborted) throw options.cancelled();
       if (owner === undefined) return job();
       await admit(owner, signal);
       try {
+        if (signal?.aborted) throw options.cancelled();
         return await job();
       } finally {
         release(owner);

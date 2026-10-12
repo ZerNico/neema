@@ -36,7 +36,10 @@ export interface WorkerJob<T> {
   readonly message: object;
   /** Buffers moved to the worker rather than copied; the caller must not use them again. */
   readonly transfer?: readonly ArrayBuffer[];
+  /** Active execution limit, starting at dispatch. */
   readonly timeoutMs: number;
+  /** Optional wall-clock deadline including the wait in either lane. */
+  readonly deadline?: number;
   readonly signal?: AbortSignal;
   /** Background jobs wait behind every queued foreground job. */
   readonly background?: boolean;
@@ -66,6 +69,7 @@ const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(
 
 export function createWorkerPool(options: WorkerPoolOptions) {
   const slots: Slot[] = [];
+  const retiring = new Set<Promise<unknown>>();
   const lanes = { foreground: [] as Pending[], background: [] as Pending[] };
   let nextId = 1;
   let closed = false;
@@ -82,7 +86,13 @@ export function createWorkerPool(options: WorkerPoolOptions) {
     slots.splice(slots.indexOf(slot), 1);
     const job = slot.job;
     slot.job = null;
-    void slot.worker.terminate();
+    // Removing a slot permits replacement, but shutdown still owns its termination.
+    const stopped = slot.worker.terminate();
+    retiring.add(stopped);
+    void stopped.then(
+      () => retiring.delete(stopped),
+      () => retiring.delete(stopped),
+    );
     if (job) settle(job, { ok: false, error: options.failure(failure) });
     pump();
   };
@@ -91,11 +101,12 @@ export function createWorkerPool(options: WorkerPoolOptions) {
     slots.push(slot);
     slot.worker.on("message", (reply: WorkerReply) => {
       const job = slot.job;
-      if (!job || reply?.id !== job.id) return;
+      if (!job || slot.dead || reply?.id !== job.id || expire(job)) return;
       const post: Post = (message, transfer = []) => {
         // The job may have ended (deadline, cancel) while its caller prepared an answer.
+        if (slot.dead || slot.job !== job || expire(job)) return;
         // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.
-        if (!slot.dead && slot.job === job) slot.worker.postMessage(message, [...transfer]);
+        slot.worker.postMessage(message, [...transfer]);
       };
       let result: Settlement<unknown> | undefined;
       try {
@@ -103,7 +114,7 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       } catch (error) {
         result = { ok: false, error: asError(error) };
       }
-      if (!result) return;
+      if (slot.dead || slot.job !== job || expire(job) || !result) return;
       slot.job = null;
       settle(job, result);
       pump();
@@ -125,6 +136,13 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       let slot = slots.find((item) => !item.dead && !item.job);
       if (!slot && slots.length >= options.size) return;
       const job = (lanes.foreground.length ? lanes.foreground : lanes.background).shift()!;
+      if (job.deadline !== undefined && job.deadline <= Date.now()) {
+        settle(job, {
+          ok: false,
+          error: options.failure({ reason: "timeout", timeoutMs: job.timeoutMs }),
+        });
+        continue;
+      }
       try {
         slot ??= spawn();
       } catch (cause) {
@@ -134,10 +152,22 @@ export function createWorkerPool(options: WorkerPoolOptions) {
         });
         continue;
       }
+      const remaining =
+        job.deadline === undefined
+          ? job.timeoutMs
+          : Math.min(job.timeoutMs, job.deadline - Date.now());
+      if (remaining <= 0) {
+        settle(job, {
+          ok: false,
+          error: options.failure({ reason: "timeout", timeoutMs: job.timeoutMs }),
+        });
+        continue;
+      }
       slot.job = job;
+      if (job.timer) clearTimeout(job.timer);
       job.timer = setTimeout(
-        () => retire(slot, { reason: "timeout", timeoutMs: job.timeoutMs }),
-        job.timeoutMs,
+        () => fail(job, { reason: "timeout", timeoutMs: job.timeoutMs }),
+        remaining,
       );
       try {
         // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.
@@ -151,23 +181,31 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       }
     }
   };
-  const cancel = (job: Pending) => {
+  const fail = (job: Pending, failure: WorkerFailure) => {
     for (const lane of [lanes.foreground, lanes.background]) {
       const index = lane.indexOf(job);
       if (index >= 0) {
         lane.splice(index, 1);
-        settle(job, { ok: false, error: options.failure({ reason: "cancelled" }) });
+        settle(job, { ok: false, error: options.failure(failure) });
         return;
       }
     }
     const slot = slots.find((item) => item.job === job);
-    if (slot) retire(slot, { reason: "cancelled" });
+    if (slot) retire(slot, failure);
+  };
+  const expire = (job: Pending) => {
+    // Timer delivery can lag behind a worker reply or an asynchronously prepared response.
+    if (job.deadline === undefined || job.deadline > Date.now()) return false;
+    fail(job, { reason: "timeout", timeoutMs: job.timeoutMs });
+    return true;
   };
 
   return {
     run<T>(job: WorkerJob<T>): Promise<T> {
       if (closed) return Promise.reject(options.failure({ reason: "closed" }));
       if (job.signal?.aborted) return Promise.reject(options.failure({ reason: "cancelled" }));
+      if (job.deadline !== undefined && job.deadline <= Date.now())
+        return Promise.reject(options.failure({ reason: "timeout", timeoutMs: job.timeoutMs }));
       const lane = job.background ? lanes.background : lanes.foreground;
       if (lane.length >= options.queue) return Promise.reject(options.failure({ reason: "busy" }));
       return new Promise<T>((resolve, reject) => {
@@ -178,10 +216,15 @@ export function createWorkerPool(options: WorkerPoolOptions) {
           reject,
         };
         if (job.signal) {
-          pending.abort = () => cancel(pending);
+          pending.abort = () => fail(pending, { reason: "cancelled" });
           job.signal.addEventListener("abort", pending.abort, { once: true });
         }
         lane.push(pending);
+        if (job.deadline !== undefined)
+          pending.timer = setTimeout(
+            () => fail(pending, { reason: "timeout", timeoutMs: pending.timeoutMs }),
+            job.deadline - Date.now(),
+          );
         pump();
       });
     },
@@ -191,14 +234,15 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       const refuse = (job: Pending) =>
         settle(job, { ok: false, error: options.failure({ reason: "closed" }) });
       for (const job of [...lanes.foreground.splice(0), ...lanes.background.splice(0)]) refuse(job);
-      await Promise.allSettled(
-        slots.splice(0).map((slot) => {
+      await Promise.allSettled([
+        ...retiring,
+        ...slots.splice(0).map((slot) => {
           slot.dead = true;
           if (slot.job) refuse(slot.job);
           slot.job = null;
           return slot.worker.terminate();
         }),
-      );
+      ]);
     },
   };
 }

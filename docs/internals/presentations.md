@@ -69,8 +69,17 @@ and result types are read from the handlers, so `run({ kind: "render" })` return
 slides, never a union to narrow. Top-level request buffers are copied and handed over, the
 caller's own left untouched. A failure the worker reports by name is a `JobError` subclass
 (`PresentationError`, `SpreadsheetError`) with a stable `code`; anything else crosses the
-boundary only as a generic failure. A new worker is a module of handlers, a runtime of
+boundary only as a generic failure. Office and PDF job timeouts bound active execution,
+not owner admission, font preparation or pool queueing. Custom invocations separately
+supply a queue-inclusive deadline. A new worker is a module of handlers, a runtime of
 configuration, and one entry in `scripts/build-office-workers.mjs`.
+
+Every Office tool carries its Effect cancellation signal through source resolution and
+runtime calls, including a presentation edit's nested render. Cancellation removes a
+waiting job or retires the active job's worker. Async loads without cancellation support
+are checked on return, and private draft writes check the signal immediately before
+mutation. Workspace disposal and generation-fenced publication remain separate guards.
+Stopping a later render does not roll back an edit already saved as a private draft.
 
 Reject active content (ActiveX, OLE, macros, executables), embedded audio and video, and
 external rendering dependencies rather than fetching them. Every picture relationship must

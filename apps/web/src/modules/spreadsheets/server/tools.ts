@@ -97,17 +97,20 @@ export function prepareSpreadsheetTools(host: SpreadsheetToolHost): { group: Too
     SpreadsheetError,
   );
 
-  const inspect = execute("inspect", async (raw): Promise<SpreadsheetToolResult> => {
-    const source = await openSource(raw, false);
+  const inspect = execute("inspect", async (raw, signal): Promise<SpreadsheetToolResult> => {
+    const source = await openSource(raw, signal, false);
     const sheet = raw.sheet === undefined ? undefined : text(raw.sheet, "sheet", 31);
     const range = raw.range === undefined ? undefined : text(raw.range, "range", 30);
     if (range && !parseRange(range))
       invalid(`range: "${range}" is not a cell range like "A1:H60".`);
-    const inspection = await host.runtime.run({
-      kind: "inspect",
-      bytes: source.bytes,
-      scope: { ...(sheet ? { sheet } : {}), ...(range ? { range } : {}) },
-    });
+    const inspection = await host.runtime.run(
+      {
+        kind: "inspect",
+        bytes: source.bytes,
+        scope: { ...(sheet ? { sheet } : {}), ...(range ? { range } : {}) },
+      },
+      signal,
+    );
     const position = inspection.window
       ? inspection.sheets.findIndex((each) => each.name === inspection.window!.sheet) + 1
       : 0;
@@ -137,12 +140,12 @@ export function prepareSpreadsheetTools(host: SpreadsheetToolHost): { group: Too
     };
   });
 
-  const edit = execute("edit", async (raw): Promise<SpreadsheetToolResult> => {
-    const { create, source, name } = await beginEdit(raw, "Workbook.xlsx");
+  const edit = execute("edit", async (raw, signal): Promise<SpreadsheetToolResult> => {
+    const { create, source, name } = await beginEdit(raw, "Workbook.xlsx", signal);
     const operations = parseSpreadsheetOperations(raw.operations ?? []);
-    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" });
-    const output = await host.runtime.run({ kind: "edit", bytes, operations });
-    const draft = saveDraft(source, output.bytes, name);
+    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" }, signal);
+    const output = await host.runtime.run({ kind: "edit", bytes, operations }, signal);
+    const draft = saveDraft(source, output.bytes, name, signal);
     const changes = describeSpreadsheetChanges(operations);
     const errors = output.formulaErrors.count;
     return {

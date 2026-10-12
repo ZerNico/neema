@@ -269,13 +269,19 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       return invalid(`${field}: expected 1 to ${max} slide IDs from slides[].slideId`);
     return list.map((id, index) => whole(id, `${field}[${index}]`, 1, 0xffffffff));
   };
-  const availableFonts = async () => [...((await host.fonts?.()) ?? BUNDLED_FONTS)];
+  const availableFonts = async (signal: AbortSignal) => {
+    signal.throwIfAborted();
+    const fonts = await host.fonts?.();
+    signal.throwIfAborted();
+    return [...(fonts ?? BUNDLED_FONTS)];
+  };
   /**
    * A font must be one previews can draw; the name is normalized to its
    * catalogue spelling. Curated Google families are fetched first, so naming
    * one is enough; one that cannot be fetched now is refused like any other.
    */
-  const checkFonts = async (operations: unknown[]) => {
+  const checkFonts = async (operations: unknown[], signal: AbortSignal) => {
+    signal.throwIfAborted();
     const fields: Array<{ owner: Record<string, unknown>; key: string; path: string }> = [];
     const visit = (value: unknown, path: string): void => {
       if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}[${index}]`));
@@ -291,11 +297,11 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
     );
     if (!fields.length) return;
     const named = fields.map(({ owner, key }) => String(owner[key]));
-    let fonts = await availableFonts();
+    let fonts = await availableFonts(signal);
     const lower = new Set(fonts.map((font) => font.toLowerCase()));
     if (host.ensureFonts && named.some((name) => !lower.has(name.trim().toLowerCase()))) {
       await host.ensureFonts(named);
-      fonts = await availableFonts();
+      fonts = await availableFonts(signal);
     }
     const known = new Map(fonts.map((font) => [font.toLowerCase(), font]));
     for (const { owner, key, path } of fields) {
@@ -311,9 +317,10 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
     }
   };
   /** Validates the batch, then swaps each image reference for authorized bytes. */
-  const materialize = async (raw: unknown) => {
+  const materialize = async (raw: unknown, signal: AbortSignal) => {
     const operations = parsePresentationOperations(raw, "tool");
-    await checkFonts(operations);
+    await checkFonts(operations, signal);
+    signal.throwIfAborted();
     let imageBytes = 0;
     for (const [index, operation] of operations.entries()) {
       if (operation.kind !== "addImage" && operation.kind !== "replaceImage") continue;
@@ -324,7 +331,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         return invalid(
           `${field}: expected attachment:<id>, project:<id>@<version>, skill:<revision>/<path> or an imported working: reference.`,
         );
-      const file = await resolve(ref);
+      const file = await resolve(ref, signal);
       imageBytes += file.bytes.length;
       if (
         file.bytes.length > PRESENTATION_LIMITS.imageBytes ||
@@ -341,9 +348,16 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
     }
     return operations;
   };
-  const rendered = async (bytes: Uint8Array, slideIds: number[], label: string) => {
+  const rendered = async (
+    bytes: Uint8Array,
+    slideIds: number[],
+    label: string,
+    signal: AbortSignal,
+  ) => {
+    signal.throwIfAborted();
     if (!host.onPreview) return "Vision feedback is unavailable; no pixels were inspected.";
-    const slides = await host.runtime.run({ kind: "render", bytes, slideIds });
+    const slides = await host.runtime.run({ kind: "render", bytes, slideIds }, signal);
+    signal.throwIfAborted();
     await host.onPreview(
       slides.map((slide) => ({
         slideId: slide.slideId,
@@ -354,8 +368,8 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
     return [...new Set(slides.map((slide) => slide.warning).filter(Boolean))].join(" ");
   };
 
-  const inspect = execute("inspect", async (raw): Promise<PresentationToolResult> => {
-    const source = await openSource(raw, false);
+  const inspect = execute("inspect", async (raw, signal): Promise<PresentationToolResult> => {
+    const source = await openSource(raw, signal, false);
     const page = offset(raw.page, "page", MAX_PAGE);
     const shapeOffset = offset(raw.shapeOffset, "shapeOffset", PRESENTATION_LIMITS.shapesPerSlide);
     const layoutOffset = offset(raw.layoutOffset, "layoutOffset", MAX_LAYOUT_OFFSET);
@@ -376,7 +390,10 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
           : { slides: { page }, owners: true, catalog: true }),
       ...(templateId === undefined ? {} : { templateId }),
     };
-    const inspection = await host.runtime.run({ kind: "inspect", bytes: source.bytes, scope });
+    const inspection = await host.runtime.run(
+      { kind: "inspect", bytes: source.bytes, scope },
+      signal,
+    );
     const every = inspection.slides;
     const selected = selectedIds.map((id) => {
       const slide = every.find((item) => item.slideId === id);
@@ -426,7 +443,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
                 : null,
             masters: inspection.masters ?? [],
             theme: inspection.theme ?? null,
-            availableFonts: await availableFonts(),
+            availableFonts: await availableFonts(signal),
           }
         : {}),
       ...(inspection.template
@@ -455,7 +472,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       ...sourceFields(source),
     };
   });
-  const edit = execute("edit", async (raw): Promise<PresentationToolResult> => {
+  const edit = execute("edit", async (raw, signal): Promise<PresentationToolResult> => {
     if (raw.render !== undefined && raw.render !== "changed" && raw.render !== "all")
       invalid('render: expected "changed" or "all".');
     if (raw.render !== undefined && raw.renderSlideIds !== undefined)
@@ -464,12 +481,16 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       raw.renderSlideIds === undefined
         ? null
         : idList(raw.renderSlideIds, "renderSlideIds", PRESENTATION_LIMITS.rendersPerCall);
-    const { create, source, name } = await beginEdit(raw, "Presentation.pptx");
-    const operations = await materialize(raw.operations ?? []);
-    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" });
+    const { create, source, name } = await beginEdit(raw, "Presentation.pptx", signal);
+    const operations = await materialize(raw.operations ?? [], signal);
+    signal.throwIfAborted();
+    const bytes = source ? source.bytes : await host.runtime.run({ kind: "create" }, signal);
     // Edits never change layouts, and an opened deck was inspected first, so
     // only a new deck's result carries the catalog.
-    const output = await host.runtime.run({ kind: "edit", bytes, operations, catalog: create });
+    const output = await host.runtime.run(
+      { kind: "edit", bytes, operations, catalog: create },
+      signal,
+    );
     const slides = output.inspection.slides.filter(isSummary);
     const renderIds =
       explicitIds ??
@@ -478,7 +499,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
         : raw.render === "all"
           ? slides.slice(0, PRESENTATION_LIMITS.rendersPerCall).map((slide) => slide.slideId)
           : null);
-    const { snapshot, fields } = saveDraft(source, output.bytes, name);
+    const { snapshot, fields } = saveDraft(source, output.bytes, name, signal);
     let previewWarning: string | undefined;
     if (renderIds?.length) {
       try {
@@ -486,8 +507,10 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
           output.bytes,
           renderIds,
           `${snapshot.ref.id}@${snapshot.ref.revision}`,
+          signal,
         );
       } catch (error) {
+        signal.throwIfAborted();
         previewWarning = `Edit committed, but the preview failed${error instanceof PresentationError ? ` (${error.message})` : ""}. Do not repeat the edit.`;
       }
     }
@@ -522,7 +545,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
               output.inspection.layouts.length > INSPECT_LIMITS.layoutsPerPage
                 ? INSPECT_LIMITS.layoutsPerPage
                 : null,
-            availableFonts: await availableFonts(),
+            availableFonts: await availableFonts(signal),
           }
         : {}),
       ...(renderIds?.length && host.onPreview ? { renderedSlideIds: renderIds } : {}),
@@ -530,8 +553,8 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       ...(output.fontsNotEmbedded ? { fontsNotEmbedded: output.fontsNotEmbedded } : {}),
     };
   });
-  const render = execute("render", async (raw): Promise<PresentationToolResult> => {
-    const source = await openSource(raw);
+  const render = execute("render", async (raw, signal): Promise<PresentationToolResult> => {
+    const source = await openSource(raw, signal);
     // Asked for more than one call draws, it draws the first ones and names the
     // rest, rather than failing a call whose intent is plain.
     const asked = Array.isArray(raw.slideIds) ? raw.slideIds : [raw.slideIds];
@@ -545,6 +568,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
       source.ref.kind === "working"
         ? `${source.ref.id}@${source.ref.revision}`
         : sha256Hex(source.bytes),
+      signal,
     );
     return {
       family: "presentation",
