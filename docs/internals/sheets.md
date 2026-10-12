@@ -25,7 +25,10 @@ browser workers and the Excel file tools); this page records the decisions behin
 - Copy and fill shift relative parts by position (`copyFormula`) and are sent as plain cell
   writes. Cut (`move`) redirects every reference wholly inside the moved cells, and `sort`
   carries an explicit row order, computed once by whoever sorts; moved formulas shift as a
-  copy would and references from elsewhere keep their positions, as in Excel.
+  copy would and references from elsewhere keep their positions, as in Excel. If any shifted
+  formula needs rows or columns not already present, the whole sort is dropped before cells or
+  comment anchors move. Growth needs caller-supplied IDs in earlier operations, never IDs minted
+  during replay. Other operations in that change still apply and the refusal is shown.
 
 ## Deleting
 
@@ -241,7 +244,9 @@ browser workers and the Excel file tools); this page records the decisions behin
   (`SEQUENCE`, `MAKEARRAY`, `INDIRECT`, `OFFSET` and the like). The worker follows its last calculation (`calculateSheet`'s `follows`): it compares each
   row's cell contents with what it calculated before and recalculates only the formulas the
   changed cells reach (those reading them, filling them, shown as `#SPILL!`, or using
-  `INDIRECT` and `OFFSET`, and everything after those), keeping every other result. A change to
+  `INDIRECT` and `OFFSET`, and everything after those), keeping every other result and its
+  volatility. Re-evaluating a formula replaces that metadata, and removing the last reader
+  clears it, so an unrelated edit cannot hide a later context-only refresh. A change to
   rows, columns, sheets or names, a new moment for a sheet that reads it, or a spill changing
   shape starts over whole. On the page, a new revision's context alone calculates nothing unless
   a formula read the moment, and the feed echoing a tab's own edits keeps its document, so a

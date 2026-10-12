@@ -210,6 +210,75 @@ describe("applying changes", () => {
     expect(render(doc, cell(doc, "C5")!.f!)).toBe("B1+B2");
   });
 
+  it.each(["A1000+A1", "A1000+$A$1+A$1+$A1"])(
+    "refuses a whole sort needing growth for %s, keeping other writes and anchors",
+    (text) => {
+      let doc = set(emptyDoc(), "A1", { v: 30 });
+      doc = set(doc, "A2", { v: 10 });
+      doc = set(doc, "B1", { f: text });
+      doc = set(doc, "B2", { f: "A2*2" });
+      doc = apply(doc, {
+        op: "anchor",
+        thread: "note",
+        at: { sh: "s1", r: "s1.r1", c: "s1.c2" },
+      }).doc;
+      const change = {
+        clientId: "sorter",
+        seq: 1,
+        ops: [
+          { op: "set", sh: "s1", cells: [{ r: "s1.r4", c: "s1.c4", v: "before" }] },
+          {
+            op: "sort",
+            sh: "s1",
+            c1: "s1.c1",
+            c2: "s1.c2",
+            rows: ["s1.r1", "s1.r2"],
+            order: ["s1.r2", "s1.r1"],
+          },
+          { op: "set", sh: "s1", cells: [{ r: "s1.r5", c: "s1.c4", v: "after" }] },
+        ],
+      } satisfies Parameters<typeof applyChange>[1];
+      const result = applyChange(doc, change, 99);
+      expect(result.dropped).toEqual(["a sort whose shifted formulas need more rows or columns"]);
+      expect([cell(result.doc, "A1")?.v, cell(result.doc, "A2")?.v]).toEqual([30, 10]);
+      expect(render(result.doc, cell(result.doc, "B1")!.f!)).toBe(text);
+      expect(render(result.doc, cell(result.doc, "B2")!.f!)).toBe("A2*2");
+      expect(result.doc.anchors).toEqual(doc.anchors);
+      expect([cell(result.doc, "D4")?.v, cell(result.doc, "D5")?.v]).toEqual(["before", "after"]);
+      expect(result.doc.sheet.s1!.rows).toEqual(doc.sheet.s1!.rows);
+      expect(
+        applyChange(JSON.parse(JSON.stringify(doc)), JSON.parse(JSON.stringify(change)), 99),
+      ).toEqual(result);
+    },
+  );
+
+  it("refuses sort growth after row deletion, but accepts growth explicitly supplied first", () => {
+    let doc = deleteRows(emptyDoc(), 3);
+    doc = set(doc, "B1", { f: "A999+A1" });
+    const sort: SheetOp = {
+      op: "sort",
+      sh: "s1",
+      c1: "s1.c1",
+      c2: "s1.c2",
+      rows: ["s1.r1", "s1.r2"],
+      order: ["s1.r2", "s1.r1"],
+    };
+    expect(apply(doc, sort).dropped).toHaveLength(1);
+    const grown = apply(
+      doc,
+      {
+        op: "insert",
+        sh: "s1",
+        axis: "rows",
+        ids: ["planned-row"],
+        after: "s1.r1000",
+      },
+      sort,
+    );
+    expect(grown.dropped).toEqual([]);
+    expect(render(grown.doc, cell(grown.doc, "B2")!.f!)).toBe("A1000+A2");
+  });
+
   it("drops what can't apply and says so, applying the rest", () => {
     let doc = apply(emptyDoc(), {
       op: "merge",

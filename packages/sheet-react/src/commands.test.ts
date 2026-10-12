@@ -116,6 +116,20 @@ describe("editing the selection", () => {
     expect([shown(doc, 1, 1), shown(doc, 1, 2)]).toEqual([null, null]);
   });
 
+  it("keeps a sort needing growth as an operation whose refusal the caller can report", () => {
+    let doc = type(emptyDoc(), 1, 1, "30");
+    doc = type(doc, 2, 1, "10");
+    doc = type(doc, 1, 2, "=A1000+A1");
+    const idsBefore = minted;
+    const ops = sortSelection(context(doc, [2, 2], [1, 1]), false);
+    expect(ops).toHaveLength(1);
+    expect(minted).toBe(idsBefore);
+    const result = applyChange(doc, { clientId: "t", seq: 1, ops }, 1);
+    expect(result.dropped).toEqual(["a sort whose shifted formulas need more rows or columns"]);
+    expect(result.doc).toBe(doc);
+    expect(formulaAt(result.doc, 1, 2)).toBe("A1000+A1");
+  });
+
   it("fills a formula down, each copy reading its own row", () => {
     let doc = type(emptyDoc(), 1, 1, "1");
     doc = type(doc, 2, 1, "2");

@@ -758,9 +758,9 @@ function sort(
   if (!cols.length) return drop(doc, dropped, "a sort whose columns were deleted");
   const at: FormulaAt = { doc, sheet: op.sh };
   const writes: [string, string, Cell][] = [];
-  op.rows.forEach((to, index) => {
+  for (const [index, to] of op.rows.entries()) {
     const from = op.order[index]!;
-    if (from === to) return;
+    if (from === to) continue;
     const shift = { rows: rowIndex.at(to)! - rowIndex.at(from)!, cols: 0 };
     for (const c of cols) {
       const cell = cellAt(sheet, from, c);
@@ -769,10 +769,13 @@ function sort(
         continue;
       }
       const copied = cell.f ? copyFormula(cell.f, shift, at) : null;
-      const f = copied && "formula" in copied ? copied.formula : cell.f;
+      // Replay cannot mint the IDs growth needs. Refuse before any cells or anchors move.
+      if (copied && "grow" in copied)
+        return drop(doc, dropped, "a sort whose shifted formulas need more rows or columns");
+      const f = copied?.formula;
       writes.push([to, c, { ...cell, ...(f ? { f } : {}), w: revision }]);
     }
-  });
+  }
   // A thread on one row's sorted cells goes where its row's contents went.
   const destination = new Map(op.order.map((from, index) => [from, op.rows[index]!]));
   const sorted = new Set(cols);

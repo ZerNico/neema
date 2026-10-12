@@ -68,6 +68,7 @@ const key = (sheet: string, row: string, col: string) => `${sheet}\u0000${row}\u
 interface CalcState {
   readonly context: CalcContext;
   readonly volatile: boolean;
+  readonly volatileCells: ReadonlySet<string>;
   /** Sheets, names and every sheet's rows and columns, as JSON: what positions follow from. */
   readonly structure: string;
   /** Each row's cells as JSON, by sheet and row ID. */
@@ -130,6 +131,7 @@ export function calculateSheet(
     )
       ? before
       : undefined;
+  const volatileCells = new Set(follow?.volatileCells);
   const results = new Map<string, Scalar>(follow?.results);
   const areas = new Map<string, CellBox>(follow?.areas);
   const spilled = new Set<string>(follow?.spilled);
@@ -160,6 +162,7 @@ export function calculateSheet(
         const [top, left] = [rowsOf(id).at(r), colsOf(id).at(c)];
         if (top === undefined || left === undefined) continue;
         results.delete(key(id, r, c));
+        volatileCells.delete(key(id, r, c));
         changed.push({ sheet: sheet.name, box: { top, left, bottom: top, right: left } });
         const area = dropArea(id, r, c);
         if (area) changed.push({ sheet: sheet.name, box: area });
@@ -182,7 +185,6 @@ export function calculateSheet(
       if (name && hit && dropArea(id, r, c)) changed.push({ sheet: name, box: area });
     }
   const formulaIds = new Map<StoredFormula, { sheet: string; r: string; c: string }>();
-  let volatile = false;
 
   const store: CellStore = {
     sheets: sheetIds.map((id) => doc.sheet[id]!.name),
@@ -305,6 +307,7 @@ export function calculateSheet(
       const at = formulaIds.get(formula)!;
       // Shown as 0, it fills nothing.
       dropArea(at.sheet, at.r, at.c);
+      volatileCells.delete(key(at.sheet, at.r, at.c));
       results.set(key(at.sheet, at.r, at.c), 0);
     },
     previous: (formula) => {
@@ -313,13 +316,16 @@ export function calculateSheet(
     },
     volatile: (formula) => {
       const at = formulaIds.get(formula)!;
+      const cell = key(at.sheet, at.r, at.c);
+      // Evaluated formulas replace their metadata. Reused results keep theirs.
+      volatileCells.delete(cell);
       return {
         get now() {
-          volatile = true;
+          volatileCells.add(cell);
           return context.now;
         },
         random: (call) => {
-          volatile = true;
+          volatileCells.add(cell);
           return stream(hash(`${context.seed}|${at.sheet}|${at.r}|${at.c}|${call}`));
         },
       };
@@ -327,6 +333,7 @@ export function calculateSheet(
   };
 
   const report = calculate(store, limits, changed);
+  const volatile = volatileCells.size > 0;
   const values: SheetValues = {
     context,
     report,
@@ -345,6 +352,15 @@ export function calculateSheet(
     },
   };
   if (tracked)
-    states.set(values, { context, volatile, structure, rows: rowJson, results, areas, spilled });
+    states.set(values, {
+      context,
+      volatile,
+      volatileCells,
+      structure,
+      rows: rowJson,
+      results,
+      areas,
+      spilled,
+    });
   return values;
 }

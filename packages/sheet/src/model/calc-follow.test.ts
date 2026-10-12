@@ -84,7 +84,7 @@ const snapshot = (doc: SheetDoc, values: SheetValues) => {
   for (const r of rows.ids.slice(0, SIZE + 2))
     for (const c of cols.ids.slice(0, SIZE + 2))
       cells.push([values.value("s1", r, c), values.spill("s1", r, c)]);
-  return { cells, report: values.report };
+  return { cells, report: values.report, volatile: values.volatile };
 };
 
 describe("a calculation following the one before", () => {
@@ -114,6 +114,89 @@ describe("a calculation following the one before", () => {
       ),
       { numRuns: 300 },
     );
+  });
+
+  it("keeps reused NOW and RAND volatile, refreshes their dependents, and retires the last reader", () => {
+    let doc = emptyDoc();
+    const writeFormula = (r: string, c: string, text: string): CellWrite => {
+      const parsed = parseFormula(text, { doc, sheet: "s1" });
+      if (!("formula" in parsed)) throw new Error("unparsed");
+      return { r, c, f: parsed.formula };
+    };
+    const edit = (...cells: CellWrite[]) => {
+      doc = applyChange(
+        doc,
+        { clientId: "t", seq: 1, ops: [{ op: "set", sh: "s1", cells }] },
+        2,
+      ).doc;
+    };
+    edit(
+      writeFormula("s1.r1", "s1.c1", "NOW()"),
+      writeFormula("s1.r2", "s1.c1", "RAND()"),
+      writeFormula("s1.r1", "s1.c2", "A1+A2"),
+    );
+    let previous = calculateSheet(doc, context, undefined, { previous: null });
+    expect(previous.volatile).toBe(true);
+    edit({ r: "s1.r4", c: "s1.c4", v: "unrelated" });
+    previous = calculateSheet(doc, context, undefined, { previous });
+    expect(snapshot(doc, previous)).toEqual(snapshot(doc, calculateSheet(doc, context)));
+    expect(previous.volatile).toBe(true);
+    const next = { ...context, revision: 3, now: context.now + 1, seed: 8 };
+    previous = calculateSheet(doc, next, undefined, { previous });
+    expect(snapshot(doc, previous)).toEqual(snapshot(doc, calculateSheet(doc, next)));
+    expect(previous.value("s1", "s1.r1", "s1.c1")).toBe(next.now);
+    expect(previous.value("s1", "s1.r1", "s1.c2")).toBe(
+      next.now + Number(previous.value("s1", "s1.r2", "s1.c1")),
+    );
+    edit({ r: "s1.r1", c: "s1.c1", v: 10 });
+    previous = calculateSheet(doc, next, undefined, { previous });
+    expect(previous.volatile).toBe(true);
+    edit({ r: "s1.r2", c: "s1.c1", v: 20 });
+    previous = calculateSheet(doc, next, undefined, { previous });
+    expect(previous.volatile).toBe(false);
+    expect(snapshot(doc, previous)).toEqual(snapshot(doc, calculateSheet(doc, next)));
+    const later = { ...next, now: next.now + 1, seed: 9 };
+    const followed = calculateSheet(doc, later, undefined, { previous });
+    expect(snapshot(doc, followed)).toEqual(snapshot(doc, calculateSheet(doc, later)));
+    expect(followed.value("s1", "s1.r1", "s1.c2")).toBe(30);
+  });
+
+  it("drops volatility when a changed dependency makes a volatile branch stop reading context", () => {
+    let doc = emptyDoc();
+    const parsed = parseFormula("IF(A1,NOW(),0)", { doc, sheet: "s1" });
+    if (!("formula" in parsed)) throw new Error("unparsed");
+    doc = applyChange(
+      doc,
+      {
+        clientId: "t",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: true },
+              { r: "s1.r1", c: "s1.c2", f: parsed.formula },
+            ],
+          },
+        ],
+      },
+      1,
+    ).doc;
+    const first = calculateSheet(doc, context, undefined, { previous: null });
+    expect(first.volatile).toBe(true);
+    doc = applyChange(
+      doc,
+      {
+        clientId: "t",
+        seq: 2,
+        ops: [{ op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c1", v: false }] }],
+      },
+      2,
+    ).doc;
+    const next = calculateSheet(doc, context, undefined, { previous: first });
+    expect(next.volatile).toBe(false);
+    expect(snapshot(doc, next)).toEqual(snapshot(doc, calculateSheet(doc, context)));
   });
 
   it("follows one edit down a long column", () => {

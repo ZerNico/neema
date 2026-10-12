@@ -1,5 +1,6 @@
 import { rangeWide } from "@chat/sheet/model/conditional";
 import { draft } from "@chat/sheet/model/draft";
+import { applyChange } from "@chat/sheet/model/apply";
 import { columnIndex, columnLetters, parseCell, parseRange } from "@chat/sheet/a1";
 import type { Scalar } from "@chat/sheet/engine/evaluate";
 import { calculateSheet, type CalcContext } from "@chat/sheet/model/calc";
@@ -452,7 +453,17 @@ export function convertOperations(
         });
         const order = keyed.map((each) => each.r);
         if (order.every((r, index) => r === sorted[index])) return;
-        emit({ op: "sort", sh, c1: cols[0]!, c2: cols.at(-1)!, rows: sorted, order });
+        const sort = {
+          op: "sort",
+          sh,
+          c1: cols[0]!,
+          c2: cols.at(-1)!,
+          rows: sorted,
+          order,
+        } as const;
+        const checked = applyChange(plan.doc, { clientId: "draft", seq: 0, ops: [sort] }, -1);
+        if (checked.dropped.length) throw new Refused("invalid", checked.dropped[0]!);
+        emit(sort);
         return;
       }
       case "addSheet": {

@@ -127,6 +127,34 @@ describe("converting the model's sheet edits", () => {
     expect(edit(below, ragged, seen)).toMatchObject({ ok: true });
   });
 
+  it("reports a sort needing formula growth as invalid, never as a successful no-op", () => {
+    const doc = done(
+      edit(emptyDoc(), [
+        {
+          kind: "setCells",
+          sheet: "Sheet1",
+          start: "A1",
+          rows: [
+            [30, "=A1000+A1"],
+            [10, "=A2"],
+          ],
+        },
+      ]),
+    );
+    const before = JSON.stringify(doc);
+    const result = edit(doc, [
+      { kind: "setCells", sheet: "Sheet1", start: "D4", rows: [["not committed"]] },
+      { kind: "sort", sheet: "Sheet1", range: "A1:B2", by: "A" },
+    ]);
+    expect(result).toEqual({
+      ok: false,
+      outcome: "invalid",
+      message: "a sort whose shifted formulas need more rows or columns",
+    });
+    expect(JSON.stringify(doc)).toBe(before);
+    expect(formulaAt(doc, "B1")).toBe("A1000+A1");
+  });
+
   it("sorts by calculated values, blanks last, keeping the header", () => {
     let doc = done(
       edit(emptyDoc(), [
