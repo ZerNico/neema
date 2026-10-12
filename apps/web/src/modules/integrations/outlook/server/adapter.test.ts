@@ -5,7 +5,8 @@ import type { UnattendedGrant } from "../../consent.ts";
 import type { AdapterFailure } from "../../server/adapter.ts";
 import type { IntegrationApprovals } from "../../server/approvals.ts";
 import type { ConnectedSession } from "../../server/service.ts";
-import { prepareIntegrationTools } from "../../server/tools.ts";
+import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
+import { outlookManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";
 import { outlookAdapter } from "./adapter.ts";
 
@@ -112,6 +113,8 @@ const session: ConnectedSession = {
   configIdentity: "config",
   integration: { id: "outlook", kind: "outlook", name: "Outlook" },
   adapter: outlookAdapter,
+  tools: shippedTools(outlookManifest, outlookAdapter),
+  authKind: "oauth",
 };
 const handlers = outlookAdapter.handlers;
 const refusal = (prepare: Effect.Effect<unknown, AdapterFailure>) =>
@@ -204,6 +207,8 @@ describe("sending under a schedule's allowance", () => {
   const counted = new Map<string, number>();
   const approvals: IntegrationApprovals["Service"] = {
     request: vi.fn(() => Effect.succeed("allow" as const)),
+    elicit: () => Effect.succeed({ action: "cancel" as const }),
+    answer: () => Effect.succeed(false),
     decide: () => Effect.succeed(false),
     get: () => Effect.succeed(null),
     pending: () => Effect.succeed([]),
@@ -220,6 +225,7 @@ describe("sending under a schedule's allowance", () => {
       sessionFor: () => Effect.succeed(session),
       rowIdFor: (id) => Effect.succeed(`row-${id}`),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: {
         reserve: (_integration, allowance) =>
           Effect.sync(() => {
@@ -326,6 +332,7 @@ describe("sending under a schedule's allowance", () => {
       sessionFor: () => Effect.succeed(session),
       rowIdFor: () => Effect.succeed("row"),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: { reserve, release: () => Effect.void },
     })!;
     const send = prepared.group.handlers.int_outlook__send_mail as (

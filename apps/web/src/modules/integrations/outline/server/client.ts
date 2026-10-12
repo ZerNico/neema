@@ -63,7 +63,12 @@ export const outlineCall = <A>(
   Effect.gen(function* () {
     const credential = yield* session.credential;
     // Outline takes its own OAuth tokens and API keys alike as a bearer.
-    const token = credential.kind === "oauth" ? credential.accessToken : credential.values.key;
+    const token =
+      credential.kind === "oauth"
+        ? credential.accessToken
+        : credential.kind === "api_key"
+          ? credential.values.key
+          : "";
     const response = yield* Effect.tryPromise({
       try: (signal) =>
         fetch(`${outlineBase(session.config)}/api/${method}`, {

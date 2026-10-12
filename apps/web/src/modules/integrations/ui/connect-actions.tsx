@@ -16,7 +16,7 @@ import { FieldDescription, FieldError, FieldGroup } from "~/ui/primitives/field"
 import { findIntegrationType } from "../catalog.ts";
 import { connectUrl } from "../client/queries.ts";
 import type { UserIntegration } from "../schema.ts";
-import { connectIntegrationApiKey } from "../server/functions.ts";
+import { connectIntegrationApiKey, connectIntegrationOpen } from "../server/functions.ts";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 
 /**
@@ -34,23 +34,63 @@ export function ConnectActions({
   const [keyOpen, setKeyOpen] = useState(false);
   if (!manifest) return null;
   const reconnect = integration.connection?.status === "needs_reauth";
+  // A server from a catalog is known by its own name, not its type's.
+  const service = manifest.toolSource === "catalog" ? integration.name : manifest.name;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
+      {/* One primary: no account first, then a sign-in, a token last. */}
+      {integration.methods.open ? <TurnOnButton integration={integration} /> : null}
       {integration.methods.apiKey ? (
         <Button
           size="sm"
-          variant={integration.methods.oauth ? "outline" : "default"}
+          variant={integration.methods.oauth || integration.methods.open ? "outline" : "default"}
           onClick={() => setKeyOpen(true)}
         >
-          Use an API key
+          Use {manifest.apiKey?.noun ?? "an API key"}
         </Button>
       ) : null}
       {integration.methods.oauth ? (
-        <SignInButton integration={integration} returnTo={returnTo}>
-          {reconnect ? "Reconnect" : `Sign in with ${manifest.name}`}
+        <SignInButton
+          integration={integration}
+          returnTo={returnTo}
+          variant={integration.methods.open ? "outline" : "default"}
+        >
+          {reconnect ? "Reconnect" : `Sign in with ${service}`}
         </SignInButton>
       ) : null}
       {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
+    </div>
+  );
+}
+
+/** For a server that needs no account of one's own: open, or the admin's shared key. */
+export function TurnOnButton({
+  integration,
+  children = "Turn on",
+}: {
+  integration: UserIntegration;
+  children?: ReactNode;
+}) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const turnOn = useMutation({
+    mutationFn: () => connectIntegrationOpen({ data: { integrationId: integration.id } }),
+    onSuccess: async (result) => {
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+    onError: () => setError(`Could not reach ${integration.name}.`),
+  });
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <PendingButton size="sm" pending={turnOn.isPending} onClick={() => turnOn.mutate()}>
+        {children}
+      </PendingButton>
+      {error ? <FieldError>{error}</FieldError> : null}
     </div>
   );
 }
@@ -59,16 +99,19 @@ export function ConnectActions({
 export function SignInButton({
   integration,
   returnTo,
+  variant = "default",
   children,
 }: {
   integration: UserIntegration;
   returnTo?: string | undefined;
+  variant?: "default" | "outline";
   children: ReactNode;
 }) {
   const desktop = useDesktop();
   return (
     <Button
       size="sm"
+      variant={variant}
       // In the desktop app a new-window link goes to the system browser,
       // which is where the sign-in has to happen; a browser tab just goes.
       render={
@@ -106,7 +149,7 @@ export function ApiKeyDialog({
       await queryClient.invalidateQueries({ queryKey: ["integrations"] });
       onOpenChange(false);
     },
-    onError: () => setError("Could not check that key."),
+    onError: () => setError("Could not check that."),
   });
 
   return (
@@ -119,10 +162,12 @@ export function ApiKeyDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect {integration.name} with an API key</DialogTitle>
+          <DialogTitle>
+            Connect {integration.name} with {manifest.apiKey?.noun ?? "an API key"}
+          </DialogTitle>
           <DialogDescription>
-            The key is checked with {manifest.name}, encrypted, and never shown again. Chats act
-            with everything it can reach.
+            It’s checked with {integration.name}, encrypted, and never shown again. Chats act with
+            everything it can reach.
           </DialogDescription>
         </DialogHeader>
         <form

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { adminIntegrationsQuery } from "../client/queries.ts";
 import type { AdminIntegration } from "../schema.ts";
-import { createIntegration } from "../server/functions.ts";
+import { createIntegration, saveIntegrationConfig } from "../server/functions.ts";
 import { AdminIntegrationsPage } from "./admin-integrations-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -18,7 +18,7 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../server/functions.ts", () => ({
   createIntegration: vi.fn(async () => ({ ok: true, id: "jira-2" })),
   deleteIntegration: vi.fn(),
-  saveIntegrationConfig: vi.fn(),
+  saveIntegrationConfig: vi.fn(async () => ({ ok: true })),
   listAdminIntegrations: vi.fn(),
   listIntegrationDirectory: vi.fn(async () => []),
 }));
@@ -35,6 +35,8 @@ const jira = (id: string, name: string): AdminIntegration & { redirectUri: strin
   allowApiKeys: true,
   audience: "instance",
   connectionCount: 2,
+  sharedCredentialConfigured: false,
+  catalog: null,
   redirectUri: null,
 });
 
@@ -72,6 +74,43 @@ describe("admin integrations", () => {
     await waitFor(() =>
       expect(createIntegration).toHaveBeenCalledWith({
         data: { kind: "jira", name: "Jira · Ops" },
+      }),
+    );
+  });
+
+  it("ticks the ways into an MCP server and shows only what they need", async () => {
+    const user = userEvent.setup();
+    mount([
+      {
+        ...jira("mcp", "DeepWiki"),
+        kind: "mcp",
+        config: { url: "https://mcp.deepwiki.com/mcp", ways: "anonymous", anonymous: "open" },
+        allowApiKeys: false,
+        connectionCount: 0,
+      },
+    ]);
+    await user.click(screen.getByRole("button", { name: "Set up DeepWiki" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set up DeepWiki" });
+    expect(within(dialog).getByRole("radio", { name: "No key" })).toBeChecked();
+    expect(within(dialog).queryByLabelText("Redirect URI")).not.toBeInTheDocument();
+
+    // Private repos want a token beside open use.
+    expect(within(dialog).queryByLabelText(/Header/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: "Personal token" }));
+    expect(within(dialog).getByLabelText(/Header/)).toBeInTheDocument();
+
+    // Signing in registers the app by itself, so its own client waits behind a switch.
+    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
+    expect(within(dialog).queryByLabelText("Redirect URI")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("switch", { name: "Registered app" }));
+    expect(within(dialog).getByLabelText("Redirect URI")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saveIntegrationConfig).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          config: expect.objectContaining({ ways: "token anonymous", anonymous: "open" }),
+        }),
       }),
     );
   });

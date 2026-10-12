@@ -28,5 +28,10 @@ export class IntegrationAuthFailed extends Schema.TaggedError<IntegrationAuthFai
 /** Any other failure talking to the service. The message is safe to show. */
 export class IntegrationRequestFailed extends Schema.TaggedError<IntegrationRequestFailed>()(
   "IntegrationRequestFailed",
-  { status: Schema.NullOr(Schema.Number), message: Schema.String },
+  {
+    status: Schema.NullOr(Schema.Number),
+    message: Schema.String,
+    /** Scopes the service said the call lacked (a 403 `insufficient_scope`), to ask for next time. */
+    missingScopes: Schema.optionalKey(Schema.Array(Schema.String)),
+  },
 ) {}

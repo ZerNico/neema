@@ -18,11 +18,19 @@ import {
   summarizeCall,
   type IntegrationAllowance,
   type IntegrationManifest,
-  type IntegrationToolDefinition,
   type ToolAccess,
 } from "../manifest.ts";
+import { REVIEWABLE_CHARS } from "../mcp/catalog.ts";
+import type { ElicitationAnswer } from "../schema.ts";
 import type { IntegrationModelResult } from "../tool-schema.ts";
-import type { AdapterFailure, PreparedCall } from "./adapter.ts";
+import type {
+  AdapterFailure,
+  AdapterFile,
+  CallContext,
+  IntegrationAdapter,
+  OfferedTool,
+  PreparedCall,
+} from "./adapter.ts";
 import type { ApprovalAnswer, IntegrationApprovals } from "./approvals.ts";
 import type { ConnectedSession } from "./service.ts";
 import type { IntegrationAuthFailed } from "../errors.ts";
@@ -38,8 +46,27 @@ export interface OfferedIntegration {
 
 export interface IntegrationToolEntry {
   readonly integrationId: string;
-  readonly tool: IntegrationToolDefinition;
+  readonly tool: OfferedTool;
 }
+
+/** A shipped type's tools, each with its handler; one without a handler is not offered. */
+export const shippedTools = (manifest: IntegrationManifest, adapter: IntegrationAdapter) =>
+  manifest.tools.flatMap((tool): OfferedTool[] => {
+    const prepare = adapter.handlers[tool.name];
+    if (!prepare) return [];
+    return [
+      {
+        name: tool.name,
+        title: tool.title,
+        label: tool.label,
+        description: tool.description,
+        access: tool.access,
+        parameters: tool.parameters,
+        summarize: (args) => summarizeCall(tool, args),
+        prepare,
+      },
+    ];
+  });
 
 export interface PreparedIntegrationTools {
   readonly group: ToolGroup;
@@ -52,6 +79,8 @@ export interface PreparedIntegrationTools {
   take(providerCallId: string): {
     sources: ReadonlyArray<IntegrationSource>;
     access: ToolAccess | null;
+    /** Files the call returned, for the engine to store under the generation fence. */
+    files: ReadonlyArray<AdapterFile>;
   };
 }
 
@@ -99,6 +128,11 @@ export function prepareIntegrationTools(input: {
     session: ConnectedSession,
     failure: IntegrationAuthFailed,
   ) => Effect.Effect<void>;
+  /** Remembers scopes a call was refused for, so Settings can ask for them. */
+  reportMissingScopes: (
+    session: ConnectedSession,
+    scopes: ReadonlyArray<string>,
+  ) => Effect.Effect<void>;
   /** This answer's uses of each allowance, durable so a resumed answer keeps them. */
   allowanceUses: {
     reserve(integrationId: string, allowance: IntegrationAllowance): Effect.Effect<boolean>;
@@ -109,6 +143,7 @@ export function prepareIntegrationTools(input: {
   const handlers: Record<string, unknown> = {};
   const names = new Map<string, IntegrationToolEntry>();
   const pendingSources = new Map<string, IntegrationSource[]>();
+  const pendingFiles = new Map<string, ReadonlyArray<AdapterFile>>();
   const effectiveAccessByCall = new Map<string, ToolAccess>();
 
   for (const offer of input.offered) {
@@ -117,9 +152,11 @@ export function prepareIntegrationTools(input: {
     // The integration's own name, so two of one type read apart: "Jira · Acme".
     const name = offer.session.integration.name;
     const changes = Semaphore.makeUnsafe(1);
-    for (const tool of manifest.tools) {
-      const prepare = offer.session.adapter.handlers[tool.name];
-      if (!prepare) continue;
+    // A shared key acts as the admin's account for whoever chats: reads only.
+    const shared = offer.session.authKind === "shared";
+    for (const tool of offer.session.tools) {
+      const prepare = tool.prepare;
+      if (shared && tool.access !== "read") continue;
       // Blocked tools are not offered at all, so the model never plans around them.
       if (permissionFor(tool, offer.permissions) === "block") continue;
       const modelName = integrationToolName(offer.integrationId, tool.name);
@@ -145,6 +182,11 @@ export function prepareIntegrationTools(input: {
           case "destructive":
             return failure(
               `Not permitted: scheduled runs never ${tool.title.toLowerCase()} in ${name}. ${instead}`,
+              true,
+            );
+          case "shared":
+            return failure(
+              `Not permitted: ${name} is shared by everyone here, so it only reads. ${instead}`,
               true,
             );
           case "grant":
@@ -178,6 +220,7 @@ export function prepareIntegrationTools(input: {
             allowedInChat: now.allowedInChat.includes(tool.name),
             unattended: offer.unattended,
             reach,
+            shared,
           });
         });
       /**
@@ -206,6 +249,20 @@ export function prepareIntegrationTools(input: {
           );
         });
       const report = (session: ConnectedSession) => (error: AdapterFailure) => {
+        // Nobody here signed in: the admin's key, or a server that now wants an
+        // account, is the admin's to fix, so no one's connection is marked.
+        if (
+          error._tag === "IntegrationAuthFailed" &&
+          session.authKind !== "oauth" &&
+          session.authKind !== "api_key"
+        )
+          return Effect.succeed(
+            failure(
+              session.authKind === "shared"
+                ? `${name} refused the shared key. Tell the user an admin needs to update it.`
+                : `${name} now asks for a sign-in. Tell the user an admin needs to set one up.`,
+            ),
+          );
         if (error._tag === "IntegrationAuthFailed")
           return input
             .reportAuthFailure(session, error)
@@ -217,6 +274,16 @@ export function prepareIntegrationTools(input: {
               ),
             );
         if (error._tag === "IntegrationRejected") return Effect.succeed(failure(error.reason));
+        if (error.missingScopes?.length && session.authKind === "oauth")
+          return input
+            .reportMissingScopes(session, error.missingScopes)
+            .pipe(
+              Effect.as(
+                failure(
+                  `${name} needs more access than the user granted. Tell the user to choose “Grant more access” for ${name} in Settings → Integrations, then try again.`,
+                ),
+              ),
+            );
         return Effect.succeed(failure(error.message));
       };
       handlers[modelName] = (args: unknown, context: { readonly toolCallId: string }) =>
@@ -225,7 +292,33 @@ export function prepareIntegrationTools(input: {
           // Whom it reaches is not known yet; that can only tighten the answer.
           const early = yield* currentConsent(null);
           if (early.kind === "refuse") return refusal(early);
-          const prepared = yield* prepare(offer.session, args).pipe(Effect.result);
+          // A server may ask several things at once; the person sees one at a time.
+          const asking = Semaphore.makeUnsafe(1);
+          // Nobody to ask in a scheduled run, so no way to ask is given at all.
+          const callContext: CallContext | undefined =
+            offer.unattended !== null
+              ? undefined
+              : {
+                  elicit: (prompt) =>
+                    Effect.gen(function* () {
+                      const callId = yield* input.rowIdFor(context.toolCallId);
+                      if (!callId) return { action: "cancel" } satisfies ElicitationAnswer;
+                      return yield* asking.withPermits(1)(
+                        input.approvals.elicit(input.owner.userId, {
+                          callId,
+                          conversationId: input.owner.conversationId,
+                          messageId: input.owner.messageId,
+                          integrationId: offer.integrationId,
+                          tool: tool.name,
+                          access: tool.access,
+                          summary: tool.summarize(args),
+                          targets: [],
+                          prompt,
+                        }),
+                      );
+                    }),
+                };
+          const prepared = yield* prepare(offer.session, args, callContext).pipe(Effect.result);
           if (prepared._tag === "Failure") return yield* report(offer.session)(prepared.failure);
           const call = prepared.success;
           const outside = yield* outsideScope(call);
@@ -245,6 +338,13 @@ export function prepareIntegrationTools(input: {
           if (before.kind === "ask") {
             const callId = yield* input.rowIdFor(context.toolCallId);
             if (!callId) return failure("This action could not be put to the user.", true);
+            // A person approves what they can see: all of it, or nothing goes.
+            const inFull = tool.inFull?.(args) ?? null;
+            if (inFull !== null && inFull.length > REVIEWABLE_CHARS)
+              return failure(
+                `This action sends more than can be shown for approval (${inFull.length} characters), so it did not run. Send less at once.`,
+                true,
+              );
             const answer: ApprovalAnswer = yield* input.approvals.request(input.owner.userId, {
               callId,
               conversationId: input.owner.conversationId,
@@ -252,8 +352,10 @@ export function prepareIntegrationTools(input: {
               integrationId: offer.integrationId,
               tool: tool.name,
               access,
-              summary: call.summary ?? summarizeCall(tool, args),
+              summary: prepared.success.summary ?? tool.summarize(args),
               targets: reach ? [...reach.targets] : [],
+              ...(tool.details ? { details: tool.details(args) } : {}),
+              ...(inFull !== null ? { inFull } : {}),
             });
             if (answer === "deny")
               return failure("The user declined this action. Do not retry it unasked.", true);
@@ -261,8 +363,10 @@ export function prepareIntegrationTools(input: {
               return failure("Nobody approved this action in time, so it did not run.", true);
           }
           // Approval waits outside the permit. Queueing waits before the final
-          // authority checks, and changing calls hold the permit through execution.
-          const admitted = Effect.gen(function* () {
+          // authority checks, and changing calls hold the permit through execution:
+          // a change queued behind another sees what changed while it waited.
+          const goOut = Effect.gen(function* () {
+            // Permissions may have changed during the wait; the prepared call has not.
             const after = yield* currentConsent(reach);
             if (after.kind === "refuse") return refusal(after);
             if (after.kind === "ask" && before.kind !== "ask")
@@ -278,6 +382,19 @@ export function prepareIntegrationTools(input: {
               session.configIdentity !== offer.session.configIdentity
             )
               return failure(`${name} is no longer connected or available.`, true);
+            // Taken off, reclassified or changed since the answer started (an
+            // admin's review, a shared key): what was decided above no longer holds.
+            const current = session.tools.find((entry) => entry.name === tool.name);
+            if (
+              !current ||
+              current.access !== tool.access ||
+              current.revision !== tool.revision ||
+              (session.authKind === "shared" && current.access !== "read")
+            )
+              return failure(
+                `“${tool.title}” in ${name} changed since this answer started, so it did not run.`,
+                true,
+              );
             const narrowed = yield* outsideScope(call);
             if (narrowed) return narrowed;
             // Unattended, each call reaching people takes one of the run's few
@@ -307,6 +424,7 @@ export function prepareIntegrationTools(input: {
                   read: source.read,
                 }));
                 if (sources.length) pendingSources.set(context.toolCallId, sources);
+                if (result.files?.length) pendingFiles.set(context.toolCallId, result.files);
                 return {
                   ok: true,
                   result: result.output,
@@ -325,7 +443,9 @@ export function prepareIntegrationTools(input: {
               Effect.catch(report(session)),
             );
           });
-          return yield* tool.access === "read" ? admitted : changes.withPermits(1)(admitted);
+          // One change at a time per connection: nothing else in this answer
+          // edits a draft between the check that read it and its sending.
+          return yield* tool.access === "read" ? goOut : changes.withPermits(1)(goOut);
         });
     }
   }
@@ -337,9 +457,11 @@ export function prepareIntegrationTools(input: {
     take: (providerCallId) => {
       const sources = pendingSources.get(providerCallId) ?? [];
       const access = effectiveAccessByCall.get(providerCallId) ?? null;
+      const files = pendingFiles.get(providerCallId) ?? [];
       pendingSources.delete(providerCallId);
+      pendingFiles.delete(providerCallId);
       effectiveAccessByCall.delete(providerCallId);
-      return { sources, access };
+      return { sources, access, files };
     },
   };
 }

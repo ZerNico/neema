@@ -36,6 +36,8 @@ export const outlineManifest = {
     ],
     helpUrl: (config) => (config.baseUrl ? `${config.baseUrl.replace(/\/+$/, "")}/settings` : null),
   },
+  sharedCredential: null,
+  toolSource: "static",
   tools: OUTLINE_TOOLS,
   allowances: [],
   scope: null,

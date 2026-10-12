@@ -4,8 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { myIntegrationsQuery } from "../client/queries.ts";
+import { outlineManifest } from "../outline/manifest.ts";
 import type { UserIntegration } from "../schema.ts";
-import { connectIntegrationApiKey, updateIntegrationConnection } from "../server/functions.ts";
+import {
+  connectIntegrationApiKey,
+  connectIntegrationOpen,
+  updateIntegrationConnection,
+} from "../server/functions.ts";
 import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -17,6 +22,7 @@ vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
   updateIntegrationConnection: vi.fn(),
   connectIntegrationApiKey: vi.fn(),
+  connectIntegrationOpen: vi.fn(async () => ({ ok: true })),
   listIntegrationScopeOptions: vi.fn(async () => ({
     ok: true,
     options: [
@@ -31,7 +37,14 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
   kind: "outline",
   name: "Outline",
   available: true,
-  methods: { oauth: true, apiKey: true },
+  methods: { oauth: true, apiKey: true, open: null },
+  tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
+    name,
+    title,
+    label,
+    description,
+    access,
+  })),
   apiKeyHelpUrl: null,
   connection: connection && {
     id: "connection-1",
@@ -41,6 +54,7 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
     offerByDefault: true,
     toolPermissions: {},
     scope: null,
+    requiredScopes: null,
     createdAt: "2026-09-24T10:00:00Z",
     ...connection,
   },
@@ -84,6 +98,19 @@ describe("integration account row", () => {
       expect(connectIntegrationApiKey).toHaveBeenCalledWith({
         data: { integrationId: "outline", values: { key: "ol_api_x" } },
       }),
+    );
+  });
+
+  it("lets a person turn an open server on again after the admin changed it", async () => {
+    mount({
+      ...outline({ authKind: "none", accountLabel: "No sign-in needed", status: "needs_reauth" }),
+      methods: { oauth: false, apiKey: false, open: "none" },
+    });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Signed out")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Turn on again" }));
+    await waitFor(() =>
+      expect(connectIntegrationOpen).toHaveBeenCalledWith({ data: { integrationId: "outline" } }),
     );
   });
 

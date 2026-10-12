@@ -10,21 +10,12 @@ import type { ComponentProps, ComponentType } from "react";
 export type ToolAccess = "read" | "write" | "destructive";
 
 /**
- * One model-callable function, defined once and read by both halves: the
- * client renders it (Settings, tool rows, approvals) and the server offers it
- * and runs its handler, which `IntegrationHandlers` keys by `name`.
+ * What any screen needs to show one tool, whether the code ships it or an
+ * admin approved it from a server's catalog.
  */
-/** Parameters that decode without services, so a summary can decode them anywhere. */
-export type ToolFields = {
-  readonly [key: string]: Schema.Top & { readonly DecodingServices: never };
-};
-
-export interface IntegrationToolDefinition<
-  Name extends string = string,
-  Fields extends ToolFields = ToolFields,
-> {
+export interface IntegrationToolInfo {
   /** The handler's key; the model sees `int_<integration>__<name>`. */
-  readonly name: Name;
+  readonly name: string;
   /** What the tool does, for Settings: "Search documents". */
   readonly title: string;
   /** What a call did, for the transcript: "Searched Outline". */
@@ -32,6 +23,23 @@ export interface IntegrationToolDefinition<
   /** What the model reads when choosing it. */
   readonly description: string;
   readonly access: ToolAccess;
+}
+
+/** Parameters that decode without services, so a summary can decode them anywhere. */
+export type ToolFields = {
+  readonly [key: string]: Schema.Top & { readonly DecodingServices: never };
+};
+
+/**
+ * One model-callable function the code ships, defined once and read by both
+ * halves: the client renders it and the server offers it and runs its
+ * handler, which `IntegrationHandlers` keys by `name`.
+ */
+export interface IntegrationToolDefinition<
+  Name extends string = string,
+  Fields extends ToolFields = ToolFields,
+> extends IntegrationToolInfo {
+  readonly name: Name;
   /**
    * Every field `Schema.optionalKey`: a key the model omits must reach the
    * handler, which explains it, instead of failing the whole generation.
@@ -79,11 +87,29 @@ export interface IntegrationAllowance {
  * person pastes to connect without OAuth. The kind picks the control and,
  * for a person's credential, the check made before the service is asked.
  */
+export interface FieldCondition {
+  readonly key: string;
+  readonly values: ReadonlyArray<string>;
+}
+
 export interface IntegrationField {
   readonly key: string;
   readonly label: string;
-  /** `secret` is never shown again once saved. */
-  readonly kind: "url" | "text" | "email" | "secret";
+  /**
+   * `secret` is never shown again once saved. `choice` holds one of `options`,
+   * `choices` any of them, space-separated.
+   */
+  readonly kind: "url" | "text" | "email" | "secret" | "choice" | "choices";
+  readonly options?: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly description?: string;
+  }>;
+  /**
+   * Shown only while another field holds one of these values; a list means any
+   * of them. A field whose condition names a hidden field is hidden too.
+   */
+  readonly when?: FieldCondition | ReadonlyArray<FieldCondition>;
   readonly placeholder?: string;
   readonly description?: string;
   readonly required: boolean;
@@ -106,11 +132,11 @@ export interface IntegrationScope {
  * redirect URI. `values` are things to copy exactly, such as scopes.
  */
 export interface OAuthSetup {
-  /** Where the app is registered; the first step links to it. */
+  /** Where the app is registered, when there is one place; the first step links to it. */
   readonly console: {
     readonly label: string;
     readonly url: (config: Readonly<Record<string, string>>) => string | null;
-  };
+  } | null;
   readonly steps: ReadonlyArray<{ readonly text: string; readonly values?: ReadonlyArray<string> }>;
 }
 
@@ -126,18 +152,45 @@ export interface IntegrationManifest {
   readonly description: string;
   readonly logo: ComponentType<ComponentProps<"svg">>;
   readonly adminFields: ReadonlyArray<IntegrationField>;
-  /** Present when the service can act as an OAuth provider for us. */
-  readonly oauth: { readonly setup: OAuthSetup } | null;
+  /**
+   * Present when the service can act as an OAuth provider for us. `when`
+   * shows its admin setup only while the admin's config chooses sign-in.
+   */
+  readonly oauth: {
+    readonly setup: OAuthSetup;
+    readonly when?: NonNullable<IntegrationField["when"]>;
+    /** The app registers itself when it can, so the admin's own client waits behind a switch. */
+    readonly optionalClient?: boolean;
+  } | null;
   /**
    * Present when a person can connect by pasting an API key instead of
    * OAuth. The fields are everything the service needs with it (some want
    * the account's email beside the key); the adapter decides how to send them.
    */
   readonly apiKey: {
+    /** What a person pastes, in a sentence: "an API key" unless said otherwise. */
+    readonly noun?: string;
     readonly fields: ReadonlyArray<IntegrationField>;
     /** Where in the service a person creates one, from the admin config. */
     readonly helpUrl: (config: Readonly<Record<string, string>>) => string | null;
+    /** When the admin's config chooses keys itself; then there is no separate switch. */
+    readonly when?: NonNullable<IntegrationField["when"]>;
   } | null;
+  /**
+   * Present when an admin may hold one key for everyone. Its calls act as
+   * the admin's account for whoever chats, so only reads are ever offered.
+   */
+  readonly sharedCredential: {
+    readonly fields: ReadonlyArray<IntegrationField>;
+    /** The admin config that turns it on. */
+    readonly when: NonNullable<IntegrationField["when"]>;
+  } | null;
+  /**
+   * `static`: the code ships `tools`. `catalog`: each integration's tools come
+   * from its server and are offered only once an admin approved them, so
+   * `tools` is empty and screens read the integration's own list.
+   */
+  readonly toolSource: "static" | "catalog";
   readonly tools: ReadonlyArray<IntegrationToolDefinition>;
   readonly allowances: ReadonlyArray<IntegrationAllowance>;
   /**

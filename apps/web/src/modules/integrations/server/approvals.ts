@@ -1,6 +1,7 @@
 import { Context, Deferred, Duration, Effect, Layer } from "effect";
+import { uuidv7 } from "uuidv7";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import type { PendingIntegrationCall } from "../schema.ts";
+import type { ElicitationAnswer, PendingIntegrationCall } from "../schema.ts";
 
 export type ApprovalAnswer = "allow" | "deny" | "timeout";
 
@@ -8,29 +9,49 @@ export type ApprovalAnswer = "allow" | "deny" | "timeout";
 export const APPROVAL_TIMEOUTS = {
   read: Duration.minutes(2),
   change: Duration.minutes(10),
+  /** Inside the MCP request's own five minutes, so the server is still listening. */
+  elicitation: Duration.minutes(4),
 } as const;
+
+type Answer =
+  | { readonly kind: "decision"; readonly value: "allow" | "deny" }
+  | { readonly kind: "elicitation"; readonly value: ElicitationAnswer };
 
 interface Waiting {
   readonly userId: string;
   readonly call: PendingIntegrationCall;
-  readonly answer: Deferred.Deferred<"allow" | "deny">;
+  readonly answer: Deferred.Deferred<Answer>;
 }
 
+type Pending = Omit<PendingIntegrationCall, "expiresAt" | "kind" | "promptId">;
+
 /**
- * Integration calls parked on a person's decision. The handler owns the wait:
- * Stop, lease loss or the generation ending interrupt it, and its finalizer
- * removes the entry, so a late Allow finds nothing to approve. In memory like
- * `ExternalCompletion`; a restart ends the generation and its waits with it.
+ * Integration calls parked on a person: an approval before a call runs, or a
+ * service's question while it runs. The handler owns the wait: Stop, lease
+ * loss or the generation ending interrupt it, and its finalizer removes the
+ * entry, so a late answer finds nothing. In memory like `ExternalCompletion`;
+ * a restart ends the generation and its waits with it.
  */
 export class IntegrationApprovals extends Context.Service<
   IntegrationApprovals,
   {
-    request(
+    request(userId: string, call: Pending): Effect.Effect<ApprovalAnswer>;
+    /**
+     * Asks the person on a service's behalf; no answer in time cancels. One
+     * question per call at a time: the caller asks the next once this returns.
+     */
+    elicit(
       userId: string,
-      call: Omit<PendingIntegrationCall, "expiresAt">,
-    ): Effect.Effect<ApprovalAnswer>;
+      call: Pending & { prompt: NonNullable<PendingIntegrationCall["prompt"]> },
+    ): Effect.Effect<ElicitationAnswer>;
     /** False when there is no such waiting call for this person any more. */
     decide(userId: string, callId: string, answer: "allow" | "deny"): Effect.Effect<boolean>;
+    answer(
+      userId: string,
+      callId: string,
+      promptId: string,
+      answer: ElicitationAnswer,
+    ): Effect.Effect<boolean>;
     get(userId: string, callId: string): Effect.Effect<PendingIntegrationCall | null>;
     pending(userId: string): Effect.Effect<ReadonlyArray<PendingIntegrationCall>>;
   }
@@ -45,11 +66,9 @@ export class IntegrationApprovals extends Context.Service<
           .publish(userId, { type: "integration.approval.changed", conversationId })
           .pipe(Effect.catchCause(() => Effect.void));
 
-      return IntegrationApprovals.of({
-        request: Effect.fn("IntegrationApprovals.request")(function* (userId, call) {
-          const timeout =
-            call.access === "read" ? APPROVAL_TIMEOUTS.read : APPROVAL_TIMEOUTS.change;
-          const answer = yield* Deferred.make<"allow" | "deny">();
+      const park = (userId: string, call: PendingIntegrationCall, timeout: Duration.Duration) =>
+        Effect.gen(function* () {
+          const answer = yield* Deferred.make<Answer>();
           const entry: Waiting = {
             userId,
             call: { ...call, expiresAt: Date.now() + Duration.toMillis(timeout) },
@@ -59,25 +78,52 @@ export class IntegrationApprovals extends Context.Service<
             Effect.sync(() => waiting.set(call.callId, entry)).pipe(
               Effect.andThen(announce(userId, call.conversationId)),
             ),
+            () => Deferred.await(answer).pipe(Effect.timeoutOption(timeout)),
             () =>
-              Deferred.await(answer).pipe(
-                Effect.timeoutOption(timeout),
-                Effect.map((decided) =>
-                  decided._tag === "Some" ? decided.value : ("timeout" as const),
-                ),
-              ),
-            () =>
-              Effect.sync(() => waiting.delete(call.callId)).pipe(
-                Effect.andThen(announce(userId, call.conversationId)),
-              ),
+              Effect.sync(() => {
+                // Only this wait's own entry: a later one under the same row may have replaced it.
+                if (waiting.get(call.callId) === entry) waiting.delete(call.callId);
+              }).pipe(Effect.andThen(announce(userId, call.conversationId))),
           );
-        }),
+        });
 
-        decide: Effect.fn("IntegrationApprovals.decide")(function* (userId, callId, answer) {
+      const settle = (userId: string, callId: string, answer: Answer, promptId?: string) =>
+        Effect.gen(function* () {
           const entry = waiting.get(callId);
           if (!entry || entry.userId !== userId) return false;
+          if ((entry.call.kind === "elicitation") !== (answer.kind === "elicitation")) return false;
+          if (entry.call.promptId !== promptId) return false;
           return yield* Deferred.succeed(entry.answer, answer);
+        });
+
+      return IntegrationApprovals.of({
+        request: Effect.fn("IntegrationApprovals.request")(function* (userId, call) {
+          const decided = yield* park(
+            userId,
+            { ...call, kind: "approval", expiresAt: 0 },
+            call.access === "read" ? APPROVAL_TIMEOUTS.read : APPROVAL_TIMEOUTS.change,
+          );
+          return decided._tag === "Some" && decided.value.kind === "decision"
+            ? decided.value.value
+            : "timeout";
         }),
+
+        elicit: Effect.fn("IntegrationApprovals.elicit")(function* (userId, call) {
+          const answered = yield* park(
+            userId,
+            { ...call, kind: "elicitation", promptId: uuidv7(), expiresAt: 0 },
+            APPROVAL_TIMEOUTS.elicitation,
+          );
+          return answered._tag === "Some" && answered.value.kind === "elicitation"
+            ? answered.value.value
+            : { action: "cancel" };
+        }),
+
+        decide: (userId, callId, answer) =>
+          settle(userId, callId, { kind: "decision", value: answer }),
+
+        answer: (userId, callId, promptId, answer) =>
+          settle(userId, callId, { kind: "elicitation", value: answer }, promptId),
 
         get: (userId, callId) =>
           Effect.sync(() => {

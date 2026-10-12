@@ -1,7 +1,44 @@
-import type { IntegrationField } from "./manifest.ts";
+import type { FieldCondition, IntegrationField } from "./manifest.ts";
 import { parseMailbox } from "./mailbox.ts";
 
 const MAX_LENGTH = 2_000;
+
+/** What a field holds: one value, or each of a `choices` field's. */
+export const fieldValues = (value: string | undefined) => (value ?? "").split(" ");
+
+/**
+ * Whether a field applies, given what the rest of the form holds. A hidden
+ * field's value is a leftover, so a condition on it does not hold.
+ */
+export const fieldShown = (
+  field: Pick<IntegrationField, "when">,
+  values: Readonly<Record<string, string>>,
+  fields: ReadonlyArray<IntegrationField> = [],
+): boolean => {
+  if (!field.when) return true;
+  const any: ReadonlyArray<FieldCondition> = "key" in field.when ? [field.when] : field.when;
+  return any.some((condition) => {
+    const named = fields.find((candidate) => candidate.key === condition.key);
+    if (named && !fieldShown(named, values, fields)) return false;
+    return fieldValues(values[condition.key]).some((value) => condition.values.includes(value));
+  });
+};
+
+/** A form's starting values: what is stored, else each choice's first option. */
+export const fieldDefaults = (
+  fields: ReadonlyArray<IntegrationField>,
+  stored: Readonly<Record<string, string>>,
+) => {
+  const values: Record<string, string> = { ...stored };
+  for (const field of fields)
+    if (
+      (field.kind === "choice" || field.kind === "choices") &&
+      !values[field.key] &&
+      field.options?.[0]
+    )
+      values[field.key] = field.options[0].value;
+  return values;
+};
 
 /**
  * What a person typed into a declared form, trimmed and checked by kind, or
@@ -28,6 +65,19 @@ export const readFields = (
       if (!URL.canParse(raw) || !/^https?:$/.test(new URL(raw).protocol))
         return { error: `The ${field.label} is not a web address.` };
       values[field.key] = raw;
+    } else if (field.kind === "choice") {
+      if (!field.options?.some((option) => option.value === raw))
+        return { error: `Choose one of the ${field.label} options.` };
+      values[field.key] = raw;
+    } else if (field.kind === "choices") {
+      const picked = raw.split(/\s+/);
+      const options = field.options ?? [];
+      if (!picked.every((value) => options.some((option) => option.value === value)))
+        return { error: `Choose from the ${field.label} options.` };
+      values[field.key] = options
+        .filter((option) => picked.includes(option.value))
+        .map((option) => option.value)
+        .join(" ");
     } else values[field.key] = raw;
   }
   return { values };

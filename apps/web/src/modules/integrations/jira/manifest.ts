@@ -55,6 +55,8 @@ export const jiraManifest = {
     ],
     helpUrl: () => "https://id.atlassian.com/manage-profile/security/api-tokens",
   },
+  sharedCredential: null,
+  toolSource: "static",
   tools: JIRA_TOOLS,
   allowances: [],
   scope: { label: "Projects", noun: "project" },

@@ -169,7 +169,6 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
-import { summarizeCall } from "~/modules/integrations/manifest.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
@@ -1511,6 +1510,11 @@ export class StreamEngine extends Context.Service<
                     userId: input.userId,
                     failure,
                   }),
+                reportMissingScopes: (session, scopes) =>
+                  integrations.reportMissingScopes(
+                    { userId: input.userId, connectionId: session.connectionId },
+                    scopes,
+                  ),
                 allowanceUses: {
                   reserve: (integrationId, allowance) =>
                     integrations.reserveAllowance({
@@ -3026,7 +3030,7 @@ export class StreamEngine extends Context.Service<
                           }
                           if (family === "integration") {
                             const entry = integrationTools!.names.get(part.name)!;
-                            const summary = summarizeCall(entry.tool, args)?.slice(0, 200) ?? null;
+                            const summary = entry.tool.summarize(args)?.slice(0, 200) ?? null;
                             integrationSummaries.set(part.id, summary);
                             // The handler may park on an approval, which names
                             // this row; release it only once the row exists.
@@ -3803,7 +3807,51 @@ export class StreamEngine extends Context.Service<
                           const integrationEntry = integrationTools?.names.get(part.name);
                           if (integrationEntry) {
                             if (isPreliminary) return;
-                            const { sources, access } = integrationTools!.take(part.id);
+                            const { sources, access, files } = integrationTools!.take(part.id);
+                            // Files a service returned become attachments of the answer,
+                            // stored under the fence like a custom tool's; a failed one is noted.
+                            // By position: the result lists the files in the order returned,
+                            // and two may share a name.
+                            const undelivered = new Map<number, string>();
+                            for (const [index, file] of files.entries()) {
+                              const stored = yield* deliverFile(file, rowId);
+                              if ("reason" in stored) {
+                                undelivered.set(index, stored.reason.slice(0, 200));
+                                continue;
+                              }
+                              turnFiles.push(
+                                yield* fileForModel(promptDeps.parser, {
+                                  id: stored.attachment.id,
+                                  fileName: file.name,
+                                  mediaType: stored.attachment.mediaType,
+                                  bytes: file.bytes,
+                                  vision: model?.capabilities.vision ?? false,
+                                  files: model?.capabilities.files ?? false,
+                                }),
+                              );
+                            }
+                            // The result already names each file; mark the ones that did not arrive.
+                            const returned = part.result as { ok?: unknown; result?: unknown };
+                            const output = returned.result as { files?: unknown } | null | undefined;
+                            if (
+                              undelivered.size &&
+                              returned.ok === true &&
+                              output &&
+                              Array.isArray(output.files)
+                            ) {
+                              const noted = {
+                                ...returned,
+                                result: {
+                                  ...output,
+                                  files: output.files.map((entry: object, index: number) =>
+                                    undelivered.has(index)
+                                      ? { ...entry, notAttached: undelivered.get(index) }
+                                      : entry,
+                                  ),
+                                },
+                              };
+                              Object.assign(part, { result: noted, encodedResult: noted });
+                            }
                             for (const source of sources)
                               sourcesByIndex.set(
                                 source.index,

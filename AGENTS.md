@@ -68,8 +68,10 @@ edit the wrong thing.
   `fileInput` and return files; returned ones become attachments of the answer. Workers contain hangs, not authority: code is
   trusted and has the server’s filesystem, environment, network and process access.
 - **integration / type / connection / source**: a type is a service the code ships an
-  adapter for (Outline, Outlook, Jira); an integration is an admin-configured instance of a
-  type, with its own id and name, so there may be two of one type. Stored `integrationId`s
+  adapter for (Outline, Outlook, Jira, or any MCP server); an integration is an
+  admin-configured instance of a type, with its own id and name, so there may be two of one
+  type. An MCP integration offers only the tools an admin approved from its server's
+  catalog. Stored `integrationId`s
   name the integration, never the type. A connection is one person's
   credentials for it, never shared; chats, agents and schedules use the sender's own. A
   knowledge source mirrors part of an integration into a collection as the collection owner.
@@ -254,6 +256,9 @@ skipped one on purpose.
 - `docs/internals/integrations.md`: connected services. Manifest and adapter, per-person
   connections and token refresh, OAuth bound to the starting browser, consent levels,
   schedule grants, knowledge sources.
+- `docs/internals/mcp.md`: remote MCP servers as an integration type. Approved tool
+  catalogs and drift, access from untrusted hints, discovered OAuth, origin locking,
+  elicitation, the shared key that only reads.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
   boundary, queued files as a second owner kind, and why only a desktop app can
   start queued Work.
@@ -339,6 +344,10 @@ All release candidates. Pin exactly; never float to `latest`.
   install script only fetches CUDA files and is denied in `allowBuilds`. On a bump, run the OCR
   test in `pdf/server/pages.test.ts` with model files present and `pnpm build`, whose PDF worker
   smoke proves the natives load from the output. See [PDFs](docs/internals/pdf.md).
+- `@modelcontextprotocol/client` (and `@modelcontextprotocol/server`, tests only) are v2, pinned
+  exact as a pair; v1 is the separate `@modelcontextprotocol/sdk`. On a bump, run
+  `src/modules/integrations/mcp/server/*.test.ts`, which drive real servers of both protocol
+  eras and an authorization server. See [MCP](docs/internals/mcp.md).
 - `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
   reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
   component uncompiled, which is most of them. On a bump, count compiled components, not test results.

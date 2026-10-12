@@ -19,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import { findIntegrationType } from "../catalog.ts";
 import { permissionFor, type ToolPermission } from "../consent.ts";
-import type { IntegrationToolDefinition } from "../manifest.ts";
+import type { IntegrationToolInfo } from "../manifest.ts";
 
 const CHOICES: ReadonlyArray<{ value: ToolPermission; label: string; icon: typeof HandIcon }> = [
   { value: "allow", label: "Always allow", icon: CheckmarkCircle02Icon },
@@ -38,19 +38,22 @@ const GROUP_ITEMS = [
  */
 export function ToolPermissions({
   kind,
+  tools: given,
   permissions,
   disabled,
   onChange,
 }: {
   /** The integration type whose tools these are. */
   kind: string;
+  /** The integration's own tools; a shipped type's are its manifest's. */
+  tools?: ReadonlyArray<IntegrationToolInfo>;
   permissions: Readonly<Record<string, ToolPermission>>;
   disabled?: boolean;
   /** Only the tools that changed; the server merges them in. */
   onChange: (changes: Record<string, ToolPermission>) => void;
 }) {
   const manifest = findIntegrationType(kind);
-  const tools = manifest?.tools ?? [];
+  const tools = given ?? manifest?.tools ?? [];
   // Their own group, so allowing every change at once never also lets mail go out unasked.
   const reaching = new Set(manifest?.allowances.flatMap((allowance) => allowance.tools) ?? []);
   const groups = [
@@ -91,7 +94,7 @@ function ToolGroup({
   onChange,
 }: {
   title: string;
-  tools: ReadonlyArray<IntegrationToolDefinition>;
+  tools: ReadonlyArray<IntegrationToolInfo>;
   permissions: Readonly<Record<string, ToolPermission>>;
   disabled: boolean | undefined;
   onChange: (changes: Record<string, ToolPermission>) => void;
@@ -158,7 +161,9 @@ function ToolGroup({
             const value = permissionFor(tool, permissions);
             return (
               <li key={tool.name} className="flex items-center gap-3 py-2 pl-5.5">
-                <span className="min-w-0 flex-1 truncate text-sm">{tool.title}</span>
+                <span className="min-w-0 flex-1 truncate text-sm" title={tool.description}>
+                  {tool.title}
+                </span>
                 <ToggleGroup
                   value={[value]}
                   onValueChange={(next) => {

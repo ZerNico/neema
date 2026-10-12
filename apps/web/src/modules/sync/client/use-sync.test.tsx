@@ -96,6 +96,7 @@ describe("useSync", () => {
   it("discovers a missed approval in the real activity card after recovery", async () => {
     vi.mocked(listPendingIntegrationCalls).mockResolvedValue([
       {
+        kind: "approval",
         callId: "call",
         conversationId: "chat",
         messageId: "message",

@@ -23,7 +23,12 @@ describe("integration catalog", () => {
         manifest.tools.map((tool) => tool.name).toSorted(),
       );
       expect(Boolean(adapter.knowledge)).toBe(manifest.knowledgeSource);
-      expect(Boolean(adapter.oauth)).toBe(manifest.oauth !== null);
+      // Sign-in is either fixed endpoints or found at sign-in time, never both.
+      expect(Boolean(adapter.oauth || adapter.discoveredOAuth)).toBe(manifest.oauth !== null);
+      expect(Boolean(adapter.oauth && adapter.discoveredOAuth)).toBe(false);
+      // A catalog type's tools come from its server; the code ships none.
+      expect(Boolean(adapter.catalog)).toBe(manifest.toolSource === "catalog");
+      if (manifest.toolSource === "catalog") expect(manifest.tools).toEqual([]);
     }
   });
 

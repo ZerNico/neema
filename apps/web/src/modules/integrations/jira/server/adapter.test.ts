@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { IntegrationApprovals } from "../../server/approvals.ts";
 import type { ConnectedSession } from "../../server/service.ts";
-import { prepareIntegrationTools } from "../../server/tools.ts";
+import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
+import { jiraManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { jiraAdapter } from "./adapter.ts";
@@ -414,6 +415,8 @@ describe("a connection limited to some projects", () => {
       configIdentity: "config",
       integration: { id: "jira", kind: "jira", name: "Jira" },
       adapter: jiraAdapter,
+      tools: shippedTools(jiraManifest, jiraAdapter),
+      authKind: "api_key",
     };
     const tools = prepareIntegrationTools({
       offered: [
@@ -428,6 +431,8 @@ describe("a connection limited to some projects", () => {
       indexer: createSourceIndexer([]),
       approvals: {
         request: () => Effect.succeed("allow"),
+        elicit: () => Effect.succeed({ action: "cancel" as const }),
+        answer: () => Effect.succeed(false),
         decide: () => Effect.succeed(false),
         get: () => Effect.succeed(null),
         pending: () => Effect.succeed([]),
@@ -441,6 +446,7 @@ describe("a connection limited to some projects", () => {
       sessionFor: () => Effect.succeed(connected),
       rowIdFor: () => Effect.succeed("row"),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
     })!;
     const create = tools.group.handlers.int_jira__create_issue as (
@@ -475,6 +481,8 @@ describe("a connection limited to some projects", () => {
     const request = vi.fn(() => Effect.succeed("allow" as const));
     const approvals: IntegrationApprovals["Service"] = {
       request,
+      elicit: () => Effect.succeed({ action: "cancel" as const }),
+      answer: () => Effect.succeed(false),
       decide: () => Effect.succeed(false),
       get: () => Effect.succeed(null),
       pending: () => Effect.succeed([]),
@@ -486,6 +494,8 @@ describe("a connection limited to some projects", () => {
       configIdentity: "config",
       integration: { id: "jira", kind: "jira", name: "Jira" },
       adapter: jiraAdapter,
+      tools: shippedTools(jiraManifest, jiraAdapter),
+      authKind: "api_key",
     };
     const tools = prepareIntegrationTools({
       offered: [
@@ -504,6 +514,7 @@ describe("a connection limited to some projects", () => {
       sessionFor: () => Effect.succeed(connected),
       rowIdFor: (id) => Effect.succeed(`row-${id}`),
       reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
       allowanceUses: { reserve: () => Effect.succeed(true), release: () => Effect.void },
     })!;
     const call = (tool: string, args: unknown) =>

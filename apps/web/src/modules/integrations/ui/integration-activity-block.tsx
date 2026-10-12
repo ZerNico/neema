@@ -20,6 +20,7 @@ import type { IntegrationDecision, PendingIntegrationCall } from "../schema.ts";
 import { decideIntegrationCall } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { useIntegrationDirectory } from "../client/directory.ts";
+import { ElicitationCard } from "./elicitation-card.tsx";
 
 /**
  * One call into a connected service. While it runs it may be parked on the
@@ -35,13 +36,16 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   const [open, setOpen] = useState(false);
   const name = useIntegrationDirectory().name(activity.integrationId);
   const failed = activity.status === "error";
-  const label = waiting
-    ? `Waiting for your approval: ${activity.label}`
-    : activity.refused
-      ? `${activity.label}: not done`
-      : failed
-        ? `${activity.label}: didn’t work`
-        : activity.label;
+  const asking = waiting?.kind === "elicitation" && waiting.prompt ? waiting : null;
+  const label = asking
+    ? `Waiting for your answer: ${activity.label}`
+    : waiting
+      ? `Waiting for your approval: ${activity.label}`
+      : activity.refused
+        ? `${activity.label}: not done`
+        : failed
+          ? `${activity.label}: didn’t work`
+          : activity.label;
   const detail = [
     activity.summary,
     activity.sources?.length ? `${activity.sources.length} results` : null,
@@ -64,7 +68,12 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
 
   return (
     <>
-      {waiting ? <ApprovalCard call={waiting} name={name} label={activity.label} /> : null}
+      {asking ? (
+        // A new question starts a fresh form, never one filled in for the last.
+        <ElicitationCard key={asking.promptId} call={asking} name={name} />
+      ) : waiting ? (
+        <ApprovalCard call={waiting} name={name} label={activity.label} />
+      ) : null}
       {!activity.error && !activity.link ? (
         <div className={cn(activityRowClassName, "mb-2")} aria-label={`${name}: ${label}`}>
           {row}
@@ -142,7 +151,25 @@ function ApprovalCard({
             {label} in {name}?
           </span>
         </div>
-        {call.summary ? (
+        {call.inFull ? (
+          // The short list would have hidden something: everything, as it is sent.
+          <pre
+            aria-label="Everything this sends"
+            className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
+          >
+            {call.inFull}
+          </pre>
+        ) : call.details?.length ? (
+          // Every argument as sent, since a server's tool has no summary of its own.
+          <dl className="bg-muted grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl p-2 text-xs">
+            {call.details.map((entry) => (
+              <div key={entry.key} className="contents">
+                <dt className="text-muted-foreground font-mono">{entry.key}</dt>
+                <dd className="min-w-0 [overflow-wrap:anywhere]">{entry.value || "empty"}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : call.summary ? (
           <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">{call.summary}</p>
         ) : null}
         {call.targets.length > 0 ? (

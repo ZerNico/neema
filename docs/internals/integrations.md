@@ -69,8 +69,11 @@ offer decides what counts as an integration call. Every tool parameter is
 
 Outline is reached through its REST API, not its `/mcp` endpoint: the sync needs REST
 anyway, and our own tools keep descriptions byte-stable for caching, let us decide each
-access class, and return citable sources. A generic remote-MCP adapter kind is the intended
-route for services we will not write an adapter for.
+access class, and return citable sources. Services we will not write an adapter for are
+added as [MCP servers](mcp.md), a type whose tools come from each integration's own
+catalog (`toolSource: "catalog"`) rather than the manifest. A session therefore carries its
+offered tools, each with its own `prepare`, and the tool layer never asks where they came
+from.
 
 ## Configuration, connections and credentials
 
@@ -80,7 +83,10 @@ route for services we will not write an adapter for.
   SQL by `integrationUsableBy` at connect, at every attempt and at every sync.
 - `integration_connections` is one row per (user, integration). Credentials are one
   `KeyCipher` JSON document and never leave the server, tool rows or logs. A connection is
-  never shared: an agent or schedule reaches only the sender's own.
+  never shared: an agent or schedule reaches only the sender's own. A type whose admin
+  config decides how people connect (MCP) may also open connections that hold nothing
+  personal (`none`, or `shared` for the admin's key); the row still carries the person's
+  toggles and tool permissions.
 - An API key is whatever the manifest's `apiKey.fields` declare, not one string: some
   services want the account's email beside the token. `readFields` checks the values by
   kind and drops undeclared keys before `verify` sees them, and the connection stores those

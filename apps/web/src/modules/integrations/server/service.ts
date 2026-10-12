@@ -1,10 +1,12 @@
+import { isIP } from "node:net";
 import { and, eq, gt } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
-import { findIntegrationType } from "../catalog.ts";
+import { publicUrl } from "~/server/public-url.ts";
+import { findIntegrationType, INTEGRATION_TYPES } from "../catalog.ts";
 import {
   IntegrationAuthFailed,
   IntegrationNotAvailable,
@@ -13,10 +15,19 @@ import {
 } from "../errors.ts";
 import type { ToolPermission, UnattendedGrant } from "../consent.ts";
 import type { IntegrationGrant } from "../grant.ts";
-import type { AdminIntegration, ScopeOption, UserIntegration } from "../schema.ts";
+import type { AdminCatalog, AdminIntegration, ScopeOption, UserIntegration } from "../schema.ts";
 import { readFields } from "../fields.ts";
-import type { Credential, IntegrationAdapter, IntegrationSession } from "./adapter.ts";
+import type { IntegrationManifest } from "../manifest.ts";
+import type {
+  CatalogDecision,
+  ConnectMethods,
+  Credential,
+  IntegrationAdapter,
+  IntegrationSession,
+  OfferedTool,
+} from "./adapter.ts";
 import { findAdapterType } from "./adapters.ts";
+import { shippedTools } from "./tools.ts";
 import {
   authorizeUrl,
   callbackPath,
@@ -29,10 +40,47 @@ import {
   IntegrationRepo,
   integrationUsableBy,
   type IntegrationConfigRow,
+  type DiscoveredServer,
   type IntegrationConnectionRow,
   type SaveConfig,
   type StoredCredentials,
+  type ToolCatalogRow,
 } from "./repo.ts";
+
+/** How soon a catalog is looked at again after a check failed, and by default after one worked. */
+const CATALOG_RETRY_MS = 60 * 60_000;
+const CATALOG_RECHECK_MS = 24 * 60 * 60_000;
+
+const failureReason = (error: { _tag: string }) =>
+  error._tag === "IntegrationAuthFailed"
+    ? "The server refused the sign-in used to list its tools."
+    : "reason" in error && typeof error.reason === "string"
+      ? error.reason
+      : "message" in error && typeof error.message === "string"
+        ? error.message
+        : "The server could not be reached.";
+
+/**
+ * Where an authorization server could fetch this app's client metadata
+ * document: only an operator-declared public HTTPS address, since a server
+ * that cannot reach the document fails the whole sign-in. Without one, the
+ * app registers itself instead.
+ */
+const metadataDocumentOrigin = () => {
+  const declared = publicUrl();
+  if (!declared?.startsWith("https://")) return null;
+  const host = new URL(declared).hostname;
+  const local =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    isIP(host.replace(/^\[|\]$/g, "")) !== 0 ||
+    !host.includes(".");
+  return local ? null : declared;
+};
+
+const UNAVAILABLE = "This integration is no longer available.";
 
 /** Refresh this long before the service would expire the token. */
 const REFRESH_MARGIN_MS = 60_000;
@@ -45,6 +93,13 @@ interface OAuthStateValue {
   redirectUri: string;
   /** A path on this app to land on afterwards; validated when it was given. */
   returnTo?: string;
+  /** Recorded when the sign-in was discovered: where the code goes, and who must answer. */
+  server?: DiscoveredServer;
+  /**
+   * The integration's revision the sign-in started under. Tokens are only
+   * kept for that one: a setup changed meanwhile must not get them.
+   */
+  revision?: number;
 }
 
 export interface ConnectedSession extends IntegrationSession {
@@ -54,6 +109,10 @@ export interface ConnectedSession extends IntegrationSession {
   /** Which integration this is: its id, the type it runs on and its name. */
   readonly integration: { readonly id: string; readonly kind: string; readonly name: string };
   readonly adapter: IntegrationAdapter;
+  /** What this integration offers, in a stable order: shipped, or its approved catalog. */
+  readonly tools: ReadonlyArray<OfferedTool>;
+  /** `shared` acts as the admin's account for everyone, so only reads are offered. */
+  readonly authKind: IntegrationConnectionRow["authKind"];
 }
 
 /** One integration as a chat sees it: whether it is on here, and how much it asks. */
@@ -83,6 +142,16 @@ export interface CallPermissions {
   allowedInChat: ReadonlyArray<string>;
 }
 
+/**
+ * The setup a piece of work started under: the fingerprint names the server
+ * and the way in, the revision tells apart two saves of the same one (moved
+ * away and back). Work that started under one must not finish under another.
+ */
+interface Setup {
+  readonly fingerprint: string;
+  readonly revision: number;
+}
+
 type RefreshResult =
   | { kind: "credential"; credential: Credential }
   | { kind: "revoked" }
@@ -107,10 +176,82 @@ const credentialIdentity = (row: IntegrationConnectionRow) => ({
   credentialRevision: row.credentialRevision,
 });
 
-const oauthReady = (row: IntegrationConfigRow | null) =>
-  Boolean(row?.oauthClientId && row.oauthClientSecretCiphertext);
+const oauthReady = (
+  row: Pick<IntegrationConfigRow, "oauthClientId" | "oauthClientSecretCiphertext"> | null,
+) => Boolean(row?.oauthClientId && row.oauthClientSecretCiphertext);
 
-const toAdmin = (row: IntegrationConfigRow & { connectionCount: number }): AdminIntegration => ({
+/**
+ * How people may connect right now. A type whose config decides it (MCP)
+ * says so itself; otherwise OAuth needs the admin's client and keys need the
+ * admin's switch. A shared key counts only once one is stored.
+ */
+const methodsFor = (
+  manifest: IntegrationManifest,
+  adapter: IntegrationAdapter,
+  row: Pick<IntegrationConfigRow, "oauthClientId" | "oauthClientSecretCiphertext" | "allowApiKeys">,
+  config: Readonly<Record<string, string>>,
+  sharedStored: boolean,
+): ConnectMethods => {
+  if (adapter.connectMethods) {
+    const declared = adapter.connectMethods(config);
+    return {
+      oauth: declared.oauth && Boolean(adapter.discoveredOAuth),
+      apiKey: declared.apiKey && Boolean(manifest.apiKey),
+      open: declared.open === "shared" && !sharedStored ? null : declared.open,
+    };
+  }
+  return {
+    oauth: Boolean(manifest.oauth && adapter.oauth && oauthReady(row)),
+    apiKey: Boolean(manifest.apiKey && row.allowApiKeys),
+    open: null,
+  };
+};
+
+/**
+ * Whether the way a connection was made is still one people may use. Only a
+ * type whose config decides its ways (MCP) can close one under a connection;
+ * the fingerprint names where credentials go, so it cannot tell.
+ */
+const wayOpen = (
+  manifest: IntegrationManifest,
+  adapter: IntegrationAdapter,
+  row: IntegrationConfigRow,
+  config: Readonly<Record<string, string>>,
+  kind: IntegrationConnectionRow["authKind"],
+) => {
+  if (!adapter.connectMethods) return true;
+  const methods = methodsFor(
+    manifest,
+    adapter,
+    row,
+    config,
+    Boolean(row.sharedCredentialCiphertext),
+  );
+  if (kind === "oauth") return methods.oauth;
+  if (kind === "api_key") return methods.apiKey;
+  return methods.open === kind;
+};
+
+/**
+ * What a review names: this listing, and how many approvals came before, so
+ * a review approves exactly what it showed and two admins cannot both win.
+ */
+const reviewVersion = (row: ToolCatalogRow) => `${row.listingId}.${row.reviewSeq}`;
+
+const toCatalog = (row: ToolCatalogRow | null): AdminCatalog => ({
+  approved: row?.approved ?? [],
+  latest: row?.latest ?? null,
+  server: row?.server ?? null,
+  checkedAt: row?.checkedAt?.toISOString() ?? null,
+  checkError: row?.checkError ?? null,
+  reviewedAt: row?.reviewedAt?.toISOString() ?? null,
+  version: row?.latest && row.listingId ? reviewVersion(row) : null,
+});
+
+const toAdmin = (
+  row: IntegrationConfigRow & { connectionCount: number },
+  catalog: AdminCatalog | null,
+): AdminIntegration => ({
   id: row.id,
   kind: row.kind,
   name: row.name,
@@ -121,6 +262,8 @@ const toAdmin = (row: IntegrationConfigRow & { connectionCount: number }): Admin
   allowApiKeys: row.allowApiKeys,
   audience: row.audience,
   connectionCount: row.connectionCount,
+  sharedCredentialConfigured: Boolean(row.sharedCredentialCiphertext),
+  catalog,
 });
 
 const NAME_MAX = 60;
@@ -167,7 +310,7 @@ export class IntegrationService extends Context.Service<
     }): Effect.Effect<AdminIntegration, IntegrationRejected>;
     deleteIntegration(id: string): Effect.Effect<void, IntegrationRejected>;
     saveConfig(
-      input: Omit<SaveConfig, "fingerprint">,
+      input: Omit<SaveConfig, "fingerprint" | "listsTools">,
     ): Effect.Effect<AdminIntegration, IntegrationRejected>;
     listForUser(userId: string): Effect.Effect<ReadonlyArray<UserIntegration>>;
     connectApiKey(
@@ -185,8 +328,29 @@ export class IntegrationService extends Context.Service<
     completeOAuth(
       userId: string,
       integrationId: string,
-      input: { code: string; state: string; cookieState: string | null },
+      input: { code: string; state: string; cookieState: string | null; iss: string | null },
     ): Effect.Effect<{ returnTo: string | null }, IntegrationNotAvailable | IntegrationRejected>;
+    /** Turns on an integration that needs no personal credential: open, or the admin's key. */
+    connectOpen(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<void, IntegrationNotAvailable | IntegrationRejected>;
+    /**
+     * Lists a catalog type's tools from its server now, as the given admin, or
+     * as whoever last reviewed it. Nothing becomes offered by this alone.
+     */
+    checkCatalog(
+      integrationId: string,
+      asUserId: string | null,
+    ): Effect.Effect<AdminCatalog, IntegrationRejected>;
+    /** What the admin approved becomes what chats are offered. */
+    approveCatalog(
+      adminId: string,
+      integrationId: string,
+      input: { version: string; decisions: ReadonlyArray<CatalogDecision> },
+    ): Effect.Effect<AdminCatalog, IntegrationRejected>;
+    /** Catalog checks due now, claimed under a lease; the sweep calls this. */
+    checkDueCatalogs(): Effect.Effect<void>;
     updatePreferences(
       userId: string,
       integrationId: string,
@@ -211,6 +375,11 @@ export class IntegrationService extends Context.Service<
       userId: string;
       failure: IntegrationAuthFailed;
     }): Effect.Effect<void>;
+    /** Records scopes a call lacked, so Settings offers to grant them. */
+    reportMissingScopes(
+      connection: { userId: string; connectionId: string },
+      scopes: ReadonlyArray<string>,
+    ): Effect.Effect<void>;
     /**
      * Connected, usable integrations and whether this chat offers them: the
      * chat's own choice, else the agent's attachments, else the connection's
@@ -256,6 +425,50 @@ export class IntegrationService extends Context.Service<
           .publish(userId, { type: "integrations.changed" })
           .pipe(Effect.catchCause(() => Effect.void));
 
+      const toolsOf = Effect.fn(function* (
+        manifest: IntegrationManifest,
+        adapter: IntegrationAdapter,
+        integrationId: string,
+      ) {
+        if (manifest.toolSource === "static") return shippedTools(manifest, adapter);
+        const catalog = adapter.catalog;
+        if (!catalog) return [];
+        const row = yield* repo.catalog(integrationId);
+        if (!row) return [];
+        return catalog.offer(row.approved, row.latest).flatMap((entry) => {
+          const tool = catalog.tool(integrationId, entry);
+          return tool ? [tool] : [];
+        });
+      });
+
+      /**
+       * The secret for a discovered sign-in's client: the admin's when it is
+       * their registered client, else the one this app registered with that
+       * issuer. A metadata document client has none.
+       */
+      const discoveredSecret = Effect.fn(function* (
+        row: IntegrationConfigRow,
+        server: DiscoveredServer,
+      ) {
+        // The admin's secret goes only to the issuer their client is pinned to.
+        if (row.oauthClientId && server.clientId === row.oauthClientId)
+          return row.oauthClientIssuer === server.issuer ? yield* repo.clientSecret(row) : null;
+        const registered = yield* repo.oauthClient(row.id, server.issuer, server.clientId);
+        return registered?.clientSecret ?? null;
+      });
+
+      const adminView = Effect.fn(function* (
+        row: IntegrationConfigRow & { connectionCount: number },
+      ) {
+        const manifest = findIntegrationType(row.kind);
+        const adapter = findAdapterType(row.kind);
+        const catalog =
+          manifest?.toolSource === "catalog" && adapter
+            ? toCatalog(yield* repo.catalog(row.id))
+            : null;
+        return toAdmin(row, catalog);
+      });
+
       /** The integration with its type, adapter and normalized config, or why it cannot be used. */
       const available = Effect.fn(function* (userId: string, integrationId: string) {
         const row = yield* repo.getConfig(integrationId);
@@ -277,6 +490,7 @@ export class IntegrationService extends Context.Service<
         connection: IntegrationConnectionRow,
         row: IntegrationConfigRow,
         adapter: IntegrationAdapter,
+        setup: Setup,
       ) =>
         Effect.gen(function* () {
           const connectionId = connection.id;
@@ -300,21 +514,24 @@ export class IntegrationService extends Context.Service<
                     ),
                   )
                   .for("share");
-                if (!config || configIdentity(config, adapter) !== configIdentity(row, adapter))
-                  return {
-                    kind: "failed",
-                    message: "This integration is no longer available.",
-                  } satisfies RefreshResult;
+                if (
+                  !config ||
+                  configIdentity(config, adapter) !== configIdentity(row, adapter) ||
+                  config.revision !== setup.revision
+                )
+                  return { kind: "failed", message: UNAVAILABLE } satisfies RefreshResult;
                 const [locked] = yield* tx
                   .select()
                   .from(integrationConnections)
                   .where(eq(integrationConnections.id, connectionId))
                   .for("update");
+                // A reconnect after a move must not hand this session the new server's token.
                 if (
                   !locked ||
                   locked.status !== "active" ||
                   locked.accountEpoch !== connection.accountEpoch ||
-                  locked.configFingerprint !== connection.configFingerprint
+                  locked.configFingerprint !== connection.configFingerprint ||
+                  locked.configFingerprint !== setup.fingerprint
                 )
                   return {
                     kind: "failed",
@@ -330,6 +547,11 @@ export class IntegrationService extends Context.Service<
                       identity: credentialIdentity(locked),
                     },
                   } satisfies RefreshResult;
+                if (stored?.kind === "none")
+                  return {
+                    kind: "credential",
+                    credential: { kind: "none", identity: credentialIdentity(locked) },
+                  } satisfies RefreshResult;
                 if (
                   stored &&
                   (stored.expiresAt === null || stored.expiresAt - REFRESH_MARGIN_MS > Date.now())
@@ -342,24 +564,31 @@ export class IntegrationService extends Context.Service<
                       identity: credentialIdentity(locked),
                     },
                   } satisfies RefreshResult;
-                if (!stored?.refreshToken || !oauth || !row.oauthClientId) {
+                const discovered = stored?.server && adapter.discoveredOAuth ? stored.server : null;
+                if (!stored?.refreshToken || (!discovered && (!oauth || !row.oauthClientId))) {
                   yield* tx
                     .update(integrationConnections)
                     .set({ status: "needs_reauth", updatedAt: new Date() })
                     .where(eq(integrationConnections.id, connectionId));
                   return { kind: "revoked" } satisfies RefreshResult;
                 }
-                const clientSecret = yield* repo.clientSecret(config);
-                const outcome = yield* requestTokens({
-                  endpoint: oauth.tokenUrl(row.config),
-                  clientId: row.oauthClientId,
-                  clientSecret,
-                  params: { grant_type: "refresh_token", refresh_token: stored.refreshToken },
-                }).pipe(
-                  Effect.catchTag("IntegrationRequestFailed", (error) =>
-                    Effect.succeed({ ok: false as const, revoked: false, message: error.message }),
-                  ),
-                );
+                // Secrets come from the locked row: an issuer pinned meanwhile still holds.
+                const outcome = discovered
+                  ? yield* adapter.discoveredOAuth!.refresh({
+                      server: discovered,
+                      clientSecret: yield* discoveredSecret(config, discovered),
+                      refreshToken: stored.refreshToken,
+                    })
+                  : yield* requestTokens({
+                      endpoint: oauth!.tokenUrl(row.config),
+                      clientId: row.oauthClientId!,
+                      clientSecret: yield* repo.clientSecret(config),
+                      params: { grant_type: "refresh_token", refresh_token: stored.refreshToken },
+                    }).pipe(
+                      Effect.catchTag("IntegrationRequestFailed", () =>
+                        Effect.succeed({ ok: false as const, revoked: false }),
+                      ),
+                    );
                 if (!outcome.ok) {
                   if (!outcome.revoked)
                     return {
@@ -378,6 +607,7 @@ export class IntegrationService extends Context.Service<
                   // Services that do not rotate send no new refresh token.
                   refreshToken: outcome.tokens.refreshToken ?? stored.refreshToken,
                   expiresAt: outcome.tokens.expiresAt,
+                  ...(discovered ? { server: discovered } : {}),
                 };
                 const credentialRevision = uuidv7();
                 yield* tx
@@ -402,10 +632,16 @@ export class IntegrationService extends Context.Service<
           return result as RefreshResult;
         });
 
+      /**
+       * The connection's credential for the setup a session was made for. A
+       * session keeps the address it started with, so a credential from a
+       * later setup (a move, then a reconnect) must never be paired with it.
+       */
       const credentialFor = (
         connection: IntegrationConnectionRow,
         row: IntegrationConfigRow,
         adapter: IntegrationAdapter,
+        setup: Setup,
       ): Effect.Effect<Credential, IntegrationAuthFailed | IntegrationRequestFailed> =>
         Effect.gen(function* () {
           const current = yield* repo.getConnectionById(connection.id);
@@ -423,21 +659,29 @@ export class IntegrationService extends Context.Service<
           );
           if (
             !enabled ||
-            current.configFingerprint !== enabled.fingerprint ||
+            enabled.fingerprint !== setup.fingerprint ||
+            enabled.row.revision !== setup.revision ||
+            current.configFingerprint !== setup.fingerprint ||
             current.configFingerprint !== connection.configFingerprint ||
-            configIdentity(enabled.row, adapter) !== configIdentity(row, adapter)
+            configIdentity(enabled.row, adapter) !== configIdentity(row, adapter) ||
+            !wayOpen(enabled.manifest, adapter, enabled.row, enabled.config, current.authKind)
           )
-            return yield* new IntegrationRequestFailed({
-              status: null,
-              message: "This integration is no longer available.",
-            });
+            return yield* new IntegrationRequestFailed({ status: null, message: UNAVAILABLE });
+          const identity = credentialIdentity(current);
+          // The admin's key, read fresh: replacing it applies to the next call.
+          if (current.authKind === "shared") {
+            const shared = yield* repo.sharedCredential(enabled.row);
+            if (!shared)
+              return yield* new IntegrationAuthFailed({
+                integrationId: row.id,
+                credential: identity,
+              });
+            return { kind: "api_key", values: shared, identity };
+          }
           const stored = yield* repo.decrypt(current);
+          if (stored?.kind === "none") return { kind: "none", identity };
           if (stored?.kind === "api_key")
-            return {
-              kind: "api_key",
-              values: stored.values,
-              identity: credentialIdentity(current),
-            };
+            return { kind: "api_key", values: stored.values, identity };
           if (
             stored &&
             (stored.expiresAt === null || stored.expiresAt - REFRESH_MARGIN_MS > Date.now())
@@ -448,7 +692,7 @@ export class IntegrationService extends Context.Service<
               identity: credentialIdentity(current),
             };
           // Expired or unreadable: refreshing decides under the row lock.
-          const result = yield* refresh(connection, row, adapter);
+          const result = yield* refresh(connection, row, adapter, setup);
           if (result.kind === "credential") return result.credential;
           if (result.kind === "revoked") {
             yield* changed(connection.userId);
@@ -469,7 +713,8 @@ export class IntegrationService extends Context.Service<
         if (
           !connection ||
           connection.status !== "active" ||
-          connection.configFingerprint !== fingerprint
+          connection.configFingerprint !== fingerprint ||
+          !wayOpen(manifest, adapter, row, config, connection.authKind)
         )
           return yield* new IntegrationNotAvailable({ integrationId });
         const session: ConnectedSession = {
@@ -478,8 +723,13 @@ export class IntegrationService extends Context.Service<
           configIdentity: configIdentity(row, adapter)!,
           integration: { id: row.id, kind: row.kind, name: row.name },
           adapter,
+          tools: yield* toolsOf(manifest, adapter, row.id),
+          authKind: connection.authKind,
           config,
-          credential: credentialFor(connection, row, adapter),
+          credential: credentialFor(connection, row, adapter, {
+            fingerprint,
+            revision: row.revision,
+          }),
           // Read fresh, so narrowing it applies to an answer already running.
           // A connection gone meanwhile reaches nothing.
           scope: manifest.scope
@@ -505,6 +755,12 @@ export class IntegrationService extends Context.Service<
           if ("error" in normalized) continue;
           if (row.connection.status !== "active") continue;
           if (row.connection.configFingerprint !== normalized.fingerprint) continue;
+          const manifest = findIntegrationType(row.config.kind);
+          if (
+            !manifest ||
+            !wayOpen(manifest, adapter, row.config, normalized.config, row.connection.authKind)
+          )
+            continue;
           usable.set(row.config.id, { connection: row.connection, config: row.config });
         }
         return usable;
@@ -535,6 +791,98 @@ export class IntegrationService extends Context.Service<
           });
         }
         return result;
+      });
+
+      /**
+       * A session to list a catalog with. An open or shared server needs nobody;
+       * otherwise it is a person's own connection, since listing may show what
+       * only an account can see.
+       */
+      const catalogSession = Effect.fn(function* (integrationId: string, userId: string | null) {
+        const row = yield* repo.getConfig(integrationId);
+        const manifest = row ? findIntegrationType(row.kind) : null;
+        const adapter = row ? findAdapterType(row.kind) : null;
+        const catalog = adapter?.catalog;
+        if (!row || !manifest || !adapter || !catalog)
+          return yield* new IntegrationRejected({
+            reason: "This integration does not list its own tools.",
+          });
+        // A switched-off integration reaches nobody, the admin's key included.
+        if (!row.enabled)
+          return yield* new IntegrationRejected({ reason: `Turn ${row.name} on first.` });
+        const normalized = adapter.normalizeConfig(row.config);
+        if ("error" in normalized)
+          return yield* new IntegrationRejected({ reason: normalized.error });
+        const methods = methodsFor(
+          manifest,
+          adapter,
+          row,
+          normalized.config,
+          Boolean(row.sharedCredentialCiphertext),
+        );
+        if (methods.open === "shared") {
+          const shared = yield* repo.sharedCredential(row);
+          if (!shared)
+            return yield* new IntegrationRejected({ reason: "Enter the shared key first." });
+          const credential: Credential = { kind: "api_key", values: shared };
+          return { row, adapter, catalog, session: probe(normalized.config, credential) };
+        }
+        // The reviewer's own account first: it may see tools nobody sees without one.
+        const own = userId
+          ? yield* sessionFor(userId, integrationId).pipe(Effect.option)
+          : Option.none();
+        if (Option.isSome(own)) return { row, adapter, catalog, session: own.value };
+        if (methods.open === "none")
+          return { row, adapter, catalog, session: probe(normalized.config, { kind: "none" }) };
+        return yield* new IntegrationRejected({
+          reason: `Turn ${row.name} on and connect your own account in Settings, then check again.`,
+        });
+      });
+
+      const checkCatalog = Effect.fn("IntegrationService.checkCatalog")(function* (
+        integrationId: string,
+        asUserId: string | null,
+      ) {
+        const token = yield* repo.startCatalogCheck(integrationId);
+        const current = yield* repo.catalog(integrationId);
+        // Recorded only for the setup the check started under: a move meanwhile drops it.
+        const started = (yield* repo.getConfig(integrationId))?.revision ?? 0;
+        const fail = (reason: string) =>
+          repo
+            .recordCatalogCheck(
+              integrationId,
+              { token, revision: started },
+              { error: reason },
+              new Date(Date.now() + CATALOG_RETRY_MS),
+            )
+            .pipe(Effect.andThen(Effect.fail(new IntegrationRejected({ reason }))));
+        const context = yield* catalogSession(
+          integrationId,
+          asUserId ?? current?.reviewedBy ?? null,
+        ).pipe(Effect.catch((error) => fail(error.reason)));
+        if (context.row.revision !== started)
+          return yield* fail("The integration changed while it was being checked. Check again.");
+        // Approved names win, so nothing approved is renamed for the model.
+        const previous = [...(current?.latest ?? []), ...(current?.approved ?? [])];
+        const listed = yield* context.catalog
+          .list(context.session, integrationId, previous)
+          .pipe(Effect.catch((error) => fail(failureReason(error))));
+        const next = new Date(Date.now() + (listed.recheckAfterMs ?? CATALOG_RECHECK_MS));
+        // A newer check, or the admin moving the server, made this listing stale: drop it.
+        const recorded = yield* repo.recordCatalogCheck(
+          integrationId,
+          { token, revision: started },
+          { latest: listed.entries, server: listed.server },
+          next,
+        );
+        if (!recorded)
+          return yield* new IntegrationRejected({
+            reason: "A newer check of this server replaced this one. Look again.",
+          });
+        yield* bus
+          .publishGlobal({ type: "integrations.changed" })
+          .pipe(Effect.catchCause(() => Effect.void));
+        return toCatalog(yield* repo.catalog(integrationId));
       });
 
       return IntegrationService.of({
@@ -611,10 +959,10 @@ export class IntegrationService extends Context.Service<
 
         adminList: Effect.fn("IntegrationService.adminList")(function* () {
           const rows = yield* repo.listConfigs();
-          return rows
-            .filter((row) => findIntegrationType(row.kind))
-            .toSorted(byName)
-            .map(toAdmin);
+          return yield* Effect.forEach(
+            rows.filter((row) => findIntegrationType(row.kind)).toSorted(byName),
+            adminView,
+          );
         }),
 
         directory: Effect.fn("IntegrationService.directory")(function* () {
@@ -639,7 +987,7 @@ export class IntegrationService extends Context.Service<
             .publishGlobal({ type: "integrations.changed" })
             .pipe(Effect.catchCause(() => Effect.void));
           const created = (yield* repo.listConfigs()).find((entry) => entry.id === id);
-          return toAdmin(created!);
+          return yield* adminView(created!);
         }),
 
         deleteIntegration: Effect.fn("IntegrationService.deleteIntegration")(function* (id) {
@@ -676,26 +1024,52 @@ export class IntegrationService extends Context.Service<
             input.oauthClientSecret === undefined
               ? Boolean(stored.oauthClientSecretCiphertext)
               : input.oauthClientSecret !== "";
-          if (clientId && !willHaveSecret && manifest.oauth)
+          // A discovered sign-in may use a public client the admin registered, with no secret.
+          if (clientId && !willHaveSecret && manifest.oauth && !adapter.discoveredOAuth)
             return yield* new IntegrationRejected({ reason: "Enter the OAuth client secret too." });
-          const oauthOn = Boolean(manifest.oauth && clientId && willHaveSecret);
-          if (input.enabled && !oauthOn && !(manifest.apiKey && input.allowApiKeys))
+          let sharedCredential = input.sharedCredential;
+          if (sharedCredential && manifest.sharedCredential) {
+            const read = readFields(manifest.sharedCredential.fields, sharedCredential);
+            if ("error" in read) return yield* new IntegrationRejected({ reason: read.error });
+            sharedCredential = read.values;
+          } else if (sharedCredential) sharedCredential = undefined;
+          const willHaveShared =
+            sharedCredential === undefined
+              ? Boolean(stored.sharedCredentialCiphertext)
+              : sharedCredential !== null;
+          const methods = methodsFor(
+            manifest,
+            adapter,
+            {
+              oauthClientId: clientId,
+              oauthClientSecretCiphertext: willHaveSecret ? "set" : null,
+              allowApiKeys: input.allowApiKeys,
+            },
+            normalized.config,
+            willHaveShared,
+          );
+          if (input.enabled && !methods.oauth && !methods.apiKey && methods.open === null)
             return yield* new IntegrationRejected({
-              reason: "Set up OAuth or allow personal API keys before turning this on.",
+              reason: adapter.connectMethods
+                ? "Enter the shared key before turning this on."
+                : "Set up OAuth or allow personal API keys before turning this on.",
             });
+          // Approval was of one server, not of words: another server starts the review over.
           const row = yield* repo.saveConfig({
             ...input,
             name,
             oauthClientId: clientId,
             config: normalized.config,
             fingerprint: normalized.fingerprint,
+            sharedCredential,
+            listsTools: manifest.toolSource === "catalog",
           });
           if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
           yield* bus
             .publishGlobal({ type: "integrations.changed" })
             .pipe(Effect.catchCause(() => Effect.void));
           const counted = (yield* repo.listConfigs()).find((entry) => entry.id === row.id);
-          return toAdmin(counted!);
+          return yield* adminView(counted!);
         }),
 
         listForUser: Effect.fn("IntegrationService.listForUser")(function* (userId) {
@@ -707,29 +1081,46 @@ export class IntegrationService extends Context.Service<
             if (!manifest || !adapter) continue;
             const normalized = adapter.normalizeConfig(entry.config.config);
             const configured = !("error" in normalized);
-            const methods = {
-              oauth: Boolean(manifest.oauth && adapter.oauth && oauthReady(entry.config)),
-              apiKey: Boolean(manifest.apiKey && entry.config.allowApiKeys),
-            };
+            const methods = methodsFor(
+              manifest,
+              adapter,
+              entry.config,
+              configured ? normalized.config : {},
+              Boolean(entry.config.sharedCredentialCiphertext),
+            );
             const open =
               entry.config.enabled &&
               entry.usable &&
               configured &&
-              (methods.oauth || methods.apiKey);
+              (methods.oauth || methods.apiKey || methods.open !== null);
             // A connection outlives its integration being switched off, so it
             // still shows (and can be removed) even when nothing new may start.
             if (!open && !entry.connection) continue;
             const connection = entry.connection;
+            const readsOnly = connection
+              ? connection.authKind === "shared"
+              : methods.open === "shared" && !methods.oauth && !methods.apiKey;
             const stale =
               connection !== null &&
               configured &&
-              connection.configFingerprint !== normalized.fingerprint;
+              (connection.configFingerprint !== normalized.fingerprint ||
+                !wayOpen(manifest, adapter, entry.config, normalized.config, connection.authKind));
             result.push({
               id: entry.config.id,
               kind: entry.config.kind,
               name: entry.config.name,
               available: open,
               methods,
+              // A shared key only ever reads, so its other tools are not anyone's to set.
+              tools: (yield* toolsOf(manifest, adapter, entry.config.id))
+                .filter((tool) => !readsOnly || tool.access === "read")
+                .map((tool) => ({
+                  name: tool.name,
+                  title: tool.title,
+                  label: tool.label,
+                  description: tool.description,
+                  access: tool.access,
+                })),
               apiKeyHelpUrl: configured
                 ? (manifest.apiKey?.helpUrl(normalized.config) ?? null)
                 : null,
@@ -742,6 +1133,7 @@ export class IntegrationService extends Context.Service<
                     offerByDefault: connection.offerByDefault,
                     toolPermissions: connection.toolPermissions,
                     scope: connection.scope,
+                    requiredScopes: connection.requiredScopes,
                     createdAt: connection.createdAt.toISOString(),
                   }
                 : null,
@@ -760,7 +1152,16 @@ export class IntegrationService extends Context.Service<
               integrationId,
             );
             const form = manifest.apiKey;
-            if (!row.allowApiKeys || !form)
+            // The same rule Settings shows: an MCP server set to sign-in or the
+            // shared key takes no personal token, whatever the old switch says.
+            const methods = methodsFor(
+              manifest,
+              adapter,
+              row,
+              config,
+              Boolean(row.sharedCredentialCiphertext),
+            );
+            if (!methods.apiKey || !form)
               return yield* new IntegrationRejected({
                 reason: "API keys are turned off for this integration.",
               });
@@ -780,32 +1181,156 @@ export class IntegrationService extends Context.Service<
           },
         ),
 
+        checkCatalog: (integrationId, asUserId) => checkCatalog(integrationId, asUserId),
+
+        approveCatalog: Effect.fn("IntegrationService.approveCatalog")(
+          function* (adminId, integrationId, input) {
+            const row = yield* repo.getConfig(integrationId);
+            const adapter = row ? findAdapterType(row.kind) : null;
+            const catalog = adapter?.catalog;
+            if (!row || !adapter || !catalog)
+              return yield* new IntegrationRejected({
+                reason: "This integration does not list its own tools.",
+              });
+            const current = yield* repo.catalog(integrationId);
+            if (!current?.latest || !current.listingId)
+              return yield* new IntegrationRejected({ reason: "Check the server’s tools first." });
+            const outdated = new IntegrationRejected({
+              reason: "The server’s tools changed while you were looking. Review them again.",
+            });
+            // Approving is approving what was seen: another listing, or another
+            // approval since, is shown again rather than overwritten.
+            if (reviewVersion(current) !== input.version) return yield* outdated;
+            const applied = catalog.apply(current.approved, current.latest, input.decisions);
+            if ("error" in applied)
+              return yield* new IntegrationRejected({ reason: applied.error });
+            const written = yield* repo.approveCatalog(integrationId, applied.approved, adminId, {
+              listingId: current.listingId,
+              reviewSeq: current.reviewSeq,
+            });
+            if (!written) return yield* outdated;
+            yield* bus
+              .publishGlobal({ type: "integrations.changed" })
+              .pipe(Effect.catchCause(() => Effect.void));
+            return toCatalog(yield* repo.catalog(integrationId));
+          },
+        ),
+
+        checkDueCatalogs: Effect.fn("IntegrationService.checkDueCatalogs")(function* () {
+          const kinds = INTEGRATION_TYPES.filter((type) => type.toolSource === "catalog").map(
+            (type) => type.kind,
+          );
+          const claimed = yield* repo.claimCatalogChecks({ kinds, limit: 5, leaseMs: 5 * 60_000 });
+          yield* Effect.forEach(
+            claimed,
+            (entry) => checkCatalog(entry.integrationId, null).pipe(Effect.ignore),
+            { concurrency: 3, discard: true },
+          );
+        }),
+
+        connectOpen: Effect.fn("IntegrationService.connectOpen")(function* (userId, integrationId) {
+          const { manifest, adapter, row, config, fingerprint } = yield* available(
+            userId,
+            integrationId,
+          );
+          const sharedStored = Boolean(row.sharedCredentialCiphertext);
+          const open = methodsFor(manifest, adapter, row, config, sharedStored).open;
+          if (!open)
+            return yield* new IntegrationRejected({
+              reason: "Connect this integration with your own account.",
+            });
+          const shared = open === "shared" ? yield* repo.sharedCredential(row) : null;
+          if (open === "shared" && !shared)
+            return yield* new IntegrationRejected({ reason: "The shared key is not set up." });
+          const verifiedOpen = yield* verified(
+            adapter,
+            config,
+            shared ? { kind: "api_key", values: shared } : { kind: "none" },
+          );
+          yield* repo.saveConnection({
+            userId,
+            integrationId,
+            authKind: open,
+            credentials: { kind: "none" },
+            accountLabel: shared ? "Shared key" : verifiedOpen.accountLabel,
+            fingerprint,
+          });
+          yield* changed(userId);
+        }),
+
         beginOAuth: Effect.fn("IntegrationService.beginOAuth")(
           function* (userId, integrationId, origin, returnTo) {
-            const { adapter, row, config } = yield* available(userId, integrationId);
+            const { manifest, adapter, row, config } = yield* available(userId, integrationId);
+            const state = randomToken();
+            const redirectUri = `${origin}${callbackPath(integrationId)}`;
+            const store = (value: OAuthStateValue) =>
+              db
+                .insert(verification)
+                .values({
+                  id: uuidv7(),
+                  identifier: stateIdentifier(state),
+                  value: JSON.stringify(value),
+                  expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
+                })
+                .pipe(Effect.orDie);
+            const discovered = adapter.discoveredOAuth;
+            if (discovered) {
+              if (!methodsFor(manifest, adapter, row, config, false).oauth)
+                return yield* new IntegrationRejected({
+                  reason: "This integration does not use sign-in.",
+                });
+              // A step-up keeps what was granted and asks for what a call lacked.
+              const connection = yield* repo.getConnection(userId, integrationId);
+              const previous = connection ? yield* repo.decrypt(connection) : null;
+              const granted =
+                previous?.kind === "oauth" && previous.server ? previous.server.scopes : [];
+              const started = yield* discovered.begin({
+                config,
+                integrationId,
+                integrationName: row.name,
+                redirectUri,
+                clientMetadataUrl: metadataDocumentOrigin()
+                  ? `${metadataDocumentOrigin()}/api/integrations/${integrationId}/oauth-client`
+                  : null,
+                state,
+                scopes: { granted, required: connection?.requiredScopes ?? [] },
+                preregistered: row.oauthClientId
+                  ? {
+                      clientId: row.oauthClientId,
+                      clientSecret: yield* repo.clientSecret(row),
+                      pin: (issuer: string) =>
+                        repo.pinClientIssuer(integrationId, row.revision, issuer),
+                    }
+                  : null,
+                storedClient: (issuer) =>
+                  repo.reusableOAuthClient(integrationId, issuer, redirectUri),
+                saveClient: (issuer, client) => repo.saveOAuthClient(integrationId, issuer, client),
+              });
+              yield* store({
+                userId,
+                integrationId,
+                verifier: started.verifier,
+                redirectUri,
+                server: started.server,
+                revision: row.revision,
+                ...(returnTo ? { returnTo } : {}),
+              });
+              return { state, url: started.url };
+            }
             if (!adapter.oauth || !row.oauthClientId || !row.oauthClientSecretCiphertext)
               return yield* new IntegrationRejected({
                 reason: "OAuth is not set up for this integration.",
               });
-            const state = randomToken();
             const verifier = randomToken();
-            const redirectUri = `${origin}${callbackPath(integrationId)}`;
             const value: OAuthStateValue = {
               userId,
               integrationId,
               verifier,
               redirectUri,
+              revision: row.revision,
               ...(returnTo ? { returnTo } : {}),
             };
-            yield* db
-              .insert(verification)
-              .values({
-                id: uuidv7(),
-                identifier: stateIdentifier(state),
-                value: JSON.stringify(value),
-                expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
-              })
-              .pipe(Effect.orDie);
+            yield* store(value);
             return {
               state,
               url: authorizeUrl({
@@ -843,6 +1368,36 @@ export class IntegrationService extends Context.Service<
             if (!stored || stored.userId !== userId || stored.integrationId !== integrationId)
               return yield* expired;
             const { adapter, row, config, fingerprint } = yield* available(userId, integrationId);
+            if (stored.revision !== row.revision)
+              return yield* new IntegrationRejected({
+                reason:
+                  "This integration’s setup changed during the sign-in. Start again from Settings.",
+              });
+            if (stored.server && adapter.discoveredOAuth) {
+              const tokens = yield* adapter.discoveredOAuth.complete({
+                server: stored.server,
+                clientSecret: yield* discoveredSecret(row, stored.server),
+                code: input.code,
+                iss: input.iss,
+                verifier: stored.verifier,
+                redirectUri: stored.redirectUri,
+              });
+              const { accountLabel } = yield* verified(adapter, config, {
+                kind: "oauth",
+                accessToken: tokens.accessToken,
+              });
+              const saved = yield* repo.saveConnection({
+                userId,
+                integrationId,
+                authKind: "oauth",
+                credentials: { kind: "oauth", ...tokens, server: stored.server },
+                accountLabel,
+                fingerprint,
+              });
+              yield* repo.clearRequiredScopes(saved.id);
+              yield* changed(userId);
+              return { returnTo: stored.returnTo ?? null };
+            }
             if (!adapter.oauth || !row.oauthClientId) return yield* expired;
             const outcome = yield* requestTokens({
               endpoint: adapter.oauth.tokenUrl(config),
@@ -935,6 +1490,15 @@ export class IntegrationService extends Context.Service<
           yield* repo.markNeedsReauth(input.failure.credential);
           yield* changed(input.userId);
         }),
+
+        reportMissingScopes: Effect.fn("IntegrationService.reportMissingScopes")(
+          function* (input, scopes) {
+            const words = scopes.filter((scope) => /^[\x21\x23-\x5B\x5D-\x7E]{1,200}$/.test(scope));
+            if (words.length === 0) return;
+            yield* repo.addRequiredScopes(input.connectionId, words);
+            yield* changed(input.userId);
+          },
+        ),
       });
     }),
   );

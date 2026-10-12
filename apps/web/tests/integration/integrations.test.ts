@@ -395,6 +395,7 @@ describe("connections", () => {
             code: "good-code",
             state: started.state,
             cookieState,
+            iss: null,
           }),
         ),
       );
@@ -405,6 +406,81 @@ describe("connections", () => {
     expect(mine?.connection).toMatchObject({ authKind: "oauth", status: "active" });
     // The state is spent once used.
     expect(Exit.isFailure(await complete(started.state))).toBe(true);
+  });
+
+  it("spends no sign-in code once the admin pointed the integration elsewhere", async () => {
+    const userId = await newUser();
+    const started = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.beginOAuth(userId, "outline", "https://chat.example.com"),
+      ),
+    );
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id: "outline",
+          name: "Outline",
+          enabled: true,
+          config: { baseUrl: "https://elsewhere.example.com" },
+          oauthClientId: "client",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    const before = tokenCalls.length;
+    try {
+      const refused = await run(
+        Effect.flatMap(IntegrationService, (s) =>
+          Effect.flip(
+            s.completeOAuth(userId, "outline", {
+              code: "good-code",
+              state: started.state,
+              cookieState: started.state,
+              iss: null,
+            }),
+          ),
+        ),
+      );
+      expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
+      expect(tokenCalls.length).toBe(before);
+      expect((await outlineFor(userId))?.connection).toBeNull();
+    } finally {
+      await configure();
+    }
+  });
+
+  it("gives a session made before a move away and back no credential", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    const before = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const moveTo = (baseUrlNow: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.saveConfig({
+            id: "outline",
+            name: "Outline",
+            enabled: true,
+            config: { baseUrl: baseUrlNow },
+            oauthClientId: "client",
+            allowApiKeys: true,
+          }),
+        ),
+      );
+    try {
+      await moveTo("https://elsewhere.example.com");
+      await moveTo(baseUrl);
+      await connectKey(userId);
+      // Same address as before, but another setup: the old session gets nothing.
+      expect(Exit.isFailure(await runtime.runPromiseExit(before.credential))).toBe(true);
+      const after = await run(
+        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      );
+      expect(await run(after.credential)).toMatchObject({ kind: "api_key" });
+    } finally {
+      await configure();
+    }
   });
 
   it("rotates an expired token once however many callers need it", async () => {
@@ -975,6 +1051,7 @@ describe("approvals", () => {
             rowIdFor: () => Effect.succeed("pending-call"),
             reportAuthFailure: (_session, failure) =>
               service.reportAuthFailure({ userId, failure }),
+            reportMissingScopes: () => Effect.void,
             allowanceUses: unlimited,
           });
           const handler = prepared?.group.handlers.int_outline__create_document as
@@ -1051,6 +1128,7 @@ describe("prepared calls", () => {
           service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
         rowIdFor: () => Effect.succeed("pending-call"),
         reportAuthFailure: (_session, failure) => service.reportAuthFailure({ userId, failure }),
+        reportMissingScopes: () => Effect.void,
         allowanceUses: unlimited,
       });
       return prepared?.group.handlers[`int_outline__${tool}`] as (
@@ -1113,6 +1191,7 @@ describe("prepared calls", () => {
               rowIdFor: () => Effect.succeed("pending-call"),
               reportAuthFailure: (_session, failure) =>
                 service.reportAuthFailure({ userId, failure }),
+              reportMissingScopes: () => Effect.void,
               allowanceUses: unlimited,
             })!;
             type Handler = (
@@ -1926,6 +2005,7 @@ describe("several integrations of one type", () => {
             integrations.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
           rowIdFor: () => Effect.succeed("call"),
           reportAuthFailure: () => Effect.void,
+          reportMissingScopes: () => Effect.void,
           allowanceUses: unlimited,
         })!;
         const search = prepared.group.handlers["int_outline-2__search"] as (

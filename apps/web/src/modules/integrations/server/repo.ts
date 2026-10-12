@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -13,6 +13,8 @@ import {
   integrationConfigs,
   integrationConnections,
   integrationGroupGrants,
+  integrationOAuthClients,
+  integrationToolCatalogs,
   integrationUserGrants,
   knowledgeCollections,
   knowledgeSources,
@@ -21,11 +23,34 @@ import {
 } from "~/db/schema/index.ts";
 import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import type { ToolPermission } from "../consent.ts";
+import type { McpToolEntry } from "../mcp/catalog.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 
 export type IntegrationConfigRow = typeof integrationConfigs.$inferSelect;
 export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;
+export type ToolCatalogRow = typeof integrationToolCatalogs.$inferSelect;
+export type AuthKind = IntegrationConnectionRow["authKind"];
+
+/** Scopes a connection may be waiting to be granted, in all. */
+const MAX_REQUIRED_SCOPES = 50;
+
+/**
+ * Where a sign-in's tokens come from when the type found it at sign-in
+ * (MCP), so a refresh needs no second discovery. Public facts, encrypted
+ * with the tokens only because they travel together.
+ */
+const DiscoveredServer = Schema.Struct({
+  issuer: Schema.String,
+  /** The authorization server's metadata as validated at sign-in. */
+  metadata: Schema.Record(Schema.String, Schema.Unknown),
+  /** The MCP server the tokens are bound to (RFC 8707). */
+  resource: Schema.String,
+  clientId: Schema.String,
+  /** What was asked for; a step-up asks for these and what was missing. */
+  scopes: Schema.Array(Schema.String),
+});
+export type DiscoveredServer = typeof DiscoveredServer.Type;
 
 /** What a connection stores, encrypted as one JSON document. */
 const StoredCredentials = Schema.Union([
@@ -40,10 +65,16 @@ const StoredCredentials = Schema.Union([
     refreshToken: Schema.NullOr(Schema.String),
     /** Epoch milliseconds; null when the service gave no lifetime. */
     expiresAt: Schema.NullOr(Schema.Number),
+    server: Schema.optionalKey(DiscoveredServer),
   }),
+  /** Nothing personal: a service everyone reaches alike, or through the admin's key. */
+  Schema.Struct({ kind: Schema.Literal("none") }),
 ]);
 export type StoredCredentials = typeof StoredCredentials.Type;
 const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(StoredCredentials));
+const decodeShared = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
+);
 
 /**
  * Who may connect: everyone signed in when the audience is the instance,
@@ -77,6 +108,17 @@ export interface SaveConfig {
   /** Absent keeps the stored secret; empty string clears it. */
   readonly oauthClientSecret?: string | undefined;
   readonly allowApiKeys: boolean;
+  /** The shared credential's fields; absent keeps what is stored, null clears it. */
+  readonly sharedCredential?: Record<string, string> | null | undefined;
+  /** Its tools come from the server, so another server starts their review over. */
+  readonly listsTools: boolean;
+}
+
+export interface StoredOAuthClient {
+  clientId: string;
+  clientSecret: string | null;
+  method: "metadata_document" | "dynamic";
+  redirectUri: string;
 }
 
 export interface AllowanceUse {
@@ -130,7 +172,7 @@ export class IntegrationRepo extends Context.Service<
     saveConnection(input: {
       userId: string;
       integrationId: string;
-      authKind: "oauth" | "api_key";
+      authKind: AuthKind;
       credentials: StoredCredentials;
       accountLabel: string;
       fingerprint: string;
@@ -176,6 +218,74 @@ export class IntegrationRepo extends Context.Service<
     ): Effect.Effect<boolean>;
     /** The integrations a chat's installed agent attached, or null for plain chat. */
     agentIntegrationIds(conversationId: string): Effect.Effect<ReadonlyArray<string> | null>;
+    /** The admin's shared credential, decrypted, for the adapter only. */
+    sharedCredential(row: IntegrationConfigRow): Effect.Effect<Record<string, string> | null>;
+    /** Clears the scopes calls were refused for, once a sign-in asked for them. */
+    clearRequiredScopes(connectionId: string): Effect.Effect<void>;
+    /** Adds scopes a call was refused for to what the next sign-in asks for. */
+    addRequiredScopes(connectionId: string, scopes: ReadonlyArray<string>): Effect.Effect<void>;
+    catalog(integrationId: string): Effect.Effect<ToolCatalogRow | null>;
+    /** Makes a catalog due for a check now, creating it on first use. */
+    scheduleCatalogCheck(integrationId: string): Effect.Effect<void>;
+    /** Claims catalogs due for a check under a lease, so two sweeps never take the same one. */
+    claimCatalogChecks(input: {
+      kinds: ReadonlyArray<string>;
+      limit: number;
+      leaseMs: number;
+    }): Effect.Effect<ReadonlyArray<ToolCatalogRow>>;
+    /**
+     * Starts a check, sweep or manual, and returns its token. Starting one
+     * supersedes any still running: only the newest may record what it saw.
+     */
+    startCatalogCheck(integrationId: string): Effect.Effect<string>;
+    /**
+     * False when a newer check, or another revision of the integration,
+     * superseded this one; nothing is written then. A listing equal to the
+     * stored one keeps its id, so a background check does not void a review.
+     */
+    recordCatalogCheck(
+      integrationId: string,
+      started: { token: string; revision: number },
+      outcome: { latest: McpToolEntry[]; server: Record<string, string> } | { error: string },
+      nextCheckAt: Date,
+    ): Effect.Effect<boolean>;
+    /**
+     * Replaces what is offered with what the admin approved, only over the
+     * listing and approval count the review showed; false when either moved on.
+     */
+    approveCatalog(
+      integrationId: string,
+      approved: McpToolEntry[],
+      reviewedBy: string,
+      reviewed: { listingId: string; reviewSeq: number },
+    ): Effect.Effect<boolean>;
+    /** The client this app registered with an issuer under this id, if it did. */
+    oauthClient(
+      integrationId: string,
+      issuer: string,
+      clientId: string,
+    ): Effect.Effect<StoredOAuthClient | null>;
+    /** The newest client registered with an issuer for this redirect, to sign in with again. */
+    reusableOAuthClient(
+      integrationId: string,
+      issuer: string,
+      redirectUri: string,
+    ): Effect.Effect<StoredOAuthClient | null>;
+    /**
+     * Pins the admin's client to an issuer unless it already is, atomically,
+     * and returns the issuer it is pinned to. Null when the integration is no
+     * longer at `revision`: the sign-in started under another setup.
+     */
+    pinClientIssuer(
+      integrationId: string,
+      revision: number,
+      issuer: string,
+    ): Effect.Effect<string | null>;
+    saveOAuthClient(
+      integrationId: string,
+      issuer: string,
+      client: StoredOAuthClient,
+    ): Effect.Effect<void>;
     /** Takes one use of an allowance for an answer; false once it reached `cap`. */
     reserveAllowance(input: AllowanceUse & { cap: number }): Effect.Effect<boolean>;
     /** Gives back a use whose call certainly sent nothing. */
@@ -187,6 +297,18 @@ export class IntegrationRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const cipher = yield* KeyCipher;
+
+      const storedClient = (row: typeof integrationOAuthClients.$inferSelect) =>
+        Effect.gen(function* () {
+          return {
+            clientId: row.clientId,
+            clientSecret: row.clientSecretCiphertext
+              ? Redacted.value(yield* cipher.decrypt(row.clientSecretCiphertext))
+              : null,
+            method: row.method,
+            redirectUri: row.redirectUri,
+          } satisfies StoredOAuthClient;
+        });
 
       const decrypt = (row: IntegrationConnectionRow) =>
         cipher
@@ -243,24 +365,44 @@ export class IntegrationRepo extends Context.Service<
               : input.oauthClientSecret === ""
                 ? null
                 : yield* cipher.encrypt(input.oauthClientSecret);
+          const shared =
+            input.sharedCredential === undefined
+              ? undefined
+              : input.sharedCredential === null
+                ? null
+                : yield* cipher.encrypt(JSON.stringify(input.sharedCredential));
           const now = new Date();
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                // What changed is decided against the row as it is now, locked, so two
+                // admins saving at once cannot each judge against what they read.
+                const [current] = yield* tx
+                  .select()
+                  .from(integrationConfigs)
+                  .where(eq(integrationConfigs.id, input.id))
+                  .for("update");
+                if (!current) return null;
+                const anotherServer = current.fingerprint !== input.fingerprint;
+                const anotherClient = current.oauthClientId !== input.oauthClientId;
                 const rows = yield* tx
                   .update(integrationConfigs)
                   .set({
                     name: input.name,
                     enabled: input.enabled,
                     config: input.config,
+                    fingerprint: input.fingerprint,
                     oauthClientId: input.oauthClientId,
                     ...(secret === undefined ? {} : { oauthClientSecretCiphertext: secret }),
+                    ...(shared === undefined ? {} : { sharedCredentialCiphertext: shared }),
+                    ...(anotherServer || anotherClient
+                      ? { revision: current.revision + 1, oauthClientIssuer: null }
+                      : {}),
                     allowApiKeys: input.allowApiKeys,
                     updatedAt: now,
                   })
                   .where(eq(integrationConfigs.id, input.id))
                   .returning();
-                if (!rows[0]) return null;
                 yield* tx
                   .update(integrationConnections)
                   .set({ status: "needs_reauth", updatedAt: now })
@@ -270,7 +412,31 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
-                return rows[0];
+                // What was approved and listed was another server's: review starts over,
+                // and a check still running for it finds its token gone.
+                if (anotherServer && input.listsTools) {
+                  const fresh = {
+                    approved: [],
+                    latest: null,
+                    listingId: null,
+                    server: null,
+                    checkedAt: null,
+                    checkError: null,
+                    reviewedBy: null,
+                    reviewedAt: null,
+                    nextCheckAt: now,
+                    checkLeaseUntil: null,
+                    checkToken: null,
+                  };
+                  yield* tx
+                    .insert(integrationToolCatalogs)
+                    .values({ integrationId: input.id, ...fresh })
+                    .onConflictDoUpdate({
+                      target: integrationToolCatalogs.integrationId,
+                      set: fresh,
+                    });
+                }
+                return rows[0] ?? null;
               }),
             )
             .pipe(Effect.orDie);
@@ -627,6 +793,249 @@ export class IntegrationRepo extends Context.Service<
               .orderBy(agentIntegrations.position)
               .pipe(Effect.orDie);
             return rows.map((row) => row.integrationId);
+          },
+        ),
+
+        sharedCredential: Effect.fn("IntegrationRepo.sharedCredential")(function* (row) {
+          if (!row.sharedCredentialCiphertext) return null;
+          const plain = Redacted.value(yield* cipher.decrypt(row.sharedCredentialCiphertext));
+          return Option.getOrNull(decodeShared(plain));
+        }),
+
+        clearRequiredScopes: Effect.fn("IntegrationRepo.clearRequiredScopes")(
+          function* (connectionId) {
+            yield* db
+              .update(integrationConnections)
+              .set({ requiredScopes: null, updatedAt: new Date() })
+              .where(eq(integrationConnections.id, connectionId))
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        addRequiredScopes: Effect.fn("IntegrationRepo.addRequiredScopes")(
+          function* (connectionId, scopes) {
+            // A union in one statement, so two refused calls at once both count. Past
+            // MAX_REQUIRED_SCOPES in all, what was asked for before stands: a server
+            // naming new scopes on every refusal cannot grow the row or the sign-in URL.
+            yield* db
+              .update(integrationConnections)
+              .set({
+                requiredScopes: sql`coalesce((select case when count(*) <= ${MAX_REQUIRED_SCOPES} then jsonb_agg(listed.scope order by listed.scope) end from (select distinct scope from jsonb_array_elements_text(coalesce(${integrationConnections.requiredScopes}, '[]'::jsonb) || ${JSON.stringify(scopes.slice(0, MAX_REQUIRED_SCOPES))}::jsonb) as joined(scope)) as listed), ${integrationConnections.requiredScopes})`,
+              })
+              .where(eq(integrationConnections.id, connectionId))
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        catalog: Effect.fn("IntegrationRepo.catalog")(function* (integrationId) {
+          const rows = yield* db
+            .select()
+            .from(integrationToolCatalogs)
+            .where(eq(integrationToolCatalogs.integrationId, integrationId))
+            .pipe(Effect.orDie);
+          return rows[0] ?? null;
+        }),
+
+        scheduleCatalogCheck: Effect.fn("IntegrationRepo.scheduleCatalogCheck")(
+          function* (integrationId) {
+            yield* db
+              .insert(integrationToolCatalogs)
+              .values({ integrationId, nextCheckAt: sql`now()` })
+              .onConflictDoUpdate({
+                target: integrationToolCatalogs.integrationId,
+                set: { nextCheckAt: sql`now()` },
+              })
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        claimCatalogChecks: Effect.fn("IntegrationRepo.claimCatalogChecks")(function* (input) {
+          if (input.kinds.length === 0) return [];
+          // Due and unleased by the database clock, like every other claim here.
+          return yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const due = yield* tx
+                  .select({ integrationId: integrationToolCatalogs.integrationId })
+                  .from(integrationToolCatalogs)
+                  .innerJoin(
+                    integrationConfigs,
+                    eq(integrationConfigs.id, integrationToolCatalogs.integrationId),
+                  )
+                  .where(
+                    and(
+                      eq(integrationConfigs.enabled, true),
+                      lte(integrationToolCatalogs.nextCheckAt, sql`now()`),
+                      or(
+                        isNull(integrationToolCatalogs.checkLeaseUntil),
+                        lte(integrationToolCatalogs.checkLeaseUntil, sql`now()`),
+                      ),
+                      sql`${integrationConfigs.kind} in (${sql.join(
+                        input.kinds.map((kind) => sql`${kind}`),
+                        sql`, `,
+                      )})`,
+                    ),
+                  )
+                  .orderBy(integrationToolCatalogs.nextCheckAt)
+                  .limit(input.limit)
+                  .for("update", { of: integrationToolCatalogs, skipLocked: true });
+                if (due.length === 0) return [];
+                return yield* tx
+                  .update(integrationToolCatalogs)
+                  .set({
+                    checkLeaseUntil: sql`now() + ${`${input.leaseMs} milliseconds`}::interval`,
+                  })
+                  .where(
+                    sql`${integrationToolCatalogs.integrationId} in (${sql.join(
+                      due.map((row) => sql`${row.integrationId}`),
+                      sql`, `,
+                    )})`,
+                  )
+                  .returning();
+              }),
+            )
+            .pipe(Effect.orDie);
+        }),
+
+        startCatalogCheck: Effect.fn("IntegrationRepo.startCatalogCheck")(
+          function* (integrationId) {
+            const token = uuidv7();
+            yield* db
+              .insert(integrationToolCatalogs)
+              .values({ integrationId, checkToken: token })
+              .onConflictDoUpdate({
+                target: integrationToolCatalogs.integrationId,
+                set: { checkToken: token },
+              })
+              .pipe(Effect.orDie);
+            return token;
+          },
+        ),
+
+        recordCatalogCheck: Effect.fn("IntegrationRepo.recordCatalogCheck")(
+          function* (integrationId, started, outcome, nextCheckAt) {
+            const latest = "error" in outcome ? null : JSON.stringify(outcome.latest);
+            const rows = yield* db
+              .update(integrationToolCatalogs)
+              .set({
+                ...("error" in outcome
+                  ? { checkError: outcome.error }
+                  : {
+                      latest: outcome.latest,
+                      listingId: sql`case when ${integrationToolCatalogs.listingId} is not null and ${integrationToolCatalogs.latest} = ${latest}::jsonb then ${integrationToolCatalogs.listingId} else ${uuidv7()} end`,
+                      server: outcome.server,
+                      checkError: null,
+                    }),
+                checkedAt: new Date(),
+                nextCheckAt,
+                checkLeaseUntil: null,
+                checkToken: null,
+              })
+              .where(
+                and(
+                  eq(integrationToolCatalogs.integrationId, integrationId),
+                  eq(integrationToolCatalogs.checkToken, started.token),
+                  sql`exists (select 1 from ${integrationConfigs} where ${integrationConfigs.id} = ${integrationId} and ${integrationConfigs.revision} = ${started.revision})`,
+                ),
+              )
+              .returning({ integrationId: integrationToolCatalogs.integrationId })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
+
+        approveCatalog: Effect.fn("IntegrationRepo.approveCatalog")(
+          function* (integrationId, approved, reviewedBy, reviewed) {
+            const rows = yield* db
+              .update(integrationToolCatalogs)
+              .set({
+                approved,
+                reviewedBy,
+                reviewedAt: new Date(),
+                reviewSeq: reviewed.reviewSeq + 1,
+              })
+              .where(
+                and(
+                  eq(integrationToolCatalogs.integrationId, integrationId),
+                  eq(integrationToolCatalogs.listingId, reviewed.listingId),
+                  eq(integrationToolCatalogs.reviewSeq, reviewed.reviewSeq),
+                ),
+              )
+              .returning({ integrationId: integrationToolCatalogs.integrationId })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
+
+        oauthClient: Effect.fn("IntegrationRepo.oauthClient")(
+          function* (integrationId, issuer, clientId) {
+            const rows = yield* db
+              .select()
+              .from(integrationOAuthClients)
+              .where(
+                and(
+                  eq(integrationOAuthClients.integrationId, integrationId),
+                  eq(integrationOAuthClients.issuer, issuer),
+                  eq(integrationOAuthClients.clientId, clientId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            return rows[0] ? yield* storedClient(rows[0]) : null;
+          },
+        ),
+
+        reusableOAuthClient: Effect.fn("IntegrationRepo.reusableOAuthClient")(
+          function* (integrationId, issuer, redirectUri) {
+            const rows = yield* db
+              .select()
+              .from(integrationOAuthClients)
+              .where(
+                and(
+                  eq(integrationOAuthClients.integrationId, integrationId),
+                  eq(integrationOAuthClients.issuer, issuer),
+                  eq(integrationOAuthClients.redirectUri, redirectUri),
+                ),
+              )
+              .orderBy(desc(integrationOAuthClients.createdAt))
+              .limit(1)
+              .pipe(Effect.orDie);
+            return rows[0] ? yield* storedClient(rows[0]) : null;
+          },
+        ),
+
+        pinClientIssuer: Effect.fn("IntegrationRepo.pinClientIssuer")(
+          function* (integrationId, revision, issuer) {
+            const rows = yield* db
+              .update(integrationConfigs)
+              .set({
+                oauthClientIssuer: sql`coalesce(${integrationConfigs.oauthClientIssuer}, ${issuer})`,
+              })
+              .where(
+                and(
+                  eq(integrationConfigs.id, integrationId),
+                  eq(integrationConfigs.revision, revision),
+                ),
+              )
+              .returning({ issuer: integrationConfigs.oauthClientIssuer })
+              .pipe(Effect.orDie);
+            return rows[0]?.issuer ?? null;
+          },
+        ),
+
+        saveOAuthClient: Effect.fn("IntegrationRepo.saveOAuthClient")(
+          function* (integrationId, issuer, client) {
+            const secret = client.clientSecret ? yield* cipher.encrypt(client.clientSecret) : null;
+            const values = {
+              clientId: client.clientId,
+              clientSecretCiphertext: secret,
+              method: client.method,
+              redirectUri: client.redirectUri,
+            };
+            yield* db
+              .insert(integrationOAuthClients)
+              .values({ integrationId, issuer, ...values })
+              .onConflictDoNothing()
+              .pipe(Effect.orDie);
           },
         ),
 

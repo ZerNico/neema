@@ -46,6 +46,8 @@ export const outlookManifest = {
     },
   },
   apiKey: null,
+  sharedCredential: null,
+  toolSource: "static",
   tools: OUTLOOK_TOOLS,
   allowances: [
     {

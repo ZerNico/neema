@@ -21,11 +21,11 @@ export interface Reach {
 /**
  * Why a call may not run: the person blocked the tool, the schedule's grant
  * does not reach that far, the call is destructive and nobody is there, the
- * schedule never granted this allowance, or it names someone the allowance
- * does not list.
+ * schedule never granted this allowance, it names someone the allowance does
+ * not list, or it would change something through a key everyone shares.
  */
 export type Refusal =
-  | { readonly reason: "blocked" | "grant" | "destructive" | "no-allowance" }
+  | { readonly reason: "blocked" | "grant" | "destructive" | "no-allowance" | "shared" }
   | { readonly reason: "outside"; readonly targets: ReadonlyArray<string> };
 
 export type Consent =
@@ -63,9 +63,12 @@ export const consentFor = (input: {
   allowedInChat: boolean;
   unattended: UnattendedGrant;
   reach: Reach | null;
+  /** The admin's key for everyone: a change would act as the admin, so it never runs. */
+  shared?: boolean;
 }): Consent => {
   if (input.permission === "block") return { kind: "refuse", reason: "blocked" };
   const access = effectiveAccess(input.access, input.reach);
+  if (input.shared && access !== "read") return { kind: "refuse", reason: "shared" };
   const unattended = input.unattended;
   if (unattended !== null) {
     if (access === "read") return RUN;
