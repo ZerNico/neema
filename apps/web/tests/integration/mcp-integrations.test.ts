@@ -8,10 +8,11 @@ import {
   inputRequired,
   McpServer,
 } from "@modelcontextprotocol/server";
+import { eq } from "drizzle-orm";
 import { Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { conversations, user } from "~/db/schema/index.ts";
+import { conversations, user, userApprovals } from "~/db/schema/index.ts";
 import type { CatalogDecision } from "~/modules/integrations/server/adapter.ts";
 import { mcpAdapter } from "~/modules/integrations/mcp/server/adapter.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
@@ -388,6 +389,34 @@ describe("an MCP server set up by an admin", () => {
     } finally {
       searchDescription = "Search the docs.";
     }
+  });
+
+  it("lists in the background as the reviewer only while their account may still act", async () => {
+    const admin = await newUser();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.insert(userApprovals).values({ userId: admin, status: "approved" }),
+      ),
+    );
+    const id = await setUp("Docs reviewer", { url: `${base}/mcp`, ways: "token" });
+    await run(
+      Effect.flatMap(IntegrationService, (s) => s.connectApiKey(admin, id, { token: "t" })),
+    );
+    const first = await check(id, admin);
+    await approve(admin, id, first.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    expect((await check(id, null)).checkError).toBeNull();
+
+    await run(
+      Effect.flatMap(Db, (db) => db.update(user).set({ banned: true }).where(eq(user.id, admin))),
+    );
+    const swept = await runtime.runPromiseExit(
+      Effect.flatMap(IntegrationService, (s) => s.checkCatalog(id, null)),
+    );
+    expect(Exit.isFailure(swept)).toBe(true);
+    const catalog = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
+    expect(catalog?.checkError).toMatch(/connect your own account/);
   });
 
   it("never lets a slower, older check undo what a newer one found", async () => {
