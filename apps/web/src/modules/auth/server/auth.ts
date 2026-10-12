@@ -7,7 +7,7 @@ import { runtime } from "~/server/runtime.ts";
 import { createAppAuth } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { makeSignupGate } from "./signup-gate.ts";
-import { SignupRepo } from "./signup-repo.ts";
+import { accountEligible } from "./account-eligibility.ts";
 
 export type Auth = ReturnType<typeof createAppAuth>;
 export type Session = Auth["$Infer"]["Session"];
@@ -88,8 +88,6 @@ export function invalidateAuth(): void {
 export async function sessionFromHeaders(headers: Headers) {
   const session = await (await currentAuth()).api.getSession({ headers });
   if (!session) return null;
-  const status = await runtime.runPromise(
-    Effect.flatMap(SignupRepo, (repo) => repo.statusOf(session.user.id)),
-  );
-  return { session, approved: status === "approved" };
+  const approved = await runtime.runPromise(accountEligible(session.user.id));
+  return { session, approved };
 }

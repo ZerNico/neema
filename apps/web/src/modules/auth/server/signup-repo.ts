@@ -10,6 +10,7 @@ import {
 } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import type { ApprovalStatus, SignupPolicy } from "../signup.ts";
+import { lockAccount, reconcileApproval } from "./account-eligibility.ts";
 
 export interface PendingAccount {
   readonly userId: string;
@@ -82,19 +83,7 @@ export class SignupRepo extends Context.Service<
         }),
 
         statusOf: Effect.fn("SignupRepo.statusOf")(function* (userId) {
-          // The bootstrap claim is the sole authority for recovering a lost
-          // after-hook. Everyone else without a row enters the admin queue.
-          yield* db
-            .execute(sql`
-            INSERT INTO user_approvals (user_id, status, decided_at)
-            SELECT u.id,
-              CASE WHEN b.owner_id = u.id THEN 'approved' ELSE 'pending' END,
-              CASE WHEN b.owner_id = u.id THEN now() ELSE NULL END
-            FROM "user" u LEFT JOIN signup_bootstrap b ON b.id = ${AUTH_SETTINGS_ID}
-            WHERE u.id = ${userId}
-            ON CONFLICT (user_id) DO NOTHING
-          `)
-            .pipe(Effect.orDie);
+          yield* reconcileApproval(db, userId);
           const rows = yield* db
             .select({ status: userApprovals.status })
             .from(userApprovals)
@@ -107,6 +96,7 @@ export class SignupRepo extends Context.Service<
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (!(yield* lockAccount(tx, userId)).length) return;
                 const inserted = yield* tx
                   .insert(userApprovals)
                   .values({
@@ -173,6 +163,8 @@ export class SignupRepo extends Context.Service<
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                if (!(yield* lockAccount(tx, userId)).length) return;
+                yield* reconcileApproval(tx, userId);
                 const changed = yield* tx
                   .update(userApprovals)
                   .set({ status, decidedAt: new Date(), decidedBy })

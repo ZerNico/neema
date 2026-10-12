@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { session, signupBootstrap, user } from "~/db/schema/index.ts";
+import { session, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
 import { createAppAuth, type ImpersonationEvent } from "~/modules/auth/server/config.ts";
 import { projectSessionIdentity } from "~/modules/auth/identity.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -75,6 +75,16 @@ beforeAll(async () => {
     baseURL: origin,
     secret: "isolated-auth-test-secret-at-least-32-characters",
     purgeUserFiles: async () => {},
+    signup: {
+      allow: async () => true,
+      record: async ({ userId }) => {
+        await db.insert(userApprovals).values({ userId, status: "approved" });
+      },
+      approved: async (userId) => {
+        const [row] = await db.select().from(userApprovals).where(eq(userApprovals.userId, userId));
+        return row?.status === "approved";
+      },
+    },
     log: logger,
   });
 }, 120_000);
@@ -93,6 +103,69 @@ beforeEach(async () => {
   adminId = await admin.signup("admin");
   targetId = await target.signup("target");
   otherId = await other.signup("other");
+});
+
+describe("native administrator eligibility", () => {
+  const endpoints = [
+    ["/admin/set-role", { role: "admin" }],
+    ["/admin/get-user", null],
+    [
+      "/admin/create-user",
+      { name: "Created", email: "created@example.test", password: "isolated-password-123" },
+    ],
+    ["/admin/update-user", { data: { name: "Changed" } }],
+    ["/admin/list-users", null],
+    ["/admin/list-user-sessions", {}],
+    ["/admin/unban-user", {}],
+    ["/admin/ban-user", {}],
+    ["/admin/impersonate-user", {}],
+    ["/admin/revoke-user-session", { sessionToken: "synthetic" }],
+    ["/admin/revoke-user-sessions", {}],
+    ["/admin/remove-user", {}],
+    ["/admin/set-user-password", { newPassword: "isolated-password-123" }],
+    ["/admin/has-permission", { permissions: { user: ["list"] } }],
+  ] as const;
+
+  it.each(["pending", "rejected"] as const)(
+    "denies every privileged endpoint to an %s admin",
+    async (status) => {
+      await db.update(userApprovals).set({ status }).where(eq(userApprovals.userId, adminId));
+      for (const [path, body] of endpoints) {
+        const requestPath = path === "/admin/get-user" ? `${path}?id=${targetId}` : path;
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Check each real native endpoint against the same suspended actor.
+        const response = await admin.request(
+          requestPath,
+          body === null ? undefined : { ...body, userId: targetId },
+        );
+        expect(response.status, path).toBe(403);
+      }
+      expect((await admin.request("/sign-out", {})).status).toBe(200);
+    },
+  );
+
+  it("checks the original actor while impersonating and allows restoration without privileged access", async () => {
+    expect((await admin.start(targetId)).status).toBe(200);
+    await db.update(user).set({ role: "admin" }).where(eq(user.id, targetId));
+    await db
+      .update(userApprovals)
+      .set({ status: "rejected" })
+      .where(eq(userApprovals.userId, adminId));
+    expect((await admin.request(`/admin/get-user?id=${otherId}`)).status).toBe(403);
+    expect((await admin.stop()).status).toBe(200);
+    expect((await admin.identity()).body.user.id).toBe(adminId);
+    expect((await admin.request(`/admin/get-user?id=${otherId}`)).status).toBe(403);
+    expect((await admin.request("/sign-out", {})).status).toBe(200);
+  });
+
+  it("denies an active ban even if a session row survives, and permits an elapsed ban", async () => {
+    await db.update(user).set({ banned: true, banExpires: null }).where(eq(user.id, adminId));
+    expect((await admin.request(`/admin/get-user?id=${targetId}`)).status).toBe(403);
+    await db
+      .update(user)
+      .set({ banExpires: new Date(0) })
+      .where(eq(user.id, adminId));
+    expect((await admin.request(`/admin/get-user?id=${targetId}`)).status).toBe(200);
+  });
 });
 
 describe("native impersonation through the production handler configuration", () => {

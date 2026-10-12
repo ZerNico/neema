@@ -3,11 +3,22 @@ import { PgClient } from "@effect/sql-pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import {
+  accountEligible,
+  requireEligibleAccount,
+  originatingSessionEligible,
+} from "~/modules/auth/server/account-eligibility.ts";
 import { Pool } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { oauthProviders, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
+import {
+  oauthProviders,
+  session,
+  signupBootstrap,
+  user,
+  userApprovals,
+} from "~/db/schema/index.ts";
 import { createAppAuth } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { makeSignupGate } from "~/modules/auth/server/signup-gate.ts";
@@ -448,6 +459,134 @@ describe("who gets an account", () => {
     expect(await statusOf("first")).toBe("approved");
     expect(await statusOf("second")).toBe("pending");
   });
+});
+
+describe("session-free account eligibility", () => {
+  const eligible = (id: string) => runtime.runPromise(accountEligible(id));
+  const required = (id: string) =>
+    runtime.runPromise(
+      Effect.flatMap(Db, (client) => client.transaction((tx) => requireEligibleAccount(tx, id))),
+    );
+
+  it("repairs only the bootstrap approval and never accepts role as approval", async () => {
+    const founder = (await signUp("founder")).body.user.id as string;
+    await db.delete(userApprovals).where(eq(userApprovals.userId, founder));
+    expect(await eligible(founder)).toBe(true);
+    const pending = await insertUser("role-alone");
+    await db.update(user).set({ role: "admin" }).where(eq(user.id, pending));
+    expect(await eligible(pending)).toBe(false);
+    expect(await signups((repo) => repo.statusOf(pending))).toBe("pending");
+    await expect(required("missing")).rejects.toMatchObject({
+      _tag: "AccountIneligible",
+      reason: "missing",
+    });
+    await expect(required(pending)).rejects.toMatchObject({
+      _tag: "AccountIneligible",
+      reason: "unapproved",
+    });
+  });
+
+  it("needs no browser session and distinguishes active from elapsed bans", async () => {
+    const id = await insertUser("background");
+    await signups((repo) => repo.record({ userId: id, status: "approved" }));
+    expect(await db.select().from(session).where(eq(session.userId, id))).toEqual([]);
+    expect(await eligible(id)).toBe(true);
+    await db.update(user).set({ banned: true, banExpires: null }).where(eq(user.id, id));
+    expect(await eligible(id)).toBe(false);
+    await expect(required(id)).rejects.toMatchObject({
+      _tag: "AccountIneligible",
+      reason: "banned",
+    });
+    await db
+      .update(user)
+      .set({ banExpires: new Date(Date.now() + 60_000) })
+      .where(eq(user.id, id));
+    expect(await eligible(id)).toBe(false);
+    await db
+      .update(user)
+      .set({ banExpires: new Date(0) })
+      .where(eq(user.id, id));
+    expect(await eligible(id)).toBe(true);
+    await signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: id }));
+    expect(await eligible(id)).toBe(false);
+    await signups((repo) => repo.decide({ userId: id, status: "approved", decidedBy: id }));
+    expect(await eligible(id)).toBe(true);
+  });
+
+  it("pins the exact unexpired originating session and effective user", async () => {
+    const id = await insertUser("feed");
+    await signups((repo) => repo.record({ userId: id, status: "approved" }));
+    const first = uuidv7(),
+      second = uuidv7();
+    await db.insert(session).values(
+      [first, second].map((sid) => ({
+        id: sid,
+        userId: id,
+        token: `synthetic-${sid}`,
+        expiresAt: new Date(Date.now() + 60_000),
+      })),
+    );
+    const check = (sid: string, effective = id) =>
+      runtime.runPromise(
+        Effect.flatMap(Db, (client) =>
+          client
+            .transaction((tx) => originatingSessionEligible(tx, sid, effective))
+            .pipe(Effect.orDie),
+        ),
+      );
+    expect(await check(first)).toBe(true);
+    expect(await check(first, "another-person")).toBe(false);
+    await db.delete(session).where(eq(session.id, first));
+    expect(await check(first)).toBe(false);
+    expect(await check(second)).toBe(true);
+    await db
+      .update(session)
+      .set({ expiresAt: new Date(0) })
+      .where(eq(session.id, second));
+    expect(await check(second)).toBe(false);
+  });
+
+  it.each(["rejection", "ban"] as const)(
+    "orders acceptance before an overlapping %s",
+    async (mutation) => {
+      const id = await insertUser(`ordered-${mutation}`);
+      await signups((repo) => repo.record({ userId: id, status: "approved" }));
+      const entered = Effect.runSync(Deferred.make<void>());
+      const release = Effect.runSync(Deferred.make<void>());
+      const acceptance = runtime.runPromise(
+        Effect.flatMap(Db, (client) =>
+          client.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* requireEligibleAccount(tx, id);
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+            }),
+          ),
+        ),
+      );
+      await runtime.runPromise(Deferred.await(entered));
+      const changed =
+        mutation === "rejection"
+          ? signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: id }))
+          : db.update(user).set({ banned: true }).where(eq(user.id, id)).execute();
+      try {
+        await runtime.runPromise(
+          Effect.tryPromise(() =>
+            pool.query<{ blocked: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+          WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0
+        ) AS blocked
+      `),
+          ).pipe(Effect.repeat({ until: (result) => result.rows[0]?.blocked === true })),
+        );
+      } finally {
+        await runtime.runPromise(Deferred.succeed(release, undefined));
+        await acceptance;
+        await changed;
+      }
+      expect(await eligible(id)).toBe(false);
+    },
+  );
 });
 
 describe("an admin deciding on a waiting account", () => {

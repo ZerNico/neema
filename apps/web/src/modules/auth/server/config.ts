@@ -1,9 +1,14 @@
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
+import {
+  APIError,
+  createAuthMiddleware,
+  getAuthoritativeSessionFromCtx,
+  isAPIError,
+} from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { count } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
@@ -191,12 +196,28 @@ export function createAppAuth({
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== startPath && ctx.path !== stopPath) return;
-        const session = await getSessionFromCtx(ctx);
+        if (!ctx.path.startsWith("/admin/")) return;
+        const session = await getAuthoritativeSessionFromCtx(ctx);
         if (!session) return; // Native endpoint owns unauthenticated errors.
         const impersonatedBy = (
           session.session as typeof session.session & { impersonatedBy?: string }
         ).impersonatedBy;
+        // Restoration stays usable after suspension, but grants no new authority.
+        if (ctx.path !== stopPath) {
+          const actorId = impersonatedBy ?? session.user.id;
+          const [actor] = await db
+            .select({
+              activeBan: sql<boolean>`${schema.user.banned} and (${schema.user.banExpires} is null or ${schema.user.banExpires} > clock_timestamp())`,
+            })
+            .from(schema.user)
+            .where(eq(schema.user.id, actorId));
+          if (!actor || actor.activeBan || !(await signup.approved(actorId))) {
+            throw new APIError("FORBIDDEN", {
+              message: "This account cannot administer the instance.",
+            });
+          }
+        }
+        if (ctx.path !== startPath && ctx.path !== stopPath) return;
         if (ctx.path === startPath && impersonatedBy) {
           throw new APIError("FORBIDDEN", {
             message: "Stop impersonating before starting another session.",

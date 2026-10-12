@@ -2,8 +2,10 @@ import { Effect } from "effect";
 import type { SignupGate } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
+import { accountEligible } from "./account-eligibility.ts";
+import { Db } from "~/server/db.ts";
 
-type Run = <A>(effect: Effect.Effect<A, never, OAuthRepo | SignupRepo>) => Promise<A>;
+type Run = <A>(effect: Effect.Effect<A, never, OAuthRepo | SignupRepo | Db>) => Promise<A>;
 
 /**
  * Unlike the provider list, none of this is baked into the auth instance: the
@@ -29,10 +31,5 @@ export const makeSignupGate = (run: Run): SignupGate => ({
       }),
     ),
 
-  approved: (userId) =>
-    run(
-      Effect.flatMap(SignupRepo, (repo) =>
-        Effect.map(repo.statusOf(userId), (status) => status === "approved"),
-      ),
-    ),
+  approved: (userId) => run(accountEligible(userId)),
 });
