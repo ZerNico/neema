@@ -108,17 +108,24 @@ from.
   connection. A different fingerprint reads as `needs_reauth`, and saving a new one marks
   every connection so, since the credentials name another server.
 - A reconnect changes `account_epoch` and `credential_revision`, even on the same server
-  and connection row. Refresh changes only the revision. A session captures the epoch and
-  an identity of normalized config, type and OAuth client credentials. Each credential read
-  requires those identities still to match, so an old endpoint cannot receive a replacement
-  account’s token. Preferences and generic `updated_at` are not credential identity.
+  and connection row. Refresh changes only the revision. A session captures the epoch, the
+  setup it started under (fingerprint and the integration's `revision`, see
+  [one server per revision](mcp.md#one-server-per-revision)) and an identity of normalized
+  config, type and OAuth client credentials. The revision tells apart two saves of one
+  address. The identity also covers a changed client secret or a setting outside the
+  fingerprint. Each credential read requires all of them still to match, so an old endpoint
+  cannot receive a replacement account’s token. Preferences and generic `updated_at` are
+  not credential identity.
 - OAuth tokens are refreshed a minute before expiry. Refresh locks the configuration
   `FOR SHARE`, then the connection `FOR UPDATE`, matching admin saves, and validates captured
-  config and epoch inside both locks before contacting OAuth. Concurrent callers take turns:
-  the first rotates the token and revision, the rest find the fresh credential. A refused
-  refresh marks the locked connection `needs_reauth`. A network failure does not.
-- Each HTTP request retains its own immutable connection, epoch and revision snapshot. A
-  provider 401 carries that snapshot, and the status update compares all three. A delayed
+  config identity, revision, fingerprint and epoch inside both locks before contacting OAuth.
+  Client secrets, the admin's or a registered one, are read from the locked configuration.
+  Concurrent callers take turns: the first rotates the token and revision, the rest find the
+  fresh credential. A refused refresh marks the locked connection `needs_reauth`. A network
+  failure does not.
+- Each request retains its own immutable connection, epoch and revision snapshot, whatever
+  the way in: a personal key or token, an MCP open connection or the admin's shared key.
+  A provider 401 carries that snapshot, and the status update compares all three. A delayed
   failure cannot disable a reconnect or refresh successor. Verification probes have no stored
   identity and cannot mark a current connection. No session-wide last-token state is used.
 - The admin's base URL is exempt from `url-safety.ts`, like the SearXNG base URL:
@@ -170,11 +177,12 @@ see. Settings lists tools under an allowance as their own group, so allowing eve
 once does not also let mail go out unasked; allowing that group does.
 Consent is checked before approval and at admission. Preparation and approval wait outside
 an answer’s per-integration mutation permit. Changing calls acquire it before final live
-consent, captured epoch/config identity, scope and allowance reservation, then hold it through
-execution. A queued change therefore sees revocation before sending or consuming an allowance.
-Reads remain concurrent. An approval cannot override a newly blocked or unavailable integration,
-and a newly required approval cannot be skipped by a call offered as allowed. Credential
-refresh checks availability again without treating an admin disable as bad credentials.
+consent, captured epoch/config identity, the offered tool's access and revision, scope and
+allowance reservation, then hold it through execution. A queued change therefore sees
+revocation before sending or consuming an allowance. Reads remain concurrent. An approval
+cannot override a newly blocked or unavailable integration, and a newly required approval
+cannot be skipped by a call offered as allowed. Credential refresh checks availability again
+without treating an admin disable as bad credentials.
 
 Cheap checks run before preparing: a blocked tool or a scheduled run without the grant is
 refused without touching the service, and a malformed call is explained without asking

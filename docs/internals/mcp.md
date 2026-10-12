@@ -42,9 +42,12 @@ Checks run when the admin asks, and in the background through `IntegrationCatalo
 (a claim with a lease, like schedules, every ten minutes, only for integrations that are on).
 Each check takes a token as it starts and only the newest token may write, so a slow check
 never puts back a listing a newer one replaced. Each check sets the next one
-from the server's `ttlMs` hint, between an hour and a day. A check runs as the admin who last
-reviewed, since listing may show what only an account can see. An open or shared-key server
-needs nobody.
+from the server's `ttlMs` hint, between an hour and a day. A check the admin asks for runs as
+them. A background check runs as the admin who last reviewed, since listing may show what
+only an account can see. That uses their personal connection unattended, so it does so only
+while their account is eligible (approved and not banned), the rule `requireAdmin` applies to
+the admin's own requests. Otherwise it lists as nobody. An open or shared-key server needs
+nobody.
 
 ## One server per revision
 
@@ -58,8 +61,10 @@ save locks the row, compares the stored fingerprint and client ID with the new o
 bumps the revision when either changed; only then does it reset the catalog and the issuer
 pin. Everything started under a revision carries it, and every write it makes requires it
 in the same statement: recording a check, pinning an issuer, completing a sign-in, and
-handing a session its credential, which a refresh checks again under the connection's lock.
-This applies to every integration type, not only MCP.
+handing a session its credential, which a refresh checks again with the integration's row
+and then the connection's locked. This applies to every integration type, not only MCP, and
+sits beside the per-credential identity in [integrations](integrations.md): the revision
+names the server, the account epoch and credential revision name whose token it is.
 
 ## Access is the admin's call, defaulting to the worst case
 
@@ -115,9 +120,10 @@ functions:
 - **Callback.** The issuer recorded at the start travels in the state row, and RFC 9207
   `iss` is checked against it before the code is spent. When the server advertises `iss`,
   a missing one is refused too.
-- **Step-up.** A 403 `insufficient_scope` records the scopes a call lacked on the connection.
-  Settings then offers "Grant more access", which asks for the union of what was granted and
-  what was missing.
+- **Step-up.** A 403 `insufficient_scope` records the scopes a call lacked on the connection,
+  only while it still has the account epoch of the session that made the call: a refusal
+  landing after the person signed in again does not ask a second time. Settings then offers
+  "Grant more access", which asks for the union of what was granted and what was missing.
 
 ## Containment
 
