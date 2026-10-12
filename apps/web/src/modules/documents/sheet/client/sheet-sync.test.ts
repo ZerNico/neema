@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
 import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
+import { applyChange } from "@chat/sheet/model/apply";
+import { parseFormula } from "@chat/sheet/model/formula";
 import type { PushSheetAnswer, PushSheetInput, SheetFrame } from "../schema.ts";
 import { SheetSync, type SheetFeedSource, type SheetOutbox } from "./sheet-sync.ts";
 
@@ -68,6 +70,139 @@ describe("a sheet's connection", () => {
     expect(pushes).toHaveLength(1);
     expect(JSON.parse(pushes[0]!.changes![0]!)).toMatchObject({ clientId: "me", seq: 1 });
     expect(sync.getState().pending).toBe(0);
+  });
+
+  it("reports a dropped sort while keeping unrelated pending operations and its live feed", async () => {
+    const { sync, feed, pushes, answerWith } = connection();
+    const initial = emptyDoc();
+    const parsed = parseFormula("A1000+A1", { doc: initial, sheet: "s1" });
+    if (!("formula" in parsed)) throw new Error("unparsed");
+    const doc = applyChange(
+      initial,
+      {
+        clientId: "setup",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: 30 },
+              { r: "s1.r2", c: "s1.c1", v: 10 },
+              { r: "s1.r1", c: "s1.c2", f: parsed.formula },
+            ],
+          },
+        ],
+      },
+      1,
+    ).doc;
+    feed({ type: "reset", doc, revision: 1, moment, acked: null });
+    const ops: SheetOp[] = [
+      write("s1.r4", "s1.c4", "before"),
+      {
+        op: "sort",
+        sh: "s1",
+        c1: "s1.c1",
+        c2: "s1.c2",
+        rows: ["s1.r1", "s1.r2"],
+        order: ["s1.r2", "s1.r1"],
+      },
+      write("s1.r5", "s1.c4", "after"),
+    ];
+    sync.dispatch(ops);
+    expect(sync.getState()).toMatchObject({
+      status: "live",
+      pending: 1,
+      refused:
+        "Some changes weren’t kept: a sort whose shifted formulas need more rows or columns.",
+    });
+    expect(["s1.r1", "s1.r2"].map((r) => valueAt(sync.getState().doc, r, "s1.c1"))).toEqual([
+      30, 10,
+    ]);
+    expect(valueAt(sync.getState().doc, "s1.r4", "s1.c4")).toBe("before");
+    expect(valueAt(sync.getState().doc, "s1.r5", "s1.c4")).toBe("after");
+    feed({
+      type: "changes",
+      changes: [{ clientId: "other", seq: 1, ops: [write("s1.r6", "s1.c4", "theirs")] }],
+      revision: 2,
+      moment,
+    });
+    expect(sync.getState().status).toBe("live");
+    expect(valueAt(sync.getState().doc, "s1.r6", "s1.c4")).toBe("theirs");
+    answerWith(() => ({ revision: 3, acked: 1, refused: [] }));
+    await sync.flush();
+    expect(pushes).toHaveLength(1);
+    expect(sync.getState().pending).toBe(0);
+    feed({ type: "changes", changes: [{ clientId: "me", seq: 1, ops }], revision: 3, moment });
+    expect(valueAt(sync.getState().doc, "s1.r4", "s1.c4")).toBe("before");
+    expect(valueAt(sync.getState().doc, "s1.r5", "s1.c4")).toBe("after");
+    expect(sync.getState().refused).toContain("shifted formulas");
+    sync.destroy();
+  });
+
+  it("reports an optimistic sort refused only when its feed batch brings a prior deletion", () => {
+    const { sync, feed } = connection();
+    const initial = emptyDoc();
+    const parsed = parseFormula("A999+A1", { doc: initial, sheet: "s1" });
+    if (!("formula" in parsed)) throw new Error("unparsed");
+    const doc = applyChange(
+      initial,
+      {
+        clientId: "setup",
+        seq: 1,
+        ops: [
+          {
+            op: "set",
+            sh: "s1",
+            cells: [
+              { r: "s1.r1", c: "s1.c1", v: 30 },
+              { r: "s1.r2", c: "s1.c1", v: 10 },
+              { r: "s1.r1", c: "s1.c2", f: parsed.formula },
+            ],
+          },
+        ],
+      },
+      1,
+    ).doc;
+    feed({ type: "reset", doc, revision: 1, moment, acked: null });
+    const ops: SheetOp[] = [
+      {
+        op: "sort",
+        sh: "s1",
+        c1: "s1.c1",
+        c2: "s1.c2",
+        rows: ["s1.r1", "s1.r2"],
+        order: ["s1.r2", "s1.r1"],
+      },
+      write("s1.r4", "s1.c4", "kept"),
+    ];
+    sync.dispatch(ops);
+    expect(valueAt(sync.getState().doc, "s1.r1", "s1.c1")).toBe(10);
+    expect(sync.getState().refused).toBeNull();
+    feed({
+      type: "changes",
+      changes: [
+        {
+          clientId: "other",
+          seq: 1,
+          ops: [{ op: "delete", sh: "s1", axis: "rows", ids: ["s1.r1000"] }],
+        },
+        { clientId: "me", seq: 1, ops },
+      ],
+      revision: 3,
+      moment,
+    });
+    expect(sync.getState()).toMatchObject({
+      status: "live",
+      pending: 0,
+      refused:
+        "Some changes weren’t kept: a sort whose shifted formulas need more rows or columns.",
+    });
+    expect(["s1.r1", "s1.r2"].map((r) => valueAt(sync.getState().doc, r, "s1.c1"))).toEqual([
+      30, 10,
+    ]);
+    expect(valueAt(sync.getState().doc, "s1.r4", "s1.c4")).toBe("kept");
+    sync.destroy();
   });
 
   it("keeps showing an acknowledged edit until the feed brings it, never flashing back", async () => {
@@ -222,7 +357,7 @@ describe("a sheet's connection", () => {
     const outbox: SheetOutbox = {
       load: async () => [...saved.values()],
       add: (_documentId, change) => saved.set(`${change.clientId}:${change.seq}`, change),
-      forget: (_documentId, clientId, seq) => {
+      forget: async (_documentId, clientId, seq) => {
         for (const [key, change] of saved)
           if (change.clientId === clientId && change.seq <= seq) saved.delete(key);
       },

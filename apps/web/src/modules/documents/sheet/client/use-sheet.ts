@@ -1,41 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { SheetChange } from "@chat/sheet/model/ops";
 import { deviceCache } from "~/modules/cache/client/device-cache.ts";
 import { pushSheet } from "../server/sheet-functions.ts";
-import { SheetSync, type SheetOutbox, type SheetState } from "./sheet-sync.ts";
+import { SheetSync, type SheetState } from "./sheet-sync.ts";
+import { sheetOutboxFor, type UnsentSheetChange } from "./sheet-outbox.ts";
 
-const store = deviceCache<{ change: SheetChange; savedAt: number }>({
+const store = deviceCache<UnsentSheetChange>({
   namespace: "sheet-unsent",
   // Unsent edits, not a cache: never evicted, whatever their size.
   keep: true,
   maxBytes: 16 * 1024 * 1024,
 });
-/** The prefix of a sheet's changes, or of one client's among them. */
-const prefixOf = (documentId: string, clientId?: string) =>
-  clientId === undefined ? `${documentId}\u0000` : `${documentId}\u0000${clientId}\u0000`;
-/**
- * Each unsent change to a sheet, kept on this device under its own key (the
- * sheet, its client and its number), so no tab overwrites another's.
- */
-const sheetOutbox: SheetOutbox = {
-  load: async (documentId) => {
-    await store.warm();
-    const entries = await store.reloadAll(prefixOf(documentId));
-    return entries
-      .map(([, entry]) => entry.change)
-      .toSorted((a, b) => a.clientId.localeCompare(b.clientId) || a.seq - b.seq);
-  },
-  add: (documentId, change) =>
-    store.set(`${prefixOf(documentId, change.clientId)}${change.seq}`, {
-      change,
-      savedAt: Date.now(),
-    }),
-  forget: (documentId, clientId, seq) => {
-    void store.reloadAll(prefixOf(documentId, clientId)).then((entries) => {
-      for (const [key, entry] of entries) if (entry.change.seq <= seq) store.delete(key);
-    });
-  },
-};
+const sheetOutbox = sheetOutboxFor(store);
 
 /**
  * The connections one sheet controller owns: the open one, and any closed

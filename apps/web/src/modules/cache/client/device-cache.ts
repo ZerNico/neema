@@ -45,8 +45,10 @@ export interface DeviceCache<V> {
    * since this one warmed. A local change not yet written stays ahead of it.
    */
   reload(key: string): Promise<V | undefined>;
-  /** Every stored entry whose key starts with `prefix`, as storage holds them now. */
+  /** Stored entries under `prefix`, overlaid by pending writes and deletion tombstones. */
   reloadAll(prefix: string): Promise<Array<[string, V]>>;
+  /** Deletes matching local entries at once, then matching entries another tab persisted. */
+  deleteWhere(prefix: string, matches: (value: V) => boolean): Promise<void>;
   set(key: string, value: V): void;
   delete(key: string): void;
 }
@@ -140,14 +142,12 @@ class NamespaceCache<V> implements DeviceCache<V> {
   private memory = new Map<string, Stored<V>>();
   private bytes = 0;
   private loading: Promise<void> | null = null;
-  /**
-   * Keys set or deleted while a load is reading. The read is older than them,
-   * so it must not bring a deleted entry back or replace a newer one; the
-   * pending writes cannot say so once a flush has taken them.
-   */
-  private touched: Set<string> | null = null;
+  /** Each read remembers touched keys even after a newer flush commits. */
+  private reads = new Set<Set<string>>();
+  private generation = 0;
   /** Keys to write (with their entry) or delete (undefined) on the next flush. */
   private dirty = new Map<string, Stored<V> | undefined>();
+  private inflight = new Set<Map<string, Stored<V> | undefined>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly maxEntryBytes: number;
 
@@ -156,25 +156,28 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   warm(): Promise<void> {
-    this.loading ??= this.load();
+    this.loading ??= this.read();
     return this.loading;
   }
 
-  private async load() {
-    this.touched = new Set();
-    try {
-      await this.read();
-    } finally {
-      this.touched = null;
-    }
+  private pending() {
+    const entries = new Map<string, Stored<V> | undefined>();
+    for (const batch of this.inflight)
+      for (const [key, entry] of batch) if (this.memory.get(key) === entry) entries.set(key, entry);
+    for (const [key, entry] of this.dirty) entries.set(key, entry);
+    return entries;
   }
 
   private async read() {
-    await ownerKnown;
-    const forOwner = owner;
-    const db = await open();
-    if (!db || forOwner === null) return;
+    const touched = new Set<string>();
+    const generation = this.generation;
+    this.reads.add(touched);
     try {
+      await ownerKnown;
+      const forOwner = owner;
+      const db = await open();
+      if (!db || forOwner === null || generation !== this.generation) return;
+      const pending = this.pending();
       const tx = db.transaction(STORE, "readonly");
       const range = IDBKeyRange.bound(
         [forOwner, this.options.namespace],
@@ -186,11 +189,10 @@ class NamespaceCache<V> implements DeviceCache<V> {
         request(tx.objectStore(STORE).getAllKeys(range)),
         request(tx.objectStore(STORE).getAll(range)),
       ]);
-      if (owner !== forOwner) return;
+      if (owner !== forOwner || generation !== this.generation) return;
       keys.forEach((raw, i) => {
         const key = (raw as Key)[2];
-        // A value set or deleted while loading is newer than the stored one.
-        if (this.touched?.has(key) || this.memory.has(key) || this.dirty.has(key)) return;
+        if (touched.has(key) || pending.has(key) || this.memory.has(key)) return;
         const entry = values[i] as Stored<V>;
         this.memory.set(key, entry);
         this.bytes += entry.bytes;
@@ -198,6 +200,8 @@ class NamespaceCache<V> implements DeviceCache<V> {
       this.evict();
     } catch {
       /* Memory only from here. */
+    } finally {
+      this.reads.delete(touched);
     }
   }
 
@@ -206,15 +210,19 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   async reloadAll(prefix: string): Promise<Array<[string, V]>> {
-    await ownerKnown;
-    const forOwner = owner;
-    const db = await open();
+    const touched = new Set<string>();
+    const generation = this.generation;
+    this.reads.add(touched);
     const local = () =>
       [...this.memory]
         .filter(([key]) => key.startsWith(prefix))
         .map(([key, entry]) => [key, entry.value] as [string, V]);
-    if (!db || forOwner === null) return local();
     try {
+      await ownerKnown;
+      const forOwner = owner;
+      const db = await open();
+      if (!db || forOwner === null || generation !== this.generation) return local();
+      const pending = this.pending();
       const tx = db.transaction(STORE, "readonly");
       const range = IDBKeyRange.bound(
         [forOwner, this.options.namespace, prefix],
@@ -224,23 +232,49 @@ class NamespaceCache<V> implements DeviceCache<V> {
         request(tx.objectStore(STORE).getAllKeys(range)),
         request(tx.objectStore(STORE).getAll(range)),
       ]);
-      if (owner !== forOwner) return local();
-      return keys.map((raw, index) => [(raw as Key)[2], (values[index] as Stored<V>).value]);
+      if (owner !== forOwner || generation !== this.generation) return local();
+      const entries = new Map(
+        keys.map((raw, index) => [(raw as Key)[2], values[index] as Stored<V>]),
+      );
+      for (const [key, entry] of this.pending()) pending.set(key, entry);
+      for (const key of touched) pending.set(key, this.memory.get(key));
+      for (const [key, entry] of pending) {
+        if (!key.startsWith(prefix)) continue;
+        if (entry) entries.set(key, entry);
+        else entries.delete(key);
+      }
+      return [...entries].map(([key, entry]) => [key, entry.value]);
     } catch {
       return local();
+    } finally {
+      this.reads.delete(touched);
     }
   }
 
+  async deleteWhere(prefix: string, matches: (value: V) => boolean): Promise<void> {
+    const generation = this.generation;
+    for (const [key, entry] of this.memory)
+      if (key.startsWith(prefix) && matches(entry.value)) this.delete(key);
+    const entries = await this.reloadAll(prefix);
+    if (generation !== this.generation) return;
+    for (const [key, value] of entries) if (matches(value)) this.delete(key);
+  }
+
   async reload(key: string): Promise<V | undefined> {
-    await ownerKnown;
-    const forOwner = owner;
-    const db = await open();
-    if (!db || forOwner === null || this.dirty.has(key)) return this.get(key);
+    const touched = new Set<string>();
+    const generation = this.generation;
+    this.reads.add(touched);
     try {
+      await ownerKnown;
+      const forOwner = owner;
+      const db = await open();
+      if (!db || forOwner === null || generation !== this.generation || this.pending().has(key))
+        return this.get(key);
       const tx = db.transaction(STORE, "readonly");
       const id: Key = [forOwner, this.options.namespace, key];
       const entry = (await request(tx.objectStore(STORE).get(id))) as Stored<V> | undefined;
-      if (owner !== forOwner || this.dirty.has(key)) return this.get(key);
+      if (owner !== forOwner || generation !== this.generation || touched.has(key))
+        return this.get(key);
       this.drop(key);
       if (entry) {
         this.memory.set(key, entry);
@@ -249,6 +283,8 @@ class NamespaceCache<V> implements DeviceCache<V> {
       return entry?.value;
     } catch {
       return this.get(key);
+    } finally {
+      this.reads.delete(touched);
     }
   }
 
@@ -275,8 +311,10 @@ class NamespaceCache<V> implements DeviceCache<V> {
   reset(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.generation += 1;
     this.memory.clear();
     this.dirty.clear();
+    this.inflight.clear();
     this.bytes = 0;
     this.loading = null;
   }
@@ -299,7 +337,7 @@ class NamespaceCache<V> implements DeviceCache<V> {
   }
 
   private mark(key: string, entry: Stored<V> | undefined) {
-    this.touched?.add(key);
+    for (const touched of this.reads) touched.add(key);
     this.dirty.set(key, entry);
     this.timer ??= setTimeout(() => void this.flush(), WRITE_DELAY_MS);
   }
@@ -310,11 +348,14 @@ class NamespaceCache<V> implements DeviceCache<V> {
     this.timer = null;
     const forOwner = owner;
     if (this.dirty.size === 0 || forOwner === null) return;
-    const batch = [...this.dirty];
+    const generation = this.generation;
+    const batch = new Map(this.dirty);
     this.dirty.clear();
-    const db = await open();
-    if (!db || owner !== forOwner) return;
+    this.inflight.add(batch);
+    let written = false;
     try {
+      const db = await open();
+      if (!db || owner !== forOwner || generation !== this.generation) return;
       const tx = db.transaction(STORE, "readwrite");
       const store = tx.objectStore(STORE);
       for (const [key, entry] of batch) {
@@ -323,8 +364,16 @@ class NamespaceCache<V> implements DeviceCache<V> {
         else store.delete(id);
       }
       await done(tx);
+      written = true;
     } catch {
-      /* A lost write costs a placeholder on the next visit, nothing more. */
+      /* Storage may be unusable; memory still holds the local view. */
+    } finally {
+      this.inflight.delete(batch);
+      if (!written && owner === forOwner && generation === this.generation) {
+        const pending = this.pending();
+        for (const [key, entry] of batch)
+          if (!pending.has(key) && this.memory.get(key) === entry) this.dirty.set(key, entry);
+      }
     }
   }
 }

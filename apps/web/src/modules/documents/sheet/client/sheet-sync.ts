@@ -28,8 +28,8 @@ export interface SheetFeedSource {
 export interface SheetOutbox {
   load(documentId: string): Promise<ReadonlyArray<SheetChange>>;
   add(documentId: string, change: SheetChange): void;
-  /** Forgets a client's changes numbered up to `seq`. */
-  forget(documentId: string, clientId: string, seq: number): void;
+  /** Retires local entries at once, then finishes deleting stored entries up to `seq`. */
+  forget(documentId: string, clientId: string, seq: number): Promise<void>;
 }
 export interface SheetSyncOptions {
   documentId: string;
@@ -245,8 +245,12 @@ export class SheetSync {
   #rebuild() {
     let view = this.#confirmed;
     if (view)
-      for (const [index, change] of this.#replayed().entries())
-        view = applyChange(view, change, this.#revision + index + 1).doc;
+      for (const [index, change] of this.#replayed().entries()) {
+        const applied = applyChange(view, change, this.#revision + index + 1);
+        view = applied.doc;
+        if (applied.dropped.length)
+          this.#refused = `Some changes weren’t kept: ${applied.dropped[0]}.`;
+      }
     this.#view = view;
     this.#notify();
   }
@@ -269,7 +273,7 @@ export class SheetSync {
     this.#pending = this.#pending.filter((change) => !done(change));
     if (clientId === this.clientId) this.#seq = Math.max(this.#seq, seq);
     if (before !== this.#pending.length)
-      this.options.outbox?.forget(this.options.documentId, clientId, seq);
+      void this.options.outbox?.forget(this.options.documentId, clientId, seq);
   }
   /**
    * Drops a client's unsent changes the server will never take. Later ones
@@ -282,7 +286,7 @@ export class SheetSync {
     if (!dropped.length) return;
     this.#pending = this.#pending.filter((change) => change.clientId !== clientId);
     const seqs = dropped.map((change) => change.seq);
-    this.options.outbox?.forget(this.options.documentId, clientId, Math.max(...seqs));
+    void this.options.outbox?.forget(this.options.documentId, clientId, Math.max(...seqs));
     if (clientId === this.clientId) {
       this.clientId = crypto.randomUUID().slice(0, 18);
       this.#seq = 0;
@@ -417,7 +421,10 @@ export class SheetSync {
         for (const [index, change] of frame.changes.entries()) {
           const revision = start + index + 1;
           if (revision <= this.#revision) continue;
-          doc = applyChange(doc, change, revision).doc;
+          const applied = applyChange(doc, change, revision);
+          doc = applied.doc;
+          if (applied.dropped.length && before.some((own) => sameChange(change, own)))
+            this.#refused = `Some changes weren’t kept: ${applied.dropped[0]}.`;
           this.#acknowledge(change.clientId, change.seq);
         }
         this.#confirmed = doc;

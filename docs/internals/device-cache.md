@@ -9,7 +9,12 @@ user (see [generative UI](generative-ui.md)); a document's unsent steps are anot
   and drops its oldest entries past it.
 - Reads come from memory: `warm()` loads a namespace once, then `get` is synchronous, which is what
   lets a component draw cached data on its first frame. Writes are batched a moment later in one
-  transaction, and flushed on `pagehide`.
+  transaction, and flushed on `pagehide`. `reload` and prefix enumeration read storage overlaid
+  by local pending and in-flight writes, including deletion tombstones. Each read tracks keys
+  touched while it waits, even after a newer flush commits, so an old read cannot replace newer
+  memory or resurrect an acknowledged outbox entry. Superseded in-flight entries are not overlaid.
+  Bulk deletion retires matching memory entries immediately, then finds persisted entries another
+  tab may own, leaving other prefixes and newer client sequences alone.
 - IndexedDB, not localStorage. localStorage is synchronous on every write and shares one small
   quota with drafts and settings; a cache of rendered trees would both block the page while a
   slider drags and risk making those writes fail.

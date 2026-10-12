@@ -3,14 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyChange } from "@chat/sheet/model/apply";
 import { parseFormula } from "@chat/sheet/model/formula";
 import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
-import type { CalcContext } from "@chat/sheet/model/calc";
-import { calculateForWire, type CalcPost, type CalcResult } from "./calc-protocol.ts";
+import { calculateSheet, type CalcContext, type SheetValues } from "@chat/sheet/model/calc";
+import { wireOf, type CalcPost, type CalcResult } from "./calc-protocol.ts";
 import { useSheetValues } from "./use-sheet-values.ts";
 
 /** A worker that calculates as the real one does, answering on the next task. */
 const posted: CalcPost[] = [];
 class FakeWorker {
   #listener: ((event: MessageEvent<CalcResult>) => void) | null = null;
+  #previous: SheetValues | null = null;
   addEventListener(_type: string, listener: (event: MessageEvent<CalcResult>) => void) {
     this.#listener = listener;
   }
@@ -19,7 +20,11 @@ class FakeWorker {
     this.answer(request);
   }
   answer(request: CalcPost) {
-    const answer = calculateForWire({ ...request, doc: JSON.parse(request.doc) as SheetDoc });
+    const calc = { ...request, doc: JSON.parse(request.doc) as SheetDoc };
+    this.#previous = calculateSheet(calc.doc, calc.context, undefined, {
+      previous: this.#previous,
+    });
+    const answer = wireOf(calc, this.#previous);
     queueMicrotask(() => this.#listener?.(new MessageEvent("message", { data: answer })));
   }
   terminate() {}
@@ -110,6 +115,48 @@ describe("a sheet's values", () => {
     expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBeNull();
     await act(async () => answer?.());
     expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBe(0);
+  });
+
+  it("refresh volatile results on a context-only update after reusing them for an unrelated edit", async () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    const clock = withFormula("NOW()");
+    const initialContext = at(1, 45_000);
+    const { result, rerender } = renderHook(({ doc, context }) => useSheetValues(doc, context), {
+      initialProps: { doc: clock, context: initialContext },
+    });
+    await act(async () => {});
+    const edited = applyChange(
+      clock,
+      {
+        clientId: "t",
+        seq: 2,
+        ops: [{ op: "set", sh: "s1", cells: [{ r: "s1.r4", c: "s1.c4", v: "unrelated" }] }],
+      },
+      2,
+    ).doc;
+    rerender({ doc: edited, context: initialContext });
+    await act(async () => {});
+    expect(result.current?.volatile).toBe(true);
+    expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBe(45_000);
+    rerender({ doc: edited, context: at(3, 45_001) });
+    await act(async () => {});
+    expect(posted).toHaveLength(3);
+    expect(result.current?.value("s1", "s1.r1", "s1.c1")).toBe(45_001);
+    const removed = applyChange(
+      edited,
+      {
+        clientId: "t",
+        seq: 3,
+        ops: [{ op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c1", v: 1 }] }],
+      },
+      3,
+    ).doc;
+    rerender({ doc: removed, context: at(3, 45_001) });
+    await act(async () => {});
+    expect(result.current?.volatile).toBe(false);
+    rerender({ doc: removed, context: at(4, 45_002) });
+    await act(async () => {});
+    expect(posted).toHaveLength(4);
   });
 
   it("are not calculated again for a new revision's context unless a formula reads it", async () => {

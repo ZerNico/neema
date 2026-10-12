@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearDeviceCaches, deviceCache, setDeviceCacheOwner } from "./device-cache.ts";
 
 // Each test opens a fresh namespace, the way a later page load would: a new
@@ -8,6 +8,38 @@ let n = 0;
 const reopen = <V>(namespace: string, maxBytes = 10_000) =>
   deviceCache<V>({ namespace, maxBytes, maxEntryBytes: 1_000 });
 const fresh = () => `test-${++n}`;
+
+/** Holds delivery after IndexedDB has captured a read, not its transaction or clock. */
+function holdRead(method: "get" | "getAll", namespace: string) {
+  const held = Promise.withResolvers<() => void>();
+  const original = IDBObjectStore.prototype[method];
+  const spy = vi.spyOn(IDBObjectStore.prototype, method).mockImplementation(function (
+    this: IDBObjectStore,
+    query: IDBValidKey | IDBKeyRange,
+  ) {
+    const req = original.call(this, query);
+    const lower = query instanceof IDBKeyRange ? query.lower : query;
+    if (!Array.isArray(lower) || lower[1] !== namespace) return req;
+    spy.mockRestore();
+    const add = req.addEventListener.bind(req);
+    vi.spyOn(req, "addEventListener").mockImplementation((type, listener, options) => {
+      if (type !== "success") return add(type, listener, options);
+      add(
+        type,
+        (event) =>
+          held.resolve(() => {
+            if (typeof listener === "function") listener.call(req, event);
+            else listener?.handleEvent(event);
+          }),
+        options,
+      );
+    });
+    return req;
+  });
+  return held.promise;
+}
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("deviceCache", () => {
   it("keeps values for the next visit and reads them synchronously once warm", async () => {
@@ -30,8 +62,9 @@ describe("deviceCache", () => {
     const name = fresh();
     const cache = deviceCache<string>({ namespace: name, maxBytes: 300, maxEntryBytes: 200 });
     await cache.warm();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1);
     cache.set("old", "x".repeat(150));
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    clock.mockReturnValue(2);
     cache.set("new", "y".repeat(150));
     cache.set("huge", "z".repeat(500));
     expect(cache.get("old")).toBeUndefined();
@@ -74,14 +107,93 @@ describe("deviceCache", () => {
     await first.flush();
 
     const next = reopen<string>(name);
+    const captured = holdRead("getAll", name);
     const warming = next.warm();
-    // Let the read's transaction open first: it sees the entry, and its answer
-    // arrives after the delete has been written.
-    for (let i = 0; i < 3; i++) await Promise.resolve();
+    const release = await captured;
     next.delete("k");
     await next.flush();
+    release();
     await warming;
     expect(next.get("k")).toBeUndefined();
+  });
+
+  it("enumerates pending additions and tombstones without hiding another tab’s writes", async () => {
+    setDeviceCacheOwner("alice");
+    const name = fresh();
+    const cache = reopen<string>(name);
+    await cache.warm();
+    cache.set("p/deleted", "gone");
+    cache.set("p/shared", "old");
+    await cache.flush();
+    const other = reopen<string>(name);
+    await other.warm();
+    other.set("p/shared", "other tab");
+    other.set("p/remote", "remote");
+    await other.flush();
+    cache.delete("p/deleted");
+    cache.set("p/local", "pending");
+    expect(new Map(await cache.reloadAll("p/"))).toEqual(
+      new Map([
+        ["p/shared", "other tab"],
+        ["p/remote", "remote"],
+        ["p/local", "pending"],
+      ]),
+    );
+    await cache.flush();
+  });
+
+  it.each(["set", "delete"] as const)(
+    "keeps a newer %s after a stale single read and its flush complete",
+    async (op) => {
+      setDeviceCacheOwner("alice");
+      const name = fresh();
+      const cache = reopen<string>(name);
+      await cache.warm();
+      cache.set("k", "old");
+      await cache.flush();
+      const captured = holdRead("get", name);
+      const reading = cache.reload("k");
+      const release = await captured;
+      if (op === "set") cache.set("k", "new");
+      else cache.delete("k");
+      await cache.flush();
+      release();
+      expect(await reading).toBe(op === "set" ? "new" : undefined);
+      expect(cache.get("k")).toBe(op === "set" ? "new" : undefined);
+      const next = reopen<string>(name);
+      await next.warm();
+      expect(next.get("k")).toBe(cache.get("k"));
+    },
+  );
+
+  it("keeps a prefix read coherent after its pending batch and newer touches both flush", async () => {
+    setDeviceCacheOwner("alice");
+    const name = fresh();
+    const cache = reopen<string>(name);
+    await cache.warm();
+    cache.set("p/changed", "old");
+    cache.set("p/deleted", "old");
+    await cache.flush();
+    cache.set("p/pending", "pending at read");
+    const captured = holdRead("getAll", name);
+    const reading = cache.reloadAll("p/");
+    const release = await captured;
+    await cache.flush();
+    cache.set("p/changed", "new");
+    cache.delete("p/deleted");
+    cache.set("p/added", "after read");
+    await cache.flush();
+    release();
+    expect(new Map(await reading)).toEqual(
+      new Map([
+        ["p/changed", "new"],
+        ["p/pending", "pending at read"],
+        ["p/added", "after read"],
+      ]),
+    );
+    expect(new Map(await reopen<string>(name).reloadAll("p/"))).toEqual(
+      new Map(await cache.reloadAll("p/")),
+    );
   });
 
   it("keeps namespaces apart", async () => {
