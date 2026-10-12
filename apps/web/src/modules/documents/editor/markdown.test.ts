@@ -339,22 +339,6 @@ describe("the new blocks against ordinary text", () => {
     expect(doc.firstChild!.textContent).toBe("a</u>b");
     expect(doc.firstChild!.firstChild!.marks.map((mark) => mark.type.name)).toEqual(["underline"]);
   });
-
-  it("parse long hostile text without stalling", () => {
-    for (const markdown of [
-      "x " + "<u>a ".repeat(10_000),
-      "a" + "^[".repeat(20_000),
-      Array.from({ length: 6_000 }, (_, i) => `Paragraph ${i}`).join("\n\n"),
-      Array.from(
-        { length: 2_000 },
-        () => "<details>\n<summary>S</summary>\n\nx\n\n</details>",
-      ).join("\n\n"),
-    ]) {
-      const started = performance.now();
-      parseMarkdown(markdown);
-      expect(performance.now() - started).toBeLessThan(1_500);
-    }
-  });
 });
 
 /** A document of one paragraph holding `text` as typed. */

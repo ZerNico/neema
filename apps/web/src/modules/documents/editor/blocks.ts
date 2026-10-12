@@ -1,6 +1,7 @@
 import { Node, type JSONContent, type MarkdownTokenizer } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { inlineStart } from "./inline-start.ts";
+import { blockStart } from "./block-start.ts";
 
 /**
  * Blocks beyond what plain Markdown has, each written as the Markdown that
@@ -35,17 +36,6 @@ const quotedLines = (src: string) => {
   return lines;
 };
 
-/**
- * Where a block of ours may start in text marked would otherwise read as one
- * paragraph: only after a line break. marked asks from the paragraph's second
- * character on, so a match at 0 would cut an escaped opening ("\[sheet")
- * after its backslash. A block at the very start is found by its tokenizer.
- */
-export const lineStart = (src: string, pattern: RegExp) => {
-  const match = new RegExp(`\\n${pattern.source}`, pattern.flags).exec(src);
-  return match ? match.index + 1 : -1;
-};
-
 /** Children rendered and quoted line by line, blank lines kept as a bare `>`. */
 const quote = (text: string) =>
   text
@@ -56,7 +46,7 @@ const quote = (text: string) =>
 const calloutTokenizer: MarkdownTokenizer = {
   name: "callout",
   level: "block",
-  start: (src) => lineStart(src, / {0,3}> ?\[!/),
+  start: blockStart(/ {0,3}> ?\[!/),
   tokenize: (src, _tokens, lexer) => {
     const lines = quotedLines(src);
     const kind = /^ {0,3}> ?\[!(\w+)\][ \t]*$/.exec(lines[0] ?? "")?.[1]?.toLowerCase();
@@ -133,7 +123,7 @@ const detailsExtent = (src: string) => {
 const detailsTokenizer: MarkdownTokenizer = {
   name: "details",
   level: "block",
-  start: (src) => lineStart(src, /<details>[ \t]*\n/i),
+  start: blockStart(/<details>[ \t]*\n/i),
   tokenize: (src, _tokens, lexer) => {
     const head = /^<details>[ \t]*\n<summary>(.*?)<\/summary>[ \t]*(?:\n|$)/i.exec(src);
     if (!head) return undefined;

@@ -1,4 +1,5 @@
 import { Marked, type marked } from "marked";
+import { DocumentLexer } from "./block-start.ts";
 
 /** Whether a marked has what a Markdown manager uses of it: tokenizer extensions and a lexer. */
 const usable = (value: Marked): value is Marked & typeof marked =>
@@ -12,6 +13,7 @@ const usable = (value: Marked): value is Marked & typeof marked =>
  */
 export const isolatedMarked = () => {
   const instance = new Marked();
+  instance.Lexer = DocumentLexer;
   if (!usable(instance)) throw new Error("marked no longer has use() and Lexer");
   return instance;
 };
