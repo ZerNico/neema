@@ -43,9 +43,10 @@ win:
   target: [nsis]
 
 nsis:
-  # The sandbox account starts srt-win.exe from the install directory. Under a
-  # per-user install that is the profile, which the account cannot read.
-  perMachine: true
+  # Installs for the current user unless the person picks everyone, so no
+  # administrator is needed. Commands reach the app under the profile through an
+  # explicit read grant (the ssh bridge runs its executable).
+  perMachine: false
   oneClick: false
   allowToChangeInstallationDirectory: true
 
