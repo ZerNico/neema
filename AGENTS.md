@@ -294,6 +294,8 @@ skipped one on purpose.
   folder goes.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
+- `docs/internals/analytics.md`: the usage ledger. What writes a row and when, rows that outlive
+  their chat and model, costs resolved once, partial sums as floors, grouping by model.
 - `docs/internals/providers.md`: `@chat/model-client` and its presets, admin overrides,
   one finish and no truncated calls, replay units for reasoning state across rounds and turns,
   the two wire formats, Azure deployments, the opt-in live check, and the settings for
@@ -494,7 +496,8 @@ Differs from most Effect 3 material online.
   as a remount, so every entrance animation replayed on each tab return. Only the
   BFCache `pagehide` snapshot hides synchronously.
 - `usage_events` is append-only, one row per attempt at finalize. Analytics reads
-  only the ledger, never `messages.usage`.
+  only the ledger, never `messages.usage`. Every insert links its model through
+  `liveModelId`, since the model may be deleted mid-call. See [analytics](docs/internals/analytics.md).
 - Physical bytes and rows cannot commit together, so `blob_cleanup_intents` records
   the risky half first: a `candidate` before an upload stores bytes, an `orphan` in
   the transaction that drops a blob's last reference. The reconciler settles them by
