@@ -310,6 +310,7 @@ const withSsh = (
   environment: Record<string, string>,
   ssh: SshSetup | null,
   agent: string | null,
+  os: NodeJS.Platform,
 ) =>
   ssh
     ? {
@@ -317,6 +318,12 @@ const withSsh = (
         PATH: [ssh.bin, environment.PATH].filter(Boolean).join(delimiter),
         // ssh-add and other agent clients read the socket from here.
         ...(agent ? { SSH_AUTH_SOCK: agent } : {}),
+        // git must use the wrapper even when core.sshCommand names another ssh. Git for Windows
+        // runs GIT_SSH_COMMAND through its MSYS shell, which cannot start in the container, and
+        // GIT_SSH without one.
+        ...(os === "win32"
+          ? { GIT_SSH: ssh.wrapper, GIT_SSH_VARIANT: "ssh" }
+          : { GIT_SSH_COMMAND: `"${ssh.wrapper}"` }),
       }
     : environment;
 
@@ -574,26 +581,27 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         );
         const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
         const agent = granted.has("ssh-agent") ? dependencies.agent : null;
-        const ssh =
-          os === "win32"
-            ? null
-            : yield* Effect.promise(async () => {
-                const binary = await findSsh(process.env.PATH, async (file) =>
-                  access(file, constants.X_OK).then(
-                    () => true,
-                    () => false,
-                  ),
-                );
-                return binary
-                  ? writeSshSetup({
-                      directory: commandDirectory,
-                      ssh: binary,
-                      node: process.execPath,
-                      knownHosts: join(home, ".ssh", "known_hosts"),
-                      agent,
-                    })
-                  : null;
-              });
+        const ssh = yield* Effect.promise(async () => {
+          const binary = await findSsh(
+            process.env.PATH,
+            async (file) =>
+              access(file, os === "win32" ? constants.F_OK : constants.X_OK).then(
+                () => true,
+                () => false,
+              ),
+            os,
+          );
+          return binary
+            ? writeSshSetup({
+                os,
+                directory: commandDirectory,
+                ssh: binary,
+                node: process.execPath,
+                knownHosts: join(home, ".ssh", "known_hosts"),
+                agent,
+              })
+            : null;
+        });
         const removeSettings = Effect.promise(() =>
           rm(commandDirectory, { recursive: true, force: true }),
         );
@@ -609,6 +617,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           ),
           ssh,
           agent,
+          os,
         );
         const filesystem = yield* Effect.promise(async () => {
           const policy = filesystemPolicy({

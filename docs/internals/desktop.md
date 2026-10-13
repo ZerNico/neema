@@ -518,6 +518,15 @@ the agent signs as the person: granted, the command may connect to the agent's
 socket and ssh is pointed at it. A destination such as
 `github.com:22` is an ordinary network grant. On macOS the sandbox may look up
 directory services, without which ssh cannot name the current user and stops.
+On Windows the wrapper is a `.cmd` around the system's OpenSSH that sets
+`ELECTRON_RUN_AS_NODE` for ssh and the bridge alone. git gets it through
+`GIT_SSH` there, since Git for Windows runs `GIT_SSH_COMMAND` through its MSYS
+shell and MSYS cannot start in the container, and through `GIT_SSH_COMMAND`
+elsewhere, which also outranks a `core.sshCommand` naming another ssh. For the
+same MSYS reason Git for Windows runs without a credential helper, and with
+OpenSSL rather than Schannel, whose revocation check fetches CRLs around the
+proxy and fails every HTTPS remote. The agent reaches ssh only through `SSH_AUTH_SOCK`, which Windows' own
+agent does not set, so there it is untested and usually absent.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

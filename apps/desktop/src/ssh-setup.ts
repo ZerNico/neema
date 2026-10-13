@@ -1,5 +1,5 @@
 import { chmod, copyFile, mkdir, writeFile } from "node:fs/promises";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, win32 } from "node:path";
 
 /**
  * The bridge ssh runs as its ProxyCommand: an authenticated CONNECT through
@@ -51,9 +51,13 @@ const quoted = (value: string) => `"${value.replaceAll('"', '\\"')}"`;
 export const findSsh = async (
   path: string | undefined,
   exists: (file: string) => Promise<boolean>,
+  os: NodeJS.Platform = process.platform,
 ): Promise<string | null> => {
-  for (const directory of (path ?? "").split(delimiter).filter(Boolean)) {
-    const candidate = join(directory, "ssh");
+  const separator = os === "win32" ? ";" : delimiter;
+  const file = os === "win32" ? "ssh.exe" : "ssh";
+  const at = os === "win32" ? win32.join : join;
+  for (const directory of (path ?? "").split(separator).filter(Boolean)) {
+    const candidate = at(directory, file);
     if (await exists(candidate)) return candidate;
   }
   return null;
@@ -62,6 +66,8 @@ export const findSsh = async (
 export interface SshSetup {
   /** Prepended to the command's PATH, so `ssh`, `git`, `scp` and `rsync` find the wrapper. */
   readonly bin: string;
+  /** The wrapper itself, for git: Git for Windows runs its own ssh unless told otherwise. */
+  readonly wrapper: string;
 }
 
 /**
@@ -71,6 +77,7 @@ export interface SshSetup {
  * `~/.ssh` itself stays unreadable. No agent unless the chat allows it.
  */
 export const writeSshSetup = async (input: {
+  readonly os: NodeJS.Platform;
   readonly directory: string;
   readonly ssh: string;
   /** The app's own executable, run in Node mode for the bridge. */
@@ -79,6 +86,9 @@ export const writeSshSetup = async (input: {
   /** The user's agent socket, when the chat allows signing in with it. */
   readonly agent: string | null;
 }): Promise<SshSetup> => {
+  const windows = input.os === "win32";
+  // Windows OpenSSH reads forward slashes in its config without escaping rules.
+  const configPath = (path: string) => quoted(windows ? path.replaceAll("\\", "/") : path);
   const bin = join(input.directory, "bin");
   await mkdir(bin, { recursive: true, mode: 0o700 });
   const tunnel = join(input.directory, "ssh-tunnel.cjs");
@@ -90,24 +100,42 @@ export const writeSshSetup = async (input: {
     config,
     [
       "Host *",
-      `  ProxyCommand /usr/bin/env ELECTRON_RUN_AS_NODE=1 ${quoted(input.node)} ${quoted(tunnel)} %h %p`,
+      // Windows has no env(1); its wrapper sets ELECTRON_RUN_AS_NODE for ssh and the bridge.
+      windows
+        ? `  ProxyCommand ${configPath(input.node)} ${configPath(tunnel)} %h %p`
+        : `  ProxyCommand /usr/bin/env ELECTRON_RUN_AS_NODE=1 ${quoted(input.node)} ${quoted(tunnel)} %h %p`,
       "  ControlMaster no",
       "  ControlPath none",
-      `  UserKnownHostsFile ${quoted(known)}`,
+      `  UserKnownHostsFile ${configPath(known)}`,
       "  StrictHostKeyChecking accept-new",
-      `  IdentityAgent ${input.agent ? quoted(input.agent) : "none"}`,
+      `  IdentityAgent ${input.agent ? configPath(input.agent) : "none"}`,
       // Key files stay unreadable; trying them only prints a denial per file.
       "  IdentityFile none",
       "",
     ].join("\n"),
     { mode: 0o600 },
   );
+  if (windows) {
+    // setlocal keeps the variable from outliving ssh in the command's own cmd session.
+    const wrapper = join(bin, "ssh.cmd");
+    await writeFile(
+      wrapper,
+      [
+        "@setlocal",
+        "@set ELECTRON_RUN_AS_NODE=1",
+        `@${quoted(input.ssh)} -F ${quoted(config)} %*`,
+        "@exit /b %ERRORLEVEL%",
+        "",
+      ].join("\r\n"),
+    );
+    return { bin, wrapper };
+  }
   const wrapper = join(bin, "ssh");
   await writeFile(wrapper, `#!/bin/sh\nexec ${quoted(input.ssh)} -F ${quoted(config)} "$@"\n`, {
     mode: 0o700,
   });
   await chmod(wrapper, 0o700);
-  return { bin };
+  return { bin, wrapper };
 };
 
 /** The folder holding the app's executable that commands must be able to read. */

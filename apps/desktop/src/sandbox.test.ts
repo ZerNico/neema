@@ -182,6 +182,18 @@ describe("commandEnvironment", () => {
   it("omits a POSIX TMPDIR on Windows", () => {
     expect(commandEnvironment({}, "C:\\w", proxy, "win32").TMPDIR).toBeUndefined();
   });
+
+  it("gives Git for Windows TLS that skips direct CRL fetches and no shell credential helper", () => {
+    const windows = commandEnvironment({}, "C:\\w", proxy, "win32");
+    expect(windows).toMatchObject({
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "http.sslBackend",
+      GIT_CONFIG_VALUE_0: "openssl",
+      GIT_CONFIG_KEY_1: "credential.helper",
+      GIT_CONFIG_VALUE_1: "",
+    });
+    expect(commandEnvironment({}, "/w", proxy, "darwin").GIT_CONFIG_COUNT).toBeUndefined();
+  });
 });
 
 /** A process that does what the test tells it to, at the moment it says. */
@@ -721,6 +733,21 @@ describe("the SSH agent", () => {
       expect(allowed?.environment?.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
       expect(other?.environment?.SSH_AUTH_SOCK).toBeUndefined();
     }
+    await close();
+  });
+
+  it("points git at the wrapper, whatever ssh its config names", async () => {
+    // Needs a real ssh on this machine's PATH for the wrapper to be written.
+    if (!existsSync("/usr/bin/ssh")) return;
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    const environment = (await launched).environment ?? {};
+    child.finish(0);
+    await result;
+    const bin = environment.PATH?.split(":")[0] ?? "";
+    expect(environment.GIT_SSH_COMMAND).toBe(`"${join(bin, "ssh")}"`);
     await close();
   });
 });

@@ -19,10 +19,19 @@ afterEach(async () => {
 describe("findSsh", () => {
   it("takes the first ssh on the PATH that exists", async () => {
     const present = new Set(["/opt/b/ssh", "/usr/bin/ssh"]);
-    expect(await findSsh("/opt/a:/opt/b:/usr/bin", async (file) => present.has(file))).toBe(
-      "/opt/b/ssh",
+    expect(
+      await findSsh("/opt/a:/opt/b:/usr/bin", async (file) => present.has(file), "darwin"),
+    ).toBe("/opt/b/ssh");
+    expect(await findSsh(undefined, async () => true, "darwin")).toBeNull();
+  });
+
+  it("looks for ssh.exe along a Windows PATH", async () => {
+    const found = await findSsh(
+      "C:\\Tools;C:\\Windows\\System32\\OpenSSH",
+      async (file) => file === "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      "win32",
     );
-    expect(await findSsh(undefined, async () => true)).toBeNull();
+    expect(found).toBe("C:\\Windows\\System32\\OpenSSH\\ssh.exe");
   });
 });
 
@@ -41,6 +50,7 @@ describe("writeSshSetup", () => {
     const knownHosts = join(root, "user_known_hosts");
     await writeFile(knownHosts, "github.com ssh-ed25519 AAAA\n");
     const setup = await writeSshSetup({
+      os: "darwin",
       directory: root,
       ssh: "/usr/bin/ssh",
       node: "/Applications/neema.app/Contents/MacOS/neema",
@@ -58,6 +68,7 @@ describe("writeSshSetup", () => {
     expect(await readFile(join(root, "known_hosts"), "utf8")).toContain("github.com");
     const wrapper = await readFile(join(setup.bin, "ssh"), "utf8");
     expect(wrapper).toBe(`#!/bin/sh\nexec "/usr/bin/ssh" -F "${join(root, "ssh_config")}" "$@"\n`);
+    expect(setup.wrapper).toBe(join(setup.bin, "ssh"));
     expect((await stat(join(setup.bin, "ssh"))).mode & 0o777).toBe(0o700);
     // The token never lands in a file.
     expect(await readFile(join(root, "ssh-tunnel.cjs"), "utf8")).toContain(
@@ -65,9 +76,34 @@ describe("writeSshSetup", () => {
     );
   });
 
+  it("writes a cmd wrapper on Windows that hands ELECTRON_RUN_AS_NODE to ssh alone", async () => {
+    const root = await directory();
+    const setup = await writeSshSetup({
+      os: "win32",
+      directory: root,
+      ssh: "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      node: "C:\\Program Files\\neema\\neema.exe",
+      knownHosts: null,
+      agent: null,
+    });
+    expect(setup.wrapper.endsWith("ssh.cmd")).toBe(true);
+    const wrapper = await readFile(setup.wrapper, "utf8");
+    expect(wrapper.split("\r\n")).toEqual([
+      "@setlocal",
+      "@set ELECTRON_RUN_AS_NODE=1",
+      `@"C:\\Windows\\System32\\OpenSSH\\ssh.exe" -F "${setup.bin.slice(0, -"bin".length)}ssh_config" %*`,
+      "@exit /b %ERRORLEVEL%",
+      "",
+    ]);
+    const config = await readFile(setup.wrapper.replace(/bin.ssh\.cmd$/, "ssh_config"), "utf8");
+    expect(config).toContain(`ProxyCommand "C:/Program Files/neema/neema.exe" "`);
+    expect(config).not.toContain("/usr/bin/env");
+  });
+
   it("names the agent only when the chat allows it", async () => {
     const root = await directory();
     await writeSshSetup({
+      os: "darwin",
       directory: root,
       ssh: "/usr/bin/ssh",
       node: process.execPath,
@@ -112,6 +148,7 @@ const fakeProxy = async (status: string) => {
 const runTunnel = async (proxyPort: number, input: string) => {
   const root = await directory();
   await writeSshSetup({
+    os: "darwin",
     directory: root,
     ssh: "/usr/bin/ssh",
     node: process.execPath,

@@ -67,8 +67,23 @@ export const commandEnvironment = (
     PIP_CACHE_DIR: path.join(cache, "pip"),
     UV_CACHE_DIR: path.join(cache, "uv"),
     MPLCONFIGDIR: path.join(cache, "matplotlib"),
+    ...(os === "win32" ? WINDOWS_GIT : {}),
     ...proxy,
   };
+};
+
+/**
+ * Git for Windows checks revocation through Schannel, which fetches CRLs
+ * directly and never through the proxy, so every HTTPS remote fails. OpenSSL
+ * skips that. Its default credential helper is a shell script, and MSYS shells
+ * cannot start in the container; commands get no stored credentials anyway.
+ */
+const WINDOWS_GIT = {
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "http.sslBackend",
+  GIT_CONFIG_VALUE_0: "openssl",
+  GIT_CONFIG_KEY_1: "credential.helper",
+  GIT_CONFIG_VALUE_1: "",
 };
 
 const escapeXml = (value: string) =>
