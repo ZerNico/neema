@@ -21,7 +21,13 @@ import {
   type NetworkGrant,
   type SandboxAvailability,
 } from "@chat/desktop-rpc";
-import { loadEgressGrants, normalizeEgressGrant, type EgressGrants } from "./egress-grants.ts";
+import {
+  loadEgressGrants,
+  type AnswerKey,
+  type EgressGrant,
+  type EgressGrants,
+  type GrantTarget,
+} from "./egress-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 
 const home = homedir();
@@ -259,9 +265,14 @@ export class Sandbox extends Context.Service<
     /** Nothing to install: re-reports availability. */
     setUp(): Effect.Effect<SandboxAvailability>;
     run(input: SandboxRun): Effect.Effect<SandboxResult, DesktopError>;
+    /** Websites allowed for every chat, as Settings lists them. */
     grants(): Effect.Effect<readonly NetworkGrant[]>;
-    approveNetwork(grant: NetworkGrant): Effect.Effect<void, DesktopError>;
-    revokeNetwork(grant: NetworkGrant): Effect.Effect<void, DesktopError>;
+    /** Records approved access. The grant must already be canonical. */
+    approveNetwork(target: GrantTarget, grant: EgressGrant): Effect.Effect<void, DesktopError>;
+    /** Removes access and closes the tunnels it allowed. */
+    revokeNetwork(target: GrantTarget, grant: EgressGrant): Effect.Effect<void, DesktopError>;
+    /** Ends this server's answer grants for every answer not listed as running. */
+    keepAnswers(origin: string, live: readonly AnswerKey[]): Effect.Effect<void>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (directory: string) =>
@@ -314,14 +325,8 @@ const collect = (streams: ReadonlyArray<Readable | null>, limit: number) => {
   };
 };
 
-/**
- * One line per refused tunnel, in the form the site reads to offer access.
- * Port 443 is a website the model may ask for; any other port needs its own grant.
- */
-const violationLine = (host: string, port: number) =>
-  port === 443
-    ? `deny network-outbound ${host}:${port} (host is not on the allow list)`
-    : `deny network-outbound ${host}:${port}`;
+/** One line per refused tunnel, in the form the site reads to offer access. */
+const violationLine = (host: string, port: number) => `deny network-outbound ${host}:${port}`;
 
 export const makeSandbox = (dependencies: SandboxDependencies) =>
   Effect.gen(function* () {
@@ -448,17 +453,17 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         };
       });
 
-    // Network permissions from the existing website approval: an exact host on
-    // port 443, kept for every chat. Narrower scopes arrive with their card.
     const always = { scope: "always" } as const;
-    const changeNetwork = (grant: NetworkGrant, add: boolean): Effect.Effect<void, DesktopError> =>
+    const changeNetwork = (
+      target: GrantTarget,
+      grant: EgressGrant,
+      add: boolean,
+    ): Effect.Effect<void, DesktopError> =>
       Effect.tryPromise({
         try: async () => {
           if (!grants) throw new Error("No network grant store is available.");
-          const entry = normalizeEgressGrant(grant.host, 443, false);
-          if (!entry || entry.host !== grant.host) throw new Error("Invalid network permission.");
-          if (add) await grants.add(always, entry);
-          else proxy.regrant(await grants.remove(always, entry));
+          if (add) await grants.add(target, grant);
+          else proxy.regrant(await grants.remove(target, grant));
         },
         catch: (cause) =>
           new DesktopError({
@@ -479,7 +484,11 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
               .filter((grant) => grant.port === 443 && !grant.privateNetwork)
               .map(({ host }) => ({ host })) ?? [],
         ),
-      approveNetwork: (grant) => changeNetwork(grant, true),
-      revokeNetwork: (grant) => changeNetwork(grant, false),
+      approveNetwork: (target, grant) => changeNetwork(target, grant, true),
+      revokeNetwork: (target, grant) => changeNetwork(target, grant, false),
+      keepAnswers: (origin, live) =>
+        Effect.sync(() => {
+          for (const id of grants?.keepAnswers(origin, live) ?? []) proxy.regrant(id);
+        }),
     });
   });

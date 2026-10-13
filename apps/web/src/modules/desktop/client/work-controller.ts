@@ -36,6 +36,8 @@ export interface WorkDependencies {
     call: ExternalOperation,
     remainingMs: number,
     askSite: (url: string) => Promise<boolean>,
+    /** For a network request: how long the approval lasts. */
+    scope: NetworkScope,
   ): Promise<DesktopToolResult>;
   complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
   cancel(callId: string): void;
@@ -46,10 +48,17 @@ export interface WorkDependencies {
   /** Remembers a call's site for its chat, or for every chat on this desktop. */
   allowSite?(call: ExternalOperation, scope: "chat" | "always"): Promise<void>;
 }
+export type NetworkScope = "answer" | "chat" | "always";
+
+const networkScopeOf = (choice: ApprovalChoice): NetworkScope =>
+  choice === "allow-always" ? "always" : choice === "allow-chat" ? "chat" : "answer";
+
 interface Entry {
   call: ExternalOperation;
   pending: PendingKind | null;
   permitted?: boolean;
+  /** What the person chose for a network request. */
+  scope?: NetworkScope;
   /** A site call waiting to learn whether its site is already allowed. */
   checking?: boolean;
   /** A running call asking about a site it was led to; answered by `decide`. */
@@ -152,7 +161,8 @@ export class WorkController {
     if (entry.asking) return this.answerSite(entry, choice);
     const kind = entry.pending;
     const blanket = choice === "allow-rest" && allowsBlanket(kind);
-    if (kind === "site" && (choice === "allow-site" || choice === "allow-always")) {
+    if (kind === "network") entry.scope = networkScopeOf(choice);
+    if (kind === "site" && (choice === "allow-chat" || choice === "allow-always")) {
       // Once remembered, other calls of this chat waiting on a site ask again;
       // the ones for the same site now find it allowed.
       const scope = choice === "allow-always" ? "always" : "chat";
@@ -226,8 +236,11 @@ export class WorkController {
       }
       if (!entry.result) {
         entry.result = entry.permitted
-          ? await this.deps.execute(entry.call, entry.call.expiresAt - Date.now(), (url) =>
-              this.askSite(entry, url),
+          ? await this.deps.execute(
+              entry.call,
+              entry.call.expiresAt - Date.now(),
+              (url) => this.askSite(entry, url),
+              entry.scope ?? "answer",
             )
           : desktopFailure(
               "You declined that",
@@ -275,7 +288,7 @@ export class WorkController {
     if (!asking) return;
     entry.asking = undefined;
     entry.pending = null;
-    if (choice === "allow-site" || choice === "allow-always") {
+    if (choice === "allow-chat" || choice === "allow-always") {
       const call = { ...entry.call, args: { ...entry.call.args, url: asking.url } };
       void (
         this.deps.allowSite?.(call, choice === "allow-always" ? "always" : "chat") ??

@@ -35,6 +35,7 @@ import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import * as diff from "./diff.ts";
+import type { AnswerKey, EgressGrant, GrantTarget } from "./egress-grants.ts";
 import { Sandbox } from "./sandbox.ts";
 
 /**
@@ -55,7 +56,9 @@ let ran: { command: string; cwd: string; allowWrite: string[] }[];
 let revealed: { absolute: string; mode: string }[];
 /** What the operating system complained about, when the test wants it to. */
 let revealComplaint: string | null;
-let approvedNetwork: string[] = [];
+const ORIGIN = "https://chat.test";
+let approvedNetwork: Array<{ target: GrantTarget; grant: EgressGrant }> = [];
+let keptAnswers: Array<{ origin: string; live: AnswerKey[] }> = [];
 
 const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
 const FRESH_CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
@@ -72,11 +75,15 @@ const stubSandbox = Layer.succeed(
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
     grants: () => Effect.succeed([]),
-    approveNetwork: ({ host }) =>
+    approveNetwork: (target, grant) =>
       Effect.sync(() => {
-        approvedNetwork.push(host);
+        approvedNetwork.push({ target, grant });
       }),
     revokeNetwork: () => Effect.void,
+    keepAnswers: (origin, live) =>
+      Effect.sync(() => {
+        keptAnswers.push({ origin, live: [...live] });
+      }),
     run: ({ command, cwd, allowWrite }) =>
       Effect.sync(() => {
         ran.push({ command, cwd, allowWrite: [...allowWrite] });
@@ -105,7 +112,7 @@ beforeAll(async () => {
       revealed.push({ absolute, mode });
       return revealComplaint;
     },
-    serverOrigin: () => "https://chat.test",
+    serverOrigin: () => ORIGIN,
     executionSession: () => ({
       id: "test-session",
       machineId: "machine-1",
@@ -240,6 +247,7 @@ describe("before a folder is attached", () => {
       handlers.runCommand({
         conversationId: fresh,
         callId: "c",
+        generationId: "generation-1",
         command: "echo hi",
         timeoutMs: 1000,
       }),
@@ -1064,6 +1072,7 @@ describe("once a folder is attached", () => {
       handlers.runCommand({
         conversationId: CONVERSATION,
         callId: "call-1",
+        generationId: "generation-1",
         command: "echo hi",
         timeoutMs: 1000,
       }),
@@ -1112,6 +1121,7 @@ describe("once a folder is attached", () => {
       handlers.runCommand({
         conversationId: CONVERSATION,
         callId: "call-3",
+        generationId: "generation-1",
         command: "echo hi",
         timeoutMs: 1000,
       }),
@@ -1329,32 +1339,81 @@ describe("once a folder is attached", () => {
 });
 
 describe("network permission boundary", () => {
+  const ask = (overrides: Partial<Parameters<typeof handlers.requestNetworkAccess>[0]> = {}) => ({
+    conversationId: CONVERSATION,
+    callId: "network-ask",
+    generationId: "generation-1",
+    host: "EXAMPLE.ORG",
+    port: 443,
+    privateNetwork: false,
+    scope: "answer" as const,
+    ...overrides,
+  });
+
   it("grants an exact destination without requiring a failed command first", async () => {
-    const input = {
-      conversationId: CONVERSATION,
-      callId: "network-ask",
-      host: "EXAMPLE.ORG",
-    };
     const commandsBefore = ran.length;
     const grantsBefore = approvedNetwork.length;
-    expect(await Effect.runPromise(handlers.requestNetworkAccess(input))).toEqual({
+    expect(await Effect.runPromise(handlers.requestNetworkAccess(ask()))).toEqual({
       host: "example.org",
+      port: 443,
+      privateNetwork: false,
+      scope: "answer",
     });
-    expect(approvedNetwork.slice(grantsBefore)).toEqual(["example.org"]);
+    expect(approvedNetwork.slice(grantsBefore)).toEqual([
+      {
+        target: {
+          scope: "answer",
+          answer: { origin: ORIGIN, conversationId: CONVERSATION, attempt: "generation-1" },
+        },
+        grant: { host: "example.org", port: 443, privateNetwork: false },
+      },
+    ]);
     expect(ran).toHaveLength(commandsBefore);
+  });
+
+  it("scopes a grant to the chat or to every chat as asked", async () => {
+    const before = approvedNetwork.length;
+    await Effect.runPromise(handlers.requestNetworkAccess(ask({ scope: "chat", port: 22 })));
+    await Effect.runPromise(handlers.requestNetworkAccess(ask({ scope: "always" })));
+    expect(approvedNetwork.slice(before).map(({ target }) => target)).toEqual([
+      { scope: "chat", chat: { origin: ORIGIN, conversationId: CONVERSATION } },
+      { scope: "always" },
+    ]);
+  });
+
+  it("needs a private network request for a private address", async () => {
+    expect(await failureOf(handlers.requestNetworkAccess(ask({ host: "10.0.0.5" })))).toBe(
+      "failed",
+    );
+    expect(
+      await Effect.runPromise(
+        handlers.requestNetworkAccess(ask({ host: "10.0.0.5", privateNetwork: true })),
+      ),
+    ).toMatchObject({ host: "10.0.0.5", privateNetwork: true });
+  });
+
+  it("ends the answers the page no longer lists as running", async () => {
+    const before = keptAnswers.length;
+    await Effect.runPromise(
+      handlers.setWorkState({
+        active: 1,
+        needsApproval: 0,
+        attempts: [{ conversationId: CONVERSATION, generationId: "generation-2" }],
+      }),
+    );
+    expect(keptAnswers.slice(before)).toEqual([
+      {
+        origin: ORIGIN,
+        live: [{ origin: ORIGIN, conversationId: CONVERSATION, attempt: "generation-2" }],
+      },
+    ]);
   });
 
   it("refuses invalid destinations without granting access", async () => {
     const before = approvedNetwork.length;
     for (const host of ["*.example.org", "https://example.org", "127.0.0.1"]) {
       expect(
-        await failureOf(
-          handlers.requestNetworkAccess({
-            conversationId: CONVERSATION,
-            callId: "invalid-network",
-            host,
-          }),
-        ),
+        await failureOf(handlers.requestNetworkAccess(ask({ callId: "invalid-network", host }))),
       ).toBe("failed");
     }
     expect(approvedNetwork).toHaveLength(before);

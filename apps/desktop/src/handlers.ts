@@ -239,7 +239,19 @@ export const makeHandlers = (shell: Shell) =>
               message: "Could not retain this cancellation. Try again after active work finishes.",
             }),
         }),
-      setWorkState: (state) => Effect.sync(() => shell.setWorkState(state)),
+      setWorkState: ({ active, needsApproval, attempts }) =>
+        Effect.gen(function* () {
+          shell.setWorkState({ active, needsApproval });
+          const origin = shell.serverOrigin();
+          yield* sandbox.keepAnswers(
+            origin,
+            attempts.map(({ conversationId, generationId }) => ({
+              origin,
+              conversationId,
+              attempt: generationId,
+            })),
+          );
+        }),
       folderStatus: ({ conversationId }) => status(conversationId),
 
       chooseFolder: ({ conversationId, replace }) =>
@@ -863,7 +875,7 @@ export const makeHandlers = (shell: Shell) =>
           };
         }),
 
-      runCommand: ({ conversationId, callId, command, timeoutMs }) =>
+      runCommand: ({ conversationId, callId, generationId, command, timeoutMs }) =>
         Effect.gen(function* () {
           const roots = yield* rootsFor(conversationId);
           // The command starts in this chat's workspace; every attached folder
@@ -877,27 +889,36 @@ export const makeHandlers = (shell: Shell) =>
           return yield* sandbox.run({
             callId,
             command,
-            context: { ...key(conversationId), attempt: callId },
+            context: { ...key(conversationId), attempt: generationId },
             cwd,
             allowWrite: allowed.filter((root): root is string => root !== null),
             timeoutMs,
           });
         }),
 
-      requestNetworkAccess: ({ host }) =>
+      requestNetworkAccess: ({ conversationId, generationId, host, port, privateNetwork, scope }) =>
         Effect.gen(function* () {
-          const valid = normalizeEgressGrant(host, 443, false);
-          const grant = valid ? { host: valid.host } : null;
+          const grant = normalizeEgressGrant(host, port, privateNetwork);
           if (!grant) {
             return yield* Effect.fail(
               new DesktopError({
                 reason: "failed",
-                message: "Enter one exact public hostname without a URL or port.",
+                message: privateNetwork
+                  ? "Name one exact host or IP address, without a URL or port."
+                  : "Name one exact public hostname without a URL or port. A private address needs a private network request.",
               }),
             );
           }
-          yield* sandbox.approveNetwork(grant);
-          return grant;
+          const chat = key(conversationId);
+          yield* sandbox.approveNetwork(
+            scope === "always"
+              ? { scope }
+              : scope === "chat"
+                ? { scope, chat }
+                : { scope, answer: { ...chat, attempt: generationId } },
+            grant,
+          );
+          return { ...grant, scope };
         }),
 
       revealPath: ({ conversationId, path, mode }) =>

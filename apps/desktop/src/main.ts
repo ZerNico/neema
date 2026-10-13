@@ -604,7 +604,14 @@ void app.whenReady().then(async () => {
     const valid = normalizeEgressGrant(input?.host, 443, false);
     const grant = valid ? { host: valid.host } : null;
     if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
-    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
+    await runtime.runPromise(
+      Effect.flatMap(Sandbox, (sandbox) =>
+        sandbox.revokeNetwork(
+          { scope: "always" },
+          { host: grant.host, port: 443, privateNetwork: false },
+        ),
+      ),
+    );
   });
   registerBrowserIpc({
     page: fromPage,

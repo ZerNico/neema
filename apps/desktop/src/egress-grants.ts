@@ -122,6 +122,11 @@ export interface EgressGrants {
   remove(target: GrantTarget, grant: EgressGrant): Promise<string>;
   /** Drops an answer's grants when the answer ends; returns their ids. */
   endAnswer(answer: AnswerKey): readonly string[];
+  /**
+   * Ends every answer of this server that is not listed as still running;
+   * returns the ended grants' ids.
+   */
+  keepAnswers(origin: string, live: readonly AnswerKey[]): readonly string[];
   /** Drops a deleted chat's grants, its answers' included; returns their ids. */
   forgetChat(chat: ChatKey): Promise<readonly string[]>;
 }
@@ -259,6 +264,19 @@ export const loadEgressGrants = async (directory: string): Promise<EgressGrants>
       const ended = answers.get(key) ?? [];
       answers.delete(key);
       return ended.map((grant) => grantId({ scope: "answer", answer }, grant));
+    },
+    keepAnswers: (origin, live) => {
+      const kept = new Set(live.map(answerKey));
+      const ids: string[] = [];
+      for (const [key, grants] of answers) {
+        if (!key.startsWith(`${origin} `) || kept.has(key)) continue;
+        // The answer key is origin, conversation and attempt; none of them contains a space.
+        const [, conversationId = "", attempt = ""] = key.split(" ");
+        const answer = { origin, conversationId, attempt };
+        for (const grant of grants) ids.push(grantId({ scope: "answer", answer }, grant));
+        answers.delete(key);
+      }
+      return ids;
     },
     forgetChat: async (chat) => {
       const prefix = `${chatKey(chat)} `;

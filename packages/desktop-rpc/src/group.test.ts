@@ -36,6 +36,7 @@ describe("model operation identity", () => {
     const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
     const payload = {
       conversationId: CONVERSATION,
+      generationId: "generation",
       command: "true",
       timeoutMs: 100,
     };

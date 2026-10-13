@@ -38,7 +38,7 @@ export type BridgeReply =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly error: unknown };
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** The key `contextBridge` exposes on `window` inside the desktop shell. */
 export const BRIDGE_KEY = "__chatDesktop" as const;

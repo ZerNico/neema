@@ -66,18 +66,48 @@ const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
 };
 
 describe("the desktop channel", () => {
-  it("round-trips only a host for network approval", async () => {
+  it("round-trips a scoped host and port for network approval", async () => {
     const client = makeDesktopClient(
-      connect({ requestNetworkAccess: ({ host }) => Effect.succeed({ host }) }),
+      connect({
+        requestNetworkAccess: ({ host, port, privateNetwork, scope }) =>
+          Effect.succeed({ host, port, privateNetwork, scope }),
+      }),
     );
     const result = await Effect.runPromise(
       client.requestNetworkAccess({
         conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         callId: "call-1",
-        host: "example.com",
+        generationId: "generation-1",
+        host: "github.com",
+        port: 22,
+        privateNetwork: false,
+        scope: "chat",
       }),
     );
-    expect(result).toEqual({ host: "example.com" });
+    expect(result).toEqual({ host: "github.com", port: 22, privateNetwork: false, scope: "chat" });
+  });
+
+  it("rejects a port outside 1 to 65535 before sending it to the desktop", async () => {
+    const request = vi.fn().mockRejectedValue(new Error("should not send"));
+    const client = makeDesktopClient({
+      protocolVersion: PROTOCOL_VERSION,
+      stageDroppedFile: async () => null,
+      request,
+    });
+    await expect(
+      Effect.runPromise(
+        client.requestNetworkAccess({
+          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+          callId: "call-1",
+          generationId: "generation-1",
+          host: "example.com",
+          port: 70_000,
+          privateNetwork: false,
+          scope: "answer",
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid conversation before sending network approval to the desktop", async () => {
@@ -92,7 +122,11 @@ describe("the desktop channel", () => {
         client.requestNetworkAccess({
           conversationId: "not-a-conversation-id",
           callId: "call-1",
+          generationId: "generation-1",
           host: "example.com",
+          port: 443,
+          privateNetwork: false,
+          scope: "answer",
         }),
       ),
     ).rejects.toThrow();
@@ -197,8 +231,9 @@ describe("the desktop channel", () => {
       machineName: "Test Mac",
     });
     expect(await Effect.runPromise(client.cancelCall({ callId: "call" }))).toBe(true);
-    await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1 }));
-    expect(work).toEqual({ active: 2, needsApproval: 1 });
+    const attempts = [{ conversationId: "chat", generationId: "generation-1" }];
+    await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1, attempts }));
+    expect(work).toEqual({ active: 2, needsApproval: 1, attempts });
     await Effect.runPromise(
       client.readFile({
         callId: "call",

@@ -81,29 +81,45 @@ describe("DesktopActivityBlock", () => {
     ).toBeInTheDocument();
   });
 
-  it("asks inline for profile-wide network access without a blanket grant", async () => {
+  it("asks for network access for this answer, this chat or every chat", async () => {
     const decide = vi.fn();
     show(
       <DesktopActivityBlock
         activity={running({
           name: "request_network_access",
-          args: { host: "example.com" },
+          args: { host: "github.com", port: 22 },
         })}
         approval={{ kind: "network", decide }}
       />,
     );
-    expect(screen.getByText("example.com")).toBeInTheDocument();
-    expect(screen.getByText(/Applies to all Work chats on this computer/)).toHaveTextContent(
-      "You can remove access in Settings › This computer.",
-    );
-    expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Allow on this computer" }));
-    expect(decide).toHaveBeenLastCalledWith("allow");
-    await userEvent.click(screen.getByRole("button", { name: "Deny" }));
-    expect(decide).toHaveBeenLastCalledWith("deny");
+    expect(screen.getByText("Allow network access on this computer")).toBeInTheDocument();
+    expect(screen.getByText("github.com:22")).toBeInTheDocument();
+    for (const [name, choice] of [
+      ["Allow for this answer", "allow"],
+      ["Allow in this chat", "allow-chat"],
+      ["Always allow", "allow-always"],
+      ["Deny", "deny"],
+    ] as const) {
+      await userEvent.click(screen.getByRole("button", { name }));
+      expect(decide).toHaveBeenLastCalledWith(choice);
+    }
   });
 
-  it("names the website host in network approval and progress", () => {
+  it("names a private network request as one", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          name: "request_network_access",
+          args: { host: "git.internal", privateNetwork: true },
+        })}
+        approval={{ kind: "network", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("Allow access to your private network")).toBeInTheDocument();
+    expect(screen.getByText("git.internal:443")).toBeInTheDocument();
+  });
+
+  it("names the destination in network approval and progress", () => {
     const activity = running({
       name: "request_network_access",
       args: { host: "picsum.photos" },
@@ -111,9 +127,9 @@ describe("DesktopActivityBlock", () => {
     show(
       <DesktopActivityBlock activity={activity} approval={{ kind: "network", decide: vi.fn() }} />,
     );
-    expect(screen.getByText("picsum.photos")).toBeInTheDocument();
+    expect(screen.getByText("picsum.photos:443")).toBeInTheDocument();
     show(<DesktopActivityBlock activity={activity} />);
-    expect(screen.getByText("Requesting network access to picsum.photos")).toBeInTheDocument();
+    expect(screen.getByText("Requesting network access to picsum.photos:443")).toBeInTheDocument();
   });
 
   it("offers no blanket grant for a delete and lists every path", () => {

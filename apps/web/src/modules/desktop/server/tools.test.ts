@@ -42,13 +42,16 @@ const waitingHandler = Effect.gen(function* () {
 });
 
 describe("desktop handler registration", () => {
-  it("offers website approval with only a required host", () => {
+  it("asks for a required host with an optional port and private network flag", () => {
     const schema = Tool.getJsonSchema(requestNetworkAccessTool);
     expect(schema).toMatchObject({
-      properties: { host: { type: "string", minLength: 1, maxLength: 253 } },
+      properties: {
+        host: { type: "string", minLength: 1, maxLength: 253 },
+        port: { type: "integer", minimum: 1, maximum: 65_535 },
+        privateNetwork: { type: "boolean" },
+      },
       required: ["host"],
     });
-    expect(schema.properties).not.toHaveProperty("port");
   });
 
   it("offers network requests only when commands are ready", () => {

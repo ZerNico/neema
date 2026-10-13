@@ -459,7 +459,11 @@ On Windows an unpackaged proxy needs host loopback opened, which lets commands
 reach other local services; there the token is what keeps one command's grants
 from another's. A refused tunnel comes back as a violation line for that command,
 which the site turns into an offer to request access. Grants are exact
-`host:port` pairs kept by `egress-grants.ts`, never by the proxy.
+`host:port` pairs kept by `egress-grants.ts`, never by the proxy, for the asking
+answer, the chat, or every chat. Chat and always grants live in the profile;
+answer grants live in memory and end when the page's work state stops listing
+that answer, so a closed page ends them all. A private-network grant is its own
+kind and is the only way a name may reach a private address.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

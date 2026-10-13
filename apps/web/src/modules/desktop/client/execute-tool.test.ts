@@ -18,120 +18,110 @@ const clientFor = (reply: unknown) => {
   };
 };
 
+const CONVERSATION = "019a574e-9415-7463-8431-11ef4a8f9b6a";
+
 const execute = (
   client: ReturnType<typeof clientFor>["client"],
   name: "run_command" | "request_network_access",
   args: Record<string, unknown>,
+  scope: "answer" | "chat" | "always" = "answer",
 ) =>
   Effect.runPromise(
-    executeDesktopTool(client, "019a574e-9415-7463-8431-11ef4a8f9b6a", 120_000, {
+    executeDesktopTool(client, CONVERSATION, 120_000, {
       callId: "call",
+      generationId: "generation-1",
       name,
       args,
+      scope,
     }),
   );
 
+const permission = { host: "example.com", port: 443, privateNetwork: false, scope: "answer" };
+
 describe("desktop network tools", () => {
-  it("requests only a website host and reports the host-only grant", async () => {
-    const { client, request } = clientFor({ host: "example.com" });
-    const result = await execute(client, "request_network_access", {
-      host: "example.com",
-    });
+  it("requests a host on 443 for this answer by default", async () => {
+    const { client, request } = clientFor(permission);
+    const result = await execute(client, "request_network_access", { host: "example.com" });
     expect(request).toHaveBeenCalledWith("requestNetworkAccess", {
       callId: "call",
-      conversationId: "019a574e-9415-7463-8431-11ef4a8f9b6a",
+      conversationId: CONVERSATION,
+      generationId: "generation-1",
       host: "example.com",
+      port: 443,
+      privateNetwork: false,
+      scope: "answer",
     });
     expect(result).toMatchObject({
       ok: true,
-      summary: "Allowed network access to example.com",
-      detail: "The user allowed example.com. You may now run or retry the command.",
+      summary: "Allowed example.com:443 for this answer",
+      detail:
+        "The user allowed example.com:443 for this answer. You may now run or retry the command.",
     });
   });
 
-  it.each([{}, { host: 443 }, { host: "" }])("refuses a missing website host: %j", async (args) => {
-    const { client, request } = clientFor({ host: "example.com" });
+  it("passes the port, private network flag and chosen scope", async () => {
+    const { client, request } = clientFor({
+      host: "git.internal",
+      port: 22,
+      privateNetwork: true,
+      scope: "chat",
+    });
+    const result = await execute(
+      client,
+      "request_network_access",
+      { host: "git.internal", port: 22, privateNetwork: true },
+      "chat",
+    );
+    expect(request).toHaveBeenCalledWith(
+      "requestNetworkAccess",
+      expect.objectContaining({ port: 22, privateNetwork: true, scope: "chat" }),
+    );
+    expect(result.summary).toBe("Allowed git.internal:22 for this chat");
+  });
+
+  it.each([{}, { host: 443 }, { host: "" }])("refuses a missing host: %j", async (args) => {
+    const { client, request } = clientFor(permission);
     const result = await execute(client, "request_network_access", args);
-    expect(result).toMatchObject({ ok: false, detail: "Name a website host." });
+    expect(result).toMatchObject({ ok: false, detail: "Name a host." });
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("offers host-only guidance for blocked HTTPS websites while preserving raw data", async () => {
+  it.each([0, 65_536, 22.5, "22"])("refuses an invalid port: %j", async (port) => {
+    const { client, request } = clientFor(permission);
+    const result = await execute(client, "request_network_access", { host: "example.com", port });
+    expect(result.ok).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("offers a request for every blocked destination while preserving raw data", async () => {
     const violations = [
-      "deny network-outbound api.example.com:443 (host is not on the allow list)",
-      "deny network-outbound api.example.com:443 (host is not on the allow list)",
-      "deny network-outbound cdn.example.com:443 (host is not on the allow list)",
+      "deny network-outbound api.example.com:443",
+      "deny network-outbound api.example.com:443",
+      "deny network-outbound github.com:22",
     ];
     const output = "Connection failed to api.example.com:443";
     const { client } = clientFor({ exitCode: 7, output, truncated: false, violations });
-    const result = await execute(client, "run_command", {
-      command: "curl https://api.example.com",
-    });
+    const result = await execute(client, "run_command", { command: "git fetch" });
     expect(result.ok).toBe(false);
-    expect(result.summary).toBe("Network access blocked: api.example.com, cdn.example.com");
+    expect(result.summary).toBe("Network access blocked: api.example.com:443, github.com:22");
     expect(result.detail).toContain(
-      "Call request_network_access separately with only the host for api.example.com, cdn.example.com",
+      "Call request_network_access for each with its host and port, wait for approval, then retry the command.",
     );
-    expect(result.detail).toContain("then retry the command");
     expect(result.detail).toContain(output);
     expect(result.violations).toEqual(violations);
   });
 
-  it.each([80, 8443])("does not offer website approval for blocked port %s", async (port) => {
-    const violations = [
-      `deny network-outbound api.example.com:${port} (host is not on the allow list)`,
-    ];
-    const { client } = clientFor({
+  it("sends the answer's id with a command", async () => {
+    const { client, request } = clientFor({
       exitCode: 0,
-      output: "partial result",
+      output: "",
       truncated: false,
-      violations,
+      violations: [],
     });
-    const result = await execute(client, "run_command", { command: "fetch data" });
-    expect(result.ok).toBe(false);
-    expect(result.detail).toContain(`api.example.com:${port}`);
-    expect(result.detail).toContain("unsupported ports; website approval cannot authorize them");
-    expect(result.detail).not.toContain("request_network_access");
-    expect(result.detail).toContain("partial result");
-    expect(result.violations).toEqual(violations);
-  });
-
-  it("reports non-HTTPS denials as unsupported regardless of the denial reason", async () => {
-    const violations = ["deny network-outbound api.example.com:8443 (port is not allowed)"];
-    const { client } = clientFor({ exitCode: 1, output: "", truncated: false, violations });
-    const result = await execute(client, "run_command", { command: "fetch data" });
-    expect(result.detail).toContain("unsupported ports; website approval cannot authorize them");
-    expect(result.detail).not.toContain("request_network_access");
-    expect(result.violations).toEqual(violations);
-  });
-
-  it("does not offer approval for unrelated HTTPS denials", async () => {
-    const { client } = clientFor({
-      exitCode: 1,
-      output: "Connection failed",
-      truncated: false,
-      violations: ["deny network-outbound api.example.com:443 (private address is blocked)"],
-    });
-    const result = await execute(client, "run_command", { command: "fetch data" });
-    expect(result.detail).not.toContain("request_network_access");
-  });
-
-  it("limits request guidance to HTTPS hosts when a command has mixed denials", async () => {
-    const { client } = clientFor({
-      exitCode: 7,
-      output: "Connection failed",
-      truncated: false,
-      violations: [
-        "deny network-outbound api.example.com:443 (host is not on the allow list)",
-        "deny network-outbound other.example.com:8080 (host is not on the allow list)",
-      ],
-    });
-    const result = await execute(client, "run_command", { command: "fetch data" });
-    expect(result.detail).toContain(
-      "Call request_network_access separately with only the host for api.example.com, wait for approval",
-    );
-    expect(result.detail).toContain(
-      "Network access to other.example.com:8080 was blocked. These destinations use unsupported ports",
+    await execute(client, "run_command", { command: "true" });
+    expect(request).toHaveBeenCalledWith(
+      "runCommand",
+      expect.objectContaining({ generationId: "generation-1" }),
     );
   });
 

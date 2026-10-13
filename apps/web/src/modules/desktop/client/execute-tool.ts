@@ -1,3 +1,4 @@
+import type { NetworkScope } from "./work-controller.ts";
 import { Effect } from "effect";
 import { DesktopError, type DesktopClient } from "@chat/desktop-rpc";
 import type { ToolActivity } from "~/modules/chat/client/use-message-stream.ts";
@@ -22,19 +23,13 @@ const asResult = (
     ? outcome.success
     : desktopFailure(refusalSummary(outcome.failure.reason), outcome.failure.message);
 
+/** The destinations the egress proxy refused, from the desktop's violation lines. */
 const blockedNetworkDestinations = (violations: readonly string[]) => [
   ...new Set(
     violations.flatMap((violation) => {
-      const match = /^deny network-outbound (\S+):(\d{1,5})(?: \(([^)]*)\))?$/.exec(
-        violation.trim(),
-      );
+      const match = /^deny network-outbound (\S+):(\d{1,5})$/.exec(violation.trim());
       const port = Number(match?.[2]);
-      return match &&
-        port >= 1 &&
-        port <= 65_535 &&
-        (port !== 443 || match[3] === "host is not on the allow list")
-        ? [`${match[1]}:${port}`]
-        : [];
+      return match && port >= 1 && port <= 65_535 ? [`${match[1]}:${port}`] : [];
     }),
   ),
 ];
@@ -145,6 +140,10 @@ export const executeDesktopTool = (
   // The page runs browser calls in its own tabs (`modules/browser/client`).
   activity: Pick<Extract<ToolActivity, { family: "desktop" }>, "args" | "callId"> & {
     readonly name: Exclude<DesktopToolName, BrowserToolName>;
+    /** The answer making the call; network grants for "this answer" belong to it. */
+    readonly generationId: string;
+    /** How long an approved network request lasts. */
+    readonly scope: NetworkScope;
   },
 ): Effect.Effect<DesktopToolResult> => {
   const args = activity.args ?? {};
@@ -349,17 +348,38 @@ export const executeDesktopTool = (
       }
       case "request_network_access": {
         const host = stringArg(args.host);
-        if (!host)
-          return Effect.succeed(desktopFailure("No website named", "Name a website host."));
+        const port = args.port ?? 443;
+        if (!host) return Effect.succeed(desktopFailure("No destination named", "Name a host."));
+        if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535)
+          return Effect.succeed(
+            desktopFailure("Invalid port", "Name a port from 1 to 65535, or omit it for 443."),
+          );
         return Effect.map(
-          client.requestNetworkAccess({ callId: activity.callId, conversationId, host }),
-          (receipt) => ({
-            v: 1 as const,
-            ok: true,
-            summary: `Allowed network access to ${receipt.host}`,
-            detail: `The user allowed ${receipt.host}. You may now run or retry the command.`,
-            truncated: false,
+          client.requestNetworkAccess({
+            callId: activity.callId,
+            conversationId,
+            generationId: activity.generationId,
+            host,
+            port,
+            privateNetwork: args.privateNetwork === true,
+            scope: activity.scope,
           }),
+          (receipt) => {
+            const destination = `${receipt.host}:${receipt.port}`;
+            const lasting =
+              receipt.scope === "always"
+                ? "for every chat"
+                : receipt.scope === "chat"
+                  ? "for this chat"
+                  : "for this answer";
+            return {
+              v: 1 as const,
+              ok: true,
+              summary: `Allowed ${destination} ${lasting}`,
+              detail: `The user allowed ${destination} ${lasting}. You may now run or retry the command.`,
+              truncated: false,
+            };
+          },
         );
       }
       case "run_command": {
@@ -381,33 +401,25 @@ export const executeDesktopTool = (
           client.runCommand({
             callId: activity.callId,
             conversationId,
+            generationId: activity.generationId,
             command,
             timeoutMs,
           }),
           (output) => {
             const blocked = blockedNetworkDestinations(output.violations);
-            const websites = blocked
-              .filter((destination) => destination.endsWith(":443"))
-              .map((destination) => destination.slice(0, -4));
-            const unsupported = blocked.filter((destination) => !destination.endsWith(":443"));
             return {
               v: 1 as const,
               ok: output.exitCode === 0 && blocked.length === 0,
               summary:
                 blocked.length > 0
-                  ? `Network access blocked: ${[...websites, ...unsupported].join(", ")}`
+                  ? `Network access blocked: ${blocked.join(", ")}`
                   : output.exitCode === 0
                     ? `Ran ${command}`
                     : `${command} exited with ${output.exitCode}`,
               detail: [
-                ...(websites.length > 0
+                ...(blocked.length > 0
                   ? [
-                      `Network access to ${websites.join(", ")} was blocked. Call request_network_access separately with only the host for ${websites.join(", ")}, wait for approval, then retry the command. Do not assume the command succeeded.`,
-                    ]
-                  : []),
-                ...(unsupported.length > 0
-                  ? [
-                      `Network access to ${unsupported.join(", ")} was blocked. These destinations use unsupported ports; website approval cannot authorize them. Do not assume the command succeeded.`,
+                      `Network access to ${blocked.join(", ")} was blocked. Call request_network_access for each with its host and port, wait for approval, then retry the command. Do not assume the command succeeded.`,
                     ]
                   : []),
                 output.output === "" ? "(no output)" : output.output,

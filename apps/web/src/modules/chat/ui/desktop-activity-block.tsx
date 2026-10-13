@@ -63,8 +63,11 @@ const argText = (activity: DesktopToolActivity) => {
   switch (activity.name) {
     case "run_command":
       return text(args.command);
-    case "request_network_access":
-      return text(args.host);
+    case "request_network_access": {
+      const host = text(args.host);
+      const port = typeof args.port === "number" ? args.port : 443;
+      return host ? `${host}:${port}` : "";
+    }
     case "find_files":
     case "search_files":
       return text(args.pattern);
@@ -246,7 +249,9 @@ const approvalTitle = (
     case "command":
       return "Run a program on this computer";
     case "network":
-      return "Allow network access on this computer";
+      return activity.args?.privateNetwork === true
+        ? "Allow access to your private network"
+        : "Allow network access on this computer";
     case "delete": {
       const listed = deletePathsOf(activity.args);
       if (listed.length <= 1) return "Delete from this computer";
@@ -300,7 +305,14 @@ function DeletePathList({
 }
 
 /** A site is allowed once, for this chat, or for this desktop, never by a blanket grant. */
-function SiteChoices({ decide }: { decide: (choice: ApprovalChoice) => void }) {
+/** Once, for this chat, or for every chat: the scopes a site or a network destination takes. */
+function ScopeChoices({
+  decide,
+  once,
+}: {
+  decide: (choice: ApprovalChoice) => void;
+  once: string;
+}) {
   return (
     <>
       <p className="text-muted-foreground text-xs">
@@ -309,9 +321,9 @@ function SiteChoices({ decide }: { decide: (choice: ApprovalChoice) => void }) {
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={() => decide("allow")}>
-          Allow once
+          {once}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => decide("allow-site")}>
+        <Button size="sm" variant="outline" onClick={() => decide("allow-chat")}>
           Allow in this chat
         </Button>
         <Button size="sm" variant="outline" onClick={() => decide("allow-always")}>
@@ -384,18 +396,14 @@ function ApprovalCard({
             {what}
           </pre>
         ) : null}
-        {approval.kind === "network" ? (
-          <p className="text-muted-foreground text-xs">
-            Applies to all Work chats on this computer. You can remove access in Settings › This
-            computer.
-          </p>
-        ) : null}
         {approval.kind === "site" ? (
-          <SiteChoices decide={approval.decide} />
+          <ScopeChoices decide={approval.decide} once="Allow once" />
+        ) : approval.kind === "network" ? (
+          <ScopeChoices decide={approval.decide} once="Allow for this answer" />
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>
-              {approval.kind === "network" ? "Allow on this computer" : "Allow"}
+              Allow
             </Button>
             <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
               Deny

@@ -351,6 +351,24 @@ export const RevealMode = Schema.Literals(["reveal", "open"]);
 export type RevealMode = typeof RevealMode.Type;
 
 /** Whether commands can run, and if not, whether the app itself can fix it. */
+/** How long an approved network permission lasts: the asking answer, the chat, or every chat. */
+export const GrantScope = Schema.Literals(["answer", "chat", "always"]);
+export type GrantScope = typeof GrantScope.Type;
+
+export const NetworkPort = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(1),
+  Schema.isLessThanOrEqualTo(65_535),
+);
+
+/** One approved destination: the canonical host the desktop stored, and how long it lasts. */
+export const NetworkPermission = Schema.Struct({
+  host: Schema.String,
+  port: NetworkPort,
+  privateNetwork: Schema.Boolean,
+  scope: GrantScope,
+});
+export type NetworkPermission = typeof NetworkPermission.Type;
+
 export const SandboxAvailability = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["ready"]) }),
   Schema.Struct({

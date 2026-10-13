@@ -146,9 +146,9 @@ export const runCommandTool = Tool.make("run_command", {
     "Run a shell command on the user's computer. The command starts in this chat's workspace, " +
     "and paths inside it are absolute: it may `cd` and `cp` anywhere inside the workspace and " +
     "the attached folders. It runs sandboxed: writes land only inside those roots and only " +
-    "package registries are reachable by default. A blocked HTTPS website needs a separate " +
-    "request_network_access call naming only its host and user approval before retrying. " +
-    "Other network destinations are unsupported. The user is asked before " +
+    "package registries are reachable by default. A blocked destination needs a separate " +
+    "request_network_access call naming its host and port, and user approval before retrying. " +
+    "The user is asked before " +
     "the command happens and may refuse. Installed Python and Node can run here; discover " +
     "the executable when needed. Each call is a fresh process, so shell state does not persist. " +
     "Prefer the file tools over commands to inspect or change files.",
@@ -161,13 +161,18 @@ export const runCommandTool = Tool.make("run_command", {
 
 export const requestNetworkAccessTool = Tool.make("request_network_access", {
   description:
-    "Ask the user to allow a command on their computer to access one HTTPS website. " +
-    "Name only its exact host before running a command that needs it, or use the host " +
-    "reported by a blocked run_command result that supports requesting access. Wait for " +
-    "approval before running or retrying the command. Approval is saved for every Work chat " +
-    "on this desktop. Other network destinations are unsupported.",
+    "Ask the user to let commands on their computer reach one network destination: an exact " +
+    "host and port, such as registry.example.com on 443 or github.com on 22 for git over SSH. " +
+    "Request it before running a command that needs it, or use the destination a blocked " +
+    "run_command result reports. Wait for approval before running or retrying the command. " +
+    "The user decides whether it lasts for this answer, this chat, or every chat. Set " +
+    "privateNetwork only for a host on their local or company network, such as an internal " +
+    "git server or a private IP address. Proxied TCP only: plain HTTP and UDP never work.",
   parameters: Schema.Struct({
     host: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253)),
+    /** Defaults to 443. */
+    port: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }))),
+    privateNetwork: Schema.optionalKey(Schema.Boolean),
   }),
   success: DesktopToolResult,
   failureMode: "return",

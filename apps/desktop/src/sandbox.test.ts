@@ -220,7 +220,7 @@ describe("run", () => {
     expect(await connectThrough(proxyUrl, "example.com:22")).toMatch(/^HTTP\/1\.1 403/);
     child.finish(1);
     expect((await result).violations).toEqual([
-      "deny network-outbound example.com:443 (host is not on the allow list)",
+      "deny network-outbound example.com:443",
       "deny network-outbound example.com:22",
     ]);
     await close();
@@ -307,10 +307,13 @@ describe("run", () => {
   });
 });
 
-describe("website approvals", () => {
-  it("keeps an approved host on 443 for every chat and lists it", async () => {
+describe("network approvals", () => {
+  const always = { scope: "always" } as const;
+  const site = { host: "example.com", port: 443, privateNetwork: false };
+
+  it("lists hosts allowed for every chat and revokes them", async () => {
     const { sandbox, grants, close } = await harness(async () => fakeProcess().process);
-    await Effect.runPromise(sandbox.approveNetwork({ host: "example.com" }));
+    await Effect.runPromise(sandbox.approveNetwork(always, site));
     expect(await Effect.runPromise(sandbox.grants())).toEqual([{ host: "example.com" }]);
     expect(
       grants.decide(
@@ -319,15 +322,30 @@ describe("website approvals", () => {
         443,
       ).allowed,
     ).toBe(true);
-    await Effect.runPromise(sandbox.revokeNetwork({ host: "example.com" }));
+    await Effect.runPromise(sandbox.revokeNetwork(always, site));
     expect(await Effect.runPromise(sandbox.grants())).toEqual([]);
     await close();
   });
 
-  it("refuses a host that is not an exact public name", async () => {
-    const { sandbox, close } = await harness(async () => fakeProcess().process);
-    const exit = await Effect.runPromiseExit(sandbox.approveNetwork({ host: "10.0.0.1" }));
-    expect(exit).toMatchObject({ _tag: "Failure" });
+  it("ends an answer's grants when the page no longer lists it as running", async () => {
+    const { sandbox, grants, close } = await harness(async () => fakeProcess().process);
+    const answer = {
+      origin: "https://chat.example",
+      conversationId: "chat-a",
+      attempt: "attempt-1",
+    };
+    const context = {
+      server: answer.origin,
+      chat: answer.conversationId,
+      attempt: answer.attempt,
+      command: "c",
+    };
+    await Effect.runPromise(sandbox.approveNetwork({ scope: "answer", answer }, site));
+    expect(grants.decide(context, "example.com", 443).allowed).toBe(true);
+    await Effect.runPromise(sandbox.keepAnswers(answer.origin, [answer]));
+    expect(grants.decide(context, "example.com", 443).allowed).toBe(true);
+    await Effect.runPromise(sandbox.keepAnswers(answer.origin, []));
+    expect(grants.decide(context, "example.com", 443).allowed).toBe(false);
     await close();
   });
 });

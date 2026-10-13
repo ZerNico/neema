@@ -146,6 +146,7 @@ describe("app-owned Work execution", () => {
         first,
         expect.any(Number),
         expect.any(Function),
+        "answer",
       );
       expect(controller.pending("a").get("next-network")).toBe("network");
       const subsequent = snapshot({ ...next, callId: "future-network" });
@@ -155,6 +156,28 @@ describe("app-owned Work execution", () => {
       expect(deps.execute).toHaveBeenCalledTimes(1);
     },
   );
+
+  it.each([
+    ["allow", "answer"],
+    ["allow-chat", "chat"],
+    ["allow-always", "always"],
+  ] as const)("passes the network scope the person chose: %s", async (choice, scope) => {
+    const { controller, deps, completed } = setup();
+    const request = {
+      ...call("network"),
+      name: "request_network_access",
+      args: { host: "one.example" },
+    };
+    controller.reconcile(snapshot(request));
+    controller.decide("network", choice);
+    await completed;
+    expect(deps.execute).toHaveBeenCalledExactlyOnceWith(
+      request,
+      expect.any(Number),
+      expect.any(Function),
+      scope,
+    );
+  });
 
   it("declines network access without invoking the desktop grant", async () => {
     const { controller, deps, completed } = setup();
@@ -220,7 +243,12 @@ describe("app-owned Work execution", () => {
     controller.decide("next", "allow-rest");
     await completed;
     expect(deps.execute).toHaveBeenCalledTimes(1);
-    expect(deps.execute).toHaveBeenCalledWith(next, expect.any(Number), expect.any(Function));
+    expect(deps.execute).toHaveBeenCalledWith(
+      next,
+      expect.any(Number),
+      expect.any(Function),
+      "answer",
+    );
     expect(deps.cancel).toHaveBeenCalledWith("old");
   });
 
@@ -357,7 +385,7 @@ describe("browser sites", () => {
 
   it.each([
     ["allow", null],
-    ["allow-site", "chat"],
+    ["allow-chat", "chat"],
     ["allow-always", "always"],
   ] as const)("%s runs the call and remembers it for %s", async (choice, scope) => {
     let allowed = false;
@@ -382,7 +410,7 @@ describe("browser sites", () => {
   });
 
   it.each([
-    ["allow-site", true, "chat"],
+    ["allow-chat", true, "chat"],
     ["allow", true, null],
     ["deny", false, null],
   ] as const)(

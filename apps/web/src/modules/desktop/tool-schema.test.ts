@@ -68,9 +68,7 @@ describe("desktop tools system hint", () => {
     expect(hint).toContain("Files the user drops into the chat land in the workspace");
     expect(hint).toContain("Commands run sandboxed and start in the workspace");
     expect(hint).toContain("`cd` and `cp` between them work");
-    expect(hint).toContain("request_network_access with only the exact host");
-    expect(hint).toContain("Other network destinations are unsupported");
-    expect(hint).not.toContain("host and port");
+    expect(hint).toContain("request_network_access with its exact host and port");
     expect(hint).toContain("Work permissions never grant network access");
   });
 
@@ -91,7 +89,7 @@ describe("desktop tools system hint", () => {
     );
     expect(hint).toContain("Temporary files and Python caches default to the workspace");
     expect(hint).toContain("files instead of opening GUI windows");
-    expect(hint).toContain("supplied authenticated proxies");
+    expect(hint).toContain("supplied authenticated proxy");
     expect(hint).toContain("explicit proxy support, including authentication");
     expect(hint).toContain("Do not bypass the proxy or sandbox restrictions");
     expect(hint).toContain("a failed command is not required");

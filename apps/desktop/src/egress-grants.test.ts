@@ -197,6 +197,27 @@ describe("changes", () => {
     expect(grants.endAnswer(answer)).toEqual([]);
   });
 
+  it("ends the answers no longer running, on this server only", async () => {
+    const grants = await loadEgressGrants(await directory());
+    const live = { ...chat, attempt: "attempt-live" };
+    const ended = { ...chat, attempt: "attempt-ended" };
+    const elsewhere = { ...otherServer, attempt: "attempt-ended" };
+    await grants.add({ scope: "answer", answer: live }, site("live.example.org"));
+    const endedId = await grants.add({ scope: "answer", answer: ended }, site("ended.example.org"));
+    await grants.add({ scope: "answer", answer: elsewhere }, site("elsewhere.example.org"));
+
+    expect(grants.keepAnswers(chat.origin, [live])).toEqual([endedId]);
+    expect(grants.decide(context(chat, "attempt-live"), "live.example.org", 443).allowed).toBe(
+      true,
+    );
+    expect(grants.decide(context(chat, "attempt-ended"), "ended.example.org", 443).allowed).toBe(
+      false,
+    );
+    expect(
+      grants.decide(context(otherServer, "attempt-ended"), "elsewhere.example.org", 443).allowed,
+    ).toBe(true);
+  });
+
   it("forgets a deleted chat's grants and its answers', and nothing else", async () => {
     const grants = await loadEgressGrants(await directory());
     const chatId = await grants.add({ scope: "chat", chat }, site("chat.example.org"));

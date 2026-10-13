@@ -11,9 +11,12 @@ import {
   FileInfo,
   FolderStatus,
   FoundPaths,
+  GrantScope,
   LIMITS,
   LocalTransactionId,
   MoveReceipt,
+  NetworkPermission,
+  NetworkPort,
   PendingPromotion,
   PromotionReceipt,
   RevealMode,
@@ -89,6 +92,10 @@ export const DesktopRpcs = RpcGroup.make(
     payload: {
       active: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       needsApproval: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      /** The answers still running; network grants scoped to any other answer end. */
+      attempts: Schema.Array(
+        Schema.Struct({ conversationId: Schema.String, generationId: Schema.String }),
+      ),
     },
     success: Schema.Void,
   }),
@@ -242,14 +249,22 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
-  /** Requests approved website access; the desktop fixes the port to 443. */
+  /**
+   * Records network access the person approved for commands: one exact
+   * host and port, for the answer that asked, the chat, or every chat.
+   */
   Rpc.make("requestNetworkAccess", {
     payload: {
       conversationId: WorkspaceId,
       callId: Schema.String,
+      /** The answer asking; an `answer` grant ends with it. */
+      generationId: Schema.String,
       host: Schema.String,
+      port: NetworkPort,
+      privateNetwork: Schema.Boolean,
+      scope: GrantScope,
     },
-    success: Schema.Struct({ host: Schema.String }),
+    success: NetworkPermission,
     error: DesktopError,
   }),
 
@@ -258,6 +273,8 @@ export const DesktopRpcs = RpcGroup.make(
       conversationId: WorkspaceId,
       /** Correlates the sandbox violation record with the tool call. */
       callId: Schema.String,
+      /** The answer running it, whose `answer` grants apply. */
+      generationId: Schema.String,
       /**
        * Run in the chat's workspace. Paths inside the command are absolute;
        * the sandbox allows reads and writes inside the workspace and every
