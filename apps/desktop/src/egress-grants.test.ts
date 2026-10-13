@@ -80,6 +80,8 @@ describe("decide", () => {
       grantId: "builtin registry.npmjs.org",
     });
     expect(grants.decide(context(chat), "a.b.github.com", 443)).toMatchObject({ allowed: true });
+    for (const host of ["repo.maven.apache.org", "plugins.gradle.org", "services.gradle.org"])
+      expect(grants.decide(context(chat), host, 443).allowed).toBe(true);
     expect(grants.decide(context(chat), "github.com", 22).allowed).toBe(false);
     // A wildcard covers subdomains, never the apex or a lookalike.
     expect(grants.decide(context(chat), "npmjs.org", 443).allowed).toBe(false);

@@ -58,6 +58,11 @@ const BUILT_IN: ReadonlyArray<string> = [
   "github.com",
   "*.github.com",
   "objects.githubusercontent.com",
+  "repo.maven.apache.org",
+  "repo1.maven.org",
+  "plugins.gradle.org",
+  "services.gradle.org",
+  "downloads.gradle.org",
 ];
 
 const builtInId = (pattern: string) => `builtin ${pattern}`;
