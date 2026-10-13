@@ -3,12 +3,7 @@
 // native title tooltips, none of which match the rest of the app and none of
 // which take a class, so the table and its parts are ours.
 
-import {
-  Copy01Icon,
-  Download01Icon,
-  FullScreenIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { Copy01Icon, Download01Icon, FullScreenIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
 import {
@@ -38,7 +33,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 
 const FORMATS = {
-  markdown: { label: "Markdown", extension: "md", type: "text/markdown", write: tableDataToMarkdown },
+  markdown: {
+    label: "Markdown",
+    extension: "md",
+    type: "text/markdown",
+    write: tableDataToMarkdown,
+  },
   csv: { label: "CSV", extension: "csv", type: "text/csv", write: tableDataToCSV },
   tsv: {
     label: "TSV",

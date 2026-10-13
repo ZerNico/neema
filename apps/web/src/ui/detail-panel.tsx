@@ -476,8 +476,7 @@ function DetailPanelResizer({
         } else if (event.key === "ArrowRight") {
           if (expanded) setDetailPanelExpanded(false);
           else onResize(width - DETAIL_PANEL_STEP);
-        }
-        else if (event.key === "Home" || event.key === "End") onReset();
+        } else if (event.key === "Home" || event.key === "End") onReset();
         else return;
         event.preventDefault();
       }}

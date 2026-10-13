@@ -89,7 +89,13 @@ describe("quotedStrings", () => {
 </script>
 <pin place="Potsdam Hauptbahnhof"/>`;
     expect([...quotedStrings(code)].toSorted()).toEqual(
-      ["Lange Brücke", "Museum Barberini, Potsdam", "Potsdam Hauptbahnhof", "Sanssouci", 'say "hi"'].toSorted(),
+      [
+        "Lange Brücke",
+        "Museum Barberini, Potsdam",
+        "Potsdam Hauptbahnhof",
+        "Sanssouci",
+        'say "hi"',
+      ].toSorted(),
     );
   });
 

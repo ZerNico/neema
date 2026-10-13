@@ -114,7 +114,6 @@ function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGr
   );
 }
 
-
 /** One tab of a ribbon: its name and its groups, in the order they give way to More. */
 export interface RibbonTab<Name extends string> {
   readonly value: Name;

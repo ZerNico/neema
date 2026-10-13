@@ -33,7 +33,12 @@ function optionLabel(options: unknown, value: unknown): string | undefined {
   if (!Array.isArray(options)) return shown(value);
   for (const option of options) {
     if (option === value) return shown(option);
-    if (typeof option === "object" && option !== null && "value" in option && option.value === value)
+    if (
+      typeof option === "object" &&
+      option !== null &&
+      "value" in option &&
+      option.value === value
+    )
       return "label" in option ? shown(option.label) : shown(value);
   }
   return shown(value);
@@ -121,8 +126,9 @@ function linesOf(node: ValidNode, lookups: UiLookups): string[] {
     case "tabs": {
       const tabs = nodes(node.children).filter((child) => child.tag === "tab");
       const open =
-        tabs.find((tab) => p.value !== undefined && (tab.props.value ?? tab.props.label) === p.value) ??
-        tabs[0];
+        tabs.find(
+          (tab) => p.value !== undefined && (tab.props.value ?? tab.props.label) === p.value,
+        ) ?? tabs[0];
       return open ? [`Tab open: ${shown(open.props.label)}`] : [];
     }
     case "map":
@@ -156,4 +162,3 @@ export function digestTree(tree: readonly Child[], lookups: UiLookups): string |
   }
   return kept.length > 0 ? kept.join("\n") : null;
 }
-

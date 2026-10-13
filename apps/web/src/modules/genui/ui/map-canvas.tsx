@@ -47,7 +47,6 @@ function arrivedRoutes(block: string, keys: readonly string[]): Set<string> {
   return fresh;
 }
 
-
 /** A theme colour as rgb, which MapLibre's layers can read; CSS variables and oklch they cannot. */
 function resolveColor(name: string): string {
   const canvas = document.createElement("canvas");

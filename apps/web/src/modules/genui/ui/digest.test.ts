@@ -53,7 +53,10 @@ describe("digestTree", () => {
         el("step", { title: "Boil" }),
         el("step", { title: "Rest" }),
       ]),
-      el("wizard", { current: 1 }, [el("step", { title: "Frame" }), el("step", { title: "Wheels" })]),
+      el("wizard", { current: 1 }, [
+        el("step", { title: "Frame" }),
+        el("step", { title: "Wheels" }),
+      ]),
     ];
     expect(digestTree(tree, NO_LOOKUPS)).toBe(
       ["Capitals: 2 of 3 answered, 1 right", "Steps: 2 of 3 done", "Step 2 of 2: Wheels"].join(

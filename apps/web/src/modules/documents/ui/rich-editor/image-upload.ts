@@ -51,9 +51,7 @@ export const addImages = async (editor: Editor, files: ReadonlyArray<File>, at: 
   if (!documentId || images.length === 0) return;
   const id = Symbol("upload");
   setPending(editor, { add: id, at });
-  const results = await Promise.allSettled(
-    images.map((file) => upload(editor, documentId, file)),
-  );
+  const results = await Promise.allSettled(images.map((file) => upload(editor, documentId, file)));
   if (editor.isDestroyed) return;
   const position = pendingKey.getState(editor.state)?.get(id);
   setPending(editor, { remove: id });

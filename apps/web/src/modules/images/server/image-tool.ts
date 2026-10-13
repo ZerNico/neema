@@ -83,11 +83,13 @@ const words = (text: string) =>
  */
 export const imageFileStem = (name: unknown, prompt: string): string => {
   const given = typeof name === "string" ? words(name.replace(/\.[a-z0-9]{2,4}$/i, "")) : [];
-  const chosen = given.length ? given : words(prompt).filter((word) => !FILLER.has(word)).slice(0, 4);
+  const chosen = given.length
+    ? given
+    : words(prompt)
+        .filter((word) => !FILLER.has(word))
+        .slice(0, 4);
   // By code point: a UTF-16 cut could leave half of a character outside the basic plane.
-  return (
-    Array.from(chosen.join("-")).slice(0, 60).join("").replace(/-+$/, "") || "image"
-  );
+  return Array.from(chosen.join("-")).slice(0, 60).join("").replace(/-+$/, "") || "image";
 };
 
 /**

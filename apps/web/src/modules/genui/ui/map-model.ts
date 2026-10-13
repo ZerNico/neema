@@ -167,7 +167,10 @@ export function resolveMap(node: ValidNode, lookups: UiLookups, waiting: boolean
 /** Places and routes a map draws that the answer has no result for. */
 export interface MapNeeds {
   readonly places: readonly string[];
-  readonly routes: ReadonlyArray<{ readonly mode: RoutedMode; readonly stops: readonly RouteStop[] }>;
+  readonly routes: ReadonlyArray<{
+    readonly mode: RoutedMode;
+    readonly stops: readonly RouteStop[];
+  }>;
 }
 
 /**

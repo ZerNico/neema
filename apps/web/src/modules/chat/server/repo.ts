@@ -4003,13 +4003,11 @@ export class ChatRepo extends Context.Service<
                   completedAt: new Date(),
                 })
                 .where(eq(messages.id, input.messageId));
-              yield* tx
-                .insert(usageEvents)
-                .values({
-                  id: uuidv7(),
-                  ...input.ledger,
-                  modelId: liveModelId(input.ledger.modelId),
-                });
+              yield* tx.insert(usageEvents).values({
+                id: uuidv7(),
+                ...input.ledger,
+                modelId: liveModelId(input.ledger.modelId),
+              });
               yield* tx
                 .update(conversations)
                 .set({ lastMessageAt: new Date() })

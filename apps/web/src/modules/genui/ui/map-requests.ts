@@ -4,11 +4,7 @@
 // the answer and every remount sees it; a reload reads it from the answer.
 
 import { use, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import {
-  mergeLookups,
-  NO_LOOKUPS,
-  type UiLookups,
-} from "~/modules/chat/assistant-output.ts";
+import { mergeLookups, NO_LOOKUPS, type UiLookups } from "~/modules/chat/assistant-output.ts";
 import type { ValidNode } from "../catalog.ts";
 import { BlockOrdinalContext, GenuiActionsContext, GenuiMessageContext } from "./context.ts";
 import { mapNeeds } from "./map-model.ts";

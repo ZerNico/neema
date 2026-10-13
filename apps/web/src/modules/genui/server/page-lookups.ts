@@ -120,11 +120,10 @@ export const resolvePageLookups = (
       }
       // A name stop must be a place this answer holds: the page never makes
       // the server geocode a stop it did not also pass the source check above.
-      const stops = route.stops.map(
-        (stop): UiPlace | undefined =>
-          typeof stop === "string"
-            ? placeOf(normalizeQuery(stop))
-            : { status: "resolved", lat: stop.lat, lng: stop.lng },
+      const stops = route.stops.map((stop): UiPlace | undefined =>
+        typeof stop === "string"
+          ? placeOf(normalizeQuery(stop))
+          : { status: "resolved", lat: stop.lat, lng: stop.lng },
       );
       if (stops.some((stop) => stop === undefined)) continue;
       const coordinates = stops.flatMap((stop) => {

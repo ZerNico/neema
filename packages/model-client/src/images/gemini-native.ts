@@ -120,7 +120,8 @@ const once = (connection: Connection, model: string, request: NormalizedImageReq
           .map((part) => str(part["text"]) ?? "")
           .join("")
           .trim();
-        if (images.length > 0) return imagesResult({ images, revisedPrompt: text || undefined, usage });
+        if (images.length > 0)
+          return imagesResult({ images, revisedPrompt: text || undefined, usage });
         const reason = str(candidate["finishReason"]);
         if (text || (reason && DECLINED.has(reason)))
           return refusedResult(

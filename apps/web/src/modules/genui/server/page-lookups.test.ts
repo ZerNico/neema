@@ -77,7 +77,9 @@ describe("resolvePageLookups", () => {
         places: [],
         routes: [kept, unknown, coords],
       });
-      expect(Object.keys(found.routes).toSorted()).toEqual([routeKey(kept), routeKey(coords)].toSorted());
+      expect(Object.keys(found.routes).toSorted()).toEqual(
+        [routeKey(kept), routeKey(coords)].toSorted(),
+      );
       expect(routed).toEqual([2, 2]);
     }),
   );

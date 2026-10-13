@@ -79,7 +79,12 @@ describe("uiStateContextMessage", () => {
         updatedAt: at(2),
       },
       // Untouched state but a route that resolved later: the digest alone still says it.
-      { ...quiz, state: { __seed: 1 }, digest: "Bike route A → B: 225 km · 10 h 2 min", updatedAt: at(1) },
+      {
+        ...quiz,
+        state: { __seed: 1 },
+        digest: "Bike route A → B: 225 km · 10 h 2 min",
+        updatedAt: at(1),
+      },
     ]);
     const lines = String(message?.content).split("\n");
     expect(lines[2]).toBe(

@@ -124,7 +124,8 @@ export function prepareMapRouteTool(deps: MapRouteDeps): ToolGroup {
         places.set(name, pickPlace(matches.get(name) ?? [], others));
       }
       const found = written.map((stop): MapRouteStop => {
-        if (typeof stop !== "string") return { query: `${stop.lat},${stop.lng}`, found: true, ...stop };
+        if (typeof stop !== "string")
+          return { query: `${stop.lat},${stop.lng}`, found: true, ...stop };
         const place = places.get(stop);
         return place ? { query: stop, found: true, ...place } : { query: stop, found: false };
       });
@@ -148,7 +149,11 @@ export function prepareMapRouteTool(deps: MapRouteDeps): ToolGroup {
           routes: { [routeKey({ mode: routed, stops: written })]: route },
         });
       }
-      if (route.status !== "resolved" || route.distance === undefined || route.duration === undefined)
+      if (
+        route.status !== "resolved" ||
+        route.distance === undefined ||
+        route.duration === undefined
+      )
         return rejected(`No ${routed} route was found between these stops.`, found);
       return {
         v: 1,

@@ -40,7 +40,9 @@ describe("ModelCombobox", () => {
     );
     await user.click(await screen.findByPlaceholderText("Search models or type an ID…"));
     await user.keyboard("gemini");
-    expect(await screen.findByRole("option", { name: /Nano Banana · 32k ctx · Chat/ })).toBeTruthy();
+    expect(
+      await screen.findByRole("option", { name: /Nano Banana · 32k ctx · Chat/ }),
+    ).toBeTruthy();
     await user.click(screen.getByRole("option", { name: /Nano Banana · Image/ }));
     expect(onPick).toHaveBeenCalledWith(
       expect.objectContaining({ type: "image", imageFamily: "openrouter-image" }),

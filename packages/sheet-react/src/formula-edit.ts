@@ -70,7 +70,23 @@ const inString = (text: string, index: number) => {
   return quoted;
 };
 /** Characters after which a reference or a function may start; a backslash splits a localized array's columns. */
-const OPENERS = new Set(["=", "(", ",", ";", "\\", "+", "-", "*", "/", "^", "&", "<", ">", ":", " "]);
+const OPENERS = new Set([
+  "=",
+  "(",
+  ",",
+  ";",
+  "\\",
+  "+",
+  "-",
+  "*",
+  "/",
+  "^",
+  "&",
+  "<",
+  ">",
+  ":",
+  " ",
+]);
 
 /** The function name being typed before the caret, and the names it could become. */
 export function completion(

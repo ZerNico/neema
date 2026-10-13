@@ -189,11 +189,17 @@ describe("catalogReference", () => {
 describe("map pins and anchors", () => {
   it("keeps one emoji as a pin's icon and drops anything else", () => {
     for (const icon of ["🏰", "🖼️", "👩🏽‍🍳", "🇩🇪"]) {
-      const pin = only(only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes).children);
+      const pin = only(
+        only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes)
+          .children,
+      );
       expect(pin.props.icon).toBe(icon);
     }
     for (const icon of ["A", "🏰🏰", "<b>", "🏰 castle"]) {
-      const pin = only(only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes).children);
+      const pin = only(
+        only(validateTree([el("map", { label: "M" }, [el("pin", { lat: 1, lng: 2, icon })])]).nodes)
+          .children,
+      );
       expect(pin.props.icon).toBeUndefined();
     }
   });

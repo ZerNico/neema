@@ -209,7 +209,15 @@ export function UiMap({
   const missingPlaces = off ? [] : model.pins.filter((pin) => pin.status === "missing");
   const missingRoutes = off ? [] : model.routes.filter((route) => route.status === "missing");
   const current = model.pins.find((pin) => pin.id === selected);
-  const shared = { model, label, selected, onSelect: select, view, block, onBroken: () => setBroken(true) };
+  const shared = {
+    model,
+    label,
+    selected,
+    onSelect: select,
+    view,
+    block,
+    onBroken: () => setBroken(true),
+  };
 
   return (
     <figure

@@ -10,7 +10,6 @@ export interface Hsv {
   readonly v: number;
 }
 
-
 /** `#RRGGBB` as HSV; null for anything else. */
 export function hexToHsv(hex: string): Hsv | null {
   const match = HEX.exec(hex.trim());
