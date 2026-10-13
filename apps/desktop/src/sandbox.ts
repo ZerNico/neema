@@ -217,7 +217,8 @@ export const filesystemPolicy = (input: PolicyInput) => ({
   readwritePaths: [
     ...input.writable,
     ...input.userFolders,
-    ...(input.os === "win32" ? [] : ["/dev/null"]),
+    // bubblewrap gives each command its own /dev; binding the host's /dev/null over it breaks it.
+    ...(input.os === "darwin" ? ["/dev/null"] : []),
   ],
   readonlyPaths: [
     ...systemRead(input.os),
@@ -240,9 +241,11 @@ const exists = (path: string) =>
   );
 
 /**
- * Windows refuses a whole policy naming a path that does not exist, where the
- * other backends skip it. A missing denied path is safe to drop: nothing can
- * create it except inside a writable folder, as the command's own file.
+ * Windows refuses a whole policy naming a path that does not exist, and
+ * bubblewrap fails to start; Seatbelt skips it, and is given the same list so
+ * every platform runs one policy. A missing denied path is safe to drop:
+ * nothing can create it except inside a writable folder, as the command's own
+ * file.
  */
 const existingOnly = async (policy: FilesystemPolicy): Promise<FilesystemPolicy> => {
   const keep = async (paths: readonly string[]) => {
@@ -287,16 +290,24 @@ export const networkPolicy = (
   proxyUrl: string,
   local: boolean,
 ): NetworkPolicy =>
-  os === "win32" && local
-    ? { egress: { default: "deny" }, ingress: { default: "allow", hostLoopback: "allow" } }
-    : {
+  // bubblewrap gives each command its own network namespace with its own loopback, so a
+  // command can always talk to itself and never to the host's services.
+  os === "linux"
+    ? {
         egress: { default: "deny" },
-        ingress:
-          os === "win32" || local
-            ? { default: "allow", hostLoopback: "allow" }
-            : { default: "deny", hostLoopback: "deny" },
+        ingress: { default: "deny", hostLoopback: "deny" },
         runtimeConfig: { networkProxy: proxyUrl },
-      };
+      }
+    : os === "win32" && local
+      ? { egress: { default: "deny" }, ingress: { default: "allow", hostLoopback: "allow" } }
+      : {
+          egress: { default: "deny" },
+          ingress:
+            os === "win32" || local
+              ? { default: "allow", hostLoopback: "allow" }
+              : { default: "deny", hostLoopback: "deny" },
+          runtimeConfig: { networkProxy: proxyUrl },
+        };
 
 /**
  * Switches a person grants commands, in the same scopes as other grants:
@@ -557,12 +568,21 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             unavailable(available.kind === "unsupported" ? available.reason : "Unavailable."),
           );
         }
-        const { token, proxyUrl } = proxy.issue({
+        const context = {
           server: input.context.origin,
           chat: input.context.conversationId,
           attempt: input.context.attempt,
           command: input.callId,
-        });
+        };
+        // bubblewrap refuses a proxy URL carrying credentials (bwrap's arguments are readable
+        // by every local user), and reaches only that one endpoint: there the port is the token.
+        const { token, proxyUrl } =
+          os === "linux"
+            ? yield* Effect.tryPromise({
+                try: () => proxy.issuePort(context),
+                catch: (cause) => unavailable(`Could not start the command: ${String(cause)}`),
+              })
+            : proxy.issue(context);
         denials.set(input.callId, []);
         const forget = Effect.sync(() => {
           // Ends every tunnel the command opened, and its leftover children's.
@@ -633,7 +653,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
           });
-          return os === "win32" ? existingOnly(policy) : policy;
+          return existingOnly(policy);
         });
         const request: ContainerRequest = {
           command: shellCommand(input.command, os),

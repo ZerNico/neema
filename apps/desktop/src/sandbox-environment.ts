@@ -100,11 +100,14 @@ const escapeXml = (value: string) =>
  */
 export const mavenSettings = (proxyUrl: string, repository: string) => {
   const url = new URL(proxyUrl);
+  // A command's own port (Linux) takes no credentials.
+  const credentials = url.username
+    ? `<username>${escapeXml(decodeURIComponent(url.username))}</username>` +
+      `<password>${escapeXml(decodeURIComponent(url.password))}</password>`
+    : "";
   const proxy = (protocol: string) =>
     `<proxy><id>egress-${protocol}</id><active>true</active><protocol>${protocol}</protocol>` +
-    `<host>${escapeXml(url.hostname)}</host><port>${url.port}</port>` +
-    `<username>${escapeXml(decodeURIComponent(url.username))}</username>` +
-    `<password>${escapeXml(decodeURIComponent(url.password))}</password></proxy>`;
+    `<host>${escapeXml(url.hostname)}</host><port>${url.port}</port>${credentials}</proxy>`;
   return (
     `<settings><localRepository>${escapeXml(repository)}</localRepository>` +
     `<proxies>${proxy("https")}${proxy("http")}</proxies></settings>`
@@ -128,8 +131,12 @@ export const jvmEnvironment = (
   const proxy = ["https", "http"].flatMap((scheme) => [
     `-D${scheme}.proxyHost=${url.hostname}`,
     `-D${scheme}.proxyPort=${url.port}`,
-    `-D${scheme}.proxyUser=${decodeURIComponent(url.username)}`,
-    `-D${scheme}.proxyPassword=${decodeURIComponent(url.password)}`,
+    ...(url.username
+      ? [
+          `-D${scheme}.proxyUser=${decodeURIComponent(url.username)}`,
+          `-D${scheme}.proxyPassword=${decodeURIComponent(url.password)}`,
+        ]
+      : []),
   ]);
   return {
     JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true",

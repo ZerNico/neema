@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { connect } from "node:net";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -72,6 +72,17 @@ describe("filesystemPolicy", () => {
     }
   });
 
+  it("leaves /dev/null to the sandbox on Linux, which gives each command its own /dev", () => {
+    const linux = filesystemPolicy({
+      os: "linux",
+      writable: ["/work"],
+      readable: [],
+      protectedDirectory: null,
+      userFolders: [],
+    });
+    expect(linux.readwritePaths).toEqual(["/work"]);
+  });
+
   it("leaves /dev/null to the system on Windows", () => {
     const windows = filesystemPolicy({
       os: "win32",
@@ -114,6 +125,15 @@ describe("networkPolicy", () => {
       ingress: { default: "allow", hostLoopback: "allow" },
       runtimeConfig: { networkProxy: proxy },
     });
+  });
+
+  it("keeps ingress shut on Linux, where each command has its own loopback", () => {
+    for (const local of [false, true])
+      expect(networkPolicy("linux", proxy, local)).toEqual({
+        egress: { default: "deny" },
+        ingress: { default: "deny", hostLoopback: "deny" },
+        runtimeConfig: { networkProxy: proxy },
+      });
   });
 
   it("on Windows leaves proxy mode for local services, which allows no other loopback", () => {
@@ -260,6 +280,9 @@ const harness = async (
   extra: Partial<SandboxDependencies> = {},
 ) => {
   const root = await directory();
+  // Policies name only paths that exist, so the stand-in agent socket is a real file.
+  const agent = join(root, "agent.sock");
+  await writeFile(agent, "");
   const grants = await loadEgressGrants(root);
   const paths = await loadPathGrants(root, { home, denied: [root] });
   const capabilities = await loadScopedGrants(root, "capability-grants.json", () => true);
@@ -271,7 +294,7 @@ const harness = async (
     grants,
     paths,
     capabilities,
-    agent: "/tmp/agent.sock",
+    agent,
     userFolders: () => [],
     ...extra,
   };
@@ -281,6 +304,7 @@ const harness = async (
     sandbox,
     grants,
     paths,
+    agent,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   };
 };
@@ -307,20 +331,23 @@ describe("run", () => {
     const child = fakeProcess();
     const { launch, launched } = launcher(child.process);
     const { sandbox, close } = await harness(launch);
-    const result = Effect.runPromise(sandbox.run(run({ command: "echo 'it''s'" })));
+    const workspace = await directory();
+    const result = Effect.runPromise(
+      sandbox.run(run({ command: "echo 'it''s'", cwd: workspace, allowWrite: [workspace] })),
+    );
     const request = await launched;
     child.stdout.write("hi\n");
     child.finish(0);
     expect(await result).toEqual({ exitCode: 0, output: "hi\n", truncated: false, violations: [] });
     expect(request).toMatchObject({
       command: `/bin/sh -c 'echo '\\''it'\\'''\\''s'\\'''`,
-      workingDirectory: "/w",
+      workingDirectory: workspace,
       timeoutMs: 60_000,
       network: { egress: { default: "deny" }, ingress: { hostLoopback: "deny" } },
     });
     // The workspace, the command's own private folder and /dev/null.
-    const [workspace, own, devNull, ...rest] = request.filesystem?.readwritePaths ?? [];
-    expect([workspace, devNull, rest]).toEqual(["/w", "/dev/null", []]);
+    const [writable, own, devNull, ...rest] = request.filesystem?.readwritePaths ?? [];
+    expect([writable, devNull, rest]).toEqual([workspace, "/dev/null", []]);
     expect(own).toMatch(/neema-command-/);
     const proxyUrl = request.network?.runtimeConfig?.networkProxy ?? "";
     expect(proxyUrl).toMatch(/^http:\/\/cmd:[^@]+@127\.0\.0\.1:\d+$/);
@@ -366,15 +393,23 @@ describe("run", () => {
     await close();
   });
 
-  it("keeps the whole policy elsewhere", async () => {
+  it("names only paths that exist on Linux and macOS too, so every platform runs one policy", async () => {
+    const workspace = await directory();
     const child = fakeProcess();
-    const { launch, launched } = launcher(child.process);
-    const { sandbox, close } = await harness(launch);
-    const result = Effect.runPromise(sandbox.run(run()));
-    const request = await launched;
+    const { promise: missing, resolve } = Promise.withResolvers<string[]>();
+    const { sandbox, close } = await harness(async (request) => {
+      const {
+        readwritePaths = [],
+        readonlyPaths = [],
+        deniedPaths = [],
+      } = request.filesystem ?? {};
+      resolve([...readwritePaths, ...readonlyPaths, ...deniedPaths].filter((p) => !existsSync(p)));
+      return child.process;
+    });
+    const result = Effect.runPromise(sandbox.run(run({ cwd: workspace, allowWrite: [workspace] })));
+    expect(await missing).toEqual([]);
     child.finish(0);
     await result;
-    expect(request.filesystem?.readwritePaths).toContain("/w");
     await close();
   });
 
@@ -437,6 +472,24 @@ describe("run", () => {
     child.finish(0);
     await result;
     expect(request.ui).toBeUndefined();
+    await close();
+  });
+
+  it("gives a Linux command its own proxy port and no credentials to leak", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch, "linux");
+    const result = Effect.runPromise(sandbox.run(run()));
+    const request = await launched;
+    const proxyUrl = request.network?.runtimeConfig?.networkProxy ?? "";
+    expect(proxyUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(await connectThrough(proxyUrl, "example.com:443")).toMatch(/^HTTP\/1\.1 403/);
+    child.finish(0);
+    expect((await result).violations).toEqual(["deny network-outbound example.com:443"]);
+    // The port closes with the command.
+    expect(await connectThrough(proxyUrl, "example.com:443").catch(() => "refused")).toBe(
+      "refused",
+    );
     await close();
   });
 
@@ -714,7 +767,7 @@ describe("the SSH agent", () => {
 
   it("reaches commands of that chat only, by socket and environment", async () => {
     const requests: ContainerRequest[] = [];
-    const { sandbox, close } = await harness(async (request) => {
+    const { sandbox, close, agent } = await harness(async (request) => {
       requests.push(request);
       const child = fakeProcess();
       child.finish(0);
@@ -727,10 +780,10 @@ describe("the SSH agent", () => {
       sandbox.run(run({ context: { ...chat, conversationId: "chat-b", attempt: "a" } })),
     );
     const [allowed, other] = requests;
-    expect(allowed?.filesystem?.readwritePaths).toContain("/tmp/agent.sock");
-    expect(other?.filesystem?.readwritePaths).not.toContain("/tmp/agent.sock");
+    expect(allowed?.filesystem?.readwritePaths).toContain(agent);
+    expect(other?.filesystem?.readwritePaths).not.toContain(agent);
     if (process.platform !== "win32") {
-      expect(allowed?.environment?.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
+      expect(allowed?.environment?.SSH_AUTH_SOCK).toBe(agent);
       expect(other?.environment?.SSH_AUTH_SOCK).toBeUndefined();
     }
     await close();

@@ -12,13 +12,16 @@ const net = require("node:net");
 const proxy = new URL(process.env.HTTPS_PROXY || process.env.https_proxy || "");
 const [host, port] = process.argv.slice(2);
 const authority = (host.includes(":") ? "[" + host + "]" : host) + ":" + port;
-const credentials = Buffer.from(
-  decodeURIComponent(proxy.username) + ":" + decodeURIComponent(proxy.password),
-).toString("base64");
+// A command's own port (Linux) takes no credentials.
+const authorization = proxy.username
+  ? "\\r\\nProxy-Authorization: Basic " +
+    Buffer.from(
+      decodeURIComponent(proxy.username) + ":" + decodeURIComponent(proxy.password),
+    ).toString("base64")
+  : "";
 const socket = net.connect(Number(proxy.port), proxy.hostname, () => {
   socket.write(
-    "CONNECT " + authority + " HTTP/1.1\\r\\nHost: " + authority +
-      "\\r\\nProxy-Authorization: Basic " + credentials + "\\r\\n\\r\\n",
+    "CONNECT " + authority + " HTTP/1.1\\r\\nHost: " + authority + authorization + "\\r\\n\\r\\n",
   );
 });
 let head = Buffer.alloc(0);
