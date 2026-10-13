@@ -83,28 +83,11 @@ jobs:
       # Testcontainers starts the pinned pgvector image on the runner's Docker.
       - run: pnpm --filter @chat/web exec vitest run --project integration
 
-  windows-sandbox:
-    runs-on: windows-2025
-    timeout-minutes: 15
-    env:
-      # A hardlink keeps the store's profile-only ACL, and the sandbox account
-      # must start the vendored srt-win.exe itself.
-      pnpm_config_package_import_method: copy
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - name: Native sandbox sessions and process cleanup
-        env:
-          NEEMA_DISPOSABLE_WINDOWS_RUNNER: ${{ runner.environment == 'github-hosted' && '1' || '0' }}
-        run: pnpm --filter @chat/desktop test:windows-sandbox
-
   # The one required check for branch protection and the merge queue, so adding
   # or renaming a job never means editing repository settings.
   ci-ok:
     if: always()
-    needs: [format, lint, typecheck, test, integration, windows-sandbox]
+    needs: [format, lint, typecheck, test, integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

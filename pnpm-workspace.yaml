@@ -49,8 +49,12 @@ allowBuilds:
   electron-winstaller: false
   # Its CPU binaries ship in the package; the script only fetches CUDA ones.
   onnxruntime-node: false
+  # Pulled in by @microsoft/mxc-sdk. koffi's binaries come from per-platform
+  # optional packages and its script only checks one loads. node-pty is loaded
+  # only for PTY sessions, which the desktop never starts.
+  koffi: false
+  node-pty: false
 
 # Behaviour these packages do not have upstream; see Version pins in AGENTS.md.
 patchedDependencies:
-  "@anthropic-ai/sandbox-runtime@0.0.77": patches/@anthropic-ai__sandbox-runtime@0.0.77.patch
   "@office-kit/pptx-preview@0.11.0": patches/@office-kit__pptx-preview@0.11.0.patch

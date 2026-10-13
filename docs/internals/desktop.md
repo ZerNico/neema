@@ -434,114 +434,36 @@ supplied, never a host absolute the caller did not already know. Only
 claim protection against every concurrent filesystem replacement or
 hard-link alias.
 
-Commands always use `@anthropic-ai/sandbox-runtime`, with no unsandboxed fallback.
-Its manager is one per process with one proxy and one live policy, so network
-permissions belong to the desktop profile, not a chat or server origin. The
-built-in registry/GitHub rules are available without asking. An off-list
-connection is denied and reported to the model; it may separately call
-`request_network_access` with only the exact website hostname, or request a known
-website before attempting a command. User grants are fixed to port 443; the desktop
-expands each stored hostname to an explicit `host:443` SRT rule because a bare host
-would allow every port. This restricts the destination port, not the protocol
-inside the tunnel. Other blocked ports cannot be approved through this tool.
-The existing inline Work approval card asks the person under every permission
-level, without a blanket option. The connected web app is trusted to relay that
-decision to the desktop, which validates the exact hostname. Canonical hostnames
-are persisted as a JSON array in the local profile. Each grant affects new proxy
-connections across all its chats and connected servers,
-and can be removed in Settings › This computer. Command auto-approval never grants
-network access. The model must explicitly run or retry its command. Existing tunnels
-are not torn down by revocation. macOS and Linux commands run concurrently, with
-per-command filesystem permissions. Linux mount cleanup waits for the last command.
-Start and command admission share a lifecycle lock with reset, but waiting for
-commands to finish never holds that lock. Once an approved network change begins,
-Stop waits for persistence and the proxy to agree.
+Commands run in Microsoft's execution containers (`@microsoft/mxc-sdk`), with no
+unsandboxed fallback: Seatbelt on macOS, bubblewrap on Linux, an AppContainer
+process container on Windows. Each command is one request carrying its whole
+policy, so commands run concurrently and share no sandbox state. Availability is
+what MXC reports for the machine; where it has no backend (an Intel Mac, a
+Windows build without process containers) commands are unavailable, never run
+unconfined. The Linux and Windows backends have not been exercised end to end.
 
-Windows grants are session-wide NTFS permissions. One command at a time, across
-all chats, owns initialize, execution and checked reset. The command permit and
-cleanup-failure latch are process-wide, not per service. A fixed named-pipe lock
-also excludes this app’s other profiles and dev shells until cleanup finishes.
-Setup takes the same ownership. Cold readiness, setup and initialization all use
-the explicitly resolved vendored broker. The sandbox account starts that broker
-itself, so it must be readable outside any user profile: the Windows installer is
-per-machine, and a pnpm-linked checkout under a profile fails with access denied. No Windows per-execution allow grants
-are passed to SRT, which rejects them. Network updates remain live during a
-command and preserve its active filesystem policy. Waiting and preparation consume
-the existing command deadline rather than starting a new timeout at spawn.
+Reads are allow-listed: the system's own directories and the toolchain folders
+under home (version managers, package stores, caches, git's identity). The rest
+of home is unreadable. Credential files and the profile's permission store are
+denied, and in MXC a denied path outranks every other grant, so attaching a
+parent folder cannot reopen them. Writes are allowed in the chat's workspace, the
+attached folders, `/dev/null`, and on macOS the per-user temp and cache folders
+that developer tools find through confstr rather than TMPDIR. Temporary files and
+the npm, pip and uv caches point at the workspace, since home is read-only.
+A tool installed somewhere unusual fails with a denial naming the path.
 
-SRT is pinned and patched so native cleanup errors, invalid reports and retained
-ACLs fail instead of becoming warnings. Partial initialization also checks rollback
-before discarding ownership. The adapter waits for process cleanup and reset,
-then releases the next command. Unconfirmed cleanup disables commands and setup for
-the rest of the process and retains host ownership. This checks native-reported
-outcomes, not an independent ACL audit. Restarting is not proof of recovery, and
-crash recovery still belongs to SRT. There is no unsandboxed fallback or global ACL
-recovery sweep. Other applications using the shared `srt-sandbox` account do not
-participate in this app’s named-pipe lock.
+The only network destination is the [egress proxy](egress-proxy.md). Each command
+gets a token, and its proxy URL goes in MXC's `networkProxy`: MXC replaces the
+proxy variables with that URL, so a token placed anywhere else never arrives.
+On Windows an unpackaged proxy needs host loopback opened, which lets commands
+reach other local services; there the token is what keeps one command's grants
+from another's. A refused tunnel comes back as a violation line for that command,
+which the site turns into an offer to request access. Grants are exact
+`host:port` pairs kept by `egress-grants.ts`, never by the proxy.
 
-Reads are deny-then-allow in SRT, so home is denied as a whole and toolchain
-assets are re-allowed inside it. Windows is the exception. Its profile ACL already
-keeps the sandbox account out, while every SRT deny becomes an inherited ACE that
-restamps the target’s parents, and a missing target becomes a placeholder file. There
-the adapter denies only credential paths that exist inside an existing grant. The
-same ACL leaves an attached folder under the profile unusable, since Node and similar
-tools stat every ancestor. Each profile folder above an attached root therefore gets a
-read-attributes ACE for the sandbox account. It is not inherited, lists nothing and
-opens no file, so it is left in place rather than joining SRT’s checked cleanup.
-Writing a profile ACL re-propagates the whole tree, so it is written only when absent. Cargo gets binaries, registry and Git caches,
-Maven gets its repository and wrapper, and Gradle gets caches, wrappers, JDKs
-and native libraries, not their containing config directories. Pip gets its
-cache, not its user config. Conventional credential-bearing config paths and
-known cache tokens are explicitly denied even when an attached parent re-allows
-their directory. Installed SRT preserves these deeper denies. This is a named
-path policy, not discovery of arbitrary secrets stored in build assets.
-The rest of the disk stays readable. Each call adds its attached folders to
-both read and write allowances. They and the chat’s workspace, resolved per
-call through `rootsFor`, are the only writable roots. The profile’s
-network-grant directory stays write-denied even when someone attaches its
-parent. Local file mutations also refuse it and attempts to replace its
-ancestors. Unusual tool installations or credential-bearing user build config
-fail closed rather than gaining a broader home allowance.
-
-On macOS, the adapter reads only the literal words in SRT's leading `env`
-assignments, including whole-quoted assignments and unset options. Encoded proxy
-credentials cause SRT to quote entire words; matching only bare `KEY=value`
-prefixes silently missed them. The adapter replaces the proxy hostname
-`localhost` with `127.0.0.1` to avoid Seatbelt-denied resolution, preserving
-credentials, protocols and ports. The executable, profile and user command stay
-byte-for-byte unchanged. Linux and Windows keep their own proxy routing.
-
-The POSIX child environment keeps only PATH, HOME, user and shell identity,
-locale, timezone and terminal settings. Arbitrary launch variables and runtime
-injection options do not cross that boundary. The same excluded names are
-supplied to SRT before wrapping, since it can compose inherited Java or Git
-settings into its command. SRT’s own generated proxy authentication, trust and
-transport overlays remain in argv. Nothing sanitizes the parent desktop
-process. Windows keeps its separate fresh child-profile contract.
-
-Temporary files default to the existing workspace, and Python and XDG caches to
-its `.cache` tree. On POSIX, quoted exports run inside confinement after SRT's
-own environment setup, whose TMPDIR may not exist. On Windows, the adapter uses
-SRT's child `--env` argv overlay before `--`, not the broker's environment, and
-keeps SRT's omission of POSIX TMPDIR and proxy bypass variables. The original
-command still supplies violation attribution on every platform.
-
-These defaults change neither HOME nor the process-wide environment and add no
-write allowances. Cache directories are created by libraries inside the sandbox:
-host-side mkdir beneath a model-writable workspace could follow a symlink outside
-it. Explicit command assignments can override defaults within the same policy.
-Temporary-file APIs own their cleanup; abandoned files remain in the workspace,
-with no additional sweeper.
-
-Owned POSIX process groups are terminated during cancellation and cleanup.
-Descendants that deliberately escape their group are outside that guarantee.
-The generic Windows process owner uses `taskkill /T`, which cannot enumerate a
-tree after its root exits. SRT documents a native Job Object behind its broker,
-but the package does not include that implementation. The dedicated disposable
-Windows CI suite checks real descendant exit on normal completion, Stop and
-timeout before a new permission session. macOS unit tests cannot certify that
-native boundary. Sandbox preparation must settle before ownership is released,
-even when cancellation or the execution deadline arrives first.
+The environment starts from identity, locale and terminal variables only. MXC
+kills the command's process tree when it exits, and Stop or the deadline kills
+it; a detached server a command starts dies with it.
 
 ## Policy is server-held; consent is local
 

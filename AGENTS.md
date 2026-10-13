@@ -361,9 +361,10 @@ All release candidates. Pin exactly; never float to `latest`.
 - `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
   reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
   component uncompiled, which is most of them. On a bump, count compiled components, not test results.
-- `@anthropic-ai/sandbox-runtime` is pinned to 0.0.77 and patched to fail on unconfirmed
-  Windows ACL cleanup, including partial initialization rollback. On a bump, run the installed
-  runtime contract tests and the disposable Windows native suite before dropping the patch.
+- `@microsoft/mxc-sdk` (the desktop's command sandbox) is pinned exact; its install-time
+  dependencies `koffi` and `node-pty` are denied scripts in `allowBuilds`. On a bump, run real
+  commands through `makeSandbox` on each OS (the unit tests stub the launcher) and check the
+  proxy token still reaches commands through `networkProxy`.
   See [desktop](docs/internals/desktop.md#containment-and-command-isolation).
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.

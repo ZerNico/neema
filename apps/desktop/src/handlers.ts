@@ -1,6 +1,6 @@
 import { open, readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
-import { conflictsWithNetworkGrants, normalizeNetworkGrant } from "./network-grants.ts";
+import { conflictsWithNetworkGrants, normalizeEgressGrant } from "./egress-grants.ts";
 import { Effect } from "effect";
 import {
   DesktopError,
@@ -877,6 +877,7 @@ export const makeHandlers = (shell: Shell) =>
           return yield* sandbox.run({
             callId,
             command,
+            context: { ...key(conversationId), attempt: callId },
             cwd,
             allowWrite: allowed.filter((root): root is string => root !== null),
             timeoutMs,
@@ -885,7 +886,8 @@ export const makeHandlers = (shell: Shell) =>
 
       requestNetworkAccess: ({ host }) =>
         Effect.gen(function* () {
-          const grant = normalizeNetworkGrant(host);
+          const valid = normalizeEgressGrant(host, 443, false);
+          const grant = valid ? { host: valid.host } : null;
           if (!grant) {
             return yield* Effect.fail(
               new DesktopError({

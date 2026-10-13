@@ -10,15 +10,14 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "pnpm exec vitest run",
-    "test:windows-sandbox": "pnpm exec vitest run --config vitest.windows.config.ts",
     "dev": "node dev.mjs",
     "build": "node build.mjs",
     "start": "pnpm build && node electron-app.mjs",
     "package": "pnpm build && electron-builder --publish never"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.77",
-    "@chat/egress-proxy": "workspace:*"
+    "@chat/egress-proxy": "workspace:*",
+    "@microsoft/mxc-sdk": "1.0.0"
   },
   "devDependencies": {
     "@chat/desktop-rpc": "workspace:*",

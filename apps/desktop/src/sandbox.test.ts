@@ -1,0 +1,333 @@
+import { connect } from "node:net";
+import { mkdtemp, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import type { ContainerRequest } from "@microsoft/mxc-sdk/v1";
+import { Effect, Exit, Fiber, Scope } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
+import { loadEgressGrants } from "./egress-grants.ts";
+import { commandEnvironment } from "./sandbox-environment.ts";
+import {
+  filesystemPolicy,
+  makeSandbox,
+  type LaunchedProcess,
+  type SandboxDependencies,
+  type SandboxRun,
+} from "./sandbox.ts";
+
+const home = homedir();
+const roots: string[] = [];
+const directory = async () => {
+  const root = await mkdtemp(join(tmpdir(), "chat-sandbox-"));
+  roots.push(root);
+  return root;
+};
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("filesystemPolicy", () => {
+  const policy = filesystemPolicy({
+    os: "darwin",
+    writable: ["/work/project", "/profile/workspaces/chat"],
+    protectedDirectory: "/profile/network-grants",
+    userFolders: ["/var/folders/xy/T"],
+  });
+
+  it("writes only the attached folders, the workspace and the user's own temp folders", () => {
+    expect(policy.readwritePaths).toEqual([
+      "/work/project",
+      "/profile/workspaces/chat",
+      "/var/folders/xy/T",
+      "/dev/null",
+    ]);
+  });
+
+  it("reads toolchains under home but never home itself", () => {
+    expect(policy.readonlyPaths).toContain(join(home, ".cargo", "registry"));
+    expect(policy.readonlyPaths).toContain(join(home, ".gitconfig"));
+    expect(policy.readonlyPaths).not.toContain(home);
+  });
+
+  it("denies credentials and the permission store whatever is attached", () => {
+    for (const path of [
+      join(home, ".ssh"),
+      join(home, ".aws"),
+      join(home, ".git-credentials"),
+      join(home, ".config", "git", "credentials"),
+      "/profile/network-grants",
+    ]) {
+      expect(policy.deniedPaths).toContain(path);
+    }
+  });
+
+  it("leaves /dev/null to the system on Windows", () => {
+    const windows = filesystemPolicy({
+      os: "win32",
+      writable: ["C:\\work"],
+      protectedDirectory: null,
+      userFolders: [],
+    });
+    expect(windows.readwritePaths).toEqual(["C:\\work"]);
+  });
+});
+
+describe("commandEnvironment", () => {
+  const proxy = { HTTPS_PROXY: "http://cmd:t@127.0.0.1:9" };
+
+  it("keeps identity and locale, drops the rest of the desktop's environment", () => {
+    const env = commandEnvironment(
+      { PATH: "/usr/bin", HOME: "/home/u", LANG: "C", NODE_OPTIONS: "--require x", SECRET: "s" },
+      "/w",
+      proxy,
+      "linux",
+    );
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.LANG).toBe("C");
+    expect(env.NODE_OPTIONS).toBeUndefined();
+    expect(env.SECRET).toBeUndefined();
+  });
+
+  it("puts temporary files and caches in the workspace and adds the proxy", () => {
+    const env = commandEnvironment({}, "/w", proxy, "linux");
+    expect(env).toMatchObject({
+      TMPDIR: "/w",
+      TEMP: "/w",
+      XDG_CACHE_HOME: "/w/.cache",
+      HTTPS_PROXY: proxy.HTTPS_PROXY,
+    });
+  });
+
+  it("omits a POSIX TMPDIR on Windows", () => {
+    expect(commandEnvironment({}, "C:\\w", proxy, "win32").TMPDIR).toBeUndefined();
+  });
+});
+
+/** A process that does what the test tells it to, at the moment it says. */
+const fakeProcess = () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const { promise: exited, resolve: exit } = Promise.withResolvers<{
+    exitCode: number;
+    timedOut: boolean;
+  }>();
+  let killed = 0;
+  const process: LaunchedProcess = {
+    standardOutput: stdout,
+    standardError: stderr,
+    wait: () => exited,
+    kill: () => {
+      killed += 1;
+      stdout.end();
+      stderr.end();
+      exit({ exitCode: 137, timedOut: false });
+    },
+  };
+  const finish = (exitCode: number) => {
+    stdout.end();
+    stderr.end();
+    exit({ exitCode, timedOut: false });
+  };
+  return { process, stdout, stderr, finish, killed: () => killed };
+};
+
+/** Resolves with the request once the sandbox launches, so tests wait on the launch itself. */
+const launcher = (process: LaunchedProcess) => {
+  const { promise: launched, resolve } = Promise.withResolvers<ContainerRequest>();
+  const launch = async (request: ContainerRequest) => {
+    resolve(request);
+    return process;
+  };
+  return { launch, launched };
+};
+
+const run = (overrides: Partial<SandboxRun> = {}): SandboxRun => ({
+  callId: "call-1",
+  command: "echo hi",
+  context: { origin: "https://chat.example", conversationId: "chat-a", attempt: "attempt-1" },
+  cwd: "/w",
+  allowWrite: ["/w"],
+  timeoutMs: 60_000,
+  ...overrides,
+});
+
+const harness = async (launch: SandboxDependencies["launch"]) => {
+  const grants = await loadEgressGrants(await directory());
+  const dependencies: SandboxDependencies = {
+    os: "darwin",
+    support: () => ({ isSupported: true, availableMethods: ["seatbelt"] }),
+    launch,
+    grants,
+    userFolders: () => [],
+  };
+  const scope = await Effect.runPromise(Scope.make());
+  const sandbox = await Effect.runPromise(Scope.provide(makeSandbox(dependencies), scope));
+  return {
+    sandbox,
+    grants,
+    close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+  };
+};
+
+/** Opens a CONNECT through the command's proxy, as a tool inside the sandbox would. */
+const connectThrough = (proxyUrl: string, target: string) =>
+  new Promise<string>((resolve, reject) => {
+    const url = new URL(proxyUrl);
+    const socket = connect(Number(url.port), url.hostname, () => {
+      const auth = Buffer.from(
+        `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`,
+      ).toString("base64");
+      socket.write(`CONNECT ${target} HTTP/1.1\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
+    });
+    socket.once("data", (chunk) => {
+      resolve(chunk.toString("latin1").split("\r\n")[0] ?? "");
+      socket.destroy();
+    });
+    socket.once("error", reject);
+  });
+
+describe("run", () => {
+  it("launches the command in a shell with the policy, proxy and deadline", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run({ command: "echo 'it''s'" })));
+    const request = await launched;
+    child.stdout.write("hi\n");
+    child.finish(0);
+    expect(await result).toEqual({ exitCode: 0, output: "hi\n", truncated: false, violations: [] });
+    expect(request).toMatchObject({
+      command: `/bin/sh -c 'echo '\\''it'\\'''\\''s'\\'''`,
+      workingDirectory: "/w",
+      timeoutMs: 60_000,
+      network: { egress: { default: "deny" }, ingress: { hostLoopback: "deny" } },
+      filesystem: { readwritePaths: ["/w", "/dev/null"] },
+    });
+    const proxyUrl = request.network?.runtimeConfig?.networkProxy ?? "";
+    expect(proxyUrl).toMatch(/^http:\/\/cmd:[^@]+@127\.0\.0\.1:\d+$/);
+    expect(request.environment?.HTTPS_PROXY).toBe(proxyUrl);
+    await close();
+  });
+
+  it("reports a refused tunnel as a violation of that command only", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    const proxyUrl = (await launched).network?.runtimeConfig?.networkProxy ?? "";
+    expect(await connectThrough(proxyUrl, "example.com:443")).toMatch(/^HTTP\/1\.1 403/);
+    expect(await connectThrough(proxyUrl, "example.com:22")).toMatch(/^HTTP\/1\.1 403/);
+    child.finish(1);
+    expect((await result).violations).toEqual([
+      "deny network-outbound example.com:443 (host is not on the allow list)",
+      "deny network-outbound example.com:22",
+    ]);
+    await close();
+  });
+
+  it("revokes the command's token when it ends", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    const proxyUrl = (await launched).network?.runtimeConfig?.networkProxy ?? "";
+    child.finish(0);
+    await result;
+    expect(await connectThrough(proxyUrl, "example.com:443")).toMatch(/^HTTP\/1\.1 407/);
+    await close();
+  });
+
+  it("keeps the first output characters and says it truncated", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    await launched;
+    child.stdout.write("x".repeat(40_000));
+    child.finish(0);
+    const finished = await result;
+    expect(finished.output).toHaveLength(32_000);
+    expect(finished.truncated).toBe(true);
+    await close();
+  });
+
+  it("kills the process when the run is interrupted", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const fiber = Effect.runFork(sandbox.run(run()));
+    await launched;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(child.killed()).toBeGreaterThan(0);
+    await close();
+  });
+
+  it("fails with a timeout when MXC reports one", async () => {
+    const { sandbox, close } = await harness(async () => ({
+      standardOutput: null,
+      standardError: null,
+      wait: async () => ({ exitCode: 1, timedOut: true }),
+      kill: () => {},
+    }));
+    const exit = await Effect.runPromiseExit(sandbox.run(run({ timeoutMs: 5_000 })));
+    expect(exit).toMatchObject({ _tag: "Failure" });
+    expect(JSON.stringify(exit)).toContain("timed-out");
+    await close();
+  });
+
+  it("refuses to run where MXC has no backend", async () => {
+    const grants = await loadEgressGrants(await directory());
+    const scope = await Effect.runPromise(Scope.make());
+    const sandbox = await Effect.runPromise(
+      Scope.provide(
+        makeSandbox({
+          os: "darwin",
+          support: () => ({
+            isSupported: false,
+            reason: "Needs Apple silicon",
+            availableMethods: [],
+          }),
+          launch: async () => {
+            throw new Error("must not launch");
+          },
+          grants,
+          userFolders: () => [],
+        }),
+        scope,
+      ),
+    );
+    expect(await Effect.runPromise(sandbox.availability())).toEqual({
+      kind: "unsupported",
+      reason: "Needs Apple silicon",
+    });
+    const exit = await Effect.runPromiseExit(sandbox.run(run()));
+    expect(JSON.stringify(exit)).toContain("Needs Apple silicon");
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+});
+
+describe("website approvals", () => {
+  it("keeps an approved host on 443 for every chat and lists it", async () => {
+    const { sandbox, grants, close } = await harness(async () => fakeProcess().process);
+    await Effect.runPromise(sandbox.approveNetwork({ host: "example.com" }));
+    expect(await Effect.runPromise(sandbox.grants())).toEqual([{ host: "example.com" }]);
+    expect(
+      grants.decide(
+        { server: "https://x.example", chat: "other", attempt: "a", command: "c" },
+        "example.com",
+        443,
+      ).allowed,
+    ).toBe(true);
+    await Effect.runPromise(sandbox.revokeNetwork({ host: "example.com" }));
+    expect(await Effect.runPromise(sandbox.grants())).toEqual([]);
+    await close();
+  });
+
+  it("refuses a host that is not an exact public name", async () => {
+    const { sandbox, close } = await harness(async () => fakeProcess().process);
+    const exit = await Effect.runPromiseExit(sandbox.approveNetwork({ host: "10.0.0.1" }));
+    expect(exit).toMatchObject({ _tag: "Failure" });
+    await close();
+  });
+});

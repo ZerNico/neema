@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { canonicalHost, type CommandContext, type GrantDecision } from "@chat/egress-proxy";
 import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
@@ -11,6 +11,17 @@ import { serialWrites, writeJsonAtomic } from "./json-file.ts";
  * Consent is local: the file lives in the profile, beside the folder grants,
  * keyed by server origin and conversation like them.
  */
+export const networkGrantsDirectory = (userData: string) => join(userData, "network-grants");
+
+const inside = (parent: string, child: string) => {
+  const rest = relative(parent, child);
+  return rest === "" || (rest !== ".." && !rest.startsWith(`..${sep}`) && !rest.startsWith(sep));
+};
+
+/** A protected path cannot be changed directly or by replacing an ancestor. */
+export const conflictsWithNetworkGrants = (directory: string, path: string) =>
+  inside(directory, path) || inside(path, directory);
+
 export type GrantScope = "always" | "chat" | "answer";
 
 export interface EgressGrant {

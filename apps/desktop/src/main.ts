@@ -60,7 +60,7 @@ import { disposeOwnedProcesses } from "./process.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
-import { networkGrantsDirectory, normalizeNetworkGrant } from "./network-grants.ts";
+import { networkGrantsDirectory, normalizeEgressGrant } from "./egress-grants.ts";
 import { Sandbox } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import {
@@ -601,7 +601,8 @@ void app.whenReady().then(async () => {
   ipcMain.handle(NETWORK_REVOKE, async (event, payload: unknown) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
     const input = payload && typeof payload === "object" ? (payload as { host?: unknown }) : null;
-    const grant = typeof input?.host === "string" ? normalizeNetworkGrant(input.host) : null;
+    const valid = normalizeEgressGrant(input?.host, 443, false);
+    const grant = valid ? { host: valid.host } : null;
     if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
     await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(grant)));
   });

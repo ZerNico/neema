@@ -2,7 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { grantId, loadEgressGrants, normalizeEgressGrant } from "./egress-grants.ts";
+import {
+  conflictsWithNetworkGrants,
+  grantId,
+  loadEgressGrants,
+  networkGrantsDirectory,
+  normalizeEgressGrant,
+} from "./egress-grants.ts";
 
 const roots: string[] = [];
 const directory = async () => {
@@ -248,5 +254,23 @@ describe("the stored file", () => {
       always: [],
       chats: { "https://chat.example chat-a": [site("example.com")] },
     });
+  });
+});
+
+describe("the protected directory", () => {
+  it("covers itself, its contents and every ancestor, not siblings", async () => {
+    const root = await directory();
+    const protectedDirectory = networkGrantsDirectory(root);
+    expect(conflictsWithNetworkGrants(protectedDirectory, root)).toBe(true);
+    expect(conflictsWithNetworkGrants(protectedDirectory, protectedDirectory)).toBe(true);
+    expect(
+      conflictsWithNetworkGrants(
+        protectedDirectory,
+        join(protectedDirectory, "egress-grants.json"),
+      ),
+    ).toBe(true);
+    expect(conflictsWithNetworkGrants(protectedDirectory, join(root, "workspaces", "chat"))).toBe(
+      false,
+    );
   });
 });

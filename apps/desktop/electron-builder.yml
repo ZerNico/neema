@@ -20,9 +20,9 @@ files:
   - "!static/icons/*.svg"
   - package.json
 
-# sandbox-runtime spawns its vendored helpers (srt-win.exe, apply-seccomp, the
-# JVM agent) from paths beside its own modules. Inside an asar those paths
-# cannot be executed, so the app stays a plain directory, as it is in dev.
+# The MXC SDK runs executor binaries and loads a native library from paths
+# beside its own modules. Inside an asar those cannot be executed, so the app
+# stays a plain directory, as it is in dev.
 asar: false
 
 protocols:
