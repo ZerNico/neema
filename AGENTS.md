@@ -362,9 +362,11 @@ All release candidates. Pin exactly; never float to `latest`.
   reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
   component uncompiled, which is most of them. On a bump, count compiled components, not test results.
 - `@microsoft/mxc-sdk` (the desktop's command sandbox) is pinned exact; its install-time
-  dependencies `koffi` and `node-pty` are denied scripts in `allowBuilds`. On a bump, run real
-  commands through `makeSandbox` on each OS (the unit tests stub the launcher) and check the
-  proxy token still reaches commands through `networkProxy`.
+  dependencies `koffi` and `node-pty` are denied scripts in `allowBuilds`. Packages keep only
+  `bin/<arch>/` MXC's in-process library and the target's koffi binding (`after-pack.mjs`). On a
+  bump, run real commands through `makeSandbox` on each OS (the unit tests stub the launcher),
+  check the proxy reaches commands through `networkProxy`, and let the desktop workflow's
+  package smoke test prove the trimmed natives still load.
   See [desktop](docs/internals/desktop.md#containment-and-command-isolation).
 - `rolldown` needs no override since 1.2.7. Re-pin only if the production module
   check fails again.

@@ -20,10 +20,12 @@ files:
   - "!static/icons/*.svg"
   - package.json
 
-# The MXC SDK runs executor binaries and loads a native library from paths
-# beside its own modules. Inside an asar those cannot be executed, so the app
-# stays a plain directory, as it is in dev.
+# The MXC SDK loads its native library from a path beside its own modules,
+# which an asar cannot serve, so the app stays a plain directory, as in dev.
 asar: false
+
+# Keeps only the target's own natives: MXC ships every platform's binaries.
+afterPack: ./after-pack.mjs
 
 protocols:
   - name: neema sign-in
