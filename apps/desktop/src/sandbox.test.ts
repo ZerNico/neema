@@ -1,7 +1,8 @@
+import { existsSync } from "node:fs";
 import { connect } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ContainerRequest } from "@microsoft/mxc-sdk/v1";
 import { Effect, Exit, Fiber, Scope } from "effect";
@@ -11,8 +12,10 @@ import { loadPathGrants } from "./path-grants.ts";
 import { loadScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 import {
+  enumerableAncestors,
   filesystemPolicy,
   makeSandbox,
+  networkPolicy,
   type LaunchedProcess,
   type SandboxDependencies,
   type SandboxRun,
@@ -78,6 +81,75 @@ describe("filesystemPolicy", () => {
       userFolders: [],
     });
     expect(windows.readwritePaths).toEqual(["C:\\work"]);
+  });
+
+  it("reads Windows toolchains under AppData only on Windows", () => {
+    const npm = join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "npm");
+    const windows = filesystemPolicy({
+      os: "win32",
+      writable: [],
+      readable: [],
+      protectedDirectory: null,
+      userFolders: [],
+    });
+    expect(windows.readonlyPaths).toContain(npm);
+    expect(windows.readonlyPaths).toContain(join(home, "scoop"));
+    expect(policy.readonlyPaths).not.toContain(npm);
+  });
+});
+
+describe("networkPolicy", () => {
+  const proxy = "http://cmd:t@127.0.0.1:9";
+
+  it("sends everything through the proxy and keeps loopback shut without the grant", () => {
+    expect(networkPolicy("darwin", proxy, false)).toEqual({
+      egress: { default: "deny" },
+      ingress: { default: "deny", hostLoopback: "deny" },
+      runtimeConfig: { networkProxy: proxy },
+    });
+  });
+
+  it("opens loopback for local services and keeps the proxy", () => {
+    expect(networkPolicy("darwin", proxy, true)).toMatchObject({
+      ingress: { default: "allow", hostLoopback: "allow" },
+      runtimeConfig: { networkProxy: proxy },
+    });
+  });
+
+  it("on Windows leaves proxy mode for local services, which allows no other loopback", () => {
+    expect(networkPolicy("win32", proxy, false).runtimeConfig).toEqual({ networkProxy: proxy });
+    expect(networkPolicy("win32", proxy, true)).toEqual({
+      egress: { default: "deny" },
+      ingress: { default: "allow", hostLoopback: "allow" },
+    });
+  });
+});
+
+describe("enumerableAncestors", () => {
+  it("lists every folder above, once, without the allowed paths themselves", () => {
+    expect(
+      enumerableAncestors([
+        "C:\\Users\\me\\AppData\\Roaming\\npm",
+        "C:\\Users\\me\\AppData\\Local\\pnpm",
+        "C:\\Windows",
+        "D:\\src\\app",
+      ]).toSorted(),
+    ).toEqual(
+      [
+        "C:\\",
+        "C:\\Users",
+        "C:\\Users\\me",
+        "C:\\Users\\me\\AppData",
+        "C:\\Users\\me\\AppData\\Local",
+        "C:\\Users\\me\\AppData\\Roaming",
+        "D:\\",
+        "D:\\src",
+      ].toSorted(),
+    );
+  });
+
+  it("leaves out a folder that is itself allowed", () => {
+    expect(enumerableAncestors(["C:\\work", "C:\\work\\app"])).toEqual(["C:\\"]);
   });
 });
 
@@ -160,20 +232,36 @@ const run = (overrides: Partial<SandboxRun> = {}): SandboxRun => ({
   ...overrides,
 });
 
-const harness = async (launch: SandboxDependencies["launch"]) => {
+/** What MXC reports on a Windows build that can reach a host proxy and query parent folders. */
+const proxyCapable = [
+  {
+    backend: "processcontainer",
+    capabilities: ["ingressHostLoopbackAllow", "filesystemEnumeratePaths"],
+    warnings: [],
+  },
+] satisfies ReturnType<SandboxDependencies["backends"]>;
+
+const harness = async (
+  launch: SandboxDependencies["launch"],
+  os: NodeJS.Platform = "darwin",
+  backends: SandboxDependencies["backends"] = () => proxyCapable,
+  extra: Partial<SandboxDependencies> = {},
+) => {
   const root = await directory();
   const grants = await loadEgressGrants(root);
   const paths = await loadPathGrants(root, { home, denied: [root] });
   const capabilities = await loadScopedGrants(root, "capability-grants.json", () => true);
   const dependencies: SandboxDependencies = {
-    os: "darwin",
+    os,
     support: () => ({ isSupported: true, availableMethods: ["seatbelt"] }),
+    backends,
     launch,
     grants,
     paths,
     capabilities,
     agent: "/tmp/agent.sock",
     userFolders: () => [],
+    ...extra,
   };
   const scope = await Effect.runPromise(Scope.make());
   const sandbox = await Effect.runPromise(Scope.provide(makeSandbox(dependencies), scope));
@@ -225,6 +313,118 @@ describe("run", () => {
     const proxyUrl = request.network?.runtimeConfig?.networkProxy ?? "";
     expect(proxyUrl).toMatch(/^http:\/\/cmd:[^@]+@127\.0\.0\.1:\d+$/);
     expect(request.environment?.HTTPS_PROXY).toBe(proxyUrl);
+    await close();
+  });
+
+  it("lets Windows commands load user32 but keeps the clipboard and input closed", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch, "win32");
+    const result = Effect.runPromise(sandbox.run(run()));
+    const request = await launched;
+    child.finish(0);
+    await result;
+    expect(request.ui).toEqual({ disable: false, clipboard: "none", allowInputInjection: false });
+    await close();
+  });
+
+  it("names only paths that exist on Windows, which refuses a policy naming one that does not", async () => {
+    const workspace = await directory();
+    const child = fakeProcess();
+    const { promise: missing, resolve } = Promise.withResolvers<string[]>();
+    const { promise: writable, resolve: resolveWritable } = Promise.withResolvers<string[]>();
+    const { sandbox, close } = await harness(async (request) => {
+      // Checked at launch: the command's own folder is gone once it ends.
+      const {
+        readwritePaths = [],
+        readonlyPaths = [],
+        deniedPaths = [],
+      } = request.filesystem ?? {};
+      resolve([...readwritePaths, ...readonlyPaths, ...deniedPaths].filter((p) => !existsSync(p)));
+      resolveWritable(readwritePaths);
+      return child.process;
+    }, "win32");
+    const result = Effect.runPromise(
+      sandbox.run(run({ cwd: workspace, allowWrite: [workspace, "/nowhere/attached"] })),
+    );
+    expect(await missing).toEqual([]);
+    expect(await writable).toContain(workspace);
+    child.finish(0);
+    await result;
+    await close();
+  });
+
+  it("keeps the whole policy elsewhere", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    const request = await launched;
+    child.finish(0);
+    await result;
+    expect(request.filesystem?.readwritePaths).toContain("/w");
+    await close();
+  });
+
+  it("is unavailable on a Windows build missing either capability", async () => {
+    // Without loopback no command reaches the proxy; without enumeration Node and npm cannot start.
+    for (const capabilities of [
+      ["filesystemEnumeratePaths"],
+      ["ingressHostLoopbackAllow"],
+    ] as const) {
+      const { sandbox, close } = await harness(
+        async () => {
+          throw new Error("must not launch");
+        },
+        "win32",
+        () => [{ backend: "processcontainer", capabilities: [...capabilities], warnings: [] }],
+      );
+      expect(await Effect.runPromise(sandbox.availability())).toEqual({
+        kind: "unsupported",
+        reason: "Commands need a newer Windows build. Install the latest Windows updates.",
+      });
+      const exit = await Effect.runPromiseExit(sandbox.run(run()));
+      expect(JSON.stringify(exit)).toContain("newer Windows build");
+      await close();
+    }
+  });
+
+  it("lets Windows commands query the folders above what they may use", async () => {
+    const workspace = await directory();
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch, "win32");
+    const result = Effect.runPromise(sandbox.run(run({ cwd: workspace, allowWrite: [workspace] })));
+    const request = await launched;
+    child.finish(0);
+    await result;
+    const containment = request.containment;
+    const enumerate =
+      containment?.type === "processcontainer"
+        ? containment.config?.filesystem?.enumeratePaths
+        : [];
+    expect(enumerate).toContain(dirname(workspace));
+    expect(enumerate).not.toContain(workspace);
+    await close();
+  });
+
+  it("is ready on a Windows build that reports both capabilities", async () => {
+    const { sandbox, close } = await harness(async () => {
+      throw new Error("not launched");
+    }, "win32");
+    expect(await Effect.runPromise(sandbox.availability())).toEqual({ kind: "ready" });
+    await close();
+  });
+
+  it("leaves the UI policy to the backend elsewhere", async () => {
+    const child = fakeProcess();
+    const { launch, launched } = launcher(child.process);
+    const { sandbox, close } = await harness(launch);
+    const result = Effect.runPromise(sandbox.run(run()));
+    const request = await launched;
+    child.finish(0);
+    await result;
+    expect(request.ui).toBeUndefined();
     await close();
   });
 
@@ -306,6 +506,9 @@ describe("run", () => {
             reason: "Needs Apple silicon",
             availableMethods: [],
           }),
+          backends: () => {
+            throw new Error("only Windows asks");
+          },
           launch: async () => {
             throw new Error("must not launch");
           },

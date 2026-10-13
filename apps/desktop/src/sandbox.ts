@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { access, constants, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, win32 } from "node:path";
 import type { Readable } from "node:stream";
 import {
   createEgressProxy,
@@ -9,8 +9,10 @@ import {
   type EgressProxy,
 } from "@chat/egress-proxy";
 import {
+  getAvailableBackends,
   getPlatformSupport,
   spawn,
+  type AvailableBackend,
   type ContainerRequest,
   type NetworkPolicy,
   type PlatformSupport,
@@ -96,6 +98,30 @@ const TOOLCHAIN_READ = [
   inHome(".gitconfig"),
   inHome(".config", "git"),
 ];
+
+/**
+ * Where Windows installers and version managers put toolchains for one user,
+ * outside the dot-folders above: AppData and scoop.
+ */
+const windowsToolchainRead = (env: NodeJS.ProcessEnv) => {
+  const roaming = env.APPDATA ?? inHome("AppData", "Roaming");
+  const local = env.LOCALAPPDATA ?? inHome("AppData", "Local");
+  return [
+    join(roaming, "npm"),
+    join(roaming, "nvm"),
+    join(roaming, "fnm"),
+    join(roaming, "uv"),
+    join(local, "fnm_multishells"),
+    join(local, "pnpm"),
+    join(local, "Volta"),
+    join(local, "Yarn"),
+    join(local, "Programs", "Python"),
+    join(local, "Programs", "Git"),
+    join(local, "Microsoft", "WinGet", "Packages"),
+    join(local, "Microsoft", "WinGet", "Links"),
+    inHome("scoop"),
+  ];
+};
 
 /**
  * Credential files inside the readable toolchain folders, or inside a folder
@@ -193,33 +219,84 @@ export const filesystemPolicy = (input: PolicyInput) => ({
     ...input.userFolders,
     ...(input.os === "win32" ? [] : ["/dev/null"]),
   ],
-  readonlyPaths: [...systemRead(input.os), ...TOOLCHAIN_READ, ...input.readable],
+  readonlyPaths: [
+    ...systemRead(input.os),
+    ...TOOLCHAIN_READ,
+    ...(input.os === "win32" ? windowsToolchainRead(process.env) : []),
+    ...input.readable,
+  ],
   deniedPaths: [
     ...CREDENTIAL_DENIES,
     ...(input.protectedDirectory ? [input.protectedDirectory] : []),
   ],
 });
 
+type FilesystemPolicy = ReturnType<typeof filesystemPolicy>;
+
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
 /**
- * Only the egress proxy is reachable. Windows can only bind an unpackaged
- * proxy by opening host loopback; there the proxy's token is what keeps
- * commands from one another's grants.
+ * Windows refuses a whole policy naming a path that does not exist, where the
+ * other backends skip it. A missing denied path is safe to drop: nothing can
+ * create it except inside a writable folder, as the command's own file.
  */
+const existingOnly = async (policy: FilesystemPolicy): Promise<FilesystemPolicy> => {
+  const keep = async (paths: readonly string[]) => {
+    const present = await Promise.all(paths.map(exists));
+    return paths.filter((_, index) => present[index]);
+  };
+  const [readwritePaths, readonlyPaths, deniedPaths] = await Promise.all([
+    keep(policy.readwritePaths),
+    keep(policy.readonlyPaths),
+    keep(policy.deniedPaths),
+  ]);
+  return { readwritePaths, readonlyPaths, deniedPaths };
+};
+
+/**
+ * Every folder above an allowed path, which a Windows command may query and
+ * list but not read: names in those folders, never their files' contents.
+ */
+export const enumerableAncestors = (paths: readonly string[]) => {
+  const allowed = new Set(paths);
+  const ancestors = new Set<string>();
+  for (const path of paths) {
+    for (let parent = win32.dirname(path); !ancestors.has(parent); parent = win32.dirname(parent)) {
+      if (!allowed.has(parent)) ancestors.add(parent);
+      if (win32.dirname(parent) === parent) break;
+    }
+  }
+  return [...ancestors];
+};
+
 /**
  * Outbound goes only to the egress proxy. Local services, a grant of their own,
  * open loopback both ways: Seatbelt has no private loopback, so a command
  * talking to itself (Gradle's daemon, a test server) needs the host's, and the
- * inbound half cannot be scoped by address. Windows needs that already for an
- * unpackaged proxy; there the token keeps commands from one another's grants.
+ * inbound half cannot be scoped by address. Windows proxy mode allows no
+ * loopback but the proxy, not even a command's own listener, so there the
+ * grant leaves proxy mode: loopback opens, direct egress stays denied, and the
+ * proxy variables the command already has reach the proxy as a host service.
  */
-const networkPolicy = (os: NodeJS.Platform, proxyUrl: string, local: boolean): NetworkPolicy => ({
-  egress: { default: "deny" },
-  ingress:
-    os === "win32" || local
-      ? { default: "allow", hostLoopback: "allow" }
-      : { default: "deny", hostLoopback: "deny" },
-  runtimeConfig: { networkProxy: proxyUrl },
-});
+export const networkPolicy = (
+  os: NodeJS.Platform,
+  proxyUrl: string,
+  local: boolean,
+): NetworkPolicy =>
+  os === "win32" && local
+    ? { egress: { default: "deny" }, ingress: { default: "allow", hostLoopback: "allow" } }
+    : {
+        egress: { default: "deny" },
+        ingress:
+          os === "win32" || local
+            ? { default: "allow", hostLoopback: "allow" }
+            : { default: "deny", hostLoopback: "deny" },
+        runtimeConfig: { networkProxy: proxyUrl },
+      };
 
 /**
  * Switches a person grants commands, in the same scopes as other grants:
@@ -291,6 +368,7 @@ export interface LaunchedProcess {
 export interface SandboxDependencies {
   readonly os: NodeJS.Platform;
   readonly support: () => PlatformSupport;
+  readonly backends: () => readonly AvailableBackend[];
   readonly launch: (request: ContainerRequest) => Promise<LaunchedProcess>;
   readonly grants: EgressGrants | null;
   readonly paths: PathGrants | null;
@@ -348,6 +426,7 @@ export class Sandbox extends Context.Service<
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
+            backends: getAvailableBackends,
             launch: spawn,
             grants,
             paths,
@@ -358,6 +437,22 @@ export class Sandbox extends Context.Service<
       ),
     );
 }
+
+/**
+ * What a Windows container needs from the host. An unpackaged proxy is
+ * reachable only through host loopback, and Node, npm and git fail unless the
+ * folders above their own can be queried (`enumeratePaths`). Builds without
+ * Process Security Environment 1.1 refuse both for every command. MXC after
+ * 1.0.0 also reports `identitylessLoopbackProxy` for older hosts it can serve
+ * a proxy on; reconsider on a bump.
+ */
+const WINDOWS_NEEDS = ["ingressHostLoopbackAllow", "filesystemEnumeratePaths"] as const;
+const windowsReady = (backends: readonly AvailableBackend[]) =>
+  backends.some(
+    (backend) =>
+      backend.backend === "processcontainer" &&
+      WINDOWS_NEEDS.every((need) => backend.capabilities.includes(need)),
+  );
 
 const unavailable = (message: string) =>
   new DesktopError({ reason: "sandbox-unavailable", message });
@@ -424,20 +519,27 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       Effect.sync(() => {
         if (closed) return { kind: "unsupported", reason: "The sandbox is closing." } as const;
         let support: PlatformSupport;
+        let backends: readonly AvailableBackend[];
         try {
           support = dependencies.support();
+          backends = os === "win32" ? dependencies.backends() : [];
         } catch {
           return {
             kind: "unsupported",
             reason: "Could not check the sandbox requirements.",
           } as const;
         }
-        if (support.isSupported && support.availableMethods.length > 0)
-          return { kind: "ready" } as const;
-        return {
-          kind: "unsupported",
-          reason: support.reason || "Running commands is not supported on this computer.",
-        } as const;
+        if (!support.isSupported || support.availableMethods.length === 0)
+          return {
+            kind: "unsupported",
+            reason: support.reason || "Running commands is not supported on this computer.",
+          } as const;
+        if (os === "win32" && !windowsReady(backends))
+          return {
+            kind: "unsupported",
+            reason: "Commands need a newer Windows build. Install the latest Windows updates.",
+          } as const;
+        return { kind: "ready" } as const;
       });
 
     const run = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
@@ -495,23 +597,21 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         const removeSettings = Effect.promise(() =>
           rm(commandDirectory, { recursive: true, force: true }),
         );
-        const request: ContainerRequest = {
-          command: shellCommand(input.command, os),
-          workingDirectory: input.cwd,
-          environment: withSsh(
-            commandEnvironment(
-              process.env,
-              input.cwd,
-              {
-                ...proxyEnvironment(proxyUrl),
-                ...jvmEnvironment(proxyUrl, cache, settingsFile, os),
-              },
-              os,
-            ),
-            ssh,
-            agent,
+        const environment = withSsh(
+          commandEnvironment(
+            process.env,
+            input.cwd,
+            {
+              ...proxyEnvironment(proxyUrl),
+              ...jvmEnvironment(proxyUrl, cache, settingsFile, os),
+            },
+            os,
           ),
-          filesystem: filesystemPolicy({
+          ssh,
+          agent,
+        );
+        const filesystem = yield* Effect.promise(async () => {
+          const policy = filesystemPolicy({
             os,
             // The command's own folder: ssh records host keys there. The agent's socket, when the
             // chat allows it: connecting needs it writable.
@@ -523,7 +623,14 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             ],
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
-          }),
+          });
+          return os === "win32" ? existingOnly(policy) : policy;
+        });
+        const request: ContainerRequest = {
+          command: shellCommand(input.command, os),
+          workingDirectory: input.cwd,
+          environment,
+          filesystem,
           // Seatbelt blocks directory services, and ssh refuses to start when it cannot
           // name the current user; this one lookup answers that and nothing more.
           ...(os === "darwin"
@@ -533,6 +640,27 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                   config: { extraMachLookups: ["com.apple.system.opendirectoryd.libinfo"] },
                 },
               }
+            : {}),
+          // Node's realpath, npm and git stat every folder above the one they run in.
+          ...(os === "win32"
+            ? {
+                containment: {
+                  type: "processcontainer" as const,
+                  config: {
+                    filesystem: {
+                      enumeratePaths: enumerableAncestors([
+                        ...filesystem.readwritePaths,
+                        ...filesystem.readonlyPaths,
+                      ]),
+                    },
+                  },
+                },
+              }
+            : {}),
+          // MXC's default disables Win32k, and every program linking user32 (PowerShell, git,
+          // where, whoami) then dies at load with no output. Clipboard and input stay denied.
+          ...(os === "win32"
+            ? { ui: { disable: false, clipboard: "none" as const, allowInputInjection: false } }
             : {}),
           network: networkPolicy(os, proxyUrl, granted.has("local-services")),
           timeoutMs: input.timeoutMs,

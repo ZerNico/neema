@@ -440,10 +440,28 @@ process container on Windows. Each command is one request carrying its whole
 policy, so commands run concurrently and share no sandbox state. Availability is
 what MXC reports for the machine; where it has no backend (an Intel Mac, a
 Windows build without process containers) commands are unavailable, never run
-unconfined. The Linux and Windows backends have not been exercised end to end.
+unconfined. The Linux backend has not been exercised end to end.
+
+Windows also needs two capabilities MXC reports per host, and without either
+commands are unavailable with a request to update Windows. Host-loopback ingress
+is the only way an unpackaged proxy is reachable; the other, `allowedProxyPeer`,
+needs the proxy to run as a package or AppContainer identity. Enumeration lets a
+command query and list the folders above what it may use, never read their files:
+Node's realpath, npm and git stat every one of them up to the drive root and fail
+without it. Both arrived with Process Security Environment 1.1 ingress; 26300.9711
+has them and was exercised end to end, 26300.9457 had neither. On a supported
+build anything not granted is unreadable, a folder made at a drive root included.
+
+The container keeps Win32k on (`ui.disable: false`). MXC's default turns it off,
+and every program linking user32 (PowerShell, `where`, `whoami`) then fails at
+load with `0xC0000142` and no output. Clipboard and input injection stay denied;
+what is given up is that attack surface and the ability to open windows. A policy
+naming a missing path is refused whole on Windows, so missing paths are dropped,
+which is safe for denied ones: nothing can create them outside a writable folder.
 
 Reads are allow-listed: the system's own directories and the toolchain folders
-under home (version managers, package stores, caches, git's identity). The rest
+under home (version managers, package stores, caches, git's identity, and on
+Windows the AppData and scoop folders installers use). The rest
 of home is unreadable, except one exact file or folder the person lets commands
 read through a path request, for the answer, the chat or every chat. A disk root,
 home itself, a folder above it, or anything holding credentials is refused before
@@ -459,10 +477,9 @@ A tool installed somewhere unusual fails with a denial naming the path.
 The only network destination is the [egress proxy](egress-proxy.md). Each command
 gets a token, and its proxy URL goes in MXC's `networkProxy`: MXC replaces the
 proxy variables with that URL, so a token placed anywhere else never arrives.
-On Windows an unpackaged proxy needs host loopback opened, which lets commands
-reach other local services; there the token is what keeps one command's grants
-from another's. A refused tunnel comes back as a violation line for that command,
-which the site turns into an offer to request access. Grants are exact
+Windows proxy mode needs host loopback opened, yet lets a command reach the proxy
+and no other loopback address. A refused tunnel comes back as a violation line
+for that command, which the site turns into an offer to request access. Grants are exact
 `host:port` pairs kept by `egress-grants.ts`, never by the proxy, for the asking
 answer, the chat, or every chat. Chat and always grants live in the profile;
 answer grants live in memory and end when the page's work state stops listing
@@ -476,8 +493,11 @@ Loopback is a grant of its own, local network services, in the same three
 scopes. Seatbelt has no private loopback: a command talking to itself, as Gradle
 does with its daemon and file-lock socket, needs the host's, and the inbound
 half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
-from the network. Without the grant a command can bind nothing. Windows already
-opens loopback for the proxy.
+from the network. Without the grant a command can bind nothing. Windows proxy
+mode refuses even a command's own listener, so there the grant leaves proxy mode:
+loopback opens to the host, direct egress stays denied, and the proxy variables
+the command already carries reach the proxy as an ordinary local service, the
+token keeping one command's grants from another's.
 
 Java ignores the proxy variables. Gradle gets the proxy in `GRADLE_OPTS`, which
 reaches its daemon without being printed, and its user home in the workspace
