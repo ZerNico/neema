@@ -25,6 +25,7 @@ import {
   type GrantTarget,
 } from "./egress-grants.ts";
 import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
+import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 
 const home = homedir();
@@ -202,14 +203,24 @@ export const filesystemPolicy = (input: PolicyInput) => ({
  * proxy by opening host loopback; there the proxy's token is what keeps
  * commands from one another's grants.
  */
-const networkPolicy = (os: NodeJS.Platform, proxyUrl: string): NetworkPolicy => ({
+/**
+ * Outbound goes only to the egress proxy. Local services, a grant of their own,
+ * open loopback both ways: Seatbelt has no private loopback, so a command
+ * talking to itself (Gradle's daemon, a test server) needs the host's, and the
+ * inbound half cannot be scoped by address. Windows needs that already for an
+ * unpackaged proxy; there the token keeps commands from one another's grants.
+ */
+const networkPolicy = (os: NodeJS.Platform, proxyUrl: string, local: boolean): NetworkPolicy => ({
   egress: { default: "deny" },
   ingress:
-    os === "win32"
+    os === "win32" || local
       ? { default: "allow", hostLoopback: "allow" }
       : { default: "deny", hostLoopback: "deny" },
   runtimeConfig: { networkProxy: proxyUrl },
 });
+
+/** The one entry a local-services grant holds. */
+const LOCAL = "local";
 
 const shellCommand = (command: string, os: NodeJS.Platform) =>
   os === "win32"
@@ -219,6 +230,8 @@ const shellCommand = (command: string, os: NodeJS.Platform) =>
 export interface Permissions {
   readonly network: readonly EgressGrant[];
   readonly paths: readonly string[];
+  /** Whether commands may use local network services. */
+  readonly local: boolean;
 }
 
 export interface SandboxContext {
@@ -260,6 +273,7 @@ export interface SandboxDependencies {
   readonly launch: (request: ContainerRequest) => Promise<LaunchedProcess>;
   readonly grants: EgressGrants | null;
   readonly paths: PathGrants | null;
+  readonly local: ScopedGrants | null;
   readonly userFolders: () => ReadonlyArray<string>;
 }
 
@@ -283,6 +297,9 @@ export class Sandbox extends Context.Service<
     /** Lets commands read one more path; resolves to the real path granted. */
     approvePath(target: GrantTarget, path: string): Effect.Effect<string, DesktopError>;
     revokePath(target: GrantTarget, path: string): Effect.Effect<void, DesktopError>;
+    /** Lets commands use local network services, from their next run. */
+    approveLocal(target: GrantTarget): Effect.Effect<void, DesktopError>;
+    revokeLocal(target: GrantTarget): Effect.Effect<void, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (directory: string) =>
@@ -293,15 +310,17 @@ export class Sandbox extends Context.Service<
           Promise.all([
             loadEgressGrants(directory),
             loadPathGrants(directory, { home, denied: [...CREDENTIAL_DENIES, directory] }),
+            loadScopedGrants(directory, "local-grants.json", (entry) => entry === LOCAL),
           ]),
         ),
-        ([grants, paths]) =>
+        ([grants, paths, local]) =>
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
             launch: spawn,
             grants,
             paths,
+            local,
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
           }),
       ),
@@ -416,11 +435,15 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           filesystem: filesystemPolicy({
             os,
             writable: input.allowWrite,
-            readable: dependencies.paths?.readable(input.context) ?? [],
+            readable: dependencies.paths?.applying(input.context) ?? [],
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
           }),
-          network: networkPolicy(os, proxyUrl),
+          network: networkPolicy(
+            os,
+            proxyUrl,
+            (dependencies.local?.applying(input.context) ?? []).includes(LOCAL),
+          ),
           timeoutMs: input.timeoutMs,
         };
         const finished = yield* Effect.acquireUseRelease(
@@ -488,6 +511,22 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           }),
       }).pipe(Effect.uninterruptible);
 
+    // Applies from the next command: a running one keeps the policy it started with.
+    const changeLocal = (target: GrantTarget, add: boolean): Effect.Effect<void, DesktopError> =>
+      Effect.tryPromise({
+        try: async () => {
+          const local = dependencies.local;
+          if (!local) throw new Error("No local services grant store is available.");
+          if (add) await local.add(target, LOCAL);
+          else await local.remove(target, LOCAL);
+        },
+        catch: (cause) =>
+          new DesktopError({
+            reason: "failed",
+            message: `Could not change local services access: ${String(cause)}`,
+          }),
+      });
+
     return Sandbox.of({
       availability,
       setUp: availability,
@@ -496,18 +535,23 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         Effect.sync(() => ({
           network: grants?.list(target) ?? [],
           paths: dependencies.paths?.list(target) ?? [],
+          local: (dependencies.local?.list(target) ?? []).includes(LOCAL),
         })),
       forgetChat: (chat) =>
         Effect.promise(async () => {
           for (const id of (await grants?.forgetChat(chat)) ?? []) proxy.regrant(id);
           await dependencies.paths?.forgetChat(chat);
+          await dependencies.local?.forgetChat(chat);
         }),
+      approveLocal: (target) => changeLocal(target, true),
+      revokeLocal: (target) => changeLocal(target, false),
       approveNetwork: (target, grant) => changeNetwork(target, grant, true),
       revokeNetwork: (target, grant) => changeNetwork(target, grant, false),
       keepAnswers: (origin, live) =>
         Effect.sync(() => {
           for (const id of grants?.keepAnswers(origin, live) ?? []) proxy.regrant(id);
           dependencies.paths?.keepAnswers(origin, live);
+          dependencies.local?.keepAnswers(origin, live);
         }),
       approvePath: (target, path) =>
         Effect.tryPromise({

@@ -56,7 +56,11 @@ describe("desktop handler registration", () => {
 
   it("offers network and path requests only when commands are ready", () => {
     const deps = { rowIdFor: () => Effect.succeed(undefined) };
-    for (const name of ["request_network_access", "request_path_access"]) {
+    for (const name of [
+      "request_network_access",
+      "request_path_access",
+      "request_local_services",
+    ]) {
       expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(name);
       expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(name);
     }

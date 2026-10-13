@@ -122,6 +122,20 @@ describe("DesktopActivityBlock", () => {
     expect(decide).toHaveBeenLastCalledWith("allow-chat");
   });
 
+  it("warns what local network services open before asking", async () => {
+    const decide = vi.fn();
+    show(
+      <DesktopActivityBlock
+        activity={running({ name: "request_local_services", args: {} })}
+        approval={{ kind: "local", decide }}
+      />,
+    );
+    expect(screen.getByText("Let commands use local network services")).toBeInTheDocument();
+    expect(screen.getByText(/could be reached from your network/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow for this answer" }));
+    expect(decide).toHaveBeenLastCalledWith("allow");
+  });
+
   it("names a private network request as one", () => {
     show(
       <DesktopActivityBlock

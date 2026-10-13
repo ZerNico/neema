@@ -4,6 +4,8 @@ import {
   NETWORK_REVOKE,
   PATHS_LIST,
   PATHS_REVOKE,
+  LOCAL_GET,
+  LOCAL_REVOKE,
   type DesktopNetwork,
 } from "@chat/desktop-rpc";
 
@@ -13,4 +15,6 @@ export const makeNetworkBridge = (ipc: Pick<IpcRenderer, "invoke">): DesktopNetw
     ipc.invoke(NETWORK_REVOKE, { host, port, privateNetwork }),
   listPaths: () => ipc.invoke(PATHS_LIST),
   revokePath: (path) => ipc.invoke(PATHS_REVOKE, { path }),
+  localAllowed: () => ipc.invoke(LOCAL_GET),
+  revokeLocal: () => ipc.invoke(LOCAL_REVOKE),
 });

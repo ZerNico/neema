@@ -369,7 +369,7 @@ export const NetworkPermission = Schema.Struct({
 });
 export type NetworkPermission = typeof NetworkPermission.Type;
 
-/** One thing a chat may reach: a network destination or a readable path. */
+/** One thing a chat may reach: a network destination, a readable path, or local services. */
 export const ChatPermission = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["network"]),
@@ -378,6 +378,7 @@ export const ChatPermission = Schema.Union([
     privateNetwork: Schema.Boolean,
   }),
   Schema.Struct({ kind: Schema.Literals(["path"]), path: Schema.String }),
+  Schema.Struct({ kind: Schema.Literals(["local"]) }),
 ]);
 export type ChatPermission = typeof ChatPermission.Type;
 

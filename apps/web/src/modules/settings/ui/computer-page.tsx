@@ -157,6 +157,25 @@ export function ComputerPage() {
       ) : null}
       {network ? (
         <Section
+          title="Local network services"
+          description="Lets commands in every Work chat reach services on this computer and accept connections, which build tools like Gradle need. A server a command starts could be reached from your network."
+        >
+          <AllowedList
+            queryKey={["desktop-local-grant"]}
+            load={async () => ((await network.localAllowed()) ? ["Allowed for every chat"] : [])}
+            remove={() => network.revokeLocal()}
+            label={(item) => item}
+            icon={ComputerIcon}
+            empty="Asked in each chat."
+            confirmRemove={() => ({
+              title: "Stop allowing local network services?",
+              description: "Work will ask before commands use them again.",
+            })}
+          />
+        </Section>
+      ) : null}
+      {network ? (
+        <Section
           title="What commands can read"
           description="Commands in every Work chat can read these files and folders, beyond the folders attached to a chat."
         >

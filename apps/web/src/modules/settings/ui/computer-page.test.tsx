@@ -39,6 +39,8 @@ describe("ComputerPage", () => {
       revoke: vi.fn().mockResolvedValue(undefined),
       listPaths: vi.fn().mockResolvedValue([]),
       revokePath: vi.fn().mockResolvedValue(undefined),
+      localAllowed: vi.fn().mockResolvedValue(false),
+      revokeLocal: vi.fn().mockResolvedValue(undefined),
       ...overrides,
     };
     Reflect.set(globalThis, "__chatDesktop", { network });
@@ -57,6 +59,7 @@ describe("ComputerPage", () => {
     expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
       "This computer",
       "Where commands can connect",
+      "Local network services",
       "What commands can read",
     ]);
     await user.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
@@ -85,6 +88,18 @@ describe("ComputerPage", () => {
     await waitFor(() => expect(network.revokePath).toHaveBeenCalledWith("/opt/specs"));
   });
 
+  it("shows local services allowed for every chat and stops allowing them", async () => {
+    const user = userEvent.setup();
+    const network = desktop({ localAllowed: vi.fn().mockResolvedValue(true) });
+    renderPage();
+    expect(await screen.findByText("Allowed for every chat")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(network.revokeLocal).toHaveBeenCalledTimes(1));
+  });
+
   it("shows loading, failure and an empty list as rows of the same card", async () => {
     const user = userEvent.setup();
     desktop({ list: vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]) });
@@ -93,5 +108,6 @@ describe("ComputerPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load this list.");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findAllByText("Nothing yet.")).toHaveLength(2);
+    expect(screen.getByText("Asked in each chat.")).toBeInTheDocument();
   });
 });

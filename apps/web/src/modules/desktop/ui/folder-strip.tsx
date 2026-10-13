@@ -1,6 +1,7 @@
 import {
   Alert01Icon,
   Cancel01Icon,
+  ComputerIcon,
   Folder01Icon,
   FolderAddIcon,
   FolderShared01Icon,
@@ -254,7 +255,9 @@ function PermissionPicker({
 const permissionLabel = (permission: ChatPermission) =>
   permission.kind === "path"
     ? permission.path
-    : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
+    : permission.kind === "local"
+      ? "Local network services"
+      : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
 
 /**
  * What commands in this chat may reach beyond the defaults. Loaded when the
@@ -287,7 +290,13 @@ function ChatAccessList({ access }: { access: ChatAccess }) {
               aria-label={`Remove ${permissionLabel(permission)}`}
             >
               <HugeiconsIcon
-                icon={permission.kind === "path" ? FolderShared01Icon : InternetIcon}
+                icon={
+                  permission.kind === "path"
+                    ? FolderShared01Icon
+                    : permission.kind === "local"
+                      ? ComputerIcon
+                      : InternetIcon
+                }
                 strokeWidth={2}
               />
               <span className="min-w-0 flex-1 truncate">{permissionLabel(permission)}</span>

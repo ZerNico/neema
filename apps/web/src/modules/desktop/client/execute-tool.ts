@@ -382,6 +382,30 @@ export const executeDesktopTool = (
           },
         );
       }
+      case "request_local_services":
+        return Effect.map(
+          client.requestLocalAccess({
+            callId: activity.callId,
+            conversationId,
+            generationId: activity.generationId,
+            scope: activity.scope,
+          }),
+          (receipt) => {
+            const lasting =
+              receipt.scope === "always"
+                ? "for every chat"
+                : receipt.scope === "chat"
+                  ? "for this chat"
+                  : "for this answer";
+            return {
+              v: 1 as const,
+              ok: true,
+              summary: `Allowed local network services ${lasting}`,
+              detail: `Commands may now use local network services ${lasting}. You may now run or retry the command.`,
+              truncated: false,
+            };
+          },
+        );
       case "request_path_access": {
         if (!path) return Effect.succeed(desktopFailure("No path named", "Name an absolute path."));
         return Effect.map(

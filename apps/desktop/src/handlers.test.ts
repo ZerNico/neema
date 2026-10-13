@@ -79,8 +79,12 @@ const stubSandbox = Layer.succeed(
     permissions: (target) =>
       Effect.succeed(
         target.scope === "always"
-          ? { network: [{ host: "github.com", port: 22, privateNetwork: false }], paths: [] }
-          : { network: [], paths: ["/opt/specs"] },
+          ? {
+              network: [{ host: "github.com", port: 22, privateNetwork: false }],
+              paths: [],
+              local: false,
+            }
+          : { network: [], paths: ["/opt/specs"], local: true },
       ),
     forgetChat: (chat) =>
       Effect.sync(() => {
@@ -96,6 +100,8 @@ const stubSandbox = Layer.succeed(
         keptAnswers.push({ origin, live: [...live] });
       }),
     approvePath: (_target, path) => Effect.succeed(path),
+    approveLocal: () => Effect.void,
+    revokeLocal: () => Effect.void,
     revokePath: (target, path) =>
       Effect.sync(() => {
         revokedPaths.push({ target, path });
@@ -1412,7 +1418,7 @@ describe("network permission boundary", () => {
     expect(
       await Effect.runPromise(handlers.chatPermissions({ conversationId: CONVERSATION })),
     ).toEqual({
-      chat: [{ kind: "path", path: "/opt/specs" }],
+      chat: [{ kind: "path", path: "/opt/specs" }, { kind: "local" }],
       always: [{ kind: "network", host: "github.com", port: 22, privateNetwork: false }],
     });
   });

@@ -16,6 +16,7 @@ const MODEL_OPERATIONS = new Set([
   "runCommand",
   "requestNetworkAccess",
   "requestPathAccess",
+  "requestLocalAccess",
 ]);
 
 /** Operations whose result must be kept for a while: running them twice is a second edit. */
@@ -28,6 +29,7 @@ const SIDE_EFFECTS = new Set([
   "runCommand",
   "requestNetworkAccess",
   "requestPathAccess",
+  "requestLocalAccess",
 ]);
 
 // Workspace staging, promotion, cloning, grants, and cleanup deliberately stay

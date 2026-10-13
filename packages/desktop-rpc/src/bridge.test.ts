@@ -34,6 +34,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   requestNetworkAccess: unimplemented("requestNetworkAccess"),
   requestPathAccess: unimplemented("requestPathAccess"),
   chatPermissions: unimplemented("chatPermissions"),
+  requestLocalAccess: unimplemented("requestLocalAccess"),
   revokeChatPermission: unimplemented("revokeChatPermission"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),

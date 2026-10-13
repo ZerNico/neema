@@ -8,6 +8,7 @@ import { Effect, Exit, Fiber, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadEgressGrants } from "./egress-grants.ts";
 import { loadPathGrants } from "./path-grants.ts";
+import { loadScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 import {
   filesystemPolicy,
@@ -163,12 +164,14 @@ const harness = async (launch: SandboxDependencies["launch"]) => {
   const root = await directory();
   const grants = await loadEgressGrants(root);
   const paths = await loadPathGrants(root, { home, denied: [root] });
+  const local = await loadScopedGrants(root, "local-grants.json", (entry) => entry === "local");
   const dependencies: SandboxDependencies = {
     os: "darwin",
     support: () => ({ isSupported: true, availableMethods: ["seatbelt"] }),
     launch,
     grants,
     paths,
+    local,
     userFolders: () => [],
   };
   const scope = await Effect.runPromise(Scope.make());
@@ -304,6 +307,7 @@ describe("run", () => {
           },
           grants,
           paths: null,
+          local: null,
           userFolders: () => [],
         }),
         scope,
@@ -346,14 +350,17 @@ describe("network approvals", () => {
     const shared = await directory();
     await Effect.runPromise(sandbox.approveNetwork(target, site));
     const granted = await Effect.runPromise(sandbox.approvePath(target, shared));
+    await Effect.runPromise(sandbox.approveLocal(target));
     expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
       network: [site],
       paths: [granted],
+      local: true,
     });
     await Effect.runPromise(sandbox.forgetChat(chat));
     expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
       network: [],
       paths: [],
+      local: false,
     });
     await close();
   });
@@ -412,6 +419,31 @@ describe("path approvals", () => {
       const exit = await Effect.runPromiseExit(sandbox.approvePath({ scope: "always" }, path));
       expect(exit).toMatchObject({ _tag: "Failure" });
     }
+    await close();
+  });
+});
+
+describe("local services", () => {
+  it("opens loopback only for the answers it applies to", async () => {
+    const requests: ContainerRequest[] = [];
+    const { sandbox, close } = await harness(async (request) => {
+      requests.push(request);
+      const child = fakeProcess();
+      child.finish(0);
+      return child.process;
+    });
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    await Effect.runPromise(sandbox.run(run()));
+    await Effect.runPromise(sandbox.approveLocal({ scope: "chat", chat }));
+    await Effect.runPromise(sandbox.run(run()));
+    await Effect.runPromise(
+      sandbox.run(run({ context: { ...chat, conversationId: "chat-b", attempt: "a" } })),
+    );
+    expect(requests.map((request) => request.network?.ingress)).toEqual([
+      { default: "deny", hostLoopback: "deny" },
+      { default: "allow", hostLoopback: "allow" },
+      { default: "deny", hostLoopback: "deny" },
+    ]);
     await close();
   });
 });

@@ -10,6 +10,7 @@ import {
   FolderTransferIcon,
   NoInternetIcon,
   FolderShared01Icon,
+  ComputerIcon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
@@ -53,6 +54,7 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
   request_path_access: FolderShared01Icon,
+  request_local_services: ComputerIcon,
 };
 
 const iconOf = (name: DesktopToolActivity["name"]) =>
@@ -186,6 +188,8 @@ const runningLabel = (
       return what ? `Requesting network access to ${what}` : "Requesting network access";
     case "request_path_access":
       return what ? `Requesting read access to ${what}` : "Requesting read access";
+    case "request_local_services":
+      return "Requesting local network services";
   }
 };
 
@@ -256,6 +260,8 @@ const approvalTitle = (
       return "Run a program on this computer";
     case "path":
       return "Let commands read this";
+    case "local":
+      return "Let commands use local network services";
     case "network":
       return activity.args?.privateNetwork === true
         ? "Allow access to your private network"
@@ -406,8 +412,16 @@ function ApprovalCard({
         ) : null}
         {approval.kind === "site" ? (
           <ScopeChoices decide={approval.decide} once="Allow once" />
-        ) : approval.kind === "network" || approval.kind === "path" ? (
-          <ScopeChoices decide={approval.decide} once="Allow for this answer" />
+        ) : approval.kind === "network" || approval.kind === "path" || approval.kind === "local" ? (
+          <>
+            {approval.kind === "local" ? (
+              <p className="text-muted-foreground text-xs">
+                Commands could reach services running on this computer, and a server a command
+                starts could be reached from your network.
+              </p>
+            ) : null}
+            <ScopeChoices decide={approval.decide} once="Allow for this answer" />
+          </>
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>

@@ -287,6 +287,21 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
+  /**
+   * Records that the person let commands use local network services: loopback
+   * both ways, for the answer that asked, the chat, or every chat.
+   */
+  Rpc.make("requestLocalAccess", {
+    payload: {
+      conversationId: WorkspaceId,
+      callId: Schema.String,
+      generationId: Schema.String,
+      scope: GrantScope,
+    },
+    success: Schema.Struct({ scope: GrantScope }),
+    error: DesktopError,
+  }),
+
   /** The network destinations and paths a chat's commands may reach beyond the defaults. */
   Rpc.make("chatPermissions", {
     payload: { conversationId: WorkspaceId },

@@ -30,6 +30,7 @@ export const firstDecision = (
       return preauthorized ? "run" : "check-site";
     case "network":
     case "path":
+    case "local":
     case "delete":
       return "ask";
     case null:

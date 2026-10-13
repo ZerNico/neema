@@ -360,6 +360,7 @@ export const makeHandlers = (shell: Shell) =>
           const listed = (permissions: Permissions): ChatPermission[] => [
             ...permissions.network.map((grant) => ({ kind: "network" as const, ...grant })),
             ...permissions.paths.map((path) => ({ kind: "path" as const, path })),
+            ...(permissions.local ? [{ kind: "local" as const }] : []),
           ];
           const chat = yield* sandbox.permissions({ scope: "chat", chat: key(conversationId) });
           const always = yield* sandbox.permissions({ scope: "always" });
@@ -369,6 +370,7 @@ export const makeHandlers = (shell: Shell) =>
       revokeChatPermission: ({ conversationId, permission }) => {
         const target = { scope: "chat" as const, chat: key(conversationId) };
         if (permission.kind === "path") return sandbox.revokePath(target, permission.path);
+        if (permission.kind === "local") return sandbox.revokeLocal(target);
         const grant = normalizeEgressGrant(
           permission.host,
           permission.port,
@@ -948,6 +950,19 @@ export const makeHandlers = (shell: Shell) =>
             grant,
           );
           return { ...grant, scope };
+        }),
+
+      requestLocalAccess: ({ conversationId, generationId, scope }) =>
+        Effect.gen(function* () {
+          const chat = key(conversationId);
+          yield* sandbox.approveLocal(
+            scope === "always"
+              ? { scope }
+              : scope === "chat"
+                ? { scope, chat }
+                : { scope, answer: { ...chat, attempt: generationId } },
+          );
+          return { scope };
         }),
 
       requestPathAccess: ({ conversationId, generationId, path, scope }) =>

@@ -45,6 +45,8 @@ import {
   NETWORK_REVOKE,
   PATHS_LIST,
   PATHS_REVOKE,
+  LOCAL_GET,
+  LOCAL_REVOKE,
   makeDesktopResponder,
   refusalReply,
 } from "@chat/desktop-rpc";
@@ -614,6 +616,14 @@ void app.whenReady().then(async () => {
     await runtime.runPromise(
       Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(always, grant)),
     );
+  });
+  ipcMain.handle(LOCAL_GET, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    return (await permissions()).local;
+  });
+  ipcMain.handle(LOCAL_REVOKE, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeLocal(always)));
   });
   ipcMain.handle(PATHS_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

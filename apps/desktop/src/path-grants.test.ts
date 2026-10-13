@@ -70,12 +70,12 @@ describe("loadPathGrants", () => {
     await grants.add({ scope: "always" }, "/opt/always");
     await grants.add({ scope: "chat", chat }, "/opt/chat");
     await grants.add({ scope: "answer", answer }, "/opt/answer");
-    expect(grants.readable(answer)).toEqual(["/opt/always", "/opt/chat", "/opt/answer"]);
-    expect(grants.readable({ ...answer, attempt: "attempt-2" })).toEqual([
+    expect(grants.applying(answer)).toEqual(["/opt/always", "/opt/chat", "/opt/answer"]);
+    expect(grants.applying({ ...answer, attempt: "attempt-2" })).toEqual([
       "/opt/always",
       "/opt/chat",
     ]);
-    expect(grants.readable({ ...chat, conversationId: "chat-b", attempt: "x" })).toEqual([
+    expect(grants.applying({ ...chat, conversationId: "chat-b", attempt: "x" })).toEqual([
       "/opt/always",
     ]);
   });
@@ -85,9 +85,9 @@ describe("loadPathGrants", () => {
     await grants.add({ scope: "chat", chat }, "/opt/chat");
     await grants.add({ scope: "answer", answer }, "/opt/answer");
     grants.keepAnswers(chat.origin, []);
-    expect(grants.readable(answer)).toEqual(["/opt/chat"]);
+    expect(grants.applying(answer)).toEqual(["/opt/chat"]);
     await grants.forgetChat(chat);
-    expect(grants.readable(answer)).toEqual([]);
+    expect(grants.applying(answer)).toEqual([]);
   });
 
   it("keeps always and chat grants across a reload, never answer grants", async () => {
@@ -97,7 +97,7 @@ describe("loadPathGrants", () => {
     await grants.add({ scope: "chat", chat }, "/opt/chat");
     await grants.add({ scope: "answer", answer }, "/opt/answer");
     const reloaded = await loadPathGrants(root, rules);
-    expect(reloaded.readable(answer)).toEqual(["/opt/always", "/opt/chat"]);
+    expect(reloaded.applying(answer)).toEqual(["/opt/always", "/opt/chat"]);
     expect(JSON.parse(await readFile(join(root, "path-grants.json"), "utf8"))).toEqual({
       always: ["/opt/always"],
       chats: { "https://chat.example chat-a": ["/opt/chat"] },
@@ -114,6 +114,6 @@ describe("loadPathGrants", () => {
       }),
     );
     const grants = await loadPathGrants(root, rules);
-    expect(grants.readable(answer)).toEqual(["/opt/ok"]);
+    expect(grants.applying(answer)).toEqual(["/opt/ok"]);
   });
 });

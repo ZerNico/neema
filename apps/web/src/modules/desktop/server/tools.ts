@@ -194,6 +194,19 @@ export const requestPathAccessTool = Tool.make("request_path_access", {
   failureMode: "return",
 });
 
+export const requestLocalServicesTool = Tool.make("request_local_services", {
+  description:
+    "Ask the user to let commands use local network services on their computer: connect to " +
+    "servers on localhost and accept connections. Build tools such as Gradle, test suites " +
+    "that start a local server, and dev servers need it. Use it when a command fails with a " +
+    "socket or connection error on localhost, such as Gradle not reaching its daemon or " +
+    "'Operation not permitted' binding a port. Wait for approval before running or retrying " +
+    "the command. The user decides whether it lasts for this answer, this chat, or every chat.",
+  parameters: Tool.EmptyParams,
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export interface DesktopToolDeps {
   /** Waits for the durable row and its owned external registration to exist. */
   readonly rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
@@ -259,7 +272,13 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
   ] as const;
   return {
     toolkit: deps.commands
-      ? Toolkit.make(...files, runCommandTool, requestNetworkAccessTool, requestPathAccessTool)
+      ? Toolkit.make(
+          ...files,
+          runCommandTool,
+          requestNetworkAccessTool,
+          requestPathAccessTool,
+          requestLocalServicesTool,
+        )
       : Toolkit.make(...files),
     handlers: {
       list_folder: handle("list_folder", DESKTOP_TIMEOUTS.quick),
@@ -280,6 +299,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
             run_command: handle("run_command", DESKTOP_TIMEOUTS.command),
             request_network_access: handle("request_network_access", DESKTOP_TIMEOUTS.command),
             request_path_access: handle("request_path_access", DESKTOP_TIMEOUTS.command),
+            request_local_services: handle("request_local_services", DESKTOP_TIMEOUTS.command),
           }
         : {}),
     },

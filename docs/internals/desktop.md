@@ -472,6 +472,13 @@ removes its own grants from the permissions menu; every-chat grants are removed
 in Settings › This computer. Both stores forget a chat when its workspace is
 discarded, which happens once the chat is purged and Undo is gone.
 
+Loopback is a grant of its own, local network services, in the same three
+scopes. Seatbelt has no private loopback: a command talking to itself, as Gradle
+does with its daemon and file-lock socket, needs the host's, and the inbound
+half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
+from the network. Without the grant a command can bind nothing. Windows already
+opens loopback for the proxy.
+
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills
 it; a detached server a command starts dies with it.

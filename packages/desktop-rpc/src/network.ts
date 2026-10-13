@@ -12,12 +12,17 @@ export const NETWORK_LIST = "chat-desktop:network-list" as const;
 export const NETWORK_REVOKE = "chat-desktop:network-revoke" as const;
 export const PATHS_LIST = "chat-desktop:paths-list" as const;
 export const PATHS_REVOKE = "chat-desktop:paths-revoke" as const;
+export const LOCAL_GET = "chat-desktop:local-get" as const;
+export const LOCAL_REVOKE = "chat-desktop:local-revoke" as const;
 
 export interface DesktopNetwork {
   list(): Promise<NetworkGrant[]>;
   revoke(grant: NetworkGrant): Promise<void>;
   listPaths(): Promise<string[]>;
   revokePath(path: string): Promise<void>;
+  /** Whether every chat's commands may use local network services. */
+  localAllowed(): Promise<boolean>;
+  revokeLocal(): Promise<void>;
 }
 
 export function readDesktopNetwork(): DesktopNetwork | null {
@@ -25,7 +30,7 @@ export function readDesktopNetwork(): DesktopNetwork | null {
   if (typeof channel !== "object" || channel === null) return null;
   const network = Reflect.get(channel, "network");
   if (typeof network !== "object" || network === null) return null;
-  for (const method of ["list", "revoke", "listPaths", "revokePath"])
+  for (const method of ["list", "revoke", "listPaths", "revokePath", "localAllowed", "revokeLocal"])
     if (typeof Reflect.get(network, method) !== "function") return null;
   return network as DesktopNetwork;
 }
