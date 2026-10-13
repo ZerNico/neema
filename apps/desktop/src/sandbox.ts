@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { homedir, platform } from "node:os";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import {
@@ -26,7 +27,7 @@ import {
 } from "./egress-grants.ts";
 import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
 import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
-import { commandEnvironment } from "./sandbox-environment.ts";
+import { commandEnvironment, jvmEnvironment, mavenSettings } from "./sandbox-environment.ts";
 
 const home = homedir();
 const inHome = (...segments: string[]) => join(home, ...segments);
@@ -428,14 +429,31 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           proxy.revoke(token);
           denials.delete(input.callId);
         });
+        // Holds the Maven settings, token included: private, readable, and gone with the command.
+        const settingsDirectory = yield* Effect.promise(() =>
+          mkdtemp(join(tmpdir(), "neema-command-")),
+        );
+        const settingsFile = join(settingsDirectory, "settings.xml");
+        const cache = join(input.cwd, ".cache");
+        yield* Effect.promise(() =>
+          writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
+        );
+        const removeSettings = Effect.promise(() =>
+          rm(settingsDirectory, { recursive: true, force: true }),
+        );
         const request: ContainerRequest = {
           command: shellCommand(input.command, os),
           workingDirectory: input.cwd,
-          environment: commandEnvironment(process.env, input.cwd, proxyEnvironment(proxyUrl), os),
+          environment: commandEnvironment(
+            process.env,
+            input.cwd,
+            { ...proxyEnvironment(proxyUrl), ...jvmEnvironment(proxyUrl, cache, settingsFile, os) },
+            os,
+          ),
           filesystem: filesystemPolicy({
             os,
             writable: input.allowWrite,
-            readable: dependencies.paths?.applying(input.context) ?? [],
+            readable: [...(dependencies.paths?.applying(input.context) ?? []), settingsDirectory],
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
           }),
@@ -475,7 +493,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             duration: Duration.millis(Math.max(0, input.timeoutMs)),
             orElse: () => Effect.fail(expired()),
           }),
-          Effect.ensuring(forget),
+          Effect.ensuring(Effect.andThen(forget, removeSettings)),
         );
         if (finished.timedOut) {
           return yield* Effect.fail(

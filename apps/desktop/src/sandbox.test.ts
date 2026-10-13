@@ -1,5 +1,5 @@
 import { connect } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -444,6 +444,35 @@ describe("local services", () => {
       { default: "allow", hostLoopback: "allow" },
       { default: "deny", hostLoopback: "deny" },
     ]);
+    await close();
+  });
+});
+
+describe("JVM settings", () => {
+  it("routes Gradle and Maven through the proxy without putting the token in JAVA_TOOL_OPTIONS", async () => {
+    let request: ContainerRequest | undefined;
+    let settings = "";
+    const { sandbox, close } = await harness(async (sent) => {
+      request = sent;
+      const file = /^-s (\S+)/.exec(sent.environment?.MAVEN_ARGS ?? "")?.[1] ?? "";
+      settings = await readFile(file, "utf8");
+      const child = fakeProcess();
+      child.finish(0);
+      return child.process;
+    });
+    await Effect.runPromise(sandbox.run(run()));
+    const env = request?.environment ?? {};
+    const token = new URL(request?.network?.runtimeConfig?.networkProxy ?? "").password;
+    expect(env.JAVA_TOOL_OPTIONS).toBe("-Djava.net.preferIPv4Stack=true");
+    expect(env.GRADLE_USER_HOME).toBe("/w/.cache/gradle");
+    expect(env.GRADLE_OPTS).toContain(`-Dhttps.proxyPassword=${token}`);
+    expect(env.GRADLE_OPTS).toContain("-Djdk.http.auth.tunneling.disabledSchemes=");
+    expect(settings).toContain(`<password>${token}</password>`);
+    expect(settings).toContain("<localRepository>/w/.cache/m2</localRepository>");
+    // The settings file goes with the command.
+    expect(env.MAVEN_ARGS).toContain("-Daether.connector.basic.threads=1");
+    const file = /^-s (\S+)/.exec(env.MAVEN_ARGS ?? "")?.[1] ?? "";
+    await expect(readFile(file, "utf8")).rejects.toThrow();
     await close();
   });
 });

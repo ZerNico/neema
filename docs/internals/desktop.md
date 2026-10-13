@@ -479,6 +479,15 @@ half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
 from the network. Without the grant a command can bind nothing. Windows already
 opens loopback for the proxy.
 
+Java ignores the proxy variables. Gradle gets the proxy in `GRADLE_OPTS`, which
+reaches its daemon without being printed, and its user home in the workspace
+cache. Maven gets a settings file per command, written to a private temporary
+folder and removed with it, naming the proxy and a workspace repository, and one
+download thread: its client answers a proxy challenge only on its first
+connection. `JAVA_TOOL_OPTIONS` carries only `-Djava.net.preferIPv4Stack=true`,
+because every JVM prints it on start and IPv6-mapped sockets miss Seatbelt's
+loopback rules.
+
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills
 it; a detached server a command starts dies with it.
