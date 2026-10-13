@@ -67,6 +67,12 @@ export interface ProxyOptions {
 export interface EgressProxy {
   listen(): Promise<{ port: number }>;
   issue(context: CommandContext): { token: string; proxyUrl: string };
+  /**
+   * A listener of the command's own, whose connections need no credentials: for
+   * a sandbox that reaches only that one port and refuses a URL carrying them.
+   * The token still revokes it, which also closes the listener.
+   */
+  issuePort(context: CommandContext): Promise<{ token: string; proxyUrl: string }>;
   revoke(token: string): void;
   regrant(grantId: string): void;
   tunnels(): ReadonlyArray<{

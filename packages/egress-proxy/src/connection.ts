@@ -76,6 +76,8 @@ export class Connection {
   constructor(
     private readonly client: Socket,
     private readonly services: Services,
+    /** Set on a command's own listener, where the port is the credential. */
+    private readonly preset?: Identity,
   ) {
     this.deadline = new Deadline(services.timers);
     this.idle = new Deadline(services.timers);
@@ -203,7 +205,11 @@ export class Connection {
   }
 
   private accept(request: RequestHead) {
-    this.identity = this.services.tokens.authenticate(request.headers);
+    this.identity = this.preset
+      ? this.preset.active
+        ? this.preset
+        : undefined
+      : this.services.tokens.authenticate(request.headers);
     if (!this.identity) {
       this.respond(407, "Proxy authentication required");
       return;

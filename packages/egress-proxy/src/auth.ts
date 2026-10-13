@@ -42,6 +42,11 @@ export class Tokens {
     return identity?.active ? identity : undefined;
   }
 
+  /** The identity a dedicated listener serves without asking for credentials. */
+  lookup(token: string): Identity | undefined {
+    return this.entries.get(hash(token));
+  }
+
   revoke(token: string): Identity | undefined {
     const key = hash(token);
     const identity = this.entries.get(key);

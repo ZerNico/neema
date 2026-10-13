@@ -10,7 +10,11 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
 - Each command gets its own token, minted by `issue` and carried as the password in its proxy URL.
   Every CONNECT must present it. The token names the server, chat, attempt and command, so the
   callback can apply that chat's grants and a denial reaches the chat that caused it.
-- `revoke` ends a token when its command ends and closes every tunnel it opened. A command can read
+- `issuePort` mints a token and a listener of the command's own that asks for no credentials,
+  for a sandbox that reaches that one port alone and refuses a URL carrying them (bubblewrap).
+  Only there is a port a credential: where commands share loopback, one could dial another's.
+- `revoke` ends a token when its command ends and closes every tunnel it opened, and its own
+  listener if it has one. A command can read
   its own token and pass it to a process that can reach the proxy; it is only good while the
   command runs.
 - Loopback authenticates nothing. On Windows any local process can reach the listener, so every
