@@ -316,6 +316,8 @@ skipped one on purpose.
   owner and namespace, synchronous reads once warm, owner scoping and clearing on identity change.
 - `docs/internals/images.md`: image models, which one an attempt draws with and the chat's lock,
   the fixed tool schema and trailing model note, staged delivery and budgets, the ledger row.
+- `docs/internals/egress-proxy.md`: the only network path out of a sandboxed command. A token per
+  command, one canonical spelling decided once, the address guard with no exceptions, CONNECT only.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 
