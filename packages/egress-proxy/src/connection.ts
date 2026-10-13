@@ -278,6 +278,24 @@ export class Connection {
     const target = this.target;
     const identity = this.identity;
     if (!target || !identity) return;
+    let local: (() => Socket) | undefined;
+    try {
+      local = this.services.options.local?.(identity.context, target.host, target.port);
+    } catch {
+      this.fault();
+      return;
+    }
+    if (local) {
+      let socket: Socket;
+      try {
+        socket = local();
+      } catch {
+        this.network("Local service unavailable");
+        return;
+      }
+      this.attach(socket, () => this.network("Local service unavailable"));
+      return;
+    }
     let answers: ReadonlyArray<Candidate>;
     if (target.kind === "name") {
       if (
@@ -386,6 +404,15 @@ export class Connection {
       queueMicrotask(() => this.dial(candidates, index + 1));
       return;
     }
+    this.attach(socket, () => {
+      this.selected = undefined;
+      this.services.log("warn", "Egress proxy: upstream connection failed");
+      this.dial(candidates, index + 1);
+    });
+  }
+
+  /** Relays through a connecting socket; `retry` runs if it fails before the tunnel opens. */
+  private attach(socket: Socket, retry: () => void) {
     this.upstream = socket;
     let failed = false;
     const fail = () => {
@@ -396,10 +423,8 @@ export class Connection {
         this.services.log("warn", "Egress proxy: tunnel transport failed");
         this.stop();
       } else if (this.pending() && this.upstream === socket) {
-        this.selected = undefined;
-        this.services.log("warn", "Egress proxy: upstream connection failed");
         this.upstream = undefined;
-        this.dial(candidates, index + 1);
+        retry();
       }
     };
     socket.on("error", fail);

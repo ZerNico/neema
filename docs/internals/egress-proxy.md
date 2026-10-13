@@ -22,6 +22,12 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
   capped and dropped after `headerMs`. A local process can still hold those slots by reopening
   idle sockets; that is accepted.
 
+## Destinations the host serves itself
+
+- `local` may answer an allowed destination with a connector of its own instead of a dial: the
+  desktop serves the SSH agent's pipe this way on Windows. `decide` still rules first, so a grant
+  id revokes it like any tunnel; the address guard does not apply, since nothing is resolved.
+
 ## One spelling, decided once, dialled as decided
 
 - A host is validated, then canonicalized (lowercase, one trailing dot removed, every IPv4 and
