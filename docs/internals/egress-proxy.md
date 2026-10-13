@@ -26,9 +26,11 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
 - A grant names `host:port` and must carry a `grantId`. `regrant` closes the tunnels a removed
   grant allowed unless another grant still covers them. A grant is decided once, at establishment.
 - DNS is resolved once and the connection goes to an address that passed the guard, so a changing
-  answer cannot redirect it. Lookups are fully qualified (no search domains, so a bare `git` does
-  not resolve), use c-ares rather than `getaddrinfo` so a slow resolver cannot occupy libuv's
-  pool, and read the hosts file first, one read at a time for the whole process.
+  answer cannot redirect it. Lookups use the system resolver, so VPN, split DNS and the hosts
+  file behave as they do for every other program; c-ares reads the server list directly and
+  waited out dead servers the system skips. They are fully qualified (no search domains, so a
+  bare `git` does not resolve), and at most two run at once: getaddrinfo holds a libuv pool
+  thread for the whole lookup and the pool has four.
 
 ## The address guard has no exceptions
 

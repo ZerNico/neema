@@ -1,7 +1,6 @@
 import { createConnection, createServer, type Socket } from "node:net";
 import { once } from "node:events";
 import { afterEach, expect, vi } from "vitest";
-import { createDefaultResolver, type DnsResolver, type ResolverDependencies } from "../resolver.ts";
 import {
   createEgressProxy,
   type CommandContext,
@@ -348,48 +347,3 @@ export const nonStrings: ReadonlyArray<readonly [string, unknown]> = [
   ["a symbol", Symbol("host")],
   ["an object with a length", { length: 1 }],
 ];
-
-export function fakeResolver(content = "") {
-  const clock = new Clock();
-  const instances: Array<{
-    resolver: DnsResolver;
-    cancel: ReturnType<typeof vi.fn>;
-    queries: Array<{
-      host: string;
-      family: 4 | 6;
-      callback: Parameters<DnsResolver["resolve4"]>[1];
-    }>;
-  }> = [];
-  const readHosts = vi.fn<ResolverDependencies["readHosts"]>(async () => Buffer.from(content));
-  const createResolver = vi.fn(() => {
-    const queries: (typeof instances)[number]["queries"] = [];
-    const cancel = vi.fn();
-    const resolver: DnsResolver = {
-      resolve4: (host, callback) => {
-        queries.push({ host, family: 4, callback });
-      },
-      resolve6: (host, callback) => {
-        queries.push({ host, family: 6, callback });
-      },
-      cancel,
-    };
-    instances.push({ resolver, cancel, queries });
-    return resolver;
-  });
-  const dependencies: ResolverDependencies = {
-    createResolver,
-    readHosts,
-    hostsPath: "/fake/hosts",
-    now: clock.time,
-  };
-  const resolve = createDefaultResolver(37, clock.timers, dependencies);
-  function complete(family: 4 | 6, addresses: string[], code?: string, instance = 0) {
-    const query = instances[instance]?.queries.find((entry) => entry.family === family);
-    if (!query) throw new Error(`No family ${family} query on resolver ${instance}`);
-    query.callback(
-      code ? Object.assign(new Error("injected DNS error"), { code }) : null,
-      addresses,
-    );
-  }
-  return { clock, instances, createResolver, readHosts, dependencies, resolve, complete };
-}
