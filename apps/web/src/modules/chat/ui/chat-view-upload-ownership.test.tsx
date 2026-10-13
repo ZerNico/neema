@@ -177,6 +177,7 @@ function setup() {
       deletedAt: null,
       unread: false,
       scheduleId: null,
+      imageModelId: null,
       fileReferenceAliases: null,
     },
     messages: [

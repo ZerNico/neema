@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { getAgentSelection } from "~/modules/agents/server/functions.ts";
 import { describe, expect, it, vi } from "vitest";
 import { NewChatView } from "./chat-view.tsx";
@@ -111,6 +112,56 @@ const renderNewChat = (
     </QueryClientProvider>,
   );
 };
+
+describe("new chat image model", () => {
+  const imageModel = (id: string, displayName: string) => ({
+    id,
+    displayName,
+    description: null,
+    imageCapabilities: null,
+    providerName: "P",
+    isDefault: false,
+  });
+  const renderWithImages = (agentImageModelId: string | null) => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
+    });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
+    client.setQueryData(["chat-models"], []);
+    client.setQueryData(
+      ["image-models"],
+      [imageModel("img-1", "First Image"), imageModel("img-2", "Agent Image")],
+    );
+    client.setQueryData(["agents", "list"], [AGENT]);
+    client.setQueryData(["agents", "selection", AGENT.id], {
+      ...AGENT,
+      imageModelId: agentImageModelId,
+    });
+    client.setQueryData(["knowledge", "collections"], []);
+    client.setQueryData(["tools", "web-search", "availability"], { enabled: false });
+    return render(
+      <QueryClientProvider client={client}>
+        <NewChatView user={{ name: "Nico" }} initialAgentId={AGENT.id} />
+      </QueryClientProvider>,
+    );
+  };
+
+  it("shows the agent's image model, which the first answer draws with", async () => {
+    renderWithImages("img-2");
+    await userEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+    expect(
+      await screen.findByRole("menuitem", { name: /^Image model\s?Agent Image$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the admin's first when the agent prefers none", async () => {
+    renderWithImages(null);
+    await userEvent.click(screen.getByRole("button", { name: "Add files or tools" }));
+    expect(
+      await screen.findByRole("menuitem", { name: /^Image model\s?First Image$/ }),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("new chat composer", () => {
   it("puts the caret in the composer on arrival", async () => {

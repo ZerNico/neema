@@ -1,12 +1,15 @@
 import { NumberField } from "./tool-fields.tsx";
 import { useInvalidateTools } from "../client/use-invalidate-tools.ts";
 import { integerBetween } from "./integer-between.ts";
+import { imageGenerationToolQuery } from "~/modules/images/client/queries.ts";
+import { updateImageGenerationTool } from "~/modules/images/server/functions.ts";
 import {
   Brain02Icon,
   DashboardSquare01Icon,
   MapsIcon,
   GlobalSearchIcon,
   Link01Icon,
+  AiImageIcon,
   Presentation01Icon,
 } from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -58,6 +61,7 @@ export function ToolsPage() {
       <WebSearchSection />
       <UrlReaderSection />
       <OfficeFilesSection />
+      <ImageGenerationSection />
       <InteractiveUiSection />
       <MapsSection />
     </Page>
@@ -368,6 +372,54 @@ function OfficeFilesSection() {
           />
         </ListRow>
         <PresentationFontsRow />
+      </ListCard>
+    </Section>
+  );
+}
+
+/**
+ * Whether chats are offered image generation. Nothing is offered until an
+ * image model exists either; images already made stay in their answers.
+ */
+function ImageGenerationSection() {
+  const { data: tool } = useSuspenseQuery(imageGenerationToolQuery);
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => updateImageGenerationTool({ data: { enabled } }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: imageGenerationToolQuery.queryKey }),
+        queryClient.invalidateQueries({ queryKey: ["image-models"] }),
+      ]),
+    onError: (error) => toastError("Could not update image generation.", error),
+  });
+
+  if (!tool) {
+    return (
+      <Section title="Image generation">
+        <EmptyState icon={AiImageIcon} title="This tool isn’t set up yet" />
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Image generation">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium">Create and edit images</span>
+            <span className="text-muted-foreground text-xs">
+              Lets the model draw with the image model each person picks. Add image models under
+              Providers.
+            </span>
+          </div>
+          <Switch
+            checked={tool.enabled}
+            onCheckedChange={(checked) => toggle.mutate(checked)}
+            disabled={toggle.isPending}
+            aria-label="Image generation enabled"
+          />
+        </ListRow>
       </ListCard>
     </Section>
   );

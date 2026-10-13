@@ -26,6 +26,7 @@ const recoveryPrefixes = [
   ["admin", "default-capabilities"],
   ["capabilities"],
   ["chat-models"],
+  ["image-models"],
   ["admin", "models"],
   ["drafts"],
   ["integrations"],
@@ -242,6 +243,7 @@ export function useSync(
           void queryClient.invalidateQueries({ queryKey: ["conversation"] });
           clearKnowledgeTimer();
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
+          void queryClient.invalidateQueries({ queryKey: ["image-models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "group-members"] });
@@ -263,6 +265,7 @@ export function useSync(
           break;
         case "models.defaults.changed":
           void queryClient.invalidateQueries({ queryKey: ["chat-models"] });
+          void queryClient.invalidateQueries({ queryKey: ["image-models"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "models"] });
           break;
         case "integrations.changed":

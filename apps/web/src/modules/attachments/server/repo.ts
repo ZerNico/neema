@@ -182,11 +182,14 @@ export class AttachmentRepo extends Context.Service<
       size: number;
       mediaType: string;
       fileName: string;
-    }): Effect.Effect<{
-      attachment: Attachment;
-      deduped: boolean;
-      unusedStorageKey: string | null;
-    }>;
+    }): Effect.Effect<
+      {
+        attachment: Attachment;
+        deduped: boolean;
+        unusedStorageKey: string | null;
+      },
+      AttachmentRejected
+    >;
     /** Blob row for a (user, sha256) pair, or null. */
     findBlob(userId: string, sha256: string): Effect.Effect<AttachmentBlobRow | null>;
     /** Attachment + blob + who (if anyone) has claimed it, for policy checks. */
@@ -416,7 +419,12 @@ export class AttachmentRepo extends Context.Service<
               };
             }),
           )
-          .pipe(Effect.orDie);
+          .pipe(
+            // An association's refusal is the caller's to handle; anything else is a defect.
+            Effect.catch((error) =>
+              error instanceof AttachmentRejected ? Effect.fail(error) : Effect.die(error),
+            ),
+          );
       });
 
       const findBlob = Effect.fn("AttachmentRepo.findBlob")(function* (

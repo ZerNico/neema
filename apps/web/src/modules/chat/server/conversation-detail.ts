@@ -287,6 +287,8 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
             skillIds: liveAgent?.skillIds ?? [],
             // The composer's resting toggle: the agent's own default, like its model.
             searchEnabled: liveAgent?.row.searchEnabled ?? true,
+            // What the next answer falls back to when the chat's image model went away.
+            imageModelId: liveAgent?.row.imageModelId ?? null,
             available: liveAgent !== null,
           }
         : null,

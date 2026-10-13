@@ -34,6 +34,9 @@ export const conversations = pgTable(
     // pending placeholder for it. Never reset to null once resolved.
     title: text(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
+    // The image model this chat keeps using, set by every attempt that resolves
+    // one. A deleted model clears it and the next attempt falls back.
+    imageModelId: text("image_model_id").references(() => models.id, { onDelete: "set null" }),
     // Set when this conversation was forked off another one at some message.
     // Lineage is a display detail, so losing the source loses the marker
     // rather than the branch; the annotation breaks the self-reference cycle

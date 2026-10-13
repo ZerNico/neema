@@ -1,17 +1,19 @@
 import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
-import { Book02Icon, FolderLibraryIcon } from "@hugeicons/core-free-icons";
+import { Book02Icon, FolderLibraryIcon, Image02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { IntegrationTag } from "~/modules/integrations/ui/integration-mention-text.tsx";
 import { inlineTagClassName } from "~/ui/inline-tag.ts";
 import type { Mentionable } from "~/modules/integrations/mentions.ts";
 import { splitMessageTags, type ContextTag } from "../tags.ts";
 
-/** A /skill or #collection tag, in the composer or the sent message. */
+const TAG_ICONS = { skill: Book02Icon, collection: FolderLibraryIcon, image: Image02Icon } as const;
+
+/** A /skill, #collection or image tag, in the composer or the sent message. */
 export function ContextTagView({ tag, tone }: { tag: ContextTag; tone: "message" | "field" }) {
   return (
     <span className={inlineTagClassName(tone)}>
       <HugeiconsIcon
-        icon={tag.kind === "skill" ? Book02Icon : FolderLibraryIcon}
+        icon={TAG_ICONS[tag.kind]}
         strokeWidth={2}
         className="size-3.5 shrink-0"
         aria-hidden

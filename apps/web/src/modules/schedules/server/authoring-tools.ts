@@ -49,6 +49,10 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
   until: "endAt",
   message: "prompt",
   task: "prompt",
+  imageModel: "imageModelId",
+  image_model: "imageModelId",
+  image_model_id: "imageModelId",
+  preferredImageModel: "imageModelId",
   model: "modelId",
   model_id: "modelId",
   agent: "agentId",
@@ -100,7 +104,7 @@ const transport = (schema: Schema.Top) =>
   );
 // Models write "no value" as null and small integers as strings. Both mean the
 // key is absent or the number itself; refusing them only burns a round trip.
-// modelId/agentId/endAt/chatId keep null: it explicitly clears the setting.
+// modelId/agentId/imageModelId/endAt/chatId keep null: it explicitly clears the setting.
 const lenient = (raw: unknown, changes = false): unknown => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
@@ -108,7 +112,13 @@ const lenient = (raw: unknown, changes = false): unknown => {
   for (const [rawKey, value] of Object.entries(input)) {
     const key = changes ? (DRAFT_FIELD_ALIASES[rawKey] ?? rawKey) : rawKey;
     if (value === null || value === undefined) {
-      if (key === "modelId" || key === "agentId" || key === "endAt" || key === "chatId")
+      if (
+        key === "modelId" ||
+        key === "agentId" ||
+        key === "imageModelId" ||
+        key === "endAt" ||
+        key === "chatId"
+      )
         out[key] = null;
       continue;
     }
@@ -211,6 +221,8 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     let focusedDraftId: string | null = null;
     // The models this user can pick, marked with the one answering right now.
     let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];
+    let availableImageModels: ReadonlyArray<{ id: string; name: string; description?: string }> =
+      [];
     const unavailable: Result = {
       outcome: "unavailable",
       message: "No schedule draft is available in this chat. Use draft_schedule to prepare one.",
@@ -237,7 +249,13 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       if (!known.some((draft) => draft.id === focusedDraftId))
         focusedDraftId = known.at(-1)?.id ?? null;
       availableModels = [];
+      availableImageModels = [];
       if (focused()) {
+        availableImageModels = (yield* providers.listImageModelsFor(input.userId)).map((model) => ({
+          id: model.id,
+          name: model.displayName,
+          ...(model.description ? { description: model.description } : {}),
+        }));
         availableModels = (yield* providers.listChatModelsFor(input.userId)).map((model) =>
           model.id === input.currentModelId
             ? { id: model.id, name: model.displayName, current: true as const }
@@ -401,6 +419,7 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
                     draft: focused() ? state(focused()!) : null,
                     otherDrafts: known.filter((draft) => draft.id !== focusedDraftId).map(summary),
                     availableModels,
+                    ...(availableImageModels.length ? { availableImageModels } : {}),
                   }),
               },
             ]

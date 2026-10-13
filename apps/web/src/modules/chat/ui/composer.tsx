@@ -8,7 +8,7 @@ import * as m from "motion/react-m";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
-import { ChatInput } from "./chat-input.tsx";
+import { ChatInput, type ImageModelChoice } from "./chat-input.tsx";
 import { extractReferences, restoreReferences, type MessageReference } from "../references.ts";
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
@@ -98,6 +98,8 @@ interface ComposerProps {
   onSearchEnabledChange: (enabled: boolean) => void;
   reasoningEffort?: ReasoningEffort | null | undefined;
   onReasoningEffortChange?: ((effort: ReasoningEffort | null) => void) | undefined;
+  /** The chat's image model and how to change it; absent hides the picker. */
+  imageModel?: ImageModelChoice | undefined;
   controlsDisabled?: boolean;
   context?: ComposerContext | undefined;
   initialSkillId?: string | null | undefined;
@@ -134,6 +136,7 @@ interface ComposerProps {
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
   {
+    imageModel,
     onSend,
     onStop,
     onQueue,
@@ -452,6 +455,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         onSearchEnabledChange={onSearchEnabledChange}
         reasoningEffort={reasoningEffort}
         onReasoningEffortChange={onReasoningEffortChange}
+        {...(imageModel ? { imageModel } : {})}
         researchEnabled={activeResearch}
         {...(canResearch ? { onResearchEnabledChange: setResearchEnabled } : {})}
         // Offered only where Work can be honoured: a new chat, in the desktop app.

@@ -3,7 +3,19 @@ import { useState } from "react";
 import { probeEmbeddingDimensions, updateModel } from "../server/functions.ts";
 import { groupsQuery, modelAccessQuery } from "../client/queries.ts";
 import { ModelSettingsFields } from "./model-settings-form.tsx";
-import { modelSettingsFromDraft, type ModelSettingsDraft } from "./model-settings-draft.ts";
+import {
+  imagePricesOf,
+  modelSettingsFromDraft,
+  type ModelSettingsDraft,
+} from "./model-settings-draft.ts";
+import { ImageModelTestResult } from "./image-model-test.tsx";
+import { useImageModelTest } from "./use-image-model-test.ts";
+import {
+  imageFamiliesFor,
+  type ImageCapabilities,
+  type ImageFamily,
+  type ImageFamilyInfo,
+} from "@chat/model-client/image-families";
 import { ModelTestResult } from "./model-test.tsx";
 import { useModelTest } from "./use-model-test.ts";
 import { getPreset, type PresetId } from "@chat/model-client/presets";
@@ -11,6 +23,7 @@ import type {
   ModelAccess,
   ModelCapabilities,
   ModelFormat,
+  ImagePricing,
   ModelPricing,
   ModelType,
 } from "~/modules/providers/model-config.ts";
@@ -42,6 +55,9 @@ export interface EditableModel {
   pricing: ModelPricing | null;
   enabled: boolean;
   access: ModelAccess;
+  imageFamily?: ImageFamily | null;
+  imageCapabilities?: ImageCapabilities | null;
+  imagePricing?: ImagePricing | null;
 }
 
 /**
@@ -77,6 +93,7 @@ export function ModelEditDialog({
             key={model.id}
             model={model}
             apiChoice={presetId !== undefined && getPreset(presetId).modelFormat === true}
+            imageFamilies={presetId ? imageFamiliesFor(presetId) : []}
             onClose={() => onOpenChange(false)}
             onSavingChange={setSaving}
           />
@@ -89,11 +106,13 @@ export function ModelEditDialog({
 function ModelEditForm({
   model,
   apiChoice,
+  imageFamilies,
   onClose,
   onSavingChange,
 }: {
   model: EditableModel;
   apiChoice: boolean;
+  imageFamilies: ReadonlyArray<ImageFamilyInfo>;
   onClose: () => void;
   onSavingChange: (saving: boolean) => void;
 }) {
@@ -121,11 +140,15 @@ function ModelEditForm({
     access: model.access,
     selectedGroups: groups.filter((group) => allowedIds.has(group.id)),
     format: apiChoice ? (model.format ?? "responses") : null,
+    imageFamily: model.imageFamily ?? null,
+    imageCapabilities: model.imageCapabilities ?? null,
+    imagePrices: imagePricesOf(model.imagePricing ?? null),
   });
   const settings = modelSettingsFromDraft(draft);
   const test = useModelTest(model.providerId, (format) =>
     setDraft((current) => ({ ...current, format })),
   );
+  const imageTest = useImageModelTest(model.providerId);
 
   const save = useMutation({
     mutationFn: () => {
@@ -137,6 +160,7 @@ function ModelEditForm({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin"] }),
         queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+        queryClient.invalidateQueries({ queryKey: ["image-models"] }),
       ]);
       onClose();
     },
@@ -163,6 +187,7 @@ function ModelEditForm({
             draft={draft}
             setDraft={setDraft}
             groups={groups}
+            imageFamilies={imageFamilies}
             modelKey={model.modelKey}
             autoFocusDisplayName
             disabled={save.isPending}
@@ -175,8 +200,19 @@ function ModelEditForm({
         </FieldGroup>
 
         <ModelTestResult test={test.resultFor(model.modelKey)} />
+        <ImageModelTestResult result={imageTest.resultFor(model.modelKey, draft.imageFamily)} />
         {save.isError ? <FieldError>Could not save the model.</FieldError> : null}
         <DialogFooter>
+          {draft.type === "image" && draft.imageFamily ? (
+            <PendingButton
+              variant="outline"
+              pending={imageTest.pending}
+              disabled={save.isPending}
+              onClick={() => imageTest.run(model.modelKey, draft.imageFamily!)}
+            >
+              Test (1 image)
+            </PendingButton>
+          ) : null}
           {draft.type === "chat" ? (
             <PendingButton
               variant="outline"

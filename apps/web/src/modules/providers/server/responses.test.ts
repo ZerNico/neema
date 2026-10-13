@@ -362,9 +362,11 @@ describe("Responses providers", () => {
       expect(requests.map((request) => request.url)).toEqual([
         "https://resource.test/openai/deployments?api-version=2022-12-01",
       ]);
+      // Image deployments are listed too, as image models, under their deployment name.
       expect(catalog.map((model) => [model.id, model.type])).toEqual([
         ["chat", "chat"],
         ["embed", "embedding"],
+        ["painter", "image"],
       ]);
       expect(catalog[0]?.capabilities).toMatchObject({ reasoning: true, tools: true });
     }).pipe(Effect.provide(gatewayFor("azure"))),

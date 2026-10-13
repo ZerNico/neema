@@ -90,6 +90,9 @@ edit the wrong thing.
 - **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
   lists and search, neither reads nor saves memory, and is swept a day after its last
   activity. Keep clears the flag; nothing sets it later.
+- **image model**: a `models` row of type `image` that `generate_image` draws with. The person
+  picks it and the chat keeps it (its lock) until it becomes unusable. Not a chat model with
+  native image output, which still draws by itself. See [images](docs/internals/images.md).
 - **ui block**: a ` ```ui ` fence in an answer, drawn as interactive UI. Its logic runs
   in QuickJS and only JSON reaches the page. Identity is the fence's ordinal in the raw
   message text. State the reader sets is saved per block, and images are found by query
@@ -147,7 +150,7 @@ skipped one on purpose.
   and a branch. All three project the same rows; a leak fixed in one is still open
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, notify, map, research, agent-draft,
-  schedule-draft, document, project-file, desktop, custom, integration, presentation,
+  schedule-draft, document, project-file, desktop, custom, image, integration, presentation,
   spreadsheet, word, tool-file, tool-load, attachment.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
@@ -309,6 +312,8 @@ skipped one on purpose.
   contract that makes a rebuilt block equal the live one, and the QuickJS JSON boundary.
 - `docs/internals/device-cache.md`: IndexedDB caches on the reader's device. One store keyed by
   owner and namespace, synchronous reads once warm, owner scoping and clearing on identity change.
+- `docs/internals/images.md`: image models, which one an attempt draws with and the chat's lock,
+  the fixed tool schema and trailing model note, staged delivery and budgets, the ledger row.
 - `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
   handler and its timeout, containment, consent levels.
 

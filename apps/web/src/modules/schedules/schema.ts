@@ -21,6 +21,8 @@ export const ScheduleSettings = Schema.Struct({
   /** Retained selections, never permissions: both degrade explicitly at fire time. */
   modelId: Schema.NullOr(ResourceId),
   agentId: Schema.NullOr(ResourceId),
+  /** Absent keeps what is saved; null leaves the choice to each chat. */
+  imageModelId: Schema.optionalKey(Schema.NullOr(ResourceId)),
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
   collectionIds: Schema.Array(ResourceId).check(Schema.isMaxLength(5)),

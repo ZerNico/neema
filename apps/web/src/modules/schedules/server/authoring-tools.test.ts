@@ -50,6 +50,7 @@ async function setup() {
     },
     providers: {
       listChatModelsFor: () => Effect.succeed([]),
+      listImageModelsFor: () => Effect.succeed([]),
       listProviders: unexpected,
       createProvider: unexpected,
       updateProvider: unexpected,
@@ -132,5 +133,35 @@ describe("schedule draft chat target normalization", () => {
         settings: { name: "Renamed reminder", chatMode: "same", chatId: "target-chat" },
       },
     });
+  });
+});
+
+describe("schedule draft image model", () => {
+  it.each(["imageModelId", "imageModel", "image_model", "image_model_id"])(
+    "sets the image model a fire draws with through %s",
+    async (key) => {
+      const { update, patch } = await setup();
+      const result = await Effect.runPromise(
+        update({ draftId: "draft-one", expectedRevision: 1, changes: { [key]: "image-model" } }),
+      );
+      expect(patch).toHaveBeenCalledExactlyOnceWith(
+        "user-one",
+        { draftId: "draft-one", expectedRevision: 1, changes: { imageModelId: "image-model" } },
+        writeGuard,
+      );
+      expect(result).toMatchObject({ outcome: "updated", changedFields: ["imageModelId"] });
+    },
+  );
+
+  it("clears it with null, leaving the choice to each chat", async () => {
+    const { update, patch } = await setup();
+    await Effect.runPromise(
+      update({ draftId: "draft-one", expectedRevision: 1, changes: { imageModel: null } }),
+    );
+    expect(patch).toHaveBeenCalledExactlyOnceWith(
+      "user-one",
+      { draftId: "draft-one", expectedRevision: 1, changes: { imageModelId: null } },
+      writeGuard,
+    );
   });
 });

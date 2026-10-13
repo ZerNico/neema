@@ -272,7 +272,7 @@ const credentialsOf = (provider: ProviderWithKey): Credentials | null => {
 };
 
 /** The package's view of a stored provider: its preset, endpoint, credentials and overrides. */
-const connectionOf = (provider: ProviderWithKey): Connection | null =>
+export const connectionOf = (provider: ProviderWithKey): Connection | null =>
   makeConnection({
     provider: provider.id,
     preset: provider.preset,

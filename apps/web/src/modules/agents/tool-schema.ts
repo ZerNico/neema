@@ -36,6 +36,7 @@ const DraftField = Schema.Literals([
   "icon",
   "instructions",
   "modelId",
+  "imageModelId",
   "searchEnabled",
   "planEnabled",
   "starters",

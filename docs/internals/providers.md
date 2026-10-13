@@ -20,7 +20,10 @@ Hermes polyfill and tests are unchanged. Adding a service is a preset, not a bra
 
 - A preset fixes the endpoint, auth (bearer, `api-key`, or none for self-hosted), wire
   formats, the reasoning request field, what reasoning goes back in history, cache key,
-  output-limit field, catalog kind and image output.
+  output-limit field, catalog kind, a chat model's own image output and the image model
+  families it hosts. Image models are rows of their own type, called through the image
+  adapters rather than a wire format, and never gated by the chat image-output flag. See
+  [images](images.md).
 - Presets exist where a service needs behaviour no setting expresses (OpenRouter, OpenAI,
   Azure, Bedrock, Vercel) or is common enough that its settings should not be looked up (Gemini,
   DeepSeek, Mistral, Groq, xAI, Ollama). Everything else is the OpenAI-compatible preset with

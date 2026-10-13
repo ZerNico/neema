@@ -141,6 +141,7 @@ describe("AgentEditorPage", () => {
           instructions: "Be careful.",
           icon: "book",
           modelId: null,
+          imageModelId: null,
           searchEnabled: true,
           planEnabled: true,
           starters: ["Review carefully"],

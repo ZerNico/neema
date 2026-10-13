@@ -102,6 +102,18 @@ describe("server-sent events", () => {
     expect(events).toEqual([{ event: undefined, data: "ü" }]);
   });
 
+  it("reads an image-sized line over many chunks, and a CR that ends a chunk alone", async () => {
+    const big = "A".repeat(256 * 1024);
+    const frame = `data: ${big}\n\n`;
+    const chunks = Array.from({ length: Math.ceil(frame.length / 1000) }, (_, index) =>
+      frame.slice(index * 1000, (index + 1) * 1000),
+    );
+    expect(await parse([...chunks, "data: a\r", "data: b\r\r"])).toEqual([
+      { event: undefined, data: big },
+      { event: undefined, data: "a\nb" },
+    ]);
+  });
+
   it("delivers a last event the server never terminated", async () => {
     expect(await parse(["data: tail"])).toEqual([{ event: undefined, data: "tail" }]);
   });

@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
+import { ImageModelSettingRow } from "~/modules/images/ui/image-model-select.tsx";
 import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
@@ -124,6 +125,15 @@ export const ScheduleSettingsFields = withForm({
                 )}
               </form.Field>
             </ListRow>
+            <form.Field name="imageModelId">
+              {(field) => (
+                <ImageModelSettingRow
+                  value={field.state.value}
+                  onChange={(modelId) => field.handleChange(modelId)}
+                  description="Each run draws with it."
+                />
+              )}
+            </form.Field>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Web search</span>

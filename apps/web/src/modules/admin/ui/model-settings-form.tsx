@@ -51,13 +51,21 @@ import {
   type PickableGroup,
 } from "./model-settings-draft.ts";
 import { MODEL_TYPE_LABELS, MODEL_FORMAT_LABELS } from "./model-settings-labels.ts";
+import { ImageModelFields } from "./image-model-fields.tsx";
+import type { ImageFamilyInfo } from "@chat/model-client/image-families";
 
-const MODEL_TYPE_ITEMS = MODEL_TYPES.map((value) => ({ value, label: MODEL_TYPE_LABELS[value] }));
+const modelTypeItems = (images: boolean) =>
+  MODEL_TYPES.filter((value) => images || value !== "image").map((value) => ({
+    value,
+    label: MODEL_TYPE_LABELS[value],
+  }));
 
 const MODEL_FORMAT_ITEMS = MODEL_FORMATS.map((value) => ({
   value,
   label: MODEL_FORMAT_LABELS[value],
 }));
+
+const NO_IMAGE_FAMILIES: ReadonlyArray<ImageFamilyInfo> = [];
 
 const ACCESS_ITEMS: { value: ModelAccess; label: string }[] = [
   { value: "public", label: "Public" },
@@ -72,7 +80,10 @@ export function ModelSettingsFields({
   onDetectDimensions,
   autoFocusDisplayName = false,
   disabled = false,
+  imageFamilies = NO_IMAGE_FAMILIES,
 }: {
+  /** The image families this provider hosts; empty offers no image type. */
+  imageFamilies?: ReadonlyArray<ImageFamilyInfo>;
   draft: ModelSettingsDraft;
   setDraft: Dispatch<SetStateAction<ModelSettingsDraft>>;
   groups: PickableGroup[];
@@ -113,6 +124,8 @@ export function ModelSettingsFields({
 
   const patch = (next: Partial<ModelSettingsDraft>) =>
     setDraft((current) => ({ ...current, ...next }));
+  const typeItems = modelTypeItems(imageFamilies.length > 0 || draft.type === "image");
+  const image = draft.type === "image";
 
   return (
     <>
@@ -132,14 +145,28 @@ export function ModelSettingsFields({
             <FieldLabel htmlFor={`${id}-type`}>Type</FieldLabel>
             <Select
               value={draft.type}
-              onValueChange={(value) => value && patch({ type: value as ModelType })}
-              items={MODEL_TYPE_ITEMS}
+              onValueChange={(value) => {
+                if (!value) return;
+                const type = value as ModelType;
+                const family = draft.imageFamily ?? imageFamilies[0]?.id ?? null;
+                patch(
+                  type === "image" && family && !draft.imageCapabilities
+                    ? {
+                        type,
+                        imageFamily: family,
+                        imageCapabilities: imageFamilies.find((item) => item.id === family)!
+                          .defaults,
+                      }
+                    : { type },
+                );
+              }}
+              items={typeItems}
             >
               <SelectTrigger id={`${id}-type`} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {MODEL_TYPE_ITEMS.map((item) => (
+                {typeItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -171,7 +198,7 @@ export function ModelSettingsFields({
               </FieldDescription>
             </Field>
           ) : null}
-          {draft.type === "chat" ? (
+          {draft.type === "chat" || image ? (
             <Field className="sm:col-span-2">
               <FieldLabel htmlFor={`${id}-description`}>
                 Description <OptionalMark />
@@ -180,10 +207,14 @@ export function ModelSettingsFields({
                 id={`${id}-description`}
                 value={draft.description}
                 maxLength={MODEL_DESCRIPTION_MAX}
-                placeholder="Fast, good for everyday questions"
+                placeholder={image ? "Good at text in images" : "Fast, good for everyday questions"}
                 onChange={(event) => patch({ description: event.target.value })}
               />
-              <FieldDescription>Shown under the name when someone picks a model.</FieldDescription>
+              <FieldDescription>
+                {image
+                  ? "Shown in the image picker and told to the chat model."
+                  : "Shown under the name when someone picks a model."}
+              </FieldDescription>
             </Field>
           ) : null}
           {modelKey === undefined ? null : (
@@ -193,24 +224,26 @@ export function ModelSettingsFields({
               <FieldDescription>The provider-side identifier cannot be changed.</FieldDescription>
             </Field>
           )}
-          <Field data-invalid={contextInvalid}>
-            <FieldLabel htmlFor={`${id}-context-length`}>
-              {draft.type === "chat" ? "Context length" : "Max input tokens"} <OptionalMark />
-            </FieldLabel>
-            <Input
-              id={`${id}-context-length`}
-              type="number"
-              min={1}
-              step={1}
-              value={draft.contextLength}
-              onChange={(event) => patch({ contextLength: event.target.value })}
-              placeholder="Unknown"
-              aria-invalid={contextInvalid}
-            />
-            {draft.type === "chat" ? (
-              <FieldDescription>Largest request the model accepts, in tokens.</FieldDescription>
-            ) : null}
-          </Field>
+          {image ? null : (
+            <Field data-invalid={contextInvalid}>
+              <FieldLabel htmlFor={`${id}-context-length`}>
+                {draft.type === "chat" ? "Context length" : "Max input tokens"} <OptionalMark />
+              </FieldLabel>
+              <Input
+                id={`${id}-context-length`}
+                type="number"
+                min={1}
+                step={1}
+                value={draft.contextLength}
+                onChange={(event) => patch({ contextLength: event.target.value })}
+                placeholder="Unknown"
+                aria-invalid={contextInvalid}
+              />
+              {draft.type === "chat" ? (
+                <FieldDescription>Largest request the model accepts, in tokens.</FieldDescription>
+              ) : null}
+            </Field>
+          )}
           {draft.type === "embedding" ? (
             <Field data-invalid={dimensionsInvalid}>
               <FieldLabel htmlFor={`${id}-embedding-dimensions`}>
@@ -278,147 +311,162 @@ export function ModelSettingsFields({
         </FieldLabel>
       </FieldSet>
 
-      <FieldSet compact disabled={disabled}>
-        <FieldLegend variant="label">Capabilities</FieldLegend>
-        {draft.type === "embedding" ? (
-          <FieldDescription>
-            Multimodal embedding models can accept images as input.
-          </FieldDescription>
-        ) : null}
-        <div className="grid gap-2 sm:grid-cols-2">
-          {visibleCapabilities.map((capability) => {
-            const label = draft.type === "embedding" ? "Image input" : capability.label;
-            const switchId = `${id}-capability-${capability.key}`;
-            return (
-              <FieldLabel key={capability.key} htmlFor={switchId}>
-                <Field orientation="horizontal">
-                  <FieldContent>
-                    <FieldTitle id={`${switchId}-title`}>
-                      <HugeiconsIcon
-                        icon={capability.icon}
-                        strokeWidth={2}
-                        className="text-muted-foreground size-4"
-                      />
-                      {label}
-                    </FieldTitle>
-                  </FieldContent>
-                  <Switch
-                    id={switchId}
-                    aria-labelledby={`${switchId}-title`}
-                    checked={draft.capabilities[capability.key]}
-                    onCheckedChange={(checked) =>
-                      patch({
-                        capabilities: {
-                          ...draft.capabilities,
-                          [capability.key]: checked,
-                        },
-                      })
-                    }
-                  />
-                </Field>
-              </FieldLabel>
-            );
-          })}
-        </div>
-        {draft.type === "chat" && draft.capabilities.reasoning ? (
-          <Field>
-            <FieldTitle>Reasoning effort levels</FieldTitle>
-            <FieldDescription>
-              Choose the levels people can select. Leave empty to use the model’s default.
-            </FieldDescription>
-            <ToggleGroup
-              multiple
-              variant="choice"
-              size="sm"
-              className="flex-wrap"
-              aria-label="Allowed reasoning levels"
-              value={[...(draft.capabilities.reasoningEfforts ?? [])]}
-              onValueChange={(values) =>
-                setDraft((current) => ({
-                  ...current,
-                  capabilities: {
-                    ...current.capabilities,
-                    reasoningEfforts: REASONING_EFFORTS.filter((effort) => values.includes(effort)),
-                  },
-                }))
-              }
-            >
-              {REASONING_EFFORTS.map((effort) => (
-                <ToggleGroupItem key={effort} value={effort}>
-                  {effort === "none"
-                    ? "Off"
-                    : effort === "xhigh"
-                      ? "Extra high"
-                      : effort === "max"
-                        ? "Maximum"
-                        : effort[0]!.toUpperCase() + effort.slice(1)}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </Field>
-        ) : null}
-      </FieldSet>
+      {image ? (
+        <ImageModelFields
+          draft={draft}
+          patch={patch}
+          families={imageFamilies}
+          disabled={disabled}
+        />
+      ) : null}
 
-      <FieldSet compact disabled={disabled}>
-        <FieldLegend variant="label">
-          Pricing <OptionalMark />
-        </FieldLegend>
-        <FieldDescription>
-          USD per 1M tokens, used when the provider doesn’t report a cost.
-        </FieldDescription>
-        <div className="grid grid-cols-2 gap-3">
-          <Field data-invalid={inputPriceInvalid || partialChatPricing}>
-            <FieldLabel htmlFor={`${id}-input-price`}>Input $/1M</FieldLabel>
-            <Input
-              id={`${id}-input-price`}
-              inputMode="decimal"
-              value={draft.inputPrice}
-              onChange={(event) => patch({ inputPrice: event.target.value })}
-              placeholder="Unknown"
-              aria-invalid={inputPriceInvalid || partialChatPricing}
-            />
-          </Field>
-          {draft.type === "chat" ? (
-            <Field data-invalid={outputPriceInvalid || partialChatPricing}>
-              <FieldLabel htmlFor={`${id}-output-price`}>Output $/1M</FieldLabel>
-              <Input
-                id={`${id}-output-price`}
-                inputMode="decimal"
-                value={draft.outputPrice}
-                onChange={(event) => patch({ outputPrice: event.target.value })}
-                placeholder="Unknown"
-                aria-invalid={outputPriceInvalid || partialChatPricing}
-              />
+      {image ? null : (
+        <FieldSet compact disabled={disabled}>
+          <FieldLegend variant="label">Capabilities</FieldLegend>
+          {draft.type === "embedding" ? (
+            <FieldDescription>
+              Multimodal embedding models can accept images as input.
+            </FieldDescription>
+          ) : null}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {visibleCapabilities.map((capability) => {
+              const label = draft.type === "embedding" ? "Image input" : capability.label;
+              const switchId = `${id}-capability-${capability.key}`;
+              return (
+                <FieldLabel key={capability.key} htmlFor={switchId}>
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldTitle id={`${switchId}-title`}>
+                        <HugeiconsIcon
+                          icon={capability.icon}
+                          strokeWidth={2}
+                          className="text-muted-foreground size-4"
+                        />
+                        {label}
+                      </FieldTitle>
+                    </FieldContent>
+                    <Switch
+                      id={switchId}
+                      aria-labelledby={`${switchId}-title`}
+                      checked={draft.capabilities[capability.key]}
+                      onCheckedChange={(checked) =>
+                        patch({
+                          capabilities: {
+                            ...draft.capabilities,
+                            [capability.key]: checked,
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                </FieldLabel>
+              );
+            })}
+          </div>
+          {draft.type === "chat" && draft.capabilities.reasoning ? (
+            <Field>
+              <FieldTitle>Reasoning effort levels</FieldTitle>
+              <FieldDescription>
+                Choose the levels people can select. Leave empty to use the model’s default.
+              </FieldDescription>
+              <ToggleGroup
+                multiple
+                variant="choice"
+                size="sm"
+                className="flex-wrap"
+                aria-label="Allowed reasoning levels"
+                value={[...(draft.capabilities.reasoningEfforts ?? [])]}
+                onValueChange={(values) =>
+                  setDraft((current) => ({
+                    ...current,
+                    capabilities: {
+                      ...current.capabilities,
+                      reasoningEfforts: REASONING_EFFORTS.filter((effort) =>
+                        values.includes(effort),
+                      ),
+                    },
+                  }))
+                }
+              >
+                {REASONING_EFFORTS.map((effort) => (
+                  <ToggleGroupItem key={effort} value={effort}>
+                    {effort === "none"
+                      ? "Off"
+                      : effort === "xhigh"
+                        ? "Extra high"
+                        : effort === "max"
+                          ? "Maximum"
+                          : effort[0]!.toUpperCase() + effort.slice(1)}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </Field>
           ) : null}
-          {draft.type === "chat" ? (
-            <>
-              <Field data-invalid={cacheReadInvalid}>
-                <FieldLabel htmlFor={`${id}-cache-read-price`}>Cache read $/1M</FieldLabel>
+        </FieldSet>
+      )}
+
+      {image ? null : (
+        <FieldSet compact disabled={disabled}>
+          <FieldLegend variant="label">
+            Pricing <OptionalMark />
+          </FieldLegend>
+          <FieldDescription>
+            USD per 1M tokens, used when the provider doesn’t report a cost.
+          </FieldDescription>
+          <div className="grid grid-cols-2 gap-3">
+            <Field data-invalid={inputPriceInvalid || partialChatPricing}>
+              <FieldLabel htmlFor={`${id}-input-price`}>Input $/1M</FieldLabel>
+              <Input
+                id={`${id}-input-price`}
+                inputMode="decimal"
+                value={draft.inputPrice}
+                onChange={(event) => patch({ inputPrice: event.target.value })}
+                placeholder="Unknown"
+                aria-invalid={inputPriceInvalid || partialChatPricing}
+              />
+            </Field>
+            {draft.type === "chat" ? (
+              <Field data-invalid={outputPriceInvalid || partialChatPricing}>
+                <FieldLabel htmlFor={`${id}-output-price`}>Output $/1M</FieldLabel>
                 <Input
-                  id={`${id}-cache-read-price`}
+                  id={`${id}-output-price`}
                   inputMode="decimal"
-                  value={draft.cacheReadPrice}
-                  onChange={(event) => patch({ cacheReadPrice: event.target.value })}
-                  placeholder="Input price"
-                  aria-invalid={cacheReadInvalid}
+                  value={draft.outputPrice}
+                  onChange={(event) => patch({ outputPrice: event.target.value })}
+                  placeholder="Unknown"
+                  aria-invalid={outputPriceInvalid || partialChatPricing}
                 />
               </Field>
-              <Field data-invalid={cacheWriteInvalid}>
-                <FieldLabel htmlFor={`${id}-cache-write-price`}>Cache write $/1M</FieldLabel>
-                <Input
-                  id={`${id}-cache-write-price`}
-                  inputMode="decimal"
-                  value={draft.cacheWritePrice}
-                  onChange={(event) => patch({ cacheWritePrice: event.target.value })}
-                  placeholder="Input price"
-                  aria-invalid={cacheWriteInvalid}
-                />
-              </Field>
-            </>
-          ) : null}
-        </div>
-      </FieldSet>
+            ) : null}
+            {draft.type === "chat" ? (
+              <>
+                <Field data-invalid={cacheReadInvalid}>
+                  <FieldLabel htmlFor={`${id}-cache-read-price`}>Cache read $/1M</FieldLabel>
+                  <Input
+                    id={`${id}-cache-read-price`}
+                    inputMode="decimal"
+                    value={draft.cacheReadPrice}
+                    onChange={(event) => patch({ cacheReadPrice: event.target.value })}
+                    placeholder="Input price"
+                    aria-invalid={cacheReadInvalid}
+                  />
+                </Field>
+                <Field data-invalid={cacheWriteInvalid}>
+                  <FieldLabel htmlFor={`${id}-cache-write-price`}>Cache write $/1M</FieldLabel>
+                  <Input
+                    id={`${id}-cache-write-price`}
+                    inputMode="decimal"
+                    value={draft.cacheWritePrice}
+                    onChange={(event) => patch({ cacheWritePrice: event.target.value })}
+                    placeholder="Input price"
+                    aria-invalid={cacheWriteInvalid}
+                  />
+                </Field>
+              </>
+            ) : null}
+          </div>
+        </FieldSet>
+      )}
 
       <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">Access</FieldLegend>

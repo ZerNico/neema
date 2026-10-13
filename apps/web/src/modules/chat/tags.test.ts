@@ -19,6 +19,20 @@ describe("message tags", () => {
     expect(findTags(tagMarkup(tag))).toEqual([{ ...tag, name: "Notes  draft" }]);
   });
 
+  it("writes and finds an image by its file link, for the model to pass back", () => {
+    const image = {
+      kind: "image",
+      id: "0199b2f1-0000-7000-8000-000000000001",
+      name: "image-1.png",
+    } as const;
+    const text = `Make ${tagMarkup(image)} bluer`;
+    expect(text).toBe("Make [image-1.png](/api/files/0199b2f1-0000-7000-8000-000000000001) bluer");
+    expect(findTags(text)).toEqual([image]);
+    expect(tagWords(text)).toBe("Make image-1.png bluer");
+    // A skill or collection prefix never names a file.
+    expect(findTags("[/x](/api/files/0199b2f1-0000-7000-8000-000000000001)")).toEqual([]);
+  });
+
   it("only takes a prefix that matches its page", () => {
     for (const text of ["[#review](/skills/skill-1)", "[/Contracts](/knowledge/col-1)"])
       expect(findTags(text)).toEqual([]);

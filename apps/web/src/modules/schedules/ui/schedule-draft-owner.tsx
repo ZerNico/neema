@@ -27,6 +27,7 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
     endAt: "End",
     prompt: "Prompt",
     modelId: "Preferred model",
+    imageModelId: "Image model",
     agentId: "Agent",
     searchEnabled: "Web search",
     researchEnabled: "Deep research",

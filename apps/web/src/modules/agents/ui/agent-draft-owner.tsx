@@ -25,6 +25,7 @@ const ui: DraftKindUi<DraftSettings> = {
     instructions: "Instructions",
     icon: "Icon",
     modelId: "Preferred model",
+    imageModelId: "Image model",
     searchEnabled: "Web search",
     planEnabled: "Working checklist",
     starters: "Conversation starters",

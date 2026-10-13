@@ -32,6 +32,16 @@ export interface ToolFile {
 }
 
 /**
+ * The app's own file link, as answers and the composer write it, read as the
+ * attachment reference it names; it then meets the same checks as any id.
+ */
+const FILE_PATH = /^(?:https?:\/\/[^/\s]+)?\/api\/files\/([0-9a-f-]{36})\/?$/i;
+export const fromFilePath = (reference: string) => {
+  const match = FILE_PATH.exec(reference);
+  return match ? `attachment:${match[1]!.toLowerCase()}` : reference;
+};
+
+/**
  * Turns what the model passed for a file parameter into bytes, within what
  * the sender of this answer may read: files in this chat (attached or
  * produced), then the current version of a project file. An id matches
@@ -79,7 +89,7 @@ export const makeToolFileResolver = (input: {
 
   const resolve = (reference: string): Effect.Effect<ToolFile, string> =>
     Effect.gen(function* () {
-      const trimmed = reference.trim();
+      const trimmed = fromFilePath(reference.trim());
       if (!trimmed) return yield* Effect.fail("Pass a file id or name.");
       const canonical = parseFileRef(trimmed);
       if (/^(attachment|project|working|skill):/.test(trimmed) && !canonical)

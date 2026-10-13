@@ -11,9 +11,16 @@ import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
 /**
+ * Where a cost came from: the provider's own figure, the model's prices, or
+ * an image priced by its model's flat rate when the quality had none.
+ */
+export const COST_SOURCES = ["provider", "pricing", "estimate"] as const;
+export type CostSource = (typeof COST_SOURCES)[number];
+
+/**
  * Append-only usage ledger: one row per generation attempt (chat answer,
- * title, context compaction, embedding request, or paid reading of scanned
- * PDF pages), written at finalize time and never updated.
+ * title, context compaction, embedding request, paid reading of scanned PDF
+ * pages, or one image operation), written at finalize time and never updated.
  * Retry adds a new row, branching copies nothing, deleting a conversation
  * leaves it intact. That is exactly why analytics reads this and not
  * `messages.usage`.
@@ -27,7 +34,15 @@ export const usageEvents = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     kind: text({
-      enum: ["chat", "title", "compaction", "embedding_document", "embedding_query", "ocr"],
+      enum: [
+        "chat",
+        "title",
+        "compaction",
+        "embedding_document",
+        "embedding_query",
+        "ocr",
+        "image",
+      ],
     }).notNull(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     // displayName snapshot so a deleted model still labels its history
@@ -47,7 +62,12 @@ export const usageEvents = pgTable(
     // USD. Null = unknown (no provider-reported cost and no model pricing).
     usageComplete: boolean("usage_complete").notNull().default(true),
     cost: doublePrecision(),
-    costSource: text("cost_source", { enum: ["provider", "pricing"] }),
+    costSource: text("cost_source", { enum: COST_SOURCES }),
+    // Image operations: images the provider made (billed), and the tool call
+    // and generation they served. Plain text, like the conversation ids.
+    imageCount: integer("image_count").notNull().default(0),
+    toolCallId: text("tool_call_id"),
+    generationId: text("generation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

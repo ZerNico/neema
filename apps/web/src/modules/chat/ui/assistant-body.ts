@@ -4,6 +4,7 @@ import type {
   CompactionActivity,
   DesktopToolActivity,
   DocumentToolActivity,
+  ImageToolActivity,
   OfficeActivity,
   ToolActivity,
   ToolFileActivity,
@@ -58,10 +59,15 @@ export type AssistantBodyPart =
   | { kind: "browser"; key: string; activities: DesktopToolActivity[] }
   | WorkingFilePart
   | DocumentPart
+  /** One image call with the images it made, drawn where the call was made. */
+  | { kind: "image"; key: string; activity: ImageToolActivity; files: AssistantFile[] }
   | {
       kind: "tool";
       key: string;
-      activity: Exclude<ToolActivity, WebToolActivity | OfficeActivity | ToolFileActivity>;
+      activity: Exclude<
+        ToolActivity,
+        WebToolActivity | OfficeActivity | ToolFileActivity | ImageToolActivity
+      >;
     }
   | { kind: "compaction"; key: string; activity: CompactionActivity }
   | { kind: "steer"; key: string; steer: AssistantSteer };
@@ -253,9 +259,19 @@ export function projectAssistantBody({
     ),
   );
   const claimed = new Map<string, AssistantFile>();
+  // An image call's files are drawn inside its part, in place of its placeholder.
+  const imageCalls = new Set(
+    tools.flatMap((activity) => (activity.family === "image" ? [activity.callId] : [])),
+  );
+  const imageFiles = new Map<string, AssistantFile[]>();
   const activities: PositionedActivity[] = [
     ...files
       .filter((activity) => {
+        const call = activity.origin?.toolCallId;
+        if (call && imageCalls.has(call)) {
+          imageFiles.set(call, [...(imageFiles.get(call) ?? []), activity]);
+          return false;
+        }
         const publish = published.get(activity.attachment.id);
         if (publish) claimed.set(publish, activity);
         return !publish;
@@ -320,6 +336,13 @@ export function projectAssistantBody({
       parts.push({ kind: "steer", key: `steer-${item.activity.id}`, steer: item.activity });
     } else if (item.kind === "compaction") {
       parts.push({ ...item, key: `compaction-${item.activity.eventId}` });
+    } else if (item.activity.family === "image") {
+      parts.push({
+        kind: "image",
+        key: `image-${item.activity.callId}`,
+        activity: item.activity,
+        files: imageFiles.get(item.activity.callId) ?? [],
+      });
     } else if (item.activity.family === "web") {
       const last = parts.at(-1);
       if (last?.kind === "web") last.activities.push(item.activity);

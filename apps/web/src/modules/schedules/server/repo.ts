@@ -41,6 +41,7 @@ export class ScheduleRepo extends Context.Service<
         endAt: Date | null;
         modelId: string | null;
         agentId: string | null;
+        imageModelId?: string | null;
         searchEnabled: boolean;
         researchEnabled: boolean;
         collectionIds: string[];
@@ -77,6 +78,7 @@ export class ScheduleRepo extends Context.Service<
           | "endAt"
           | "modelId"
           | "agentId"
+          | "imageModelId"
           | "searchEnabled"
           | "researchEnabled"
           | "collectionIds"

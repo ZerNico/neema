@@ -5,18 +5,25 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "~/modules/attachments/constants.ts";
 
-/** Bounds for everything an answer produces itself: model images and tool files alike. */
+/**
+ * Bounds for what an answer produces itself. Generated images (the model's own
+ * and the image tool's) have their own count; other tool files keep theirs;
+ * one byte ceiling covers both.
+ */
 export const ASSISTANT_FILE_LIMITS = {
   count: MAX_ATTACHMENTS_PER_MESSAGE,
   bytes: MAX_ATTACHMENT_BYTES,
   totalBytes: MAX_ATTACHMENT_BYTES * 2,
+  images: 16,
+  answerBytes: 64 * 1024 * 1024,
   replayBytes: 1024 * 1024,
 } as const;
 const Offset = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /**
  * One file an assistant answer produced, anchored to the text it appeared in.
- * `origin` names the custom tool call that returned it; absent for a model's
- * own image output.
+ * `origin` names the tool call that returned it; absent for a model's own
+ * image output. `source` is absent on files stored before it existed, which
+ * `assistantFileSource` reads from `origin`.
  */
 export const AssistantFile = Schema.Struct({
   v: Schema.Literal(1),
@@ -26,8 +33,18 @@ export const AssistantFile = Schema.Struct({
   eventIndex: Offset,
   callIndex: Offset,
   origin: Schema.optional(Schema.Struct({ toolCallId: Schema.String })),
+  source: Schema.optional(Schema.Literals(["native", "image-tool", "tool"])),
 });
 export type AssistantFile = typeof AssistantFile.Type;
+export type AssistantFileSource = NonNullable<AssistantFile["source"]>;
+
+/** Who made a file, legacy rows included: no origin was the model's own image. */
+export const assistantFileSource = (
+  file: Pick<AssistantFile, "source" | "origin">,
+): AssistantFileSource => file.source ?? (file.origin ? "tool" : "native");
+
+/** Generated images count against their own bound, everything else against the files'. */
+export const isGeneratedImage = (source: AssistantFileSource) => source !== "tool";
 /** One image found for a ```ui block's query, stored as a `search_image` attachment. */
 export const UiImage = Schema.Struct({
   attachmentId: Schema.String,

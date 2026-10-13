@@ -99,6 +99,13 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     return yield* new ScheduleRejected({ reason: "invalid end time" });
   if (settings.modelId && !(yield* deps.providers.isModelAccessible(userId, settings.modelId)))
     return yield* new ScheduleRejected({ reason: "selected model is unavailable" });
+  if (
+    settings.imageModelId &&
+    !(yield* deps.providers.listImageModelsFor(userId)).some(
+      (model) => model.id === settings.imageModelId,
+    )
+  )
+    return yield* new ScheduleRejected({ reason: "selected image model is unavailable" });
   if (settings.searchEnabled && !(yield* deps.policy.can(userId, "webSearch")))
     return yield* new ScheduleRejected({ reason: "web search is not permitted" });
   if (

@@ -274,11 +274,13 @@ describe("useSync", () => {
     const { invalidate, source } = renderSync();
     source.emit("sync", { type: "models.defaults.changed" });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["image-models"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "models"] });
     invalidate.mockClear();
     source.emit("open");
     source.emit("open");
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["image-models"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "models"] });
   });
 
@@ -287,6 +289,7 @@ describe("useSync", () => {
     source.emit("sync", { type: "resources.changed" });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["sharing"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["image-models"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "groups"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin", "group-members"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["knowledge"] }, { cancelRefetch: false });

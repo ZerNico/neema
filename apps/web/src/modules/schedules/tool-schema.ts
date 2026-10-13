@@ -37,6 +37,7 @@ const ScheduleDraftField = Schema.Literals([
   "prompt",
   "modelId",
   "agentId",
+  "imageModelId",
   "searchEnabled",
   "researchEnabled",
   "collectionIds",

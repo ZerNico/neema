@@ -7,6 +7,7 @@ import type { ModelFormat, ModelType } from "~/modules/providers/model-config.ts
 export const MODEL_TYPE_LABELS: Record<ModelType, string> = {
   chat: "Chat",
   embedding: "Embedding",
+  image: "Image",
 };
 
 export const MODEL_FORMAT_LABELS: Record<ModelFormat, string> = {

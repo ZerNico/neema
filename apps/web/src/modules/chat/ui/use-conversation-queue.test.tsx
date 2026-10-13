@@ -34,6 +34,8 @@ const row = (id: string, overrides: Partial<QueueRow> = {}): QueueRow => ({
 const settings = () => ({
   modelId: "composer-model" as string | null,
   setModelId: vi.fn(),
+  imageModelId: "composer-image" as string | null,
+  setImageModelId: vi.fn(),
   searchPreference: false as boolean | null,
   setSearchEnabled: vi.fn(),
   resetSearchEnabled: vi.fn(),
@@ -154,6 +156,7 @@ describe("useConversationQueue", () => {
         row("a", {
           input: {
             modelId: "queued-model",
+            imageModelId: "queued-image",
             searchEnabled: true,
             researchEnabled: false,
             collectionIds: ["col-1"],
@@ -163,10 +166,13 @@ describe("useConversationQueue", () => {
     });
     act(() => result.current.queue.onEditStart(result.current.queue.entries[0]!));
     expect(props.settings.setModelId).toHaveBeenLastCalledWith("queued-model");
+    // A save rebuilds the entry from the composer, so its image model must be there too.
+    expect(props.settings.setImageModelId).toHaveBeenLastCalledWith("queued-image");
     expect(props.settings.setSearchEnabled).toHaveBeenLastCalledWith(true);
     expect(props.settings.seedCollections).toHaveBeenLastCalledWith(["col-1"]);
     act(() => result.current.queue.onEditEnd());
     expect(props.settings.setModelId).toHaveBeenLastCalledWith("composer-model");
+    expect(props.settings.setImageModelId).toHaveBeenLastCalledWith("composer-image");
     expect(props.settings.setSearchEnabled).toHaveBeenLastCalledWith(false);
     expect(props.settings.resetSearchEnabled).not.toHaveBeenCalled();
     expect(props.settings.settleCollections).toHaveBeenCalledOnce();

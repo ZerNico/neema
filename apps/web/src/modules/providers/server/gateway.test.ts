@@ -1358,23 +1358,25 @@ describe("provider catalog", () => {
     Effect.gen(function* () {
       stubProvider("");
       responseFor = (url) =>
-        url.includes("output_modalities=embeddings")
-          ? JSON.stringify({
-              data: [
-                catalogEntry("qwen/qwen3-embedding-8b", ["embeddings"]),
-                // Also present in the default listing: must not appear twice.
-                catalogEntry("vendor/model", ["text"]),
-              ],
-            })
-          : JSON.stringify({
-              data: [
-                {
-                  ...catalogEntry("vendor/model", ["text"]),
-                  reasoning: { supported_efforts: ["high", "nonsense", "low", "high"] },
-                },
-                catalogEntry("vendor/painter", ["image"]),
-              ],
-            });
+        url.endsWith("/images/models")
+          ? JSON.stringify({ data: [] })
+          : url.includes("output_modalities=embeddings")
+            ? JSON.stringify({
+                data: [
+                  catalogEntry("qwen/qwen3-embedding-8b", ["embeddings"]),
+                  // Also present in the default listing: must not appear twice.
+                  catalogEntry("vendor/model", ["text"]),
+                ],
+              })
+            : JSON.stringify({
+                data: [
+                  {
+                    ...catalogEntry("vendor/model", ["text"]),
+                    reasoning: { supported_efforts: ["high", "nonsense", "low", "high"] },
+                  },
+                  catalogEntry("vendor/painter", ["image"]),
+                ],
+              });
       const repo = Layer.succeed(ProviderRepo)(
         ProviderRepo.of(
           Object.assign({} as ProviderRepo["Service"], {
@@ -1393,6 +1395,7 @@ describe("provider catalog", () => {
         gateway.fetchCatalog("p1"),
       ).pipe(Effect.provide(GatewayLayer.pipe(Layer.provide(repo))));
       expect(requests.map((request) => request.url).toSorted()).toEqual([
+        "https://provider.test/v1/images/models",
         "https://provider.test/v1/models",
         "https://provider.test/v1/models?output_modalities=embeddings",
       ]);

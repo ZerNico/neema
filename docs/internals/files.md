@@ -52,6 +52,10 @@ declared type, and only the kinds we understand are shown or handed to a model.
   `listWithBlobsForMessages`, `listForConversation`), so the model, the answer's file cards,
   tool file names and project saves never see one. A new reader of `message_attachments`
   must choose its kind.
+- An answer's own files carry a `source`: `native` for a model's image output, `image-tool`
+  for `generate_image`, `tool` for everything else a tool delivers. Generated images and other
+  files are bounded apart, one byte ceiling over both, and `assistantFileSource` reads a file
+  stored before the field from its origin. See [images](images.md).
 
 ## What the model sees
 

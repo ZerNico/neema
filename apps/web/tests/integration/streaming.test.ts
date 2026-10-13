@@ -68,6 +68,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
+import { ASSISTANT_FILE_LIMITS } from "~/modules/chat/assistant-output.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { hashSource } from "~/modules/genui/fences.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
@@ -266,7 +267,14 @@ const streamedTool = (
     ),
   ).pipe(Stream.orDie) as Stream.Stream<ChatStreamPart>;
 };
-const authoringTool = (input: GatewayInput, name: string, params: unknown, hermes = false) => {
+const authoringTool = (
+  input: GatewayInput,
+  name: string,
+  params: unknown,
+  hermes = false,
+  /** Parts the round streams before its call. */
+  lead: ReadonlyArray<AiResponse.AnyPart> = [],
+) => {
   const id = uuidv7();
   const encodePart = Schema.encodeUnknownEffect(AiResponse.StreamPart(input.toolkit!));
   const calls = hermes
@@ -281,6 +289,7 @@ const authoringTool = (input: GatewayInput, name: string, params: unknown, herme
         { tools: Object.values(input.toolkit!.tools), nextId: Effect.succeed(id) },
       )
     : Stream.make(
+        ...lead,
         AiResponse.makePart("tool-call", { id, name, params, providerExecuted: false }),
         authoringFinish("tool-calls"),
       );
@@ -10933,4 +10942,794 @@ describe("resuming an interrupted answer", () => {
       authoringScript = null;
     }
   }, 60_000);
+});
+
+describe("image generation tool", () => {
+  // An OpenAI preset pointed at a host nothing else uses; its image calls are
+  // answered by the fetch stub below, everything else goes through untouched.
+  const IMAGE_BASE = "http://images.integration.test/v1";
+  let imageProviderModelId: string;
+  let secondImageModelId: string;
+  type ImageAnswer = { status: number; body: unknown } | "hang";
+  const imageAnswers: ImageAnswer[] = [];
+  const imageRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  /** Set to hold a streamed answer after its first draft until it resolves. */
+  let previewGate: Promise<void> | null = null;
+  const realFetch = globalThis.fetch;
+
+  beforeAll(async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith(IMAGE_BASE)) return realFetch(input, init);
+      // The client sends bytes, or a form for edits; either way the fields are read back.
+      const request = new Request(url, {
+        method: init?.method ?? "POST",
+        headers: init?.headers ?? {},
+        ...(init?.body ? { body: init.body as BodyInit } : {}),
+      });
+      const type = request.headers.get("content-type") ?? "";
+      const body = type.includes("multipart")
+        ? Object.fromEntries(
+            [...(await request.formData()).entries()].map(([key, value]) => [
+              key,
+              typeof value === "string" ? value : "<file>",
+            ]),
+          )
+        : ((await request.json().catch(() => ({}))) as Record<string, unknown>);
+      imageRequests.push({ url, body });
+      const answer = imageAnswers.shift() ?? {
+        status: 200,
+        body: {
+          data: [{ b64_json: generatedPng.toString("base64") }],
+          usage: {
+            input_tokens: 20,
+            input_tokens_details: { text_tokens: 20, image_tokens: 0 },
+            output_tokens: 1000,
+          },
+        },
+      };
+      if (answer === "hang")
+        return new Promise<Response>((_, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+        );
+      // GPT Image streams when the engine asks for previews: the same answer
+      // as events, one draft first, or the error event a refusal becomes.
+      if (body["stream"] === true || body["stream"] === "true") {
+        const reply = answer.body as {
+          data?: Array<{ b64_json: string }>;
+          usage?: unknown;
+          error?: unknown;
+        };
+        const kind = url.endsWith("/edits") ? "image_edit" : "image_generation";
+        const events =
+          answer.status !== 200
+            ? [{ type: "error", error: reply.error }]
+            : [
+                {
+                  type: `${kind}.partial_image`,
+                  b64_json: editedPng.toString("base64"),
+                  partial_image_index: 0,
+                },
+                {
+                  type: `${kind}.completed`,
+                  b64_json: reply.data![0]!.b64_json,
+                  usage: reply.usage,
+                },
+              ];
+        const encoder = new TextEncoder();
+        const gate = previewGate;
+        return new Response(
+          new ReadableStream({
+            async start(controller) {
+              for (const [index, event] of events.entries()) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                // A test can hold the stream after the draft, while the call is still running.
+                if (index === 0 && gate) await gate;
+              }
+              controller.close();
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response(JSON.stringify(answer.body), {
+        status: answer.status,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const created = await runtime.runPromise(
+      Effect.gen(function* () {
+        const providers = yield* ProviderRepo;
+        const provider = yield* providers.createProvider({
+          name: "Images",
+          preset: "openai",
+          baseUrl: IMAGE_BASE,
+          apiKey: "test-key",
+        });
+        const settings = (displayName: string) => ({
+          displayName,
+          description: "Good at text in images",
+          type: "image" as const,
+          contextLength: null,
+          embeddingDimensions: null,
+          capabilities: {
+            imageOutput: false,
+            reasoning: false,
+            tools: false,
+            vision: false,
+            files: false,
+          },
+          pricing: null,
+          imageFamily: "gpt-image" as const,
+          imageCapabilities: {
+            generate: true,
+            edit: { maxReferences: 4 },
+            aspectRatios: ["1:1", "3:2", "2:3"] as const,
+            qualities: ["low", "medium", "high"] as const,
+            transparency: true,
+            maxCount: 4,
+          },
+          imagePricing: { perImage: { default: 0.04 } },
+          enabled: true,
+          access: "public" as const,
+          groupIds: [],
+        });
+        const first = yield* providers.createModel({
+          providerId: provider.id,
+          modelKey: "gpt-image-1",
+          ...settings("GPT Image"),
+        });
+        const second = yield* providers.createModel({
+          providerId: provider.id,
+          modelKey: "gpt-image-1-mini",
+          ...settings("GPT Image Mini"),
+        });
+        yield* providers.setDefaultModelOrder([first.id, second.id], "image");
+        return { first: first.id, second: second.id };
+      }),
+    );
+    imageProviderModelId = created.first;
+    secondImageModelId = created.second;
+  });
+
+  afterAll(() => {
+    vi.mocked(globalThis.fetch).mockRestore();
+  });
+
+  const chat = Effect.gen(function* () {
+    const seed = yield* setupConversation;
+    const conversation = yield* (yield* ChatRepo).createConversation({
+      userId: seed.userId,
+      modelId: textModelId,
+    });
+    return { ...seed, conversation };
+  });
+
+  const send = (seed: { userId: string; conversation: { id: string } }, pickedImage?: string) =>
+    runtime.runPromise(
+      Effect.flatMap(ChatService, (service) =>
+        service.sendMessage({
+          userId: seed.userId,
+          conversation: { kind: "existing", id: seed.conversation.id },
+          modelId: textModelId,
+          content: "Draw a cube.",
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+          ...(pickedImage ? { imageModelId: pickedImage } : {}),
+        }),
+      ),
+    );
+  const collect = (id: string) =>
+    runtime.runPromise(
+      Effect.flatMap(StreamEngine, (engine) => Stream.runCollect(engine.subscribe(id, 0))),
+    );
+  const ledger = (messageId: string) =>
+    runtime.runPromise(
+      Effect.flatMap(Db, (db) =>
+        db
+          .select()
+          .from(usageEvents)
+          .where(and(eq(usageEvents.messageId, messageId), eq(usageEvents.kind, "image"))),
+      ),
+    );
+
+  it("draws with the chat's image model, stores the image under its call and locks the model", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) {
+        expect(Object.keys(input.toolkit?.tools ?? {})).toContain("generate_image");
+        // The model is named after history, so the cached prefix never holds it.
+        const trailing = JSON.stringify(input.prompt.content.slice(-3));
+        expect(trailing).toContain("GPT Image");
+        return authoringTool(input, "generate_image", {
+          prompt: "A red cube",
+          aspect_ratio: "16:9",
+          quality: "high",
+        });
+      }
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Here is the cube." }),
+        authoringFinish(),
+      );
+    };
+    imageRequests.length = 0;
+    try {
+      const { assistantMessageId, conversationId } = await send(seed);
+      await collect(assistantMessageId);
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const message = detail.messages.find((row) => row.id === assistantMessageId)!;
+      expect(message.status).toBe("complete");
+      const call = detail.toolCalls.find((row) => row.toolName === "generate_image")!;
+      expect(call.status).toBe("complete");
+      const files = message.assistantOutput?.files ?? [];
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatchObject({ source: "image-tool", origin: { toolCallId: call.id } });
+      expect(call.result).toMatchObject({
+        family: "image",
+        status: "complete",
+        model: "GPT Image",
+        attachmentIds: [files[0]!.attachment.id],
+      });
+      // 16:9 is not one this model allows: the nearest it does is used and said.
+      expect(imageRequests[0]?.url).toBe(`${IMAGE_BASE}/images/generations`);
+      expect(imageRequests[0]?.body).toMatchObject({ model: "gpt-image-1", quality: "high" });
+      expect((call.result as { adjustments?: string[] }).adjustments?.length).toBeGreaterThan(0);
+      const [usage] = await ledger(assistantMessageId);
+      expect(usage).toMatchObject({
+        status: "complete",
+        imageCount: 1,
+        toolCallId: call.id,
+        modelId: imageProviderModelId,
+      });
+      expect(usage?.cost).not.toBeNull();
+      const stored = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          Effect.all([
+            db
+              .select({ lock: conversations.imageModelId })
+              .from(conversations)
+              .where(eq(conversations.id, conversationId)),
+            db
+              .select({ id: messageGenerationConfig.imageModelId })
+              .from(messageGenerationConfig)
+              .where(eq(messageGenerationConfig.messageId, assistantMessageId)),
+          ]),
+        ),
+      );
+      expect(stored[0][0]?.lock).toBe(imageProviderModelId);
+      expect(stored[1][0]?.id).toBe(imageProviderModelId);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("shows the newest draft while it draws, to a page that subscribes late too", async () => {
+    const seed = await runtime.runPromise(chat);
+    let release!: () => void;
+    previewGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) return authoringTool(input, "generate_image", { prompt: "Slowly" });
+      return Stream.make(authoringFinish());
+    };
+    const firstPreview = (id: string) =>
+      runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          engine.subscribe(id, 0).pipe(
+            Stream.filter((event) => event.kind === "preview" || event.kind === "done"),
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+        ),
+      );
+    try {
+      const { assistantMessageId } = await send(seed);
+      const [live] = await firstPreview(assistantMessageId);
+      expect(live).toMatchObject({ kind: "preview", mediaType: "image/png" });
+      // A reload: the draft comes from the snapshot, and the running row names its model.
+      const [late] = await firstPreview(assistantMessageId);
+      expect(late).toMatchObject({
+        kind: "preview",
+        callId: (live as { callId: string }).callId,
+      });
+      const [row] = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ status: messageToolCalls.status, result: messageToolCalls.result })
+            .from(messageToolCalls)
+            .where(eq(messageToolCalls.messageId, assistantMessageId)),
+        ),
+      );
+      expect(row).toMatchObject({
+        status: "running",
+        result: { family: "image", status: "running", model: "GPT Image" },
+      });
+      release();
+      await collect(assistantMessageId);
+      // Drafts are never kept: a page opened afterwards sees only the image.
+      const after = await runtime.runPromise(
+        Effect.flatMap(StreamEngine, (engine) =>
+          engine.subscribe(assistantMessageId, 0).pipe(Stream.runCollect),
+        ),
+      );
+      expect([...after].some((event) => event.kind === "preview")).toBe(false);
+      expect((await ledger(assistantMessageId))[0]?.imageCount).toBe(1);
+    } finally {
+      previewGate = null;
+      authoringScript = null;
+    }
+  });
+
+  it("finishes an answer that is only an image, and switches model when one is picked", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) {
+        expect(JSON.stringify(input.prompt.content.slice(-3))).toContain("GPT Image Mini");
+        return authoringTool(input, "generate_image", { prompt: "A blue cube" });
+      }
+      return Stream.make(authoringFinish());
+    };
+    imageRequests.length = 0;
+    try {
+      const { assistantMessageId, conversationId } = await send(seed, secondImageModelId);
+      await collect(assistantMessageId);
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const message = detail.messages.find((row) => row.id === assistantMessageId)!;
+      expect(message.status).toBe("complete");
+      expect(message.assistantOutput?.files).toHaveLength(1);
+      expect(imageRequests[0]?.body).toMatchObject({ model: "gpt-image-1-mini" });
+      const [row] = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ lock: conversations.imageModelId })
+            .from(conversations)
+            .where(eq(conversations.id, conversationId)),
+        ),
+      );
+      expect(row?.lock).toBe(secondImageModelId);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("resumes without the tool rather than switch from the model the answer drew with", async () => {
+    const seed = await runtime.runPromise(chat);
+    const offered: boolean[] = [];
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      offered.push(Object.keys(input.toolkit?.tools ?? {}).includes("generate_image"));
+      if (round === 1)
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Drawing " }),
+          AiResponse.makePart("finish", {
+            reason: "error",
+            usage: new AiResponse.Usage({ inputTokens: { total: 1 }, outputTokens: { total: 1 } }),
+          }),
+        );
+      return Stream.make(authoringFinish());
+    };
+    const setEnabled = (enabled: boolean) =>
+      runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db.update(models).set({ enabled }).where(eq(models.id, secondImageModelId)),
+        ),
+      );
+    try {
+      const { assistantMessageId, conversationId } = await send(seed, secondImageModelId);
+      await collect(assistantMessageId);
+      await setEnabled(false);
+      await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.resumeMessage({
+            userId: seed.userId,
+            conversationId,
+            messageId: assistantMessageId,
+          }),
+        ),
+      );
+      await collect(assistantMessageId);
+      expect(offered).toEqual([true, false]);
+      const [row] = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ lock: conversations.imageModelId })
+            .from(conversations)
+            .where(eq(conversations.id, conversationId)),
+        ),
+      );
+      expect(row?.lock).toBe(secondImageModelId);
+    } finally {
+      await setEnabled(true);
+      authoringScript = null;
+    }
+  });
+
+  it("counts the model's own images against the tool's, so it draws nothing it cannot keep", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      // The first call draws nothing, so the second comes in a round after the images landed.
+      if (round === 1)
+        return authoringTool(
+          input,
+          "generate_image",
+          { prompt: "" },
+          false,
+          Array.from({ length: ASSISTANT_FILE_LIMITS.images }, () =>
+            AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }),
+          ),
+        );
+      if (round === 2) return authoringTool(input, "generate_image", { prompt: "One more" });
+      return Stream.make(authoringFinish());
+    };
+    imageRequests.length = 0;
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: imageModelId,
+            content: "Draw many.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collect(assistantMessageId);
+      const calls = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.listToolCalls([assistantMessageId])),
+      );
+      expect(calls[1]).toMatchObject({ toolName: "generate_image", status: "error" });
+      expect(JSON.stringify(calls[1]?.result)).toContain("as many images as it may");
+      expect(imageRequests).toHaveLength(0);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("keeps a call's image when the model's own filled the count after it reserved", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      // The call runs ahead of the images streamed before it, so its budget is still open.
+      if (round === 1)
+        return authoringTool(
+          input,
+          "generate_image",
+          { prompt: "One more" },
+          false,
+          Array.from({ length: ASSISTANT_FILE_LIMITS.images }, () =>
+            AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }),
+          ),
+        );
+      return Stream.make(authoringFinish());
+    };
+    // Seventeen images read back in the next round sit at the default context's
+    // compaction line, and this test is about keeping them, not compacting.
+    const setContext = (contextLength: number | null) =>
+      runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db.update(models).set({ contextLength }).where(eq(models.id, imageModelId)),
+        ),
+      );
+    await setContext(1_000_000);
+    imageRequests.length = 0;
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: imageModelId,
+            content: "Draw many.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collect(assistantMessageId);
+      const message = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.getMessage(assistantMessageId)),
+      );
+      expect(message?.status).toBe("complete");
+      // Both were paid for, so both are kept; only the byte ceilings bound a reserved slot.
+      const files = message?.assistantOutput?.files ?? [];
+      expect(files).toHaveLength(ASSISTANT_FILE_LIMITS.images + 1);
+      const [call] = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.listToolCalls([assistantMessageId])),
+      );
+      expect(call).toMatchObject({ toolName: "generate_image", status: "complete" });
+      expect(files.at(-1)).toMatchObject({
+        source: "image-tool",
+        origin: { toolCallId: call!.id },
+      });
+      expect(imageRequests).toHaveLength(1);
+      const [usage] = await ledger(assistantMessageId);
+      expect(usage).toMatchObject({ status: "complete", imageCount: 1, toolCallId: call!.id });
+    } finally {
+      await setContext(null);
+      authoringScript = null;
+    }
+  });
+
+  it("keeps the model's own images after a call's, up to their own count", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) return authoringTool(input, "generate_image", { prompt: "First" });
+      return Stream.make(
+        ...Array.from({ length: ASSISTANT_FILE_LIMITS.images }, () =>
+          AiResponse.makePart("file", { mediaType: "image/png", data: generatedPng }),
+        ),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: imageModelId,
+            content: "Draw many.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collect(assistantMessageId);
+      const message = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.getMessage(assistantMessageId)),
+      );
+      expect(message?.status).toBe("complete");
+      expect(message?.assistantOutput?.files.map((file) => file.source)).toEqual([
+        "image-tool",
+        ...Array.from({ length: ASSISTANT_FILE_LIMITS.images }, () => "native"),
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("says when only some of a call's images could be kept", async () => {
+    const seed = await runtime.runPromise(chat);
+    const png = generatedPng.toString("base64");
+    imageAnswers.push({ status: 200, body: { data: [{ b64_json: png }, { b64_json: png }] } });
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round > 1) return Stream.make(authoringFinish());
+      // The answer already holds all but room for one more image, by its bytes.
+      return Stream.unwrap(
+        Effect.promise(async () => {
+          await runtime.runPromise(
+            Effect.flatMap(Db, (db) =>
+              db
+                .update(messages)
+                .set({
+                  assistantOutput: {
+                    v: 1,
+                    files: [
+                      {
+                        v: 1,
+                        attachment: {
+                          id: "held",
+                          fileName: "held.png",
+                          size: ASSISTANT_FILE_LIMITS.answerBytes - generatedPng.length,
+                          mediaType: "image/png",
+                          kind: "image",
+                        },
+                        textOffset: 0,
+                        turnIndex: 0,
+                        eventIndex: 0,
+                        callIndex: 0,
+                        source: "native",
+                      },
+                    ],
+                  },
+                })
+                .where(
+                  and(
+                    eq(messages.conversationId, seed.conversation.id),
+                    eq(messages.status, "streaming"),
+                  ),
+                ),
+            ),
+          );
+          return authoringTool(input, "generate_image", { prompt: "Two", count: 2 });
+        }),
+      );
+    };
+    try {
+      const { assistantMessageId } = await send(seed);
+      await collect(assistantMessageId);
+      const [call] = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.listToolCalls([assistantMessageId])),
+      );
+      expect(call).toMatchObject({ toolName: "generate_image", status: "complete" });
+      expect((call!.result as { attachmentIds: string[] }).attachmentIds).toHaveLength(1);
+      expect((call!.result as { adjustments?: string[] }).adjustments?.[0]).toMatch(
+        /^1 of 2 images could not be kept/,
+      );
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("retries with the image model picked for the retry, and moves the lock", async () => {
+    const seed = await runtime.runPromise(chat);
+    authoringScript = (input) =>
+      JSON.stringify(input.prompt.content).includes("tool-result")
+        ? Stream.make(authoringFinish())
+        : authoringTool(input, "generate_image", { prompt: "A cube" });
+    imageRequests.length = 0;
+    try {
+      const { assistantMessageId, conversationId } = await send(seed);
+      await collect(assistantMessageId);
+      await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.retryMessage({
+            userId: seed.userId,
+            conversationId,
+            messageId: assistantMessageId,
+            imageModelId: secondImageModelId,
+          }),
+        ),
+      );
+      await collect(assistantMessageId);
+      expect(imageRequests.map((row) => row.body.model)).toEqual([
+        "gpt-image-1",
+        "gpt-image-1-mini",
+      ]);
+      const [row] = await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .select({ lock: conversations.imageModelId })
+            .from(conversations)
+            .where(eq(conversations.id, conversationId)),
+        ),
+      );
+      expect(row?.lock).toBe(secondImageModelId);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("reports a refusal in the call and lets the answer go on", async () => {
+    const seed = await runtime.runPromise(chat);
+    imageAnswers.push({
+      status: 400,
+      body: {
+        error: {
+          code: "moderation_blocked",
+          message: "Your request was rejected by the safety system.",
+        },
+      },
+    });
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) return authoringTool(input, "generate_image", { prompt: "Something" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "It was declined." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId, conversationId } = await send(seed);
+      await collect(assistantMessageId);
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const message = detail.messages.find((row) => row.id === assistantMessageId)!;
+      expect(message.status).toBe("complete");
+      expect(message.assistantOutput?.files ?? []).toHaveLength(0);
+      const call = detail.toolCalls.find((row) => row.toolName === "generate_image")!;
+      expect(call.status).toBe("error");
+      expect(call.result).toMatchObject({
+        family: "image",
+        refusal: expect.stringContaining("rejected"),
+      });
+      const [usage] = await ledger(assistantMessageId);
+      expect(usage).toMatchObject({ imageCount: 0 });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("edits an image the chat holds, passed by its file link", async () => {
+    const seed = await runtime.runPromise(chat);
+    let round = 0;
+    let firstImage: string | undefined;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1) return authoringTool(input, "generate_image", { prompt: "A cube" });
+      if (round === 2)
+        return Stream.make(
+          AiResponse.makePart("text-delta", { id: "t", delta: "Made it." }),
+          authoringFinish(),
+        );
+      if (round === 3)
+        return authoringTool(input, "generate_image", {
+          prompt: "Make it green",
+          references: [`/api/files/${firstImage}`],
+        });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Edited." }),
+        authoringFinish(),
+      );
+    };
+    imageRequests.length = 0;
+    try {
+      const first = await send(seed);
+      await collect(first.assistantMessageId);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, first.conversationId),
+      );
+      firstImage = detail.messages.find((row) => row.id === first.assistantMessageId)!
+        .assistantOutput!.files[0]!.attachment.id;
+      const second = await send(seed);
+      await collect(second.assistantMessageId);
+      const after = await runtime.runPromise(
+        loadConversationDetail(seed.userId, first.conversationId),
+      );
+      const call = after.toolCalls.find(
+        (row) => row.toolName === "generate_image" && row.messageId === second.assistantMessageId,
+      )!;
+      expect(call.status).toBe("complete");
+      expect(call.result).toMatchObject({ editing: true });
+      expect(imageRequests.at(-1)?.url).toBe(`${IMAGE_BASE}/images/edits`);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("aborts the request on Stop, stores nothing and records the call as aborted", async () => {
+    const seed = await runtime.runPromise(chat);
+    imageAnswers.push("hang");
+    authoringScript = (input) => authoringTool(input, "generate_image", { prompt: "Slow" });
+    try {
+      const { assistantMessageId } = await send(seed);
+      // Waits on the request reaching the provider, not on a clock.
+      await vi.waitFor(() =>
+        expect(imageRequests.some((row) => row.body.prompt === "Slow")).toBe(true),
+      );
+      const stopped = await runtime.runPromise(
+        Effect.gen(function* () {
+          const running = yield* (yield* ChatRepo).getMessage(assistantMessageId);
+          return yield* (yield* StreamEngine).stopGeneration(
+            assistantMessageId,
+            running?.generationId ?? undefined,
+          );
+        }),
+      );
+      expect(stopped).toBe(true);
+      await collect(assistantMessageId);
+      const message = await runtime.runPromise(
+        Effect.flatMap(ChatRepo, (repo) => repo.getMessage(assistantMessageId)),
+      );
+      expect(message?.status).not.toBe("streaming");
+      expect(message?.assistantOutput?.files ?? []).toHaveLength(0);
+      await vi.waitFor(async () => {
+        const [usage] = await ledger(assistantMessageId);
+        expect(usage).toMatchObject({ status: "aborted", imageCount: 0, usageComplete: false });
+      });
+    } finally {
+      authoringScript = null;
+    }
+  });
 });

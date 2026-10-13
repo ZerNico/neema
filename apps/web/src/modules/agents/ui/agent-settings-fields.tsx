@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { EMPTY_AGENT_DRAFT } from "../draft-schema.ts";
 import { AGENT_LIMITS, AgentIcon } from "../schema.ts";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
+import { ImageModelSettingRow } from "~/modules/images/ui/image-model-select.tsx";
 import { AGENT_ICONS } from "~/modules/chat/ui/agent-icons.ts";
 import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
@@ -510,6 +511,15 @@ export const AgentSettingsFields = withForm({
                 )}
               </form.Field>
             </ListRow>
+            <form.Field name="imageModelId">
+              {(field) => (
+                <ImageModelSettingRow
+                  value={field.state.value}
+                  onChange={(modelId) => field.handleChange(modelId)}
+                  description="A new chat draws with it."
+                />
+              )}
+            </form.Field>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm font-medium">Web search by default</span>

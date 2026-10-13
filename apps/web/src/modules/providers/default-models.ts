@@ -17,6 +17,12 @@ export class InvalidUtilityModel extends Schema.TaggedError<InvalidUtilityModel>
   { reason: Schema.String },
 ) {}
 
+/** An image model whose family its provider cannot serve. */
+export class UnhostedImageFamily extends Schema.TaggedError<UnhostedImageFamily>()(
+  "UnhostedImageFamily",
+  { reason: Schema.String },
+) {}
+
 /**
  * Input is already authorized and in the admin's order, so the first row a
  * person can use is their default. Strip the rank before returning rows to the

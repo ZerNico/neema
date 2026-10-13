@@ -3,6 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import { usageEvents, user } from "~/db/schema/index.ts";
+import type { CostSource } from "~/db/schema/analytics.ts";
 
 // PostgreSQL sums integer token columns as bigint. Keep that width in SQL,
 // then reject totals outside JS's exact integer range rather than silently rounding.
@@ -30,7 +31,11 @@ export interface UsageEventInput {
   reasoningTokens: number;
   usageComplete?: boolean;
   cost: number | null;
-  costSource: "provider" | "pricing" | null;
+  costSource: CostSource | null;
+  /** Image operations: images the provider made, and the call they served. */
+  imageCount?: number;
+  toolCallId?: string;
+  generationId?: string;
 }
 
 /**
@@ -52,6 +57,9 @@ export interface UsageSummary {
   attempts: number;
   titleGenerations: number;
   compactionGenerations: number;
+  /** Image operations, each its own attempt, and the images they made. */
+  imageGenerations: number;
+  images: number;
   errorAttempts: number;
   abortedAttempts: number;
   inputTokens: number;
@@ -71,6 +79,7 @@ export interface UsageDay {
   /** ISO date (YYYY-MM-DD), UTC bucket. */
   day: string;
   messages: number;
+  images: number;
   attempts: number;
   errorAttempts: number;
   inputTokens: number;
@@ -83,6 +92,7 @@ export interface UsageDay {
 export interface UsageByModel {
   modelName: string;
   messages: number;
+  images: number;
   inputTokens: number;
   outputTokens: number;
   cost: number;
@@ -94,6 +104,7 @@ export interface UsageByUser {
   name: string;
   email: string;
   messages: number;
+  images: number;
   inputTokens: number;
   outputTokens: number;
   cost: number;
@@ -125,6 +136,7 @@ export class AnalyticsRepo extends Context.Service<
       // Sums are null over zero rows; coalesce keeps the shape numeric.
       const sums = {
         messages: sql<number>`count(*) filter (where ${usageEvents.kind} = 'chat')::int`,
+        images: sql<number>`coalesce(sum(${usageEvents.imageCount}), 0)::int`,
         inputTokens: sql`coalesce(sum(${usageEvents.inputTokens}), 0)`.mapWith(tokenTotal),
         outputTokens: sql`coalesce(sum(${usageEvents.outputTokens}), 0)`.mapWith(tokenTotal),
         cost: sql<number>`coalesce(sum(${usageEvents.cost}), 0)`,
@@ -159,6 +171,7 @@ export class AnalyticsRepo extends Context.Service<
               ...detail,
               titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
               compactionGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'compaction')::int`,
+              imageGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'image')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               ...costCompleteness,
               activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
@@ -175,6 +188,8 @@ export class AnalyticsRepo extends Context.Service<
             attempts: row.attempts,
             titleGenerations: row.titleGenerations,
             compactionGenerations: row.compactionGenerations,
+            imageGenerations: row.imageGenerations,
+            images: row.images,
             errorAttempts: row.errorAttempts,
             abortedAttempts: row.abortedAttempts,
             inputTokens: row.inputTokens,
@@ -205,7 +220,10 @@ export class AnalyticsRepo extends Context.Service<
             .from(usageEvents)
             .where(inScope(scope))
             .groupBy(usageEvents.modelName)
-            .orderBy(desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`))
+            .orderBy(
+              desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`),
+              desc(sql`coalesce(sum(${usageEvents.cost}), 0)`),
+            )
             .pipe(Effect.orDie);
         }),
 
@@ -222,7 +240,10 @@ export class AnalyticsRepo extends Context.Service<
             .innerJoin(user, eq(user.id, usageEvents.userId))
             .where(inWindow(scope))
             .groupBy(user.id, user.name, user.email)
-            .orderBy(desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`))
+            .orderBy(
+              desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`),
+              desc(sql`coalesce(sum(${usageEvents.cost}), 0)`),
+            )
             .pipe(Effect.orDie);
         }),
       });

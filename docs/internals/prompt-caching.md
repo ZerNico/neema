@@ -13,8 +13,10 @@ the whole input again on every turn.
   retained history (skill replays included, see [skills](skills.md)). A compaction summary
   sits between them as a user-role block.
 - After history, fixed for the whole answer: draft, document and knowledge data, the skill
-  catalogue and pinned roots, kept drafts and the runtime clock, as the answer's first
-  request saw them. Then the answer's rounds.
+  catalogue and pinned roots, kept drafts, the image model the answer draws with and the
+  runtime clock, as the answer's first request saw them. Then the answer's rounds. The image
+  tool's schema stays the same whichever model it uses, so picking another never uncaches the
+  tool list ([images](images.md)).
 - After the rounds, rebuilt per request: whatever in that trailing data changed during the
   answer (an edited draft, a skill loaded mid-answer), then the reminder. A document keeps its
   first view as it was and sends only its changes since, cumulatively, so a long document is not

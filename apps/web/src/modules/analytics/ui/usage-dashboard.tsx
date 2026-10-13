@@ -272,6 +272,7 @@ const GENERATION_KINDS = [
   { key: "chat", label: "chat", color: "var(--chart-1)" },
   { key: "title", label: "title", color: "var(--chart-3)" },
   { key: "compaction", label: "summarizing", color: "var(--chart-4)" },
+  { key: "image", label: "image", color: "var(--chart-2)" },
 ] as const;
 
 function SplitMeter({
@@ -446,16 +447,18 @@ export function UsageOverview({
             chat: summary.messages,
             title: summary.titleGenerations,
             compaction: summary.compactionGenerations,
+            image: summary.imageGenerations,
           }}
         />
       </ChartCard>
       <ChartCard title="By model">
         <TokensByModelChart byModel={byModel} />
         <UsageTable
-          head={["Model", "Messages", "Tokens", "Cost"]}
+          head={["Model", "Messages", "Images", "Tokens", "Cost"]}
           rows={byModel.map((row) => [
             row.modelName,
             formatCount(row.messages),
+            row.images > 0 ? formatCount(row.images) : "–",
             formatTokens(row.inputTokens + row.outputTokens),
             groupedCost(row),
           ])}
@@ -519,10 +522,11 @@ const groupedCost = ({ cost, costComplete }: Pick<UsageByModel, "cost" | "costCo
 export function UsersTable({ byUser }: { byUser: readonly UsageByUser[] }) {
   return (
     <UsageTable
-      head={["User", "Messages", "Tokens", "Cost"]}
+      head={["User", "Messages", "Images", "Tokens", "Cost"]}
       rows={byUser.map((row) => [
         `${row.name} (${row.email})`,
         formatCount(row.messages),
+        row.images > 0 ? formatCount(row.images) : "–",
         formatTokens(row.inputTokens + row.outputTokens),
         groupedCost(row),
       ])}

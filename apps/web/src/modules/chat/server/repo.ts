@@ -40,6 +40,7 @@ import {
 } from "~/modules/tools/ask-user-schema.ts";
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
+import { IMAGE_TOOL, ImageToolActivity } from "~/modules/images/tool-schema.ts";
 import { composeFileReferenceAliases } from "../file-reference-aliases.ts";
 import { DELETED_CHAT_GRACE_SECONDS, TEMPORARY_CHAT_HOURS, type OpenDocument } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -159,6 +160,8 @@ export interface GenerationConfig {
   readonly workspaceFiles?: ReadonlyArray<string>;
   /** A schedule fire's up-front integration consent; null with a person present. */
   readonly integrationGrants?: ReadonlyArray<IntegrationGrant> | null;
+  /** The image model this attempt was offered; null or absent offers no image tool. */
+  readonly imageModel?: { readonly id: string; readonly name: string } | null;
 }
 export interface DraftSummary {
   id: string;
@@ -208,6 +211,10 @@ const withClonedFileIds = (
     const stored = Option.getOrUndefined(Schema.decodeUnknownOption(CustomToolActivity)(result));
     if (stored?.fileIds) return { ...result, fileIds: stored.fileIds.flatMap(copy) };
   }
+  if (toolName === IMAGE_TOOL) {
+    const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ImageToolActivity)(result));
+    if (stored) return { ...result, attachmentIds: stored.attachmentIds.flatMap(copy) };
+  }
   return result;
 };
 
@@ -244,6 +251,10 @@ export interface ConversationDefaults {
   readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
   /** Unpublished working files kept for later answers, named so a rewind can say it removes them. */
   readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
+  /** Set where defaults were read from a stored chat, so an attempt can move its image lock. */
+  readonly conversationId?: string;
+  /** The chat's image model lock; null when it has none or the model was deleted. */
+  readonly imageModelId?: string | null;
 }
 export type ResolveError =
   | AccountIneligible
@@ -648,6 +659,10 @@ const toConfig = (
   desktopMachineName: row.desktopMachineName,
   workspaceFiles: row.workspaceFiles,
   integrationGrants: row.integrationGrants,
+  imageModel:
+    row.imageModelId && row.imageModelName
+      ? { id: row.imageModelId, name: row.imageModelName }
+      : null,
 });
 
 const readDefaults = Effect.fn("chat.readDefaults")(function* (
@@ -688,7 +703,11 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     messageId: file.createdBy,
   }));
   const [conversation] = yield* tx
-    .select({ mode: conversations.mode, projectId: conversations.projectId })
+    .select({
+      mode: conversations.mode,
+      projectId: conversations.projectId,
+      imageModelId: conversations.imageModelId,
+    })
     .from(conversations)
     .where(eq(conversations.id, conversationId))
     .pipe(Effect.orDie);
@@ -700,6 +719,8 @@ const readDefaults = Effect.fn("chat.readDefaults")(function* (
     workingFiles,
     mode: conversation?.mode ?? "chat",
     projectId: conversation?.projectId ?? null,
+    conversationId,
+    imageModelId: conversation?.imageModelId ?? null,
   } satisfies ConversationDefaults;
 });
 
@@ -765,6 +786,8 @@ const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       workspaceFiles: [...(config.workspaceFiles ?? [])],
       collectionIds: [...config.collectionIds],
       integrationGrants: config.integrationGrants ? [...config.integrationGrants] : null,
+      imageModelId: config.imageModel?.id ?? null,
+      imageModelName: config.imageModel?.name ?? null,
     })
     .pipe(Effect.orDie);
   yield* tx.delete(messageSkills).where(eq(messageSkills.messageId, messageId)).pipe(Effect.orDie);
@@ -1210,6 +1233,8 @@ export class ChatRepo extends Context.Service<
       providerCallId: string;
       toolName: string;
       arguments: JsonValue;
+      /** What a running call already knows, for a page that loads before it ends. */
+      result?: JsonValue;
     }): Effect.Effect<void>;
     completeToolCall(input: {
       id: string;
@@ -2094,14 +2119,16 @@ export class ChatRepo extends Context.Service<
                 const association = input.associateAgentId
                   ? { agentId: input.associateAgentId }
                   : null;
+                const fresh = {
+                  mode: conversation.mode,
+                  projectId: conversation.projectId,
+                  conversationId: conversation.id,
+                  imageModelId: conversation.imageModelId,
+                };
                 const defaults: ConversationDefaults = association
-                  ? {
-                      agent: association,
-                      mode: conversation.mode,
-                      projectId: conversation.projectId,
-                    }
+                  ? { agent: association, ...fresh }
                   : conversationCreated
-                    ? { agent: null, mode: conversation.mode, projectId: conversation.projectId }
+                    ? { agent: null, ...fresh }
                     : yield* readDefaults(tx, conversation.id);
                 const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
                 if (input.saveIntegrationChoices)
@@ -2869,6 +2896,7 @@ export class ChatRepo extends Context.Service<
                     // between the service's read and this lock counts.
                     title: source.title,
                     modelId: source.modelId,
+                    imageModelId: source.imageModelId,
                     // A branch of a work chat is still work: its history is
                     // full of folder activity the continuation has to match.
                     // The approval level is a fact about the chat too.
@@ -3163,7 +3191,14 @@ export class ChatRepo extends Context.Service<
                         files: message.assistantOutput.files.map((file) => {
                           const id = attachmentIds.get(file.attachment.id);
                           if (!id) throw new Error("Missing cloned assistant file");
-                          return { ...file, attachment: { ...file.attachment, id } };
+                          const toolCallId = file.origin && toolIds.get(file.origin.toolCallId);
+                          return {
+                            ...file,
+                            attachment: { ...file.attachment, id },
+                            ...(file.origin
+                              ? { origin: { toolCallId: toolCallId ?? file.origin.toolCallId } }
+                              : {}),
+                          };
                         }),
                         ...(message.assistantOutput.images
                           ? { images: remapUiImages(message.assistantOutput.images, attachmentIds) }

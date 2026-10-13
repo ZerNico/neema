@@ -283,3 +283,54 @@ describe("the utility model", () => {
     expect(await run(Effect.flatMap(repo, (r) => r.getUtilityModelId()))).toBeNull();
   });
 });
+
+describe("image model families", () => {
+  const repo = ProviderRepo;
+  const settings = (imageFamily: "gpt-image" | "openrouter-image") => ({
+    displayName: "Image",
+    type: "image" as const,
+    contextLength: null,
+    embeddingDimensions: null,
+    capabilities: {
+      imageOutput: false,
+      reasoning: false,
+      tools: false,
+      vision: false,
+      files: false,
+    },
+    pricing: null,
+    imageFamily,
+    imageCapabilities: {
+      generate: true,
+      edit: null,
+      aspectRatios: ["1:1"] as const,
+      qualities: [] as const,
+      transparency: false,
+      maxCount: 1,
+    },
+    imagePricing: null,
+    enabled: true,
+    access: "public" as const,
+    groupIds: [],
+  });
+
+  it("refuses a family the provider does not host as a typed error, on add and on edit", async () => {
+    const refused = await run(
+      Effect.flatMap(repo, (r) =>
+        r.createModel({ providerId: "p", modelKey: "gpt-image-1", ...settings("gpt-image") }),
+      ).pipe(Effect.flip),
+    );
+    expect(refused._tag).toBe("UnhostedImageFamily");
+    const created = await run(
+      Effect.flatMap(repo, (r) =>
+        r.createModel({ providerId: "p", modelKey: "flux", ...settings("openrouter-image") }),
+      ),
+    );
+    const edited = await run(
+      Effect.flatMap(repo, (r) => r.updateModel(created.id, settings("gpt-image"))).pipe(
+        Effect.flip,
+      ),
+    );
+    expect(edited._tag).toBe("UnhostedImageFamily");
+  });
+});

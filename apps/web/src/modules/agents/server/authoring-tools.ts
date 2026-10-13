@@ -43,6 +43,10 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
   systemPrompt: "instructions",
   system_prompt: "instructions",
   prompt: "instructions",
+  imageModel: "imageModelId",
+  image_model: "imageModelId",
+  image_model_id: "imageModelId",
+  preferredImageModel: "imageModelId",
   model: "modelId",
   model_id: "modelId",
   preferredModel: "modelId",
@@ -117,7 +121,7 @@ const transport = (schema: Schema.Top) =>
   );
 // Models write "no value" as null and small integers as strings. Both mean the
 // key is absent or the number itself; refusing them only burns a round trip.
-// modelId keeps null: there it is a real value (no preference).
+// modelId and imageModelId keep null: there it is a real value (no preference).
 const lenient = (raw: unknown, changes = false): unknown => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
@@ -125,7 +129,7 @@ const lenient = (raw: unknown, changes = false): unknown => {
   for (const [rawKey, value] of Object.entries(input)) {
     const key = changes ? (DRAFT_FIELD_ALIASES[rawKey] ?? rawKey) : rawKey;
     if (value === null || value === undefined) {
-      if (key === "modelId") out[key] = null;
+      if (key === "modelId" || key === "imageModelId") out[key] = null;
       continue;
     }
     if (key === "changes") out[key] = lenient(value, true);
@@ -254,6 +258,8 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
   // Short and already visible in the composer's picker, so a draft can name a
   // preference without a discovery round trip.
   let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];
+  // The image models the user can pick, in the admin's order, the same way.
+  let availableImageModels: ReadonlyArray<{ id: string; name: string; description?: string }> = [];
   const list = Effect.fn(function* (kind: typeof OptionKind.Type) {
     const rows =
       kind === "agents"
@@ -322,11 +328,17 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
       focusedDraftId = known.at(-1)?.id ?? null;
     selected = {};
     availableModels = [];
+    availableImageModels = [];
     const current = focused();
     if (current) {
       availableModels = (yield* list("models")).map(({ id, name }) =>
         id === input.currentModelId ? { id, name, current: true as const } : { id, name },
       );
+      availableImageModels = (yield* providers.listImageModelsFor(input.userId)).map((model) => ({
+        id: model.id,
+        name: model.displayName,
+        ...(model.description ? { description: model.description } : {}),
+      }));
       const ids = {
         models: current.settings.modelId ? [current.settings.modelId] : [],
         skills: current.settings.skillIds,
@@ -498,6 +510,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
                   otherDrafts: known.filter((draft) => draft.id !== focusedDraftId).map(summary),
                   selected,
                   availableModels,
+                  ...(availableImageModels.length ? { availableImageModels } : {}),
                   options: Object.fromEntries(inspected),
                 }),
             },

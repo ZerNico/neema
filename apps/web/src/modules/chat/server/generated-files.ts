@@ -13,8 +13,11 @@ import { IMAGE_MEDIA_TYPES, type AttachmentKind } from "~/modules/attachments/co
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
 import {
   type AssistantFile,
+  type AssistantFileSource,
   type AssistantOutput,
   ASSISTANT_FILE_LIMITS,
+  assistantFileSource,
+  isGeneratedImage,
 } from "../assistant-output.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -33,6 +36,9 @@ export const nextAttachmentPosition = (tx: DbTx, messageId: string) =>
       Effect.map(([row]) => row?.next ?? 0),
       Effect.orDie,
     );
+
+const totalBytes = (items: ReadonlyArray<AssistantFile>) =>
+  items.reduce((sum, item) => sum + item.attachment.size, 0);
 
 /** Strict base64 only: remote outputs are refused, never fetched. */
 export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Array) =>
@@ -83,6 +89,13 @@ export const acceptGeneratedFile = (
     bytes: Uint8Array;
     allowedKinds?: ReadonlyArray<AttachmentKind>;
     origin?: { toolCallId: string };
+    /** Which bound it counts against; see `assistantFileSource`. */
+    source: AssistantFileSource;
+    /**
+     * A slot the answer's image budget granted before the image was drawn. It
+     * was counted then and paid for since, so only the byte ceilings apply.
+     */
+    reserved?: boolean;
     inTransaction?: (tx: DbTx) => Effect.Effect<ReadonlyArray<string>>;
     textOffset: number;
     turnIndex: number;
@@ -108,14 +121,30 @@ export const acceptGeneratedFile = (
             const message = yield* lockGeneration(tx, input.fence);
             output = message.assistantOutput;
             previous = output?.files ?? [];
+            const image = isGeneratedImage(input.source);
+            const sameKind = previous.filter(
+              (item) => isGeneratedImage(assistantFileSource(item)) === image,
+            );
+            // The tool's images were counted against everything stored when their
+            // slots were granted, so a model's own image competes only with its own:
+            // in either order, both are kept.
+            const counted =
+              input.source === "native"
+                ? sameKind.filter((item) => assistantFileSource(item) === "native")
+                : sameKind;
             if (
-              previous.length >= ASSISTANT_FILE_LIMITS.count ||
-              previous.reduce((sum, item) => sum + item.attachment.size, 0) + input.bytes.length >
-                ASSISTANT_FILE_LIMITS.totalBytes
+              (!input.reserved &&
+                counted.length >=
+                  (image ? ASSISTANT_FILE_LIMITS.images : ASSISTANT_FILE_LIMITS.count)) ||
+              (!image &&
+                totalBytes(sameKind) + input.bytes.length > ASSISTANT_FILE_LIMITS.totalBytes) ||
+              totalBytes(previous) + input.bytes.length > ASSISTANT_FILE_LIMITS.answerBytes
             )
               return yield* new AttachmentRejected({
                 cause: "size",
-                reason: "This answer already holds as many files as one message may carry.",
+                reason: image
+                  ? "This answer already holds as many images as one message may carry."
+                  : "This answer already holds as many files as one message may carry.",
               });
           }),
         after: (tx, attachment) =>
@@ -128,6 +157,7 @@ export const acceptGeneratedFile = (
               eventIndex: input.eventIndex,
               callIndex: input.callIndex,
               ...(input.origin ? { origin: input.origin } : {}),
+              source: input.source,
             };
             yield* tx
               .insert(messageAttachments)
@@ -182,6 +212,7 @@ export const acceptGeneratedImage = (
       fileName: `generated-${input.eventIndex + 1}.${input.mediaType.split("/")[1]}`,
       bytes,
       allowedKinds: ["image"],
+      source: "native",
     });
   });
 

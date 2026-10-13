@@ -24,6 +24,7 @@ const EMPTY_DAY = {
   cachedInputTokens: 0,
   reasoningTokens: 0,
   cost: 0,
+  images: 0,
 } as const;
 
 /**

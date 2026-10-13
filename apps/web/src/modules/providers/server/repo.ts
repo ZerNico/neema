@@ -6,6 +6,7 @@ import {
   MAX_DEFAULT_MODELS,
   InvalidUtilityModel,
   markDefaultModel,
+  UnhostedImageFamily,
 } from "../default-models.ts";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -27,7 +28,9 @@ import {
   type ReasoningEffort,
 } from "../model-config.ts";
 import {
+  effectiveImageCapabilities,
   getPreset,
+  imageFamiliesFor,
   resolveBaseUrl,
   sanitizeSettings,
   type PresetId,
@@ -47,6 +50,16 @@ export type ChatModelRow = Pick<
   isDefault: boolean;
   reasoningEfforts?: ReasoningEffort[];
 };
+/** An image model as the composer's picker consumes it. */
+export type ImageModelRow = Pick<
+  ModelRow,
+  "id" | "displayName" | "description" | "imageCapabilities"
+> & {
+  providerName: string;
+  isDefault: boolean;
+};
+/** The model types an admin orders; embedding models have no default. */
+export type OrderedModelType = "chat" | "image";
 type ProviderRow = typeof providers.$inferSelect;
 /** Provider rows with the ciphertext stripped, safe to send to admin clients. */
 export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext"> & { hasApiKey: boolean };
@@ -92,8 +105,12 @@ export class ProviderRepo extends Context.Service<
      * see everything (but never models of a disabled provider).
      */
     listChatModelsFor(userId: string): Effect.Effect<ChatModelRow[]>;
+    /** The same predicate for image models, in the admin's image order. */
+    listImageModelsFor(userId: string): Effect.Effect<ImageModelRow[]>;
+    /** Ranks one type's models; the other type's order is left as it is. */
     setDefaultModelOrder(
       modelIds: ReadonlyArray<string>,
+      type?: OrderedModelType,
     ): Effect.Effect<void, InvalidDefaultModelOrder>;
     /** The model side generations prefer, or null to use each chat's own. */
     getUtilityModelId(): Effect.Effect<string | null>;
@@ -119,9 +136,9 @@ export class ProviderRepo extends Context.Service<
         modelKey: string;
         metadata?: Record<string, import("~/db/schema/providers.ts").JsonValue>;
       } & ModelSettings,
-    ): Effect.Effect<ModelRow>;
+    ): Effect.Effect<ModelRow, UnhostedImageFamily>;
     /** Updates model settings and replaces allowed-group links atomically. */
-    updateModel(modelId: string, input: ModelSettings): Effect.Effect<void>;
+    updateModel(modelId: string, input: ModelSettings): Effect.Effect<void, UnhostedImageFamily>;
     /** Records the API a model turned out to need, after it refused another. */
     setModelFormat(modelId: string, format: ModelFormat): Effect.Effect<void>;
     deleteModel(modelId: string): Effect.Effect<void>;
@@ -153,6 +170,28 @@ export class ProviderRepo extends Context.Service<
               .where(and(eq(modelGroupAccess.modelId, models.id), eq(groupMembers.userId, userId))),
           ),
         );
+
+      // The admin UI offers only the families a preset hosts; this is the
+      // server's own refusal, so a stored family is always one it can call.
+      const checkImageFamily = (
+        tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+        providerId: string,
+        settings: { readonly type: string; readonly imageFamily?: string | null },
+      ) =>
+        Effect.gen(function* () {
+          if (settings.type !== "image") return;
+          const [provider] = yield* tx
+            .select({ preset: providers.preset })
+            .from(providers)
+            .where(eq(providers.id, providerId));
+          if (
+            !provider ||
+            !imageFamiliesFor(provider.preset).some((family) => family.id === settings.imageFamily)
+          )
+            return yield* new UnhostedImageFamily({
+              reason: `This provider does not host ${settings.imageFamily} image models.`,
+            });
+        });
 
       return ProviderRepo.of({
         listProviders: Effect.fn("ProviderRepo.listProviders")(function* () {
@@ -292,7 +331,49 @@ export class ProviderRepo extends Context.Service<
           }));
         }),
 
-        setDefaultModelOrder: Effect.fn("ProviderRepo.setDefaultModelOrder")(function* (input) {
+        listImageModelsFor: Effect.fn("ProviderRepo.listImageModelsFor")(function* (userId) {
+          const rows = yield* db
+            .select({
+              id: models.id,
+              defaultPriority: models.defaultPriority,
+              displayName: models.displayName,
+              description: models.description,
+              imageFamily: models.imageFamily,
+              imageCapabilities: models.imageCapabilities,
+              providerName: providers.name,
+              preset: providers.preset,
+            })
+            .from(models)
+            .innerJoin(providers, eq(providers.id, models.providerId))
+            .where(
+              and(
+                eq(providers.enabled, true),
+                eq(models.enabled, true),
+                eq(models.type, "image"),
+                accessibleBy(userId),
+              ),
+            )
+            .orderBy(asc(models.defaultPriority), asc(models.displayName), asc(models.id))
+            .pipe(Effect.orDie);
+          // A family its provider's preset no longer hosts cannot be called.
+          const usable = rows.filter(
+            (row) =>
+              row.imageFamily !== null &&
+              imageFamiliesFor(row.preset).some((family) => family.id === row.imageFamily),
+          );
+          return markDefaultModel(usable).map(({ imageFamily, preset: _, ...model }) => ({
+            ...model,
+            imageCapabilities:
+              imageFamily && model.imageCapabilities
+                ? effectiveImageCapabilities(imageFamily, model.imageCapabilities)
+                : model.imageCapabilities,
+          }));
+        }),
+
+        setDefaultModelOrder: Effect.fn("ProviderRepo.setDefaultModelOrder")(function* (
+          input,
+          type = "chat",
+        ) {
           const modelIds = yield* Schema.decodeUnknownEffect(DefaultModelIds)(input).pipe(
             Effect.mapError(
               () =>
@@ -307,7 +388,7 @@ export class ProviderRepo extends Context.Service<
                 // Also serializes replacements of an empty order. Row locks on
                 // ranked models alone would not protect that case.
                 yield* tx.execute(
-                  sql`select pg_advisory_xact_lock(hashtextextended('chat.model-default-order', 0))`,
+                  sql`select pg_advisory_xact_lock(hashtextextended(${`chat.model-default-order.${type}`}, 0))`,
                 );
                 if (modelIds.length > 0) {
                   const selected = yield* tx
@@ -318,11 +399,13 @@ export class ProviderRepo extends Context.Service<
                     .for("update");
                   if (
                     selected.length !== modelIds.length ||
-                    selected.some((model) => model.type !== "chat")
+                    selected.some((model) => model.type !== type)
                   ) {
                     return yield* new InvalidDefaultModelOrder({
                       reason:
-                        "Some models are no longer available for chat. Refresh the list and try again.",
+                        type === "image"
+                          ? "Some models are no longer image models. Refresh the list and try again."
+                          : "Some models are no longer available for chat. Refresh the list and try again.",
                     });
                   }
                 }
@@ -331,7 +414,10 @@ export class ProviderRepo extends Context.Service<
                   modelIds.map((id) => sql`${id}`),
                   sql`, `,
                 )}]::text[], ${models.id}) - 1`;
-                yield* tx.update(models).set({ defaultPriority: rank, updatedAt: new Date() });
+                yield* tx
+                  .update(models)
+                  .set({ defaultPriority: rank, updatedAt: new Date() })
+                  .where(eq(models.type, type));
               }),
             )
             .pipe(
@@ -428,6 +514,7 @@ export class ProviderRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* checkImageFamily(tx, providerId, settings);
                 const rows = yield* tx
                   .insert(models)
                   .values({ id: modelId, providerId, modelKey, metadata, ...settings })
@@ -440,7 +527,11 @@ export class ProviderRepo extends Context.Service<
                 return rows[0]!;
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.catch((error) =>
+                error instanceof UnhostedImageFamily ? Effect.fail(error) : Effect.die(error),
+              ),
+            );
         }),
 
         setModelFormat: Effect.fn("ProviderRepo.setModelFormat")(function* (modelId, format) {
@@ -456,11 +547,21 @@ export class ProviderRepo extends Context.Service<
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                const [current] = yield* tx
+                  .select({ type: models.type, providerId: models.providerId })
+                  .from(models)
+                  .where(eq(models.id, modelId))
+                  .for("update");
+                if (!current) return;
+                yield* checkImageFamily(tx, current.providerId, settings);
                 yield* tx
                   .update(models)
                   .set({
                     ...settings,
-                    ...(settings.type === "embedding" ? { defaultPriority: null } : {}),
+                    // A rank belongs to one type's order; a new type starts unplaced.
+                    ...(settings.type === "embedding" || settings.type !== current.type
+                      ? { defaultPriority: null }
+                      : {}),
                     updatedAt: new Date(),
                   })
                   .where(eq(models.id, modelId));
@@ -478,7 +579,11 @@ export class ProviderRepo extends Context.Service<
                 });
               }),
             )
-            .pipe(Effect.orDie);
+            .pipe(
+              Effect.catch((error) =>
+                error instanceof UnhostedImageFamily ? Effect.fail(error) : Effect.die(error),
+              ),
+            );
         }),
 
         deleteModel: Effect.fn("ProviderRepo.deleteModel")(function* (modelId) {

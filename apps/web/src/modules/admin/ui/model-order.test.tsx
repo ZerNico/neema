@@ -84,11 +84,15 @@ describe("ModelOrder", () => {
     await user.click(button("Move Beta · Provider up"));
     expect(names()).toEqual(["Alpha", "Beta", "Charlie"]);
     await waitFor(() =>
-      expect(saveMock).toHaveBeenLastCalledWith({ data: { modelIds: ["a", "b", "c"] } }),
+      expect(saveMock).toHaveBeenLastCalledWith({
+        data: { modelIds: ["a", "b", "c"], type: "chat" },
+      }),
     );
     await user.click(button("Move Alpha · Provider down"));
     await waitFor(() =>
-      expect(saveMock).toHaveBeenLastCalledWith({ data: { modelIds: ["b", "a", "c"] } }),
+      expect(saveMock).toHaveBeenLastCalledWith({
+        data: { modelIds: ["b", "a", "c"], type: "chat" },
+      }),
     );
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat-models"] }));
     expect(names()).toEqual(["Beta", "Alpha", "Charlie"]);
@@ -107,7 +111,9 @@ describe("ModelOrder", () => {
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1));
     finishFirst();
     await waitFor(() =>
-      expect(saveMock).toHaveBeenLastCalledWith({ data: { modelIds: ["a", "c", "b"] } }),
+      expect(saveMock).toHaveBeenLastCalledWith({
+        data: { modelIds: ["a", "c", "b"], type: "chat" },
+      }),
     );
   });
 

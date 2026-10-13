@@ -29,6 +29,8 @@ export const AgentSettings = Schema.Struct({
     Schema.isMinLength(1, { message: "Enter the instructions." }),
   ),
   modelId: Schema.NullOr(ResourceId),
+  /** Preferred image model; absent keeps what is saved, null leaves it to each chat. */
+  imageModelId: Schema.optionalKey(Schema.NullOr(ResourceId)),
   searchEnabled: Schema.Boolean,
   planEnabled: Schema.Boolean,
   starters: Schema.Array(AgentStarter.check(Schema.isMinLength(1))).check(
@@ -70,6 +72,7 @@ export interface AgentDetail extends AgentSelectionDetail {
 /** Configuration metadata intentionally visible to shared recipients. */
 export interface AgentSelectionDetail extends AgentSummary {
   modelId: string | null;
+  imageModelId?: string | null;
   searchEnabled: boolean;
   planEnabled: boolean;
   starters: ReadonlyArray<string>;

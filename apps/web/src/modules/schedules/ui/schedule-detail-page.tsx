@@ -58,6 +58,7 @@ const scheduleToSettings = (schedule: {
   prompt: string;
   modelId: string | null;
   agentId: string | null;
+  imageModelId?: string | null;
   searchEnabled: boolean;
   researchEnabled: boolean;
   collectionIds: string[];
@@ -75,6 +76,7 @@ const scheduleToSettings = (schedule: {
   prompt: schedule.prompt,
   modelId: schedule.modelId,
   agentId: schedule.agentId,
+  imageModelId: schedule.imageModelId ?? null,
   searchEnabled: schedule.searchEnabled,
   researchEnabled: schedule.researchEnabled,
   collectionIds: [...schedule.collectionIds],

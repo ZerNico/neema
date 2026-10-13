@@ -99,7 +99,7 @@ import {
   type GenerationIdentity,
 } from "./generation-fence.ts";
 import { appendReplay, replayUnitOf, type ProviderReplay } from "./provider-replay.ts";
-import { replayOf, roundPrompt } from "@chat/model-client";
+import { type ImageQuality, replayOf, roundPrompt } from "@chat/model-client";
 import { prepareConversationContext } from "./conversation-context.ts";
 import {
   Context,
@@ -166,6 +166,25 @@ import {
   projectKnowledgeToolResult,
 } from "~/modules/knowledge/tool-schema.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { loadImageModel } from "~/modules/images/server/descriptor.ts";
+import {
+  imageCallShape,
+  imageModelNote,
+  makeImageBudget,
+  prepareImageTool,
+} from "~/modules/images/server/image-tool.ts";
+import {
+  IMAGE_TOOL,
+  imageActivity,
+  runningImageActivity,
+  type ImageToolActivity,
+} from "~/modules/images/tool-schema.ts";
+import {
+  ASSISTANT_FILE_LIMITS as ANSWER_FILE_LIMITS,
+  assistantFileSource,
+  isGeneratedImage,
+  type AssistantFileSource,
+} from "../assistant-output.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
@@ -291,10 +310,21 @@ export interface LookupsEvent {
   readonly lookups: UiLookups;
 }
 
+/** The latest in-progress image of a running image call, by its row id. Never persisted. */
+export interface PreviewEvent {
+  readonly messageId: string;
+  readonly runId?: string;
+  readonly callId: string;
+  readonly mediaType: string;
+  /** Base64; the client draws it as a data URI. */
+  readonly data: string;
+}
+
 export type StreamEvent =
   | ({ readonly kind: "chunk" } & ChunkEvent)
   | ({ readonly kind: "status" } & StatusEvent)
   | ({ readonly kind: "lookups" } & LookupsEvent)
+  | ({ readonly kind: "preview" } & PreviewEvent)
   | ({ readonly kind: "done" } & DoneEvent);
 
 // One assistant message may span several model turns when tools are involved:
@@ -476,6 +506,9 @@ export class StreamEngine extends Context.Service<
       };
       // The latest status of each generation still reading, for a subscriber that joins mid-read.
       const statuses = new Map<string, StatusEvent>();
+      // The newest preview of each running image call, by message, so a page
+      // that subscribes mid-draw (a reload, a second tab) sees it at once.
+      const previews = new Map<string, Map<string, PreviewEvent>>();
       // Sliding, not unbounded: a subscriber that stops reading (stalled SSE
       // connection) must not buffer every in-flight generation's chunks
       // forever. Dropped events are recoverable: resume replays from
@@ -745,7 +778,9 @@ export class StreamEngine extends Context.Service<
         let seq = resuming ? yield* repo.lastChunkSeq(input.messageId) : 0;
         let assembled = resuming ? currentMessage.content : "";
         let assembledReasoning = resuming ? (currentMessage.reasoning ?? "") : "";
-        let acceptedImages = 0;
+        // Anything the answer delivered counts as output, including what a
+        // resumed answer already holds, so a files-only answer is not empty.
+        let deliveredFiles = resuming ? (currentMessage.assistantOutput?.files?.length ?? 0) : 0;
         // A resumed answer keeps the replay units its model wrote; the resume
         // transaction already cleared them for a different model.
         let replay: ProviderReplay | null = resuming
@@ -1447,6 +1482,83 @@ export class StreamEngine extends Context.Service<
           const customTools = customToolManifests.length
             ? prepareCustomTools(customToolManifests, customToolRuntime, toolFiles?.resolve)
             : undefined;
+          // Loaded once, before the toolkit, and held for every round: an admin
+          // edit mid-answer applies to the next answer. Checked again here, so
+          // a model that became unusable since resolution offers nothing.
+          const imageModel =
+            config.imageModel && fence && Option.isSome(imageAttachments)
+              ? yield* loadImageModel(input.userId, config.imageModel.id).pipe(
+                  Effect.provideService(ProviderRepo, providers),
+                )
+              : null;
+          // One budget for the answer's generated images, the model's own included.
+          const imageBudget = makeImageBudget(
+            ownFiles.filter((file) => isGeneratedImage(assistantFileSource(file))).length,
+            ANSWER_FILE_LIMITS.images,
+          );
+          const imageTool = imageModel
+            ? prepareImageTool({
+                model: imageModel,
+                resolveFile: toolFiles?.resolve,
+                budget: imageBudget,
+                rowIdFor,
+                preview: (callId, image) =>
+                  Effect.gen(function* () {
+                    if (!fence) return;
+                    const event: PreviewEvent = {
+                      messageId: input.messageId,
+                      runId: fence.generationId,
+                      callId,
+                      mediaType: image.mediaType,
+                      data: Buffer.from(image.data).toString("base64"),
+                    };
+                    const calls = previews.get(input.messageId) ?? new Map();
+                    calls.set(callId, event);
+                    previews.set(input.messageId, calls);
+                    yield* PubSub.publish(pubsub, { kind: "preview", ...event });
+                  }),
+                record: (operation) =>
+                  analytics
+                    .record({
+                      userId: input.userId,
+                      kind: "image",
+                      modelId: imageModel.id,
+                      modelName: imageModel.name,
+                      conversationId: input.conversationId,
+                      messageId: input.messageId,
+                      status: operation.status,
+                      inputTokens: operation.usage.inputTokens,
+                      outputTokens: operation.usage.outputTokens,
+                      cachedInputTokens: 0,
+                      cacheWriteTokens: null,
+                      reasoningTokens: 0,
+                      usageComplete: operation.usage.complete,
+                      cost: operation.cost,
+                      costSource: operation.costSource,
+                      imageCount: operation.images,
+                      ...(operation.toolCallId ? { toolCallId: operation.toolCallId } : {}),
+                      ...(input.generationId ? { generationId: input.generationId } : {}),
+                    })
+                    .pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logWarning("image usage could not be recorded", cause),
+                      ),
+                    ),
+              })
+            : undefined;
+          // Fixed for the answer, after history: another image model changes
+          // this note, never the cached prefix ahead of it.
+          const imageNotice: ReadonlyArray<Prompt.MessageEncoded> = imageModel
+            ? [
+                {
+                  role: "user",
+                  content: `<application-policy>\n${imageModelNote(
+                    imageModel,
+                    model?.capabilities.imageOutput === true,
+                  )}\n</application-policy>`,
+                },
+              ]
+            : [];
           // Drafts exist only where an editor is offered, and so does delivery.
           // Machine tools return files too (screenshots, reads, imports), which
           // only publishing delivers.
@@ -1679,6 +1791,7 @@ export class StreamEngine extends Context.Service<
             ...(mapRouteTools ? [mapRouteTools] : []),
             ...officeTools.map((tool) => tool.group),
             ...(customTools ? [customTools.group] : []),
+            ...(imageTool ? [imageTool.group] : []),
             ...(publishFileTool ? [publishFileTool.group] : []),
             ...(createFileTool ? [createFileTool.createGroup] : []),
             ...(integrationTools ? [integrationTools.group] : []),
@@ -1978,6 +2091,7 @@ export class StreamEngine extends Context.Service<
             ...(knowledgeContext?.messages ?? []),
             ...(skillTools?.messages() ?? []),
             ...keptNotice,
+            ...imageNotice,
             ...(uiStateContext ? [uiStateContext] : []),
             runtimeContext,
           ];
@@ -2027,6 +2141,7 @@ export class StreamEngine extends Context.Service<
           // user-provided data, never instructions (docs/internals/memory.md).
           const fixedPrefix = buildFixedPrefix({
             lazyFamilies: offeredLazy,
+            images: imageTool !== undefined,
             agentAuthoring: permissions.agentsCreate,
             documents: permissions.documents,
             knowledge: !!knowledgeSession,
@@ -2529,7 +2644,13 @@ export class StreamEngine extends Context.Service<
             // publish, a custom tool's output, a shared screenshot): the
             // attachment and its file chunk land together, under the fence.
             const deliverFile = (
-              file: { name: string; mediaType: string; bytes: Uint8Array },
+              file: {
+                name: string;
+                mediaType: string;
+                bytes: Uint8Array;
+                fileSource?: AssistantFileSource;
+                reserved?: boolean;
+              },
               toolCallId: string,
               inTransaction?: (
                 tx: DbTx,
@@ -2547,6 +2668,8 @@ export class StreamEngine extends Context.Service<
                     mediaType: file.mediaType,
                     bytes: file.bytes,
                     origin: { toolCallId },
+                    source: file.fileSource ?? "tool",
+                    ...(file.reserved ? { reserved: true } : {}),
                     ...(inTransaction
                       ? { inTransaction: (tx: DbTx) => inTransaction(tx, fence) }
                       : {}),
@@ -2559,6 +2682,7 @@ export class StreamEngine extends Context.Service<
                     Effect.tap((delivered) =>
                       Effect.gen(function* () {
                         seq += 1;
+                        deliveredFiles += 1;
                         yield* PubSub.publish(pubsub, {
                           kind: "chunk",
                           messageId: input.messageId,
@@ -2579,6 +2703,8 @@ export class StreamEngine extends Context.Service<
               });
             // provider call id -> our durable row id
             const callRowIds = new Map<string, string>();
+            // What an image call draws, named at its start and kept for its result.
+            const imageCalls = new Map<string, ImageToolActivity>();
             // Where each call was made in the answer's text, for envelopes sent after it.
             const callTextOffsets = new Map<string, number>();
             // The argument summary an integration row showed at start, for its result.
@@ -2705,7 +2831,9 @@ export class StreamEngine extends Context.Service<
                             type: "text",
                             text: attachmentReferenceHint(image.attachment),
                           });
-                          acceptedImages += 1;
+                          // Held for good, so a later tool call does not draw what cannot be kept.
+                          imageBudget.reserve(1);
+                          deliveredFiles += 1;
                           return;
                         }
                         case "text-delta": {
@@ -2782,13 +2910,16 @@ export class StreamEngine extends Context.Service<
                                                               : part.name === "web_search" ||
                                                                   part.name === "read_url"
                                                                 ? "web"
-                                                                : customToolNames.has(part.name)
-                                                                  ? "custom"
-                                                                  : integrationTools?.names.has(
-                                                                        part.name,
-                                                                      )
-                                                                    ? "integration"
-                                                                    : null;
+                                                                : part.name === IMAGE_TOOL &&
+                                                                    imageTool
+                                                                  ? "image"
+                                                                  : customToolNames.has(part.name)
+                                                                    ? "custom"
+                                                                    : integrationTools?.names.has(
+                                                                          part.name,
+                                                                        )
+                                                                      ? "integration"
+                                                                      : null;
                           if (!family) return;
                           const rowId = uuidv7();
                           callRowIds.set(part.id, rowId);
@@ -2809,6 +2940,14 @@ export class StreamEngine extends Context.Service<
                             textOffset,
                             providerCallId: part.id,
                             toolName: part.name,
+                            // A page loading mid-draw shows the model and frame the live start names.
+                            ...(family === "image" && imageModel
+                              ? {
+                                  result: json(
+                                    runningImageActivity(imageCallShape(imageModel, args)),
+                                  ),
+                                }
+                              : {}),
                             // Memory, drafts and documents own their content in a
                             // row that can be deleted, so the call keeps nothing of
                             // it. Other tools that write content keep a trimmed
@@ -2820,7 +2959,8 @@ export class StreamEngine extends Context.Service<
                                   family === "tool-file" ||
                                   isOfficeFamily(family) ||
                                   family === "research" ||
-                                  family === "integration"
+                                  family === "integration" ||
+                                  family === "image"
                                 ? storedArguments(args)
                                 : family === "ask"
                                   ? askArgs && Option.isSome(askArgs)
@@ -3057,6 +3197,33 @@ export class StreamEngine extends Context.Service<
                               label: entry.tool.label,
                               access: entry.tool.access,
                               summary,
+                            });
+                            return;
+                          }
+                          if (family === "image") {
+                            if (!imageModel) return;
+                            const shape = runningImageActivity(imageCallShape(imageModel, args));
+                            imageCalls.set(part.id, shape);
+                            // Previews name the call by this row, which the handler cannot know.
+                            yield* Deferred.succeed(callRowReady(part.id), {
+                              rowId,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              family: "image",
+                              phase: "start",
+                              callId: rowId,
+                              name: IMAGE_TOOL,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                              model: shape.model,
+                              editing: shape.editing,
+                              ...(shape.aspectRatio ? { aspectRatio: shape.aspectRatio } : {}),
+                              count: shape.requested,
                             });
                             return;
                           }
@@ -3903,6 +4070,121 @@ export class StreamEngine extends Context.Service<
                             return;
                           }
 
+                          if (part.name === IMAGE_TOOL && imageTool && imageModel) {
+                            if (isPreliminary) return;
+                            const raw = (part.result ?? {}) as {
+                              ok?: boolean;
+                              quality?: ImageQuality;
+                              adjustments?: ReadonlyArray<string>;
+                              refusal?: string;
+                              error?: string;
+                            };
+                            const shape =
+                              imageCalls.get(part.id) ??
+                              runningImageActivity(imageCallShape(imageModel, {}));
+                            imageCalls.delete(part.id);
+                            previews.get(input.messageId)?.delete(rowId);
+                            const staged = imageTool.take(part.id);
+                            const attachmentIds: string[] = [];
+                            const failures: string[] = [];
+                            const images = staged?.images ?? [];
+                            for (const [index, image] of images.entries()) {
+                              const extension = image.mediaType.split("/")[1] ?? "png";
+                              const stored = yield* deliverFile(
+                                {
+                                  // Numbered only when the call made several.
+                                  name: `${staged?.stem ?? "image"}${images.length > 1 ? `-${index + 1}` : ""}.${extension === "jpeg" ? "jpg" : extension}`,
+                                  mediaType: image.mediaType,
+                                  bytes: image.data,
+                                  fileSource: "image-tool",
+                                  // Its slot was granted before it drew: kept even if the
+                                  // model's own images filled the count since.
+                                  reserved: true,
+                                },
+                                rowId,
+                              );
+                              if ("reason" in stored) {
+                                failures.push(stored.reason);
+                                continue;
+                              }
+                              attachmentIds.push(stored.attachment.id);
+                              // Vision models see what they made, once, like any file.
+                              turnFiles.push(
+                                yield* fileForModel(promptDeps.parser, {
+                                  id: stored.attachment.id,
+                                  fileName: stored.attachment.fileName,
+                                  mediaType: stored.attachment.mediaType,
+                                  bytes: image.data,
+                                  vision: model?.capabilities.vision ?? false,
+                                  files: model?.capabilities.files ?? false,
+                                }),
+                              );
+                            }
+                            staged?.settle(attachmentIds.length);
+                            // Some kept and some not: the call succeeded, but the paid-for
+                            // images it lost are said, first, so the caption never drops it.
+                            const adjustments =
+                              attachmentIds.length > 0 && failures.length > 0
+                                ? [
+                                    `${failures.length} of ${failures.length + attachmentIds.length} images could not be kept: ${failures[0]}`,
+                                    ...(raw.adjustments ?? []),
+                                  ]
+                                : raw.adjustments;
+                            const error =
+                              raw.error ??
+                              (staged && attachmentIds.length === 0
+                                ? (failures[0] ?? "The images could not be stored.")
+                                : undefined);
+                            if (staged) {
+                              const delivered = {
+                                ...raw,
+                                ...(attachmentIds.length === 0 ? { ok: false } : {}),
+                                ...(error ? { error } : {}),
+                                ...(adjustments ? { adjustments } : {}),
+                                images: attachmentIds.length,
+                                attachmentIds,
+                                files: attachmentIds.map((id) =>
+                                  formatFileRef({ kind: "attachment", id }),
+                                ),
+                              };
+                              Object.assign(part, { result: delivered, encodedResult: delivered });
+                            }
+                            const activity = imageActivity({
+                              ...shape,
+                              attachmentIds,
+                              quality: raw.quality,
+                              adjustments,
+                              refusal: raw.refusal,
+                              error: part.isFailure
+                                ? "The image tool failed."
+                                : raw.refusal
+                                  ? undefined
+                                  : error,
+                            });
+                            yield* repo.completeToolCall({
+                              id: rowId,
+                              result: json(activity),
+                              status: activity.status,
+                              ...(activity.status === "error"
+                                ? {
+                                    error: {
+                                      code: activity.refusal ? "ImageRefused" : "ImageFailed",
+                                      message:
+                                        activity.refusal ?? activity.error ?? "No image was made.",
+                                    },
+                                  }
+                                : {}),
+                            });
+                            yield* pushToolChunk({
+                              v: 1,
+                              phase: "result",
+                              callId: rowId,
+                              name: IMAGE_TOOL,
+                              ...activity,
+                            });
+                            return;
+                          }
+
                           if (customToolNames.has(part.name)) {
                             if (isPreliminary) return;
                             const fileIds: string[] = [];
@@ -4412,7 +4694,7 @@ export class StreamEngine extends Context.Service<
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
           // A resumed answer starts from its earlier text, so it is never empty.
-          if (!questionPresented && assembled.trim().length === 0 && acceptedImages === 0)
+          if (!questionPresented && assembled.trim().length === 0 && deliveredFiles === 0)
             return yield* Effect.fail(new Error("[ResponseEmpty]"));
         });
 
@@ -4556,6 +4838,7 @@ export class StreamEngine extends Context.Service<
                     if (inFlight.get(input.messageId) === registration) {
                       inFlight.delete(input.messageId);
                       statuses.delete(input.messageId);
+                      previews.delete(input.messageId);
                     }
                   }),
                 ),
@@ -4677,9 +4960,15 @@ export class StreamEngine extends Context.Service<
                     lookups: lookupsOf(output),
                   })
                 : Stream.empty;
+            const drawing: Stream.Stream<StreamEvent> = Stream.fromIterable(
+              [...(previews.get(messageId)?.values() ?? [])]
+                .filter((event) => event.runId === runId)
+                .map((event) => ({ kind: "preview" as const, ...event })),
+            );
             return replay.pipe(
               Stream.concat(reading),
               Stream.concat(imageSnapshot),
+              Stream.concat(drawing),
               Stream.concat(live),
             );
           }),

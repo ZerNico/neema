@@ -173,6 +173,9 @@ describe("AddModelDialog", () => {
           enabled: true,
           access: "public",
           groupIds: [],
+          imageFamily: null,
+          imageCapabilities: null,
+          imagePricing: null,
         },
       }),
     );

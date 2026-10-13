@@ -17,6 +17,7 @@ export const EMPTY_SCHEDULE_DRAFT: ScheduleDraftSettings = {
   prompt: "",
   modelId: null,
   agentId: null,
+  imageModelId: null,
   searchEnabled: false,
   researchEnabled: false,
   collectionIds: [],

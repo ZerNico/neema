@@ -2,6 +2,8 @@ import { Effect } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { authenticate, endpoint, type Connection } from "./connection.ts";
 import { httpError, invalidOutput, networkError } from "./errors.ts";
+import { inferImageFamily, type ImageFamily } from "./images/families.ts";
+import { getPreset, PRESET_IDS } from "./preset.ts";
 import { bedrockScope } from "./sigv4.ts";
 
 export const REASONING_EFFORTS = [
@@ -35,11 +37,32 @@ export interface CatalogPricing {
 export interface CatalogModel {
   readonly id: string;
   readonly name: string;
-  readonly type: "chat" | "embedding";
+  readonly type: "chat" | "embedding" | "image";
   readonly contextLength: number | null;
   readonly capabilities: CatalogCapabilities;
   readonly pricing: CatalogPricing | null;
+  /** The image family an `image` entry is called with. */
+  readonly imageFamily?: ImageFamily;
 }
+
+const NO_CAPABILITIES: CatalogCapabilities = {
+  reasoning: false,
+  tools: false,
+  vision: false,
+  files: false,
+  imageOutput: false,
+};
+
+const imageEntry = (id: string, name: string, family: ImageFamily): CatalogModel => ({
+  id,
+  name,
+  type: "image",
+  contextLength: null,
+  capabilities: NO_CAPABILITIES,
+  // Catalog prices are per token; image models are priced per image by the admin.
+  pricing: null,
+  imageFamily: family,
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -89,8 +112,35 @@ export const inferType = (outputModalities: ReadonlyArray<string> | undefined) =
   return null;
 };
 
-const listingEntry = (raw: unknown, efforts: boolean): CatalogModel | null => {
+/**
+ * An image model in a plain listing: by the listing's own `type` where it has
+ * one (Vercel), else by the id. OpenRouter lists image models separately.
+ */
+const listedImage = (connection: Connection, raw: Record<string, unknown>, id: string) => {
+  if (connection.preset.catalog === "openrouter") return null;
+  const preset = PRESET_IDS.find((presetId) => presetId === connection.preset.id);
+  if (!preset) return null;
+  if (typeof raw["type"] === "string" && raw["type"] !== "image") return null;
+  const family = inferImageFamily(preset, id);
+  if (raw["type"] === "image")
+    return (
+      family ??
+      (getPreset(preset).images?.families.includes("openai-compatible-image")
+        ? "openai-compatible-image"
+        : null)
+    );
+  return family;
+};
+
+const listingEntry = (
+  connection: Connection,
+  raw: unknown,
+  efforts: boolean,
+): CatalogModel | null => {
   if (!isRecord(raw) || typeof raw["id"] !== "string") return null;
+  const family = listedImage(connection, raw, raw["id"]);
+  if (family)
+    return imageEntry(raw["id"], typeof raw["name"] === "string" ? raw["name"] : raw["id"], family);
   const architecture = isRecord(raw["architecture"]) ? raw["architecture"] : {};
   const output = strings(architecture["output_modalities"]) ?? strings(raw["output_modalities"]);
   const input = strings(architecture["input_modalities"]) ?? strings(raw["input_modalities"]) ?? [];
@@ -159,6 +209,10 @@ const azureEntry = (raw: unknown): CatalogModel | null => {
     return null;
   if (raw["status"] !== undefined && raw["status"] !== "succeeded") return null;
   const model = raw["model"];
+  // Classified by the base model; requests name the deployment.
+  const family = inferImageFamily("azure", model);
+  if (family)
+    return imageEntry(raw["id"], raw["id"] === model ? model : `${raw["id"]} (${model})`, family);
   if (AZURE_SKIPPED.test(model)) return null;
   const embedding = /embedding/i.test(model);
   const reasoning = /^(o\d|gpt-5)/i.test(model);
@@ -205,6 +259,51 @@ const bedrockProfile =
     };
   };
 
+/** Bedrock's image foundation models that run on demand, by their family. */
+const bedrockImage = (raw: unknown): CatalogModel | null => {
+  if (!isRecord(raw) || typeof raw["modelId"] !== "string") return null;
+  const lifecycle = isRecord(raw["modelLifecycle"]) ? raw["modelLifecycle"]["status"] : undefined;
+  if (lifecycle !== undefined && lifecycle !== "ACTIVE") return null;
+  const inference = strings(raw["inferenceTypesSupported"]);
+  if (inference && !inference.includes("ON_DEMAND")) return null;
+  const family = inferImageFamily("bedrock", raw["modelId"]);
+  if (!family) return null;
+  return imageEntry(
+    raw["modelId"],
+    typeof raw["modelName"] === "string" ? raw["modelName"] : raw["modelId"],
+    family,
+  );
+};
+
+/**
+ * OpenRouter's image models as image entries. One that also chats is listed
+ * twice under the same id, once per type, the image entry beside its chat one.
+ */
+const withOpenRouterImages = (
+  listed: ReadonlyArray<CatalogModel>,
+  images: ReadonlyArray<unknown>,
+): ReadonlyArray<CatalogModel> => {
+  const names = new Map(
+    images.flatMap((raw) =>
+      isRecord(raw) && typeof raw["id"] === "string"
+        ? [[raw["id"], typeof raw["name"] === "string" ? raw["name"] : raw["id"]] as const]
+        : [],
+    ),
+  );
+  const known = new Set(listed.map((model) => model.id));
+  return [
+    ...listed.flatMap((model) => {
+      const name = names.get(model.id);
+      return name !== undefined && model.type === "chat"
+        ? [model, imageEntry(model.id, name, "openrouter-image")]
+        : [model];
+    }),
+    ...Array.from(names)
+      .filter(([id]) => !known.has(id))
+      .map(([id, name]) => imageEntry(id, name, "openrouter-image")),
+  ];
+};
+
 /**
  * The models a connection offers, per its preset: OpenRouter's two listings
  * (text and embeddings), Azure's deployments, or one OpenAI-style listing.
@@ -226,10 +325,22 @@ export const fetchCatalog = (connection: Connection) =>
       }
       case "bedrock": {
         const listed = listing(yield* getJson(connection, endpoint(connection, "/models"))).flatMap(
-          (raw) => listingEntry(raw, false) ?? [],
+          (raw) => listingEntry(connection, raw, false) ?? [],
         );
         const scope = bedrockScope(new URL(connection.baseUrl));
         if (!scope) return listed;
+        // Mantle lists no image models; the control plane does, under its own permission.
+        const images = yield* getJson(
+          connection,
+          `https://bedrock.${scope.region}.amazonaws.com/foundation-models?byOutputModality=IMAGE`,
+        ).pipe(
+          Effect.map((value) =>
+            isRecord(value) && Array.isArray(value["modelSummaries"])
+              ? value["modelSummaries"].flatMap((raw) => bedrockImage(raw) ?? [])
+              : [],
+          ),
+          Effect.orElseSucceed((): CatalogModel[] => []),
+        );
         // Listing profiles is its own IAM permission; without it the rest still shows.
         const profiles = yield* getJson(
           connection,
@@ -244,7 +355,7 @@ export const fetchCatalog = (connection: Connection) =>
           ),
           Effect.orElseSucceed((): CatalogModel[] => []),
         );
-        return [...listed, ...profiles];
+        return [...listed, ...profiles, ...images];
       }
       case "openrouter":
       case "openai-list": {
@@ -260,10 +371,20 @@ export const fetchCatalog = (connection: Connection) =>
           { concurrency: 2 },
         );
         const seen = new Set<string>();
-        return pages
+        const listed = pages
           .flatMap(listing)
-          .flatMap((raw) => listingEntry(raw, connection.preset.catalog === "openrouter") ?? [])
+          .flatMap(
+            (raw) =>
+              listingEntry(connection, raw, connection.preset.catalog === "openrouter") ?? [],
+          )
           .filter((model) => !seen.has(model.id) && Boolean(seen.add(model.id)));
+        if (connection.preset.catalog !== "openrouter") return listed;
+        // A listing of its own; without it the chat models still show.
+        const images = yield* getJson(connection, endpoint(connection, "/images/models")).pipe(
+          Effect.map(listing),
+          Effect.orElseSucceed((): unknown[] => []),
+        );
+        return withOpenRouterImages(listed, images);
       }
     }
   });

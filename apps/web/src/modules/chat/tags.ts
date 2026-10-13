@@ -8,18 +8,29 @@ import { splitIntegrationMentions, type Mentionable } from "~/modules/integratio
  * (skill ids, collection ids) is still what loads them; the link only names them.
  */
 export interface ContextTag {
-  kind: "skill" | "collection";
+  /** `image` names a chat image by its file link, so the model can pass it to edit. */
+  kind: "skill" | "collection" | "image";
   id: string;
   /** The name without its "/" or "#". */
   name: string;
 }
 
-const PREFIX = { skill: "/", collection: "#" } as const;
-const PATH = { skill: "skills", collection: "knowledge" } as const;
+const PREFIX = { skill: "/", collection: "#", image: "" } as const;
+const PATH = { skill: "skills", collection: "knowledge", image: "api/files" } as const;
 
-// The prefix must match the page: "/" goes with /skills, "#" with /knowledge.
+// The prefix must match the page: "/" goes with /skills, "#" with /knowledge,
+// and an image is any name linking to its file.
 const TAG =
-  /\[(?:\/([^\]\n]{1,80})\]\(\/skills|#([^\]\n]{1,80})\]\(\/knowledge)\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\)/gu;
+  /\[(?:\/(?<skill>[^\]\n]{1,80})\]\(\/skills|#(?<collection>[^\]\n]{1,80})\]\(\/knowledge|(?<image>[^\]\n/#][^\]\n]{0,79})\]\(\/api\/files)\/(?<id>[A-Za-z0-9][A-Za-z0-9_-]{0,127})\)/gu;
+
+const tagOf = (match: RegExpMatchArray): ContextTag => {
+  const groups = match.groups!;
+  if (groups["skill"] !== undefined)
+    return { kind: "skill", id: groups["id"]!, name: groups["skill"] };
+  if (groups["collection"] !== undefined)
+    return { kind: "collection", id: groups["id"]!, name: groups["collection"] };
+  return { kind: "image", id: groups["id"]!, name: groups["image"]! };
+};
 
 /** A name as link text: brackets and line breaks would end the link early. */
 const linkText = (name: string) =>
@@ -33,17 +44,18 @@ export const tagMarkup = (tag: ContextTag) =>
 
 /** The text with each tag's link replaced by its words, for copying and short labels. */
 export const tagWords = (text: string) =>
-  text.replace(TAG, (_, skill?: string, collection?: string) =>
-    skill === undefined ? `#${collection}` : `/${skill}`,
-  );
+  text.replace(TAG, (...args: unknown[]) => {
+    const groups = args.at(-1) as Record<string, string | undefined>;
+    return groups["skill"] !== undefined
+      ? `/${groups["skill"]}`
+      : groups["collection"] !== undefined
+        ? `#${groups["collection"]}`
+        : groups["image"]!;
+  });
 
 /** Every skill and collection tag in the text, in order, repeats included. */
 export function findTags(text: string): ContextTag[] {
-  return [...text.matchAll(TAG)].map((match) =>
-    match[1] === undefined
-      ? { kind: "collection", id: match[3]!, name: match[2]! }
-      : { kind: "skill", id: match[3]!, name: match[1] },
-  );
+  return [...text.matchAll(TAG)].map(tagOf);
 }
 
 export type MessageSegment =
@@ -75,10 +87,7 @@ export function splitMessageTags(text: string, integrations: Mentionable): Messa
   let last = 0;
   for (const match of text.matchAll(TAG)) {
     plain(last, match.index);
-    const tag: ContextTag =
-      match[1] === undefined
-        ? { kind: "collection", id: match[3]!, name: match[2]! }
-        : { kind: "skill", id: match[3]!, name: match[1] };
+    const tag = tagOf(match);
     segments.push({ kind: "tag", start: match.index, text: match[0], tag });
     last = match.index + match[0].length;
   }

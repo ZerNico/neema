@@ -1,11 +1,23 @@
 import { Schema } from "effect";
 import { DefaultModelIds } from "~/modules/providers/default-models.ts";
 import { MODEL_FORMATS, REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
-import { AUTH_KINDS, PRESET_IDS, REASONING_SHAPES, WIRE_FORMATS } from "@chat/model-client";
+import {
+  ASPECT_RATIOS,
+  AUTH_KINDS,
+  IMAGE_FAMILIES,
+  IMAGE_QUALITIES,
+  PRESET_IDS,
+  REASONING_SHAPES,
+  WIRE_FORMATS,
+} from "@chat/model-client";
 import { AwsKeys } from "~/modules/providers/aws-keys.ts";
 import { CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 
-export const UpdateDefaultModelOrderInput = Schema.Struct({ modelIds: DefaultModelIds });
+export const UpdateDefaultModelOrderInput = Schema.Struct({
+  modelIds: DefaultModelIds,
+  /** Absent orders chat models, as before image models existed. */
+  type: Schema.optionalKey(Schema.Literals(["chat", "image"])),
+});
 
 export const UpdateUtilityModelInput = Schema.Struct({
   modelId: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
@@ -108,6 +120,45 @@ const EmbeddingModelSettings = {
   pricing: Schema.NullOr(EmbeddingPricingSchema),
 };
 
+const ImageCapabilitiesSchema = Schema.Struct({
+  generate: Schema.Boolean,
+  edit: Schema.NullOr(Schema.Struct({ maxReferences: PositiveInteger })),
+  aspectRatios: Schema.Array(Schema.Literals(ASPECT_RATIOS)).check(Schema.isMinLength(1)),
+  qualities: Schema.Array(Schema.Literals(IMAGE_QUALITIES)),
+  transparency: Schema.Boolean,
+  maxCount: PositiveInteger,
+});
+
+const ImagePricingSchema = Schema.Struct({
+  tokens: Schema.optionalKey(
+    Schema.Struct({
+      textInput: NonNegativePrice,
+      imageInput: NonNegativePrice,
+      output: NonNegativePrice,
+    }),
+  ),
+  perImage: Schema.optionalKey(
+    Schema.Struct({
+      default: Schema.optionalKey(NonNegativePrice),
+      low: Schema.optionalKey(NonNegativePrice),
+      medium: Schema.optionalKey(NonNegativePrice),
+      high: Schema.optionalKey(NonNegativePrice),
+    }),
+  ),
+});
+
+const ImageModelSettings = {
+  ...CommonModelSettings,
+  type: Schema.Literal("image"),
+  embeddingDimensions: Schema.Null,
+  // Ignored: normalization stores none, image capabilities are their own field.
+  capabilities: ChatCapabilitiesSchema,
+  pricing: Schema.Null,
+  imageFamily: Schema.Literals(IMAGE_FAMILIES),
+  imageCapabilities: ImageCapabilitiesSchema,
+  imagePricing: Schema.NullOr(ImagePricingSchema),
+};
+
 export const CreateModelInput = Schema.Union([
   Schema.Struct({
     providerId: Schema.String,
@@ -119,11 +170,17 @@ export const CreateModelInput = Schema.Union([
     modelKey: Schema.String.check(Schema.isMinLength(1)),
     ...EmbeddingModelSettings,
   }),
+  Schema.Struct({
+    providerId: Schema.String,
+    modelKey: Schema.String.check(Schema.isMinLength(1)),
+    ...ImageModelSettings,
+  }),
 ]);
 
 export const UpdateModelInput = Schema.Union([
   Schema.Struct({ modelId: Schema.String, ...ChatModelSettings }),
   Schema.Struct({ modelId: Schema.String, ...EmbeddingModelSettings }),
+  Schema.Struct({ modelId: Schema.String, ...ImageModelSettings }),
 ]);
 
 export const ModelIdInput = Schema.Struct({

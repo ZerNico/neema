@@ -33,6 +33,8 @@ import { resolveChatModel } from "../client/selected-model.ts";
 import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
 import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";
 import { ModelPicker } from "./model-picker.tsx";
+import { ImageModelMenu } from "~/modules/images/ui/image-model-picker.tsx";
+import { imageModelsQuery } from "~/modules/images/client/queries.ts";
 import {
   AgentPicker,
   CollectionPicker,
@@ -107,6 +109,16 @@ const previewFor = (item: AttachmentUpload): string | null => {
   return null;
 };
 
+/** The chat's image model as the composer shows it; a pick goes with the next send or retry. */
+export interface ImageModelChoice {
+  readonly value: string | null;
+  /** The model the chat keeps, used when the pick is gone. */
+  readonly lock?: string | null | undefined;
+  /** The agent's image model, which the next answer falls back to before the admin's first. */
+  readonly agentPreference?: string | null | undefined;
+  readonly onChange: (modelId: string) => void;
+}
+
 export const ChatInput = forwardRef<
   ComposerFieldHandle,
   {
@@ -135,6 +147,7 @@ export const ChatInput = forwardRef<
     onReasoningEffortChange?: ((effort: ReasoningEffort | null) => void) | undefined;
     researchEnabled?: boolean;
     onResearchEnabledChange?: (enabled: boolean) => void;
+    imageModel?: ImageModelChoice | undefined;
     /**
      * Chat or Work, offered only where Work can be honoured: a new chat inside
      * the desktop app. Absent hides the toggle; an existing chat's mode is
@@ -195,6 +208,7 @@ export const ChatInput = forwardRef<
     onReasoningEffortChange,
     researchEnabled = false,
     onResearchEnabledChange,
+    imageModel,
     mode,
     blockedReason = null,
     attachments,
@@ -269,8 +283,11 @@ export const ChatInput = forwardRef<
   // They drifted apart when Skills was added to the menu without being added
   // to any of them, so they read it from one place now.
   const [addingIntegration, setAddingIntegration] = useState(false);
+  const { data: imageModels = [] } = useQuery({ ...imageModelsQuery, enabled: !!imageModel });
+  const canChooseImageModel = !!imageModel && imageModels.length > 0;
   const hasTools =
     (!!context && (canChooseKnowledge || (canChooseAgent && !context.agentLocked))) ||
+    canChooseImageModel ||
     (!!skills && canChooseSkills) ||
     (canResearch && (!!onResearchEnabledChange || researchEnabled)) ||
     // Only when there is something to connect or already connected.
@@ -665,6 +682,15 @@ export const ChatInput = forwardRef<
                   </span>
                 ) : null}
               </DropdownMenuItem>
+            ) : null}
+            {imageModel && canChooseImageModel ? (
+              <ImageModelMenu
+                value={imageModel.value}
+                lock={imageModel.lock}
+                agentPreference={imageModel.agentPreference}
+                onChange={imageModel.onChange}
+                disabled={controlsDisabled}
+              />
             ) : null}
             {integrations && (integrations.items.length || integrations.canAdd) ? (
               <>

@@ -29,6 +29,9 @@ export const schedules = pgTable(
     // degrades the fire to a plain chat rather than erroring the schedule.
     modelId: text("model_id"),
     agentId: text("agent_id"),
+    // Retained like `modelId`. In a chat the schedule keeps using, a fire's
+    // choice moves that chat's image model, so editing the schedule applies.
+    imageModelId: text("image_model_id"),
     searchEnabled: boolean("search_enabled").notNull().default(false),
     researchEnabled: boolean("research_enabled").notNull().default(false),
     collectionIds: jsonb("collection_ids").$type<string[]>().notNull().default([]),

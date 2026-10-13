@@ -37,6 +37,8 @@ export const agents = pgTable(
     // Retain the selection when a model is deleted, so use fails explicitly
     // rather than silently changing the agent's preferred configuration.
     modelId: text("model_id"),
+    // Preferred image model, retained like `modelId`; a chat's own lock wins.
+    imageModelId: text("image_model_id"),
     searchEnabled: boolean("search_enabled").notNull().default(false),
     planEnabled: boolean("plan_enabled").notNull().default(false),
     starters: jsonb().$type<string[]>().notNull().default([]),
@@ -169,6 +171,12 @@ export const messageGenerationConfig = pgTable("message_generation_config", {
   researchEnabled: boolean("research_enabled").notNull().default(false),
   reasoningEffort:
     text("reasoning_effort").$type<import("~/modules/providers/model-config.ts").ReasoningEffort>(),
+  /**
+   * The image model this attempt was offered, with its name as it was then.
+   * Keyed by message, so a retry overwrites it; the ledger keeps each call.
+   */
+  imageModelId: text("image_model_id"),
+  imageModelName: text("image_model_name"),
   /**
    * The folders attached on the machine this attempt was sent from, by name.
    * Null means the tools that reach a machine were not offered. Only names:

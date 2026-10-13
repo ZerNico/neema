@@ -50,6 +50,12 @@ vi.mock("../server/functions.ts", () => ({
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("~/modules/images/server/functions.ts", () => ({
+  getImageGenerationTool: vi.fn(),
+  updateImageGenerationTool: vi.fn(),
+  listImageModels: vi.fn(async () => []),
+  testImageModel: vi.fn(),
+}));
 vi.mock("~/modules/presentations/server/font-functions.ts", () => ({
   listPresentationFonts: vi.fn(async () => []),
   uploadPresentationFont: vi.fn(),
@@ -138,6 +144,7 @@ const renderPage = ({
   client.setQueryData(["admin", "tools", "memory"], memory);
   client.setQueryData(["admin", "presentation-fonts"], []);
   client.setQueryData(["admin", "tools", "office-files"], officeFiles);
+  client.setQueryData(["admin", "tools", "image-generation"], tool("image_generation", {}));
   client.setQueryData(["admin", "tools", "interactive-ui"], interactiveUi);
   client.setQueryData(["admin", "tools", "maps"], maps);
   client.setQueryData(["admin", "tools", "web-search"], webSearch);

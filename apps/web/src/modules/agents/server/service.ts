@@ -49,6 +49,13 @@ export const validateAgentSettings = Effect.fn(function* (
     });
   if (settings.modelId && !(yield* modelFor(providers, userId, settings.modelId)))
     return yield* new AgentRejected({ reason: "selected model is unavailable" });
+  if (
+    settings.imageModelId &&
+    !(yield* providers.listImageModelsFor(userId)).some(
+      (model) => model.id === settings.imageModelId,
+    )
+  )
+    return yield* new AgentRejected({ reason: "selected image model is unavailable" });
   return {
     ...settings,
     name: settings.name.trim(),
@@ -149,6 +156,7 @@ export class AgentService extends Context.Service<
           selection: {
             ...summarizeAgent(row, ownerName, userId),
             modelId: row.modelId,
+            imageModelId: row.imageModelId,
             searchEnabled: row.searchEnabled,
             planEnabled: row.planEnabled,
             starters: row.starters,

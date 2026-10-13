@@ -136,6 +136,9 @@ describe("ModelEditDialog", () => {
           enabled: false,
           access: "groups",
           groupIds: ["g1"],
+          imageFamily: null,
+          imageCapabilities: null,
+          imagePricing: null,
         },
       }),
     );

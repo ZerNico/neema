@@ -86,6 +86,7 @@ import { SaveToProjectActions } from "~/modules/projects/ui/save-to-project.tsx"
 import { useWritableChatProject } from "~/modules/projects/ui/writable-chat-project-context.ts";
 import { IntegrationActivityBlock } from "~/modules/integrations/ui/integration-activity-block.tsx";
 import { CustomToolActivityBlock } from "./custom-tool-activity-block.tsx";
+import { ImageActivityBlock } from "~/modules/images/ui/image-activity-block.tsx";
 import { MemoryActivityBlock } from "./memory-activity-block.tsx";
 import { BrowserActivityBlock } from "./browser-activity-block.tsx";
 import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
@@ -249,6 +250,8 @@ export interface DisplayMessage {
   temporary?: boolean;
   /** What the answer's ```ui blocks looked up: images, places, routes. */
   uiLookups?: UiLookups;
+  /** In-progress images of running image calls, by call; live only. */
+  imagePreviews?: Readonly<Record<string, string>>;
   /**
    * Files this send copied into the chat's workspace, by basename. The path
    * joins against the machine's current workspace root at click time: the
@@ -765,6 +768,15 @@ const AssistantBody = memo(function AssistantBody({
       );
     if (part.kind === "file")
       return <AssistantFileAttachment key={part.key} file={part.file} fresh={streaming} />;
+    if (part.kind === "image")
+      return (
+        <ImageActivityBlock
+          key={part.key}
+          activity={part.activity}
+          files={part.files}
+          preview={message.imagePreviews?.[part.activity.callId]}
+        />
+      );
     if (part.kind === "steer") return <SteerBubble key={part.key} steer={part.steer} />;
     if (part.kind === "text") {
       // Keyed on the raw text, before any citation rewrite changes lengths.

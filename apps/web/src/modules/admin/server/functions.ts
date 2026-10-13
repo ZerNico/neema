@@ -151,7 +151,7 @@ export const updateDefaultModelOrder = createServerFn({ method: "POST" })
       Effect.gen(function* () {
         const repo = yield* ProviderRepo;
         const sync = yield* SyncBus;
-        yield* repo.setDefaultModelOrder(data.modelIds);
+        yield* repo.setDefaultModelOrder(data.modelIds, data.type ?? "chat");
         yield* sync
           .publishGlobal({ type: "models.defaults.changed" })
           .pipe(
@@ -193,14 +193,28 @@ export const updateUtilityModel = createServerFn({ method: "POST" })
 export const createModel = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateModelInput))
-  .handler(({ data }) => runtime.runPromise(ProviderRepo.use((repo) => repo.createModel(data))));
+  .handler(({ data }) =>
+    runtime.runPromise(
+      ProviderRepo.use((repo) => repo.createModel(data)).pipe(
+        Effect.catchTag("UnhostedImageFamily", (error) =>
+          Effect.die(new Response(error.reason, { status: 400 })),
+        ),
+      ),
+    ),
+  );
 
 export const updateModel = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateModelInput))
   .handler(({ data }) => {
     const { modelId, ...patch } = data;
-    return runtime.runPromise(ProviderRepo.use((repo) => repo.updateModel(modelId, patch)));
+    return runtime.runPromise(
+      ProviderRepo.use((repo) => repo.updateModel(modelId, patch)).pipe(
+        Effect.catchTag("UnhostedImageFamily", (error) =>
+          Effect.die(new Response(error.reason, { status: 400 })),
+        ),
+      ),
+    );
   });
 
 export const deleteModel = createServerFn({ method: "POST" })

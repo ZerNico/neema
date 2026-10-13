@@ -9,10 +9,12 @@ export {
   type Credentials,
   type ModelCall,
 } from "./connection.ts";
-export { parseErrorBody, retryAfter } from "./errors.ts";
+export { parseErrorBody, retryAfter, type ModelClientError } from "./errors.ts";
+export * from "./images/index.ts";
 export { foldParts, layer, make } from "./language-model.ts";
 export {
   AUTH_KINDS,
+  bedrockRuntimeOrigin,
   effectiveSettings,
   formatFor,
   getPreset,

@@ -14,6 +14,7 @@ export const storedAgentToDraftSettings = ({
   icon: row.icon as DraftSettings["icon"],
   instructions: row.instructions,
   modelId: row.modelId,
+  imageModelId: row.imageModelId,
   searchEnabled: row.searchEnabled,
   planEnabled: row.planEnabled,
   starters: row.starters,

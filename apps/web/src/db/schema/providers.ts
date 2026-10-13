@@ -1,6 +1,22 @@
-import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import type { PresetId, ProviderSettings } from "@chat/model-client";
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import type {
+  ImageCapabilities,
+  ImageFamily,
+  PresetId,
+  ProviderSettings,
+} from "@chat/model-client";
+import type {
+  ImagePricing,
   ModelCapabilities,
   ModelPricing,
   ModelType,
@@ -46,7 +62,7 @@ export const models = pgTable(
     displayName: text("display_name").notNull(),
     /** Admin-written line under the name in model pickers, for people who don't know models. */
     description: text(),
-    type: text({ enum: ["chat", "embedding"] })
+    type: text({ enum: ["chat", "embedding", "image"] })
       .$type<ModelType>()
       .notNull(),
     // Selection priority only; null leaves this model in the alphabetical fallback.
@@ -66,6 +82,14 @@ export const models = pgTable(
     // prices (OpenRouter), admin-editable. Null = unknown, so usage costs then
     // rely on provider-reported numbers or stay unknown.
     pricing: jsonb().$type<ModelPricing>(),
+    // Image models only, all three together (checked below). The family names
+    // the adapter and its fixed limits, apart from the provider's model key,
+    // since an Azure deployment name says nothing about the model behind it.
+    imageFamily: text("image_family").$type<ImageFamily>(),
+    // What an admin allows, clipped to the family's limits wherever it is read.
+    imageCapabilities: jsonb("image_capabilities").$type<ImageCapabilities>(),
+    // Its own column: every token-pricing reader stays untouched by image rows.
+    imagePricing: jsonb("image_pricing").$type<ImagePricing>(),
     // "public": every user sees and can use it. "groups": only members of the
     // groups linked via model_group_access (admins always bypass).
     access: text({ enum: ["public", "groups"] })
@@ -75,7 +99,14 @@ export const models = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("models_provider_id_idx").on(t.providerId)],
+  (t) => [
+    index("models_provider_id_idx").on(t.providerId),
+    check(
+      "models_image_fields",
+      sql`(${t.type} = 'image') = (${t.imageFamily} is not null and ${t.imageCapabilities} is not null)`,
+    ),
+    check("models_image_pricing", sql`${t.type} = 'image' or ${t.imagePricing} is null`),
+  ],
 );
 
 /**

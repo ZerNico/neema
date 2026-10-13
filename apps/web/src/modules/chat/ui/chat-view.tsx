@@ -340,6 +340,9 @@ export function ChatView({
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
   const [modelId, setModelId] = useState<string | null>(null);
+  // A pick in this view; the chat's own lock shows until one is made.
+  const [imageModelId, setImageModelId] = useState<string | null>(null);
+  const imagePick = imageModelId ? { imageModelId } : {};
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editResearchEnabled, setEditResearchEnabled] = useState(false);
   // One instance, mounted for the whole view: an edit opens by seeding it, so
@@ -648,6 +651,7 @@ export function ChatView({
       const conversation = { kind: "existing" as const, id: conversationId };
       const fields = {
         modelId: effectiveModelId!,
+        ...imagePick,
         content: input.content,
         searchEnabled,
         reasoningEffort,
@@ -750,6 +754,7 @@ export function ChatView({
         data: {
           conversationId,
           ...input,
+          ...imagePick,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
@@ -861,6 +866,7 @@ export function ChatView({
       return editMessage({
         data: {
           conversationId,
+          ...(input.content !== undefined ? imagePick : {}),
           researchEnabled: false,
           ...editFields,
           ...(await work.attemptFields()),
@@ -1087,6 +1093,7 @@ export function ChatView({
     // What a send carries now; a queued message freezes it.
     submission: async () => ({
       modelId: effectiveModelId!,
+      ...imagePick,
       searchEnabled,
       reasoningEffort,
       ...(await work.attemptFields()),
@@ -1099,6 +1106,8 @@ export function ChatView({
     settings: {
       modelId,
       setModelId,
+      imageModelId,
+      setImageModelId,
       reasoningEffort,
       setReasoningEffort,
       searchPreference,
@@ -1498,6 +1507,7 @@ export function ChatView({
           status: stream.status,
           reading: stream.reading,
           lookups: stream.lookups,
+          previews: stream.previews,
         }
       : null;
     return baseDisplay.map((base) => projectRow(base, edit, live));
@@ -1526,6 +1536,7 @@ export function ChatView({
     stream.files,
     stream.lookups,
     stream.live,
+    stream.previews,
     stream.reading,
     stream.status,
     stream.steers,
@@ -1772,6 +1783,12 @@ export function ChatView({
                   onSearchEnabledChange={setSearchEnabled}
                   reasoningEffort={reasoningEffort}
                   onReasoningEffortChange={setReasoningEffort}
+                  imageModel={{
+                    value: imageModelId,
+                    lock: data.conversation.imageModelId,
+                    agentPreference: data.agent?.imageModelId,
+                    onChange: setImageModelId,
+                  }}
                   context={context}
                 />
               </div>
@@ -1806,6 +1823,7 @@ interface LiveRow {
   readonly status: NonNullable<DisplayMessage["liveStream"]>["status"];
   readonly reading: Exclude<DisplayMessage["reading"], undefined>;
   readonly lookups: Parameters<typeof mergeLookups>[1];
+  readonly previews: NonNullable<DisplayMessage["imagePreviews"]>;
 }
 
 /**
@@ -1845,6 +1863,7 @@ function projectRow(
     liveStream: { text: live.text, status: live.status },
     reading: live.reading,
     uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, live.lookups),
+    imagePreviews: live.previews,
   };
 }
 
@@ -1878,6 +1897,8 @@ export function NewChatView({
   const [greetingMoment] = useState(() => ({ now: new Date(), roll: Math.random() }));
   const [modelId, setModelId] = useState<string | null>(null);
   const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
+  // Null leaves the first answer to pick: the agent's image model, else the admin's first.
+  const [imageModelId, setImageModelId] = useState<string | null>(null);
   const context = useContextSelection({
     mode: "draft",
     agent: initialAgentId ? { id: initialAgentId, name: null } : null,
@@ -1950,6 +1971,7 @@ export function NewChatView({
       };
       const fields = {
         modelId: modelId!,
+        ...(imageModelId ? { imageModelId } : {}),
         content: input.content,
         searchEnabled,
         reasoningEffort,
@@ -2174,6 +2196,11 @@ export function NewChatView({
             onSearchEnabledChange={setSearchEnabled}
             reasoningEffort={reasoningEffort}
             onReasoningEffortChange={setReasoningEffort}
+            imageModel={{
+              value: imageModelId,
+              agentPreference: selectedAgent.data?.imageModelId,
+              onChange: setImageModelId,
+            }}
             context={{
               ...context,
               onAgentChange: (id) => {

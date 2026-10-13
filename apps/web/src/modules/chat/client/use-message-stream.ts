@@ -31,15 +31,11 @@ import {
   type ScheduleDraftActivityResult,
 } from "~/modules/schedules/tool-schema.ts";
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
+import { ImageToolEnvelope } from "~/modules/images/tool-schema.ts";
+import type { ImageQuality } from "@chat/model-client";
 import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
-import {
-  AssistantFile,
-  ASSISTANT_FILE_LIMITS,
-  mergeLookups,
-  NO_LOOKUPS,
-  type UiLookups,
-} from "../assistant-output.ts";
+import { AssistantFile, mergeLookups, NO_LOOKUPS, type UiLookups } from "../assistant-output.ts";
 import { SteerChunkEnvelope } from "../schema.ts";
 import type { AssistantSteer } from "../ui/assistant-body.ts";
 import {
@@ -227,6 +223,21 @@ export interface CustomToolActivity extends ToolActivityBase {
   workingFiles?: ReadonlyArray<{ id: string; revision: number; name: string }>;
 }
 
+/** One `generate_image` call; the images themselves are the answer's files. */
+export interface ImageToolActivity extends ToolActivityBase {
+  family: "image";
+  model: string;
+  editing: boolean;
+  aspectRatio?: string;
+  /** Images asked for, which the placeholder draws while it runs. */
+  requested: number;
+  attachmentIds?: ReadonlyArray<string>;
+  /** Known only when it was sent, not when the provider picked it. */
+  quality?: ImageQuality;
+  adjustments?: ReadonlyArray<string>;
+  refusal?: string;
+}
+
 /** One call into a connected service; a declined or unpermitted call is `refused`. */
 export interface IntegrationToolActivity extends ToolActivityBase {
   family: "integration";
@@ -245,6 +256,7 @@ export type ToolActivity =
   | IntegrationToolActivity
   | ScheduleDraftToolActivity
   | CustomToolActivity
+  | ImageToolActivity
   | ToolFileActivity
   | OfficeActivity
   | DocumentToolActivity
@@ -302,6 +314,8 @@ export interface StreamState {
   reading: { read: number; total: number } | null;
   /** What the answer's ```ui blocks looked up: images, places, routes. */
   lookups: UiLookups;
+  /** The newest in-progress image of each running image call, as a data URI; live only. */
+  previews: Readonly<Record<string, string>>;
 }
 
 type Action =
@@ -322,6 +336,7 @@ type Action =
     }
   | { kind: "reading"; reading: StreamState["reading"] }
   | { kind: "lookups"; lookups: UiLookups }
+  | { kind: "preview"; callId: string; uri: string }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
 const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
@@ -403,6 +418,7 @@ export function applyToolChunk(
     e.family !== "agent-draft" &&
     e.family !== "schedule-draft" &&
     e.family !== "custom" &&
+    e.family !== "image" &&
     e.family !== "tool-file" &&
     !isOfficeFamily(e.family) &&
     e.family !== "integration" &&
@@ -530,6 +546,47 @@ export function applyToolChunk(
         : {}),
       ...(parsed.phase === "result" && parsed.error ? { error: parsed.error } : {}),
     };
+    return index === -1
+      ? [...tools, next]
+      : tools.map((activity, i) => (i === index ? next : activity));
+  }
+  if (family === "image") {
+    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ImageToolEnvelope)(envelope));
+    if (!parsed || (existing && parsed.phase === "start")) return tools;
+    const previous = existing?.family === "image" ? existing : undefined;
+    const next: ImageToolActivity =
+      parsed.phase === "start"
+        ? {
+            family: "image",
+            ...position,
+            callId: parsed.callId,
+            name: parsed.name,
+            turnIndex: parsed.turnIndex,
+            callIndex: parsed.callIndex,
+            status: "running",
+            model: parsed.model,
+            editing: parsed.editing,
+            ...(parsed.aspectRatio ? { aspectRatio: parsed.aspectRatio } : {}),
+            requested: parsed.count,
+          }
+        : {
+            family: "image",
+            ...position,
+            callId: parsed.callId,
+            name: parsed.name,
+            turnIndex: previous?.turnIndex ?? 0,
+            callIndex: previous?.callIndex ?? tools.length,
+            status: parsed.status,
+            model: parsed.model,
+            editing: parsed.editing,
+            ...(parsed.aspectRatio ? { aspectRatio: parsed.aspectRatio } : {}),
+            requested: parsed.requested,
+            attachmentIds: parsed.attachmentIds,
+            ...(parsed.quality ? { quality: parsed.quality } : {}),
+            ...(parsed.adjustments?.length ? { adjustments: parsed.adjustments } : {}),
+            ...(parsed.refusal ? { refusal: parsed.refusal } : {}),
+            ...(parsed.error ? { error: parsed.error } : {}),
+          };
     return index === -1
       ? [...tools, next]
       : tools.map((activity, i) => (i === index ? next : activity));
@@ -1118,11 +1175,8 @@ export const applyFileChunk = (
 ): AssistantFile[] => {
   try {
     const file = Schema.decodeUnknownSync(AssistantFile)(JSON.parse(delta));
-    if (
-      files.some((item) => item.attachment.id === file.attachment.id) ||
-      files.length >= ASSISTANT_FILE_LIMITS.count
-    )
-      return [...files];
+    // Limits are the server's: what it stored is what a reload shows.
+    if (files.some((item) => item.attachment.id === file.attachment.id)) return [...files];
     return [...files, file];
   } catch {
     return [...files];
@@ -1267,12 +1321,26 @@ function applyChunk(
     case "steer":
       return { ...state, steers: applySteerChunk(state.steers, delta) };
     case "writing":
-    case "tool":
-      return { ...state, tools: applyToolActivityChunk(state.tools, kind, delta, at) };
+    case "tool": {
+      const tools = applyToolActivityChunk(state.tools, kind, delta, at);
+      return { ...state, tools, previews: runningPreviews(state.previews, tools) };
+    }
   }
 }
 
-function reducer(state: StreamState, action: Action): StreamState {
+/** A draft is shown only while its call runs; the finished image replaces it. */
+const runningPreviews = (
+  previews: StreamState["previews"],
+  tools: ReadonlyArray<ToolActivity>,
+): StreamState["previews"] => {
+  const ended = Object.keys(previews).filter((callId) =>
+    tools.some((tool) => tool.callId === callId && tool.status !== "running"),
+  );
+  if (ended.length === 0) return previews;
+  return Object.fromEntries(Object.entries(previews).filter(([callId]) => !ended.includes(callId)));
+};
+
+export function streamReducer(state: StreamState, action: Action): StreamState {
   switch (action.kind) {
     case "reset":
       return {
@@ -1283,6 +1351,7 @@ function reducer(state: StreamState, action: Action): StreamState {
         status: "streaming",
         reading: null,
         lookups: action.lookups ?? NO_LOOKUPS,
+        previews: {},
       };
     case "chunk":
       return applyChunk(state, action.chunkKind, action.delta, action.at);
@@ -1291,12 +1360,18 @@ function reducer(state: StreamState, action: Action): StreamState {
     case "lookups":
       // Each event restates every result so far, so a repeat changes nothing.
       return { ...state, lookups: mergeLookups(state.lookups, action.lookups) };
+    case "preview":
+      // A draft that lands after its call ended has nothing left to stand in for.
+      return state.tools.some((tool) => tool.callId === action.callId && tool.status !== "running")
+        ? state
+        : { ...state, previews: { ...state.previews, [action.callId]: action.uri } };
     case "done":
       return {
         ...state,
         tools: withoutWriting(state.tools),
         status: action.status,
         reading: null,
+        previews: {},
       };
   }
 }
@@ -1339,7 +1414,7 @@ export function useMessageStream(
   canonicalStatus?: "streaming" | "complete" | "error" | "aborted",
 ) {
   const queryClient = useQueryClient();
-  const [state, dispatch] = useReducer(reducer, {
+  const [state, dispatch] = useReducer(streamReducer, {
     files: initial?.files ?? [],
     tools: initial?.tools ?? [],
     compactions: initial?.compactions ?? [],
@@ -1347,6 +1422,7 @@ export function useMessageStream(
     status: messageId ? "streaming" : "idle",
     reading: null,
     lookups: initial?.lookups ?? NO_LOOKUPS,
+    previews: {},
   });
   const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
@@ -1445,6 +1521,21 @@ export function useMessageStream(
       };
       if (!acceptsRun(data.runId)) return;
       dispatch({ kind: "lookups", lookups: data.lookups });
+    });
+
+    source.addEventListener("preview", (raw) => {
+      const data = JSON.parse((raw as MessageEvent).data) as {
+        callId: string;
+        mediaType: string;
+        data: string;
+        runId?: string;
+      };
+      if (!acceptsRun(data.runId) || !/^image\/(png|jpeg|webp)$/.test(data.mediaType)) return;
+      dispatch({
+        kind: "preview",
+        callId: data.callId,
+        uri: `data:${data.mediaType};base64,${data.data}`,
+      });
     });
 
     source.addEventListener("done", (raw) => {

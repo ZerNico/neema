@@ -9,6 +9,7 @@ import { fileReferencesSystemHint } from "../file-references.ts";
 import { RESEARCH_APP_POLICY } from "./research/tool.ts";
 import { webToolsSystemHint } from "./search-prompt.ts";
 import { toolLoadPolicy } from "~/modules/tools/server/tool-load.ts";
+import { IMAGE_APP_POLICY } from "~/modules/images/server/policy.ts";
 import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 
 /**
@@ -66,6 +67,8 @@ export interface FixedPrefixInput {
     readonly commands: boolean;
   } | null;
   readonly browser: boolean;
+  /** `generate_image` is offered; which model it uses is told after history. */
+  readonly images?: boolean;
   /**
    * The interactive-ui skill is offered, so the model is told what ui blocks are
    * for; `photos` when image blocks can be filled, which takes web search.
@@ -113,6 +116,7 @@ export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded
     ? [system(desktopToolsSystemHint(input.desktop.folders, input.desktop.commands))]
     : []),
   ...(input.browser ? [system(BROWSER_TOOLS_SYSTEM_HINT)] : []),
+  ...(input.images ? [system(IMAGE_APP_POLICY)] : []),
   ...input.memory,
   // The project's come first; an agent picked in it refines them.
   ...(input.project?.instructions.trim() || input.agent?.instructions.trim()

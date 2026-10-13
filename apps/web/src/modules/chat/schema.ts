@@ -65,6 +65,8 @@ const generationFields = {
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
   modelId: Schema.String,
+  /** The composer's image model; absent or null keeps the chat's own. */
+  imageModelId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   content: MessageContent,
   searchEnabled: Schema.Boolean,
@@ -259,6 +261,8 @@ export const SearchChatsInput = Schema.Struct({
 export const QueueMessageInput = Schema.Struct({
   conversationId: Schema.String,
   modelId: Schema.String,
+  /** The composer's image model; absent or null keeps the chat's own. */
+  imageModelId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   content: MessageContent,
   searchEnabled: Schema.Boolean,
@@ -322,6 +326,8 @@ export const RetryMessageInput = Schema.Struct({
   conversationId: Schema.String,
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
+  /** The composer's image model; absent or null keeps the chat's own. */
+  imageModelId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
 });

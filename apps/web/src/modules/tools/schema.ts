@@ -13,6 +13,7 @@ import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
 import { ScheduleDraftToolEnvelope } from "~/modules/schedules/tool-schema.ts";
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
+import { ImageToolEnvelope } from "~/modules/images/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
 import { PlanStep } from "./plan-schema.ts";
@@ -277,6 +278,7 @@ export const ToolChunkEnvelope = Schema.Union([
   IntegrationToolEnvelope,
   ScheduleDraftToolEnvelope,
   CustomToolEnvelope,
+  ImageToolEnvelope,
   DocumentToolEnvelope,
   ProjectFileToolEnvelope,
   KnowledgeToolEnvelope,

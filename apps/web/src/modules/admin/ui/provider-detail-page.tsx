@@ -23,6 +23,13 @@ import { MODEL_DIALOG_CLASS } from "./model-dialog.ts";
 import { ModelTestResult } from "./model-test.tsx";
 import { useModelTest } from "./use-model-test.ts";
 import { ModelSettingsFields } from "./model-settings-form.tsx";
+import { ImageModelTestResult } from "./image-model-test.tsx";
+import { useImageModelTest } from "./use-image-model-test.ts";
+import {
+  imageFamiliesFor,
+  inferImageFamily,
+  suggestedImageCapabilities,
+} from "@chat/model-client/image-families";
 import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
 import {
   emptyModelSettingsDraft,
@@ -90,6 +97,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["admin"] }),
       queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+      queryClient.invalidateQueries({ queryKey: ["image-models"] }),
     ]);
 
   const toggleProvider = useMutation({
@@ -342,6 +350,7 @@ export function AddModelDialog({
   const test = useModelTest(providerId, (format) =>
     setDraft((current) => ({ ...current, format })),
   );
+  const imageTest = useImageModelTest(providerId);
 
   const reset = () => {
     selectedId.current = null;
@@ -349,6 +358,7 @@ export function AddModelDialog({
     setTyped("");
     setDraft(initialDraft());
     test.clear();
+    imageTest.clear();
   };
 
   const add = useMutation({
@@ -366,6 +376,7 @@ export function AddModelDialog({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin"] }),
         queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+        queryClient.invalidateQueries({ queryKey: ["image-models"] }),
       ]);
       reset();
       onOpenChange(false);
@@ -413,10 +424,18 @@ export function AddModelDialog({
                   selectedId.current = picked.id;
                   setPick(picked);
                   setTyped(picked.id);
+                  // A typed id the client knows (gpt-image-1, dall-e-3) starts as that image model.
+                  const typedFamily =
+                    picked.custom && presetId ? inferImageFamily(presetId, picked.id) : null;
+                  const family = picked.imageFamily ?? typedFamily;
                   setDraft((current) => ({
                     ...current,
                     displayName: picked.name,
-                    type: picked.type,
+                    type: typedFamily ? "image" : picked.type,
+                    imageFamily: family,
+                    imageCapabilities: family
+                      ? suggestedImageCapabilities(family, picked.id)
+                      : null,
                     contextLength:
                       picked.contextLength === null ? "" : String(picked.contextLength),
                     embeddingDimensions: "",
@@ -461,6 +480,7 @@ export function AddModelDialog({
                 draft={draft}
                 setDraft={setDraft}
                 groups={groups}
+                imageFamilies={presetId ? imageFamiliesFor(presetId) : []}
                 disabled={add.isPending}
                 onDetectDimensions={() =>
                   probeEmbeddingDimensions({ data: { providerId, modelKey: effective.id } })
@@ -470,8 +490,19 @@ export function AddModelDialog({
           </FieldGroup>
 
           <ModelTestResult test={test.resultFor(effective?.id)} />
+          <ImageModelTestResult result={imageTest.resultFor(effective?.id, draft.imageFamily)} />
           {add.isError ? <FieldError>Could not add the model.</FieldError> : null}
           <DialogFooter>
+            {effective && draft.type === "image" && draft.imageFamily ? (
+              <PendingButton
+                variant="outline"
+                pending={imageTest.pending}
+                disabled={add.isPending}
+                onClick={() => imageTest.run(effective.id, draft.imageFamily!)}
+              >
+                Test (1 image)
+              </PendingButton>
+            ) : null}
             {effective && draft.type === "chat" ? (
               <PendingButton
                 variant="outline"

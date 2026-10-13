@@ -387,6 +387,8 @@ describe("branching a conversation", () => {
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
           mode: "chat",
           projectId: null,
+          conversationId: forked.conversation.id,
+          imageModelId: null,
           agent: { agentId: null },
           agentDrafts: [],
           scheduleDrafts: [],
@@ -400,6 +402,8 @@ describe("branching a conversation", () => {
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
           mode: "chat",
           projectId: null,
+          conversationId: forked.conversation.id,
+          imageModelId: null,
           agent: { agentId: null },
           agentDrafts: [],
           scheduleDrafts: [],
@@ -630,6 +634,67 @@ describe("branching a conversation", () => {
     ).toMatchObject({ fileIds: [copyOf("export.csv")] });
     expect(result.kept).toEqual([]);
     expect(result.defaults.workingFiles).toEqual([]);
+  });
+
+  it("points a branched image at its cloned call", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const attachmentRepo = yield* AttachmentRepo;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "draw a fox", assistant: "Here." }]);
+        const answer = source.messages[1]!;
+        yield* attach(userId, answer.id, [{ fileName: "image-1.png", position: 0 }]);
+        const [image] = yield* attachmentRepo.listWithBlobsForMessages([answer.id]);
+        const callId = uuidv7();
+        yield* repo.insertToolCall({
+          id: callId,
+          messageId: answer.id,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "call_fox",
+          toolName: "generate_image",
+          arguments: {},
+        });
+        yield* repo.completeToolCall({ id: callId, status: "complete", result: {} });
+        yield* db
+          .update(messages)
+          .set({
+            assistantOutput: {
+              v: 1,
+              files: [
+                {
+                  v: 1,
+                  attachment: {
+                    id: image!.id,
+                    fileName: "image-1.png",
+                    size: 4,
+                    mediaType: "image/png",
+                    kind: "image",
+                  },
+                  textOffset: 0,
+                  turnIndex: 0,
+                  eventIndex: 1,
+                  callIndex: 0,
+                  origin: { toolCallId: callId },
+                  source: "image-tool",
+                },
+              ],
+            },
+          })
+          .where(eq(messages.id, answer.id));
+
+        const forked = yield* branch(userId, source.conversation.id, answer.id);
+        const clonedAnswer = forked.messages[1]!;
+        return {
+          calls: yield* repo.listToolCalls([clonedAnswer.id]),
+          output: (yield* repo.getMessage(clonedAnswer.id))?.assistantOutput,
+        };
+      }),
+    );
+    const [call] = result.calls;
+    expect(result.output?.files[0]?.origin).toEqual({ toolCallId: call!.id });
   });
 
   it("flattens file aliases for a shorter branch after its source was deleted", async () => {

@@ -603,3 +603,55 @@ describe("runs of work", () => {
     ).toEqual(["work(web,document:fill-1+fill-2+fill-3,document:other)", "card:create", "text"]);
   });
 });
+
+describe("image calls", () => {
+  const attachment = (id: string) => ({
+    id,
+    fileName: `${id}.png`,
+    mediaType: "image/png",
+    size: 10,
+    kind: "image" as const,
+  });
+  const file = (id: string, toolCallId?: string) => ({
+    v: 1 as const,
+    attachment: attachment(id),
+    textOffset: 0,
+    turnIndex: 0,
+    eventIndex: 0,
+    callIndex: 0,
+    ...(toolCallId ? { origin: { toolCallId } } : {}),
+  });
+
+  it("draws an image call's files inside its part, leaving other files their own", () => {
+    const { parts } = projectGrouped({
+      content: "Here.",
+      rawTextLength: 5,
+      streaming: false,
+      tools: [
+        {
+          family: "image",
+          name: "generate_image",
+          callId: "call-1",
+          textOffset: 0,
+          turnIndex: 0,
+          callIndex: 0,
+          status: "complete",
+          model: "GPT Image",
+          editing: false,
+          requested: 2,
+          attachmentIds: ["a", "b"],
+        },
+      ],
+      compactions: [],
+      files: [file("a", "call-1"), file("b", "call-1"), file("c")],
+    });
+    const image = parts.find((part) => part.kind === "image");
+    expect(image?.kind === "image" && image.files.map((item) => item.attachment.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(
+      parts.flatMap((part) => (part.kind === "file" ? [part.file.attachment.id] : [])),
+    ).toEqual(["c"]);
+  });
+});

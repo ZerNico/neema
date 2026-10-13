@@ -6,9 +6,11 @@ import {
   applyToolChunk,
   learnServerClock,
   serverNow,
+  streamReducer,
   type CompactionActivity,
   type ToolActivity,
 } from "./use-message-stream.ts";
+import { NO_LOOKUPS } from "../assistant-output.ts";
 
 const env = (value: Record<string, unknown>) => JSON.stringify({ v: 1, ...value });
 
@@ -694,5 +696,119 @@ describe("the server's clock", () => {
     expect(Math.abs(serverNow() - (Date.now() - 60_000))).toBeLessThan(1000);
     learnServerClock(Date.now());
     expect(Math.abs(serverNow() - Date.now())).toBeLessThan(1000);
+  });
+});
+
+describe("image tool chunks", () => {
+  const begin = env({
+    family: "image",
+    phase: "start",
+    callId: "img-1",
+    name: "generate_image",
+    turnIndex: 0,
+    callIndex: 0,
+    textOffset: 4,
+    model: "GPT Image",
+    editing: false,
+    aspectRatio: "3:2",
+    count: 2,
+  });
+
+  it("starts a running call with its placeholder shape and settles it with its files", () => {
+    const running = applyToolChunk([], begin);
+    expect(running).toEqual([
+      expect.objectContaining({
+        family: "image",
+        status: "running",
+        aspectRatio: "3:2",
+        requested: 2,
+        textOffset: 4,
+      }),
+    ]);
+    const done = applyToolChunk(
+      running,
+      env({
+        family: "image",
+        phase: "result",
+        callId: "img-1",
+        name: "generate_image",
+        version: 1,
+        status: "complete",
+        model: "GPT Image",
+        editing: false,
+        aspectRatio: "3:2",
+        requested: 2,
+        attachmentIds: ["a", "b"],
+        adjustments: ["Made 3:2 at 1536x1024."],
+      }),
+    );
+    expect(done[0]).toMatchObject({
+      status: "complete",
+      attachmentIds: ["a", "b"],
+      adjustments: ["Made 3:2 at 1536x1024."],
+      callIndex: 0,
+    });
+  });
+
+  it("drops a call's draft when it ends, and ignores one arriving after", () => {
+    const idle = {
+      files: [],
+      tools: [],
+      compactions: [],
+      steers: [],
+      status: "streaming" as const,
+      reading: null,
+      lookups: NO_LOOKUPS,
+      previews: {},
+    };
+    const drawing = streamReducer(
+      streamReducer(idle, { kind: "chunk", chunkKind: "tool", delta: begin }),
+      { kind: "preview", callId: "img-1", uri: "data:image/png;base64,AA" },
+    );
+    expect(drawing.previews).toEqual({ "img-1": "data:image/png;base64,AA" });
+    const result = env({
+      family: "image",
+      phase: "result",
+      callId: "img-1",
+      name: "generate_image",
+      version: 1,
+      status: "complete",
+      model: "GPT Image",
+      editing: false,
+      requested: 1,
+      attachmentIds: ["a"],
+    });
+    const done = streamReducer(drawing, { kind: "chunk", chunkKind: "tool", delta: result });
+    expect(done.previews).toEqual({});
+    const late = streamReducer(done, {
+      kind: "preview",
+      callId: "img-1",
+      uri: "data:image/png;base64,BB",
+    });
+    expect(late).toBe(done);
+  });
+
+  it("keeps a refusal's words and never reopens a finished call", () => {
+    const refused = applyToolChunk(
+      applyToolChunk([], begin),
+      env({
+        family: "image",
+        phase: "result",
+        callId: "img-1",
+        name: "generate_image",
+        version: 1,
+        status: "error",
+        model: "GPT Image",
+        editing: false,
+        requested: 1,
+        attachmentIds: [],
+        refusal: "Rejected by the safety system.",
+      }),
+    );
+    expect(refused[0]).toMatchObject({
+      status: "error",
+      refusal: "Rejected by the safety system.",
+    });
+    expect(applyToolChunk(refused, begin)).toBe(refused);
   });
 });

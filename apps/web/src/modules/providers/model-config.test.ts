@@ -74,6 +74,9 @@ describe("normalizeModelSettings", () => {
       enabled: true,
       access: "groups",
       groupIds: ["g1", "g2"],
+      imageFamily: null,
+      imageCapabilities: null,
+      imagePricing: null,
     });
   });
 

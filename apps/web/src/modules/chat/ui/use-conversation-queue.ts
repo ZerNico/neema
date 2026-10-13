@@ -20,6 +20,7 @@ export interface QueueRow extends EditableQueuedMessage {
   steerGenerationId: string | null;
   input: EditableQueuedMessage["input"] & {
     modelId: string;
+    imageModelId?: string | null;
     searchEnabled: boolean;
     collectionIds?: ReadonlyArray<string> | undefined;
   };
@@ -83,6 +84,9 @@ export function useConversationQueue(input: {
   settings: {
     modelId: string | null;
     setModelId: (modelId: string | null) => void;
+    /** The image model picked for the next send; null leaves it to the chat's lock. */
+    imageModelId: string | null;
+    setImageModelId: (imageModelId: string | null) => void;
     reasoningEffort?: ReasoningEffort | null;
     setReasoningEffort?: (effort: ReasoningEffort | null, modelId?: string | null) => void;
     searchPreference: boolean | null;
@@ -162,6 +166,7 @@ export function useConversationQueue(input: {
   // The composer settings an open edit borrowed, handed back when it ends.
   const borrowed = useRef<{
     modelId: string | null;
+    imageModelId: string | null;
     reasoningEffort: ReasoningEffort | null;
     searchPreference: boolean | null;
   } | null>(null);
@@ -206,12 +211,14 @@ export function useConversationQueue(input: {
       onEditStart: (entry) => {
         borrowed.current = {
           modelId: settings.modelId,
+          imageModelId: settings.imageModelId,
           reasoningEffort: settings.reasoningEffort ?? null,
           searchPreference: settings.searchPreference,
         };
         const row = input.rows.find((item) => item.id === entry.id);
         if (!row) return;
         settings.setModelId(row.input.modelId);
+        settings.setImageModelId(row.input.imageModelId ?? null);
         settings.setReasoningEffort?.(row.input.reasoningEffort ?? null, row.input.modelId);
         settings.setSearchEnabled(row.input.searchEnabled);
         settings.seedCollections(row.input.collectionIds ?? []);
@@ -219,6 +226,7 @@ export function useConversationQueue(input: {
       onEditEnd: () => {
         if (borrowed.current) {
           settings.setModelId(borrowed.current.modelId);
+          settings.setImageModelId(borrowed.current.imageModelId);
           settings.setReasoningEffort?.(borrowed.current.reasoningEffort, borrowed.current.modelId);
           settings.setSearchEnabled(borrowed.current.searchPreference);
         }

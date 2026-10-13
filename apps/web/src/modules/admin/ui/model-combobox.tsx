@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchProviderCatalog } from "../server/functions.ts";
 import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
+import type { ImageFamily } from "@chat/model-client/image-families";
 import type {
   ModelCapabilities,
   ModelPricing,
@@ -28,6 +29,8 @@ export interface CatalogPick {
   pricing?: ModelPricing | null;
   /** True when the entry was typed by the user rather than picked from the catalog. */
   custom?: boolean;
+  /** The family an image entry is called with. */
+  imageFamily?: ImageFamily;
 }
 
 /**
@@ -117,7 +120,8 @@ export function ModelCombobox({
                 </span>
               </ComboboxItem>
             ) : (
-              <ComboboxItem key={item.id} value={item}>
+              // A model that both chats and draws is listed once per type.
+              <ComboboxItem key={`${item.type}:${item.id}`} value={item}>
                 <span className="flex flex-col">
                   <span>{item.id}</span>
                   <span className="text-muted-foreground text-xs">

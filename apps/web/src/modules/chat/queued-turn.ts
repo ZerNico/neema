@@ -14,6 +14,8 @@ import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
 export interface QueuedTurnInput {
   modelId: string;
+  /** The composer's image model when queued; absent keeps the chat's own. */
+  imageModelId?: string | null;
   reasoningEffort?: ReasoningEffort | null;
   searchEnabled: boolean;
   researchEnabled: boolean;

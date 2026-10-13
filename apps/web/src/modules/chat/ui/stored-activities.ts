@@ -1,5 +1,6 @@
 import { OFFICE_FAMILIES, officeFamilyOfTool } from "~/modules/office/families.ts";
 import { ToolFileActivity } from "../tool-file-schema.ts";
+import { IMAGE_TOOL, ImageToolActivity } from "~/modules/images/tool-schema.ts";
 import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
 import { IntegrationToolActivity as StoredIntegrationActivity } from "~/modules/integrations/tool-schema.ts";
 import {
@@ -371,6 +372,33 @@ export function toActivity(row: {
       ...(result?.attachmentId ? { attachmentId: result.attachmentId } : {}),
       ...(result?.workingFileId ? { workingFileId: result.workingFileId } : {}),
       ...(row.error ? { error: row.error.message } : result?.error ? { error: result.error } : {}),
+    };
+  }
+
+  if (row.toolName === IMAGE_TOOL) {
+    // Every row is written with a running snapshot, so the shape is always stored.
+    const stored = Option.getOrNull(Schema.decodeUnknownOption(ImageToolActivity)(row.result));
+    return {
+      family: "image",
+      ...position,
+      callId: row.id,
+      name: row.toolName,
+      turnIndex: row.turnIndex,
+      callIndex: row.callIndex,
+      status: row.status,
+      model: stored?.model ?? "",
+      editing: stored?.editing ?? false,
+      ...(stored?.aspectRatio ? { aspectRatio: stored.aspectRatio } : {}),
+      requested: stored?.requested ?? 1,
+      ...(stored ? { attachmentIds: stored.attachmentIds } : {}),
+      ...(stored?.quality ? { quality: stored.quality } : {}),
+      ...(stored?.adjustments?.length ? { adjustments: stored.adjustments } : {}),
+      ...(stored?.refusal ? { refusal: stored.refusal } : {}),
+      ...(row.error && !stored?.refusal
+        ? { error: row.error.message }
+        : stored?.error
+          ? { error: stored.error }
+          : {}),
     };
   }
 

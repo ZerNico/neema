@@ -10,6 +10,7 @@ import {
   searchProvidersQuery,
 } from "~/modules/tools/client/queries.ts";
 import { presentationFontsQuery } from "~/modules/presentations/client/queries.ts";
+import { imageGenerationToolQuery } from "~/modules/images/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/tools")({
   loader: ({ context }) =>
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_app/admin/tools")({
       context.queryClient.ensureQueryData(urlReaderToolQuery),
       context.queryClient.ensureQueryData(presentationFontsQuery),
       context.queryClient.ensureQueryData(officeFilesToolQuery),
+      context.queryClient.ensureQueryData(imageGenerationToolQuery),
       context.queryClient.ensureQueryData(interactiveUiToolQuery),
       context.queryClient.ensureQueryData(mapsToolQuery),
     ]),

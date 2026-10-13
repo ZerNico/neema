@@ -88,6 +88,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       queryClient.invalidateQueries({ queryKey: ["admin"] }),
       // Membership decides model visibility, so pickers must refetch too.
       queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+      queryClient.invalidateQueries({ queryKey: ["image-models"] }),
     ]);
 
   const add = useMutation({

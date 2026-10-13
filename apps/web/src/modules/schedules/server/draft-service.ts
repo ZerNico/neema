@@ -44,6 +44,7 @@ const scheduleToSettings = (row: ScheduleRow): ScheduleDraftSettings => ({
   prompt: row.prompt,
   modelId: row.modelId,
   agentId: row.agentId,
+  imageModelId: row.imageModelId,
   searchEnabled: row.searchEnabled,
   researchEnabled: row.researchEnabled,
   collectionIds: [...row.collectionIds],

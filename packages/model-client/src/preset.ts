@@ -5,6 +5,7 @@
  * never branch on a service's name.
  */
 
+import type { ImageFamily } from "./images/families.ts";
 import { bedrockScope } from "./sigv4.ts";
 
 /**
@@ -96,6 +97,8 @@ export interface Preset {
   /** OpenRouter's `modalities`, sent on every request so image output is per call. */
   readonly imageOutput: boolean;
   readonly catalog: Catalog;
+  /** Image model families this service may host; absent when it hosts none. */
+  readonly images?: { readonly families: ReadonlyArray<ImageFamily> };
   /** One line shown under the preset in admin. */
   readonly note?: string;
 }
@@ -139,15 +142,16 @@ const bedrockBaseUrl = (url: string) => {
  * URL is mantle: only runtime takes the geo and global inference profiles
  * (`eu.anthropic.…`), and mantle serves Claude in a few regions only.
  */
-const bedrockMessagesUrl = (baseUrl: string) => {
+export const bedrockRuntimeOrigin = (baseUrl: string) => {
   const url = new URL(baseUrl);
   const scope = bedrockScope(url);
-  const origin =
-    scope && !url.hostname.startsWith("bedrock-runtime")
-      ? `https://bedrock-runtime.${scope.region}.amazonaws.com`
-      : url.origin;
-  return `${origin}/anthropic/v1/messages`;
+  return scope && !url.hostname.startsWith("bedrock-runtime")
+    ? `https://bedrock-runtime.${scope.region}.amazonaws.com`
+    : url.origin;
 };
+
+const bedrockMessagesUrl = (baseUrl: string) =>
+  `${bedrockRuntimeOrigin(baseUrl)}/anthropic/v1/messages`;
 
 const definePresets = <const T extends ReadonlyArray<Preset>>(presets: T) => presets;
 
@@ -163,6 +167,7 @@ export const PRESETS = definePresets([
     cacheMarkers: /^anthropic\//,
     imageOutput: true,
     catalog: "openrouter",
+    images: { families: ["openrouter-image"] },
   },
   {
     id: "openai",
@@ -181,6 +186,7 @@ export const PRESETS = definePresets([
     overridable: [],
     imageOutput: false,
     catalog: "openai-list",
+    images: { families: ["gpt-image", "dall-e-3", "dall-e-2"] },
   },
   {
     id: "azure",
@@ -201,6 +207,7 @@ export const PRESETS = definePresets([
     modelFormat: true,
     imageOutput: false,
     catalog: "azure-deployments",
+    images: { families: ["gpt-image", "dall-e-3"] },
     note: "Models are deployment names",
   },
   {
@@ -224,6 +231,7 @@ export const PRESETS = definePresets([
     messages: { models: /(^|\.)anthropic\./, url: bedrockMessagesUrl },
     imageOutput: false,
     catalog: "bedrock",
+    images: { families: ["nova-canvas", "titan-image", "stability"] },
   },
   {
     id: "vercel",
@@ -236,6 +244,8 @@ export const PRESETS = definePresets([
     cacheMarkers: /^anthropic\//,
     imageOutput: false,
     catalog: "openai-list",
+    // Its OpenAI-compatible Images API, where GPT Image models take their own fields.
+    images: { families: ["gpt-image", "openai-compatible-image"] },
   },
   {
     id: "gemini",
@@ -247,6 +257,8 @@ export const PRESETS = definePresets([
     overridable: [],
     imageOutput: false,
     catalog: "openai-list",
+    // Imagen is shut down in the Gemini API, so only Gemini image models remain.
+    images: { families: ["gemini-image"] },
   },
   {
     id: "deepseek",
@@ -292,6 +304,7 @@ export const PRESETS = definePresets([
     overridable: [],
     imageOutput: false,
     catalog: "openai-list",
+    images: { families: ["xai-image"] },
   },
   {
     id: "ollama",
@@ -304,6 +317,7 @@ export const PRESETS = definePresets([
     overridable: ["reasoning"],
     imageOutput: false,
     catalog: "openai-list",
+    images: { families: ["openai-compatible-image"] },
     note: "Ollama cuts prompts to its context size, set OLLAMA_CONTEXT_LENGTH",
   },
   {
@@ -317,6 +331,7 @@ export const PRESETS = definePresets([
     overridable: ALL_SETTINGS,
     imageOutput: false,
     catalog: "openai-list",
+    images: { families: ["openai-compatible-image"] },
   },
 ]);
 

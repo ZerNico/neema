@@ -22,6 +22,7 @@ import {
 } from "~/ui/sortable-list.tsx";
 import { moveId } from "~/ui/move-id.ts";
 import { updateDefaultModelOrder } from "../server/functions.ts";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
 
 type PriorityModel = Pick<
   ModelRow,
@@ -41,17 +42,33 @@ export function ModelOrderDialog({
   models: ReadonlyArray<PriorityModel>;
   providers: Providers;
 }) {
+  const hasImages = models.some((model) => model.type === "image");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Model order</DialogTitle>
           <DialogDescription>
-            Model pickers list chat models in this order, and new chats start with the first one the
-            person can use. Changes save right away.
+            Pickers list models in this order, and a chat starts with the first one the person can
+            use. Changes save right away.
           </DialogDescription>
         </DialogHeader>
-        {open ? <ModelOrder models={models} providers={providers} /> : null}
+        {open && hasImages ? (
+          <Tabs defaultValue="chat">
+            <TabsList>
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="image">Image</TabsTrigger>
+            </TabsList>
+            <TabsContent value="chat">
+              <ModelOrder models={models} providers={providers} type="chat" />
+            </TabsContent>
+            <TabsContent value="image">
+              <ModelOrder models={models} providers={providers} type="image" />
+            </TabsContent>
+          </Tabs>
+        ) : open ? (
+          <ModelOrder models={models} providers={providers} type="chat" />
+        ) : null}
         <DialogFooter>
           <DialogClose render={<Button />}>Done</DialogClose>
         </DialogFooter>
@@ -60,7 +77,7 @@ export function ModelOrderDialog({
   );
 }
 
-const mutationKey = ["admin", "save-default-model-order"];
+const mutationKeyOf = (type: "chat" | "image") => ["admin", "save-default-model-order", type];
 
 // Placed models first, then the rest alphabetically: the order chat pickers receive.
 const byRank = (a: PriorityModel, b: PriorityModel) =>
@@ -72,15 +89,19 @@ const byRank = (a: PriorityModel, b: PriorityModel) =>
 export function ModelOrder({
   models,
   providers,
+  type = "chat",
 }: {
   models: ReadonlyArray<PriorityModel>;
   providers: Providers;
+  /** Each type keeps its own order; saving one leaves the other as it is. */
+  type?: "chat" | "image";
 }) {
+  const mutationKey = mutationKeyOf(type);
   const queryClient = useQueryClient();
   // The last order chosen, shown until the final queued save settles and the
   // refetch returns, so no refetch in between can show an older one.
   const [draft, setDraft] = useState<string[] | null>(null);
-  const chatModels = models.filter((model) => model.type === "chat");
+  const chatModels = models.filter((model) => model.type === type);
   // Sorting the filtered copy; the client targets ES2022, before toSorted.
   // oxlint-disable-next-line unicorn/no-array-sort
   const saved = chatModels.sort(byRank).map((model) => model.id);
@@ -98,7 +119,7 @@ export function ModelOrder({
   const save = useMutation({
     mutationKey,
     scope: { id: mutationKey.join(":") },
-    mutationFn: (modelIds: string[]) => updateDefaultModelOrder({ data: { modelIds } }),
+    mutationFn: (modelIds: string[]) => updateDefaultModelOrder({ data: { modelIds, type } }),
     onError: () =>
       toast.error(
         "Could not save the model order. Refresh the page if a model was removed, then try again.",
@@ -108,6 +129,7 @@ export function ModelOrder({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin", "models"] }),
         queryClient.invalidateQueries({ queryKey: ["chat-models"] }),
+        queryClient.invalidateQueries({ queryKey: ["image-models"] }),
       ]);
       setDraft(null);
     },
@@ -119,7 +141,11 @@ export function ModelOrder({
   const move = (from: number, to: number) => apply(moveId(order, from, to));
 
   if (order.length === 0) {
-    return <p className="text-muted-foreground text-sm">No chat models yet.</p>;
+    return (
+      <p className="text-muted-foreground text-sm">
+        {type === "image" ? "No image models yet." : "No chat models yet."}
+      </p>
+    );
   }
   return (
     <ListCard className="max-h-[50vh] overflow-y-auto">

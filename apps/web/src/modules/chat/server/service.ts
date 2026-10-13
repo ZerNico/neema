@@ -37,6 +37,7 @@ import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-s
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { resolveImageModel } from "~/modules/images/server/resolve.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -106,6 +107,8 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveInte
     openDocument?: OpenDocument | undefined;
     /** See chat/schema.ts `generationFields.agentId`. */
     agentId?: string | null | undefined;
+    /** The composer's image model; absent keeps the chat's own. */
+    imageModelId?: string | null | undefined;
   };
 
 /** A text-and-files submission held for later, with the settings it was made under. */
@@ -272,6 +275,8 @@ export class ChatService extends Context.Service<
         messageId: string;
         /** Regenerate with this model instead of the one that answered before. */
         modelId?: string | undefined;
+        /** Draw with this image model from now on; absent keeps the chat's own. */
+        imageModelId?: string | null | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
@@ -362,6 +367,8 @@ export class ChatService extends Context.Service<
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
         skillIds?: ReadonlyArray<string> | undefined;
         collectionIds?: ReadonlyArray<string> | undefined;
+        /** The composer's image model; absent keeps the chat's own. */
+        imageModelId?: string | null | undefined;
       },
     ): Effect.Effect<
       { assistantMessageId: string },
@@ -452,6 +459,7 @@ export class ChatService extends Context.Service<
       prompt: string;
       modelId: string | null;
       agentId: string | null;
+      imageModelId?: string | null;
       searchEnabled: boolean;
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
@@ -698,6 +706,10 @@ function makeChatService() {
            * a fired answer included, has a person present and passes none.
            */
           integrationGrants?: ReadonlyArray<IntegrationGrant>;
+          /** The image model this submission picked; absent keeps the chat's own. */
+          imageModelId?: string | null | undefined;
+          /** Continues the same answer, so it keeps the image model it drew with. */
+          resume?: boolean;
         } & (
           | {
               attempt: "retry";
@@ -716,6 +728,14 @@ function makeChatService() {
       (tx, defaults: ConversationDefaults, continuation) =>
         Effect.gen(function* () {
           yield* requireEligibleAccount(tx, input.userId);
+          const imageModel = yield* resolveImageModel(tx, {
+            userId: input.userId,
+            conversationId: defaults.conversationId,
+            lockId: defaults.imageModelId,
+            explicitId: input.imageModelId,
+            agentId: defaults.agent?.agentId,
+            ...(input.resume ? { resumedId: continuation?.imageModel?.id ?? null } : {}),
+          });
           // Read here like an agent, so retry and edit meet the project as it is
           // now, and a person who lost access cannot keep working in it.
           const resolvedProject = defaults.projectId
@@ -816,6 +836,7 @@ function makeChatService() {
               workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
               integrationGrants: input.integrationGrants ?? null,
               resolvedProject,
+              imageModel,
             };
           }
           const agent = defaults.agent
@@ -854,10 +875,12 @@ function makeChatService() {
             ...resolved,
             integrationGrants: input.integrationGrants ?? null,
             resolvedProject,
+            imageModel,
           };
         }).pipe(
           Effect.provideService(KnowledgeRepo, knowledge),
           Effect.provideService(AgentRepo, agents),
+          Effect.provideService(ProviderRepo, providers),
         );
 
     const reserveWorkTurn = Effect.fn("ChatService.reserveWorkTurn")(function* (input: {
@@ -1038,6 +1061,7 @@ function makeChatService() {
               userId: input.userId,
               model,
               searchAvailable,
+              imageModelId: entry.input.imageModelId,
               searchEnabled: entry.input.searchEnabled,
               researchEnabled,
               reasoningEffort: entry.input.reasoningEffort,
@@ -1208,6 +1232,7 @@ function makeChatService() {
         resolve: resolver({
           attempt: "send",
           userId: input.userId,
+          imageModelId: input.imageModelId,
           searchEnabled: input.searchEnabled,
           researchEnabled,
           reasoningEffort: input.reasoningEffort,
@@ -1330,6 +1355,8 @@ function makeChatService() {
       prompt: string;
       modelId: string | null;
       agentId: string | null;
+      /** The schedule's image model; it moves the lock of a chat the schedule keeps using. */
+      imageModelId?: string | null;
       searchEnabled: boolean;
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
@@ -1389,6 +1416,7 @@ function makeChatService() {
             reasoningEffort: null,
             model,
             searchAvailable,
+            imageModelId: input.imageModelId ?? null,
             collectionIds: input.collectionIds,
             skillIds: input.skillIds,
             // Always set on a fire, empty included: an empty grant list means
@@ -1449,6 +1477,7 @@ function makeChatService() {
         conversationId: string;
         assistantMessageId: string;
         modelId: string;
+        imageModelId?: string | null | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
         deleteMessageIds: ReadonlyArray<string>;
@@ -1486,6 +1515,7 @@ function makeChatService() {
             userId: input.userId,
             model,
             searchAvailable,
+            imageModelId: input.imageModelId,
             ...(input.edit
               ? {
                   attempt: "edit",
@@ -1569,6 +1599,7 @@ function makeChatService() {
         conversationId: string;
         messageId: string;
         modelId?: string | undefined;
+        imageModelId?: string | null | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
@@ -1658,6 +1689,7 @@ function makeChatService() {
         conversationId: input.conversationId,
         assistantMessageId: message.id,
         modelId,
+        imageModelId: input.imageModelId,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
         deleteMessageIds: after.map((m) => m.id),
@@ -1761,6 +1793,7 @@ function makeChatService() {
           model,
           searchAvailable: yield* searchToolEnabled,
           attempt: "retry",
+          resume: true,
           fromDesktop: input.fromDesktop,
           desktopExecutorId: input.desktopExecutorId,
           desktopFolders: input.desktopFolders,
@@ -1903,6 +1936,8 @@ function makeChatService() {
         /** Omitted keeps the attempt's saved selection; sent replaces it. */
         skillIds?: ReadonlyArray<string> | undefined;
         collectionIds?: ReadonlyArray<string> | undefined;
+        /** The composer's image model; absent keeps the chat's own. */
+        imageModelId?: string | null | undefined;
       },
     ) {
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -1966,6 +2001,7 @@ function makeChatService() {
           conversationId: input.conversationId,
           assistantMessageId: assistant.id,
           modelId: input.modelId,
+          imageModelId: input.imageModelId,
           timeZone: input.timeZone,
           openDocument: input.openDocument,
           deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
@@ -2013,6 +2049,7 @@ function makeChatService() {
         resolve: resolver({
           attempt: "edit",
           userId: input.userId,
+          imageModelId: input.imageModelId,
           searchEnabled: input.searchEnabled,
           researchEnabled,
           reasoningEffort: input.reasoningEffort,

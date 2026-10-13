@@ -3,6 +3,9 @@ import { AiError } from "effect/unstable/ai";
 
 export const MODULE = "ModelClient";
 
+/** Every failure this package reports. */
+export type ModelClientError = AiError.AiError;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
