@@ -84,6 +84,7 @@ const data = {
   byModel: [
     {
       modelName: "Fast One",
+      linked: true,
       messages: 30,
       images: 0,
       inputTokens: 900_000,
@@ -93,6 +94,7 @@ const data = {
     },
     {
       modelName: "Slow One",
+      linked: true,
       messages: 12,
       images: 0,
       inputTokens: 300_000,
@@ -166,6 +168,18 @@ describe("AnalyticsPage", () => {
         expect(cells.at(-1)?.textContent).toBe(cost.text);
       }
     }
+  });
+  it("marks a deleted model only where a current model shares its name", async () => {
+    renderPage({
+      byModel: [
+        { ...data.byModel[0]!, modelName: "Shared", linked: true },
+        { ...data.byModel[0]!, modelName: "Shared", linked: false },
+        { ...data.byModel[0]!, modelName: "Mistral OCR", linked: false },
+      ],
+    });
+    expect(await screen.findByRole("row", { name: /^Shared 30 / })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^Shared \(deleted\) / })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /^Mistral OCR 30 / })).toBeInTheDocument();
   });
   it("shows the KPI tiles from the summary", async () => {
     renderPage();

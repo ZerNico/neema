@@ -7,7 +7,7 @@ import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { usageEvents, userApprovals } from "~/db/schema/index.ts";
+import { models, usageEvents, userApprovals } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
@@ -940,6 +940,47 @@ describe("usage aggregates", () => {
     expect(result.byUser[0]).toMatchObject({ inputTokens: 310, outputTokens: 155, cost: 0.003 });
   });
 
+  it("groups a renamed model as one line and a deleted one by its saved name", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const userId = yield* makeUser();
+        const model = yield* makeModel();
+        const row = {
+          userId,
+          kind: "chat" as const,
+          status: "complete" as const,
+          inputTokens: 10,
+          outputTokens: 5,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          createdAt: new Date(WINDOW_TO.getTime() - DAY_MS / 2),
+        };
+        yield* db.insert(usageEvents).values([
+          { ...row, id: uuidv7(), modelId: model.id, modelName: "Gamma" },
+          { ...row, id: uuidv7(), modelId: model.id, modelName: "Gamma v2" },
+          // A deleted model that went by the live one's current name.
+          { ...row, id: uuidv7(), modelId: null, modelName: "Gamma v2" },
+          { ...row, id: uuidv7(), modelId: null, modelName: "Gamma v2" },
+          { ...row, id: uuidv7(), modelId: null, modelName: "Retired" },
+        ]);
+        yield* db.update(models).set({ displayName: "Gamma v2" }).where(eq(models.id, model.id));
+        return yield* analytics.byModel({ from: WINDOW_FROM, to: WINDOW_TO, userId });
+      }),
+    );
+    expect(
+      result.map(({ modelName, linked, messages }) => ({ modelName, linked, messages })),
+    ).toEqual(
+      expect.arrayContaining([
+        { modelName: "Gamma v2", linked: true, messages: 2 },
+        { modelName: "Gamma v2", linked: false, messages: 2 },
+        { modelName: "Retired", linked: false, messages: 1 },
+      ]),
+    );
+    expect(result).toHaveLength(3);
+  });
+
   it("keeps one user's rows out of another's scope", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -1018,6 +1059,7 @@ describe("embedding ledger isolation", () => {
     expect(result.models).toEqual([
       {
         modelName: "Embedding model",
+        linked: false,
         messages: 0,
         images: 0,
         inputTokens: 1000,

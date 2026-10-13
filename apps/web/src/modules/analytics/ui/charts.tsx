@@ -157,6 +157,14 @@ export function MessagesPerDayChart({
 
 const MAX_MODEL_BARS = 8;
 
+// Only a name that a current model also uses needs telling apart.
+export const modelLabels = (byModel: readonly UsageByModel[]) => {
+  const current = new Set(byModel.filter((row) => row.linked).map((row) => row.modelName));
+  return byModel.map((row) =>
+    !row.linked && current.has(row.modelName) ? `${row.modelName} (deleted)` : row.modelName,
+  );
+};
+
 /**
  * Horizontal bars, total tokens by model. Magnitude comparison, so one hue;
  * identity lives in the row label, not in color. The tail beyond the top
@@ -164,8 +172,9 @@ const MAX_MODEL_BARS = 8;
  */
 export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel[] }) {
   const definition = useMemo(() => {
-    const rows = byModel.map((row) => ({
-      model: row.modelName,
+    const labels = modelLabels(byModel);
+    const rows = byModel.map((row, index) => ({
+      model: labels[index]!,
       tokens: row.inputTokens + row.outputTokens,
     }));
     const shown = rows.slice(0, MAX_MODEL_BARS);

@@ -101,6 +101,8 @@ export interface UsageDay {
 
 export interface UsageByModel {
   modelName: string;
+  /** False when no model row backs these rows (deleted, or a service without one); they group by saved name. */
+  linked: boolean;
   messages: number;
   images: number;
   inputTokens: number;
@@ -225,11 +227,20 @@ export class AnalyticsRepo extends Context.Service<
         }),
 
         byModel: Effect.fn("AnalyticsRepo.byModel")(function* (scope) {
+          // A model that still exists is one line under its current name, across
+          // renames. Deleting it clears the link, so its rows fall back to their saved name.
+          const savedName = sql`case when ${usageEvents.modelId} is null then ${usageEvents.modelName} end`;
           return yield* db
-            .select({ modelName: usageEvents.modelName, ...sums, ...costCompleteness })
+            .select({
+              modelName: sql<string>`coalesce(${models.displayName}, min(${usageEvents.modelName}))`,
+              linked: sql<boolean>`${usageEvents.modelId} is not null`,
+              ...sums,
+              ...costCompleteness,
+            })
             .from(usageEvents)
+            .leftJoin(models, eq(models.id, usageEvents.modelId))
             .where(inScope(scope))
-            .groupBy(usageEvents.modelName)
+            .groupBy(usageEvents.modelId, models.displayName, savedName)
             .orderBy(
               desc(sql`sum(${usageEvents.inputTokens}) + sum(${usageEvents.outputTokens})`),
               desc(sql`coalesce(sum(${usageEvents.cost}), 0)`),

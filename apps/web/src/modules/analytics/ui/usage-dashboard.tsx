@@ -7,6 +7,7 @@ import type { UsageWindow } from "../server/range.ts";
 import type { UsageRangeDays, UsageRangeEncoded } from "../schema.ts";
 import {
   MessagesPerDayChart,
+  modelLabels,
   TokensByModelChart,
   TokensPerDayChart,
   UsageSparkline,
@@ -336,6 +337,7 @@ export function UsageOverview({
   );
 
   const tokens = summary.inputTokens + summary.outputTokens;
+  const modelNames = modelLabels(byModel);
   const previousTokens = previousSummary.inputTokens + previousSummary.outputTokens;
 
   // A partial cost sum is a floor, not a total, so say so instead of lying.
@@ -455,8 +457,8 @@ export function UsageOverview({
         <TokensByModelChart byModel={byModel} />
         <UsageTable
           head={["Model", "Messages", "Images", "Tokens", "Cost"]}
-          rows={byModel.map((row) => [
-            row.modelName,
+          rows={byModel.map((row, index) => [
+            modelNames[index]!,
             formatCount(row.messages),
             row.images > 0 ? formatCount(row.images) : "–",
             formatTokens(row.inputTokens + row.outputTokens),
