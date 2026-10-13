@@ -54,14 +54,12 @@ describe("desktop handler registration", () => {
     });
   });
 
-  it("offers network requests only when commands are ready", () => {
+  it("offers network and path requests only when commands are ready", () => {
     const deps = { rowIdFor: () => Effect.succeed(undefined) };
-    expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(
-      "request_network_access",
-    );
-    expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(
-      "request_network_access",
-    );
+    for (const name of ["request_network_access", "request_path_access"]) {
+      expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(name);
+      expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(name);
+    }
   });
 
   it.effect("waits for registration and keeps an answer that arrived before readiness", () =>

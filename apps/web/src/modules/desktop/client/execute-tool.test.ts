@@ -22,7 +22,7 @@ const CONVERSATION = "019a574e-9415-7463-8431-11ef4a8f9b6a";
 
 const execute = (
   client: ReturnType<typeof clientFor>["client"],
-  name: "run_command" | "request_network_access",
+  name: "run_command" | "request_network_access" | "request_path_access",
   args: Record<string, unknown>,
   scope: "answer" | "chat" | "always" = "answer",
 ) =>
@@ -123,6 +123,26 @@ describe("desktop network tools", () => {
       "runCommand",
       expect.objectContaining({ generationId: "generation-1" }),
     );
+  });
+
+  it("requests read access to a path with the chosen scope", async () => {
+    const { client, request } = clientFor({ path: "/opt/specs", scope: "chat" });
+    const result = await execute(client, "request_path_access", { path: "/opt/specs" }, "chat");
+    expect(request).toHaveBeenCalledWith("requestPathAccess", {
+      callId: "call",
+      conversationId: CONVERSATION,
+      generationId: "generation-1",
+      path: "/opt/specs",
+      scope: "chat",
+    });
+    expect(result.summary).toBe("Allowed reading /opt/specs for this chat");
+  });
+
+  it("refuses a path request without a path", async () => {
+    const { client, request } = clientFor({ path: "/opt", scope: "answer" });
+    const result = await execute(client, "request_path_access", {});
+    expect(result.ok).toBe(false);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("does not infer network access from unrelated denials", async () => {

@@ -105,6 +105,23 @@ describe("DesktopActivityBlock", () => {
     }
   });
 
+  it("asks to let commands read a path for this answer, this chat or every chat", async () => {
+    const decide = vi.fn();
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          name: "request_path_access",
+          args: { path: "/Users/alex/Downloads/spec.pdf" },
+        })}
+        approval={{ kind: "path", decide }}
+      />,
+    );
+    expect(screen.getByText("Let commands read this")).toBeInTheDocument();
+    expect(screen.getByText("/Users/alex/Downloads/spec.pdf")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
+    expect(decide).toHaveBeenLastCalledWith("allow-chat");
+  });
+
   it("names a private network request as one", () => {
     show(
       <DesktopActivityBlock

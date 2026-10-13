@@ -9,7 +9,7 @@ export type PendingKind = ApprovalKind | "read";
 
 /**
  * Kinds a person may allow for the rest of a chat. Reads follow the Work level,
- * and deletes, network destinations and sites are always asked one by one.
+ * and deletes, network destinations, paths and sites are always asked one by one.
  */
 export const allowsBlanket = (kind: PendingKind) =>
   kind === "edit" || kind === "command" || kind === "browser-action";
@@ -29,6 +29,7 @@ export const firstDecision = (
     case "site":
       return preauthorized ? "run" : "check-site";
     case "network":
+    case "path":
     case "delete":
       return "ask";
     case null:

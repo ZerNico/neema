@@ -84,6 +84,8 @@ const stubSandbox = Layer.succeed(
       Effect.sync(() => {
         keptAnswers.push({ origin, live: [...live] });
       }),
+    approvePath: (_target, path) => Effect.succeed(path),
+    revokePath: () => Effect.void,
     run: ({ command, cwd, allowWrite }) =>
       Effect.sync(() => {
         ran.push({ command, cwd, allowWrite: [...allowWrite] });

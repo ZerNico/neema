@@ -36,7 +36,7 @@ export interface WorkDependencies {
     call: ExternalOperation,
     remainingMs: number,
     askSite: (url: string) => Promise<boolean>,
-    /** For a network request: how long the approval lasts. */
+    /** For a network or path request: how long the approval lasts. */
     scope: NetworkScope,
   ): Promise<DesktopToolResult>;
   complete(call: ExternalOperation, token: string, result: DesktopToolResult): Promise<boolean>;
@@ -57,7 +57,7 @@ interface Entry {
   call: ExternalOperation;
   pending: PendingKind | null;
   permitted?: boolean;
-  /** What the person chose for a network request. */
+  /** What the person chose for a network or path request. */
   scope?: NetworkScope;
   /** A site call waiting to learn whether its site is already allowed. */
   checking?: boolean;
@@ -161,7 +161,7 @@ export class WorkController {
     if (entry.asking) return this.answerSite(entry, choice);
     const kind = entry.pending;
     const blanket = choice === "allow-rest" && allowsBlanket(kind);
-    if (kind === "network") entry.scope = networkScopeOf(choice);
+    if (kind === "network" || kind === "path") entry.scope = networkScopeOf(choice);
     if (kind === "site" && (choice === "allow-chat" || choice === "allow-always")) {
       // Once remembered, other calls of this chat waiting on a site ask again;
       // the ones for the same site now find it allowed.

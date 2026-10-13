@@ -32,6 +32,7 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   writeFile: unimplemented("writeFile"),
   saveToWorkspace: unimplemented("saveToWorkspace"),
   requestNetworkAccess: unimplemented("requestNetworkAccess"),
+  requestPathAccess: unimplemented("requestPathAccess"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),

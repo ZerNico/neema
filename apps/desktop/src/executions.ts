@@ -15,6 +15,7 @@ const MODEL_OPERATIONS = new Set([
   "searchFiles",
   "runCommand",
   "requestNetworkAccess",
+  "requestPathAccess",
 ]);
 
 /** Operations whose result must be kept for a while: running them twice is a second edit. */
@@ -26,6 +27,7 @@ const SIDE_EFFECTS = new Set([
   "deletePath",
   "runCommand",
   "requestNetworkAccess",
+  "requestPathAccess",
 ]);
 
 // Workspace staging, promotion, cloning, grants, and cleanup deliberately stay

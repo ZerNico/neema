@@ -9,6 +9,7 @@ import {
   FolderSearchIcon,
   FolderTransferIcon,
   NoInternetIcon,
+  FolderShared01Icon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
@@ -51,6 +52,7 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
+  request_path_access: FolderShared01Icon,
 };
 
 const iconOf = (name: DesktopToolActivity["name"]) =>
@@ -68,6 +70,8 @@ const argText = (activity: DesktopToolActivity) => {
       const port = typeof args.port === "number" ? args.port : 443;
       return host ? `${host}:${port}` : "";
     }
+    case "request_path_access":
+      return text(args.path);
     case "find_files":
     case "search_files":
       return text(args.pattern);
@@ -180,6 +184,8 @@ const runningLabel = (
       return what ? `Running ${what}` : "Running a program";
     case "request_network_access":
       return what ? `Requesting network access to ${what}` : "Requesting network access";
+    case "request_path_access":
+      return what ? `Requesting read access to ${what}` : "Requesting read access";
   }
 };
 
@@ -248,6 +254,8 @@ const approvalTitle = (
           : "Read this file";
     case "command":
       return "Run a program on this computer";
+    case "path":
+      return "Let commands read this";
     case "network":
       return activity.args?.privateNetwork === true
         ? "Allow access to your private network"
@@ -398,7 +406,7 @@ function ApprovalCard({
         ) : null}
         {approval.kind === "site" ? (
           <ScopeChoices decide={approval.decide} once="Allow once" />
-        ) : approval.kind === "network" ? (
+        ) : approval.kind === "network" || approval.kind === "path" ? (
           <ScopeChoices decide={approval.decide} once="Allow for this answer" />
         ) : (
           <div className="flex flex-wrap gap-2">

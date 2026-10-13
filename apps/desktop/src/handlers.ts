@@ -921,6 +921,20 @@ export const makeHandlers = (shell: Shell) =>
           return { ...grant, scope };
         }),
 
+      requestPathAccess: ({ conversationId, generationId, path, scope }) =>
+        Effect.gen(function* () {
+          const chat = key(conversationId);
+          const granted = yield* sandbox.approvePath(
+            scope === "always"
+              ? { scope }
+              : scope === "chat"
+                ? { scope, chat }
+                : { scope, answer: { ...chat, attempt: generationId } },
+            path,
+          );
+          return { path: granted, scope };
+        }),
+
       revealPath: ({ conversationId, path, mode }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);

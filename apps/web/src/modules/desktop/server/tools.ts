@@ -178,6 +178,22 @@ export const requestNetworkAccessTool = Tool.make("request_network_access", {
   failureMode: "return",
 });
 
+export const requestPathAccessTool = Tool.make("request_path_access", {
+  description:
+    "Ask the user to let commands read one exact file or folder outside the attached folders, " +
+    "such as a reference repository or a document in Downloads. Use it when a command fails " +
+    "with a permission error on a path outside the workspace and attached folders, or before " +
+    "running a command that needs one. Name the absolute path. Wait for approval before " +
+    "running or retrying the command. The user decides whether it lasts for this answer, this " +
+    "chat, or every chat. Read only: to write somewhere, ask the user to attach that folder. " +
+    "The home folder as a whole and credential files are never shared.",
+  parameters: Schema.Struct({
+    path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
+  }),
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export interface DesktopToolDeps {
   /** Waits for the durable row and its owned external registration to exist. */
   readonly rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
@@ -243,7 +259,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
   ] as const;
   return {
     toolkit: deps.commands
-      ? Toolkit.make(...files, runCommandTool, requestNetworkAccessTool)
+      ? Toolkit.make(...files, runCommandTool, requestNetworkAccessTool, requestPathAccessTool)
       : Toolkit.make(...files),
     handlers: {
       list_folder: handle("list_folder", DESKTOP_TIMEOUTS.quick),
@@ -263,6 +279,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
         ? {
             run_command: handle("run_command", DESKTOP_TIMEOUTS.command),
             request_network_access: handle("request_network_access", DESKTOP_TIMEOUTS.command),
+            request_path_access: handle("request_path_access", DESKTOP_TIMEOUTS.command),
           }
         : {}),
     },

@@ -444,7 +444,11 @@ unconfined. The Linux and Windows backends have not been exercised end to end.
 
 Reads are allow-listed: the system's own directories and the toolchain folders
 under home (version managers, package stores, caches, git's identity). The rest
-of home is unreadable. Credential files and the profile's permission store are
+of home is unreadable, except one exact file or folder the person lets commands
+read through a path request, for the answer, the chat or every chat. A disk root,
+home itself, a folder above it, or anything holding credentials is refused before
+anyone is asked, and a stored grant breaking those rules is dropped on load.
+Credential files and the profile's permission store are
 denied, and in MXC a denied path outranks every other grant, so attaching a
 parent folder cannot reopen them. Writes are allowed in the chat's workspace, the
 attached folders, `/dev/null`, and on macOS the per-user temp and cache folders

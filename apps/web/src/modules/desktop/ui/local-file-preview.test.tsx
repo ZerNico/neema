@@ -68,6 +68,7 @@ const connect = (): DesktopClient => {
     searchFiles: notUsed("searchFiles"),
     runCommand: notUsed("runCommand"),
     requestNetworkAccess: notUsed("requestNetworkAccess"),
+    requestPathAccess: notUsed("requestPathAccess"),
     setUpSandbox: notUsed("setUpSandbox"),
     stageFile: notUsed("stageFile"),
     discardStagedFile: notUsed("discardStagedFile"),

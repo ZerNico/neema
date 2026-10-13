@@ -7,6 +7,7 @@ import type { ContainerRequest } from "@microsoft/mxc-sdk/v1";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadEgressGrants } from "./egress-grants.ts";
+import { loadPathGrants } from "./path-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 import {
   filesystemPolicy,
@@ -31,6 +32,7 @@ describe("filesystemPolicy", () => {
   const policy = filesystemPolicy({
     os: "darwin",
     writable: ["/work/project", "/profile/workspaces/chat"],
+    readable: ["/opt/shared/specs"],
     protectedDirectory: "/profile/network-grants",
     userFolders: ["/var/folders/xy/T"],
   });
@@ -42,6 +44,10 @@ describe("filesystemPolicy", () => {
       "/var/folders/xy/T",
       "/dev/null",
     ]);
+  });
+
+  it("reads the paths the person granted", () => {
+    expect(policy.readonlyPaths).toContain("/opt/shared/specs");
   });
 
   it("reads toolchains under home but never home itself", () => {
@@ -66,6 +72,7 @@ describe("filesystemPolicy", () => {
     const windows = filesystemPolicy({
       os: "win32",
       writable: ["C:\\work"],
+      readable: [],
       protectedDirectory: null,
       userFolders: [],
     });
@@ -153,12 +160,15 @@ const run = (overrides: Partial<SandboxRun> = {}): SandboxRun => ({
 });
 
 const harness = async (launch: SandboxDependencies["launch"]) => {
-  const grants = await loadEgressGrants(await directory());
+  const root = await directory();
+  const grants = await loadEgressGrants(root);
+  const paths = await loadPathGrants(root, { home, denied: [root] });
   const dependencies: SandboxDependencies = {
     os: "darwin",
     support: () => ({ isSupported: true, availableMethods: ["seatbelt"] }),
     launch,
     grants,
+    paths,
     userFolders: () => [],
   };
   const scope = await Effect.runPromise(Scope.make());
@@ -166,6 +176,7 @@ const harness = async (launch: SandboxDependencies["launch"]) => {
   return {
     sandbox,
     grants,
+    paths,
     close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
   };
 };
@@ -292,6 +303,7 @@ describe("run", () => {
             throw new Error("must not launch");
           },
           grants,
+          paths: null,
           userFolders: () => [],
         }),
         scope,
@@ -346,6 +358,41 @@ describe("network approvals", () => {
     expect(grants.decide(context, "example.com", 443).allowed).toBe(true);
     await Effect.runPromise(sandbox.keepAnswers(answer.origin, []));
     expect(grants.decide(context, "example.com", 443).allowed).toBe(false);
+    await close();
+  });
+});
+
+describe("path approvals", () => {
+  it("makes an approved path readable to that answer's commands only", async () => {
+    const shared = await directory();
+    const requests: ContainerRequest[] = [];
+    const { sandbox, close } = await harness(async (request) => {
+      requests.push(request);
+      const child = fakeProcess();
+      child.finish(0);
+      return child.process;
+    });
+    const answer = {
+      origin: "https://chat.example",
+      conversationId: "chat-a",
+      attempt: "attempt-1",
+    };
+    const granted = await Effect.runPromise(
+      sandbox.approvePath({ scope: "answer", answer }, shared),
+    );
+    await Effect.runPromise(sandbox.run(run()));
+    await Effect.runPromise(sandbox.run(run({ context: { ...answer, attempt: "attempt-2" } })));
+    expect(requests[0]?.filesystem?.readonlyPaths).toContain(granted);
+    expect(requests[1]?.filesystem?.readonlyPaths).not.toContain(granted);
+    await close();
+  });
+
+  it("refuses home and credentials before asking anything of the store", async () => {
+    const { sandbox, close } = await harness(async () => fakeProcess().process);
+    for (const path of [home, join(home, ".ssh")]) {
+      const exit = await Effect.runPromiseExit(sandbox.approvePath({ scope: "always" }, path));
+      expect(exit).toMatchObject({ _tag: "Failure" });
+    }
     await close();
   });
 });

@@ -179,6 +179,25 @@ describe("app-owned Work execution", () => {
     );
   });
 
+  it("passes the scope chosen for a path request", async () => {
+    const { controller, deps, completed } = setup();
+    const request = {
+      ...call("path"),
+      name: "request_path_access",
+      args: { path: "/opt/specs" },
+    };
+    controller.reconcile(snapshot(request));
+    expect(controller.pending("a").get("path")).toBe("path");
+    controller.decide("path", "allow-always");
+    await completed;
+    expect(deps.execute).toHaveBeenCalledExactlyOnceWith(
+      request,
+      expect.any(Number),
+      expect.any(Function),
+      "always",
+    );
+  });
+
   it("declines network access without invoking the desktop grant", async () => {
     const { controller, deps, completed } = setup();
     controller.reconcile(snapshot({ ...call("network"), name: "request_network_access" }));

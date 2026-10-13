@@ -382,6 +382,33 @@ export const executeDesktopTool = (
           },
         );
       }
+      case "request_path_access": {
+        if (!path) return Effect.succeed(desktopFailure("No path named", "Name an absolute path."));
+        return Effect.map(
+          client.requestPathAccess({
+            callId: activity.callId,
+            conversationId,
+            generationId: activity.generationId,
+            path,
+            scope: activity.scope,
+          }),
+          (receipt) => {
+            const lasting =
+              receipt.scope === "always"
+                ? "for every chat"
+                : receipt.scope === "chat"
+                  ? "for this chat"
+                  : "for this answer";
+            return {
+              v: 1 as const,
+              ok: true,
+              summary: `Allowed reading ${receipt.path} ${lasting}`,
+              detail: `Commands may now read ${receipt.path} ${lasting}. You may now run or retry the command.`,
+              truncated: false,
+            };
+          },
+        );
+      }
       case "run_command": {
         // A slow approval has already eaten into the server's wait; what is
         // left, minus the trip back, is all the command may take.

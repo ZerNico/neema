@@ -28,6 +28,7 @@ import {
   type EgressGrants,
   type GrantTarget,
 } from "./egress-grants.ts";
+import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
 import { commandEnvironment } from "./sandbox-environment.ts";
 
 const home = homedir();
@@ -101,7 +102,7 @@ const TOOLCHAIN_READ = [
  * Credential files inside the readable toolchain folders, or inside a folder
  * the person attached. A denied path outranks every grant in MXC.
  */
-const CREDENTIAL_DENIES = [
+export const CREDENTIAL_DENIES = [
   inHome(".cache", "huggingface", "token"),
   inHome(".cache", "gh"),
   inHome(".config", "git", "credentials"),
@@ -179,6 +180,8 @@ export interface PolicyInput {
   readonly os: NodeJS.Platform;
   /** Every attached folder's real root and the chat's workspace: the only writable places. */
   readonly writable: ReadonlyArray<string>;
+  /** Paths the person let this answer's commands read. */
+  readonly readable: ReadonlyArray<string>;
   /** The profile's permission store, which no command may read or change. */
   readonly protectedDirectory: string | null;
   readonly userFolders: ReadonlyArray<string>;
@@ -191,7 +194,7 @@ export const filesystemPolicy = (input: PolicyInput) => ({
     ...input.userFolders,
     ...(input.os === "win32" ? [] : ["/dev/null"]),
   ],
-  readonlyPaths: [...systemRead(input.os), ...TOOLCHAIN_READ],
+  readonlyPaths: [...systemRead(input.os), ...TOOLCHAIN_READ, ...input.readable],
   deniedPaths: [
     ...CREDENTIAL_DENIES,
     ...(input.protectedDirectory ? [input.protectedDirectory] : []),
@@ -255,6 +258,7 @@ export interface SandboxDependencies {
   readonly support: () => PlatformSupport;
   readonly launch: (request: ContainerRequest) => Promise<LaunchedProcess>;
   readonly grants: EgressGrants | null;
+  readonly paths: PathGrants | null;
   readonly userFolders: () => ReadonlyArray<string>;
 }
 
@@ -273,19 +277,28 @@ export class Sandbox extends Context.Service<
     revokeNetwork(target: GrantTarget, grant: EgressGrant): Effect.Effect<void, DesktopError>;
     /** Ends this server's answer grants for every answer not listed as running. */
     keepAnswers(origin: string, live: readonly AnswerKey[]): Effect.Effect<void>;
+    /** Lets commands read one more path; resolves to the real path granted. */
+    approvePath(target: GrantTarget, path: string): Effect.Effect<string, DesktopError>;
+    revokePath(target: GrantTarget, path: string): Effect.Effect<void, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (directory: string) =>
     Layer.effect(
       Sandbox,
       Effect.flatMap(
-        Effect.promise(() => loadEgressGrants(directory)),
-        (grants) =>
+        Effect.promise(() =>
+          Promise.all([
+            loadEgressGrants(directory),
+            loadPathGrants(directory, { home, denied: [...CREDENTIAL_DENIES, directory] }),
+          ]),
+        ),
+        ([grants, paths]) =>
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
             launch: spawn,
             grants,
+            paths,
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
           }),
       ),
@@ -400,6 +413,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           filesystem: filesystemPolicy({
             os,
             writable: input.allowWrite,
+            readable: dependencies.paths?.readable(input.context) ?? [],
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
           }),
@@ -489,6 +503,35 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       keepAnswers: (origin, live) =>
         Effect.sync(() => {
           for (const id of grants?.keepAnswers(origin, live) ?? []) proxy.regrant(id);
+          dependencies.paths?.keepAnswers(origin, live);
+        }),
+      approvePath: (target, path) =>
+        Effect.tryPromise({
+          try: async () => {
+            const paths = dependencies.paths;
+            if (!paths) throw new Error("No path grant store is available.");
+            const checked = await checkPathGrant(path, {
+              home,
+              denied: [...CREDENTIAL_DENIES, ...(grants ? [grants.directory] : [])],
+            });
+            if (!checked.ok) throw new Error(checked.reason);
+            await paths.add(target, checked.path);
+            return checked.path;
+          },
+          catch: (cause) =>
+            new DesktopError({
+              reason: "failed",
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+        }),
+      revokePath: (target, path) =>
+        Effect.tryPromise({
+          try: async () => dependencies.paths?.remove(target, path),
+          catch: (cause) =>
+            new DesktopError({
+              reason: "failed",
+              message: `Could not remove access: ${String(cause)}`,
+            }),
         }),
     });
   });

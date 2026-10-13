@@ -268,6 +268,23 @@ export const DesktopRpcs = RpcGroup.make(
     error: DesktopError,
   }),
 
+  /**
+   * Records read access the person approved for commands: one exact path
+   * outside the attached folders, for the answer that asked, the chat, or
+   * every chat. The desktop resolves it and refuses what it would never grant.
+   */
+  Rpc.make("requestPathAccess", {
+    payload: {
+      conversationId: WorkspaceId,
+      callId: Schema.String,
+      generationId: Schema.String,
+      path: Schema.String,
+      scope: GrantScope,
+    },
+    success: Schema.Struct({ path: Schema.String, scope: GrantScope }),
+    error: DesktopError,
+  }),
+
   Rpc.make("runCommand", {
     payload: {
       conversationId: WorkspaceId,
