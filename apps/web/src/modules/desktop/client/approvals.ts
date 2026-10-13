@@ -31,6 +31,7 @@ export const firstDecision = (
     case "network":
     case "path":
     case "local":
+    case "ssh-agent":
     case "delete":
       return "ask";
     case null:

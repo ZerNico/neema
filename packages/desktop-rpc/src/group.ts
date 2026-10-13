@@ -4,6 +4,7 @@ import {
   BinaryContents,
   ChatPermission,
   ChatPermissions,
+  Capability,
   CommandOutput,
   DeleteReceipt,
   DesktopError,
@@ -288,14 +289,16 @@ export const DesktopRpcs = RpcGroup.make(
   }),
 
   /**
-   * Records that the person let commands use local network services: loopback
-   * both ways, for the answer that asked, the chat, or every chat.
+   * Records a switch the person granted commands: local network services, for
+   * the answer, the chat or every chat, or signing in with their SSH agent, for
+   * the chat only.
    */
-  Rpc.make("requestLocalAccess", {
+  Rpc.make("requestCapability", {
     payload: {
       conversationId: WorkspaceId,
       callId: Schema.String,
       generationId: Schema.String,
+      capability: Capability,
       scope: GrantScope,
     },
     success: Schema.Struct({ scope: GrantScope }),

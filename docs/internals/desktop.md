@@ -492,7 +492,10 @@ ssh, and with it git, scp and rsync, finds a wrapper first on `PATH` with its
 own config: a `ProxyCommand` bridge that opens an authenticated CONNECT, run by
 the app's own executable in Node mode so nothing is installed, no connection
 sharing (a master would outlive the command's token), known hosts from a copy of
-the user's, and no key files, since `~/.ssh` stays denied. A destination such as
+the user's, and no key files, since `~/.ssh` stays denied. Signing in with the
+user's SSH agent is a switch granted per chat only, never for every chat, since
+the agent signs as the person: granted, the command may connect to the agent's
+socket and ssh is pointed at it. A destination such as
 `github.com:22` is an ordinary network grant. On macOS the sandbox may look up
 directory services, without which ssh cannot name the current user and stops.
 

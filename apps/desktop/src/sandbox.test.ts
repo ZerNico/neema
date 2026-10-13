@@ -164,14 +164,15 @@ const harness = async (launch: SandboxDependencies["launch"]) => {
   const root = await directory();
   const grants = await loadEgressGrants(root);
   const paths = await loadPathGrants(root, { home, denied: [root] });
-  const local = await loadScopedGrants(root, "local-grants.json", (entry) => entry === "local");
+  const capabilities = await loadScopedGrants(root, "capability-grants.json", () => true);
   const dependencies: SandboxDependencies = {
     os: "darwin",
     support: () => ({ isSupported: true, availableMethods: ["seatbelt"] }),
     launch,
     grants,
     paths,
-    local,
+    capabilities,
+    agent: "/tmp/agent.sock",
     userFolders: () => [],
   };
   const scope = await Effect.runPromise(Scope.make());
@@ -310,7 +311,8 @@ describe("run", () => {
           },
           grants,
           paths: null,
-          local: null,
+          capabilities: null,
+          agent: null,
           userFolders: () => [],
         }),
         scope,
@@ -353,17 +355,17 @@ describe("network approvals", () => {
     const shared = await directory();
     await Effect.runPromise(sandbox.approveNetwork(target, site));
     const granted = await Effect.runPromise(sandbox.approvePath(target, shared));
-    await Effect.runPromise(sandbox.approveLocal(target));
+    await Effect.runPromise(sandbox.approveCapability(target, "local-services"));
     expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
       network: [site],
       paths: [granted],
-      local: true,
+      capabilities: ["local-services"],
     });
     await Effect.runPromise(sandbox.forgetChat(chat));
     expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
       network: [],
       paths: [],
-      local: false,
+      capabilities: [],
     });
     await close();
   });
@@ -437,7 +439,7 @@ describe("local services", () => {
     });
     const chat = { origin: "https://chat.example", conversationId: "chat-a" };
     await Effect.runPromise(sandbox.run(run()));
-    await Effect.runPromise(sandbox.approveLocal({ scope: "chat", chat }));
+    await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "local-services"));
     await Effect.runPromise(sandbox.run(run()));
     await Effect.runPromise(
       sandbox.run(run({ context: { ...chat, conversationId: "chat-b", attempt: "a" } })),
@@ -476,6 +478,46 @@ describe("JVM settings", () => {
     expect(env.MAVEN_ARGS).toContain("-Daether.connector.basic.threads=1");
     const file = /^-s (\S+)/.exec(env.MAVEN_ARGS ?? "")?.[1] ?? "";
     await expect(readFile(file, "utf8")).rejects.toThrow();
+    await close();
+  });
+});
+
+describe("the SSH agent", () => {
+  it("is granted per chat only", async () => {
+    const { sandbox, close } = await harness(async () => fakeProcess().process);
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    for (const target of [
+      { scope: "always" } as const,
+      { scope: "answer", answer: { ...chat, attempt: "a" } } as const,
+    ]) {
+      const exit = await Effect.runPromiseExit(sandbox.approveCapability(target, "ssh-agent"));
+      expect(JSON.stringify(exit)).toContain("per chat only");
+    }
+    await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
+    await close();
+  });
+
+  it("reaches commands of that chat only, by socket and environment", async () => {
+    const requests: ContainerRequest[] = [];
+    const { sandbox, close } = await harness(async (request) => {
+      requests.push(request);
+      const child = fakeProcess();
+      child.finish(0);
+      return child.process;
+    });
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
+    await Effect.runPromise(sandbox.run(run()));
+    await Effect.runPromise(
+      sandbox.run(run({ context: { ...chat, conversationId: "chat-b", attempt: "a" } })),
+    );
+    const [allowed, other] = requests;
+    expect(allowed?.filesystem?.readwritePaths).toContain("/tmp/agent.sock");
+    expect(other?.filesystem?.readwritePaths).not.toContain("/tmp/agent.sock");
+    if (process.platform !== "win32") {
+      expect(allowed?.environment?.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
+      expect(other?.environment?.SSH_AUTH_SOCK).toBeUndefined();
+    }
     await close();
   });
 });

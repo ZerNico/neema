@@ -60,6 +60,7 @@ describe("desktop handler registration", () => {
       "request_network_access",
       "request_path_access",
       "request_local_services",
+      "request_ssh_agent",
     ]) {
       expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(name);
       expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(name);

@@ -136,6 +136,24 @@ describe("DesktopActivityBlock", () => {
     expect(decide).toHaveBeenLastCalledWith("allow");
   });
 
+  it("offers the SSH agent for this chat only", async () => {
+    const decide = vi.fn();
+    show(
+      <DesktopActivityBlock
+        activity={running({ name: "request_ssh_agent", args: {} })}
+        approval={{ kind: "ssh-agent", decide }}
+      />,
+    );
+    expect(
+      screen.getByText("Let commands in this chat sign in with your SSH keys"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/key files stay unreadable/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow for this answer" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
+    expect(decide).toHaveBeenLastCalledWith("allow-chat");
+  });
+
   it("names a private network request as one", () => {
     show(
       <DesktopActivityBlock

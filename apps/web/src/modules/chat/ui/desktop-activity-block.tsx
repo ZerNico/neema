@@ -11,6 +11,7 @@ import {
   NoInternetIcon,
   FolderShared01Icon,
   ComputerIcon,
+  Key01Icon,
   PencilEdit02Icon,
   SearchList01Icon,
   TerminalIcon,
@@ -55,6 +56,7 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   request_network_access: NoInternetIcon,
   request_path_access: FolderShared01Icon,
   request_local_services: ComputerIcon,
+  request_ssh_agent: Key01Icon,
 };
 
 const iconOf = (name: DesktopToolActivity["name"]) =>
@@ -190,6 +192,8 @@ const runningLabel = (
       return what ? `Requesting read access to ${what}` : "Requesting read access";
     case "request_local_services":
       return "Requesting local network services";
+    case "request_ssh_agent":
+      return "Requesting sign-in with SSH keys";
   }
 };
 
@@ -262,6 +266,8 @@ const approvalTitle = (
       return "Let commands read this";
     case "local":
       return "Let commands use local network services";
+    case "ssh-agent":
+      return "Let commands in this chat sign in with your SSH keys";
     case "network":
       return activity.args?.privateNetwork === true
         ? "Allow access to your private network"
@@ -410,7 +416,22 @@ function ApprovalCard({
             {what}
           </pre>
         ) : null}
-        {approval.kind === "site" ? (
+        {approval.kind === "ssh-agent" ? (
+          <>
+            <p className="text-muted-foreground text-xs">
+              Commands could use the keys in your SSH agent to sign in to the hosts this chat may
+              reach. The key files stay unreadable.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => approval.decide("allow-chat")}>
+                Allow in this chat
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
+                Deny
+              </Button>
+            </div>
+          </>
+        ) : approval.kind === "site" ? (
           <ScopeChoices decide={approval.decide} once="Allow once" />
         ) : approval.kind === "network" || approval.kind === "path" || approval.kind === "local" ? (
           <>

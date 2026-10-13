@@ -221,13 +221,26 @@ const networkPolicy = (os: NodeJS.Platform, proxyUrl: string, local: boolean): N
   runtimeConfig: { networkProxy: proxyUrl },
 });
 
-/** The one entry a local-services grant holds. */
-const LOCAL = "local";
+/**
+ * Switches a person grants commands, in the same scopes as other grants:
+ * local network services, and signing in through their SSH agent (chat only).
+ */
+export type Capability = "local-services" | "ssh-agent";
+const CAPABILITIES: ReadonlySet<string> = new Set<Capability>(["local-services", "ssh-agent"]);
 
 /** Puts the ssh wrapper first, so ssh, git, scp and rsync all go through the proxy. */
-const withSsh = (environment: Record<string, string>, ssh: SshSetup | null) =>
+const withSsh = (
+  environment: Record<string, string>,
+  ssh: SshSetup | null,
+  agent: string | null,
+) =>
   ssh
-    ? { ...environment, PATH: [ssh.bin, environment.PATH].filter(Boolean).join(delimiter) }
+    ? {
+        ...environment,
+        PATH: [ssh.bin, environment.PATH].filter(Boolean).join(delimiter),
+        // ssh-add and other agent clients read the socket from here.
+        ...(agent ? { SSH_AUTH_SOCK: agent } : {}),
+      }
     : environment;
 
 const shellCommand = (command: string, os: NodeJS.Platform) =>
@@ -238,8 +251,8 @@ const shellCommand = (command: string, os: NodeJS.Platform) =>
 export interface Permissions {
   readonly network: readonly EgressGrant[];
   readonly paths: readonly string[];
-  /** Whether commands may use local network services. */
-  readonly local: boolean;
+  /** Switches granted: local network services, the SSH agent. */
+  readonly capabilities: readonly Capability[];
 }
 
 export interface SandboxContext {
@@ -281,7 +294,9 @@ export interface SandboxDependencies {
   readonly launch: (request: ContainerRequest) => Promise<LaunchedProcess>;
   readonly grants: EgressGrants | null;
   readonly paths: PathGrants | null;
-  readonly local: ScopedGrants | null;
+  readonly capabilities: ScopedGrants | null;
+  /** The user's SSH agent socket, if they run one. */
+  readonly agent: string | null;
   readonly userFolders: () => ReadonlyArray<string>;
 }
 
@@ -305,9 +320,15 @@ export class Sandbox extends Context.Service<
     /** Lets commands read one more path; resolves to the real path granted. */
     approvePath(target: GrantTarget, path: string): Effect.Effect<string, DesktopError>;
     revokePath(target: GrantTarget, path: string): Effect.Effect<void, DesktopError>;
-    /** Lets commands use local network services, from their next run. */
-    approveLocal(target: GrantTarget): Effect.Effect<void, DesktopError>;
-    revokeLocal(target: GrantTarget): Effect.Effect<void, DesktopError>;
+    /** Grants a switch, from the commands' next run. The SSH agent is per chat only. */
+    approveCapability(
+      target: GrantTarget,
+      capability: Capability,
+    ): Effect.Effect<void, DesktopError>;
+    revokeCapability(
+      target: GrantTarget,
+      capability: Capability,
+    ): Effect.Effect<void, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (directory: string) =>
@@ -318,17 +339,20 @@ export class Sandbox extends Context.Service<
           Promise.all([
             loadEgressGrants(directory),
             loadPathGrants(directory, { home, denied: [...CREDENTIAL_DENIES, directory] }),
-            loadScopedGrants(directory, "local-grants.json", (entry) => entry === LOCAL),
+            loadScopedGrants(directory, "capability-grants.json", (entry) =>
+              CAPABILITIES.has(entry),
+            ),
           ]),
         ),
-        ([grants, paths, local]) =>
+        ([grants, paths, capabilities]) =>
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
             launch: spawn,
             grants,
             paths,
-            local,
+            capabilities,
+            agent: process.env.SSH_AUTH_SOCK ?? null,
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
           }),
       ),
@@ -446,6 +470,8 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         yield* Effect.promise(() =>
           writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
         );
+        const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
+        const agent = granted.has("ssh-agent") ? dependencies.agent : null;
         const ssh =
           os === "win32"
             ? null
@@ -462,7 +488,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                       ssh: binary,
                       node: process.execPath,
                       knownHosts: join(home, ".ssh", "known_hosts"),
-                      agent: null,
+                      agent,
                     })
                   : null;
               });
@@ -483,11 +509,13 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
               os,
             ),
             ssh,
+            agent,
           ),
           filesystem: filesystemPolicy({
             os,
-            // The command's own folder: ssh records host keys there.
-            writable: [...input.allowWrite, commandDirectory],
+            // The command's own folder: ssh records host keys there. The agent's socket, when the
+            // chat allows it: connecting needs it writable.
+            writable: [...input.allowWrite, commandDirectory, ...(agent ? [agent] : [])],
             readable: [
               ...(dependencies.paths?.applying(input.context) ?? []),
               // The ssh bridge runs on the app's own executable.
@@ -506,11 +534,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                 },
               }
             : {}),
-          network: networkPolicy(
-            os,
-            proxyUrl,
-            (dependencies.local?.applying(input.context) ?? []).includes(LOCAL),
-          ),
+          network: networkPolicy(os, proxyUrl, granted.has("local-services")),
           timeoutMs: input.timeoutMs,
         };
         const finished = yield* Effect.acquireUseRelease(
@@ -579,18 +603,25 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       }).pipe(Effect.uninterruptible);
 
     // Applies from the next command: a running one keeps the policy it started with.
-    const changeLocal = (target: GrantTarget, add: boolean): Effect.Effect<void, DesktopError> =>
+    const changeCapability = (
+      target: GrantTarget,
+      capability: Capability,
+      add: boolean,
+    ): Effect.Effect<void, DesktopError> =>
       Effect.tryPromise({
         try: async () => {
-          const local = dependencies.local;
-          if (!local) throw new Error("No local services grant store is available.");
-          if (add) await local.add(target, LOCAL);
-          else await local.remove(target, LOCAL);
+          const capabilities = dependencies.capabilities;
+          if (!capabilities) throw new Error("No grant store is available.");
+          // The agent signs as the person; that is decided per chat, never for every chat.
+          if (capability === "ssh-agent" && target.scope !== "chat")
+            throw new Error("Signing in with SSH keys is allowed per chat only.");
+          if (add) await capabilities.add(target, capability);
+          else await capabilities.remove(target, capability);
         },
         catch: (cause) =>
           new DesktopError({
             reason: "failed",
-            message: `Could not change local services access: ${String(cause)}`,
+            message: cause instanceof Error ? cause.message : String(cause),
           }),
       });
 
@@ -602,23 +633,25 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         Effect.sync(() => ({
           network: grants?.list(target) ?? [],
           paths: dependencies.paths?.list(target) ?? [],
-          local: (dependencies.local?.list(target) ?? []).includes(LOCAL),
+          capabilities: (dependencies.capabilities?.list(target) ?? []).filter(
+            (entry): entry is Capability => CAPABILITIES.has(entry),
+          ),
         })),
       forgetChat: (chat) =>
         Effect.promise(async () => {
           for (const id of (await grants?.forgetChat(chat)) ?? []) proxy.regrant(id);
           await dependencies.paths?.forgetChat(chat);
-          await dependencies.local?.forgetChat(chat);
+          await dependencies.capabilities?.forgetChat(chat);
         }),
-      approveLocal: (target) => changeLocal(target, true),
-      revokeLocal: (target) => changeLocal(target, false),
+      approveCapability: (target, capability) => changeCapability(target, capability, true),
+      revokeCapability: (target, capability) => changeCapability(target, capability, false),
       approveNetwork: (target, grant) => changeNetwork(target, grant, true),
       revokeNetwork: (target, grant) => changeNetwork(target, grant, false),
       keepAnswers: (origin, live) =>
         Effect.sync(() => {
           for (const id of grants?.keepAnswers(origin, live) ?? []) proxy.regrant(id);
           dependencies.paths?.keepAnswers(origin, live);
-          dependencies.local?.keepAnswers(origin, live);
+          dependencies.capabilities?.keepAnswers(origin, live);
         }),
       approvePath: (target, path) =>
         Effect.tryPromise({

@@ -22,7 +22,12 @@ const CONVERSATION = "019a574e-9415-7463-8431-11ef4a8f9b6a";
 
 const execute = (
   client: ReturnType<typeof clientFor>["client"],
-  name: "run_command" | "request_network_access" | "request_path_access" | "request_local_services",
+  name:
+    | "run_command"
+    | "request_network_access"
+    | "request_path_access"
+    | "request_local_services"
+    | "request_ssh_agent",
   args: Record<string, unknown>,
   scope: "answer" | "chat" | "always" = "answer",
 ) =>
@@ -141,13 +146,24 @@ describe("desktop network tools", () => {
   it("requests local network services with the chosen scope", async () => {
     const { client, request } = clientFor({ scope: "always" });
     const result = await execute(client, "request_local_services", {}, "always");
-    expect(request).toHaveBeenCalledWith("requestLocalAccess", {
+    expect(request).toHaveBeenCalledWith("requestCapability", {
       callId: "call",
       conversationId: CONVERSATION,
       generationId: "generation-1",
+      capability: "local-services",
       scope: "always",
     });
     expect(result.summary).toBe("Allowed local network services for every chat");
+  });
+
+  it("asks for the SSH agent for this chat whatever scope was passed", async () => {
+    const { client, request } = clientFor({ scope: "chat" });
+    const result = await execute(client, "request_ssh_agent", {}, "always");
+    expect(request).toHaveBeenCalledWith(
+      "requestCapability",
+      expect.objectContaining({ capability: "ssh-agent", scope: "chat" }),
+    );
+    expect(result.summary).toBe("Allowed signing in with SSH keys for this chat");
   });
 
   it("refuses a path request without a path", async () => {

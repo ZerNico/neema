@@ -2,6 +2,7 @@ import {
   Alert01Icon,
   Cancel01Icon,
   ComputerIcon,
+  Key01Icon,
   Folder01Icon,
   FolderAddIcon,
   FolderShared01Icon,
@@ -257,7 +258,9 @@ const permissionLabel = (permission: ChatPermission) =>
     ? permission.path
     : permission.kind === "local"
       ? "Local network services"
-      : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
+      : permission.kind === "ssh-agent"
+        ? "Signing in with your SSH keys"
+        : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
 
 /**
  * What commands in this chat may reach beyond the defaults. Loaded when the
@@ -295,7 +298,9 @@ function ChatAccessList({ access }: { access: ChatAccess }) {
                     ? FolderShared01Icon
                     : permission.kind === "local"
                       ? ComputerIcon
-                      : InternetIcon
+                      : permission.kind === "ssh-agent"
+                        ? Key01Icon
+                        : InternetIcon
                 }
                 strokeWidth={2}
               />

@@ -382,12 +382,31 @@ export const executeDesktopTool = (
           },
         );
       }
-      case "request_local_services":
+      case "request_ssh_agent":
         return Effect.map(
-          client.requestLocalAccess({
+          client.requestCapability({
             callId: activity.callId,
             conversationId,
             generationId: activity.generationId,
+            capability: "ssh-agent",
+            scope: "chat",
+          }),
+          () => ({
+            v: 1 as const,
+            ok: true,
+            summary: "Allowed signing in with SSH keys for this chat",
+            detail:
+              "Commands in this chat may now sign in with the user's SSH agent. You may now retry the command.",
+            truncated: false,
+          }),
+        );
+      case "request_local_services":
+        return Effect.map(
+          client.requestCapability({
+            callId: activity.callId,
+            conversationId,
+            generationId: activity.generationId,
+            capability: "local-services",
             scope: activity.scope,
           }),
           (receipt) => {

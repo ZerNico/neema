@@ -360,7 +360,11 @@ export const makeHandlers = (shell: Shell) =>
           const listed = (permissions: Permissions): ChatPermission[] => [
             ...permissions.network.map((grant) => ({ kind: "network" as const, ...grant })),
             ...permissions.paths.map((path) => ({ kind: "path" as const, path })),
-            ...(permissions.local ? [{ kind: "local" as const }] : []),
+            ...permissions.capabilities.map((capability) =>
+              capability === "ssh-agent"
+                ? { kind: "ssh-agent" as const }
+                : { kind: "local" as const },
+            ),
           ];
           const chat = yield* sandbox.permissions({ scope: "chat", chat: key(conversationId) });
           const always = yield* sandbox.permissions({ scope: "always" });
@@ -370,7 +374,8 @@ export const makeHandlers = (shell: Shell) =>
       revokeChatPermission: ({ conversationId, permission }) => {
         const target = { scope: "chat" as const, chat: key(conversationId) };
         if (permission.kind === "path") return sandbox.revokePath(target, permission.path);
-        if (permission.kind === "local") return sandbox.revokeLocal(target);
+        if (permission.kind === "local") return sandbox.revokeCapability(target, "local-services");
+        if (permission.kind === "ssh-agent") return sandbox.revokeCapability(target, "ssh-agent");
         const grant = normalizeEgressGrant(
           permission.host,
           permission.port,
@@ -952,15 +957,16 @@ export const makeHandlers = (shell: Shell) =>
           return { ...grant, scope };
         }),
 
-      requestLocalAccess: ({ conversationId, generationId, scope }) =>
+      requestCapability: ({ conversationId, generationId, capability, scope }) =>
         Effect.gen(function* () {
           const chat = key(conversationId);
-          yield* sandbox.approveLocal(
+          yield* sandbox.approveCapability(
             scope === "always"
               ? { scope }
               : scope === "chat"
                 ? { scope, chat }
                 : { scope, answer: { ...chat, attempt: generationId } },
+            capability,
           );
           return { scope };
         }),

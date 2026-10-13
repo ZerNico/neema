@@ -207,6 +207,18 @@ export const requestLocalServicesTool = Tool.make("request_local_services", {
   failureMode: "return",
 });
 
+export const requestSshAgentTool = Tool.make("request_ssh_agent", {
+  description:
+    "Ask the user to let commands in this chat sign in with their SSH keys through their SSH " +
+    "agent, for example to push with git over SSH. Use it when an SSH connection to a host " +
+    "this chat may reach fails with 'Permission denied (publickey)'. Request the host's port " +
+    "with request_network_access first. The key files themselves are never readable. Wait for " +
+    "approval before retrying. It lasts for this chat only.",
+  parameters: Tool.EmptyParams,
+  success: DesktopToolResult,
+  failureMode: "return",
+});
+
 export interface DesktopToolDeps {
   /** Waits for the durable row and its owned external registration to exist. */
   readonly rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
@@ -278,6 +290,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
           requestNetworkAccessTool,
           requestPathAccessTool,
           requestLocalServicesTool,
+          requestSshAgentTool,
         )
       : Toolkit.make(...files),
     handlers: {
@@ -300,6 +313,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
             request_network_access: handle("request_network_access", DESKTOP_TIMEOUTS.command),
             request_path_access: handle("request_path_access", DESKTOP_TIMEOUTS.command),
             request_local_services: handle("request_local_services", DESKTOP_TIMEOUTS.command),
+            request_ssh_agent: handle("request_ssh_agent", DESKTOP_TIMEOUTS.command),
           }
         : {}),
     },

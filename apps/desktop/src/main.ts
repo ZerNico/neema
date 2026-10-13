@@ -619,11 +619,13 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(LOCAL_GET, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return (await permissions()).local;
+    return (await permissions()).capabilities.includes("local-services");
   });
   ipcMain.handle(LOCAL_REVOKE, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeLocal(always)));
+    await runtime.runPromise(
+      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeCapability(always, "local-services")),
+    );
   });
   ipcMain.handle(PATHS_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

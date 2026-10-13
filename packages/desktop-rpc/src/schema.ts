@@ -369,7 +369,7 @@ export const NetworkPermission = Schema.Struct({
 });
 export type NetworkPermission = typeof NetworkPermission.Type;
 
-/** One thing a chat may reach: a network destination, a readable path, or local services. */
+/** One thing a chat may reach: a destination, a readable path, local services or the SSH agent. */
 export const ChatPermission = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["network"]),
@@ -379,6 +379,7 @@ export const ChatPermission = Schema.Union([
   }),
   Schema.Struct({ kind: Schema.Literals(["path"]), path: Schema.String }),
   Schema.Struct({ kind: Schema.Literals(["local"]) }),
+  Schema.Struct({ kind: Schema.Literals(["ssh-agent"]) }),
 ]);
 export type ChatPermission = typeof ChatPermission.Type;
 
@@ -388,6 +389,10 @@ export const ChatPermissions = Schema.Struct({
   always: Schema.Array(ChatPermission),
 });
 export type ChatPermissions = typeof ChatPermissions.Type;
+
+/** Switches a person grants commands: local network services, and their SSH agent (chat only). */
+export const Capability = Schema.Literals(["local-services", "ssh-agent"]);
+export type Capability = typeof Capability.Type;
 
 export const SandboxAvailability = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["ready"]) }),
