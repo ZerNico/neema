@@ -536,9 +536,13 @@ OpenSSL rather than Schannel, whose revocation check fetches CRLs around the
 proxy and fails every HTTPS remote. The agent is whichever the user's own ssh would use, looked up when it is
 allowed: `ssh -G` for a host no config names, so an `IdentityAgent` under
 `Host *` (1Password, Secretive) counts, else `SSH_AUTH_SOCK`. Allowing it where
-none runs is refused at once. On Windows it is refused too: the agent is a named
-pipe, which a container's filesystem policy cannot grant (MXC opens the path and
-fails the launch), and without a grant containers are denied it.
+none runs is refused at once. Windows' agent is a named pipe, which a
+container's filesystem policy cannot grant (MXC opens the path and fails the
+launch). There ssh starts under a bridge that names a pipe of the command's own
+as the agent and carries each connection to the egress proxy, which serves the
+reserved destination `ssh-agent.invalid:1` from the user's pipe while the chat
+allows it; revoking closes what is open. `ssh-add` run directly finds no agent
+there.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

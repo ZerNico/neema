@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentFromConfig, findAgent, type AgentLookup } from "./ssh-agent.ts";
+import { agentFromConfig, findAgent, WINDOWS_AGENT, type AgentLookup } from "./ssh-agent.ts";
 
 const env = { SSH_AUTH_SOCK: "/tmp/launchd/Listeners", OP_AGENT: "/tmp/op.sock" };
 
@@ -22,6 +22,7 @@ describe("agentFromConfig", () => {
 });
 
 const lookup = (overrides: Partial<AgentLookup>): AgentLookup => ({
+  os: "darwin",
   env,
   ssh: "/usr/bin/ssh",
   config: async () => "user me\n",
@@ -51,5 +52,13 @@ describe("findAgent", () => {
 
   it("offers nothing for an agent that is not running", async () => {
     expect(await findAgent(lookup({ exists: async () => false }))).toBeNull();
+  });
+
+  it("finds Windows' own agent, which never sets SSH_AUTH_SOCK", async () => {
+    const pipes = new Set([WINDOWS_AGENT]);
+    expect(
+      await findAgent(lookup({ os: "win32", env: {}, exists: async (path) => pipes.has(path) })),
+    ).toBe(WINDOWS_AGENT);
+    expect(await findAgent(lookup({ env: {}, exists: async () => true }))).toBeNull();
   });
 });

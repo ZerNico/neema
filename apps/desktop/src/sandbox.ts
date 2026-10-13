@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { access, constants, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { delimiter, join, win32 } from "node:path";
 import type { Readable } from "node:stream";
 import {
   createEgressProxy,
   childEnvironment as proxyEnvironment,
+  type CommandContext,
   type EgressProxy,
 } from "@chat/egress-proxy";
 import {
@@ -30,7 +32,7 @@ import {
 import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
 import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment, jvmEnvironment, mavenSettings } from "./sandbox-environment.ts";
-import { findAgent, pathExists, sshConfig } from "./ssh-agent.ts";
+import { AGENT_DESTINATION, findAgent, pathExists, sshConfig } from "./ssh-agent.ts";
 import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
@@ -452,6 +454,7 @@ export class Sandbox extends Context.Service<
             capabilities,
             agent: async () =>
               findAgent({
+                os: platform(),
                 env: process.env,
                 ssh: await findSsh(process.env.PATH, pathExists),
                 config: sshConfig,
@@ -478,6 +481,9 @@ const windowsReady = (backends: readonly AvailableBackend[]) =>
       backend.backend === "processcontainer" &&
       WINDOWS_NEEDS.every((need) => backend.capabilities.includes(need)),
   );
+
+/** Revoking the agent in a chat closes the relayed connections it allowed. */
+const AGENT_GRANT = "capability:ssh-agent";
 
 const unavailable = (message: string) =>
   new DesktopError({ reason: "sandbox-unavailable", message });
@@ -522,9 +528,33 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
     const running = new Set<LaunchedProcess>();
     let closed = false;
 
+    // Windows commands whose chat allowed the agent, and the pipe it was found at.
+    const relayedAgents = new Map<string, string>();
+    const agentAllowed = (context: CommandContext) =>
+      relayedAgents.has(context.command) &&
+      (dependencies.capabilities
+        ?.applying({
+          origin: context.server,
+          conversationId: context.chat,
+          attempt: context.attempt,
+        })
+        .includes("ssh-agent") ??
+        false);
     const proxy: EgressProxy = createEgressProxy({
       decide: (context, host, port) =>
-        grants ? grants.decide(context, host, port) : { allowed: false, reason: "No grants" },
+        host === AGENT_DESTINATION.host && port === AGENT_DESTINATION.port
+          ? agentAllowed(context)
+            ? { allowed: true, grantId: AGENT_GRANT }
+            : { allowed: false, reason: "This chat has not allowed signing in with the SSH agent." }
+          : grants
+            ? grants.decide(context, host, port)
+            : { allowed: false, reason: "No grants" },
+      local: (context, host, port) => {
+        const pipe = relayedAgents.get(context.command);
+        return host === AGENT_DESTINATION.host && port === AGENT_DESTINATION.port && pipe
+          ? () => connect(pipe)
+          : undefined;
+      },
       onDenial: ({ context, host, port }) => {
         const lines = denials.get(context.command);
         if (lines && lines.length < 20) lines.push(violationLine(host, port));
@@ -595,6 +625,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           // Ends every tunnel the command opened, and its leftover children's.
           proxy.revoke(token);
           denials.delete(input.callId);
+          relayedAgents.delete(input.callId);
         });
         // Holds the Maven settings (token included) and the ssh setup: private, readable, and gone
         // with the command.
@@ -607,10 +638,12 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
         );
         const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
-        const agent =
-          granted.has("ssh-agent") && os !== "win32"
-            ? yield* Effect.promise(() => dependencies.agent())
-            : null;
+        const found = granted.has("ssh-agent")
+          ? yield* Effect.promise(() => dependencies.agent())
+          : null;
+        // Windows' agent is a pipe no container may be given; the proxy carries it instead.
+        if (found && os === "win32") relayedAgents.set(input.callId, found);
+        const agent = os === "win32" ? null : found;
         const ssh = yield* Effect.promise(async () => {
           const binary = await findSsh(
             process.env.PATH,
@@ -629,6 +662,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                 node: process.execPath,
                 knownHosts: join(home, ".ssh", "known_hosts"),
                 agent,
+                relayAgent: relayedAgents.has(input.callId),
               })
             : null;
         });
@@ -782,14 +816,12 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           // The agent signs as the person; that is decided per chat, never for every chat.
           if (capability === "ssh-agent" && target.scope !== "chat")
             throw new Error("Signing in with SSH keys is allowed per chat only.");
-          // Windows' agent is a named pipe, and a container's filesystem policy cannot grant
-          // one: MXC opens the path and fails the launch.
-          if (add && capability === "ssh-agent" && os === "win32")
-            throw new Error("Commands can’t sign in with the SSH agent on Windows yet.");
           if (add && capability === "ssh-agent" && !(await dependencies.agent()))
             throw new Error("No SSH agent is running on this computer.");
           if (add) await capabilities.add(target, capability);
           else await capabilities.remove(target, capability);
+          // Closes relayed agent connections a removed grant no longer covers.
+          if (capability === "ssh-agent") proxy.regrant(AGENT_GRANT);
         },
         catch: (cause) =>
           new DesktopError({

@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
 
+/** Where Windows' own OpenSSH agent listens. It never sets SSH_AUTH_SOCK. */
+export const WINDOWS_AGENT = "\\\\.\\pipe\\openssh-ssh-agent";
+
+/**
+ * The destination a Windows command asks the egress proxy for to reach the
+ * agent. `.invalid` never resolves, so it cannot name a real host.
+ */
+export const AGENT_DESTINATION = { host: "ssh-agent.invalid", port: 1 } as const;
+
 /**
  * The agent named by `ssh -G`: an IdentityAgent from the user's config (how
  * 1Password and Secretive are usually wired), or SSH_AUTH_SOCK when the config
@@ -18,6 +27,7 @@ export const agentFromConfig = (output: string, env: NodeJS.ProcessEnv): string 
 };
 
 export interface AgentLookup {
+  readonly os: NodeJS.Platform;
   readonly env: NodeJS.ProcessEnv;
   /** The user's ssh, or null when there is none to ask. */
   readonly ssh: string | null;
@@ -39,7 +49,8 @@ export const findAgent = async (lookup: AgentLookup): Promise<string | null> => 
   } catch {
     agent = lookup.env.SSH_AUTH_SOCK || null;
   }
-  return agent && (await lookup.exists(agent)) ? agent : null;
+  if (agent) return (await lookup.exists(agent)) ? agent : null;
+  return lookup.os === "win32" && (await lookup.exists(WINDOWS_AGENT)) ? WINDOWS_AGENT : null;
 };
 
 /** Runs the user's ssh to print its effective config; it connects nowhere. */

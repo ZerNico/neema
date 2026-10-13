@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -98,6 +98,33 @@ describe("writeSshSetup", () => {
     const config = await readFile(setup.wrapper.replace(/bin.ssh\.cmd$/, "ssh_config"), "utf8");
     expect(config).toContain(`ProxyCommand "C:/Program Files/neema/neema.exe" "`);
     expect(config).not.toContain("/usr/bin/env");
+  });
+
+  it("starts ssh under the agent bridge on Windows when the chat allows the agent", async () => {
+    const root = await directory();
+    const setup = await writeSshSetup({
+      os: "win32",
+      directory: root,
+      ssh: "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      node: "C:\\Program Files\\neema\\neema.exe",
+      knownHosts: null,
+      agent: null,
+      relayAgent: true,
+    });
+    const bridge = join(root, "ssh-agent-bridge.cjs");
+    expect((await readFile(setup.wrapper, "utf8")).split("\r\n")[2]).toBe(
+      `@"C:\\Program Files\\neema\\neema.exe" "${bridge}" "C:\\Windows\\System32\\OpenSSH\\ssh.exe" -F "${join(root, "ssh_config")}" %*`,
+    );
+    expect(await readFile(join(root, "ssh_config"), "utf8")).toContain(
+      "IdentityAgent SSH_AUTH_SOCK",
+    );
+    const source = await readFile(bridge, "utf8");
+    expect(source).toContain('"ssh-agent.invalid:1"');
+    expect(source).toContain('"\\\\\\\\.\\\\pipe\\\\neema-agent-"');
+    // The generated script must parse.
+    const checked = spawnSync(process.execPath, ["--check", bridge], { encoding: "utf8" });
+    expect(checked.stderr).toBe("");
+    expect(checked.status).toBe(0);
   });
 
   it("names the agent only when the chat allows it", async () => {

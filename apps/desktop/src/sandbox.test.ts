@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, createServer } from "node:net";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -765,12 +765,16 @@ describe("the SSH agent", () => {
     await close();
   });
 
-  it("is refused where no agent runs, and on Windows, whose agent pipe a container cannot be given", async () => {
+  it("is refused where no agent runs", async () => {
     const chat = { origin: "https://chat.example", conversationId: "chat-a" };
-    const never = async () => {
-      throw new Error("must not launch");
-    };
-    const none = await harness(never, "darwin", () => proxyCapable, { agent: async () => null });
+    const none = await harness(
+      async () => {
+        throw new Error("must not launch");
+      },
+      "darwin",
+      () => proxyCapable,
+      { agent: async () => null },
+    );
     expect(
       JSON.stringify(
         await Effect.runPromiseExit(
@@ -779,15 +783,52 @@ describe("the SSH agent", () => {
       ),
     ).toContain("No SSH agent is running on this computer.");
     await none.close();
-    const windows = await harness(never, "win32");
-    expect(
-      JSON.stringify(
-        await Effect.runPromiseExit(
-          windows.sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"),
-        ),
+  });
+
+  it("carries a Windows command's agent through the proxy, for that chat only", async () => {
+    // A socket stands in for Windows' agent pipe: the proxy only connects to the path.
+    const pipe = join(await directory(), "agent.sock");
+    const agentServer = createServer((socket) => socket.once("data", () => socket.write("keys")));
+    await new Promise<void>((resolve) => agentServer.listen(pipe, resolve));
+    const launches: Array<ReturnType<typeof Promise.withResolvers<ContainerRequest>>> = [
+      Promise.withResolvers<ContainerRequest>(),
+      Promise.withResolvers<ContainerRequest>(),
+    ];
+    const children: ReturnType<typeof fakeProcess>[] = [];
+    const { sandbox, close } = await harness(
+      async (request) => {
+        launches[children.length]?.resolve(request);
+        const child = fakeProcess();
+        children.push(child);
+        return child.process;
+      },
+      "win32",
+      () => proxyCapable,
+      { agent: async () => pipe },
+    );
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
+    const allowed = Effect.runPromise(sandbox.run(run({ callId: "allowed" })));
+    const mine = await launches[0]?.promise;
+    const other = Effect.runPromise(
+      sandbox.run(
+        run({ callId: "other", context: { ...chat, conversationId: "chat-b", attempt: "a" } }),
       ),
-    ).toContain("on Windows yet");
-    await windows.close();
+    );
+    const theirs = await launches[1]?.promise;
+    // The pipe is never named to the container; the proxy is the way to it.
+    expect(mine?.filesystem?.readwritePaths).not.toContain(pipe);
+    expect(mine?.environment?.SSH_AUTH_SOCK).toBeUndefined();
+    const agent = "ssh-agent.invalid:1";
+    const url = (request?: ContainerRequest) => request?.network?.runtimeConfig?.networkProxy ?? "";
+    expect(await connectThrough(url(mine), agent)).toMatch(/^HTTP\/1\.1 200/);
+    expect(await connectThrough(url(theirs), agent)).toMatch(/^HTTP\/1\.1 403/);
+    await Effect.runPromise(sandbox.revokeCapability({ scope: "chat", chat }, "ssh-agent"));
+    expect(await connectThrough(url(mine), agent)).toMatch(/^HTTP\/1\.1 403/);
+    for (const child of children) child.finish(0);
+    await Promise.all([allowed, other]);
+    await close();
+    await new Promise<void>((resolve) => agentServer.close(() => resolve()));
   });
 
   it("reaches commands of that chat only, by socket and environment", async () => {
