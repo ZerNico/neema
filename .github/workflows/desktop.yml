@@ -76,6 +76,24 @@ jobs:
           read -ra targets <<< "$TARGETS"
           pnpm exec electron-builder --publish never "${targets[@]}" -c.extraMetadata.version="$VERSION"
 
+      # The installer's extractor skips files whose filter it cannot decode, and still succeeds.
+      - name: Check the installers' payloads
+        if: matrix.os == 'windows'
+        shell: bash
+        working-directory: apps/desktop
+        run: |
+          for installer in release/*.exe; do
+            # Relative, so Git Bash hands 7z.exe a path it can read.
+            out="payload-$(basename "$installer" .exe)"
+            7z x -y -o"$out" "$installer" '$PLUGINSDIR/app-*.7z' >/dev/null
+            methods=$(7z l -slt "$out"/'$PLUGINSDIR'/app-*.7z | grep '^Method = ' | sort -u)
+            echo "$installer: $(tr '\n' ' ' <<< "$methods")"
+            if grep -q ARM64 <<< "$methods"; then
+              echo "::error::$installer compresses executables with 7-Zip's ARM64 filter"
+              exit 1
+            fi
+          done
+
       # The runner's own architecture runs one contained command from the packaged app.
       - name: Prepare the Linux sandbox
         if: matrix.os == 'linux'
