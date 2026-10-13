@@ -17,7 +17,8 @@
     "package": "pnpm build && electron-builder --publish never"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.77"
+    "@anthropic-ai/sandbox-runtime": "0.0.77",
+    "@chat/egress-proxy": "workspace:*"
   },
   "devDependencies": {
     "@chat/desktop-rpc": "workspace:*",
