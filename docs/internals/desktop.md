@@ -533,8 +533,12 @@ shell and MSYS cannot start in the container, and through `GIT_SSH_COMMAND`
 elsewhere, which also outranks a `core.sshCommand` naming another ssh. For the
 same MSYS reason Git for Windows runs without a credential helper, and with
 OpenSSL rather than Schannel, whose revocation check fetches CRLs around the
-proxy and fails every HTTPS remote. The agent reaches ssh only through `SSH_AUTH_SOCK`, which Windows' own
-agent does not set, so there it is untested and usually absent.
+proxy and fails every HTTPS remote. The agent is whichever the user's own ssh would use, looked up when it is
+allowed: `ssh -G` for a host no config names, so an `IdentityAgent` under
+`Host *` (1Password, Secretive) counts, else `SSH_AUTH_SOCK`. Allowing it where
+none runs is refused at once. On Windows it is refused too: the agent is a named
+pipe, which a container's filesystem policy cannot grant (MXC opens the path and
+fails the launch), and without a grant containers are denied it.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

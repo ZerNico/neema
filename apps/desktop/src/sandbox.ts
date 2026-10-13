@@ -30,6 +30,7 @@ import {
 import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
 import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment, jvmEnvironment, mavenSettings } from "./sandbox-environment.ts";
+import { findAgent, pathExists, sshConfig } from "./ssh-agent.ts";
 import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
@@ -391,8 +392,8 @@ export interface SandboxDependencies {
   readonly grants: EgressGrants | null;
   readonly paths: PathGrants | null;
   readonly capabilities: ScopedGrants | null;
-  /** The user's SSH agent socket, if they run one. */
-  readonly agent: string | null;
+  /** The user's SSH agent, looked up when a chat allows commands to sign in with it. */
+  readonly agent: () => Promise<string | null>;
   readonly userFolders: () => ReadonlyArray<string>;
 }
 
@@ -449,7 +450,13 @@ export class Sandbox extends Context.Service<
             grants,
             paths,
             capabilities,
-            agent: process.env.SSH_AUTH_SOCK ?? null,
+            agent: async () =>
+              findAgent({
+                env: process.env,
+                ssh: await findSsh(process.env.PATH, pathExists),
+                config: sshConfig,
+                exists: pathExists,
+              }),
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
           }),
       ),
@@ -600,7 +607,10 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
         );
         const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
-        const agent = granted.has("ssh-agent") ? dependencies.agent : null;
+        const agent =
+          granted.has("ssh-agent") && os !== "win32"
+            ? yield* Effect.promise(() => dependencies.agent())
+            : null;
         const ssh = yield* Effect.promise(async () => {
           const binary = await findSsh(
             process.env.PATH,
@@ -772,6 +782,12 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           // The agent signs as the person; that is decided per chat, never for every chat.
           if (capability === "ssh-agent" && target.scope !== "chat")
             throw new Error("Signing in with SSH keys is allowed per chat only.");
+          // Windows' agent is a named pipe, and a container's filesystem policy cannot grant
+          // one: MXC opens the path and fails the launch.
+          if (add && capability === "ssh-agent" && os === "win32")
+            throw new Error("Commands can’t sign in with the SSH agent on Windows yet.");
+          if (add && capability === "ssh-agent" && !(await dependencies.agent()))
+            throw new Error("No SSH agent is running on this computer.");
           if (add) await capabilities.add(target, capability);
           else await capabilities.remove(target, capability);
         },

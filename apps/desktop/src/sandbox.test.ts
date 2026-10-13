@@ -294,7 +294,7 @@ const harness = async (
     grants,
     paths,
     capabilities,
-    agent,
+    agent: async () => agent,
     userFolders: () => [],
     ...extra,
   };
@@ -580,7 +580,7 @@ describe("run", () => {
           grants,
           paths: null,
           capabilities: null,
-          agent: null,
+          agent: async () => null,
           userFolders: () => [],
         }),
         scope,
@@ -763,6 +763,31 @@ describe("the SSH agent", () => {
     }
     await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
     await close();
+  });
+
+  it("is refused where no agent runs, and on Windows, whose agent pipe a container cannot be given", async () => {
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    const never = async () => {
+      throw new Error("must not launch");
+    };
+    const none = await harness(never, "darwin", () => proxyCapable, { agent: async () => null });
+    expect(
+      JSON.stringify(
+        await Effect.runPromiseExit(
+          none.sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"),
+        ),
+      ),
+    ).toContain("No SSH agent is running on this computer.");
+    await none.close();
+    const windows = await harness(never, "win32");
+    expect(
+      JSON.stringify(
+        await Effect.runPromiseExit(
+          windows.sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"),
+        ),
+      ),
+    ).toContain("on Windows yet");
+    await windows.close();
   });
 
   it("reaches commands of that chat only, by socket and environment", async () => {
