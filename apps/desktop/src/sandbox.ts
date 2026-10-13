@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, constants, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
 import {
   createEgressProxy,
@@ -28,6 +28,7 @@ import {
 import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
 import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment, jvmEnvironment, mavenSettings } from "./sandbox-environment.ts";
+import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
 const inHome = (...segments: string[]) => join(home, ...segments);
@@ -222,6 +223,12 @@ const networkPolicy = (os: NodeJS.Platform, proxyUrl: string, local: boolean): N
 
 /** The one entry a local-services grant holds. */
 const LOCAL = "local";
+
+/** Puts the ssh wrapper first, so ssh, git, scp and rsync all go through the proxy. */
+const withSsh = (environment: Record<string, string>, ssh: SshSetup | null) =>
+  ssh
+    ? { ...environment, PATH: [ssh.bin, environment.PATH].filter(Boolean).join(delimiter) }
+    : environment;
 
 const shellCommand = (command: string, os: NodeJS.Platform) =>
   os === "win32"
@@ -429,34 +436,76 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           proxy.revoke(token);
           denials.delete(input.callId);
         });
-        // Holds the Maven settings, token included: private, readable, and gone with the command.
-        const settingsDirectory = yield* Effect.promise(() =>
+        // Holds the Maven settings (token included) and the ssh setup: private, readable, and gone
+        // with the command.
+        const commandDirectory = yield* Effect.promise(() =>
           mkdtemp(join(tmpdir(), "neema-command-")),
         );
-        const settingsFile = join(settingsDirectory, "settings.xml");
+        const settingsFile = join(commandDirectory, "settings.xml");
         const cache = join(input.cwd, ".cache");
         yield* Effect.promise(() =>
           writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
         );
+        const ssh =
+          os === "win32"
+            ? null
+            : yield* Effect.promise(async () => {
+                const binary = await findSsh(process.env.PATH, async (file) =>
+                  access(file, constants.X_OK).then(
+                    () => true,
+                    () => false,
+                  ),
+                );
+                return binary
+                  ? writeSshSetup({
+                      directory: commandDirectory,
+                      ssh: binary,
+                      node: process.execPath,
+                      knownHosts: join(home, ".ssh", "known_hosts"),
+                      agent: null,
+                    })
+                  : null;
+              });
         const removeSettings = Effect.promise(() =>
-          rm(settingsDirectory, { recursive: true, force: true }),
+          rm(commandDirectory, { recursive: true, force: true }),
         );
         const request: ContainerRequest = {
           command: shellCommand(input.command, os),
           workingDirectory: input.cwd,
-          environment: commandEnvironment(
-            process.env,
-            input.cwd,
-            { ...proxyEnvironment(proxyUrl), ...jvmEnvironment(proxyUrl, cache, settingsFile, os) },
-            os,
+          environment: withSsh(
+            commandEnvironment(
+              process.env,
+              input.cwd,
+              {
+                ...proxyEnvironment(proxyUrl),
+                ...jvmEnvironment(proxyUrl, cache, settingsFile, os),
+              },
+              os,
+            ),
+            ssh,
           ),
           filesystem: filesystemPolicy({
             os,
-            writable: input.allowWrite,
-            readable: [...(dependencies.paths?.applying(input.context) ?? []), settingsDirectory],
+            // The command's own folder: ssh records host keys there.
+            writable: [...input.allowWrite, commandDirectory],
+            readable: [
+              ...(dependencies.paths?.applying(input.context) ?? []),
+              // The ssh bridge runs on the app's own executable.
+              ...(ssh ? [appBundle(process.execPath)] : []),
+            ],
             protectedDirectory: grants?.directory ?? null,
             userFolders: dependencies.userFolders(),
           }),
+          // Seatbelt blocks directory services, and ssh refuses to start when it cannot
+          // name the current user; this one lookup answers that and nothing more.
+          ...(os === "darwin"
+            ? {
+                containment: {
+                  type: "seatbelt" as const,
+                  config: { extraMachLookups: ["com.apple.system.opendirectoryd.libinfo"] },
+                },
+              }
+            : {}),
           network: networkPolicy(
             os,
             proxyUrl,

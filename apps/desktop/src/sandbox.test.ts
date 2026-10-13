@@ -216,8 +216,11 @@ describe("run", () => {
       workingDirectory: "/w",
       timeoutMs: 60_000,
       network: { egress: { default: "deny" }, ingress: { hostLoopback: "deny" } },
-      filesystem: { readwritePaths: ["/w", "/dev/null"] },
     });
+    // The workspace, the command's own private folder and /dev/null.
+    const [workspace, own, devNull, ...rest] = request.filesystem?.readwritePaths ?? [];
+    expect([workspace, devNull, rest]).toEqual(["/w", "/dev/null", []]);
+    expect(own).toMatch(/neema-command-/);
     const proxyUrl = request.network?.runtimeConfig?.networkProxy ?? "";
     expect(proxyUrl).toMatch(/^http:\/\/cmd:[^@]+@127\.0\.0\.1:\d+$/);
     expect(request.environment?.HTTPS_PROXY).toBe(proxyUrl);

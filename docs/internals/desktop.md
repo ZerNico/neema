@@ -488,6 +488,14 @@ connection. `JAVA_TOOL_OPTIONS` carries only `-Djava.net.preferIPv4Stack=true`,
 because every JVM prints it on start and IPv6-mapped sockets miss Seatbelt's
 loopback rules.
 
+ssh, and with it git, scp and rsync, finds a wrapper first on `PATH` with its
+own config: a `ProxyCommand` bridge that opens an authenticated CONNECT, run by
+the app's own executable in Node mode so nothing is installed, no connection
+sharing (a master would outlive the command's token), known hosts from a copy of
+the user's, and no key files, since `~/.ssh` stays denied. A destination such as
+`github.com:22` is an ordinary network grant. On macOS the sandbox may look up
+directory services, without which ssh cannot name the current user and stops.
+
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills
 it; a detached server a command starts dies with it.
