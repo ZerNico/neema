@@ -467,7 +467,10 @@ which the site turns into an offer to request access. Grants are exact
 answer, the chat, or every chat. Chat and always grants live in the profile;
 answer grants live in memory and end when the page's work state stops listing
 that answer, so a closed page ends them all. A private-network grant is its own
-kind and is the only way a name may reach a private address.
+kind and is the only way a name may reach a private address. A chat lists and
+removes its own grants from the permissions menu; every-chat grants are removed
+in Settings › This computer. Both stores forget a chat when its workspace is
+discarded, which happens once the chat is purged and Undo is gone.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

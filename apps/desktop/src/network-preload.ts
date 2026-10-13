@@ -1,7 +1,16 @@
 import type { IpcRenderer } from "electron";
-import { NETWORK_LIST, NETWORK_REVOKE, type DesktopNetwork } from "@chat/desktop-rpc";
+import {
+  NETWORK_LIST,
+  NETWORK_REVOKE,
+  PATHS_LIST,
+  PATHS_REVOKE,
+  type DesktopNetwork,
+} from "@chat/desktop-rpc";
 
 export const makeNetworkBridge = (ipc: Pick<IpcRenderer, "invoke">): DesktopNetwork => ({
   list: () => ipc.invoke(NETWORK_LIST),
-  revoke: (host) => ipc.invoke(NETWORK_REVOKE, { host }),
+  revoke: ({ host, port, privateNetwork }) =>
+    ipc.invoke(NETWORK_REVOKE, { host, port, privateNetwork }),
+  listPaths: () => ipc.invoke(PATHS_LIST),
+  revokePath: (path) => ipc.invoke(PATHS_REVOKE, { path }),
 });

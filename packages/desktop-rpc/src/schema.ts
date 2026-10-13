@@ -369,6 +369,25 @@ export const NetworkPermission = Schema.Struct({
 });
 export type NetworkPermission = typeof NetworkPermission.Type;
 
+/** One thing a chat may reach: a network destination or a readable path. */
+export const ChatPermission = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literals(["network"]),
+    host: Schema.String,
+    port: NetworkPort,
+    privateNetwork: Schema.Boolean,
+  }),
+  Schema.Struct({ kind: Schema.Literals(["path"]), path: Schema.String }),
+]);
+export type ChatPermission = typeof ChatPermission.Type;
+
+/** What a chat may reach: its own grants, and those every chat has, which it cannot remove. */
+export const ChatPermissions = Schema.Struct({
+  chat: Schema.Array(ChatPermission),
+  always: Schema.Array(ChatPermission),
+});
+export type ChatPermissions = typeof ChatPermissions.Type;
+
 export const SandboxAvailability = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["ready"]) }),
   Schema.Struct({

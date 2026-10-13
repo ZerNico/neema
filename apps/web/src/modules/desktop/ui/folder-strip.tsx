@@ -1,19 +1,33 @@
-import { Alert01Icon, Folder01Icon, FolderAddIcon, Shield01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert01Icon,
+  Cancel01Icon,
+  Folder01Icon,
+  FolderAddIcon,
+  FolderShared01Icon,
+  InternetIcon,
+  Shield01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { SandboxAvailability } from "@chat/desktop-rpc";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import type { ChatPermission, SandboxAvailability } from "@chat/desktop-rpc";
+import { toastError } from "~/ui/error-toast.ts";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 import { PERMISSION_LEVELS } from "../client/approvals.ts";
-import type { FolderState } from "../client/bridge.ts";
+import type { ChatAccess, FolderState } from "../client/bridge.ts";
 
 /** The chat's approval policy, held server-side; the strip is where it is changed. */
 export interface WorkSettingsControl {
@@ -126,7 +140,11 @@ export function FolderStrip({
           <>
             <SandboxNotice state={status.sandbox} busy={busy} onSetUp={folder.setUpSandbox} />
             {settings ? (
-              <PermissionPicker level={settings.permissionLevel} onChange={settings.onChange} />
+              <PermissionPicker
+                level={settings.permissionLevel}
+                onChange={settings.onChange}
+                access={folder.access}
+              />
             ) : null}
           </>
         ) : null}
@@ -174,13 +192,16 @@ function SandboxNotice({
 function PermissionPicker({
   level,
   onChange,
+  access,
 }: {
   level: PermissionLevel;
   onChange: (level: PermissionLevel) => void;
+  access: ChatAccess;
 }) {
   const current = PERMISSION_LEVELS.find((option) => option.value === level)!;
+  const [open, setOpen] = useState(false);
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -222,9 +243,65 @@ function PermissionPicker({
         </DropdownMenuRadioGroup>
         <p className="text-muted-foreground px-3 py-2 text-xs">
           The delete tool always asks, once for the whole list. An allowed command can still delete
-          files. Network access always asks separately on your computer.
+          files. Network access and reading other paths always ask separately.
         </p>
+        {open ? <ChatAccessList access={access} /> : null}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+const permissionLabel = (permission: ChatPermission) =>
+  permission.kind === "path"
+    ? permission.path
+    : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
+
+/**
+ * What commands in this chat may reach beyond the defaults. Loaded when the
+ * menu opens, since the desktop holds it and it changes with every approval.
+ * Grants for every chat are named but removed in Settings.
+ */
+function ChatAccessList({ access }: { access: ChatAccess }) {
+  const queryClient = useQueryClient();
+  const listed = useQuery({ queryKey: access.queryKey, queryFn: access.load, retry: false });
+  const removal = useMutation({
+    mutationFn: (permission: ChatPermission) => access.revoke(permission),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: access.queryKey }),
+    onError: (error) => toastError("Couldn’t remove it.", error),
+  });
+  if (!listed.data) return null;
+  const { chat, always } = listed.data;
+  if (chat.length === 0 && always.length === 0) return null;
+  return (
+    <>
+      <DropdownMenuSeparator />
+      {chat.length > 0 ? (
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Allowed in this chat</DropdownMenuLabel>
+          {chat.map((permission) => (
+            <DropdownMenuItem
+              key={permissionLabel(permission)}
+              closeOnClick={false}
+              disabled={removal.isPending}
+              onClick={() => removal.mutate(permission)}
+              aria-label={`Remove ${permissionLabel(permission)}`}
+            >
+              <HugeiconsIcon
+                icon={permission.kind === "path" ? FolderShared01Icon : InternetIcon}
+                strokeWidth={2}
+              />
+              <span className="min-w-0 flex-1 truncate">{permissionLabel(permission)}</span>
+              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      ) : null}
+      {always.length > 0 ? (
+        <p className="text-muted-foreground px-3 py-2 text-xs">
+          Every chat may also reach {always.length === 1 ? "one more" : `${always.length} more`},
+          listed in Settings › This computer.
+        </p>
+      ) : null}
+    </>
   );
 }

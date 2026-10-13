@@ -18,6 +18,8 @@ import {
   readDesktopBrowser,
   readDesktopChannel,
   WORKSPACE_FOLDER_NAME,
+  type ChatPermission,
+  type ChatPermissions,
   type DesktopAuth,
   type DesktopClient,
   type DesktopError,
@@ -74,7 +76,15 @@ export type FolderState = (
   choose: (replace?: string) => void;
   detach: (name: string) => void;
   setUpSandbox: () => void;
+  /** What this chat's commands may reach beyond the defaults, and how to remove one. */
+  access: ChatAccess;
 };
+
+export interface ChatAccess {
+  readonly queryKey: readonly string[];
+  load: () => Promise<ChatPermissions>;
+  revoke: (permission: ChatPermission) => Promise<void>;
+}
 
 export const folderQueryKey = (conversationId: string) =>
   ["desktop-folder", conversationId] as const;
@@ -233,6 +243,12 @@ export const useFolder = (conversationId: string): FolderState | null => {
     detach: (name) => run(client.detachFolder({ conversationId, name })),
     setUpSandbox: () =>
       run(Effect.flatMap(client.setUpSandbox(), () => client.folderStatus({ conversationId }))),
+    access: {
+      queryKey: ["desktop-chat-permissions", conversationId],
+      load: () => Effect.runPromise(client.chatPermissions({ conversationId })),
+      revoke: (permission) =>
+        Effect.runPromise(client.revokeChatPermission({ conversationId, permission })),
+    },
   };
 };
 

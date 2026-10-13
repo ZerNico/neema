@@ -326,7 +326,7 @@ describe("network approvals", () => {
   it("lists hosts allowed for every chat and revokes them", async () => {
     const { sandbox, grants, close } = await harness(async () => fakeProcess().process);
     await Effect.runPromise(sandbox.approveNetwork(always, site));
-    expect(await Effect.runPromise(sandbox.grants())).toEqual([{ host: "example.com" }]);
+    expect((await Effect.runPromise(sandbox.permissions(always))).network).toEqual([site]);
     expect(
       grants.decide(
         { server: "https://x.example", chat: "other", attempt: "a", command: "c" },
@@ -335,7 +335,26 @@ describe("network approvals", () => {
       ).allowed,
     ).toBe(true);
     await Effect.runPromise(sandbox.revokeNetwork(always, site));
-    expect(await Effect.runPromise(sandbox.grants())).toEqual([]);
+    expect((await Effect.runPromise(sandbox.permissions(always))).network).toEqual([]);
+    await close();
+  });
+
+  it("forgets a chat's network and path grants together", async () => {
+    const { sandbox, close } = await harness(async () => fakeProcess().process);
+    const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+    const target = { scope: "chat", chat } as const;
+    const shared = await directory();
+    await Effect.runPromise(sandbox.approveNetwork(target, site));
+    const granted = await Effect.runPromise(sandbox.approvePath(target, shared));
+    expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
+      network: [site],
+      paths: [granted],
+    });
+    await Effect.runPromise(sandbox.forgetChat(chat));
+    expect(await Effect.runPromise(sandbox.permissions(target))).toEqual({
+      network: [],
+      paths: [],
+    });
     await close();
   });
 

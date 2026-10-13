@@ -1,5 +1,10 @@
-import { ComputerIcon, Globe02Icon, InternetIcon } from "@hugeicons/core-free-icons";
-import { readDesktopNetwork } from "@chat/desktop-rpc";
+import {
+  ComputerIcon,
+  FolderShared01Icon,
+  Globe02Icon,
+  InternetIcon,
+} from "@hugeicons/core-free-icons";
+import { readDesktopNetwork, type NetworkGrant } from "@chat/desktop-rpc";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
@@ -12,25 +17,32 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 
 const subscribeToNothing = () => () => {};
 
+/** A destination as a person reads it: host and port, and whether it is on their own network. */
+export const destinationLabel = ({ host, port, privateNetwork }: NetworkGrant) =>
+  `${host}:${port}${privateNetwork ? " (private network)" : ""}`;
+
 /**
  * One list of things allowed on this computer, each removable. Loading, an
  * error and an empty list are rows of the same card, so every section on the
  * page has one shape.
  */
-function AllowedList({
+function AllowedList<T>({
   queryKey,
   load,
   remove,
+  label,
   icon,
   empty,
   confirmRemove,
 }: {
   queryKey: readonly string[];
-  load: () => Promise<ReadonlyArray<string>>;
-  remove: (item: string) => Promise<void>;
+  load: () => Promise<ReadonlyArray<T>>;
+  remove: (item: T) => Promise<void>;
+  /** What the row says; also its key, so it must be unique in the list. */
+  label: (item: T) => string;
   icon: IconSvgElement;
   empty: string;
-  confirmRemove: (item: string) => { title: string; description: string };
+  confirmRemove: (item: T) => { title: string; description: string };
 }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
@@ -62,13 +74,13 @@ function AllowedList({
         <ListRow className="text-muted-foreground text-sm">{empty}</ListRow>
       ) : (
         items.data.map((item) => (
-          <ListRow key={item}>
+          <ListRow key={label(item)}>
             <HugeiconsIcon
               icon={icon}
               strokeWidth={2}
               className="text-muted-foreground size-5 shrink-0"
             />
-            <span className="min-w-0 flex-1 wrap-anywhere text-sm font-medium">{item}</span>
+            <span className="min-w-0 flex-1 wrap-anywhere text-sm font-medium">{label(item)}</span>
             <PendingButton
               variant="ghost"
               size="sm"
@@ -114,6 +126,7 @@ export function ComputerPage() {
             queryKey={["desktop-browser-sites"]}
             load={() => agent.allowedSites()}
             remove={(site) => agent.revokeSite(site)}
+            label={(site) => site}
             icon={Globe02Icon}
             empty="No sites yet."
             confirmRemove={(site) => ({
@@ -125,18 +138,38 @@ export function ComputerPage() {
       ) : null}
       {network ? (
         <Section
-          title="Websites Work can connect to"
-          description="When Work runs tasks on this computer, it can reach these sites without asking, for example to download a package."
+          title="Where commands can connect"
+          description="Commands in every Work chat reach these without asking, for example to download a package. Ones allowed for a single chat are listed in that chat."
         >
           <AllowedList
             queryKey={["desktop-network-grants"]}
-            load={async () => (await network.list()).map((grant) => grant.host)}
-            remove={(host) => network.revoke(host)}
+            load={() => network.list()}
+            remove={(grant) => network.revoke(grant)}
+            label={destinationLabel}
             icon={InternetIcon}
-            empty="No websites yet."
-            confirmRemove={(host) => ({
-              title: `Remove ${host}?`,
+            empty="Nothing yet."
+            confirmRemove={(grant) => ({
+              title: `Remove ${destinationLabel(grant)}?`,
               description: "Work will ask before connecting to it again.",
+            })}
+          />
+        </Section>
+      ) : null}
+      {network ? (
+        <Section
+          title="What commands can read"
+          description="Commands in every Work chat can read these files and folders, beyond the folders attached to a chat."
+        >
+          <AllowedList
+            queryKey={["desktop-path-grants"]}
+            load={() => network.listPaths()}
+            remove={(path) => network.revokePath(path)}
+            label={(path) => path}
+            icon={FolderShared01Icon}
+            empty="Nothing yet."
+            confirmRemove={(path) => ({
+              title: `Remove ${path}?`,
+              description: "Work will ask before reading it again.",
             })}
           />
         </Section>

@@ -7,6 +7,7 @@ import {
   LIMITS,
   UNOPENABLE_EXTENSIONS,
   WORKSPACE_FOLDER_NAME,
+  type ChatPermission,
   type DeleteFailure,
   type DesktopHandlers,
   type DirectoryEntry,
@@ -20,7 +21,7 @@ import { withRegexMatcher, type RegexMatcher } from "./regex-matcher.ts";
 import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { exists, folderName, resolveAmongRoots, resolveInFolder } from "./folders.ts";
-import { Sandbox } from "./sandbox.ts";
+import { Sandbox, type Permissions } from "./sandbox.ts";
 import { ripgrepAvailable, searchWithRipgrep } from "./ripgrep.ts";
 import { globToRegExp, globMatches, walkFiles } from "./walk.ts";
 
@@ -350,7 +351,35 @@ export const makeHandlers = (shell: Shell) =>
           return yield* status(toConversationId);
         }),
 
-      discardWorkspace: ({ conversationId }) => workspaces.discard(conversationId),
+      // Called once the chat is gone for good, after Undo is no longer offered.
+      discardWorkspace: ({ conversationId }) =>
+        Effect.andThen(sandbox.forgetChat(key(conversationId)), workspaces.discard(conversationId)),
+
+      chatPermissions: ({ conversationId }) =>
+        Effect.gen(function* () {
+          const listed = (permissions: Permissions): ChatPermission[] => [
+            ...permissions.network.map((grant) => ({ kind: "network" as const, ...grant })),
+            ...permissions.paths.map((path) => ({ kind: "path" as const, path })),
+          ];
+          const chat = yield* sandbox.permissions({ scope: "chat", chat: key(conversationId) });
+          const always = yield* sandbox.permissions({ scope: "always" });
+          return { chat: listed(chat), always: listed(always) };
+        }),
+
+      revokeChatPermission: ({ conversationId, permission }) => {
+        const target = { scope: "chat" as const, chat: key(conversationId) };
+        if (permission.kind === "path") return sandbox.revokePath(target, permission.path);
+        const grant = normalizeEgressGrant(
+          permission.host,
+          permission.port,
+          permission.privateNetwork,
+        );
+        return grant && grant.host === permission.host
+          ? sandbox.revokeNetwork(target, grant)
+          : Effect.fail(
+              new DesktopError({ reason: "failed", message: "Invalid network permission." }),
+            );
+      },
 
       listDirectory: ({ conversationId, path }) =>
         Effect.gen(function* () {

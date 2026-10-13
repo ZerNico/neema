@@ -33,6 +33,8 @@ const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
   saveToWorkspace: unimplemented("saveToWorkspace"),
   requestNetworkAccess: unimplemented("requestNetworkAccess"),
   requestPathAccess: unimplemented("requestPathAccess"),
+  chatPermissions: unimplemented("chatPermissions"),
+  revokeChatPermission: unimplemented("revokeChatPermission"),
   runCommand: unimplemented("runCommand"),
   revealPath: unimplemented("revealPath"),
   setUpSandbox: unimplemented("setUpSandbox"),

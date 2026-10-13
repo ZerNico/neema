@@ -69,6 +69,8 @@ const connect = (): DesktopClient => {
     runCommand: notUsed("runCommand"),
     requestNetworkAccess: notUsed("requestNetworkAccess"),
     requestPathAccess: notUsed("requestPathAccess"),
+    chatPermissions: notUsed("chatPermissions"),
+    revokeChatPermission: notUsed("revokeChatPermission"),
     setUpSandbox: notUsed("setUpSandbox"),
     stageFile: notUsed("stageFile"),
     discardStagedFile: notUsed("discardStagedFile"),

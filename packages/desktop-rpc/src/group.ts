@@ -2,6 +2,8 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { Schema } from "effect";
 import {
   BinaryContents,
+  ChatPermission,
+  ChatPermissions,
   CommandOutput,
   DeleteReceipt,
   DesktopError,
@@ -282,6 +284,20 @@ export const DesktopRpcs = RpcGroup.make(
       scope: GrantScope,
     },
     success: Schema.Struct({ path: Schema.String, scope: GrantScope }),
+    error: DesktopError,
+  }),
+
+  /** The network destinations and paths a chat's commands may reach beyond the defaults. */
+  Rpc.make("chatPermissions", {
+    payload: { conversationId: WorkspaceId },
+    success: ChatPermissions,
+    error: DesktopError,
+  }),
+
+  /** Removes one of the chat's own grants; a removed network grant closes its tunnels. */
+  Rpc.make("revokeChatPermission", {
+    payload: { conversationId: WorkspaceId, permission: ChatPermission },
+    success: Schema.Void,
     error: DesktopError,
   }),
 

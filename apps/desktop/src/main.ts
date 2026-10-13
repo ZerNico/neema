@@ -43,6 +43,8 @@ import {
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
   NETWORK_REVOKE,
+  PATHS_LIST,
+  PATHS_REVOKE,
   makeDesktopResponder,
   refusalReply,
 } from "@chat/desktop-rpc";
@@ -594,23 +596,36 @@ void app.whenReady().then(async () => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
     restoreWindow();
   });
+  // Settings › This computer: what every chat may reach. The page is trusted to
+  // ask, never to name something else: each payload is held to the grant rules.
+  const always = { scope: "always" } as const;
+  const permissions = () =>
+    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.permissions(always)));
   ipcMain.handle(NETWORK_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.grants()));
+    return (await permissions()).network;
   });
   ipcMain.handle(NETWORK_REVOKE, async (event, payload: unknown) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    const input = payload && typeof payload === "object" ? (payload as { host?: unknown }) : null;
-    const valid = normalizeEgressGrant(input?.host, 443, false);
-    const grant = valid ? { host: valid.host } : null;
-    if (!grant || grant.host !== input?.host) throw new Error("Invalid network permission.");
+    const input =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const grant = normalizeEgressGrant(input.host, input.port, input.privateNetwork === true);
+    if (!grant || grant.host !== input.host) throw new Error("Invalid network permission.");
     await runtime.runPromise(
-      Effect.flatMap(Sandbox, (sandbox) =>
-        sandbox.revokeNetwork(
-          { scope: "always" },
-          { host: grant.host, port: 443, privateNetwork: false },
-        ),
-      ),
+      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(always, grant)),
+    );
+  });
+  ipcMain.handle(PATHS_LIST, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    return (await permissions()).paths;
+  });
+  ipcMain.handle(PATHS_REVOKE, async (event, payload: unknown) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    const path =
+      payload && typeof payload === "object" ? (payload as { path?: unknown }).path : null;
+    if (typeof path !== "string") throw new Error("Invalid path permission.");
+    await runtime.runPromise(
+      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokePath(always, path)),
     );
   });
   registerBrowserIpc({

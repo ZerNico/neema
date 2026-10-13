@@ -33,42 +33,65 @@ describe("ComputerPage", () => {
     expect(screen.getByText("Only in neema Desktop")).toBeInTheDocument();
   });
 
-  it("lists the websites Work can connect to and removes one only after confirming", async () => {
+  const desktop = (overrides: Record<string, unknown> = {}) => {
+    const network = {
+      list: vi.fn().mockResolvedValue([]),
+      revoke: vi.fn().mockResolvedValue(undefined),
+      listPaths: vi.fn().mockResolvedValue([]),
+      revokePath: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    };
+    Reflect.set(globalThis, "__chatDesktop", { network });
+    return network;
+  };
+
+  it("lists destinations with their ports and removes one only after confirming", async () => {
     const user = userEvent.setup();
-    const list = vi
-      .fn()
-      .mockResolvedValue([{ host: "example.com" }, { host: "other.example.com" }]);
-    const revoke = vi.fn().mockResolvedValue(undefined);
-    Reflect.set(globalThis, "__chatDesktop", { network: { list, revoke } });
+    const ssh = { host: "github.com", port: 22, privateNetwork: false };
+    const internal = { host: "git.internal", port: 443, privateNetwork: true };
+    const network = desktop({ list: vi.fn().mockResolvedValue([ssh, internal]) });
     renderPage();
 
-    expect(await screen.findByText("example.com")).toBeInTheDocument();
+    expect(await screen.findByText("github.com:22")).toBeInTheDocument();
+    expect(screen.getByText("git.internal:443 (private network)")).toBeInTheDocument();
     expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
       "This computer",
-      "Websites Work can connect to",
+      "Where commands can connect",
+      "What commands can read",
     ]);
     await user.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Remove example.com?");
+    expect(dialog).toHaveTextContent("Remove github.com:22?");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(revoke).not.toHaveBeenCalled();
+    expect(network.revoke).not.toHaveBeenCalled();
 
     await user.click(screen.getAllByRole("button", { name: "Remove" })[1]!);
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }),
     );
-    await waitFor(() => expect(revoke).toHaveBeenCalledWith("other.example.com"));
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(network.revoke).toHaveBeenCalledWith(internal));
+    await waitFor(() => expect(network.list).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists readable paths and removes one", async () => {
+    const user = userEvent.setup();
+    const network = desktop({ listPaths: vi.fn().mockResolvedValue(["/opt/specs"]) });
+    renderPage();
+    expect(await screen.findByText("/opt/specs")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }),
+    );
+    await waitFor(() => expect(network.revokePath).toHaveBeenCalledWith("/opt/specs"));
   });
 
   it("shows loading, failure and an empty list as rows of the same card", async () => {
     const user = userEvent.setup();
-    const list = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
-    Reflect.set(globalThis, "__chatDesktop", { network: { list, revoke: vi.fn() } });
+    desktop({ list: vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]) });
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load this list.");
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("No websites yet.")).toBeInTheDocument();
+    expect(await screen.findAllByText("Nothing yet.")).toHaveLength(2);
   });
 });

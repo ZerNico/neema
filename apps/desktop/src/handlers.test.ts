@@ -35,7 +35,7 @@ import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import * as diff from "./diff.ts";
-import type { AnswerKey, EgressGrant, GrantTarget } from "./egress-grants.ts";
+import type { AnswerKey, ChatKey, EgressGrant, GrantTarget } from "./egress-grants.ts";
 import { Sandbox } from "./sandbox.ts";
 
 /**
@@ -59,6 +59,8 @@ let revealComplaint: string | null;
 const ORIGIN = "https://chat.test";
 let approvedNetwork: Array<{ target: GrantTarget; grant: EgressGrant }> = [];
 let keptAnswers: Array<{ origin: string; live: AnswerKey[] }> = [];
+let forgotten: ChatKey[] = [];
+const revokedPaths: Array<{ target: GrantTarget; path: string }> = [];
 
 const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
 const FRESH_CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
@@ -74,7 +76,16 @@ const stubSandbox = Layer.succeed(
   Sandbox.of({
     availability: () => Effect.succeed({ kind: "ready" as const }),
     setUp: () => Effect.succeed({ kind: "ready" as const }),
-    grants: () => Effect.succeed([]),
+    permissions: (target) =>
+      Effect.succeed(
+        target.scope === "always"
+          ? { network: [{ host: "github.com", port: 22, privateNetwork: false }], paths: [] }
+          : { network: [], paths: ["/opt/specs"] },
+      ),
+    forgetChat: (chat) =>
+      Effect.sync(() => {
+        forgotten.push(chat);
+      }),
     approveNetwork: (target, grant) =>
       Effect.sync(() => {
         approvedNetwork.push({ target, grant });
@@ -85,7 +96,10 @@ const stubSandbox = Layer.succeed(
         keptAnswers.push({ origin, live: [...live] });
       }),
     approvePath: (_target, path) => Effect.succeed(path),
-    revokePath: () => Effect.void,
+    revokePath: (target, path) =>
+      Effect.sync(() => {
+        revokedPaths.push({ target, path });
+      }),
     run: ({ command, cwd, allowWrite }) =>
       Effect.sync(() => {
         ran.push({ command, cwd, allowWrite: [...allowWrite] });
@@ -1392,6 +1406,42 @@ describe("network permission boundary", () => {
         handlers.requestNetworkAccess(ask({ host: "10.0.0.5", privateNetwork: true })),
       ),
     ).toMatchObject({ host: "10.0.0.5", privateNetwork: true });
+  });
+
+  it("lists a chat's own grants apart from those every chat has", async () => {
+    expect(
+      await Effect.runPromise(handlers.chatPermissions({ conversationId: CONVERSATION })),
+    ).toEqual({
+      chat: [{ kind: "path", path: "/opt/specs" }],
+      always: [{ kind: "network", host: "github.com", port: 22, privateNetwork: false }],
+    });
+  });
+
+  it("removes only from the chat's own grants", async () => {
+    await Effect.runPromise(
+      handlers.revokeChatPermission({
+        conversationId: CONVERSATION,
+        permission: { kind: "path", path: "/opt/specs" },
+      }),
+    );
+    expect(revokedPaths.at(-1)).toEqual({
+      target: { scope: "chat", chat: { origin: ORIGIN, conversationId: CONVERSATION } },
+      path: "/opt/specs",
+    });
+    expect(
+      await failureOf(
+        handlers.revokeChatPermission({
+          conversationId: CONVERSATION,
+          permission: { kind: "network", host: "Not Canonical", port: 443, privateNetwork: false },
+        }),
+      ),
+    ).toBe("failed");
+  });
+
+  it("forgets a chat's grants when its workspace is discarded for good", async () => {
+    const before = forgotten.length;
+    await Effect.runPromise(handlers.discardWorkspace({ conversationId: CONVERSATION }));
+    expect(forgotten.slice(before)).toEqual([{ origin: ORIGIN, conversationId: CONVERSATION }]);
   });
 
   it("ends the answers the page no longer lists as running", async () => {

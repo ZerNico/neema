@@ -9,6 +9,12 @@ import { Composer } from "./composer.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import type { ConversationMode } from "../schema.ts";
 
+const noAccess = {
+  queryKey: ["desktop-chat-permissions", "test"],
+  load: async () => ({ chat: [], always: [] }),
+  revoke: async () => {},
+};
+
 vi.mock("../server/functions.ts", () => ({
   listChatModels: vi.fn(),
   listConversations: vi.fn(),
@@ -64,6 +70,7 @@ const folderState = () =>
         choose: bridge.choose,
         detach: vi.fn(),
         setUpSandbox: vi.fn(),
+        access: noAccess,
       }
     : null;
 
@@ -165,6 +172,7 @@ describe("work mode", () => {
         refusal: null,
         refresh: () => {},
         setUpSandbox: () => {},
+        access: noAccess,
         choose: () =>
           setStatus({
             folders: [{ name: "site", path: "/home/user/site", alive: true }],

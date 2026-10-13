@@ -15,15 +15,11 @@ import {
   type PlatformSupport,
 } from "@microsoft/mxc-sdk/v1";
 import { Context, Duration, Effect, Layer } from "effect";
-import {
-  DesktopError,
-  LIMITS,
-  type NetworkGrant,
-  type SandboxAvailability,
-} from "@chat/desktop-rpc";
+import { DesktopError, LIMITS, type SandboxAvailability } from "@chat/desktop-rpc";
 import {
   loadEgressGrants,
   type AnswerKey,
+  type ChatKey,
   type EgressGrant,
   type EgressGrants,
   type GrantTarget,
@@ -220,6 +216,11 @@ const shellCommand = (command: string, os: NodeJS.Platform) =>
     ? `cmd.exe /d /s /c "${command}"`
     : `/bin/sh -c '${command.replaceAll("'", "'\\''")}'`;
 
+export interface Permissions {
+  readonly network: readonly EgressGrant[];
+  readonly paths: readonly string[];
+}
+
 export interface SandboxContext {
   readonly origin: string;
   readonly conversationId: string;
@@ -269,8 +270,10 @@ export class Sandbox extends Context.Service<
     /** Nothing to install: re-reports availability. */
     setUp(): Effect.Effect<SandboxAvailability>;
     run(input: SandboxRun): Effect.Effect<SandboxResult, DesktopError>;
-    /** Websites allowed for every chat, as Settings lists them. */
-    grants(): Effect.Effect<readonly NetworkGrant[]>;
+    /** What one scope allows, for Settings (always) and a chat's own list. */
+    permissions(target: GrantTarget): Effect.Effect<Permissions>;
+    /** A chat is gone for good: its grants, and its answers', go too. */
+    forgetChat(chat: ChatKey): Effect.Effect<void>;
     /** Records approved access. The grant must already be canonical. */
     approveNetwork(target: GrantTarget, grant: EgressGrant): Effect.Effect<void, DesktopError>;
     /** Removes access and closes the tunnels it allowed. */
@@ -467,7 +470,6 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         };
       });
 
-    const always = { scope: "always" } as const;
     const changeNetwork = (
       target: GrantTarget,
       grant: EgressGrant,
@@ -490,14 +492,16 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       availability,
       setUp: availability,
       run,
-      grants: () =>
-        Effect.sync(
-          () =>
-            grants
-              ?.list(always)
-              .filter((grant) => grant.port === 443 && !grant.privateNetwork)
-              .map(({ host }) => ({ host })) ?? [],
-        ),
+      permissions: (target) =>
+        Effect.sync(() => ({
+          network: grants?.list(target) ?? [],
+          paths: dependencies.paths?.list(target) ?? [],
+        })),
+      forgetChat: (chat) =>
+        Effect.promise(async () => {
+          for (const id of (await grants?.forgetChat(chat)) ?? []) proxy.regrant(id);
+          await dependencies.paths?.forgetChat(chat);
+        }),
       approveNetwork: (target, grant) => changeNetwork(target, grant, true),
       revokeNetwork: (target, grant) => changeNetwork(target, grant, false),
       keepAnswers: (origin, live) =>
