@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
-import { usageEvents, user } from "~/db/schema/index.ts";
+import { models, usageEvents, user } from "~/db/schema/index.ts";
 import type { CostSource } from "~/db/schema/analytics.ts";
 
 // PostgreSQL sums integer token columns as bigint. Keep that width in SQL,
@@ -14,6 +14,16 @@ const tokenTotal = (value: unknown): number => {
 };
 
 export type UsageEventRow = typeof usageEvents.$inferSelect;
+
+// A model can be deleted while its call runs. Linking under a row lock either
+// holds the model until this write commits or finds it gone and links nothing;
+// the saved name labels the row either way.
+export const liveModelId = (modelId: string | null) =>
+  modelId === null
+    ? null
+    : sql<
+        string | null
+      >`(select ${models.id} from ${models} where ${models.id} = ${modelId} for key share)`;
 
 export interface UsageEventInput {
   userId: string;
@@ -160,7 +170,7 @@ export class AnalyticsRepo extends Context.Service<
         record: Effect.fn("AnalyticsRepo.record")(function* (event) {
           yield* db
             .insert(usageEvents)
-            .values({ id: uuidv7(), ...event })
+            .values({ id: uuidv7(), ...event, modelId: liveModelId(event.modelId) })
             .pipe(Effect.orDie);
         }),
 

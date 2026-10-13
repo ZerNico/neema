@@ -1,3 +1,4 @@
+import { liveModelId } from "~/modules/analytics/server/repo.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
@@ -447,7 +448,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                             id,
                             userId: deps.userId,
                             kind: "compaction",
-                            modelId: model?.id ?? null,
+                            modelId: liveModelId(model?.id ?? null),
                             modelName: model?.displayName ?? deps.modelId,
                             conversationId: fence.conversationId,
                             messageId: fence.messageId,

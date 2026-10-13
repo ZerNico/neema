@@ -955,7 +955,7 @@ export class StreamEngine extends Context.Service<
               ledger: {
                 userId: input.userId,
                 kind: "chat",
-                modelId: model ? input.modelId : null,
+                modelId: input.modelId,
                 modelName: model?.displayName ?? input.modelId,
                 conversationId: input.conversationId,
                 messageId: input.messageId,
@@ -4791,7 +4791,7 @@ export class StreamEngine extends Context.Service<
                   ledger: {
                     userId: input.userId,
                     kind: "chat",
-                    modelId: null,
+                    modelId: input.modelId,
                     modelName: input.modelId,
                     conversationId: input.conversationId,
                     messageId: input.messageId,

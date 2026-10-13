@@ -1,4 +1,4 @@
-import type { UsageEventInput } from "~/modules/analytics/server/repo.ts";
+import { liveModelId, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
@@ -4003,7 +4003,13 @@ export class ChatRepo extends Context.Service<
                   completedAt: new Date(),
                 })
                 .where(eq(messages.id, input.messageId));
-              yield* tx.insert(usageEvents).values({ id: uuidv7(), ...input.ledger });
+              yield* tx
+                .insert(usageEvents)
+                .values({
+                  id: uuidv7(),
+                  ...input.ledger,
+                  modelId: liveModelId(input.ledger.modelId),
+                });
               yield* tx
                 .update(conversations)
                 .set({ lastMessageAt: new Date() })
@@ -4031,7 +4037,11 @@ export class ChatRepo extends Context.Service<
                 // Terminal state and accounting must either both commit or both roll back.
                 yield* tx
                   .insert(usageEvents)
-                  .values({ id: uuidv7(), ...input.ledger })
+                  .values({
+                    id: uuidv7(),
+                    ...input.ledger,
+                    modelId: liveModelId(input.ledger.modelId),
+                  })
                   .pipe(Effect.orDie);
                 yield* tx
                   .update(conversations)

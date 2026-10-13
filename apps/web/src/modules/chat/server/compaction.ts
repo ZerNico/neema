@@ -636,7 +636,7 @@ const recordCompactionUsage = Effect.fn("chat.recordCompactionUsage")(function* 
   yield* deps.analytics.record({
     userId: input.userId,
     kind: "compaction",
-    modelId: model ? input.modelId : null,
+    modelId: input.modelId,
     modelName: model?.displayName ?? input.modelId,
     conversationId: input.conversationId,
     messageId: input.messageId,

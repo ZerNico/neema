@@ -364,7 +364,7 @@ export const modelReader =
                 return deps.analytics.record({
                   userId: owner,
                   kind: "ocr",
-                  modelId: model ? deps.modelId : null,
+                  modelId: deps.modelId,
                   modelName: model?.displayName ?? deps.modelId,
                   status: "complete",
                   inputTokens: totals.inputTokens,

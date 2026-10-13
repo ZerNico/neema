@@ -1,4 +1,5 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
+import { liveModelId } from "~/modules/analytics/server/repo.ts";
 import { and, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -7,7 +8,6 @@ import {
   messageCompactionEvents,
   messages,
   messageToolCalls,
-  models,
   researchRuns,
   researchTasks,
   researchCalls,
@@ -165,7 +165,7 @@ export const createResearchStore = (db: Db["Service"]) => {
           id: call.id,
           userId: run.userId,
           kind: "compaction",
-          modelId: null,
+          modelId: liveModelId(run.modelId),
           modelName: run.modelName,
           conversationId: run.conversationId,
           messageId: run.messageId,
@@ -240,18 +240,13 @@ export const createResearchStore = (db: Db["Service"]) => {
           .where(eq(messageToolCalls.id, run.toolCallId))
           .pipe(Effect.orDie);
     }
-    const existingModel = (yield* tx
-      .select({ id: models.id })
-      .from(models)
-      .where(eq(models.id, run.modelId))
-      .pipe(Effect.orDie))[0];
     yield* tx
       .insert(usageEvents)
       .values({
         id: run.id,
         userId: run.userId,
         kind: "chat",
-        modelId: existingModel?.id ?? null,
+        modelId: liveModelId(run.modelId),
         modelName: run.modelName,
         conversationId: run.conversationId,
         messageId: run.messageId,

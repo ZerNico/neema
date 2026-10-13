@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
+import { Client } from "pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
@@ -386,6 +387,60 @@ describe("usage ledger capture", () => {
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({ modelId: null, modelName: result.modelName });
   }, 60_000);
+
+  it("links no model when its deletion commits while the row waits to be written", async () => {
+    const { userId, model } = await run(
+      Effect.gen(function* () {
+        return { userId: yield* makeUser(), model: yield* makeModel() };
+      }),
+    );
+    const admin = new Client({ connectionString: database.url });
+    const observer = new Client({ connectionString: database.url });
+    await admin.connect();
+    await observer.connect();
+    try {
+      await admin.query("begin");
+      await admin.query("delete from models where id = $1", [model.id]);
+      const { rows } = await admin.query<{ pid: number }>("select pg_backend_pid() as pid");
+      const messageId = uuidv7();
+      const recorded = run(
+        Effect.gen(function* () {
+          const analytics = yield* AnalyticsRepo;
+          yield* analytics.record({
+            userId,
+            kind: "chat",
+            modelId: model.id,
+            modelName: model.displayName,
+            messageId,
+            status: "complete",
+            inputTokens: 1,
+            outputTokens: 1,
+            cachedInputTokens: 0,
+            cacheWriteTokens: null,
+            reasoningTokens: 0,
+            cost: null,
+            costSource: null,
+          });
+        }),
+      );
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop
+        const blocked = await observer.query(
+          "select 1 from pg_stat_activity where datname = current_database() and $1::int = any(pg_blocking_pids(pid))",
+          [rows[0]!.pid],
+        );
+        if (blocked.rows.length > 0) break;
+      }
+      await admin.query("commit");
+      await recorded;
+      const events = await run(eventsForMessage(messageId));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ modelId: null, modelName: model.displayName });
+    } finally {
+      await admin.end();
+      await observer.end();
+    }
+  });
 
   it("records title generations as their own kind", async () => {
     finishMetadata = undefined;

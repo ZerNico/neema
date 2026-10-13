@@ -154,7 +154,7 @@ const recordTitleUsage = Effect.fn("chat.recordTitleUsage")(function* (
   yield* deps.analytics.record({
     userId: input.userId,
     kind: "title",
-    modelId: model ? modelId : null,
+    modelId,
     modelName: model?.displayName ?? modelId,
     conversationId: input.conversationId,
     status: "complete",
