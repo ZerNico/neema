@@ -38,7 +38,7 @@ import {
 } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime, Result } from "effect";
 import {
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
@@ -47,6 +47,9 @@ import {
   PATHS_REVOKE,
   LOCAL_GET,
   LOCAL_REVOKE,
+  AGENT_GET,
+  AGENT_CHOOSE,
+  type AgentChoiceReply,
   makeDesktopResponder,
   refusalReply,
 } from "@chat/desktop-rpc";
@@ -65,7 +68,7 @@ import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
 import { networkGrantsDirectory, normalizeEgressGrant } from "./egress-grants.ts";
-import { Sandbox } from "./sandbox.ts";
+import { Sandbox, type AgentChange } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import {
   SIGN_IN_SCHEME,
@@ -137,6 +140,30 @@ let tray: Tray | undefined;
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
+/** The app's own question before the SSH agent changes: the page asking is the server's. */
+const confirmAgent = async (change: AgentChange) => {
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: ["Cancel", change.kind === "use" ? "Use this agent" : "Use the default"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Change the SSH agent?",
+    message:
+      change.kind === "use"
+        ? `Sign in with the keys in ${change.socket}?`
+        : change.fallback
+          ? `Sign in with the keys in ${change.fallback}?`
+          : "Stop signing in with a chosen agent?",
+    detail:
+      change.kind === "use"
+        ? "Work chats you allow to sign in with SSH will use this agent. Only choose a socket your own agent made."
+        : change.fallback
+          ? "Work chats you allow to sign in with SSH will use the agent SSH_AUTH_SOCK names."
+          : "No other agent was found, so commands won’t sign in with SSH.",
+  });
+  return response === 1;
+};
+
 const runExecution = (tag: string, payload: unknown, signal: AbortSignal) =>
   runtime.runPromise(respond(tag, payload), { signal });
 // Replaced on a server switch: a disposed instance refuses every later call.
@@ -626,6 +653,26 @@ void app.whenReady().then(async () => {
     await runtime.runPromise(
       Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeCapability(always, "local-services")),
     );
+  });
+  ipcMain.handle(AGENT_GET, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    return runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.agentSetting()));
+  });
+  // The page only asks: a socket must answer as an agent, and the person confirms here, also
+  // before going back to the default, which may hold other keys.
+  ipcMain.handle(AGENT_CHOOSE, async (event, payload: unknown): Promise<AgentChoiceReply> => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    const socket =
+      payload && typeof payload === "object" ? (payload as { socket?: unknown }).socket : null;
+    if (socket !== null && typeof socket !== "string") throw new Error("Invalid agent socket.");
+    const outcome = await runtime.runPromise(
+      Effect.result(
+        Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket, confirmAgent)),
+      ),
+    );
+    return Result.isSuccess(outcome)
+      ? { ok: true, changed: outcome.success }
+      : { ok: false, message: outcome.failure.message };
   });
   ipcMain.handle(PATHS_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

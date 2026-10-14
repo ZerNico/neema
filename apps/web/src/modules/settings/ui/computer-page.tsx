@@ -14,6 +14,7 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { SshAgentSetting } from "./ssh-agent-setting.tsx";
 
 const subscribeToNothing = () => () => {};
 
@@ -174,6 +175,7 @@ export function ComputerPage() {
           />
         </Section>
       ) : null}
+      {network ? <SshAgentSetting network={network} /> : null}
       {network ? (
         <Section
           title="What commands can read"

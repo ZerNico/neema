@@ -110,4 +110,97 @@ describe("ComputerPage", () => {
     expect(await screen.findAllByText("Nothing yet.")).toHaveLength(2);
     expect(screen.getByText("Asked in each chat.")).toBeInTheDocument();
   });
+  it("names the agent in use and asks the app to use another socket or the default", async () => {
+    const user = userEvent.setup();
+    const fallback = {
+      chosen: null,
+      chosenFound: false,
+      fallback: "/tmp/launchd/Listeners",
+      fallbackFrom: "environment",
+      choosable: true,
+    };
+    const chosen = { ...fallback, chosen: "/Users/me/op/agent.sock", chosenFound: true };
+    const chooseAgent = vi.fn().mockResolvedValue({ ok: true, changed: true });
+    desktop({
+      agent: vi.fn().mockResolvedValueOnce(fallback).mockResolvedValue(chosen),
+      chooseAgent,
+    });
+    renderPage();
+
+    expect(await screen.findByText("/tmp/launchd/Listeners")).toBeInTheDocument();
+    expect(screen.getByText("From SSH_AUTH_SOCK")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Agent socket"), "/Users/me/op/agent.sock");
+    await user.click(screen.getByRole("button", { name: "Use" }));
+    expect(chooseAgent).toHaveBeenCalledWith("/Users/me/op/agent.sock");
+    expect(await screen.findByText("/Users/me/op/agent.sock")).toBeInTheDocument();
+    expect(screen.queryByText("From SSH_AUTH_SOCK")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use default" }));
+    expect(chooseAgent).toHaveBeenLastCalledWith(null);
+  });
+
+  it("says why the app refused a socket, and nothing when the person cancelled", async () => {
+    const user = userEvent.setup();
+    const { toast } = await import("sonner");
+    vi.mocked(toast.error).mockClear();
+    const chooseAgent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        message: "/x didn’t answer as an SSH agent. Is it running?",
+      })
+      .mockResolvedValueOnce({ ok: true, changed: false });
+    desktop({
+      agent: vi.fn().mockResolvedValue({
+        chosen: null,
+        chosenFound: false,
+        fallback: null,
+        fallbackFrom: null,
+        choosable: true,
+      }),
+      chooseAgent,
+    });
+    renderPage();
+
+    const input = await screen.findByLabelText("Agent socket");
+    await user.type(input, "/x");
+    await user.click(screen.getByRole("button", { name: "Use" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(vi.mocked(toast.error).mock.calls[0])).toContain("didn’t answer");
+    await user.click(screen.getByRole("button", { name: "Use" }));
+    await waitFor(() => expect(chooseAgent).toHaveBeenCalledTimes(2));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    // Declined in the app's dialog: nothing changed, the path stays to edit.
+    expect(input).toHaveValue("/x");
+  });
+
+  it("shows a chosen agent that has gone, and Windows' own agent with nothing to name", async () => {
+    desktop({
+      agent: vi.fn().mockResolvedValue({
+        chosen: "/Users/me/op/agent.sock",
+        chosenFound: false,
+        fallback: null,
+        fallbackFrom: null,
+        choosable: true,
+      }),
+      chooseAgent: vi.fn(),
+    });
+    const { unmount } = renderPage();
+    expect(await screen.findByText("Not running")).toBeInTheDocument();
+    unmount();
+
+    desktop({
+      agent: vi.fn().mockResolvedValue({
+        chosen: null,
+        chosenFound: false,
+        fallback: "\\\\.\\pipe\\openssh-ssh-agent",
+        fallbackFrom: "windows",
+        choosable: false,
+      }),
+      chooseAgent: vi.fn(),
+    });
+    renderPage();
+    expect(await screen.findByText("Windows’ own agent")).toBeInTheDocument();
+    expect(screen.queryByText("From SSH_AUTH_SOCK")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent socket")).not.toBeInTheDocument();
+  });
 });

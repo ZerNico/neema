@@ -14,6 +14,8 @@ export const PATHS_LIST = "chat-desktop:paths-list" as const;
 export const PATHS_REVOKE = "chat-desktop:paths-revoke" as const;
 export const LOCAL_GET = "chat-desktop:local-get" as const;
 export const LOCAL_REVOKE = "chat-desktop:local-revoke" as const;
+export const AGENT_GET = "chat-desktop:agent-get" as const;
+export const AGENT_CHOOSE = "chat-desktop:agent-choose" as const;
 
 /** The SSH agent commands sign in with: the socket chosen, and the one used when none is. */
 export interface AgentSetting {
@@ -28,6 +30,11 @@ export interface AgentSetting {
   readonly choosable: boolean;
 }
 
+/** The outcome of choosing: changed, declined in the app's dialog, or refused with a reason. */
+export type AgentChoiceReply =
+  | { readonly ok: true; readonly changed: boolean }
+  | { readonly ok: false; readonly message: string };
+
 export interface DesktopNetwork {
   list(): Promise<NetworkGrant[]>;
   revoke(grant: NetworkGrant): Promise<void>;
@@ -36,6 +43,10 @@ export interface DesktopNetwork {
   /** Whether every chat's commands may use local network services. */
   localAllowed(): Promise<boolean>;
   revokeLocal(): Promise<void>;
+  /** Absent in desktop builds that predate choosing an agent. */
+  agent?(): Promise<AgentSetting>;
+  /** Asks the app to use this socket (it confirms with its own dialog), or clears the choice. */
+  chooseAgent?(socket: string | null): Promise<AgentChoiceReply>;
 }
 
 export function readDesktopNetwork(): DesktopNetwork | null {
