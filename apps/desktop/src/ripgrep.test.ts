@@ -9,6 +9,7 @@ import {
   parseRipgrepSearchOutput,
   ripgrepAvailable,
   searchWithRipgrep,
+  findRipgrep,
 } from "./ripgrep.ts";
 
 describe("parseRipgrepSearchOutput", () => {
@@ -68,4 +69,20 @@ describe("ripgrep failures", async () => {
       expect(hits.filesSearched).toBeGreaterThan(0);
     },
   );
+});
+
+describe("findRipgrep", () => {
+  it("takes rg only from absolute PATH entries, never the folder being searched", async () => {
+    const present = new Set(["/opt/rg/bin/rg", "bin/rg"]);
+    const exists = async (file: string) => present.has(file);
+    expect(await findRipgrep("bin:.:/opt/rg/bin", exists, "darwin")).toBe("/opt/rg/bin/rg");
+    expect(await findRipgrep(".:bin", exists, "darwin")).toBeNull();
+    expect(
+      await findRipgrep(
+        ".;C:\\Tools",
+        async (file) => file.endsWith("Tools/rg.exe") || file.endsWith("Tools\\rg.exe"),
+        "win32",
+      ),
+    ).toMatch(/rg\.exe$/);
+  });
 });

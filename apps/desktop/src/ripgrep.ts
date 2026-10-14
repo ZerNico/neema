@@ -1,3 +1,5 @@
+import { access, constants } from "node:fs/promises";
+import { posix, win32 } from "node:path";
 import { Effect } from "effect";
 import { runOwnedProcess } from "./process.ts";
 import type { SearchMatch } from "@chat/desktop-rpc";
@@ -25,24 +27,52 @@ import { DesktopError, LIMITS } from "@chat/desktop-rpc";
 
 const OUTPUT_BYTES = 8 * 1024 * 1024;
 
-/** Resolved once per process; `rg` does not appear mid-session. */
-let available: Promise<boolean> | undefined;
-
-export const ripgrepAvailable = (): Promise<boolean> => {
-  available ??= Effect.runPromise(
-    runOwnedProcess({
-      program: "rg",
-      args: ["--version"],
-      cwd: process.cwd(),
-      env: process.env,
-      timeoutMs: 3_000,
-    }),
-  ).then(
-    (result) => result.code === 0,
-    () => false,
-  );
-  return available;
+/**
+ * rg's full path, from the absolute PATH entries only. Started by a bare name, Windows looks in
+ * the working directory first, which is the folder being searched: a file a command wrote there
+ * would run outside any container with the app's rights.
+ */
+export const findRipgrep = async (
+  path: string | undefined,
+  exists: (file: string) => Promise<boolean>,
+  os: NodeJS.Platform = process.platform,
+): Promise<string | null> => {
+  const paths = os === "win32" ? win32 : posix;
+  const name = os === "win32" ? "rg.exe" : "rg";
+  for (const directory of (path ?? "").split(paths.delimiter)) {
+    if (!directory || !paths.isAbsolute(directory)) continue;
+    const candidate = paths.join(directory, name);
+    if (await exists(candidate)) return candidate;
+  }
+  return null;
 };
+
+/** Resolved once per process; `rg` does not appear mid-session. */
+let program: Promise<string | null> | undefined;
+
+const ripgrep = () => {
+  program ??= findRipgrep(process.env.PATH, (file) =>
+    access(file, constants.X_OK).then(
+      () => true,
+      () => false,
+    ),
+  ).then(async (found) => {
+    if (!found) return null;
+    const version = await Effect.runPromise(
+      runOwnedProcess({
+        program: found,
+        args: ["--version"],
+        cwd: process.cwd(),
+        env: process.env,
+        timeoutMs: 3_000,
+      }),
+    ).catch(() => null);
+    return version?.code === 0 ? found : null;
+  });
+  return program;
+};
+
+export const ripgrepAvailable = (): Promise<boolean> => ripgrep().then((found) => found !== null);
 
 /**
  * `--no-config` first: a user's `RIPGREP_CONFIG_PATH` could add `--follow`
@@ -55,30 +85,31 @@ const RG_TREE = ["--no-config", "--hidden", "--no-require-git", "--glob", "!.git
 const RG_TIMEOUT_MS = 30_000;
 
 const rg = (args: readonly string[], cwd: string) =>
-  runOwnedProcess({
-    program: "rg",
-    args: [...args],
-    cwd,
-    env: process.env,
-    timeoutMs: RG_TIMEOUT_MS,
-    outputChars: OUTPUT_BYTES,
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.fail(
-        new DesktopError({ reason: "failed", message: `Could not run rg: ${String(cause)}` }),
+  Effect.gen(function* () {
+    const found = yield* Effect.promise(ripgrep);
+    if (!found)
+      return yield* new DesktopError({ reason: "failed", message: "rg is not available." });
+    const result = yield* runOwnedProcess({
+      program: found,
+      args: [...args],
+      cwd,
+      env: process.env,
+      timeoutMs: RG_TIMEOUT_MS,
+      outputChars: OUTPUT_BYTES,
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.fail(
+          new DesktopError({ reason: "failed", message: `Could not run rg: ${String(cause)}` }),
+        ),
       ),
-    ),
-    Effect.flatMap((result) =>
-      result.timedOut
-        ? Effect.fail(
-            new DesktopError({
-              reason: "timed-out",
-              message: `The search was still running after ${RG_TIMEOUT_MS / 1000}s and was stopped.`,
-            }),
-          )
-        : Effect.succeed(result),
-    ),
-  );
+    );
+    if (result.timedOut)
+      return yield* new DesktopError({
+        reason: "timed-out",
+        message: `The search was still running after ${RG_TIMEOUT_MS / 1000}s and was stopped.`,
+      });
+    return result;
+  });
 
 /**
  * rg exits 2 for any error, including one unreadable file in a tree that

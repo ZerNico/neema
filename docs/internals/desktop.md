@@ -596,7 +596,11 @@ the desktop host.
 
 Search uses installed ripgrep when available and the JavaScript walker
 otherwise; no additional native binary is bundled, and the handler picks the
-backend once per call. The fallback tests lines in a dedicated worker with a
+backend once per call. ripgrep runs outside any container, so it is started by the
+full path found in an absolute `PATH` entry, never by its bare name: Windows looks
+a bare name up in the working directory first, which is the folder searched, where a
+command may have written an `rg.exe`. Like the person's own shell, it trusts the
+folders on `PATH`. The fallback tests lines in a dedicated worker with a
 parent-owned 30-second deadline. Cancellation, failure and completion await
 that exact worker’s termination, so the content-search regexp’s backtracking
 cannot block Electron’s main thread. Its worker source is embedded in the main

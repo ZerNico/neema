@@ -6,7 +6,9 @@ import { DesktopError, LIMITS } from "@chat/desktop-rpc";
 export const terminateProcessTree = (pid: number): Promise<void> => {
   if (process.platform === "win32") {
     return new Promise((resolve, reject) => {
-      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], (error) => {
+      // By its full path: a bare name is looked up where a command may have written.
+      const taskkill = `${process.env.SYSTEMROOT ?? "C:\\Windows"}\\System32\\taskkill.exe`;
+      execFile(taskkill, ["/PID", String(pid), "/T", "/F"], (error) => {
         if (error) reject(error);
         else resolve();
       });
