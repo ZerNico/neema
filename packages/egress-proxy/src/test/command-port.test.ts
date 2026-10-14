@@ -70,3 +70,54 @@ test("closing the proxy closes every command's port", async () => {
   expect(error.code).toBe("ECONNREFUSED");
   await expect(f.proxy.issuePort(other)).rejects.toThrow("closed");
 });
+
+test("a local destination on a command's own port knows whether the token came along", async () => {
+  const seen: boolean[] = [];
+  const f = await fixture({
+    decide: () => ({ allowed: true, grantId: "agent" }),
+    local: (_context, _host, _port, proven) => {
+      seen.push(proven);
+      return proven ? undefined : null;
+    },
+  });
+  const { token, proxyUrl } = await f.proxy.issuePort(other);
+  // Anyone on this machine can reach the port; without the token the agent stays shut.
+  const stranger = await dial(proxyUrl);
+  await write(stranger.socket, request("ssh-agent.invalid:1"));
+  await response(stranger, 403, true);
+  // Refused, but not counted against the command whose port it is.
+  expect(f.onDenial).not.toHaveBeenCalled();
+  const bridge = await dial(proxyUrl);
+  await write(
+    bridge.socket,
+    request("example.com:443", `Basic ${Buffer.from(`cmd:${token}`).toString("base64")}`),
+  );
+  expect((await bridge.head()).status).toBe(200);
+  await f.peer();
+  // The stranger's request was judged unproven, the bridge's proven.
+  expect(seen[0]).toBe(false);
+  expect(seen.at(-1)).toBe(true);
+});
+
+test("a stranger asking a command's port for a local destination its chat refused is not counted", async () => {
+  const f = await fixture({
+    decide: (_context, host) =>
+      host === "ssh-agent.invalid"
+        ? { allowed: false, reason: "The chat has not allowed the agent" }
+        : { allowed: true, grantId: "g" },
+    local: (_context, host, _port, proven) =>
+      host === "ssh-agent.invalid" ? (proven ? undefined : null) : undefined,
+  });
+  const { proxyUrl } = await f.proxy.issuePort(other);
+  const stranger = await dial(proxyUrl);
+  await write(stranger.socket, request("ssh-agent.invalid:1"));
+  await response(stranger, 403, true);
+  // Nor by plain HTTP, which is refused on another path.
+  const plain = await dial(proxyUrl);
+  await write(
+    plain.socket,
+    "GET http://ssh-agent.invalid:1/ HTTP/1.1\r\nHost: ssh-agent.invalid:1\r\n\r\n",
+  );
+  await response(plain, 403, true);
+  expect(f.onDenial).not.toHaveBeenCalled();
+});

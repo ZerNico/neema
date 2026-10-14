@@ -43,14 +43,17 @@ export interface ProxyOptions {
   readonly interfaceAddresses?: () => ReadonlyArray<string>;
   /**
    * A destination the host serves itself, such as the SSH agent: returns a connector
-   * for a still-connecting socket, or undefined to resolve and dial as usual. Asked
-   * only after `decide` allowed the destination; the address guard does not apply.
+   * for a still-connecting socket, `null` to refuse it, or undefined to resolve and
+   * dial as usual. Asked only after `decide` allowed the destination; the address
+   * guard does not apply. `proven` is false on a command's own port when the client
+   * did not also present the command's token: anyone local can reach that port.
    */
   readonly local?: (
     context: CommandContext,
     host: string,
     port: number,
-  ) => (() => import("node:net").Socket) | undefined;
+    proven: boolean,
+  ) => (() => import("node:net").Socket) | null | undefined;
   /** Must return a socket that is still connecting; the proxy waits for its connect event. */
   readonly connect?: (address: string, port: number, family: 4 | 6) => import("node:net").Socket;
   /** Defaults to console. Receives only fixed diagnostics and validated numeric addresses. */

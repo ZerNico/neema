@@ -25,8 +25,13 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
 ## Destinations the host serves itself
 
 - `local` may answer an allowed destination with a connector of its own instead of a dial: the
-  desktop serves the SSH agent's pipe this way on Windows. `decide` still rules first, so a grant
-  id revokes it like any tunnel; the address guard does not apply, since nothing is resolved.
+  desktop serves the SSH agent this way. `decide` still rules first, so a grant id revokes it like
+  any tunnel; the address guard does not apply, since nothing is resolved. `local` learns whether
+  the connection presented the token, which on a command's own port it need not, and answers
+  `null` to refuse; the agent needs that proof, since anyone local can reach such a port. A refusal of
+  a local destination to a caller without that proof is answered but never reported against the
+  command. Other refusals on such a port are reported whoever asked, as the command's own tools
+  present no token there either, so another local user can add lines to its violations.
 
 ## One spelling, decided once, dialled as decided
 
