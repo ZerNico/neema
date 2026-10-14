@@ -33,6 +33,11 @@ const context = (key: { origin: string; conversationId: string }, attempt = "att
 const site = (host: string, port = 443) => ({ host, port, privateNetwork: false });
 
 describe("normalizeEgressGrant", () => {
+  it("never grants a .invalid name, where the agent's reserved destination lives", () => {
+    expect(normalizeEgressGrant("ssh-agent.invalid", 1, false)).toBeNull();
+    expect(normalizeEgressGrant("ssh-agent.invalid", 1, true)).toBeNull();
+  });
+
   it("accepts one canonical public name and port", () => {
     expect(normalizeEgressGrant("Example.COM.", 443, false)).toEqual(site("example.com"));
     expect(normalizeEgressGrant("github.com", 22, false)).toEqual(site("github.com", 22));

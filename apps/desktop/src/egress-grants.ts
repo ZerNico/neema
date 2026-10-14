@@ -89,6 +89,8 @@ export const normalizeEgressGrant = (
   if (canonical.kind === "name") {
     const labels = canonical.host.split(".");
     if (labels.length < 2 || /^\d+$/.test(labels.at(-1) ?? "")) return null;
+    // .invalid never resolves; the agent's reserved destination lives there.
+    if (labels.at(-1) === "invalid") return null;
     const privateName =
       canonical.host === "localhost" ||
       canonical.host.endsWith(".localhost") ||
