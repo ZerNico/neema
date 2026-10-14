@@ -24,6 +24,11 @@ export interface Denial {
   readonly host: string;
   readonly port: number;
   readonly reason: string;
+  /**
+   * What would let it through: a grant for this host and port (`decide` refused), one that also
+   * opts into private-network addresses (only such addresses were refused), or nothing.
+   */
+  readonly lift: "grant" | "private-network" | null;
 }
 
 export interface ProxyOptions {

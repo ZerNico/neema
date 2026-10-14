@@ -1,6 +1,6 @@
 import { isIP, type Socket } from "node:net";
-import type { GrantDecision, ProxyOptions } from "./index.ts";
-import { interfaceIdentities, preparedRefusal } from "./address-guard.ts";
+import type { Denial, GrantDecision, ProxyOptions } from "./index.ts";
+import { interfaceIdentities, preparedRefusal, PRIVATE_NETWORK } from "./address-guard.ts";
 import { type Identity, Tokens } from "./auth.ts";
 import { canonicalHost, parseTarget, plainHttpAuthority } from "./host.ts";
 import { RequestParser, type RequestHead } from "./parser.ts";
@@ -49,6 +49,18 @@ function checkedDecision(decision: GrantDecision): GrantDecision {
   }
   return snapshot;
 }
+
+/**
+ * A destination no grant opens: loopback and the guard's other fixed refusals whatever a grant
+ * allows, and names that only ever mean this machine or nothing (`localhost`, `.invalid`).
+ */
+const unliftable = (host: string, own: ReadonlySet<string>) => {
+  const canonical = canonicalHost(host);
+  if (!canonical.ok) return true;
+  if (canonical.kind === "name") return /(?:^|\.)(?:localhost|invalid)$/.test(canonical.host);
+  // The machine's own addresses are refused whatever a grant allows, like loopback.
+  return preparedRefusal(canonical.host, own, true) !== null;
+};
 
 export class Connection {
   identity: Identity | undefined;
@@ -127,7 +139,8 @@ export class Connection {
       }
       if (!next.allowed || refusal !== null) {
         if (this.phase === "tunnel") this.stop();
-        else this.deny(next.allowed ? `Address policy refused: ${refusal}` : (next.reason ?? "Grant removed"));
+        else if (!next.allowed) this.refuse(next.reason ?? "Grant removed");
+        else this.refuseAddresses([refusal ?? "Address policy refused"]);
         return;
       }
       this.decision = next;
@@ -246,7 +259,7 @@ export class Connection {
     }
     if (this.phase !== "headers" || !this.identity.active || this.client.destroyed) return;
     if (!decision.allowed) {
-      this.deny(decision.reason ?? "No grant for host:port");
+      this.refuse(decision.reason ?? "No grant for host:port");
       return;
     }
     this.decision = decision;
@@ -263,7 +276,7 @@ export class Connection {
     this.identity.reservedTunnels++;
     // A candidate the policy skipped makes the answer its refusal, even when time ran out.
     this.deadline.start(this.services.limits.establishMs, () => {
-      if (this.fallbackRefusals.size) this.deny(`Address policy refused: ${[...this.fallbackRefusals].toSorted().join(", ")}`);
+      if (this.fallbackRefusals.size) this.refuseAddresses(this.fallbackRefusals);
       else this.network("Establishment deadline exceeded");
     });
     this.bufferEarly(request.early);
@@ -359,7 +372,7 @@ export class Connection {
           survivors.push({ address: canonical.host, family: canonical.kind === "ipv4" ? 4 : 6 });
         }
       }
-      if (!survivors.length) this.deny(`Address policy refused: ${[...refused].toSorted().join(", ")}`);
+      if (!survivors.length) this.refuseAddresses(refused);
       else {
         // Should every survivor fail to connect, the answer is still the policy's refusal.
         for (const reason of refused) this.fallbackRefusals.add(reason);
@@ -376,7 +389,7 @@ export class Connection {
     if (!candidate) {
       // Exhausted fallback is 403 if any candidate was policy-refused, regardless of order.
       // Return 502 only when every fallback candidate failed at the network level.
-      if (this.fallbackRefusals.size) this.deny(`Address policy refused: ${[...this.fallbackRefusals].toSorted().join(", ")}`);
+      if (this.fallbackRefusals.size) this.refuseAddresses(this.fallbackRefusals);
       else this.network("Upstream connection failed");
       return;
     }
@@ -483,16 +496,49 @@ export class Connection {
     if (this.phase === "tunnel") this.idle.start(this.services.limits.idleMs, () => this.stop());
   }
 
+  /** Refused by `decide`: a grant for this host and port would allow it. */
+  private refuse(reason: string) {
+    const host = this.target?.host ?? "";
+    let own: ReadonlySet<string>;
+    try {
+      own = interfaceIdentities(this.services.interfaceAddresses());
+    } catch {
+      own = new Set();
+    }
+    this.deny(reason, host, this.target?.port ?? 0, false, unliftable(host, own) ? null : "grant");
+  }
+
+  /** Refused by the address guard: a private-network grant lifts it when an address was private. */
+  private refuseAddresses(reasons: Iterable<string>) {
+    const all = [...new Set(reasons)].toSorted();
+    // One usable address is enough: a private one makes a private-network grant the remedy.
+    const lift = all.includes(PRIVATE_NETWORK) ? "private-network" : null;
+    this.deny(
+      `Address policy refused: ${all.join(", ")}`,
+      this.target?.host ?? "",
+      this.target?.port ?? 0,
+      false,
+      lift,
+    );
+  }
+
   private deny(
     reason: string,
     host = this.target?.host ?? "",
     port = this.target?.port ?? 0,
     headOnly = false,
+    lift: Denial["lift"] = null,
   ) {
     if (!this.identity || this.phase === "closed" || this.phase === "responding") return;
     this.respond(403, reason, headOnly);
     try {
-      this.services.options.onDenial({ context: this.identity.context, host, port, reason });
+      this.services.options.onDenial({
+        context: this.identity.context,
+        host,
+        port,
+        reason,
+        lift,
+      });
     } catch {
       this.services.log("error", "Egress proxy: denial reporting failed");
     }

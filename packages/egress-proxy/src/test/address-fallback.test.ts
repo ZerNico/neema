@@ -66,5 +66,5 @@ test("a refused private address still answers when the public one beside it stay
   await dialled.promise;
   f.clock.advance(30_000);
   expect((await client.head()).status).toBe(403);
-  expect(f.onDenial.mock.calls[0]?.[0].reason).toContain("private network");
+  expect(f.onDenial.mock.calls[0]?.[0].lift).toBe("private-network");
 });

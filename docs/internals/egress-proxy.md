@@ -60,4 +60,8 @@ connection fails closed.
 - Tools that do not use an HTTP proxy cannot reach the network at all. Java ignores the proxy
   variables, so Gradle and Maven get their own proxy settings from the desktop.
 - A denial is a `403` with `x-egress-denied: 1`; a network failure is a `502`. When a candidate was
-  skipped by policy and nothing else got through, the answer is the denial.
+  skipped by policy and nothing else got through, the answer is the denial. A reported denial
+  says what would `lift` it: a grant when `decide` refused, a private-network grant when the
+  address guard refused a private address among them (one usable address is enough), or nothing (plain HTTP, any other address the
+  guard refuses, a limit, and a destination it would refuse whatever a grant allowed: loopback,
+  `localhost`, `.invalid`), so a caller can tell "ask for a grant" from a refusal no grant changes.

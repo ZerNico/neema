@@ -127,8 +127,14 @@ test("concurrent commands retain their own server/chat/attempt policy", async ()
   await response(bNo, 403, true);
   expect(f.denials).toEqual(
     expect.arrayContaining([
-      { context: CONTEXT, host: "b.example", port: 443, reason: expect.any(String) },
-      { context: B, host: "a.example", port: 443, reason: expect.any(String) },
+      {
+        context: CONTEXT,
+        host: "b.example",
+        port: 443,
+        reason: expect.any(String),
+        lift: "grant",
+      },
+      { context: B, host: "a.example", port: 443, reason: expect.any(String), lift: "grant" },
     ]),
   );
   expect(f.denials).toHaveLength(2);
@@ -273,7 +279,10 @@ for (const order of ["network then policy", "policy then network"] as const) {
     first.destroy(new Error("network refused"));
     expect((await response(client, 403, true)).body).toContain("private network");
     expect(f.onDenial).toHaveBeenCalledTimes(1);
-    expect(f.onDenial.mock.calls[0]?.[0].reason).toContain("private network");
+    expect(f.onDenial.mock.calls[0]?.[0]).toMatchObject({
+      reason: expect.stringContaining("private network"),
+      lift: "private-network",
+    });
     expect(f.connect).toHaveBeenCalledTimes(order === "network then policy" ? 1 : 2);
     expect(f.dials.some(({ address }) => address === "10.1.2.3")).toBe(false);
   });
@@ -301,9 +310,28 @@ test("private permission removed during a public IPv6 dial cannot admit a privat
   socket.destroy(new Error("Injected dial failure"));
   await response(client, 403, true);
   expect(f.onDenial).toHaveBeenCalledTimes(1);
-  expect(f.onDenial.mock.calls[0]?.[0].reason).toContain("private network");
+  expect(f.onDenial.mock.calls[0]?.[0]).toMatchObject({
+    reason: expect.stringContaining("private network"),
+    lift: "private-network",
+  });
   expect(f.connect).toHaveBeenCalledTimes(1);
   expect(f.resolve).toHaveBeenCalledTimes(1);
+});
+
+test("a private-network grant lifts a refusal when any address was private", async () => {
+  for (const [addresses, lift] of [
+    [["10.1.2.3", "192.168.1.9"], "private-network"],
+    [["10.1.2.3", "127.0.0.1"], "private-network"],
+    [["127.0.0.1", "169.254.1.1"], null],
+  ] as const) {
+    const f = await fixture({
+      decide: () => allow("ordinary", false),
+      resolve: async () => addresses.map((address) => ({ address, family: 4 as const })),
+    });
+    const client = await f.open();
+    await response(client, 403, true);
+    expect(f.onDenial.mock.calls[0]?.[0].lift).toBe(lift);
+  }
 });
 
 test("a regrant refusing the private candidate being dialed reports one denial", async () => {
@@ -353,4 +381,45 @@ test("revocation inside the connector closes the socket it returns", async () =>
   expect(client.transcript.length).toBe(0);
   expect(f.dials[0]?.socket.destroyed).toBe(true);
   expect(f.proxy.tunnels()).toEqual([]);
+});
+
+test("a grant revoked while the tunnel is still being set up is reported as liftable by a grant", async () => {
+  let granted = true;
+  const resolving = deferred<void>();
+  const lookup = deferred<Array<{ address: string; family: 4 }>>();
+  const f = await fixture({
+    decide: () => (granted ? allow("chat") : { allowed: false, reason: "Grant removed" }),
+    resolve: () => {
+      resolving.resolve();
+      return lookup.promise;
+    },
+  });
+  const client = await f.open();
+  await resolving.promise;
+  granted = false;
+  f.proxy.regrant("chat");
+  await response(client, 403, true);
+  // Asking for the grant again would let it through, so the denial must say so.
+  expect(f.denials).toEqual([
+    { context: CONTEXT, host: "example.com", port: 443, reason: "Grant removed", lift: "grant" },
+  ]);
+  lookup.resolve([{ address: PUBLIC, family: 4 }]);
+});
+
+test("a refused private address still answers when the public one beside it fails", async () => {
+  const f = await fixture({
+    decide: () => allow("ordinary", false),
+    resolve: async () => [
+      { address: "10.20.30.40", family: 4 },
+      { address: PUBLIC6, family: 6 },
+    ],
+    connect: () => {
+      const socket = new Socket();
+      queueMicrotask(() => socket.destroy(new Error("Injected dial failure")));
+      return socket;
+    },
+  });
+  const client = await f.open();
+  await response(client, 403, true);
+  expect(f.onDenial.mock.calls[0]?.[0].lift).toBe("private-network");
 });

@@ -79,6 +79,24 @@ test("a thrown decision callback is an internal fault, not a policy denial", asy
   expect(f.proxy.tunnels()).toEqual([]);
 });
 
+test("a refusal no grant could lift says so: loopback, localhost and .invalid", async () => {
+  for (const [target, lift] of [
+    ["localhost:2222", null],
+    ["dev.localhost:80", null],
+    ["127.0.0.1:8080", null],
+    ["[::1]:22", null],
+    ["foo.invalid:1", null],
+    // The machine's own address (the fixture's interface): refused whatever is granted.
+    ["192.0.2.10:3000", null],
+    ["10.1.2.3:22", "grant"],
+    ["example.com:443", "grant"],
+  ] as const) {
+    const f = await fixture({ decide: () => ({ allowed: false, reason: "No grant" }) });
+    await response(await f.open(target), 403, true);
+    expect([target, f.denials[0]?.lift]).toEqual([target, lift]);
+  }
+});
+
 test("a denial is reported exactly once with the complete command context and canonical authority", async () => {
   const f = await fixture({
     decide: () => ({ allowed: false, reason: "Host has no approved grant" }),
@@ -90,6 +108,7 @@ test("a denial is reported exactly once with the complete command context and ca
       host: "example.com",
       port: 8443,
       reason: "Host has no approved grant",
+      lift: "grant",
     },
   ]);
   expect(result.body).toContain("Host has no approved grant");

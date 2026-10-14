@@ -1,6 +1,9 @@
 import { canonicalHost } from "./host.ts";
 import { carriedIPv4, ipv6Words } from "./ip.ts";
 
+/** The one refusal a grant can lift, by opting its host into private-network addresses. */
+export const PRIVATE_NETWORK = "private network";
+
 const metadata4 = new Set(["100.100.100.200", "168.63.129.16", "192.0.0.192"]);
 const metadata6 = new Set([
   "fd20:ce::254",
@@ -41,7 +44,7 @@ function ipv4Refusal(address: string, privateNetwork: boolean): string | null {
       (a === 192 && b === 168) ||
       (a === 100 && b >= 64 && b <= 127))
   )
-    return "private network";
+    return PRIVATE_NETWORK;
   return null;
 }
 
@@ -85,7 +88,7 @@ export function preparedRefusal(
   if ((words[0] === 0xfd00 && words[1] === 0xec2) || metadata6.has(candidate.host))
     return "cloud metadata / platform endpoint";
   if (words[0] === 0x64 && words[1] === 0xff9b && words[2] === 1) return "local-use NAT64";
-  if (!privateNetwork && (words[0] & 0xfe00) === 0xfc00) return "private network";
+  if (!privateNetwork && (words[0] & 0xfe00) === 0xfc00) return PRIVATE_NETWORK;
   const carried = carriedIPv4(words);
   return carried ? ipv4Refusal(carried, privateNetwork) : null;
 }

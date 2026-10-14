@@ -97,7 +97,14 @@ test.each(plainTargets)(
     const result = await response(client, 403, true);
     expect(result.body).toMatch(/plain HTTP/i);
     expect(f.denials).toEqual([
-      { context: CONTEXT, host, port, reason: "Plain HTTP is not supported. Use CONNECT." },
+      {
+        context: CONTEXT,
+        host,
+        port,
+        reason: "Plain HTTP is not supported. Use CONNECT.",
+        // No grant could make plain HTTP work.
+        lift: null,
+      },
     ]);
     expect(f.decide).not.toHaveBeenCalled();
     expect(f.resolve).not.toHaveBeenCalled();
