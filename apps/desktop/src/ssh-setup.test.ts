@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createServer, type Socket } from "node:net";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { appBundle, findSsh, writeSshSetup } from "./ssh-setup.ts";
+import { appBundle, findSsh, userHostSettings, writeSshSetup } from "./ssh-setup.ts";
 
 const roots: string[] = [];
 const directory = async () => {
@@ -45,6 +45,22 @@ describe("appBundle", () => {
 });
 
 describe("writeSshSetup", () => {
+  it("never makes a command folder that is already gone", async () => {
+    const gone = join(await directory(), "neema-command-gone");
+    await expect(
+      writeSshSetup({
+        os: "darwin",
+        directory: gone,
+        ssh: "/usr/bin/ssh",
+        node: "/opt/neema/neema",
+        knownHosts: null,
+        userConfig: null,
+        relayAgent: false,
+      }),
+    ).rejects.toThrow("ENOENT");
+    await expect(stat(gone)).rejects.toThrow("ENOENT");
+  });
+
   it("writes a wrapper and a config that tunnel through the proxy and share nothing", async () => {
     const root = await directory();
     const knownHosts = join(root, "user_known_hosts");
@@ -55,7 +71,8 @@ describe("writeSshSetup", () => {
       ssh: "/usr/bin/ssh",
       node: "/Applications/neema.app/Contents/MacOS/neema",
       knownHosts,
-      agent: null,
+      userConfig: null,
+      relayAgent: false,
     });
     const config = await readFile(join(root, "ssh_config"), "utf8");
     expect(config).toContain(
@@ -67,7 +84,9 @@ describe("writeSshSetup", () => {
     expect(config).toContain("IdentityFile none");
     expect(await readFile(join(root, "known_hosts"), "utf8")).toContain("github.com");
     const wrapper = await readFile(join(setup.bin, "ssh"), "utf8");
-    expect(wrapper).toBe(`#!/bin/sh\nexec "/usr/bin/ssh" -F "${join(root, "ssh_config")}" "$@"\n`);
+    expect(wrapper).toBe(
+      `#!/bin/sh\nexec "/usr/bin/ssh" "-F" "${join(root, "ssh_config")}" "$@"\n`,
+    );
     expect(setup.wrapper).toBe(join(setup.bin, "ssh"));
     expect((await stat(join(setup.bin, "ssh"))).mode & 0o777).toBe(0o700);
     // The token never lands in a file.
@@ -84,14 +103,15 @@ describe("writeSshSetup", () => {
       ssh: "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
       node: "C:\\Program Files\\neema\\neema.exe",
       knownHosts: null,
-      agent: null,
+      userConfig: null,
+      relayAgent: false,
     });
     expect(setup.wrapper.endsWith("ssh.cmd")).toBe(true);
     const wrapper = await readFile(setup.wrapper, "utf8");
     expect(wrapper.split("\r\n")).toEqual([
       "@setlocal",
       "@set ELECTRON_RUN_AS_NODE=1",
-      `@"C:\\Windows\\System32\\OpenSSH\\ssh.exe" -F "${setup.bin.slice(0, -"bin".length)}ssh_config" %*`,
+      `@"C:\\Windows\\System32\\OpenSSH\\ssh.exe" "-F" "${setup.bin.slice(0, -"bin".length)}ssh_config" %*`,
       "@exit /b %ERRORLEVEL%",
       "",
     ]);
@@ -108,12 +128,12 @@ describe("writeSshSetup", () => {
       ssh: "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
       node: "C:\\Program Files\\neema\\neema.exe",
       knownHosts: null,
-      agent: null,
+      userConfig: null,
       relayAgent: true,
     });
     const bridge = join(root, "ssh-agent-bridge.cjs");
     expect((await readFile(setup.wrapper, "utf8")).split("\r\n")[2]).toBe(
-      `@"C:\\Program Files\\neema\\neema.exe" "${bridge}" "C:\\Windows\\System32\\OpenSSH\\ssh.exe" -F "${join(root, "ssh_config")}" %*`,
+      `@"C:\\Program Files\\neema\\neema.exe" "${bridge}" "C:\\Windows\\System32\\OpenSSH\\ssh.exe" "-F" "${join(root, "ssh_config")}" %*`,
     );
     expect(await readFile(join(root, "ssh_config"), "utf8")).toContain(
       "IdentityAgent SSH_AUTH_SOCK",
@@ -127,19 +147,173 @@ describe("writeSshSetup", () => {
     expect(checked.status).toBe(0);
   });
 
-  it("names the agent only when the chat allows it", async () => {
+  it("starts ssh, ssh-add and ssh-keygen under the agent bridge, never naming its socket", async () => {
     const root = await directory();
+    const tools = await directory();
+    for (const name of ["ssh", "ssh-add", "ssh-keygen"]) await writeFile(join(tools, name), "");
+    const setup = await writeSshSetup({
+      os: "darwin",
+      directory: root,
+      ssh: join(tools, "ssh"),
+      node: "/Applications/neema.app/Contents/MacOS/neema",
+      knownHosts: null,
+      userConfig: null,
+      relayAgent: true,
+    });
+    const bridge = join(root, "ssh-agent-bridge.cjs");
+    const run = `exec /usr/bin/env ELECTRON_RUN_AS_NODE=1 "/Applications/neema.app/Contents/MacOS/neema" "${bridge}"`;
+    expect(await readFile(setup.wrapper, "utf8")).toBe(
+      `#!/bin/sh\n${run} "${join(tools, "ssh")}" "-F" "${join(root, "ssh_config")}" "$@"\n`,
+    );
+    expect(setup.keygen).toBe(join(setup.bin, "ssh-keygen"));
+    expect(await readFile(join(setup.bin, "ssh-keygen"), "utf8")).toBe(
+      `#!/bin/sh\n${run} "${join(tools, "ssh-keygen")}" "$@"\n`,
+    );
+    expect(await readFile(join(setup.bin, "ssh-add"), "utf8")).toBe(
+      `#!/bin/sh\n${run} "${join(tools, "ssh-add")}" "$@"\n`,
+    );
+    const config = await readFile(join(root, "ssh_config"), "utf8");
+    expect(config).toContain("IdentityAgent SSH_AUTH_SOCK");
+    const checked = spawnSync(process.execPath, ["--check", bridge], { encoding: "utf8" });
+    expect(checked.status).toBe(0);
+  });
+
+  it("hands scp and sftp the wrapper, since they run ssh by its absolute path", async () => {
+    const root = await directory();
+    const tools = await directory();
+    for (const name of ["ssh", "scp", "sftp"]) await writeFile(join(tools, name), "");
+    const setup = await writeSshSetup({
+      os: "linux",
+      directory: root,
+      ssh: join(tools, "ssh"),
+      node: process.execPath,
+      knownHosts: null,
+      userConfig: null,
+      relayAgent: false,
+    });
+    for (const name of ["scp", "sftp"])
+      expect(await readFile(join(setup.bin, name), "utf8")).toBe(
+        `#!/bin/sh\nexec "${join(tools, name)}" "-S" "${setup.wrapper}" "$@"\n`,
+      );
+    // Without the agent there is no ssh-add wrapper to reach it through.
+    expect(await stat(join(setup.bin, "ssh-add")).catch(() => null)).toBeNull();
+  });
+
+  it("keeps the user's host aliases after the generated settings", async () => {
+    const root = await directory();
+    const userConfig = join(root, "user_config");
+    await writeFile(
+      userConfig,
+      [
+        "Host work-github",
+        "  HostName github.com",
+        "  User git",
+        "  IdentityFile ~/.ssh/work",
+        "  ProxyCommand nc %h %p",
+        'Match exec "touch /tmp/x"',
+        "  HostName evil.example",
+        "Host db",
+        "  Port=2222",
+        "Include ~/.ssh/more",
+      ].join("\n"),
+    );
     await writeSshSetup({
       os: "darwin",
       directory: root,
       ssh: "/usr/bin/ssh",
       node: process.execPath,
       knownHosts: null,
-      agent: "/tmp/agent.sock",
+      userConfig,
+      relayAgent: false,
     });
-    expect(await readFile(join(root, "ssh_config"), "utf8")).toContain(
-      'IdentityAgent "/tmp/agent.sock"',
+    const config = await readFile(join(root, "ssh_config"), "utf8");
+    const [generated = "", user = ""] = config.trimEnd().split("\n\n");
+    expect(generated).toContain("ProxyCommand /usr/bin/env");
+    expect(user).toBe("Host work-github\n  HostName github.com\n  User git\nHost db\n  Port 2222");
+  });
+});
+
+describe("userHostSettings", () => {
+  it("drops Match blocks, keys, proxies and includes", () => {
+    expect(
+      userHostSettings(
+        "# comment\nHost a\n  IdentityAgent ~/x.sock\n  ProxyJump bastion\n  hostname A.example\nMatch host a\n  User root\n",
+      ),
+    ).toBe("Host a\n  hostname A.example");
+  });
+});
+
+describe("the agent bridge", () => {
+  it("names a socket of its own to the program and carries it through the proxy", async () => {
+    const proxy = await fakeProxy("200 Connection Established");
+    // Socket paths are limited to 104 bytes on macOS; command folders sit in a short root too.
+    const root = await realpath(await mkdtemp("/tmp/chat-bridge-"));
+    roots.push(root);
+    await writeSshSetup({
+      os: "darwin",
+      directory: root,
+      ssh: "/usr/bin/ssh",
+      node: process.execPath,
+      knownHosts: null,
+      userConfig: null,
+      relayAgent: true,
+    });
+    // Stands in for ssh-add: talks to whatever SSH_AUTH_SOCK names and prints the answer.
+    const client = join(root, "client.cjs");
+    await writeFile(
+      client,
+      `const s = require("node:net").connect(process.env.SSH_AUTH_SOCK, () => s.write("ping"));
+       s.once("data", (d) => { console.log(process.env.SSH_AUTH_SOCK.startsWith(${JSON.stringify(root)}), String(d)); s.destroy(); });`,
     );
+    const child = spawn(
+      process.execPath,
+      [join(root, "ssh-agent-bridge.cjs"), process.execPath, client],
+      { env: { HTTPS_PROXY: `http://cmd:secret-token@127.0.0.1:${proxy.port}` } },
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+    expect(Buffer.concat(stderr).toString()).toBe("");
+    expect(code).toBe(0);
+    // The fake proxy echoes, so the program's request comes back through the bridge.
+    expect(Buffer.concat(stdout).toString().trim()).toBe("true ping");
+    expect(proxy.heads[0]).toContain("CONNECT ssh-agent.invalid:1 HTTP/1.1");
+    await proxy.close();
+  });
+
+  it("closes the program's agent connection when the proxy hangs up before answering", async () => {
+    const server = createServer((socket: Socket) => socket.once("data", () => socket.destroy()));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const root = await realpath(await mkdtemp("/tmp/chat-bridge-"));
+    roots.push(root);
+    await writeSshSetup({
+      os: "darwin",
+      directory: root,
+      ssh: "/usr/bin/ssh",
+      node: process.execPath,
+      knownHosts: null,
+      userConfig: null,
+      relayAgent: true,
+    });
+    const client = join(root, "client.cjs");
+    await writeFile(
+      client,
+      `const s = require("node:net").connect(process.env.SSH_AUTH_SOCK, () => s.write("ping"));
+       s.on("close", () => console.log("closed"));`,
+    );
+    const child = spawn(
+      process.execPath,
+      [join(root, "ssh-agent-bridge.cjs"), process.execPath, client],
+      { env: { HTTPS_PROXY: `http://cmd:secret-token@127.0.0.1:${port}` } },
+    );
+    const stdout: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    await new Promise((resolve) => child.on("close", resolve));
+    expect(Buffer.concat(stdout).toString().trim()).toBe("closed");
+    await new Promise((resolve) => server.close(resolve));
   });
 });
 
@@ -180,7 +354,8 @@ const runTunnel = async (proxyPort: number, input: string) => {
     ssh: "/usr/bin/ssh",
     node: process.execPath,
     knownHosts: null,
-    agent: null,
+    userConfig: null,
+    relayAgent: false,
   });
   const child = spawn(process.execPath, [join(root, "ssh-tunnel.cjs"), "github.com", "22"], {
     env: { HTTPS_PROXY: `http://cmd:secret-token@127.0.0.1:${proxyPort}` },

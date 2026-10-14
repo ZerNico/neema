@@ -52,17 +52,25 @@ export const commandEnvironment = (
 ): Record<string, string> => {
   const path = os === "win32" ? win32 : posix;
   const cache = path.join(cwd, ".cache");
-  const inherited = Object.entries(parent).filter(
-    (entry): entry is [string, string] =>
-      entry[1] !== undefined && CHILD_ENVIRONMENT.has(entry[0].toUpperCase()),
-  );
+  const inherited = Object.entries(parent)
+    .filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && CHILD_ENVIRONMENT.has(entry[0].toUpperCase()),
+    )
+    // Windows spells it Path; one PATH key keeps a later PATH from shadowing it with a second.
+    .map(([name, value]): [string, string] =>
+      os === "win32" && name.toUpperCase() === "PATH" ? ["PATH", value] : [name, value],
+    );
   return {
     ...Object.fromEntries(inherited),
+    // MXC gives a Windows container its own TEMP and TMP, where files OpenSSH writes are
+    // unreadable to git (signing fails); Git for Windows reads TMPDIR first.
     TEMP: cwd,
     TMP: cwd,
-    // MSYS tools on Windows misread a POSIX TMPDIR.
-    ...(os === "win32" ? {} : { TMPDIR: cwd }),
+    TMPDIR: cwd,
     XDG_CACHE_HOME: cache,
+    // clang and swiftc otherwise keep modules in macOS's per-user cache, which is read-only.
+    CLANG_MODULE_CACHE_PATH: path.join(cache, "clang"),
     npm_config_cache: path.join(cache, "npm"),
     PIP_CACHE_DIR: path.join(cache, "pip"),
     UV_CACHE_DIR: path.join(cache, "uv"),
@@ -115,36 +123,51 @@ export const mavenSettings = (proxyUrl: string, repository: string) => {
 };
 
 /**
- * Java ignores the proxy variables. Gradle takes the proxy from GRADLE_OPTS,
- * which it passes on to its daemon without printing; JAVA_TOOL_OPTIONS would
- * print the token on every JVM start, so it carries only the IPv4 switch
- * Seatbelt's loopback rules need. Maven gets its settings file by path.
+ * The JVM's proxy settings, token included. They go to Gradle in an argument
+ * file named in GRADLE_OPTS: as plain options they would sit in the JVM's
+ * process arguments, which other processes can list.
+ */
+export const jvmProxyArguments = (proxyUrl: string) => {
+  const url = new URL(proxyUrl);
+  return [
+    ...["https", "http"].flatMap((scheme) => [
+      `-D${scheme}.proxyHost=${url.hostname}`,
+      `-D${scheme}.proxyPort=${url.port}`,
+      // A command's own port (Linux) takes no credentials.
+      ...(url.username
+        ? [
+            `-D${scheme}.proxyUser=${decodeURIComponent(url.username)}`,
+            `-D${scheme}.proxyPassword=${decodeURIComponent(url.password)}`,
+          ]
+        : []),
+    ]),
+    // Java disables Basic for proxy tunnels by default; the proxy only speaks Basic.
+    "-Djdk.http.auth.tunneling.disabledSchemes=",
+  ];
+};
+
+/**
+ * Java ignores the proxy variables. Gradle reads its proxy from the argument
+ * file and passes it on to its daemon; JAVA_TOOL_OPTIONS would print it on
+ * every JVM start, so it carries only the IPv4 switch Seatbelt's loopback
+ * rules need. Maven gets its settings file by path.
  */
 export const jvmEnvironment = (
-  proxyUrl: string,
   cache: string,
   settingsFile: string,
+  gradleArguments: string,
   os = platform(),
 ): Record<string, string> => {
   const path = os === "win32" ? win32 : posix;
-  const url = new URL(proxyUrl);
-  const proxy = ["https", "http"].flatMap((scheme) => [
-    `-D${scheme}.proxyHost=${url.hostname}`,
-    `-D${scheme}.proxyPort=${url.port}`,
-    ...(url.username
-      ? [
-          `-D${scheme}.proxyUser=${decodeURIComponent(url.username)}`,
-          `-D${scheme}.proxyPassword=${decodeURIComponent(url.password)}`,
-        ]
-      : []),
-  ]);
+  // cmd keeps the quotes for java and mvn.cmd; the POSIX scripts split on spaces whatever the
+  // quoting, and the command folders there (/tmp, /private/tmp) have none.
+  const argument = (value: string) => (os === "win32" ? `"${value}"` : value);
   return {
     JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true",
     GRADLE_USER_HOME: path.join(cache, "gradle"),
-    // Java disables Basic for proxy tunnels by default; the proxy only speaks Basic.
-    GRADLE_OPTS: [...proxy, "-Djdk.http.auth.tunneling.disabledSchemes="].join(" "),
+    GRADLE_OPTS: argument(`@${gradleArguments}`),
     // Maven's client answers a proxy challenge only on its first connection, so
     // parallel downloads on new ones fail; one thread keeps them on it.
-    MAVEN_ARGS: `-s ${settingsFile} -Daether.connector.basic.threads=1`,
+    MAVEN_ARGS: `-s ${argument(settingsFile)} -Daether.connector.basic.threads=1`,
   };
 };

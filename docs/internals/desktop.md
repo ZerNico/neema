@@ -460,22 +460,107 @@ what is given up is that attack surface and the ability to open windows.
 
 Reads are allow-listed: the system's own directories and the toolchain folders
 under home (version managers, package stores, caches, git's identity, and on
-Windows the AppData and scoop folders installers use). The rest
-of home is unreadable, except one exact file or folder the person lets commands
-read through a path request, for the answer, the chat or every chat. A disk root,
-home itself, a folder above it, or anything holding credentials is refused before
-anyone is asked, and a stored grant breaking those rules is dropped on load.
-Credential files and the profile's permission store are
-denied, and in MXC a denied path outranks every other grant, so attaching a
-parent folder cannot reopen them. Writes are allowed in the chat's workspace, the
-attached folders, and on macOS `/dev/null` and the per-user temp and cache folders
-that developer tools find through confstr rather than TMPDIR; bubblewrap gives
-each command its own `/dev` and `/tmp`, and binding the host's `/dev/null` over
-its own breaks it. Paths that do not exist are left out of every policy: Windows
-refuses a policy naming one and bubblewrap fails to start, and a missing denied
-path can only be created inside a writable folder, as the command's own file. Temporary files and
-the npm, pip and uv caches point at the workspace, since home is read-only.
-A tool installed somewhere unusual fails with a denial naming the path.
+Windows the AppData and scoop folders installers use). The rest of home is
+unreadable, except one exact file or folder the person lets commands read through
+a path request, for the answer, the chat or every chat. A disk root, home itself,
+a folder above it, anything holding credentials, the app's own data (permissions,
+other chats' workspaces, cookies) and the folder of commands' private folders are
+refused before anyone is asked, a stored grant breaking those rules is dropped
+on load, and every grant is checked again before each command, so one a command
+has since replaced with a link is left out. A swap between that check and the
+launch is not covered. A path whose real path differs from the one asked for, a link a command
+could have planted, is refused with the real path named, so what is granted is
+what the card showed. The two must match in case too, since a case-sensitive
+volume may hold a link differing from its target only in case; macOS's own `/tmp`,
+`/var` and `/etc` aliases are not links for this. A substituted or mapped Windows
+drive is a link in this sense: a path on it is refused naming the folder it maps to
+(measured with `subst`), which can then be asked for. Credential files, git's
+credential-cache socket (it answers whoever opens it) and the permission store are
+denied in every policy, and in MXC a denied path outranks every other grant. A
+credential path that is a link (a dotfiles manager links `~/.ssh`) has its target
+denied too, as has every link inside a credential tree (a key kept elsewhere, a
+linked folder), at the real path the system resolves, in the spelling it stores (a link's own
+spelling of a Unicode name may differ). macOS keeps its writable folders under a second spelling
+on the data volume (`/System/Volumes/Data/Users/…`); a target, and the agent's socket, is denied under both (Seatbelt judges only the short one), and path
+checks take either for the same place. Each tree is walked breadth first within its own budget, a level's links
+before its folders, so a link near the root is never crowded out by a large cache
+below it (one deep inside such a cache may go unseen). Only where a link ends counts: a link
+on the way, or a dangling one, that sits in a folder attached writable is not looked for, so
+attaching that folder lets commands decide where the credential leads, as attaching the credential's own folder would
+(accepted: following each link's chain meant guessing at aliases and spellings the system
+resolves, and those guesses kept opening holes). A folder in a credential tree
+that cannot be listed, or a link whose target cannot be reached, stops commands,
+attach and approval until the app may read it,
+since links in it could lead anywhere, as Seatbelt judges the path
+opened. They are resolved before each command, attach and
+approval decides anything, within the command's own deadline. Attach and approval give
+up after ten seconds rather than hang on a stalled mount, and then refuse; the walk at
+startup is not awaited, so such a mount cannot keep the app from opening. A credential target
+inside a writable folder also has the folder between them denied, as for the agent's
+socket, since a rename would otherwise reopen it. A deny
+holds a path, not a file, though: a command that can rename a folder above a denied
+path reaches it by the new name. So a writable folder must never hold one. A folder
+that holds or lies inside credentials, the app's own data or a command root, or is
+home, is refused when attached, judged by where a link leads as well as by its name.
+A command whose writable folders, by their real paths, hold or lie inside one does
+not start; the chat's own workspace is the one exception (app data and the command
+roots cannot simply be denied, as the workspace and the command's own folder sit
+inside them). An attached folder is recorded by its real path and used, by commands
+and every file tool, only while that is still its real path, so one that another
+chat's command swapped for a link shows as gone instead of being followed; the folder is
+pinned to that path where it is used, not only checked beforehand. Sockets inside an
+attached folder are not looked for: a command may connect to one there (a dev tool's
+control socket in the project, like overmind's), the same trust as letting it change
+the scripts the person runs. Denying the sockets found would not hold, since a command
+that may write the folder can rename one past its deny, and refusing such folders would refuse
+ordinary projects (git's fsmonitor keeps one in `.git`). A built-in
+folder (`/opt`, a toolchain's, macOS's per-user temp) that holds app data or a command
+root, by its name or its real path, as a dev profile there would, is left out of the
+policy.
+
+Writes are allowed in the chat's workspace, the attached folders, the command's
+private folder, and on macOS `/dev/null`. macOS's per-user temp and cache folders,
+which developer tools find through confstr rather than TMPDIR, are only readable:
+every app keeps sockets there (an `ssh-agent` started in a terminal, VS Code's git
+credential helper, Chrome's open-this-URL socket), and Seatbelt lets a command
+connect to a socket in any folder it may write. bubblewrap lets a command connect to
+a socket in a folder it may only read (measured), so on Linux the readable folders
+must hold none. Of `/nix` only the store and profiles are readable, never the
+daemon's socket, which would build and fetch for a command on the host, past the
+proxy. `~/.cache` is not readable on Linux at all (IBus keeps a socket in
+`~/.cache/ibus`); commands keep their caches in the workspace through
+`XDG_CACHE_HOME`, where tools look first. The other readable home folders are
+searched a few levels deep for sockets, each denied, every few seconds at most; that
+search is bounded, so those folders are trusted to be toolchains, not sockets. A path
+the person grants on Linux must be no socket or pipe and hold none, judged by a full
+walk at approval and again before each command (an answer is reused for ten seconds);
+a folder that cannot be listed is refused, as it may still be entered by name. System
+socket folders (`/run`, `/var/run`,
+`/tmp/.X11-unix`, `/proc`, `/sys`, `/dev`) and a tree too large to walk are refused
+outright. Read access to `/run/docker.sock` would be root on the host. Measured with them read-only: git,
+xcrun, clang, make and swiftc work, given `CLANG_MODULE_CACHE_PATH` in the workspace
+cache. The Xcode stub tools may print one harmless warning that the cache folder is
+unavailable when xcrun has to look a tool up; `DEVELOPER_DIR`, read once from
+`xcode-select -p`, spares most lookups. Nothing private goes in
+a folder commands can reach: each command's folder (its
+Maven settings and Gradle arguments, token included, and its ssh setup) is made
+in a root made with `mkdtemp` where no command can reach, under `/private/tmp`
+on macOS, and only its own folder is granted. The OS sweeps old temp entries, so a
+root that is gone or no longer plainly the user's own is replaced by a fresh
+`mkdtemp`, never made again by name. Each resource a command takes (its token, its
+listener on Linux, its folder) is released as soon as it is taken, so Stop during
+setup leaves none behind and never waits on a stalled read of the user's files; setup
+abandoned midway cannot bring a removed folder back, as nothing in it is made
+recursively. Setup spends the command's own time limit. bubblewrap gives each command its own `/dev` and `/tmp`, and binding the
+host's `/dev/null` over its own breaks it. Paths to grant that do not exist are
+left out: Windows refuses a policy naming one and bubblewrap fails to start.
+Seatbelt keeps a missing denied path denied, so there a token written mid-command
+into a readable cache stays out of reach; Windows refuses missing denied paths and
+bubblewrap cannot deny one inside a read-only mount, so there it does not. Temporary
+files and the npm, pip and uv caches point at the workspace, since home is
+read-only. On Windows MXC replaces `TEMP` and `TMP` with the container's own
+folder, where git cannot read the signature OpenSSH writes, so `TMPDIR`, which
+Git for Windows reads first, names the workspace there too. A tool installed somewhere unusual fails with a denial naming the path.
 
 The only network destination is the [egress proxy](egress-proxy.md). Each command
 gets a token, and its proxy URL goes in MXC's `networkProxy`: MXC replaces the
@@ -484,16 +569,20 @@ bubblewrap refuses a URL carrying credentials, since bwrap's arguments are
 readable by every local user, and lets a command reach that one endpoint alone,
 so on Linux each command gets a listener of its own and the port is the token.
 Windows proxy mode needs host loopback opened, yet lets a command reach the proxy
-and no other loopback address. A refused tunnel comes back as a violation line
-for that command, which the site turns into an offer to request access. Grants are exact
-`host:port` pairs kept by `egress-grants.ts`, never by the proxy, for the asking
-answer, the chat, or every chat. Chat and always grants live in the profile;
-answer grants live in memory and end when the page's work state stops listing
-that answer, so a closed page ends them all. A private-network grant is its own
-kind and is the only way a name may reach a private address. A chat lists and
-removes its own grants from the permissions menu; every-chat grants are removed
-in Settings › This computer. Both stores forget a chat when its workspace is
-discarded, which happens once the chat is purged and Undo is gone.
+and no other loopback address. A tunnel refused for want of a grant comes back as
+a `deny network-outbound host:port` line, marked `private-network` when only a
+grant that also opts into private-network addresses would do, which the site turns
+into an offer to request access; any other refusal (plain HTTP, loopback, a limit,
+the agent) comes back as a `refused` line with its reason, which no grant would
+change. Either kind fails the command's result, whatever its exit code. Grants are exact `host:port` pairs kept by `egress-grants.ts`, never
+by the proxy, for the asking answer, the chat, or every chat. Chat and always
+grants live in the profile; answer grants live in memory and end when the page's
+work state stops listing that answer, so a closed page ends them all. A
+private-network grant is its own kind and is the only way a name may reach a
+private address. A chat lists and removes its own grants from the permissions
+menu; every-chat grants are removed in Settings › This computer. Both stores
+forget a chat when its workspace is discarded, which happens once the chat is
+purged and Undo is gone.
 
 Loopback is a grant of its own, local network services, in the same three
 scopes. Seatbelt has no private loopback: a command talking to itself, as Gradle
@@ -501,48 +590,89 @@ does with its daemon and file-lock socket, needs the host's, and the inbound
 half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
 from the network. Without the grant a command can bind nothing. On Linux every
 command has a loopback of its own and talks to itself without the grant, and
-bubblewrap cannot open the host's, so the grant changes nothing there. Windows
-proxy mode refuses even a command's own listener, so there the grant leaves proxy mode:
+bubblewrap cannot open the host's, so the grant is refused there. Windows proxy
+mode refuses even a command's own listener, so there the grant leaves proxy mode:
 loopback opens to the host, direct egress stays denied, and the proxy variables
 the command already carries reach the proxy as an ordinary local service, the
 token keeping one command's grants from another's.
 
-Java ignores the proxy variables. Gradle gets the proxy in `GRADLE_OPTS`, which
-reaches its daemon without being printed, and its user home in the workspace
-cache. Maven gets a settings file per command, written to a private temporary
-folder and removed with it, naming the proxy and a workspace repository, and one
-download thread: its client answers a proxy challenge only on its first
-connection. `JAVA_TOOL_OPTIONS` carries only `-Djava.net.preferIPv4Stack=true`,
-because every JVM prints it on start and IPv6-mapped sockets miss Seatbelt's
-loopback rules.
+Java ignores the proxy variables. Gradle reads its proxy from an argument file in
+the command's folder, named in `GRADLE_OPTS`: as plain options the token would sit
+in the JVM's arguments, which other processes can list. Java 8 reads no argument files, so
+Gradle on Java 8 does not start; it is not supported. Its user home is the
+workspace cache. Maven gets a settings file there too, naming the proxy and a
+workspace repository, and one download thread: its client answers a proxy
+challenge only on its first connection. Both paths are quoted on Windows, where a
+profile folder may hold spaces; the POSIX launchers split on spaces whatever the
+quoting, so the command root there is under `/tmp` (`/private/tmp` on macOS)
+whatever `TMPDIR` says, which also leaves room for the agent bridge's socket name. `JAVA_TOOL_OPTIONS` carries only
+`-Djava.net.preferIPv4Stack=true`, because every JVM prints it on start and
+IPv6-mapped sockets miss Seatbelt's loopback rules.
 
-ssh, and with it git, scp and rsync, finds a wrapper first on `PATH` with its
-own config: a `ProxyCommand` bridge that opens an authenticated CONNECT, run by
-the app's own executable in Node mode so nothing is installed, no connection
-sharing (a master would outlive the command's token), known hosts from a copy of
-the user's, and no key files, since `~/.ssh` stays denied. Signing in with the
-user's SSH agent is a switch granted per chat only, never for every chat, since
-the agent signs as the person: granted, the command may connect to the agent's
-socket and ssh is pointed at it. A destination such as
-`github.com:22` is an ordinary network grant. On macOS the sandbox may look up
-directory services, without which ssh cannot name the current user and stops.
-On Windows the wrapper is a `.cmd` around the system's OpenSSH that sets
-`ELECTRON_RUN_AS_NODE` for ssh and the bridge alone. git gets it through
-`GIT_SSH` there, since Git for Windows runs `GIT_SSH_COMMAND` through its MSYS
-shell and MSYS cannot start in the container, and through `GIT_SSH_COMMAND`
-elsewhere, which also outranks a `core.sshCommand` naming another ssh. For the
-same MSYS reason Git for Windows runs without a credential helper, and with
-OpenSSL rather than Schannel, whose revocation check fetches CRLs around the
-proxy and fails every HTTPS remote. The agent is whichever the user's own ssh would use, looked up when it is
-allowed: `ssh -G` for a host no config names, so an `IdentityAgent` under
-`Host *` (1Password, Secretive) counts, else `SSH_AUTH_SOCK`. Allowing it where
-none runs is refused at once. Windows' agent is a named pipe, which a
-container's filesystem policy cannot grant (MXC opens the path and fails the
-launch). There ssh starts under a bridge that names a pipe of the command's own
-as the agent and carries each connection to the egress proxy, which serves the
-reserved destination `ssh-agent.invalid:1` from the user's pipe while the chat
-allows it; revoking closes what is open. `ssh-add` run directly finds no agent
-there.
+ssh, and with it git and rsync, finds a wrapper first on `PATH` with its own
+config: a `ProxyCommand` bridge that opens an authenticated CONNECT, run by the
+app's own executable in Node mode so nothing is installed, no connection sharing
+(a master would outlive the command's token), known hosts from a copy of the
+user's, and no key files, since `~/.ssh` stays denied. The user's own `Host`
+blocks follow, reduced to how to reach each host (aliases, users, ports): keys,
+agents, proxies, includes and `Match` blocks, which can run commands, are dropped,
+and ssh keeps the first value, so the generated settings win. `scp` and `sftp`
+run ssh by its absolute path, so their wrappers hand them ours with `-S`. A
+destination such as `github.com:22` is an ordinary network grant. On macOS the
+sandbox may look up directory services, without which ssh cannot name the current
+user and stops. On Windows the wrappers are `.cmd` files around the system's
+OpenSSH that set `ELECTRON_RUN_AS_NODE` for the tool and its bridges alone. git
+gets the ssh wrapper through `GIT_SSH` there, since Git for Windows runs
+`GIT_SSH_COMMAND` through its MSYS shell and MSYS cannot start in the container,
+and through `GIT_SSH_COMMAND` elsewhere, which also outranks a `core.sshCommand`
+naming another ssh. For the same MSYS reason Git for Windows runs without a
+credential helper, and with OpenSSL rather than Schannel, whose revocation check
+fetches CRLs around the proxy and fails every HTTPS remote. Git for Windows finds
+programs on `PATH` as `.exe` only, so when the agent is relayed `gpg.ssh.program`
+names the ssh-keygen wrapper, or commit signing would bypass the bridge.
+
+Signing in with the user's SSH agent is a switch granted per chat only, never for
+every chat, since the agent signs as the person. The agent is the socket chosen in
+Settings › This computer, else `SSH_AUTH_SOCK`, else on Windows its fixed pipe, looked up before
+each command. No ssh config is read to find it: finding the agent there meant running ssh over a
+config commands might redirect (`Include`s, links, `Match exec`), and every guard on that was
+another place to get wrong. An agent set only in the config (1Password, Secretive) is named
+once in Settings instead. The page that asks is the server's, so the app takes a socket only
+when it answers an identities request as an agent would (Docker's does not) and the person
+confirms in the app's own dialog; going back to the default, which may hold other keys, is
+confirmed too. The socket is kept by its real path, since a link a command made could later
+point elsewhere, and is denied to commands once it has answered. A choice is refused while any
+command runs, or a stopped one's launch is still pending: its policy was made without the socket,
+so it could replace the socket before it is used. A real path too long for a socket address
+(1Password's, for a long user name) is refused rather than kept. Every refusal reads the same,
+so the page cannot learn which paths exist; a socket that accepts and never answers is refused
+only after the check's two seconds, which the page could time (accepted). One choice is made at a
+time, from the request to its end. A change cuts off running commands that relay any agent but
+the one now in effect, also SSH_AUTH_SOCK's on a first choice. Every agent found stays denied, by its name and wherever its
+link led, so a changed choice or a retargeted link does not open the old one. A chosen socket
+that is gone means no agent, never a quiet fallback to `SSH_AUTH_SOCK`'s, which may hold other
+keys. A chat that
+allowed the agent while none runs is told so, not asked again. Allowing it where none runs
+is refused at once. Its socket is never named to a container, on any platform:
+ssh, ssh-add and ssh-keygen (git signs commits with it) start under a bridge that listens on a socket (a pipe on Windows)
+of the command's own, names it to them as their agent, and has the egress proxy
+carry each connection to the reserved destination `ssh-agent.invalid:1`, which
+the proxy serves from the user's agent while the chat allows it. On Linux a
+command's port is open to every local user, so there the agent is served only on
+a connection that also presents the command's token, which the bridge reads from
+the command's folder. Revoking closes what is open. The agent's socket, and the one `SSH_AUTH_SOCK`
+names when another is chosen, are denied to every command,
+whatever its chat allows, since it may sit where commands can reach (an
+attached folder): measured, Seatbelt answers `EPERM` and
+bubblewrap mounts `/dev/null` over it. Each is denied by the path given and by its
+real one, since a link (a `~/.ssh/ssh_auth_sock` pointing at the real socket) leads
+past the given path, and Seatbelt judges the path opened. As a deny holds a path, a socket inside a
+writable folder also gets the folder between the two denied, which no command can rename: measured, with
+only the socket denied a Seatbelt command renamed its folder and reached the agent.
+So the agent's socket may sit anywhere, even under `~/.ssh`, and no command can
+open, remove or replace it. A Windows pipe is no
+path to deny, and a container cannot open the user's anyway; it could not be
+granted either, as MXC opens the path and fails the launch.
 
 The environment starts from identity, locale and terminal variables only. MXC
 kills the command's process tree when it exits, and Stop or the deadline kills

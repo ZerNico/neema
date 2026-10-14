@@ -192,3 +192,23 @@ describe("resolving an absolute path among several roots", () => {
     expect(outcome.failure.message).not.toContain(outsideDir);
   });
 });
+
+describe("a pinned root", () => {
+  it("is gone once a link replaces it, however recently it was checked", async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), "chat-pinned-")));
+    const attached = join(base, "project");
+    await mkdir(attached);
+    await mkdir(join(base, "elsewhere"));
+    const before = await Effect.runPromise(Effect.result(resolveInFolder(attached, ".", true)));
+    expect(before._tag).toBe("Success");
+    await rm(attached, { recursive: true });
+    await symlink(join(base, "elsewhere"), attached);
+    const after = await Effect.runPromise(Effect.result(resolveInFolder(attached, ".", true)));
+    expect(after._tag === "Failure" && after.failure.reason).toBe("no-folder");
+    // Unpinned (the workspace), the same root still resolves where it leads.
+    expect((await Effect.runPromise(Effect.result(resolveInFolder(attached, "."))))._tag).toBe(
+      "Success",
+    );
+    await rm(base, { recursive: true, force: true });
+  });
+});

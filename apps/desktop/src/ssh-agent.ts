@@ -1,5 +1,7 @@
-import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
+import { connect } from "node:net";
+import { isAbsolute, join } from "node:path";
+import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
 /** Where Windows' own OpenSSH agent listens. It never sets SSH_AUTH_SOCK. */
 export const WINDOWS_AGENT = "\\\\.\\pipe\\openssh-ssh-agent";
@@ -10,62 +12,123 @@ export const WINDOWS_AGENT = "\\\\.\\pipe\\openssh-ssh-agent";
  */
 export const AGENT_DESTINATION = { host: "ssh-agent.invalid", port: 1 } as const;
 
-/**
- * The agent named by `ssh -G`: an IdentityAgent from the user's config (how
- * 1Password and Secretive are usually wired), or SSH_AUTH_SOCK when the config
- * names none or names that variable.
- */
-export const agentFromConfig = (output: string, env: NodeJS.ProcessEnv): string | null => {
-  const line = output
-    .split(/\r?\n/)
-    .find((entry) => entry.toLowerCase().startsWith("identityagent "));
-  const value = line?.slice("identityagent ".length).trim();
-  if (value === undefined || value === "SSH_AUTH_SOCK") return env.SSH_AUTH_SOCK || null;
-  if (value === "none") return null;
-  if (value.startsWith("$")) return env[value.slice(1)] || null;
-  return value;
-};
-
 export interface AgentLookup {
   readonly os: NodeJS.Platform;
   readonly env: NodeJS.ProcessEnv;
-  /** The user's ssh, or null when there is none to ask. */
-  readonly ssh: string | null;
-  readonly config: (ssh: string) => Promise<string>;
+  /** The socket the person chose in Settings, if any. */
+  readonly chosen: string | null;
   readonly exists: (path: string) => Promise<boolean>;
 }
 
 /**
- * The agent a chat's commands may sign in with, looked up when one is allowed
- * so a changed config or a restarted agent is seen. A host no config names
- * gets only what `Host *` sets, which is what every destination shares.
+ * The agent a chat's commands may sign in with: the socket the person chose (1Password and
+ * Secretive set theirs only in ssh's config, which is not read to find it), else SSH_AUTH_SOCK,
+ * else Windows' own pipe. One that is not there counts as none.
  */
-export const findAgent = async (lookup: AgentLookup): Promise<string | null> => {
-  let agent: string | null;
-  try {
-    agent = lookup.ssh
-      ? agentFromConfig(await lookup.config(lookup.ssh), lookup.env)
-      : lookup.env.SSH_AUTH_SOCK || null;
-  } catch {
-    agent = lookup.env.SSH_AUTH_SOCK || null;
-  }
-  if (agent) return (await lookup.exists(agent)) ? agent : null;
-  return lookup.os === "win32" && (await lookup.exists(WINDOWS_AGENT)) ? WINDOWS_AGENT : null;
+export const findAgent = async ({ os, env, chosen, exists }: AgentLookup) => {
+  const agent =
+    chosen ??
+    (env.SSH_AUTH_SOCK && isAbsolute(env.SSH_AUTH_SOCK) ? env.SSH_AUTH_SOCK : null) ??
+    (os === "win32" ? WINDOWS_AGENT : null);
+  return agent && (await exists(agent)) ? agent : null;
 };
 
-/** Runs the user's ssh to print its effective config; it connects nowhere. */
-export const sshConfig = (ssh: string) =>
-  new Promise<string>((resolve, reject) => {
-    execFile(
-      ssh,
-      ["-G", "-o", "BatchMode=yes", "agent-lookup.invalid"],
-      { timeout: 5_000, encoding: "utf8" },
-      (error, stdout) => (error ? reject(error) : resolve(stdout)),
-    );
+/** The most an identities answer may take before the socket counts as no agent. */
+const MAX_ANSWER = 256 * 1024;
+
+/**
+ * Whether `frame` (length, then payload) is a whole identities answer: type 12, a key count,
+ * then that many key blobs and comments, nothing left over.
+ */
+export const isIdentitiesAnswer = (frame: Buffer) => {
+  if (frame.length < 9 || frame.readUInt32BE(0) !== frame.length - 4 || frame[4] !== 12)
+    return false;
+  let offset = 9;
+  const skipString = () => {
+    if (offset + 4 > frame.length) return false;
+    const length = frame.readUInt32BE(offset);
+    offset += 4 + length;
+    return offset <= frame.length;
+  };
+  for (let key = 0; key < frame.readUInt32BE(5); key += 1)
+    if (!skipString() || !skipString()) return false;
+  return offset === frame.length;
+};
+
+/**
+ * Whether `socket` answers as an SSH agent: asked for its identities, it answers with them.
+ * Settings is a page the server serves, so a socket it names (Docker's) must prove it is one.
+ */
+export const answersAsAgent = (socket: string, timeoutMs = 2_000) =>
+  new Promise<boolean>((resolve) => {
+    const connection = connect({ path: socket });
+    const timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref();
+    function done(answer: boolean) {
+      clearTimeout(timer);
+      connection.destroy();
+      resolve(answer);
+    }
+    let received = Buffer.alloc(0);
+    // SSH_AGENTC_REQUEST_IDENTITIES: length 1, type 11. The answer is type 12.
+    connection.on("connect", () => connection.write(Buffer.from([0, 0, 0, 1, 11])));
+    connection.on("data", (chunk: Buffer) => {
+      received = Buffer.concat([received, chunk]);
+      if (received.length < 4) return;
+      const whole = 4 + received.readUInt32BE(0);
+      if (whole > MAX_ANSWER || received.length > whole) done(false);
+      else if (received.length === whole) done(isIdentitiesAnswer(received));
+    });
+    connection.on("error", () => done(false));
+    connection.on("close", () => done(false));
   });
+
+/** The agent socket the person chose in Settings, kept in the profile. */
+export interface AgentChoice {
+  current(): string | null;
+  set(socket: string | null): Promise<void>;
+}
+
+export const loadAgentChoice = async (directory: string): Promise<AgentChoice> => {
+  const file = join(directory, "ssh-agent.json");
+  let current: string | null = null;
+  try {
+    const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+    const socket =
+      parsed && typeof parsed === "object" ? (parsed as { socket?: unknown }).socket : null;
+    if (typeof socket === "string" && isAbsolute(socket)) current = socket;
+  } catch {
+    // A lost or invalid file chooses nothing.
+  }
+  const queue = serialWrites();
+  return {
+    current: () => current,
+    set: (socket) =>
+      queue(async () => {
+        await writeJsonAtomic(file, { socket });
+        current = socket;
+      }),
+  };
+};
 
 export const pathExists = (path: string) =>
   access(path).then(
     () => true,
     () => false,
   );
+
+const PIPES = "\\\\.\\pipe\\";
+
+/**
+ * Whether an agent is there. A Windows pipe is looked up in the pipe list: opening it to check
+ * takes one of the agent's instances, and a second check right after finds it busy (measured).
+ * Windows takes either slash in a pipe's path, `.` or `?` as its device, and names in any case.
+ */
+export const agentExists = async (
+  path: string,
+  pipes: () => Promise<string[]> = () => readdir(PIPES),
+) => {
+  const pipe = /^[\\/]{2}[.?][\\/]pipe[\\/](.+)$/i.exec(path)?.[1]?.toLowerCase();
+  if (pipe === undefined) return pathExists(path);
+  return (await pipes().catch((): string[] => [])).some((name) => name.toLowerCase() === pipe);
+};

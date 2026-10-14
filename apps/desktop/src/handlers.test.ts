@@ -25,6 +25,7 @@ import { join, resolve } from "node:path";
 import { Effect, Layer } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  DesktopError,
   LIMITS,
   WORKSPACE_FOLDER_NAME,
   makeDesktopResponder,
@@ -99,9 +100,22 @@ const stubSandbox = Layer.succeed(
       Effect.sync(() => {
         keptAnswers.push({ origin, live: [...live] });
       }),
+    checkFolder: (path) =>
+      path.endsWith("app-data")
+        ? Effect.fail(new DesktopError({ reason: "failed", message: "Never shared." }))
+        : Effect.void,
     approvePath: (_target, path) => Effect.succeed(path),
     approveCapability: () => Effect.void,
     revokeCapability: () => Effect.void,
+    agentSetting: () =>
+      Effect.succeed({
+        chosen: null,
+        chosenFound: false,
+        fallback: null,
+        fallbackFrom: null,
+        choosable: true,
+      }),
+    chooseAgent: () => Effect.succeed(false),
     revokePath: (target, path) =>
       Effect.sync(() => {
         revokedPaths.push({ target, path });
@@ -1192,6 +1206,44 @@ describe("once a folder is attached", () => {
       handlers.chooseFolder({ conversationId: id, replace: "site" }),
     );
     expect(again.folders).toEqual([{ name: "site", path: moved, alive: true }]);
+    picked = root;
+  });
+
+  it("refuses a folder the sandbox will not open to commands", async () => {
+    const refused = join(root, "..", "app-data");
+    await mkdir(refused, { recursive: true });
+    picked = refused;
+    expect(await failureOf(handlers.chooseFolder({ conversationId: CONVERSATION }))).toBe("failed");
+    const state = await Effect.runPromise(handlers.folderStatus({ conversationId: CONVERSATION }));
+    expect(state.folders.map((folder) => folder.path)).not.toContain(refused);
+    picked = root;
+  });
+
+  it("stops using an attached folder once a link replaces it", async () => {
+    const id = SOURCE_CONVERSATION;
+    const project = join(root, "..", "swapped", "project");
+    const elsewhere = join(root, "..", "swapped", "elsewhere");
+    await mkdir(project, { recursive: true });
+    await mkdir(elsewhere, { recursive: true });
+    picked = project;
+    await Effect.runPromise(handlers.chooseFolder({ conversationId: id }));
+    // A command in another chat that can write the parent swaps the folder for a link.
+    await rm(project, { recursive: true });
+    await symlink(elsewhere, project);
+    ran = [];
+    await Effect.runPromise(
+      handlers.runCommand({
+        conversationId: id,
+        callId: "swap",
+        generationId: "generation-1",
+        command: "echo hi",
+        timeoutMs: 1000,
+      }),
+    );
+    expect(ran[0]?.allowWrite).not.toContain(await realpath(elsewhere));
+    const state = await Effect.runPromise(handlers.folderStatus({ conversationId: id }));
+    expect(state.folders.find((folder) => folder.name === "project")?.alive).toBe(false);
+    await Effect.runPromise(handlers.detachFolder({ conversationId: id, name: "project" }));
     picked = root;
   });
 

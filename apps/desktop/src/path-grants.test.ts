@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkPathGrant, loadPathGrants, pathRefusal } from "./path-grants.ts";
+import { checkPathGrant, loadPathGrants, pathRefusal, touchesDenied } from "./path-grants.ts";
 
 const roots: string[] = [];
 const directory = async () => {
@@ -36,25 +36,71 @@ describe("pathRefusal", () => {
     }
   });
 
+  it.runIf(process.platform === "darwin")(
+    "takes the data volume's spelling of a folder for the folder",
+    () => {
+      expect(
+        touchesDenied("/private/tmp/project", ["/System/Volumes/Data/private/tmp/project/key"]),
+      ).toBe(true);
+      expect(
+        touchesDenied("/System/Volumes/Data/Users/alex/project", ["/Users/alex/project/key"]),
+      ).toBe(true);
+    },
+  );
+
   it("refuses a relative path", () => {
     expect(pathRefusal("Documents", rules)).not.toBeNull();
   });
 });
 
 describe("checkPathGrant", () => {
-  it("grants the real path a symlink points to, and judges that path", async () => {
+  it("refuses a link, naming where it leads, so what is granted is what was asked", async () => {
     const root = await directory();
     await mkdir(join(root, "real"));
+    // A command could plant this in its workspace; the card would show the link, not the target.
     await symlink(join(root, "real"), join(root, "link"));
-    const checked = await checkPathGrant(join(root, "link"), { home: "/nowhere", denied: [] });
-    expect(checked).toMatchObject({ ok: true });
-    expect(checked.ok && checked.path.endsWith("/real")).toBe(true);
+    const linked = await checkPathGrant(join(root, "link"), { home: "/nowhere", denied: [] });
+    expect(linked.ok).toBe(false);
+    const reason = linked.ok ? "" : linked.reason;
+    expect(reason).toContain("real");
+    expect(reason).toContain("Ask for that path itself.");
 
-    const toDenied = await checkPathGrant(join(root, "link"), {
-      home: "/nowhere",
-      denied: [checked.ok ? checked.path : ""],
-    });
-    expect(toDenied.ok).toBe(false);
+    const real = await checkPathGrant(join(root, "real") + "/", { home: "/nowhere", denied: [] });
+    expect(real).toMatchObject({ ok: true });
+  });
+
+  it("refuses a path spelled in another case than its real one", async () => {
+    const root = await directory();
+    await mkdir(join(root, "Project"));
+    const resolve = async () => join(root, "project");
+    const checked = await checkPathGrant(
+      join(root, "Project"),
+      { home: "/nowhere", denied: [] },
+      resolve,
+    );
+    expect(checked).toMatchObject({ ok: false });
+    expect(checked.ok ? "" : checked.reason).toContain(join(root, "project"));
+  });
+
+  it.runIf(process.platform === "darwin")("accepts macOS's own /tmp and /var aliases", async () => {
+    // tmpdir() is under /var/folders, which resolves to /private/var/folders.
+    const root = await directory();
+    expect((await checkPathGrant(root, { home: "/nowhere", denied: [] })).ok).toBe(true);
+  });
+
+  it("refuses the app's own data, inside or above it", () => {
+    const appData = {
+      home: "/Users/alex",
+      denied: ["/Users/alex/Library/Application Support/neema"],
+    };
+    for (const path of [
+      "/Users/alex/Library/Application Support/neema/workspaces/other-chat",
+      "/Users/alex/Library/Application Support/neema/Cookies",
+      "/Users/alex/Library/Application Support",
+    ])
+      expect(pathRefusal(path, appData)).toBe(
+        "Credentials and the app’s own data are never shared with commands.",
+      );
   });
 
   it("refuses a missing path, a relative one and a non-string", async () => {

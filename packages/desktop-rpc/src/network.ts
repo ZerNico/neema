@@ -15,6 +15,19 @@ export const PATHS_REVOKE = "chat-desktop:paths-revoke" as const;
 export const LOCAL_GET = "chat-desktop:local-get" as const;
 export const LOCAL_REVOKE = "chat-desktop:local-revoke" as const;
 
+/** The SSH agent commands sign in with: the socket chosen, and the one used when none is. */
+export interface AgentSetting {
+  /** The socket chosen, by its real path. */
+  readonly chosen: string | null;
+  /** Whether the chosen socket is there now; when it is not, commands get no agent. */
+  readonly chosenFound: boolean;
+  readonly fallback: string | null;
+  /** Where the fallback comes from: SSH_AUTH_SOCK, or Windows' own pipe. */
+  readonly fallbackFrom: "environment" | "windows" | null;
+  /** False on Windows, whose commands use Windows' own agent. */
+  readonly choosable: boolean;
+}
+
 export interface DesktopNetwork {
   list(): Promise<NetworkGrant[]>;
   revoke(grant: NetworkGrant): Promise<void>;

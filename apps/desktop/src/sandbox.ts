@@ -1,13 +1,23 @@
 import { execFileSync } from "node:child_process";
-import { access, constants, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  constants,
+  lstat,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { delimiter, join, win32 } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, win32 } from "node:path";
 import type { Readable } from "node:stream";
 import {
   createEgressProxy,
   childEnvironment as proxyEnvironment,
   type CommandContext,
+  type Denial,
   type EgressProxy,
 } from "@chat/egress-proxy";
 import {
@@ -20,19 +30,55 @@ import {
   type PlatformSupport,
 } from "@microsoft/mxc-sdk/v1";
 import { Context, Duration, Effect, Layer } from "effect";
-import { DesktopError, LIMITS, type SandboxAvailability } from "@chat/desktop-rpc";
+import {
+  DesktopError,
+  LIMITS,
+  type AgentSetting,
+  type SandboxAvailability,
+} from "@chat/desktop-rpc";
 import {
   loadEgressGrants,
+  normalizeEgressGrant,
   type AnswerKey,
   type ChatKey,
   type EgressGrant,
   type EgressGrants,
   type GrantTarget,
 } from "./egress-grants.ts";
-import { checkPathGrant, loadPathGrants, type PathGrants } from "./path-grants.ts";
+import { makeCommandRoot, type CommandRoot } from "./command-root.ts";
+import {
+  checkPathGrant,
+  credentialLinks,
+  loadPathGrants,
+  pathRefusal,
+  spellings,
+  touchesDenied,
+  unaliased,
+  within,
+  type PathGrants,
+  type PathRules,
+} from "./path-grants.ts";
 import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
-import { commandEnvironment, jvmEnvironment, mavenSettings } from "./sandbox-environment.ts";
-import { AGENT_DESTINATION, findAgent, pathExists, sshConfig } from "./ssh-agent.ts";
+import {
+  commandEnvironment,
+  jvmEnvironment,
+  jvmProxyArguments,
+  mavenSettings,
+} from "./sandbox-environment.ts";
+import {
+  AGENT_DESTINATION,
+  answersAsAgent,
+  findAgent,
+  loadAgentChoice,
+  agentExists,
+  WINDOWS_AGENT,
+  type AgentChoice,
+} from "./ssh-agent.ts";
+
+/** What the person is asked to confirm: a socket to use, or going back to the default. */
+export type AgentChange =
+  | { readonly kind: "use"; readonly socket: string }
+  | { readonly kind: "default"; readonly fallback: string | null };
 import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
@@ -127,6 +173,14 @@ const windowsToolchainRead = (env: NodeJS.ProcessEnv) => {
 };
 
 /**
+ * The toolchain folders commands read. Not ~/.cache on Linux: bubblewrap lets a command connect
+ * to a socket in a folder it may only read, and that one holds sockets (IBus's) at any depth.
+ * Commands keep their caches in the workspace (XDG_CACHE_HOME), where tools look first.
+ */
+const toolchainRead = (os: NodeJS.Platform) =>
+  os === "linux" ? TOOLCHAIN_READ.filter((path) => path !== inHome(".cache")) : TOOLCHAIN_READ;
+
+/**
  * Credential files inside the readable toolchain folders, or inside a folder
  * the person attached. A denied path outranks every grant in MXC.
  */
@@ -134,6 +188,9 @@ export const CREDENTIAL_DENIES = [
   inHome(".cache", "huggingface", "token"),
   inHome(".cache", "gh"),
   inHome(".config", "git", "credentials"),
+  // git credential-cache's daemon socket answers whoever opens it.
+  inHome(".cache", "git"),
+  inHome(".git-credential-cache"),
   inHome(".git-credentials"),
   inHome(".ssh"),
   inHome(".aws"),
@@ -186,13 +243,28 @@ const systemRead = (os: NodeJS.Platform): string[] => {
       process.env.PROGRAMDATA ?? "C:\\ProgramData",
     ];
   }
-  return ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/nix", "/snap"];
+  // Nix's store and profiles, never all of /nix: bubblewrap lets a command connect to a socket
+  // in a folder it may only read (measured), and the daemon's socket would build and fetch
+  // for it on the host, past the proxy.
+  return [
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/etc",
+    "/opt",
+    "/nix/store",
+    "/nix/var/nix/profiles",
+    "/snap",
+  ];
 };
 
 /**
- * Per-user folders macOS hands to developer tools through confstr, ignoring
- * TMPDIR. git and xcrun fail to start without them. They hold only this user's
- * temporary and cache files.
+ * Per-user folders macOS hands to developer tools through confstr, ignoring TMPDIR. Readable
+ * only: every app keeps sockets there (an ssh-agent started in a terminal, VS Code's git
+ * credential helper, Chrome's open-this-URL socket), and a writable grant lets a command
+ * connect to them. Measured: git, xcrun, clang, swiftc and make work with them read-only.
  */
 const macUserFolders = (): string[] => {
   try {
@@ -204,6 +276,14 @@ const macUserFolders = (): string[] => {
   }
 };
 
+const macDeveloperDir = (): string | null => {
+  try {
+    return execFileSync("/usr/bin/xcode-select", ["-p"], { encoding: "utf8" }).trim() || null;
+  } catch {
+    return null;
+  }
+};
+
 export interface PolicyInput {
   readonly os: NodeJS.Platform;
   /** Every attached folder's real root and the chat's workspace: the only writable places. */
@@ -212,6 +292,12 @@ export interface PolicyInput {
   readonly readable: ReadonlyArray<string>;
   /** The profile's permission store, which no command may read or change. */
   readonly protectedDirectory: string | null;
+  /** The user's SSH agent sockets, reached only through the proxy, never opened directly. */
+  readonly agentSockets?: readonly string[];
+  /** Where credential paths that are links really lead: denied too, as a deny holds a path. */
+  readonly credentialTargets?: readonly string[];
+  /** Sockets found in readable folders (Linux), which a command could otherwise connect to. */
+  readonly readableSockets?: readonly string[];
   readonly userFolders: ReadonlyArray<string>;
 }
 
@@ -219,21 +305,51 @@ export interface PolicyInput {
 export const filesystemPolicy = (input: PolicyInput) => ({
   readwritePaths: [
     ...input.writable,
-    ...input.userFolders,
     // bubblewrap gives each command its own /dev; binding the host's /dev/null over it breaks it.
     ...(input.os === "darwin" ? ["/dev/null"] : []),
   ],
   readonlyPaths: [
     ...systemRead(input.os),
-    ...TOOLCHAIN_READ,
+    ...toolchainRead(input.os),
     ...(input.os === "win32" ? windowsToolchainRead(process.env) : []),
     ...input.readable,
+    ...input.userFolders,
   ],
   deniedPaths: [
     ...CREDENTIAL_DENIES,
+    // A credential linked into a writable folder: the folder a rename could move is denied too.
+    ...socketDenies(input.credentialTargets ?? [], input.writable),
+    ...(input.readableSockets ?? []),
     ...(input.protectedDirectory ? [input.protectedDirectory] : []),
+    ...socketDenies(input.agentSockets ?? [], input.writable),
   ],
 });
+
+/**
+ * A deny holds a path, not a file: a command that can rename a folder above a denied socket
+ * reaches the socket by the new name (measured with Seatbelt). Under a writable folder the deny
+ * also covers the topmost folder between it and the socket, which no command can rename.
+ */
+export const socketDenies = (sockets: readonly string[], writable: readonly string[]) =>
+  sockets.flatMap((socket) => {
+    const holder = writable
+      .filter((folder) => within(folder, socket))
+      .toSorted((a, b) => depth(a) - depth(b))[0];
+    // Counted as a depth, which no spelling (macOS's /private, case) can change, and cut from
+    // the socket's own path.
+    const steps = holder ? depth(socket) - depth(holder) : 0;
+    // Directly in the writable folder, the socket's own deny is all a rename could touch.
+    if (steps < 2) return [socket];
+    let folder = socket;
+    for (let up = 1; up < steps; up += 1) folder = dirname(folder);
+    return [...new Set([socket, folder, unaliased(folder)])];
+  });
+
+/** How many names a path has below its root, whatever its spelling. */
+const depth = (path: string) =>
+  unaliased(normalize(path))
+    .split(/[\\/]+/)
+    .filter(Boolean).length;
 
 type FilesystemPolicy = ReturnType<typeof filesystemPolicy>;
 
@@ -243,22 +359,28 @@ const exists = (path: string) =>
     () => false,
   );
 
+const present = async (paths: readonly string[]) => {
+  const found = await Promise.all(paths.map(exists));
+  return paths.filter((_, index) => found[index]);
+};
+
 /**
  * Windows refuses a whole policy naming a path that does not exist, and
- * bubblewrap fails to start; Seatbelt skips it, and is given the same list so
- * every platform runs one policy. A missing denied path is safe to drop:
- * nothing can create it except inside a writable folder, as the command's own
- * file.
+ * bubblewrap fails to start on a missing one it should mount, or deny inside a
+ * read-only mount; Seatbelt skips them, and gets the same grants so every
+ * platform runs one policy. Only Seatbelt can keep a missing path denied, so
+ * elsewhere a credential created mid-command under a readable folder is not.
  */
-const existingOnly = async (policy: FilesystemPolicy): Promise<FilesystemPolicy> => {
-  const keep = async (paths: readonly string[]) => {
-    const present = await Promise.all(paths.map(exists));
-    return paths.filter((_, index) => present[index]);
-  };
+const existingOnly = async (
+  policy: FilesystemPolicy,
+  os: NodeJS.Platform,
+): Promise<FilesystemPolicy> => {
   const [readwritePaths, readonlyPaths, deniedPaths] = await Promise.all([
-    keep(policy.readwritePaths),
-    keep(policy.readonlyPaths),
-    keep(policy.deniedPaths),
+    present(policy.readwritePaths),
+    present(policy.readonlyPaths),
+    // Seatbelt keeps a missing denied path denied, so a token written while the command runs
+    // (into a readable cache folder) does not become readable there.
+    os === "darwin" ? policy.deniedPaths : present(policy.deniedPaths),
   ]);
   return { readwritePaths, readonlyPaths, deniedPaths };
 };
@@ -320,26 +442,33 @@ export type Capability = "local-services" | "ssh-agent";
 const CAPABILITIES: ReadonlySet<string> = new Set<Capability>(["local-services", "ssh-agent"]);
 
 /** Puts the ssh wrapper first, so ssh, git, scp and rsync all go through the proxy. */
-const withSsh = (
-  environment: Record<string, string>,
-  ssh: SshSetup | null,
-  agent: string | null,
-  os: NodeJS.Platform,
-) =>
+const withSsh = (environment: Record<string, string>, ssh: SshSetup | null, os: NodeJS.Platform) =>
   ssh
     ? {
         ...environment,
-        PATH: [ssh.bin, environment.PATH].filter(Boolean).join(delimiter),
-        // ssh-add and other agent clients read the socket from here.
-        ...(agent ? { SSH_AUTH_SOCK: agent } : {}),
+        PATH: [ssh.bin, environment.PATH].filter(Boolean).join(os === "win32" ? ";" : ":"),
         // git must use the wrapper even when core.sshCommand names another ssh. Git for Windows
         // runs GIT_SSH_COMMAND through its MSYS shell, which cannot start in the container, and
         // GIT_SSH without one.
         ...(os === "win32"
-          ? { GIT_SSH: ssh.wrapper, GIT_SSH_VARIANT: "ssh" }
+          ? { GIT_SSH: ssh.wrapper, GIT_SSH_VARIANT: "ssh", ...windowsSigner(environment, ssh) }
           : { GIT_SSH_COMMAND: `"${ssh.wrapper}"` }),
       }
     : environment;
+
+/**
+ * Git for Windows finds programs on PATH as .exe only, so commit signing would start the real
+ * ssh-keygen outside the agent bridge; named in git's environment config, the wrapper runs.
+ */
+export const windowsSigner = (environment: Record<string, string>, ssh: SshSetup) => {
+  if (!ssh.keygen) return {};
+  const index = Number(environment.GIT_CONFIG_COUNT ?? "0");
+  return {
+    GIT_CONFIG_COUNT: String(index + 1),
+    [`GIT_CONFIG_KEY_${index}`]: "gpg.ssh.program",
+    [`GIT_CONFIG_VALUE_${index}`]: ssh.keygen,
+  };
+};
 
 const shellCommand = (command: string, os: NodeJS.Platform) =>
   os === "win32"
@@ -364,7 +493,7 @@ export interface SandboxRun {
   readonly callId: string;
   readonly command: string;
   readonly context: SandboxContext;
-  /** Already resolved and proven inside a folder by `resolveInFolder`. */
+  /** The chat's workspace, where the command starts: the one writable place in app data. */
   readonly cwd: string;
   /** Every attached folder's real root: the only places a command may write. */
   readonly allowWrite: ReadonlyArray<string>;
@@ -394,9 +523,23 @@ export interface SandboxDependencies {
   readonly grants: EgressGrants | null;
   readonly paths: PathGrants | null;
   readonly capabilities: ScopedGrants | null;
-  /** The user's SSH agent, looked up when a chat allows commands to sign in with it. */
+  /** The user's SSH agent, looked up before each command. */
   readonly agent: () => Promise<string | null>;
+  /** The agent socket the person chose in Settings. */
+  readonly agentChoice?: AgentChoice | null;
   readonly userFolders: () => ReadonlyArray<string>;
+  /**
+   * Where each command's private folder is made: a place no command may read or write, never
+   * the per-user temp folder macOS developer tools need, which every command can write. The
+   * sandbox closes it when it closes.
+   */
+  readonly commandRoot: CommandRoot;
+  /** What a path grant may never name; the command roots are added as they are made. */
+  readonly pathRules: PathRules;
+  /** The app's own data in each spelling, which no built-in readable folder may open either. */
+  readonly appData?: readonly string[];
+  /** The active Xcode or Command Line Tools (macOS), named so its stub tools stay quiet. */
+  readonly developerDir?: string | null;
 }
 
 export class Sandbox extends Context.Service<
@@ -416,6 +559,8 @@ export class Sandbox extends Context.Service<
     revokeNetwork(target: GrantTarget, grant: EgressGrant): Effect.Effect<void, DesktopError>;
     /** Ends this server's answer grants for every answer not listed as running. */
     keepAnswers(origin: string, live: readonly AnswerKey[]): Effect.Effect<void>;
+    /** Refuses a folder to attach that would open credentials or the app's own data. */
+    checkFolder(path: string): Effect.Effect<void, DesktopError>;
     /** Lets commands read one more path; resolves to the real path granted. */
     approvePath(target: GrantTarget, path: string): Effect.Effect<string, DesktopError>;
     revokePath(target: GrantTarget, path: string): Effect.Effect<void, DesktopError>;
@@ -428,22 +573,62 @@ export class Sandbox extends Context.Service<
       target: GrantTarget,
       capability: Capability,
     ): Effect.Effect<void, DesktopError>;
+    /** The agent socket chosen in Settings, and the one used when none is. */
+    agentSetting(): Effect.Effect<AgentSetting>;
+    /**
+     * Chooses the agent socket, or clears the choice with null; false when the person declined.
+     * A socket must answer as an agent, and `confirm` (the app's own dialog) must agree, since
+     * the page asking is the server's.
+     */
+    chooseAgent(
+      socket: string | null,
+      confirm: (change: AgentChange) => Promise<boolean>,
+    ): Effect.Effect<boolean, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (directory: string) =>
     Layer.effect(
       Sandbox,
       Effect.flatMap(
-        Effect.promise(() =>
-          Promise.all([
+        Effect.promise(async () => {
+          // macOS's tmpdir is the per-user folder every command can write; /private/tmp is not.
+          // Linux uses /tmp whatever TMPDIR says: the root's path must hold no spaces (POSIX
+          // launchers split Maven and Gradle arguments) and leave room for a socket name.
+          const commandRoot = await makeCommandRoot(
+            platform() === "darwin" ? "/private/tmp" : platform() === "linux" ? "/tmp" : tmpdir(),
+          );
+          // The app's own data: permissions, other chats' workspaces, cookies. Home, its
+          // credentials and the app's data in both spellings, since paths arrive real.
+          const appData = dirname(directory);
+          const realAppData = await realpath(appData).catch(() => appData);
+          const realHome = await realpath(home).catch(() => home);
+          const pathRules = {
+            home: realHome,
+            denied: [
+              ...CREDENTIAL_DENIES,
+              ...(realHome === home
+                ? []
+                : CREDENTIAL_DENIES.map((path) => join(realHome, relative(home, path)))),
+              appData,
+              realAppData,
+            ],
+          };
+          return Promise.all([
+            commandRoot,
+            pathRules,
+            [appData, realAppData],
             loadEgressGrants(directory),
-            loadPathGrants(directory, { home, denied: [...CREDENTIAL_DENIES, directory] }),
+            loadPathGrants(directory, {
+              ...pathRules,
+              denied: [...pathRules.denied, ...commandRoot.all()],
+            }),
             loadScopedGrants(directory, "capability-grants.json", (entry) =>
               CAPABILITIES.has(entry),
             ),
-          ]),
-        ),
-        ([grants, paths, capabilities]) =>
+            loadAgentChoice(directory),
+          ]);
+        }),
+        ([commandRoot, pathRules, appData, grants, paths, capabilities, agentChoice]) =>
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
@@ -452,15 +637,19 @@ export class Sandbox extends Context.Service<
             grants,
             paths,
             capabilities,
-            agent: async () =>
+            agent: () =>
               findAgent({
                 os: platform(),
                 env: process.env,
-                ssh: await findSsh(process.env.PATH, pathExists),
-                config: sshConfig,
-                exists: pathExists,
+                chosen: agentChoice.current(),
+                exists: agentExists,
               }),
+            agentChoice,
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
+            developerDir: platform() === "darwin" ? macDeveloperDir() : null,
+            commandRoot,
+            pathRules,
+            appData,
           }),
       ),
     );
@@ -487,6 +676,12 @@ const AGENT_GRANT = "capability:ssh-agent";
 
 const unavailable = (message: string) =>
   new DesktopError({ reason: "sandbox-unavailable", message });
+/** A setup step that failed; its cause reads as a sentence for the model. */
+const setupFailed = (cause: unknown) =>
+  unavailable(
+    `Could not start the command: ${cause instanceof Error ? cause.message : String(cause)}`,
+  );
+
 const expired = () =>
   new DesktopError({ reason: "timed-out", message: "The command’s time limit was reached." });
 
@@ -518,8 +713,109 @@ const collect = (streams: ReadonlyArray<Readable | null>, limit: number) => {
   };
 };
 
-/** One line per refused tunnel, in the form the site reads to offer access. */
-const violationLine = (host: string, port: number) => `deny network-outbound ${host}:${port}`;
+/**
+ * One line per refused tunnel. One a grant would allow is in the form the site reads to offer
+ * access, marked when the grant must also opt into private-network addresses; any other refusal
+ * (plain HTTP, loopback, a limit, the agent, its own switch) carries its reason instead.
+ */
+export const denialLine = ({ host, port, reason, lift }: Omit<Denial, "context">) => {
+  // The grant store says which grant it is: an IP literal or a private-suffix name is only ever
+  // a private-network grant, and some names are no grant at all.
+  const kind =
+    lift !== "grant" || normalizeEgressGrant(host, port, false)
+      ? lift
+      : normalizeEgressGrant(host, port, true)
+        ? "private-network"
+        : null;
+  return kind !== null && host !== AGENT_DESTINATION.host
+    ? `deny network-outbound ${host}:${port}${kind === "private-network" ? " private-network" : ""}`
+    : `refused network-outbound ${host || "?"}:${port}: ${reason}`;
+};
+
+/** The paths that open none of `places` by their name or their real path; `own` always stays. */
+const notOpening = async (
+  paths: readonly string[],
+  own: ReadonlySet<string>,
+  places: readonly string[],
+) => {
+  const opens = await Promise.all(
+    paths.map((path) =>
+      own.has(path)
+        ? false
+        : realpath(path).then(
+            (real) => touchesDenied(path, places) || touchesDenied(real, places),
+            () => touchesDenied(path, places),
+          ),
+    ),
+  );
+  return paths.filter((_, index) => !opens[index]);
+};
+
+/** System folders of live sockets on Linux: never granted, whatever they hold right now. */
+const LINUX_SOCKET_HOMES = ["/run", "/var/run", "/proc", "/sys", "/dev", "/tmp/.X11-unix"];
+
+/**
+ * Why a path cannot be granted on Linux for the sockets it is or holds, from a full walk;
+ * a tree too large to walk is refused too, rather than trusted unseen.
+ */
+export const socketHolding = async (path: string, budget = 50_000): Promise<string | null> => {
+  if (LINUX_SOCKET_HOMES.some((folder) => within(folder, path) || within(path, folder)))
+    return "That holds system sockets, which commands could use to act outside their limits.";
+  const real = await realpath(path).catch(() => path);
+  let level = [real];
+  const first = await lstat(real).catch(() => null);
+  // A named pipe too: the kernel lets a read-only mount's FIFO be opened for writing.
+  if (first?.isSocket() || first?.isFIFO())
+    return "That is a socket or pipe, which commands could use to act outside their limits.";
+  if (!first?.isDirectory()) return null;
+  while (level.length > 0) {
+    const next: string[] = [];
+    for (const folder of level) {
+      // A folder that cannot be listed may still be entered by name: unchecked is not empty.
+      const entries = await readdir(folder, { withFileTypes: true }).catch(() => null);
+      if (!entries) return `${folder} cannot be checked for sockets, so it cannot be shared.`;
+      budget -= entries.length;
+      if (budget < 0)
+        return "That folder is too large to check for sockets. Name a folder inside it.";
+      for (const entry of entries) {
+        if (entry.isSocket() || entry.isFIFO())
+          return `That folder holds a socket or pipe (${join(folder, entry.name)}), which commands could use to act outside their limits.`;
+        if (entry.isDirectory()) next.push(join(folder, entry.name));
+      }
+    }
+    level = next;
+  }
+  return null;
+};
+
+const SOCKET_SCAN_MS = 10_000;
+
+/** The refusal when a chat allowed the agent but none is running; the web client keys on it. */
+export const NO_AGENT = "No SSH agent was running on this computer when the command started.";
+
+/**
+ * The sockets in `roots`, a few levels down and within a budget of entries. bubblewrap lets a
+ * command connect to a socket in a folder it may only read (measured), and readable home
+ * folders can hold one (IBus keeps its socket in ~/.cache/ibus).
+ */
+export const socketsUnder = async (roots: readonly string[], levels = 3, budget = 20_000) => {
+  const found: string[] = [];
+  let level = [...roots];
+  for (let step = 0; step < levels && level.length > 0 && budget > 0; step += 1) {
+    const next: string[] = [];
+    for (const folder of level) {
+      const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+      budget -= entries.length;
+      for (const entry of entries) {
+        if (entry.isSocket()) found.push(join(folder, entry.name));
+        else if (entry.isDirectory()) next.push(join(folder, entry.name));
+      }
+      if (budget <= 0) break;
+    }
+    level = next;
+  }
+  return found;
+};
 
 export const makeSandbox = (dependencies: SandboxDependencies) =>
   Effect.gen(function* () {
@@ -528,36 +824,53 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
     const running = new Set<LaunchedProcess>();
     let closed = false;
 
-    // Windows commands whose chat allowed the agent, and the pipe it was found at.
+    // Commands whose chat allowed the agent, and where the user's agent was found.
     const relayedAgents = new Map<string, string>();
-    const agentAllowed = (context: CommandContext) =>
-      relayedAgents.has(context.command) &&
-      (dependencies.capabilities
+    // Every agent found stays denied: one chosen before, or gone for a moment, would otherwise
+    // be open to the next command.
+    const seenAgents = new Set<string>();
+    // Bumped around every change of choice: a lookup that spans one is done again, so a command
+    // never starts relaying the agent just given up.
+    let agentEpoch = 0;
+    const currentAgent = async (relayFor?: string) => {
+      for (;;) {
+        const epoch = agentEpoch;
+        const found = await dependencies.agent().catch(() => null);
+        if (epoch !== agentEpoch) continue;
+        if (found) seenAgents.add(found);
+        if (found && relayFor !== undefined) relayedAgents.set(relayFor, found);
+        return found;
+      }
+    };
+    const agentGranted = (context: CommandContext) =>
+      dependencies.capabilities
         ?.applying({
           origin: context.server,
           conversationId: context.chat,
           attempt: context.attempt,
         })
-        .includes("ssh-agent") ??
-        false);
+        .includes("ssh-agent") ?? false;
     const proxy: EgressProxy = createEgressProxy({
       decide: (context, host, port) =>
         host === AGENT_DESTINATION.host && port === AGENT_DESTINATION.port
-          ? agentAllowed(context)
-            ? { allowed: true, grantId: AGENT_GRANT }
-            : { allowed: false, reason: "This chat has not allowed signing in with the SSH agent." }
+          ? !agentGranted(context)
+            ? { allowed: false, reason: "This chat has not allowed signing in with the SSH agent." }
+            : relayedAgents.has(context.command)
+              ? { allowed: true, grantId: AGENT_GRANT }
+              : // Allowed, but none ran when the command started: asking again would not help.
+                { allowed: false, reason: NO_AGENT }
           : grants
             ? grants.decide(context, host, port)
             : { allowed: false, reason: "No grants" },
-      local: (context, host, port) => {
-        const pipe = relayedAgents.get(context.command);
-        return host === AGENT_DESTINATION.host && port === AGENT_DESTINATION.port && pipe
-          ? () => connect(pipe)
-          : undefined;
+      local: (context, host, port, proven) => {
+        if (host !== AGENT_DESTINATION.host || port !== AGENT_DESTINATION.port) return undefined;
+        const agent = relayedAgents.get(context.command);
+        // A command's own port (Linux) answers anyone local; the agent wants its token too.
+        return agent && proven ? () => connect(agent) : null;
       },
-      onDenial: ({ context, host, port }) => {
+      onDenial: ({ context, ...denial }) => {
         const lines = denials.get(context.command);
-        if (lines && lines.length < 20) lines.push(violationLine(host, port));
+        if (lines && lines.length < 20) lines.push(denialLine(denial));
       },
     });
     yield* Effect.promise(() => proxy.listen());
@@ -567,6 +880,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         closed = true;
         for (const process of running) process.kill();
         await proxy.close();
+        await dependencies.commandRoot.close();
       }),
     );
 
@@ -597,7 +911,136 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         return { kind: "ready" } as const;
       });
 
+    // Roots made since startup count too: a folder attached earlier may hold one now.
+    // A credential path may be a link (a dotfiles manager links ~/.ssh): its target is a
+    // credential too, wherever it lies. Resolved at start and again before each command.
+    let credentialTargets: readonly string[] = [];
+    let credentialWalks = 0;
+    let credentialStored = 0;
+    const resolveCredentials = async () => {
+      const walk = (credentialWalks += 1);
+      const found = await credentialLinks(CREDENTIAL_DENIES);
+      // A slower, older walk never replaces a newer one's answer.
+      if (walk > credentialStored) {
+        credentialStored = walk;
+        credentialTargets = found;
+      }
+      return found;
+    };
+    /** For attach and approval: a credential on a stalled mount refuses rather than hangs. */
+    const boundedCredentials = () =>
+      Promise.race([
+        resolveCredentials(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Checking where credentials lie took too long. Try again.")),
+            10_000,
+          ).unref(),
+        ),
+      ]);
+
+    // On Linux a command may connect to a socket it can only read, so a granted path must be
+    // no socket and hold none. Judged by a full walk, refused when too large to finish; the
+    // answer is reused for a few seconds.
+    const socketRefusals = new Map<string, { at: number; refusal: Promise<string | null> }>();
+    const linuxSocketRefusal = (path: string): Promise<string | null> => {
+      if (os !== "linux") return Promise.resolve(null);
+      const now = Date.now();
+      const known = socketRefusals.get(path);
+      if (known && now - known.at <= SOCKET_SCAN_MS) return known.refusal;
+      const refusal = socketHolding(path);
+      socketRefusals.set(path, { at: now, refusal });
+      return refusal;
+    };
+
+    // Linux only (Seatbelt refuses a connect in a read-only folder); looked at every few seconds.
+    let socketScan: { at: number; found: Promise<string[]> } | null = null;
+    const readableSockets = () => {
+      if (os !== "linux") return Promise.resolve([]);
+      const now = Date.now();
+      if (!socketScan || now - socketScan.at > SOCKET_SCAN_MS)
+        socketScan = { at: now, found: socketsUnder(toolchainRead(os)).catch(() => []) };
+      return socketScan.found;
+    };
+    // Not awaited: a credential link onto a stalled mount must not keep the app from opening.
+    // Attach, approval and each command walk again, bounded, before relying on it.
+    void resolveCredentials().catch(() => undefined);
+
+    const pathRules = (credentials: readonly string[] = credentialTargets): PathRules => ({
+      ...dependencies.pathRules,
+      denied: [...dependencies.pathRules.denied, ...credentials, ...dependencies.commandRoot.all()],
+    });
+
+    // Commands from their first step until their launch has settled: an agent chosen while one
+    // runs would be open to it, as its policy was built before the choice.
+    let active = 0;
+    // Whether a choice of agent is being made, from the request to its end.
+    let choosing = false;
     const run = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => (active += 1)),
+        () => runCommand(input),
+        () => Effect.sync(() => (active -= 1)),
+      );
+
+    const choose = async (
+      choice: AgentChoice,
+      socket: string | null,
+      confirm: (change: AgentChange) => Promise<boolean>,
+    ) => {
+      // Commands relaying any agent but the one now in effect stop at once, rather than when they
+      // end, also on a first choice, when theirs was SSH_AUTH_SOCK's.
+      const settle = async (next: string | null) => {
+        agentEpoch += 1;
+        await choice.set(next);
+        agentEpoch += 1;
+        const now = await dependencies.agent().catch(() => null);
+        for (const [command, relayed] of relayedAgents)
+          if (relayed !== now) relayedAgents.delete(command);
+        proxy.regrant(AGENT_GRANT);
+      };
+      if (socket === null) {
+        if (choice.current() === null) return false;
+        const fallback = await findAgent({
+          os,
+          env: process.env,
+          chosen: null,
+          exists: agentExists,
+        });
+        if (!(await confirm({ kind: "default", fallback }))) return false;
+        await settle(null);
+        return true;
+      }
+      if (os === "win32") throw new Error("Windows commands use Windows’ own agent.");
+      if (!isAbsolute(socket)) throw new Error("Name the agent’s socket by its full path.");
+      // No command may be running: one started earlier has a policy without the socket, and
+      // could replace it before it is used. Asked first, so the answer says nothing of the path.
+      if (active > 0) throw new Error("Wait for the commands running on this computer to finish.");
+      // Kept by its real path: a link (one a command made) could be pointed elsewhere later.
+      const real = await realpath(socket).catch(() => null);
+      const valid =
+        real !== null &&
+        Buffer.byteLength(real) <= (os === "darwin" ? 103 : 107) &&
+        (await lstat(real).then(
+          (info) => info.isSocket(),
+          () => false,
+        )) &&
+        (await answersAsAgent(real));
+      // Again, for a command started during the check, and before the verdict, so that answer
+      // too is the same for any path.
+      if (active > 0) throw new Error("Wait for the commands running on this computer to finish.");
+      // One answer for every refusal: the page must not learn which paths exist. A socket that
+      // accepts and never answers is refused only after the agent check's two seconds, which the
+      // page could time (accepted).
+      if (!valid || real === null) throw new Error(`${socket} isn’t a running SSH agent’s socket.`);
+      // Denied from now on, chosen or not.
+      seenAgents.add(real);
+      if (!(await confirm({ kind: "use", socket: real }))) return false;
+      await settle(real);
+      return true;
+    };
+
+    const runCommand = (input: SandboxRun): Effect.Effect<SandboxResult, DesktopError> =>
       Effect.gen(function* () {
         const available = yield* availability();
         if (available.kind !== "ready") {
@@ -605,146 +1048,309 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             unavailable(available.kind === "unsupported" ? available.reason : "Unavailable."),
           );
         }
+        // The command's deadline covers everything from here, a slow filesystem included.
+        const started = Date.now();
+        // Links made since the last command count before anything is judged by these rules.
+        const [linkedCredentials, workspace] = yield* Effect.tryPromise({
+          try: () =>
+            Promise.all([resolveCredentials(), realpath(input.cwd).catch(() => input.cwd)]),
+          catch: (cause) =>
+            new DesktopError({
+              reason: "failed",
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(Math.max(0, input.timeoutMs)),
+            orElse: () => Effect.fail(expired()),
+          }),
+        );
+        // A writable folder holding or inside the app's data or a command root would open other
+        // chats' workspaces and other commands' tokens. The chat's own workspace (where the
+        // command starts) is the one place inside them a command may write.
+        const exposing = input.allowWrite.find(
+          (folder) =>
+            !within(input.cwd, folder) &&
+            !within(workspace, folder) &&
+            touchesDenied(folder, pathRules(linkedCredentials).denied),
+        );
+        if (exposing) {
+          return yield* new DesktopError({
+            reason: "failed",
+            message: `${exposing} holds credentials or the app’s own data. Detach it to run commands.`,
+          });
+        }
         const context = {
           server: input.context.origin,
           chat: input.context.conversationId,
           attempt: input.context.attempt,
           command: input.callId,
         };
-        // bubblewrap refuses a proxy URL carrying credentials (bwrap's arguments are readable
-        // by every local user), and reaches only that one endpoint: there the port is the token.
-        const { token, proxyUrl } =
-          os === "linux"
-            ? yield* Effect.tryPromise({
-                try: () => proxy.issuePort(context),
-                catch: (cause) => unavailable(`Could not start the command: ${String(cause)}`),
-              })
-            : proxy.issue(context);
-        denials.set(input.callId, []);
-        const forget = Effect.sync(() => {
-          // Ends every tunnel the command opened, and its leftover children's.
-          proxy.revoke(token);
-          denials.delete(input.callId);
-          relayedAgents.delete(input.callId);
-        });
-        // Holds the Maven settings (token included) and the ssh setup: private, readable, and gone
-        // with the command.
-        const commandDirectory = yield* Effect.promise(() =>
-          mkdtemp(join(tmpdir(), "neema-command-")),
-        );
-        const settingsFile = join(commandDirectory, "settings.xml");
-        const cache = join(input.cwd, ".cache");
-        yield* Effect.promise(() =>
-          writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), { mode: 0o600 }),
-        );
-        const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
-        const found = granted.has("ssh-agent")
-          ? yield* Effect.promise(() => dependencies.agent())
-          : null;
-        // Windows' agent is a pipe no container may be given; the proxy carries it instead.
-        if (found && os === "win32") relayedAgents.set(input.callId, found);
-        const agent = os === "win32" ? null : found;
-        const ssh = yield* Effect.promise(async () => {
-          const binary = await findSsh(
-            process.env.PATH,
-            async (file) =>
-              access(file, os === "win32" ? constants.F_OK : constants.X_OK).then(
-                () => true,
-                () => false,
-              ),
-            os,
-          );
-          return binary
-            ? writeSshSetup({
+        // Every resource is released as soon as it is acquired, so a Stop or a failure during
+        // setup leaves no live token, listener or credential-bearing folder behind.
+        const finished = yield* Effect.scoped(
+          Effect.gen(function* () {
+            // bubblewrap refuses a proxy URL carrying credentials (bwrap's arguments are readable
+            // by every local user), and reaches only that one endpoint: there the port is the token.
+            const { token, proxyUrl } = yield* Effect.acquireRelease(
+              Effect.tryPromise({
+                try: async () => {
+                  const issued =
+                    os === "linux" ? await proxy.issuePort(context) : proxy.issue(context);
+                  denials.set(input.callId, []);
+                  return issued;
+                },
+                catch: setupFailed,
+              }),
+              (issued) =>
+                Effect.sync(() => {
+                  // Ends every tunnel the command opened, and its leftover children's.
+                  proxy.revoke(issued.token);
+                  denials.delete(input.callId);
+                  relayedAgents.delete(input.callId);
+                }),
+            );
+            // Holds the Maven settings (token included) and the ssh setup. Its root is one no
+            // command can read or write (never the shared per-user temp folder macOS grants).
+            const commandDirectory = yield* Effect.acquireRelease(
+              Effect.tryPromise({
+                try: async () =>
+                  mkdtemp(join(await dependencies.commandRoot.current(), "neema-command-")),
+                catch: setupFailed,
+              }),
+              // A process the kill has not yet reaped may still hold a file (Windows); the root
+              // goes when the sandbox closes, so a failure here never replaces the result.
+              (directory) =>
+                Effect.promise(() =>
+                  rm(directory, { recursive: true, force: true, maxRetries: 3 }).catch(
+                    () => undefined,
+                  ),
+                ),
+            );
+            const settingsFile = join(commandDirectory, "settings.xml");
+            const gradleArgs = join(commandDirectory, "gradle.args");
+            const cache = join(input.cwd, ".cache");
+            yield* Effect.tryPromise({
+              try: () =>
+                Promise.all([
+                  writeFile(settingsFile, mavenSettings(proxyUrl, join(cache, "m2")), {
+                    mode: 0o600,
+                  }),
+                  writeFile(gradleArgs, jvmProxyArguments(proxyUrl).join("\n"), { mode: 0o600 }),
+                ]),
+              catch: setupFailed,
+            });
+            const granted = new Set(dependencies.capabilities?.applying(input.context) ?? []);
+            // The agent is never named to the container: the proxy carries it, and its socket is
+            // denied to every command, since it may sit where commands can reach. A Windows pipe
+            // is no path to deny, so Windows looks only for a chat that relays one.
+            const found =
+              os === "win32" && !granted.has("ssh-agent")
+                ? null
+                : yield* Effect.promise(() =>
+                    currentAgent(granted.has("ssh-agent") ? input.callId : undefined),
+                  );
+            const hostAgent = os === "win32" ? null : found;
+            const ssh = yield* Effect.tryPromise({
+              try: async () => {
+                const binary = await findSsh(
+                  process.env.PATH,
+                  async (file) =>
+                    access(file, os === "win32" ? constants.F_OK : constants.X_OK).then(
+                      () => true,
+                      () => false,
+                    ),
+                  os,
+                );
+                return binary
+                  ? writeSshSetup({
+                      os,
+                      directory: commandDirectory,
+                      ssh: binary,
+                      node: process.execPath,
+                      knownHosts: join(home, ".ssh", "known_hosts"),
+                      userConfig: join(home, ".ssh", "config"),
+                      // By the grant, not the lookup: with no agent running the bridge still asks,
+                      // and the proxy's refusal says none was running.
+                      relayAgent: granted.has("ssh-agent"),
+                      // The URL of a command's own port carries no token; the bridge reads it here.
+                      proxyKey: new URL(proxyUrl).username ? null : token,
+                    })
+                  : null;
+              },
+              catch: setupFailed,
+              // Interruptible, since it reads the user's files (a stalled mount must not hold up
+              // Stop). Abandoned, it cannot bring the folder back: bin is made non-recursively.
+            });
+            const environment = withSsh(
+              commandEnvironment(
+                process.env,
+                input.cwd,
+                {
+                  ...proxyEnvironment(proxyUrl),
+                  ...jvmEnvironment(cache, settingsFile, gradleArgs, os),
+                  // Spares the stubs (git, xcrun) most xcodebuild lookups, each of which warns on
+                  // stderr that the read-only per-user cache folder is unavailable.
+                  ...(dependencies.developerDir
+                    ? { DEVELOPER_DIR: dependencies.developerDir }
+                    : {}),
+                },
                 os,
-                directory: commandDirectory,
-                ssh: binary,
-                node: process.execPath,
-                knownHosts: join(home, ".ssh", "known_hosts"),
-                agent,
-                relayAgent: relayedAgents.has(input.callId),
-              })
-            : null;
-        });
-        const removeSettings = Effect.promise(() =>
-          rm(commandDirectory, { recursive: true, force: true }),
-        );
-        const environment = withSsh(
-          commandEnvironment(
-            process.env,
-            input.cwd,
-            {
-              ...proxyEnvironment(proxyUrl),
-              ...jvmEnvironment(proxyUrl, cache, settingsFile, os),
-            },
-            os,
-          ),
-          ssh,
-          agent,
-          os,
-        );
-        const filesystem = yield* Effect.promise(async () => {
-          const policy = filesystemPolicy({
-            os,
-            // The command's own folder: ssh records host keys there. The agent's socket, when the
-            // chat allows it: connecting needs it writable.
-            writable: [...input.allowWrite, commandDirectory, ...(agent ? [agent] : [])],
-            readable: [
-              ...(dependencies.paths?.applying(input.context) ?? []),
-              // The ssh bridge runs on the app's own executable.
-              ...(ssh ? [appBundle(process.execPath)] : []),
-            ],
-            protectedDirectory: grants?.directory ?? null,
-            userFolders: dependencies.userFolders(),
-          });
-          return existingOnly(policy);
-        });
-        const request: ContainerRequest = {
-          command: shellCommand(input.command, os),
-          workingDirectory: input.cwd,
-          environment,
-          filesystem,
-          // Seatbelt blocks directory services, and ssh refuses to start when it cannot
-          // name the current user; this one lookup answers that and nothing more.
-          ...(os === "darwin"
-            ? {
-                containment: {
-                  type: "seatbelt" as const,
-                  config: { extraMachLookups: ["com.apple.system.opendirectoryd.libinfo"] },
-                },
-              }
-            : {}),
-          // Node's realpath, npm and git stat every folder above the one they run in.
-          ...(os === "win32"
-            ? {
-                containment: {
-                  type: "processcontainer" as const,
-                  config: {
-                    filesystem: {
-                      enumeratePaths: enumerableAncestors([
-                        ...filesystem.readwritePaths,
-                        ...filesystem.readonlyPaths,
-                      ]),
+              ),
+              ssh,
+              os,
+            );
+            // A granted path is checked again each run: a command may since have replaced it, or
+            // a folder above it, with a link to somewhere the person never approved.
+            const readable = yield* Effect.promise(async () => {
+              const paths = dependencies.paths?.applying(input.context) ?? [];
+              const checked = await Promise.all(
+                paths.map(
+                  async (path) =>
+                    (await checkPathGrant(path, pathRules(linkedCredentials))).ok &&
+                    (await linuxSocketRefusal(path)) === null,
+                ),
+              );
+              return paths.filter((_, index) => checked[index] === true);
+            });
+            // The agent in effect, every one seen before, and SSH_AUTH_SOCK's when another is
+            // chosen, which still answers whoever opens it. Each by the path given and by its
+            // real one: a deny holds the path opened, and a link leads past the given one.
+            const agentSockets = yield* Effect.promise(async () => {
+              const given = [
+                hostAgent,
+                ...(os === "win32" ? [] : seenAgents),
+                os === "win32" ? null : process.env.SSH_AUTH_SOCK,
+              ].filter((socket): socket is string => !!socket && isAbsolute(socket));
+              const real = (
+                await Promise.all(given.map((socket) => realpath(socket).catch(() => socket)))
+              ).flatMap(spellings);
+              // Where a link led stays denied too: retargeted, it would open the old agent.
+              if (os !== "win32") for (const socket of real) seenAgents.add(socket);
+              return [...new Set([...given, ...real])];
+            });
+            const socketsReadable = yield* Effect.promise(readableSockets);
+            const policy = yield* Effect.tryPromise({
+              try: () =>
+                existingOnly(
+                  filesystemPolicy({
+                    os,
+                    // The command's own folder: ssh records host keys there.
+                    writable: [...input.allowWrite, commandDirectory],
+                    readable: [
+                      ...readable,
+                      // The ssh bridge runs on the app's own executable.
+                      ...(ssh ? [appBundle(process.execPath)] : []),
+                    ],
+                    protectedDirectory: grants?.directory ?? null,
+                    agentSockets,
+                    credentialTargets: linkedCredentials,
+                    readableSockets: socketsReadable,
+                    userFolders: dependencies.userFolders(),
+                  }),
+                  os,
+                ),
+              catch: setupFailed,
+            });
+            // A built-in folder (/opt, a toolchain's, macOS's per-user temp) could hold the app's
+            // data or the command roots in an unusual setup (a dev profile there), directly or
+            // through a link: such a folder is left out. What the person granted is checked apart.
+            const appPlaces = [...(dependencies.appData ?? []), ...dependencies.commandRoot.all()];
+            const own = new Set([...readable, ...input.allowWrite, commandDirectory]);
+            const filesystem = yield* Effect.promise(async () => ({
+              ...policy,
+              readwritePaths: await notOpening(policy.readwritePaths, own, appPlaces),
+              readonlyPaths: await notOpening(policy.readonlyPaths, own, appPlaces),
+            }));
+            // Setup spends the same budget as the command: the deadline is the caller's.
+            const remaining = input.timeoutMs - (Date.now() - started);
+            if (remaining <= 0) return yield* Effect.fail(expired());
+            const request: ContainerRequest = {
+              command: shellCommand(input.command, os),
+              workingDirectory: input.cwd,
+              environment,
+              filesystem,
+              // Seatbelt blocks directory services, and ssh refuses to start when it cannot
+              // name the current user; this one lookup answers that and nothing more.
+              ...(os === "darwin"
+                ? {
+                    containment: {
+                      type: "seatbelt" as const,
+                      config: { extraMachLookups: ["com.apple.system.opendirectoryd.libinfo"] },
                     },
-                  },
-                },
-              }
-            : {}),
-          // MXC's default disables Win32k, and every program linking user32 (PowerShell, git,
-          // where, whoami) then dies at load with no output. Clipboard and input stay denied.
-          ...(os === "win32"
-            ? { ui: { disable: false, clipboard: "none" as const, allowInputInjection: false } }
-            : {}),
-          network: networkPolicy(os, proxyUrl, granted.has("local-services")),
-          timeoutMs: input.timeoutMs,
-        };
-        const finished = yield* Effect.acquireUseRelease(
-          Effect.tryPromise({
-            try: () => dependencies.launch(request),
-            catch: (cause) => unavailable(`Could not start the command: ${String(cause)}`),
-          }).pipe(Effect.tap((child) => Effect.sync(() => running.add(child)))),
-          (child) =>
-            Effect.promise(async () => {
+                  }
+                : {}),
+              // Node's realpath, npm and git stat every folder above the one they run in.
+              ...(os === "win32"
+                ? {
+                    containment: {
+                      type: "processcontainer" as const,
+                      config: {
+                        filesystem: {
+                          enumeratePaths: enumerableAncestors([
+                            ...filesystem.readwritePaths,
+                            ...filesystem.readonlyPaths,
+                          ]),
+                        },
+                      },
+                    },
+                  }
+                : {}),
+              // MXC's default disables Win32k, and every program linking user32 (PowerShell, git,
+              // where, whoami) then dies at load with no output. Clipboard and input stay denied.
+              ...(os === "win32"
+                ? {
+                    ui: {
+                      disable: false,
+                      clipboard: "none" as const,
+                      allowInputInjection: false,
+                    },
+                  }
+                : {}),
+              network: networkPolicy(os, proxyUrl, granted.has("local-services")),
+              timeoutMs: remaining,
+            };
+            // A native launch may stall, and Stop and the deadline must not wait for it: the
+            // wait is interruptible, and a process that lands after either is killed on arrival.
+            const launching = Promise.resolve().then(() => dependencies.launch(request));
+            // A launch abandoned midway still counts until its process has come and been killed.
+            // One that never settles keeps the agent setting refused until the app restarts.
+            active += 1;
+            void launching.then(
+              () => (active -= 1),
+              () => (active -= 1),
+            );
+            const child = yield* Effect.uninterruptibleMask((restore) =>
+              restore(
+                Effect.tryPromise({
+                  try: () => launching,
+                  catch: (cause) => unavailable(`Could not start the command: ${String(cause)}`),
+                }),
+              ).pipe(
+                Effect.onInterrupt(() =>
+                  Effect.sync(() => {
+                    launching.then(
+                      (late) => late.kill(),
+                      () => undefined,
+                    );
+                  }),
+                ),
+                Effect.tap((launched) =>
+                  Effect.sync(() => running.add(launched)).pipe(
+                    // Stop and the deadline land here: the process tree goes with the command.
+                    Effect.andThen(
+                      Effect.addFinalizer(() =>
+                        Effect.sync(() => {
+                          running.delete(launched);
+                          launched.kill();
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            return yield* Effect.promise(async () => {
               const output = collect(
                 [child.standardOutput, child.standardError],
                 LIMITS.outputChars,
@@ -755,19 +1361,14 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                 ...output.result(),
                 violations: [...(denials.get(input.callId) ?? [])],
               };
-            }),
-          // Stop and the deadline land here: the process tree goes with the command.
-          (child) =>
-            Effect.sync(() => {
-              running.delete(child);
-              child.kill();
-            }),
+            });
+          }),
         ).pipe(
           Effect.timeoutOrElse({
-            duration: Duration.millis(Math.max(0, input.timeoutMs)),
+            // What the checks above left of the command's own deadline.
+            duration: Duration.millis(Math.max(0, input.timeoutMs - (Date.now() - started))),
             orElse: () => Effect.fail(expired()),
           }),
-          Effect.ensuring(Effect.andThen(forget, removeSettings)),
         );
         if (finished.timedOut) {
           return yield* Effect.fail(
@@ -816,8 +1417,19 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           // The agent signs as the person; that is decided per chat, never for every chat.
           if (capability === "ssh-agent" && target.scope !== "chat")
             throw new Error("Signing in with SSH keys is allowed per chat only.");
-          if (add && capability === "ssh-agent" && !(await dependencies.agent()))
-            throw new Error("No SSH agent is running on this computer.");
+          if (add && capability === "ssh-agent") {
+            if (!(await currentAgent()))
+              throw new Error(
+                os === "win32"
+                  ? "No SSH agent was found. Start Windows’ OpenSSH Authentication Agent service."
+                  : "No SSH agent was found. Start one, or name its socket in Settings › This computer.",
+              );
+          }
+          // bubblewrap gives every command a loopback of its own and cannot open the host's.
+          if (add && capability === "local-services" && os === "linux")
+            throw new Error(
+              "On Linux commands reach their own local services already. This computer’s can’t be opened to them.",
+            );
           if (add) await capabilities.add(target, capability);
           else await capabilities.remove(target, capability);
           // Closes relayed agent connections a removed grant no longer covers.
@@ -858,16 +1470,41 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           dependencies.paths?.keepAnswers(origin, live);
           dependencies.capabilities?.keepAnswers(origin, live);
         }),
+      checkFolder: (path) =>
+        Effect.promise(async () => {
+          // Unchecked credentials refuse the folder: an old list could miss a fresh link.
+          const credentials = await boundedCredentials().catch((cause: unknown) =>
+            cause instanceof Error ? cause.message : String(cause),
+          );
+          if (typeof credentials === "string") return credentials;
+          const rules = pathRules(credentials);
+          // A link is judged by where it leads as well as by its own name.
+          const real = await realpath(path).catch(() => path);
+          return pathRefusal(path, rules) ?? pathRefusal(real, rules);
+        }).pipe(
+          Effect.flatMap((refusal) =>
+            refusal
+              ? Effect.fail(new DesktopError({ reason: "failed", message: refusal }))
+              : Effect.void,
+          ),
+        ),
       approvePath: (target, path) =>
         Effect.tryPromise({
           try: async () => {
             const paths = dependencies.paths;
             if (!paths) throw new Error("No path grant store is available.");
-            const checked = await checkPathGrant(path, {
-              home,
-              denied: [...CREDENTIAL_DENIES, ...(grants ? [grants.directory] : [])],
-            });
+            const checked = await checkPathGrant(path, pathRules(await boundedCredentials()));
             if (!checked.ok) throw new Error(checked.reason);
+            const sockets = await Promise.race([
+              linuxSocketRefusal(checked.path),
+              new Promise<string>((resolve) =>
+                setTimeout(
+                  () => resolve("Checking that folder for sockets took too long. Try again."),
+                  10_000,
+                ).unref(),
+              ),
+            ]);
+            if (sockets) throw new Error(sockets);
             await paths.add(target, checked.path);
             return checked.path;
           },
@@ -884,6 +1521,45 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
             new DesktopError({
               reason: "failed",
               message: `Could not remove access: ${String(cause)}`,
+            }),
+        }),
+      agentSetting: () =>
+        Effect.promise(async () => {
+          const chosen = dependencies.agentChoice?.current() ?? null;
+          const fallback = await findAgent({
+            os,
+            env: process.env,
+            chosen: null,
+            exists: agentExists,
+          });
+          return {
+            choosable: os !== "win32",
+            chosen,
+            chosenFound: chosen !== null && (await agentExists(chosen)),
+            fallback,
+            fallbackFrom:
+              fallback === null ? null : fallback === WINDOWS_AGENT ? "windows" : "environment",
+          } satisfies AgentSetting;
+        }),
+      chooseAgent: (socket, confirm) =>
+        Effect.tryPromise({
+          try: async (): Promise<boolean> => {
+            const choice = dependencies.agentChoice;
+            if (!choice) throw new Error("No settings store is available.");
+            // One choice at a time, claimed before anything is awaited: the page asking is the
+            // server's, and may ask again and again.
+            if (choosing) throw new Error("Answer the open question first.");
+            choosing = true;
+            try {
+              return await choose(choice, socket, confirm);
+            } finally {
+              choosing = false;
+            }
+          },
+          catch: (cause) =>
+            new DesktopError({
+              reason: "failed",
+              message: cause instanceof Error ? cause.message : String(cause),
             }),
         }),
     });

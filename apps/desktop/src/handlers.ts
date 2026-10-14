@@ -1,4 +1,14 @@
-import { open, readdir, readFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  open,
+  readdir,
+  readFile,
+  mkdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { conflictsWithNetworkGrants, normalizeEgressGrant } from "./egress-grants.ts";
 import { Effect } from "effect";
@@ -21,6 +31,7 @@ import { withRegexMatcher, type RegexMatcher } from "./regex-matcher.ts";
 import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { exists, folderName, resolveAmongRoots, resolveInFolder } from "./folders.ts";
+import { isOwnRealPath } from "./path-grants.ts";
 import { Sandbox, type Permissions } from "./sandbox.ts";
 import { ripgrepAvailable, searchWithRipgrep } from "./ripgrep.ts";
 import { globToRegExp, globMatches, walkFiles } from "./walk.ts";
@@ -111,6 +122,28 @@ const deleteFailureReason = (reason: DesktopError["reason"]): DeleteFailure["rea
     ? reason
     : "failed";
 
+/**
+ * An attached folder is recorded by its real path and used only while that is still its
+ * real path: a command elsewhere could replace it with a link, and every tool would then
+ * write wherever the link leads. The workspace is the app's own.
+ */
+const stillAttached = (folder: string) =>
+  Effect.promise(() =>
+    realpath(folder).then(
+      (real) => isOwnRealPath(folder, real),
+      () => true,
+    ),
+  );
+
+/** One scope's permissions, as the chat's list shows them. */
+const permissionList = (permissions: Permissions): ChatPermission[] => [
+  ...permissions.network.map((grant) => ({ kind: "network" as const, ...grant })),
+  ...permissions.paths.map((path) => ({ kind: "path" as const, path })),
+  ...permissions.capabilities.map((capability) =>
+    capability === "ssh-agent" ? { kind: "ssh-agent" as const } : { kind: "local" as const },
+  ),
+];
+
 export const makeHandlers = (shell: Shell) =>
   Effect.gen(function* () {
     const store = yield* GrantStore;
@@ -134,10 +167,14 @@ export const makeHandlers = (shell: Shell) =>
      * empty world.
      */
     const rootsFor = (conversationId: string) =>
-      Effect.map(grants.lookup(conversationId), (folders) => [
-        { name: WORKSPACE_FOLDER_NAME, root: workspaces.path(conversationId) },
-        ...folders.map((folder) => ({ name: folderName(folder), root: folder })),
-      ]);
+      Effect.gen(function* () {
+        const folders = yield* grants.lookup(conversationId);
+        const kept = yield* Effect.filter(folders, stillAttached);
+        return [
+          { name: WORKSPACE_FOLDER_NAME, root: workspaces.path(conversationId), pinned: false },
+          ...kept.map((folder) => ({ name: folderName(folder), root: folder, pinned: true })),
+        ];
+      });
 
     /**
      * A model path, absolute on disk, resolved inside the root that owns it.
@@ -216,11 +253,14 @@ export const makeHandlers = (shell: Shell) =>
         const listed = yield* Effect.forEach(folders, (folder) =>
           // A remembered folder can have been moved, renamed or deleted since.
           // Resolving its own root is the cheapest proof that it is still there.
-          Effect.map(resolveInFolder(folder, ".").pipe(Effect.result), (alive) => ({
-            name: folderName(folder),
-            path: folder,
-            alive: alive._tag === "Success",
-          })),
+          Effect.gen(function* () {
+            const alive = yield* resolveInFolder(folder, ".").pipe(Effect.result);
+            return {
+              name: folderName(folder),
+              path: folder,
+              alive: alive._tag === "Success" && (yield* stillAttached(folder)),
+            };
+          }),
         );
         return {
           folders: listed,
@@ -257,15 +297,18 @@ export const makeHandlers = (shell: Shell) =>
 
       chooseFolder: ({ conversationId, replace }) =>
         Effect.gen(function* () {
-          const picked = yield* Effect.tryPromise({
+          const chosen = yield* Effect.tryPromise({
             try: () => shell.pickDirectory(),
             catch: () =>
               new DesktopError({ reason: "failed", message: "Could not open the folder picker." }),
           });
           // Cancelling is an answer, not a fault: report what is attached now.
-          if (picked === null) return yield* status(conversationId);
+          if (chosen === null) return yield* status(conversationId);
+          // Recorded by where it really is, which later runs hold it to.
+          const picked = yield* Effect.promise(() => realpath(chosen).catch(() => chosen));
           // The workspace already answers to this name, so no user folder may.
           if (folderName(picked) === WORKSPACE_FOLDER_NAME) return yield* reservedName;
+          yield* sandbox.checkFolder(picked);
           // The name is how the model addresses the folder, so two folders
           // with the same name cannot both be attached to one chat.
           let current = yield* grants.lookup(conversationId);
@@ -357,18 +400,9 @@ export const makeHandlers = (shell: Shell) =>
 
       chatPermissions: ({ conversationId }) =>
         Effect.gen(function* () {
-          const listed = (permissions: Permissions): ChatPermission[] => [
-            ...permissions.network.map((grant) => ({ kind: "network" as const, ...grant })),
-            ...permissions.paths.map((path) => ({ kind: "path" as const, path })),
-            ...permissions.capabilities.map((capability) =>
-              capability === "ssh-agent"
-                ? { kind: "ssh-agent" as const }
-                : { kind: "local" as const },
-            ),
-          ];
           const chat = yield* sandbox.permissions({ scope: "chat", chat: key(conversationId) });
           const always = yield* sandbox.permissions({ scope: "always" });
-          return { chat: listed(chat), always: listed(always) };
+          return { chat: permissionList(chat), always: permissionList(always) };
         }),
 
       revokeChatPermission: ({ conversationId, permission }) => {
@@ -724,13 +758,13 @@ export const makeHandlers = (shell: Shell) =>
           const perRoot = Math.max(1, Math.floor(LIMITS.foundPaths / roots.length));
           let paths: string[] = [];
           let truncated = false;
-          for (const { root } of roots) {
+          for (const { root, pinned } of roots) {
             const matcher = yield* Effect.try({
               try: () => globToRegExp(pattern),
               catch: () =>
                 new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
             });
-            const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
+            const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
             if (resolved._tag === "Failure") continue;
             // Walker, not rg: `--files` never names a directory, so a glob like
             // `**/*extracted*` would miss `DVR/extracted_images/` and every file
@@ -781,12 +815,12 @@ export const makeHandlers = (shell: Shell) =>
               const matches: SearchMatch[] = [];
               let filesSearched = 0;
               let truncated = false;
-              for (const { root } of roots) {
+              for (const { root, pinned } of roots) {
                 if (matches.length >= LIMITS.matches) {
                   truncated = true;
                   break;
                 }
-                const resolved = yield* resolveInFolder(root, ".").pipe(Effect.result);
+                const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
                 if (resolved._tag === "Failure") continue;
                 if (!match) {
                   const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
@@ -917,8 +951,8 @@ export const makeHandlers = (shell: Shell) =>
           // The command starts in this chat's workspace; every attached folder
           // is writable too, so `cd` and `cp` between them just work.
           const cwd = yield* workspaces.ensure(conversationId);
-          const allowed = yield* Effect.forEach(roots, ({ root }) =>
-            Effect.map(resolveInFolder(root, ".").pipe(Effect.result), (resolved) =>
+          const allowed = yield* Effect.forEach(roots, ({ root, pinned }) =>
+            Effect.map(resolveInFolder(root, ".", pinned).pipe(Effect.result), (resolved) =>
               resolved._tag === "Success" ? resolved.success.absolute : null,
             ),
           );

@@ -2,6 +2,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { DesktopError } from "@chat/desktop-rpc";
+import { isOwnRealPath } from "./path-grants.ts";
 
 /**
  * Path containment: the one place that decides whether a path the site named is
@@ -90,6 +91,7 @@ export interface ResolvedPath {
 export const resolveInFolder = (
   root: string,
   requested: string,
+  pinned = false,
 ): Effect.Effect<ResolvedPath, DesktopError> =>
   Effect.gen(function* () {
     // A missing root is not a missing file: the workspace dir is created on
@@ -105,6 +107,13 @@ export const resolveInFolder = (
       ),
     );
 
+    // A pinned root (an attached folder, recorded by its real path) must still be that path:
+    // judged where it is used, so a link swapped in after any earlier check is not followed.
+    if (pinned && !isOwnRealPath(root, realRoot))
+      return yield* new DesktopError({
+        reason: "no-folder",
+        message: "The folder you chose is no longer available.",
+      });
     const target = isAbsolute(requested) ? resolve(requested) : resolve(realRoot, requested);
     const { base, trail } = yield* existingAncestor(target, requested);
     const realBase = yield* realOrFail(base, requested);
@@ -144,14 +153,14 @@ export interface LocatedPath extends ResolvedPath {
  * is skipped too; every other failure is this root's to report.
  */
 export const resolveAmongRoots = (
-  roots: ReadonlyArray<{ name: string; root: string }>,
+  roots: ReadonlyArray<{ name: string; root: string; pinned?: boolean }>,
   requested: string,
 ): Effect.Effect<LocatedPath, DesktopError> =>
   Effect.gen(function* () {
     if (!isAbsolute(requested)) return yield* Effect.fail(outside(requested));
     const normalized = resolve(requested);
-    for (const { name, root } of roots) {
-      const resolved = yield* Effect.result(resolveInFolder(root, requested));
+    for (const { name, root, pinned } of roots) {
+      const resolved = yield* Effect.result(resolveInFolder(root, requested, pinned));
       if (resolved._tag === "Failure") {
         const { reason } = resolved.failure;
         if (reason === "no-folder") continue;

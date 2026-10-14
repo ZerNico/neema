@@ -350,7 +350,6 @@ export const UNOPENABLE_EXTENSIONS = new Set([
 export const RevealMode = Schema.Literals(["reveal", "open"]);
 export type RevealMode = typeof RevealMode.Type;
 
-/** Whether commands can run, and if not, whether the app itself can fix it. */
 /** How long an approved network permission lasts: the asking answer, the chat, or every chat. */
 export const GrantScope = Schema.Literals(["answer", "chat", "always"]);
 export type GrantScope = typeof GrantScope.Type;
@@ -394,6 +393,7 @@ export type ChatPermissions = typeof ChatPermissions.Type;
 export const Capability = Schema.Literals(["local-services", "ssh-agent"]);
 export type Capability = typeof Capability.Type;
 
+/** Whether commands can run, and if not, whether the app itself can fix it. */
 export const SandboxAvailability = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["ready"]) }),
   Schema.Struct({
