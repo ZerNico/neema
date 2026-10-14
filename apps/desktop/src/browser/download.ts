@@ -1,12 +1,27 @@
-import type { DownloadItem } from "electron";
+import { app, type DownloadItem } from "electron";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, rmSync } from "node:fs";
 import { open, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { LIMITS } from "@chat/desktop-rpc";
 import { abortable } from "./calls.ts";
 
 export const DOWNLOAD_MAX = 4;
+
+/**
+ * Downloads wait in the app's own data, which no command can open: never the temp folder,
+ * which on macOS every command can write. Made synchronously, as Electron wants the save
+ * path before the download event returns.
+ */
+let swept = false;
+const staging = () => {
+  const directory = join(app.getPath("userData"), "downloads");
+  // A crash leaves what was in flight; nothing from an earlier run is still owned.
+  if (!swept) rmSync(directory, { recursive: true, force: true });
+  swept = true;
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  return directory;
+};
 const DOWNLOAD_MS = 60_000;
 
 /** Read only the bounded native file, never an untrusted advertised length. */
@@ -54,10 +69,17 @@ export async function receiveDownload(
   options: { limit?: number; lifetimeMs?: number; temporary?: string } = {},
 ) {
   const limit = options.limit ?? LIMITS.importBytes;
-  const temporary = options.temporary ?? join(tmpdir(), `neema-download-${randomUUID()}`);
+  let temporary: string;
+  try {
+    temporary = options.temporary ?? join(staging(), `neema-download-${randomUUID()}`);
+    item.setSavePath(temporary);
+  } catch (cause) {
+    // Without a save path Electron would ask the person where to save; ours is never theirs.
+    item.cancel();
+    throw cause;
+  }
   const controller = new AbortController();
   const receiving = AbortSignal.any([signal, controller.signal]);
-  item.setSavePath(temporary);
   let terminal = false;
   const { promise: finished, resolve: settle } = Promise.withResolvers<boolean>();
   const done = (_event: unknown, state: string) => {

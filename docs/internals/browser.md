@@ -290,6 +290,8 @@ ownership. A revoked drive may remain until cleanup to gate navigation, but a do
 then is cancelled before receiving or landing. Admission checks its call deadline even before
 the expiry timer runs. Normal successful release and end keep the bounded linger, which is
 separate from active call authority. At most four model downloads run at once, each for at most a minute, with declared
-and received-byte progress checks. Completion reads the exact owned temp through a bounded
-file handle before landing, then removes only that temp. Cancelled items also clean up a late
+and received-byte progress checks. A download waits in a folder in the app's own data, never
+the system temp folder, which on macOS every command can write; the folder is emptied
+once per run, so a crash mid-download leaves nothing for long. Completion reads the exact
+owned temp file through a bounded file handle before landing, then removes only that file. Cancelled items also clean up a late
 terminal report. Downloads the person starts keep the Save dialog.

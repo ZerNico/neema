@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BrowserWindow, WebContents, Session } from "electron";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_FAVICON, BROWSER_OPEN_TAB } from "@chat/desktop-rpc";
 
 const electron = vi.hoisted(() => ({
@@ -8,6 +11,8 @@ const electron = vi.hoisted(() => ({
   profile: null as Session | null,
 }));
 vi.mock("electron", () => ({
+  // Downloads wait under the app's data; a throwaway folder stands in for it.
+  app: { getPath: () => join(tmpdir(), "chat-guests-test-data") },
   clipboard: {},
   Menu: {},
   nativeImage: {},
@@ -20,6 +25,8 @@ vi.mock("./fetch.ts", () => ({
     profile.fetch(url, { signal, redirect: "manual" }),
 }));
 import { attachBrowserGuests } from "./guests.ts";
+
+afterAll(() => rmSync(join(tmpdir(), "chat-guests-test-data"), { recursive: true, force: true }));
 
 const cleanups: Array<() => void> = [];
 const fixture = () => {

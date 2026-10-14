@@ -111,3 +111,21 @@ it("bounded file reading checks cancellation", async () => {
   controller.abort();
   await expect(readDownload(path, 8, controller.signal)).rejects.toThrow();
 });
+
+it("cancels the native item when its staging cannot be set up", async () => {
+  const item = Object.assign(new EventEmitter(), {
+    setSavePath: vi.fn(() => {
+      throw new Error("staging failed");
+    }),
+    getFilename: () => "x.bin",
+    getTotalBytes: () => 0,
+    getReceivedBytes: () => 0,
+    cancel: vi.fn(),
+  });
+  await expect(
+    receiveDownload(item, async () => {}, new AbortController().signal, {
+      temporary: join(tmpdir(), "never"),
+    }),
+  ).rejects.toThrow("staging failed");
+  expect(item.cancel).toHaveBeenCalledOnce();
+});
