@@ -23,16 +23,31 @@ const asResult = (
     ? outcome.success
     : desktopFailure(refusalSummary(outcome.failure.reason), outcome.failure.message);
 
-/** The destinations the egress proxy refused, from the desktop's violation lines. */
-const blockedNetworkDestinations = (violations: readonly string[]) => [
-  ...new Set(
-    violations.flatMap((violation) => {
-      const match = /^deny network-outbound (\S+):(\d{1,5})$/.exec(violation.trim());
-      const port = Number(match?.[2]);
-      return match && port >= 1 && port <= 65_535 ? [`${match[1]}:${port}`] : [];
-    }),
-  ),
-];
+/**
+ * What the egress proxy refused, from the desktop's violation lines: destinations a grant would
+ * open, those that need it to opt into private-network addresses, and refusals no grant changes.
+ */
+const networkRefusals = (violations: readonly string[]) => {
+  const grant = new Set<string>();
+  const privateNetwork = new Set<string>();
+  const refused = new Set<string>();
+  let agent: "refused" | "missing" | null = null;
+  for (const violation of violations) {
+    const denied = /^deny network-outbound (\S+):(\d{1,5})( private-network)?$/.exec(
+      violation.trim(),
+    );
+    const port = Number(denied?.[2]);
+    if (denied && port >= 1 && port <= 65_535)
+      (denied[3] ? privateNetwork : grant).add(`${denied[1]}:${port}`);
+    const other = /^refused network-outbound (\S+): (.+)$/.exec(violation.trim());
+    // The SSH agent is a switch of its own, reached through a reserved destination.
+    // The chat may have allowed it with no agent running, which no request would change.
+    if (other?.[1] === "ssh-agent.invalid:1")
+      agent = /no ssh agent was running/i.test(other[2] ?? "") ? "missing" : "refused";
+    else if (other) refused.add(`${other[1]} (${other[2]})`);
+  }
+  return { grant: [...grant], privateNetwork: [...privateNetwork], refused: [...refused], agent };
+};
 
 /** Reader-facing line for the transcript row. The detail carries the rest. */
 const refusalSummary = (reason: string) => {
@@ -476,20 +491,41 @@ export const executeDesktopTool = (
             timeoutMs,
           }),
           (output) => {
-            const blocked = blockedNetworkDestinations(output.violations);
+            const network = networkRefusals(output.violations);
+            const blocked = [...network.grant, ...network.privateNetwork];
+            const refused =
+              blocked.length > 0 || network.refused.length > 0 || network.agent !== null;
             return {
               v: 1 as const,
-              ok: output.exitCode === 0 && blocked.length === 0,
-              summary:
-                blocked.length > 0
-                  ? `Network access blocked: ${blocked.join(", ")}`
-                  : output.exitCode === 0
-                    ? `Ran ${command}`
-                    : `${command} exited with ${output.exitCode}`,
+              ok: output.exitCode === 0 && !refused,
+              summary: refused
+                ? `Network access blocked: ${[...blocked, ...network.refused, ...(network.agent ? ["the SSH agent"] : [])].join(", ")}`
+                : output.exitCode === 0
+                  ? `Ran ${command}`
+                  : `${command} exited with ${output.exitCode}`,
               detail: [
-                ...(blocked.length > 0
+                ...(network.grant.length > 0
                   ? [
-                      `Network access to ${blocked.join(", ")} was blocked. Call request_network_access for each with its host and port, wait for approval, then retry the command. Do not assume the command succeeded.`,
+                      `Network access to ${network.grant.join(", ")} was blocked. Call request_network_access for each with its host and port, wait for approval, then retry the command. Do not assume the command succeeded.`,
+                    ]
+                  : []),
+                ...(network.privateNetwork.length > 0
+                  ? [
+                      `Network access to ${network.privateNetwork.join(", ")} was blocked, and only a private network grant opens it (an IP address, an internal name, or a host that resolved to a private address). Call request_network_access for each with privateNetwork true, wait for approval, then retry the command. Do not assume the command succeeded.`,
+                    ]
+                  : []),
+                ...(network.agent === "refused"
+                  ? [
+                      "The command was refused the SSH agent. If it needs to sign in as the person, call request_ssh_agent, wait for approval, then retry the command.",
+                    ]
+                  : network.agent === "missing"
+                    ? [
+                        "This chat may use the SSH agent, but none was running on the person's computer. Ask them to start one (on macOS and Linux they may also name its socket in Settings › This computer), then retry the command.",
+                      ]
+                    : []),
+                ...(network.refused.length > 0
+                  ? [
+                      `Network access was refused, and no request changes that: ${network.refused.join(", ")}. Do not assume the command succeeded.`,
                     ]
                   : []),
                 output.output === "" ? "(no output)" : output.output,

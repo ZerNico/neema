@@ -116,6 +116,51 @@ describe("desktop network tools", () => {
     expect(result.violations).toEqual(violations);
   });
 
+  it("asks for a private-network grant only where that alone would help", async () => {
+    const violations = ["deny network-outbound git.corp.example:22 private-network"];
+    const { client } = clientFor({ exitCode: 0, output: "", truncated: false, violations });
+    const result = await execute(client, "run_command", { command: "git fetch" });
+    expect(result.ok).toBe(false);
+    expect(result.summary).toBe("Network access blocked: git.corp.example:22");
+    expect(result.detail).toContain(
+      "Call request_network_access for each with privateNetwork true",
+    );
+  });
+
+  it("fails a command whose tunnel was refused for good, even when it exits 0", async () => {
+    const violations = [
+      "refused network-outbound example.com:80: Plain HTTP is not supported. Use CONNECT.",
+    ];
+    const { client } = clientFor({ exitCode: 0, output: "", truncated: false, violations });
+    const result = await execute(client, "run_command", { command: "curl http://example.com" });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("no request changes that");
+    expect(result.detail).not.toContain("call request_network_access");
+  });
+
+  it("points an SSH agent refusal at request_ssh_agent", async () => {
+    const violations = [
+      "refused network-outbound ssh-agent.invalid:1: This chat has not allowed signing in with the SSH agent.",
+    ];
+    const { client } = clientFor({ exitCode: 255, output: "", truncated: false, violations });
+    const result = await execute(client, "run_command", { command: "git push" });
+    expect(result.ok).toBe(false);
+    expect(result.summary).toBe("Network access blocked: the SSH agent");
+    expect(result.detail).toContain("call request_ssh_agent");
+    expect(result.detail).not.toContain("no request changes that");
+  });
+
+  it("says when the chat allowed the agent but none was running", async () => {
+    const violations = [
+      "refused network-outbound ssh-agent.invalid:1: No SSH agent was running on this computer when the command started.",
+    ];
+    const { client } = clientFor({ exitCode: 255, output: "", truncated: false, violations });
+    const result = await execute(client, "run_command", { command: "git push" });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("none was running");
+    expect(result.detail).not.toContain("call request_ssh_agent");
+  });
+
   it("sends the answer's id with a command", async () => {
     const { client, request } = clientFor({
       exitCode: 0,
