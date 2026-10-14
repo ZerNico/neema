@@ -3,6 +3,7 @@ import { Duration, Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import { advertisedParameter } from "~/modules/tools/server/toolset.ts";
 import { DESKTOP_TIMEOUTS, DesktopToolResult, desktopFailure } from "../tool-schema.ts";
 
 /**
@@ -168,11 +169,16 @@ export const requestNetworkAccessTool = Tool.make("request_network_access", {
     "The user decides whether it lasts for this answer, this chat, or every chat. Set " +
     "privateNetwork only for a host on their local or company network, such as an internal " +
     "git server or a private IP address. Proxied TCP only: plain HTTP and UDP never work.",
+  // Every key decodes anything, absent included, so the handler explains a malformed call.
   parameters: Schema.Struct({
-    host: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253)),
-    /** Defaults to 443. */
-    port: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }))),
-    privateNetwork: Schema.optionalKey(Schema.Boolean),
+    host: advertisedParameter({ type: "string", minLength: 1, maxLength: 253 }),
+    port: advertisedParameter({
+      type: "integer",
+      minimum: 1,
+      maximum: 65_535,
+      description: "Defaults to 443.",
+    }),
+    privateNetwork: advertisedParameter({ type: "boolean" }),
   }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -188,7 +194,7 @@ export const requestPathAccessTool = Tool.make("request_path_access", {
     "chat, or every chat. Read only: to write somewhere, ask the user to attach that folder. " +
     "The home folder as a whole and credential files are never shared.",
   parameters: Schema.Struct({
-    path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
+    path: advertisedParameter({ type: "string", minLength: 1, maxLength: 4_096 }),
   }),
   success: DesktopToolResult,
   failureMode: "return",

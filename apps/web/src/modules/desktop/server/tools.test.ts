@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Stream } from "effect";
+import { Deferred, Effect, Fiber, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { Tool } from "effect/unstable/ai";
-import { prepareDesktopTools, requestNetworkAccessTool } from "./tools.ts";
+import { prepareDesktopTools, requestNetworkAccessTool, requestPathAccessTool } from "./tools.ts";
 
 const owner = {
   userId: "user",
@@ -42,7 +42,7 @@ const waitingHandler = Effect.gen(function* () {
 });
 
 describe("desktop handler registration", () => {
-  it("asks for a required host with an optional port and private network flag", () => {
+  it("advertises a host, port and private network flag, and decodes a malformed call", () => {
     const schema = Tool.getJsonSchema(requestNetworkAccessTool);
     expect(schema).toMatchObject({
       properties: {
@@ -50,7 +50,12 @@ describe("desktop handler registration", () => {
         port: { type: "integer", minimum: 1, maximum: 65_535 },
         privateNetwork: { type: "boolean" },
       },
-      required: ["host"],
+    });
+    // The handler explains a missing or misspelled key; decoding must not fail the generation.
+    for (const tool of [requestNetworkAccessTool, requestPathAccessTool])
+      expect(() => Schema.decodeUnknownSync(tool.parametersSchema)({ file: "/x" })).not.toThrow();
+    expect(Tool.getJsonSchema(requestPathAccessTool)).toMatchObject({
+      properties: { path: { type: "string", minLength: 1, maxLength: 4_096 } },
     });
   });
 
