@@ -17,6 +17,7 @@ function limitsFor(options: ProxyOptions): Limits {
     outstandingResolutionsTotal:
       supplied?.outstandingResolutionsTotal ?? supplied?.tunnelsTotal ?? 256,
     establishMs: supplied?.establishMs ?? 30_000,
+    attemptMs: supplied?.attemptMs ?? 5_000,
     idleMs: supplied?.idleMs ?? 600_000,
     earlyBytes: supplied?.earlyBytes ?? 64 * 1024,
     earlyBytesTotal: supplied?.earlyBytesTotal ?? 4 * 1024 * 1024,
@@ -37,6 +38,12 @@ function limitsFor(options: ProxyOptions): Limits {
   }
   return limits;
 }
+
+const shut = (listener: Server) =>
+  new Promise<void>((resolve) => {
+    if (listener.listening) listener.close(() => resolve());
+    else resolve();
+  });
 
 export function createEgressProxy(options: ProxyOptions): EgressProxy {
   const tokens = new Tokens();
@@ -94,12 +101,6 @@ export function createEgressProxy(options: ProxyOptions): EgressProxy {
   server.maxConnections = services.limits.connectionsTotal + services.limits.tunnelsTotal;
   server.on("error", () => services.log("error", "Egress proxy: listener failed"));
   const dedicated = new Map<string, Server>();
-  const shut = (listener: Server) =>
-    new Promise<void>((resolve) => {
-      if (listener.listening) listener.close(() => resolve());
-      else resolve();
-    });
-
   const proxy: EgressProxy = {
     listen() {
       if (closed) return Promise.reject(new Error("Proxy is closed"));

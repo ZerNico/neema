@@ -62,6 +62,8 @@ export interface ProxyOptions {
     /** Defaults to tunnelsTotal. Released only when DNS settles. */
     outstandingResolutionsTotal: number;
     establishMs: number;
+    /** One address's connect attempt while others remain to try, default 5 seconds. */
+    attemptMs: number;
     idleMs: number;
     earlyBytes: number;
     earlyBytesTotal: number;

@@ -41,6 +41,9 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
   waited out dead servers the system skips. They are fully qualified (no search domains, so a
   bare `git` does not resolve), and at most two run at once: getaddrinfo holds a libuv pool
   thread for the whole lookup and the pool has four.
+- The addresses are tried in turn. While another remains, each attempt gets `attemptMs` (five
+  seconds), so a silent address (an unreachable IPv6 route) cannot spend the whole establishment
+  deadline; the last keeps what is left of it.
 
 ## The address guard has no exceptions
 

@@ -113,21 +113,21 @@ export class Connection {
         this.services.options.decide(this.identity.context, this.target.host, this.target.port),
       );
       if (!this.reserved || !this.identity.active) return;
-      let reason = next.allowed ? undefined : (next.reason ?? "Grant removed");
+      // Set only when the grant still stands but the address it was dialled on no longer passes.
+      let refusal: string | null = null;
       if (next.allowed) {
         const interfaces = interfaceIdentities(this.services.interfaceAddresses());
         if (this.selected) {
-          const refusal = preparedRefusal(
+          refusal = preparedRefusal(
             this.selected.address,
             interfaces,
             next.privateNetwork === true,
           );
-          if (refusal) reason = `Address policy refused: ${refusal}`;
         }
       }
-      if (!next.allowed || reason !== undefined) {
+      if (!next.allowed || refusal !== null) {
         if (this.phase === "tunnel") this.stop();
-        else this.deny(reason ?? "Grant removed");
+        else this.deny(next.allowed ? `Address policy refused: ${refusal}` : (next.reason ?? "Grant removed"));
         return;
       }
       this.decision = next;
@@ -261,9 +261,11 @@ export class Connection {
     this.reserved = true;
     this.services.reservedTunnels++;
     this.identity.reservedTunnels++;
-    this.deadline.start(this.services.limits.establishMs, () =>
-      this.network("Establishment deadline exceeded"),
-    );
+    // A candidate the policy skipped makes the answer its refusal, even when time ran out.
+    this.deadline.start(this.services.limits.establishMs, () => {
+      if (this.fallbackRefusals.size) this.deny(`Address policy refused: ${[...this.fallbackRefusals].toSorted().join(", ")}`);
+      else this.network("Establishment deadline exceeded");
+    });
     this.bufferEarly(request.early);
     if (this.pending()) void this.resolve();
   }
@@ -357,9 +359,12 @@ export class Connection {
           survivors.push({ address: canonical.host, family: canonical.kind === "ipv4" ? 4 : 6 });
         }
       }
-      if (!survivors.length)
-        this.deny(`Address policy refused: ${[...refused].toSorted().join(", ")}`);
-      else this.dial(survivors, 0);
+      if (!survivors.length) this.deny(`Address policy refused: ${[...refused].toSorted().join(", ")}`);
+      else {
+        // Should every survivor fail to connect, the answer is still the policy's refusal.
+        for (const reason of refused) this.fallbackRefusals.add(reason);
+        this.dial(survivors, 0);
+      }
     } catch {
       if (this.pending()) this.fault();
     }
@@ -371,8 +376,7 @@ export class Connection {
     if (!candidate) {
       // Exhausted fallback is 403 if any candidate was policy-refused, regardless of order.
       // Return 502 only when every fallback candidate failed at the network level.
-      if (this.fallbackRefusals.size)
-        this.deny(`Address policy refused: ${[...this.fallbackRefusals].toSorted().join(", ")}`);
+      if (this.fallbackRefusals.size) this.deny(`Address policy refused: ${[...this.fallbackRefusals].toSorted().join(", ")}`);
       else this.network("Upstream connection failed");
       return;
     }
@@ -404,20 +408,27 @@ export class Connection {
       queueMicrotask(() => this.dial(candidates, index + 1));
       return;
     }
-    this.attach(socket, () => {
-      this.selected = undefined;
-      this.services.log("warn", "Egress proxy: upstream connection failed");
-      this.dial(candidates, index + 1);
-    });
+    this.attach(
+      socket,
+      () => {
+        this.selected = undefined;
+        this.services.log("warn", "Egress proxy: upstream connection failed");
+        this.dial(candidates, index + 1);
+      },
+      // A silent address must not spend the whole deadline while another may answer.
+      index + 1 < candidates.length ? this.services.limits.attemptMs : undefined,
+    );
   }
 
   /** Relays through a connecting socket; `retry` runs if it fails before the tunnel opens. */
-  private attach(socket: Socket, retry: () => void) {
+  private attach(socket: Socket, retry: () => void, attemptMs?: number) {
     this.upstream = socket;
     let failed = false;
+    const attempt = new Deadline(this.services.timers);
     const fail = () => {
       if (failed) return;
       failed = true;
+      attempt.clear();
       socket.destroy();
       if (this.phase === "tunnel" && this.upstream === socket) {
         this.services.log("warn", "Egress proxy: tunnel transport failed");
@@ -438,7 +449,9 @@ export class Connection {
         this.finishRelay();
       } else fail();
     });
+    if (attemptMs !== undefined) attempt.start(attemptMs, fail);
     socket.once("connect", () => {
+      attempt.clear();
       if (!this.pending() || this.upstream !== socket || socket.destroyed) {
         socket.destroy();
         return;
