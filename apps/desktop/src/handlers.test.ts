@@ -490,6 +490,24 @@ describe("once a folder is attached", () => {
     expect(every.replacements).toBe(2);
   });
 
+  it("keeps both of two edits to one file made at once", async () => {
+    const path = join(root, "src", "both.ts");
+    await writeFile(path, "const a = 1;\nconst b = 2;\n");
+    const edit = (old: string, replacement: string) =>
+      Effect.runPromise(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "e",
+          path,
+          old,
+          new: replacement,
+          all: false,
+        }),
+      );
+    await Promise.all([edit("a = 1", "a = 10"), edit("b = 2", "b = 20")]);
+    expect(await readFile(path, "utf8")).toBe("const a = 10;\nconst b = 20;\n");
+  });
+
   it("moves without overwriting and deletes, but never a root itself", async () => {
     await writeFile(join(root, "src", "old.txt"), "x");
     await writeFile(join(root, "src", "taken.txt"), "y");

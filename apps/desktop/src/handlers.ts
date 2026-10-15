@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
 import { conflictsWithNetworkGrants, normalizeEgressGrant } from "./egress-grants.ts";
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
 import {
   DesktopError,
   LIMITS,
@@ -154,6 +154,10 @@ export const makeHandlers = (shell: Shell) =>
     const store = yield* GrantStore;
     const sandbox = yield* Sandbox;
     const workspaces = yield* WorkspaceRegistry;
+    // The page runs a round's calls at once. An edit reads, then writes, so two
+    // edits to one file would each write over the other's; changes take turns.
+    const changes = yield* Semaphore.make(1);
+    const oneChangeAtATime = changes.withPermits(1);
     // Every grant is looked up under the origin the shell is connected to, so
     // the handlers cannot forget to scope one.
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- key reads shell from the enclosing handler set
@@ -600,166 +604,172 @@ export const makeHandlers = (shell: Shell) =>
         }),
 
       editFile: ({ conversationId, path, old: before, new: after, all }) =>
-        Effect.gen(function* () {
-          const target = yield* locateForWrite(conversationId, path);
-          const info = yield* Effect.tryPromise({
-            try: () => stat(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${target.relative} does not exist.`,
-              }),
-          });
-          if (!info.isFile()) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-a-file",
-                message: `${target.relative} is not a file.`,
-              }),
-            );
-          }
-          if (info.size > LIMITS.writeBytes) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "too-large",
-                message: `${target.relative} is too large to edit.`,
-              }),
-            );
-          }
-          const bytes = yield* readPrefix(target.absolute, LIMITS.writeBytes, target.relative);
-          if (isBinary(bytes)) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-text",
-                message: `${target.relative} is not a text file.`,
-              }),
-            );
-          }
-          const text = bytes.toString("utf8");
-          if (before === "") {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "no-match",
-                message: "The text to replace must not be empty.",
-              }),
-            );
-          }
-          // Exact, and unique unless told otherwise. Guessing at whitespace or
-          // taking the first hit would land an edit somewhere the model did not
-          // look; a sharp refusal it can act on is the safer answer.
-          const first = text.indexOf(before);
-          if (first === -1) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "no-match",
-                message: `The text to replace was not found in ${target.relative}. It must match exactly, whitespace included.`,
-              }),
-            );
-          }
-          const second = text.indexOf(before, first + before.length);
-          if (second !== -1 && !all) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "ambiguous-match",
-                message: `The text to replace appears more than once in ${target.relative}. Include more surrounding lines so it is unique, or set all to replace every occurrence.`,
-              }),
-            );
-          }
-          const projected = literalReplacementSize(text, before, after, all ?? false);
-          if (projected.bytes > LIMITS.writeBytes) {
-            return yield* new DesktopError({
-              reason: "too-large",
-              message: `${target.relative} would be too large to write.`,
+        oneChangeAtATime(
+          Effect.gen(function* () {
+            const target = yield* locateForWrite(conversationId, path);
+            const info = yield* Effect.tryPromise({
+              try: () => stat(target.absolute),
+              catch: () =>
+                new DesktopError({
+                  reason: "not-found",
+                  message: `${target.relative} does not exist.`,
+                }),
             });
-          }
-          const next = all
-            ? text.replaceAll(before, () => after)
-            : text.replace(before, () => after);
-          const replacements = projected.replacements;
-          yield* Effect.tryPromise({
-            try: () => writeFile(target.absolute, next, "utf8"),
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not write ${target.relative}.`,
-              }),
-          });
-          const preview = unifiedDiff(target.relative, text, next);
-          const diff = preview.diff;
-          const truncated = preview.truncated || diff.length > LIMITS.readChars;
-          return {
-            path: target.relative,
-            replacements,
-            diff: truncated ? diff.slice(0, LIMITS.readChars) : diff,
-            truncated,
-          };
-        }),
+            if (!info.isFile()) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "not-a-file",
+                  message: `${target.relative} is not a file.`,
+                }),
+              );
+            }
+            if (info.size > LIMITS.writeBytes) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "too-large",
+                  message: `${target.relative} is too large to edit.`,
+                }),
+              );
+            }
+            const bytes = yield* readPrefix(target.absolute, LIMITS.writeBytes, target.relative);
+            if (isBinary(bytes)) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "not-text",
+                  message: `${target.relative} is not a text file.`,
+                }),
+              );
+            }
+            const text = bytes.toString("utf8");
+            if (before === "") {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "no-match",
+                  message: "The text to replace must not be empty.",
+                }),
+              );
+            }
+            // Exact, and unique unless told otherwise. Guessing at whitespace or
+            // taking the first hit would land an edit somewhere the model did not
+            // look; a sharp refusal it can act on is the safer answer.
+            const first = text.indexOf(before);
+            if (first === -1) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "no-match",
+                  message: `The text to replace was not found in ${target.relative}. It must match exactly, whitespace included.`,
+                }),
+              );
+            }
+            const second = text.indexOf(before, first + before.length);
+            if (second !== -1 && !all) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "ambiguous-match",
+                  message: `The text to replace appears more than once in ${target.relative}. Include more surrounding lines so it is unique, or set all to replace every occurrence.`,
+                }),
+              );
+            }
+            const projected = literalReplacementSize(text, before, after, all ?? false);
+            if (projected.bytes > LIMITS.writeBytes) {
+              return yield* new DesktopError({
+                reason: "too-large",
+                message: `${target.relative} would be too large to write.`,
+              });
+            }
+            const next = all
+              ? text.replaceAll(before, () => after)
+              : text.replace(before, () => after);
+            const replacements = projected.replacements;
+            yield* Effect.tryPromise({
+              try: () => writeFile(target.absolute, next, "utf8"),
+              catch: () =>
+                new DesktopError({
+                  reason: "failed",
+                  message: `Could not write ${target.relative}.`,
+                }),
+            });
+            const preview = unifiedDiff(target.relative, text, next);
+            const diff = preview.diff;
+            const truncated = preview.truncated || diff.length > LIMITS.readChars;
+            return {
+              path: target.relative,
+              replacements,
+              diff: truncated ? diff.slice(0, LIMITS.readChars) : diff,
+              truncated,
+            };
+          }),
+        ),
 
       movePath: ({ conversationId, from, to }) =>
-        Effect.gen(function* () {
-          // Both ends are contained: a move is a read of one path and a write
-          // of another, and either could be the one that escapes.
-          const source = yield* locateForWrite(conversationId, from);
-          // Moved into the workspace, a root would go when the chat's folder does.
-          if (isRoot(source)) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "outside-folder",
-                message: "The folder itself cannot be moved.",
-              }),
-            );
-          }
-          const destination = yield* locateForWrite(conversationId, to);
-          yield* Effect.tryPromise({
-            try: () => stat(source.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${source.relative} does not exist.`,
-              }),
-          });
-          const taken = yield* exists(destination.absolute);
-          if (taken) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "already-exists",
-                message: `${destination.relative} already exists. Delete it first if you mean to replace it.`,
-              }),
-            );
-          }
-          yield* Effect.tryPromise({
-            try: async () => {
-              await mkdir(dirname(destination.absolute), { recursive: true });
-              await rename(source.absolute, destination.absolute);
-            },
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not move ${source.relative} to ${destination.relative}.`,
-              }),
-          });
-          return { from: source.relative, to: destination.relative };
-        }),
+        oneChangeAtATime(
+          Effect.gen(function* () {
+            // Both ends are contained: a move is a read of one path and a write
+            // of another, and either could be the one that escapes.
+            const source = yield* locateForWrite(conversationId, from);
+            // Moved into the workspace, a root would go when the chat's folder does.
+            if (isRoot(source)) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "outside-folder",
+                  message: "The folder itself cannot be moved.",
+                }),
+              );
+            }
+            const destination = yield* locateForWrite(conversationId, to);
+            yield* Effect.tryPromise({
+              try: () => stat(source.absolute),
+              catch: () =>
+                new DesktopError({
+                  reason: "not-found",
+                  message: `${source.relative} does not exist.`,
+                }),
+            });
+            const taken = yield* exists(destination.absolute);
+            if (taken) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "already-exists",
+                  message: `${destination.relative} already exists. Delete it first if you mean to replace it.`,
+                }),
+              );
+            }
+            yield* Effect.tryPromise({
+              try: async () => {
+                await mkdir(dirname(destination.absolute), { recursive: true });
+                await rename(source.absolute, destination.absolute);
+              },
+              catch: () =>
+                new DesktopError({
+                  reason: "failed",
+                  message: `Could not move ${source.relative} to ${destination.relative}.`,
+                }),
+            });
+            return { from: source.relative, to: destination.relative };
+          }),
+        ),
 
       deletePath: ({ conversationId, paths }) =>
-        Effect.gen(function* () {
-          // Per-path misses stay in the receipt so one missing file does not
-          // abort the rest.
-          yield* rootsFor(conversationId);
-          const deleted: { path: string; kind: "file" | "directory" }[] = [];
-          const failed: DeleteFailure[] = [];
-          for (const path of new Set(paths)) {
-            const outcome = yield* Effect.result(removeAt(conversationId, path));
-            if (outcome._tag === "Success") deleted.push(outcome.success);
-            else
-              failed.push({
-                path,
-                reason: deleteFailureReason(outcome.failure.reason),
-                message: outcome.failure.message,
-              });
-          }
-          return { deleted, failed };
-        }),
+        oneChangeAtATime(
+          Effect.gen(function* () {
+            // Per-path misses stay in the receipt so one missing file does not
+            // abort the rest.
+            yield* rootsFor(conversationId);
+            const deleted: { path: string; kind: "file" | "directory" }[] = [];
+            const failed: DeleteFailure[] = [];
+            for (const path of new Set(paths)) {
+              const outcome = yield* Effect.result(removeAt(conversationId, path));
+              if (outcome._tag === "Success") deleted.push(outcome.success);
+              else
+                failed.push({
+                  path,
+                  reason: deleteFailureReason(outcome.failure.reason),
+                  message: outcome.failure.message,
+                });
+            }
+            return { deleted, failed };
+          }),
+        ),
 
       findFiles: ({ conversationId, pattern }) =>
         Effect.gen(function* () {
@@ -890,71 +900,75 @@ export const makeHandlers = (shell: Shell) =>
         }),
 
       writeFile: ({ conversationId, path, text }) =>
-        Effect.gen(function* () {
-          const bytes = Buffer.byteLength(text, "utf8");
-          if (bytes > LIMITS.writeBytes) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "too-large",
-                message: "That file is too large to write.",
-              }),
-            );
-          }
-          const target = yield* locateForWrite(conversationId, path);
-          const existed = yield* exists(target.absolute);
-          yield* Effect.tryPromise({
-            try: async () => {
-              await mkdir(dirname(target.absolute), { recursive: true });
-              await writeFile(target.absolute, text, "utf8");
-            },
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not write ${target.relative}.`,
-              }),
-          });
-          return { path: target.relative, created: !existed, bytes };
-        }),
-
-      saveToWorkspace: ({ conversationId, fileName, base64, path }) =>
-        Effect.gen(function* () {
-          // Same ceiling as a composer import, refused while it is still text.
-          if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
-            return yield* new DesktopError({
-              reason: "too-large",
-              message: "That file is too large to save to the workspace.",
-            });
-          }
-          if (path !== undefined) {
-            // A chosen place: inside the chat's roots, exactly like a write.
+        oneChangeAtATime(
+          Effect.gen(function* () {
+            const bytes = Buffer.byteLength(text, "utf8");
+            if (bytes > LIMITS.writeBytes) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "too-large",
+                  message: "That file is too large to write.",
+                }),
+              );
+            }
             const target = yield* locateForWrite(conversationId, path);
             const existed = yield* exists(target.absolute);
-            const data = Buffer.from(base64, "base64");
             yield* Effect.tryPromise({
               try: async () => {
                 await mkdir(dirname(target.absolute), { recursive: true });
-                await writeFile(target.absolute, data);
+                await writeFile(target.absolute, text, "utf8");
               },
               catch: () =>
                 new DesktopError({
                   reason: "failed",
-                  message: `Could not save ${target.relative}.`,
+                  message: `Could not write ${target.relative}.`,
                 }),
             });
-            // Absolute, like the workspace landing: the model links files by it.
-            return { path: target.absolute, created: !existed, bytes: data.byteLength };
-          }
-          const landed = yield* workspaces.landFile(
-            conversationId,
-            fileName,
-            Buffer.from(base64, "base64"),
-          );
-          return {
-            path: join(workspaces.path(conversationId), landed.name),
-            created: true,
-            bytes: landed.bytes,
-          };
-        }),
+            return { path: target.relative, created: !existed, bytes };
+          }),
+        ),
+
+      saveToWorkspace: ({ conversationId, fileName, base64, path }) =>
+        oneChangeAtATime(
+          Effect.gen(function* () {
+            // Same ceiling as a composer import, refused while it is still text.
+            if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
+              return yield* new DesktopError({
+                reason: "too-large",
+                message: "That file is too large to save to the workspace.",
+              });
+            }
+            if (path !== undefined) {
+              // A chosen place: inside the chat's roots, exactly like a write.
+              const target = yield* locateForWrite(conversationId, path);
+              const existed = yield* exists(target.absolute);
+              const data = Buffer.from(base64, "base64");
+              yield* Effect.tryPromise({
+                try: async () => {
+                  await mkdir(dirname(target.absolute), { recursive: true });
+                  await writeFile(target.absolute, data);
+                },
+                catch: () =>
+                  new DesktopError({
+                    reason: "failed",
+                    message: `Could not save ${target.relative}.`,
+                  }),
+              });
+              // Absolute, like the workspace landing: the model links files by it.
+              return { path: target.absolute, created: !existed, bytes: data.byteLength };
+            }
+            const landed = yield* workspaces.landFile(
+              conversationId,
+              fileName,
+              Buffer.from(base64, "base64"),
+            );
+            return {
+              path: join(workspaces.path(conversationId), landed.name),
+              created: true,
+              bytes: landed.bytes,
+            };
+          }),
+        ),
 
       runCommand: ({ conversationId, callId, generationId, command, timeoutMs }) =>
         Effect.gen(function* () {
