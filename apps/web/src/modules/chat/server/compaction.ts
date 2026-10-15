@@ -1175,14 +1175,20 @@ export const summaryAppendix = (input: {
     .join("\n\n");
 };
 
+// Never "call it again": the call may have written, deleted or run something.
 const RESULT_CLEARED =
-  "[Earlier result cleared to save context. Call the tool again if you need it.]";
+  "[Earlier result cleared to save context. The call above ran. Read again if you need what it returned; never repeat a call that changed something.]";
+
+/** A result this short is a receipt (a write, a delete, a save): clearing it saves nothing. */
+const RECEIPT_CHARS = 400;
+const resultSize = (result: unknown) =>
+  typeof result === "string" ? result.length : (JSON.stringify(result)?.length ?? 0);
 
 /**
  * Old tool results go before anything is summarized: the calls stay, so the
- * model knows what it did and can ask again, at no model cost. Measured
+ * model knows what it did and can read again, at no model cost. Measured
  * against summaries on agent runs it did as well or better (JetBrains, 2025).
- * The newest results stay whole.
+ * The newest results stay whole, and so does every receipt.
  */
 export const clearOlderResults = (
   rounds: ReadonlyArray<ActiveRound>,
@@ -1202,7 +1208,12 @@ export const clearOlderResults = (
             const content = message.content.toReversed().map((part) => {
               if (part.type !== "tool-result") return part;
               seen += 1;
-              if (seen <= keep || part.result === RESULT_CLEARED) return part;
+              if (
+                seen <= keep ||
+                part.result === RESULT_CLEARED ||
+                resultSize(part.result) <= RECEIPT_CHARS
+              )
+                return part;
               changed = true;
               return Prompt.makePart("tool-result", { ...part, result: RESULT_CLEARED });
             });

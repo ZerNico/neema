@@ -1243,7 +1243,7 @@ describe("what a summary keeps beside it", () => {
 });
 
 describe("clearing old tool results", () => {
-  const round = (turnIndex: number, results: string[]): ActiveRound => ({
+  const round = (turnIndex: number, results: unknown[]): ActiveRound => ({
     turnIndex,
     prompt: Prompt.make([
       {
@@ -1277,12 +1277,28 @@ describe("clearing old tool results", () => {
     );
 
   it("keeps the newest results and every call, and is idempotent", () => {
-    const rounds = [round(0, ["a", "b"]), round(1, ["c", "d"])];
+    const page = (name: string) => name.repeat(1_000);
+    const rounds = [round(0, [page("a"), page("b")]), round(1, [page("c"), page("d")])];
     const cleared = clearOlderResults(rounds, 3);
     expect(cleared.changed).toBe(true);
-    expect(results(cleared.rounds)).toEqual([expect.stringContaining("cleared"), "b", "c", "d"]);
+    expect(results(cleared.rounds)).toEqual([
+      expect.stringContaining("cleared"),
+      page("b"),
+      page("c"),
+      page("d"),
+    ]);
     expect(cleared.rounds[0]!.prompt.content[0]!.content).toHaveLength(2);
     expect(clearOlderResults(cleared.rounds, 3).changed).toBe(false);
+  });
+
+  it("keeps an old receipt whole and never asks for a change to be repeated", () => {
+    const receipt = { path: "site/index.ts", created: false, bytes: 120 };
+    const rounds = [round(0, [receipt, "x".repeat(5_000)]), round(1, ["c", "d", "e"])];
+    const cleared = clearOlderResults(rounds, 3);
+    const [kept, stub] = results(cleared.rounds);
+    expect(kept).toEqual(receipt);
+    expect(stub).toEqual(expect.stringContaining("never repeat a call that changed something"));
+    expect(stub).not.toEqual(expect.stringContaining("Call the tool again"));
   });
 
   it("clears before summarizing when that alone fits, and never in research", () =>
