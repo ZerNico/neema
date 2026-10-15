@@ -937,7 +937,14 @@ export class ChatRepo extends Context.Service<
       userId: string,
       reservationId: string,
     ): Effect.Effect<WorkTurnReservationRow, ConversationNotFound>;
-    abortWorkTurn(userId: string, reservationId: string): Effect.Effect<void>;
+    /**
+     * Aborts a reservation still reserved and answers with the state it is left in. A turn
+     * activated meanwhile stays activated, and the caller must keep its files.
+     */
+    abortWorkTurn(
+      userId: string,
+      reservationId: string,
+    ): Effect.Effect<WorkTurnReservationRow, ConversationNotFound>;
     /**
      * One atomic turn: resolve (or create) the conversation, write the user
      * message, claim its attachments, and open the assistant row. Claiming has
@@ -1909,7 +1916,7 @@ export class ChatRepo extends Context.Service<
         ),
 
         abortWorkTurn: Effect.fn("ChatRepo.abortWorkTurn")(function* (userId, reservationId) {
-          yield* db
+          const aborted = yield* db
             .update(workTurnReservations)
             .set({ status: "aborted", updatedAt: sql`now()` })
             .where(
@@ -1919,7 +1926,24 @@ export class ChatRepo extends Context.Service<
                 eq(workTurnReservations.status, "reserved"),
               ),
             )
+            .returning()
             .pipe(Effect.orDie);
+          if (aborted[0]) return aborted[0];
+          // Not reserved any more: activated, expired or already aborted, as it now stands.
+          const rows = yield* db
+            .select()
+            .from(workTurnReservations)
+            .where(
+              and(
+                eq(workTurnReservations.id, reservationId),
+                eq(workTurnReservations.userId, userId),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.orDie);
+          const row = rows[0];
+          if (!row) return yield* new ConversationNotFound({ conversationId: reservationId });
+          return row;
         }),
 
         createTurn: Effect.fn("ChatRepo.createTurn")(function* (input) {

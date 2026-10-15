@@ -51,19 +51,20 @@ export const sendReservedWorkspaceTurn = async (input: {
           // The retry may have committed too. Leave recovery evidence intact.
           throw retryError;
         }
+        if (retryStatus.status === "reserved") {
+          try {
+            // Activation may still land first; the abort says which won.
+            retryStatus = await abortWorkTurn({ data: { reservationId } });
+          } catch {
+            throw retryError;
+          }
+        }
         if (retryStatus.status === "activated" && retryStatus.assistantMessageId) {
           activated = {
             conversationId: retryStatus.conversationId,
             assistantMessageId: retryStatus.assistantMessageId,
           };
         } else {
-          if (retryStatus.status === "reserved") {
-            try {
-              await abortWorkTurn({ data: { reservationId } });
-            } catch {
-              throw retryError;
-            }
-          }
           await input.imports.rollback(reservationId).catch(() => {});
           throw retryError;
         }

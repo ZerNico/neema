@@ -270,7 +270,7 @@ export const abortWorkTurn = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           reservationId: data.reservationId,
         }),
-      ),
+      ).pipe(Effect.catchTag("ConversationNotFound", missing)),
     ),
   );
 

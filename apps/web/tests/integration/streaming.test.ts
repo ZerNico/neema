@@ -8810,8 +8810,10 @@ describe("local tools on the user's machine", () => {
           const replay = yield* service.sendMessage(input);
           yield* (yield* StreamEngine).subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
           const status = yield* service.getWorkTurnReservation({ userId, reservationId });
+          // A recovery abort arriving after activation must say so and change nothing.
+          const lateAbort = yield* service.abortWorkTurn({ userId, reservationId });
           const config = yield* repo.getGenerationConfig(first.assistantMessageId);
-          return { beforeConversation, beforeMessages, first, replay, status, config };
+          return { beforeConversation, beforeMessages, first, replay, status, lateAbort, config };
         }),
       );
 
@@ -8823,6 +8825,7 @@ describe("local tools on the user's machine", () => {
         conversationId: result.first.conversationId,
         assistantMessageId: result.first.assistantMessageId,
       });
+      expect(result.lateAbort).toEqual(result.status);
       expect(result.config.workspaceFiles).toEqual(["report.pdf"]);
       expect(result.config.desktopFolders).toEqual(["workspace", "acme-site"]);
       expect(JSON.stringify(result.config)).not.toContain("/data/workspaces/");
@@ -8937,8 +8940,9 @@ describe("local tools on the user's machine", () => {
             .select({ id: conversations.id })
             .from(conversations)
             .where(eq(conversations.userId, seed.userId));
-          yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
+          const aborted = yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
           return {
+            aborted: aborted.status,
             failures: [retry, edit, branch].map((result) =>
               result._tag === "Failure" ? result.failure._tag : "Success",
             ),
@@ -8955,6 +8959,7 @@ describe("local tools on the user's machine", () => {
         "ConversationBusy",
         "ConversationBusy",
       ]);
+      expect(outcome.aborted).toBe("aborted");
       expect(outcome.afterMessages).toEqual(outcome.beforeMessages);
       expect(outcome.afterConversations).toEqual(outcome.beforeConversations);
     } finally {
