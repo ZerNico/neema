@@ -434,6 +434,12 @@ supplied, never a host absolute the caller did not already know. Only
 claim protection against every concurrent filesystem replacement or
 hard-link alias.
 
+Inside an attached folder, commands and file tools may change anything, `.git`
+included. A hook or `core.fsmonitor` they plant runs outside the sandbox the next
+time git runs there, an editor's background `git status` too. That is accepted:
+attaching a folder trusts the model with what runs from it, as with its scripts and
+source, and guarding one tool's files would not change that.
+
 Commands run in Microsoft's execution containers (`@microsoft/mxc-sdk`), with no
 unsandboxed fallback: Seatbelt on macOS, bubblewrap on Linux, an AppContainer
 process container on Windows. Each command is one request carrying its whole
