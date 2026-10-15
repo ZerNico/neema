@@ -61,6 +61,8 @@ const WALK_LIMIT = 50_000;
 
 const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
 
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
 // `resolveInFolder` against the root yields `relative: "."`; across
 // folders it is the prefixed name. Either way, this is the root itself.
 const isRoot = (target: { absolute: string; root: string; relative: string }) =>
@@ -640,7 +642,16 @@ export const makeHandlers = (shell: Shell) =>
                 }),
               );
             }
-            const text = bytes.toString("utf8");
+            // Written back whole, so a byte that is not UTF-8 would come back as U+FFFD
+            // everywhere in the file. A BOM is kept as it was.
+            const text = yield* Effect.try({
+              try: () => strictUtf8.decode(bytes),
+              catch: () =>
+                new DesktopError({
+                  reason: "not-text",
+                  message: `${target.relative} is not UTF-8 text, so editing it would damage it. Rewrite it whole with write_local_file if that is what you mean.`,
+                }),
+            });
             if (before === "") {
               return yield* Effect.fail(
                 new DesktopError({

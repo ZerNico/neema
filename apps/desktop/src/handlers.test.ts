@@ -490,6 +490,41 @@ describe("once a folder is attached", () => {
     expect(every.replacements).toBe(2);
   });
 
+  it("refuses to edit a file that is not UTF-8 rather than damage it", async () => {
+    const path = join(root, "src", "latin1.txt");
+    // "café = 1" in Latin-1, whose é is not UTF-8.
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x3d, 0x20, 0x31, 0x0a]);
+    await writeFile(path, latin1);
+    expect(
+      await failureOf(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "e",
+          path,
+          old: "= 1",
+          new: "= 2",
+          all: false,
+        }),
+      ),
+    ).toBe("not-text");
+    expect(await readFile(path)).toEqual(latin1);
+
+    // A byte order mark survives an edit.
+    const bom = join(root, "src", "bom.txt");
+    await writeFile(bom, "\uFEFFvalue = 1\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path: bom,
+        old: "= 1",
+        new: "= 2",
+        all: false,
+      }),
+    );
+    expect(await readFile(bom, "utf8")).toBe("\uFEFFvalue = 2\n");
+  });
+
   it("keeps both of two edits to one file made at once", async () => {
     const path = join(root, "src", "both.ts");
     await writeFile(path, "const a = 1;\nconst b = 2;\n");
@@ -893,7 +928,7 @@ describe("once a folder is attached", () => {
     }
   });
 
-  it("counts nonoverlapping matches and refuses UTF-8 expansion from malformed source", async () => {
+  it("counts nonoverlapping matches and leaves malformed source untouched", async () => {
     const path = join(root, "malformed-edit.txt");
     const source = Buffer.concat([Buffer.from("TARGET"), Buffer.alloc(666_665, 0xff)]);
     await writeFile(path, source);
@@ -909,7 +944,7 @@ describe("once a folder is attached", () => {
             all: false,
           }),
         ),
-      ).toBe("too-large");
+      ).toBe("not-text");
       expect(await readFile(path)).toEqual(source);
       await writeFile(path, "aaaaa");
       const receipt = await Effect.runPromise(
