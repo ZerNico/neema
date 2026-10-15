@@ -9,6 +9,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { conflictsWithNetworkGrants, normalizeEgressGrant } from "./egress-grants.ts";
 import { Effect, Semaphore } from "effect";
@@ -67,6 +68,75 @@ const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 // folders it is the prefixed name. Either way, this is the root itself.
 const isRoot = (target: { absolute: string; root: string; relative: string }) =>
   target.absolute === target.root || !target.relative.includes("/");
+
+/**
+ * Lines from `offset` (counting from 1), at most `limit` of them and `maxChars` in all,
+ * streamed so a late offset in a large log never loads what comes before it. Each line
+ * keeps its own ending, so a whole read is the file exactly. `nextLine` is where more
+ * follows; `lineCount` is known only once the file ended.
+ */
+const readLines = (
+  absolute: string,
+  relative: string,
+  offset: number,
+  limit: number,
+  maxChars: number,
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      const stream = createReadStream(absolute, { encoding: "utf8" });
+      let kept = "";
+      let taken = 0;
+      let line = 0;
+      let nextLine: number | null = null;
+      let pending = "";
+      // Answers whether reading should stop.
+      const take = (text: string) => {
+        line += 1;
+        if (line < offset) return false;
+        if (taken >= limit || kept.length >= maxChars) {
+          nextLine = line;
+          return true;
+        }
+        // One line longer than what is left is cut; the rest of it cannot be paged to.
+        const piece = text.slice(0, maxChars - kept.length);
+        kept += piece;
+        taken += 1;
+        if (piece.length < text.length) {
+          nextLine = line + 1;
+          return true;
+        }
+        return false;
+      };
+      try {
+        reading: for await (const chunk of stream) {
+          pending += chunk;
+          let start = 0;
+          let end = pending.indexOf("\n");
+          while (end !== -1) {
+            if (take(pending.slice(start, end + 1))) break reading;
+            start = end + 1;
+            end = pending.indexOf("\n", start);
+          }
+          pending = pending.slice(start);
+          // A line with no end in sight (minified code) is held no longer than a read needs.
+          if (pending.length > maxChars) {
+            if (line + 1 >= offset) {
+              take(pending);
+              break;
+            }
+            // Before the offset: only its end matters, to count it.
+            pending = "";
+          }
+        }
+        if (nextLine === null && pending !== "") take(pending);
+      } finally {
+        stream.destroy();
+      }
+      return { text: kept, nextLine, lineCount: nextLine === null ? line : null };
+    },
+    catch: () => new DesktopError({ reason: "failed", message: `Could not read ${relative}.` }),
+  });
 
 /** Bytes already proven to be a regular file, capped so a huge log cannot OOM us. */
 const readPrefix = (absolute: string, maxBytes: number, relative: string) =>
@@ -505,7 +575,7 @@ export const makeHandlers = (shell: Shell) =>
           return { path: target.relative, bytes: info.size };
         }),
 
-      readFile: ({ conversationId, path }) =>
+      readFile: ({ conversationId, path, offset, limit }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);
           const info = yield* Effect.tryPromise({
@@ -524,11 +594,10 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const bytes = yield* readPrefix(target.absolute, LIMITS.readBytes, target.relative);
           // A NUL in the first few kilobytes is what `file` and git use to
           // call something binary. Decoding it anyway would hand the model
           // noise and the server a string Postgres refuses.
-          if (isBinary(bytes)) {
+          if (isBinary(yield* readPrefix(target.absolute, 8_000, target.relative))) {
             return yield* Effect.fail(
               new DesktopError({
                 reason: "not-text",
@@ -536,15 +605,24 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const text = bytes.toString("utf8");
           // Capped here rather than at the caller: an uncapped read would go
           // into the transcript and, on models without native tool calling,
           // into the prompt as prose.
-          const truncated = text.length > LIMITS.readChars || info.size > bytes.length;
+          const startLine = Math.max(1, offset ?? 1);
+          const read = yield* readLines(
+            target.absolute,
+            target.relative,
+            startLine,
+            limit ?? Number.POSITIVE_INFINITY,
+            LIMITS.readChars,
+          );
           return {
             path: target.relative,
-            text: truncated ? text.slice(0, LIMITS.readChars) : text,
-            truncated,
+            text: read.text,
+            truncated: read.nextLine !== null,
+            startLine,
+            ...(read.nextLine !== null ? { nextLine: read.nextLine } : {}),
+            ...(read.lineCount !== null ? { lineCount: read.lineCount } : {}),
           };
         }),
 

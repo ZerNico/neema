@@ -33,12 +33,23 @@ export const listFolderTool = Tool.make("list_folder", {
   failureMode: "return",
 });
 
+const LineNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a file on the user's computer by its absolute path. Text comes back as " +
-    "text, truncated when long; an image or PDF comes back for you to look at when you can take " +
-    "it, otherwise as extracted text or a note that you cannot.",
-  parameters: Schema.Struct({ path: Path }),
+    "Read a file on the user's computer by its absolute path. Text comes back as text; a " +
+    "long file comes back in part, saying the offset to continue from. Give offset and limit " +
+    "to read just those lines of a large file. An image or PDF comes back for you to look at " +
+    "when you can take it, otherwise as extracted text or a note that you cannot.",
+  parameters: Schema.Struct({
+    path: Path,
+    offset: Schema.optionalKey(LineNumber).annotate({
+      description: "The first line to read, counting from 1.",
+    }),
+    limit: Schema.optionalKey(LineNumber).annotate({
+      description: "How many lines to read at most.",
+    }),
+  }),
   success: DesktopToolResult,
   failureMode: "return",
 });

@@ -104,8 +104,14 @@ export type DirectoryListing = typeof DirectoryListing.Type;
 export const FileContents = Schema.Struct({
   path: Schema.String,
   text: Schema.String,
-  /** True when the file was longer than `LIMITS.readChars`. */
+  /** True when more of the file follows what was read. */
   truncated: Schema.Boolean,
+  /** The first line read, counting from 1. */
+  startLine: Schema.optionalKey(Schema.Int),
+  /** Where the next read continues, when more follows. */
+  nextLine: Schema.optionalKey(Schema.Int),
+  /** The file's lines in all, known once a read reached its end. */
+  lineCount: Schema.optionalKey(Schema.Int),
 });
 export type FileContents = typeof FileContents.Type;
 

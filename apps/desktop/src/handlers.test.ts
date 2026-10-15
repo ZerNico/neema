@@ -356,6 +356,73 @@ describe("once a folder is attached", () => {
     expect(await readFile(join(root, "src", "new", "note.md"), "utf8")).toBe("hello");
   });
 
+  it("reads a window of lines and says where more follows", async () => {
+    const path = join(root, "src", "lines.txt");
+    const numbered = Array.from({ length: 10 }, (_, index) => `line ${index + 1}\n`);
+    await writeFile(path, numbered.join(""));
+    const read = (window: { offset?: number; limit?: number }) =>
+      Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path, ...window }),
+      );
+
+    expect(await read({ offset: 3, limit: 2 })).toMatchObject({
+      text: "line 3\nline 4\n",
+      truncated: true,
+      startLine: 3,
+      nextLine: 5,
+    });
+    // To the end: the file exactly, final newline included, and its length known.
+    expect(await read({ offset: 9 })).toMatchObject({
+      text: "line 9\nline 10\n",
+      truncated: false,
+      lineCount: 10,
+    });
+    expect(await read({ offset: 40 })).toMatchObject({ text: "", lineCount: 10 });
+  });
+
+  it("pages a file longer than one read, and a line with no end", async () => {
+    const path = join(root, "src", "long.txt");
+    const content = `${"x".repeat(999)}\n`.repeat(200) + "tail";
+    await writeFile(path, content);
+    let paged = "";
+    let reads = 0;
+    let offset: number | undefined;
+    for (;;) {
+      const page = await Effect.runPromise(
+        handlers.readFile({
+          conversationId: CONVERSATION,
+          callId: "r",
+          path,
+          ...(offset ? { offset } : {}),
+        }),
+      );
+      expect(page.text.length).toBeLessThanOrEqual(LIMITS.readChars);
+      paged += page.text;
+      reads += 1;
+      if (!page.truncated) {
+        expect(page.lineCount).toBe(201);
+        break;
+      }
+      offset = page.nextLine;
+    }
+    expect(reads).toBeGreaterThan(1);
+    expect(paged).toBe(content);
+
+    // Minified: one line far longer than a read is cut, and the line after it can be reached.
+    const minified = join(root, "src", "min.js");
+    await writeFile(minified, `${"y".repeat(LIMITS.readChars * 3)}\nafter\n`);
+    expect(
+      await Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path: minified }),
+      ),
+    ).toMatchObject({ truncated: true, nextLine: 2 });
+    expect(
+      await Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path: minified, offset: 2 }),
+      ),
+    ).toMatchObject({ text: "after\n", lineCount: 2 });
+  });
+
   it("refuses to read a binary file as text", async () => {
     await writeFile(
       join(root, "src", "logo.png"),

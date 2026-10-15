@@ -10,9 +10,30 @@ import {
   desktopFailure,
   DESKTOP_TIMEOUTS,
   deletePathsOf,
+  lineArg,
   stringArg,
   type DesktopToolName,
 } from "../tool-schema.ts";
+
+type FileText = Effect.Success<ReturnType<DesktopClient["readFile"]>>;
+
+/** Names the lines when the read was not the whole file. */
+const readSummary = (file: FileText) => {
+  const first = file.startLine ?? 1;
+  const last = (file.nextLine ?? (file.lineCount ?? first) + 1) - 1;
+  return first === 1 && !file.truncated
+    ? `Read ${file.path}`
+    : `Read ${file.path}, lines ${first}–${Math.max(first, last)}`;
+};
+
+/** The text, and where to go on from, so a long file is read in parts rather than not at all. */
+const readDetail = (file: FileText) => {
+  if (file.text === "" && file.lineCount !== undefined && (file.startLine ?? 1) > file.lineCount)
+    return `(${file.path} has ${file.lineCount} lines, none from line ${file.startLine} on.)`;
+  return file.nextLine
+    ? `${file.text}\n[More follows: read on with offset ${file.nextLine}.]`
+    : file.text;
+};
 
 const asResult = (
   outcome:
@@ -279,14 +300,22 @@ export const executeDesktopTool = (
             truncated: listing.truncated,
           }),
         );
-      case "read_local_file":
+      case "read_local_file": {
+        const offset = lineArg(args.offset);
+        const limit = lineArg(args.limit);
         return Effect.map(
-          client.readFile({ callId: activity.callId, conversationId, path }),
+          client.readFile({
+            callId: activity.callId,
+            conversationId,
+            path,
+            ...(offset ? { offset } : {}),
+            ...(limit ? { limit } : {}),
+          }),
           (file) => ({
             v: 1 as const,
             ok: true,
-            summary: `Read ${file.path}`,
-            detail: file.text,
+            summary: readSummary(file),
+            detail: readDetail(file),
             truncated: file.truncated,
           }),
         ).pipe(
@@ -313,6 +342,7 @@ export const executeDesktopTool = (
               ),
           ),
         );
+      }
       case "import_local_file":
         // Bytes for the server's tools, not for the model to look at; the loop
         // turns them into a working file and answers with its reference.

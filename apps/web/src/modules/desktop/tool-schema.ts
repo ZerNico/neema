@@ -218,6 +218,9 @@ export const desktopSuccess = (
 
 /** A string argument as the model sent it, or empty for anything else. */
 export const stringArg = (value: unknown) => (typeof value === "string" ? value : "");
+/** A line number the model gave, or nothing when it gave none that could be one. */
+export const lineArg = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 
 /**
  * How long a handler waits for the machine before telling the model it did not
