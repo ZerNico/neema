@@ -973,9 +973,10 @@ export const makeHandlers = (shell: Shell) =>
             return yield* Effect.fail(
               new DesktopError({
                 reason: "failed",
-                message: privateNetwork
-                  ? "Name one exact host or IP address, without a URL or port."
-                  : "Name one exact public hostname without a URL or port. A private address needs a private network request.",
+                message:
+                  !privateNetwork && normalizeEgressGrant(host, port, true)
+                    ? `${String(host)} is on a private network. Request it with privateNetwork true.`
+                    : "Name one exact host or IP address, without a URL or port.",
               }),
             );
           }

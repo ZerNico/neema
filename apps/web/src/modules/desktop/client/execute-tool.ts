@@ -511,7 +511,7 @@ export const executeDesktopTool = (
                   : []),
                 ...(network.privateNetwork.length > 0
                   ? [
-                      `Network access to ${network.privateNetwork.join(", ")} was blocked, and only a private network grant opens it (an IP address, an internal name, or a host that resolved to a private address). Call request_network_access for each with privateNetwork true, wait for approval, then retry the command. Do not assume the command succeeded.`,
+                      `Network access to ${network.privateNetwork.join(", ")} was blocked, and only a private network grant opens it (a private IP address, an internal name, or a host that resolved to a private address). Call request_network_access for each with privateNetwork true, wait for approval, then retry the command. Do not assume the command succeeded.`,
                     ]
                   : []),
                 ...(network.agent === "refused"

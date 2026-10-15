@@ -64,11 +64,21 @@ describe("normalizeEgressGrant", () => {
     }
   });
 
-  it("needs a private-network grant for literals and private-only names", () => {
+  it("needs a private-network grant for private addresses and private-only names", () => {
     for (const host of ["10.0.0.5", "fd00::1", "git.internal", "nas.local", "router.lan"]) {
       expect(normalizeEgressGrant(host, 443, false)).toBeNull();
       expect(normalizeEgressGrant(host, 443, true)).not.toBeNull();
     }
+  });
+
+  it("grants a public address like a name, never loopback or a metadata endpoint", () => {
+    expect(normalizeEgressGrant("91.99.224.73", 22, false)).toEqual(site("91.99.224.73", 22));
+    expect(normalizeEgressGrant("2a01:4f8::1", 22, false)).toMatchObject({
+      host: "2a01:4f8::1",
+      privateNetwork: false,
+    });
+    for (const host of ["127.0.0.1", "169.254.169.254", "::1", "::ffff:10.0.0.5"])
+      expect(normalizeEgressGrant(host, 443, false)).toBeNull();
   });
 
   it("refuses non-string hosts and non-number ports", () => {

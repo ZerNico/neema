@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { canonicalHost, type CommandContext, type GrantDecision } from "@chat/egress-proxy";
+import {
+  addressRefusal,
+  canonicalHost,
+  type CommandContext,
+  type GrantDecision,
+} from "@chat/egress-proxy";
 import { serialWrites, writeJsonAtomic } from "./json-file.ts";
 
 /**
@@ -75,7 +80,8 @@ const PRIVATE_SUFFIXES = [".local", ".internal", ".lan", ".home.arpa"];
 
 /**
  * A grant the person can approve: one canonical name or literal and one port.
- * Private-only names and literals need the private-network kind.
+ * Private-only names and addresses need the private-network kind; a public address
+ * (a server reached by IP) is an ordinary grant.
  */
 export const normalizeEgressGrant = (
   host: unknown,
@@ -96,7 +102,8 @@ export const normalizeEgressGrant = (
       canonical.host.endsWith(".localhost") ||
       PRIVATE_SUFFIXES.some((suffix) => canonical.host.endsWith(suffix));
     if (privateName && !privateNetwork) return null;
-  } else if (!privateNetwork) {
+  } else if (!privateNetwork && addressRefusal(canonical.host, [], false) !== null) {
+    // Private, or one the proxy refuses whatever a grant says (loopback, metadata).
     return null;
   }
   return { host: canonical.host, port, privateNetwork };

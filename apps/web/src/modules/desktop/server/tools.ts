@@ -163,7 +163,8 @@ export const runCommandTool = Tool.make("run_command", {
 export const requestNetworkAccessTool = Tool.make("request_network_access", {
   description:
     "Ask the user to let commands on their computer reach one network destination: an exact " +
-    "host and port, such as registry.example.com on 443 or github.com on 22 for git over SSH. " +
+    "host or public IP address and port, such as registry.example.com on 443 or github.com on " +
+    "22 for git over SSH. " +
     "Request it before running a command that needs it, or use the destination a blocked " +
     "run_command result reports. Wait for approval before running or retrying the command. " +
     "The user decides whether it lasts for this answer, this chat, or every chat. Set " +

@@ -1455,15 +1455,30 @@ describe("network permission boundary", () => {
     ]);
   });
 
-  it("needs a private network request for a private address", async () => {
-    expect(await failureOf(handlers.requestNetworkAccess(ask({ host: "10.0.0.5" })))).toBe(
-      "failed",
+  it("needs a private network request for a private address, and says so", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.result(handlers.requestNetworkAccess(ask({ host: "10.0.0.5" }))),
     );
+    expect(outcome).toMatchObject({
+      _tag: "Failure",
+      failure: {
+        reason: "failed",
+        message: "10.0.0.5 is on a private network. Request it with privateNetwork true.",
+      },
+    });
     expect(
       await Effect.runPromise(
         handlers.requestNetworkAccess(ask({ host: "10.0.0.5", privateNetwork: true })),
       ),
     ).toMatchObject({ host: "10.0.0.5", privateNetwork: true });
+  });
+
+  it("grants a public address like a name", async () => {
+    expect(
+      await Effect.runPromise(
+        handlers.requestNetworkAccess(ask({ host: "91.99.224.73", port: 22, scope: "chat" })),
+      ),
+    ).toMatchObject({ host: "91.99.224.73", port: 22, privateNetwork: false });
   });
 
   it("lists a chat's own grants apart from those every chat has", async () => {
