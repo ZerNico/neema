@@ -4,7 +4,7 @@ import {
   Globe02Icon,
   InternetIcon,
 } from "@hugeicons/core-free-icons";
-import { readDesktopNetwork, type NetworkGrant } from "@chat/desktop-rpc";
+import { readDesktopNetwork, type DesktopNetwork, type NetworkGrant } from "@chat/desktop-rpc";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
@@ -14,13 +14,15 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { Badge } from "~/ui/primitives/badge";
+import { Switch } from "~/ui/primitives/switch";
 import { SshAgentSetting } from "./ssh-agent-setting.tsx";
 
 const subscribeToNothing = () => () => {};
 
-/** A destination as a person reads it: host and port, and whether it is on their own network. */
-export const destinationLabel = ({ host, port, privateNetwork }: NetworkGrant) =>
-  `${host}:${port}${privateNetwork ? " (private network)" : ""}`;
+/** A destination as a person reads it: the host, with its port unless it is HTTPS's. */
+export const destinationLabel = ({ host, port }: NetworkGrant) =>
+  port === 443 ? host : `${host}:${port}`;
 
 /**
  * One list of things allowed on this computer, each removable. Loading, an
@@ -32,6 +34,8 @@ function AllowedList<T>({
   load,
   remove,
   label,
+  itemKey = label,
+  badge,
   icon,
   empty,
   confirmRemove,
@@ -39,8 +43,11 @@ function AllowedList<T>({
   queryKey: readonly string[];
   load: () => Promise<ReadonlyArray<T>>;
   remove: (item: T) => Promise<void>;
-  /** What the row says; also its key, so it must be unique in the list. */
+  /** What the row says; also its key unless `itemKey` gives one. */
   label: (item: T) => string;
+  itemKey?: (item: T) => string;
+  /** A short mark beside the label. */
+  badge?: (item: T) => string | null;
   icon: IconSvgElement;
   empty: string;
   confirmRemove: (item: T) => { title: string; description: string };
@@ -75,13 +82,16 @@ function AllowedList<T>({
         <ListRow className="text-muted-foreground text-sm">{empty}</ListRow>
       ) : (
         items.data.map((item) => (
-          <ListRow key={label(item)}>
+          <ListRow key={itemKey(item)}>
             <HugeiconsIcon
               icon={icon}
               strokeWidth={2}
               className="text-muted-foreground size-5 shrink-0"
             />
-            <span className="min-w-0 flex-1 wrap-anywhere text-sm font-medium">{label(item)}</span>
+            <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
+              <span className="min-w-0 wrap-anywhere">{label(item)}</span>
+              {badge?.(item) ? <Badge variant="secondary">{badge(item)}</Badge> : null}
+            </span>
             <PendingButton
               variant="ghost"
               size="sm"
@@ -119,17 +129,14 @@ export function ComputerPage() {
       ) : null}
       <BrowserSearchSetting />
       {agent ? (
-        <Section
-          title="Sites the browser can open"
-          description="Work chats open these in the browser without asking. Sites allowed for a single chat aren’t listed."
-        >
+        <Section title="Websites" description="Work opens these in the browser without asking.">
           <AllowedList
             queryKey={["desktop-browser-sites"]}
             load={() => agent.allowedSites()}
             remove={(site) => agent.revokeSite(site)}
             label={(site) => site}
             icon={Globe02Icon}
-            empty="No sites yet."
+            empty="Nothing yet."
             confirmRemove={(site) => ({
               title: `Remove ${site}?`,
               description: "Work chats will ask before opening it again.",
@@ -138,15 +145,14 @@ export function ComputerPage() {
         </Section>
       ) : null}
       {network ? (
-        <Section
-          title="Where commands can connect"
-          description="Commands in every Work chat reach these without asking, for example to download a package. Ones allowed for a single chat are listed in that chat."
-        >
+        <Section title="Internet access" description="Commands reach these without asking.">
           <AllowedList
             queryKey={["desktop-network-grants"]}
             load={() => network.list()}
             remove={(grant) => network.revoke(grant)}
             label={destinationLabel}
+            itemKey={({ host, port, privateNetwork }) => `${host}:${port}:${privateNetwork}`}
+            badge={(grant) => (grant.privateNetwork ? "Your network" : null)}
             icon={InternetIcon}
             empty="Nothing yet."
             confirmRemove={(grant) => ({
@@ -156,31 +162,10 @@ export function ComputerPage() {
           />
         </Section>
       ) : null}
-      {network ? (
-        <Section
-          title="Local network services"
-          description="Lets commands in every Work chat reach services on this computer and accept connections, which build tools like Gradle need. A server a command starts could be reached from your network."
-        >
-          <AllowedList
-            queryKey={["desktop-local-grant"]}
-            load={async () => ((await network.localAllowed()) ? ["Allowed for every chat"] : [])}
-            remove={() => network.revokeLocal()}
-            label={(item) => item}
-            icon={ComputerIcon}
-            empty="Asked in each chat."
-            confirmRemove={() => ({
-              title: "Stop allowing local network services?",
-              description: "Work will ask before commands use them again.",
-            })}
-          />
-        </Section>
-      ) : null}
+      {network ? <LocalServicesSetting network={network} /> : null}
       {network ? <SshAgentSetting network={network} /> : null}
       {network ? (
-        <Section
-          title="What commands can read"
-          description="Commands in every Work chat can read these files and folders, beyond the folders attached to a chat."
-        >
+        <Section title="Files and folders" description="Commands can read these in every chat.">
           <AllowedList
             queryKey={["desktop-path-grants"]}
             load={() => network.listPaths()}
@@ -196,5 +181,51 @@ export function ComputerPage() {
         </Section>
       ) : null}
     </Page>
+  );
+}
+
+const LOCAL_KEY = ["desktop-local-grant"] as const;
+
+/**
+ * Services on this computer for every chat, as a switch. Turning it on is confirmed in the app's
+ * own dialog, since a server a command starts could then be reached from the network. Linux
+ * commands have their own, so there is nothing to allow there.
+ */
+function LocalServicesSetting({ network }: { network: DesktopNetwork }) {
+  const queryClient = useQueryClient();
+  const state = useQuery({
+    queryKey: LOCAL_KEY,
+    queryFn: () => network.localServices(),
+    retry: false,
+    refetchOnMount: "always",
+  });
+  const change = useMutation({
+    mutationFn: async (allow: boolean) => {
+      if (allow) await network.allowLocal();
+      else await network.revokeLocal();
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: LOCAL_KEY }),
+    onError: (error) => toastError("Couldn’t change it.", error),
+  });
+  if (state.data === "unavailable") return null;
+  return (
+    <Section title="Services on this computer">
+      <ListCard>
+        <ListRow>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-sm font-medium">Allow in every chat</span>
+            <span className="text-muted-foreground text-xs">
+              Some build tools like Gradle need this.
+            </span>
+          </div>
+          <Switch
+            aria-label="Allow services on this computer in every chat"
+            checked={state.data === "allowed"}
+            disabled={!state.data || change.isPending}
+            onCheckedChange={(checked) => change.mutate(checked)}
+          />
+        </ListRow>
+      </ListCard>
+    </Section>
   );
 }

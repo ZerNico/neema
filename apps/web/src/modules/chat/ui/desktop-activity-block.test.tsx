@@ -130,7 +130,7 @@ describe("DesktopActivityBlock", () => {
         approval={{ kind: "local", decide }}
       />,
     );
-    expect(screen.getByText("Let commands use local network services")).toBeInTheDocument();
+    expect(screen.getByText("Let commands use services on this computer")).toBeInTheDocument();
     expect(screen.getByText(/could be reached from your network/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Allow for this answer" }));
     expect(decide).toHaveBeenLastCalledWith("allow");

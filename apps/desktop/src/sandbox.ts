@@ -67,18 +67,21 @@ import {
 } from "./sandbox-environment.ts";
 import {
   AGENT_DESTINATION,
+  agentKeyCount,
   answersAsAgent,
   findAgent,
   loadAgentChoice,
   agentExists,
+  knownAgents,
   WINDOWS_AGENT,
   type AgentChoice,
+  type KnownAgent,
 } from "./ssh-agent.ts";
 
 /** What the person is asked to confirm: a socket to use, or going back to the default. */
 export type AgentChange =
-  | { readonly kind: "use"; readonly socket: string }
-  | { readonly kind: "default"; readonly fallback: string | null };
+  | { readonly kind: "use"; readonly socket: string; readonly name: string | null }
+  | { readonly kind: "default"; readonly fallback: string | null; readonly name: string | null };
 import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
@@ -527,6 +530,8 @@ export interface SandboxDependencies {
   readonly agent: () => Promise<string | null>;
   /** The agent socket the person chose in Settings. */
   readonly agentChoice?: AgentChoice | null;
+  /** Where known agents put their socket; the home directory's by default. */
+  readonly knownAgents?: () => readonly KnownAgent[];
   readonly userFolders: () => ReadonlyArray<string>;
   /**
    * Where each command's private folder is made: a place no command may read or write, never
@@ -983,6 +988,31 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         () => Effect.sync(() => (active -= 1)),
       );
 
+    const known = () => dependencies.knownAgents?.() ?? knownAgents(os, home);
+    /** The known agents running here, by their real paths. Looks only at the fixed list. */
+    const foundAgents = async () => {
+      const found: KnownAgent[] = [];
+      for (const agent of known()) {
+        const real = await realpath(agent.socket).catch(() => null);
+        if (real === null || found.some((entry) => entry.socket === real)) continue;
+        if (
+          await lstat(real).then(
+            (info) => info.isSocket(),
+            () => false,
+          )
+        )
+          found.push({ name: agent.name, socket: real });
+      }
+      return found;
+    };
+    /** A known agent's name for a socket, also one that is not running now. */
+    const agentName = async (socket: string, found: readonly KnownAgent[]) => {
+      const real = await realpath(socket).catch(() => socket);
+      return (
+        [...found, ...known()].find((agent) => agent.socket === real || agent.socket === socket)
+          ?.name ?? null
+      );
+    };
     const choose = async (
       choice: AgentChoice,
       socket: string | null,
@@ -1007,7 +1037,8 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           chosen: null,
           exists: agentExists,
         });
-        if (!(await confirm({ kind: "default", fallback }))) return false;
+        const name = fallback && (await agentName(fallback, await foundAgents()));
+        if (!(await confirm({ kind: "default", fallback, name }))) return false;
         await settle(null);
         return true;
       }
@@ -1035,7 +1066,8 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       if (!valid || real === null) throw new Error(`${socket} isn’t a running SSH agent’s socket.`);
       // Denied from now on, chosen or not.
       seenAgents.add(real);
-      if (!(await confirm({ kind: "use", socket: real }))) return false;
+      const name = await agentName(real, await foundAgents());
+      if (!(await confirm({ kind: "use", socket: real, name }))) return false;
       await settle(real);
       return true;
     };
@@ -1422,7 +1454,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
               throw new Error(
                 os === "win32"
                   ? "No SSH agent was found. Start Windows’ OpenSSH Authentication Agent service."
-                  : "No SSH agent was found. Start one, or name its socket in Settings › This computer.",
+                  : "No SSH agent was found. Start one, or choose it in Settings › This computer.",
               );
           }
           // bubblewrap gives every command a loopback of its own and cannot open the host's.
@@ -1526,19 +1558,31 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       agentSetting: () =>
         Effect.promise(async () => {
           const chosen = dependencies.agentChoice?.current() ?? null;
-          const fallback = await findAgent({
-            os,
-            env: process.env,
-            chosen: null,
-            exists: agentExists,
-          });
+          const found = await foundAgents();
+          const socket =
+            chosen ??
+            (await findAgent({ os, env: process.env, chosen: null, exists: agentExists }));
           return {
             choosable: os !== "win32",
-            chosen,
-            chosenFound: chosen !== null && (await agentExists(chosen)),
-            fallback,
-            fallbackFrom:
-              fallback === null ? null : fallback === WINDOWS_AGENT ? "windows" : "environment",
+            current:
+              socket === null
+                ? null
+                : {
+                    socket,
+                    name: await agentName(socket, found),
+                    source:
+                      chosen !== null
+                        ? "chosen"
+                        : socket === WINDOWS_AGENT
+                          ? "windows"
+                          : "environment",
+                    running: chosen === null || (await agentExists(chosen)),
+                    keys:
+                      os === "win32" || (chosen !== null && !(await agentExists(chosen)))
+                        ? null
+                        : await agentKeyCount(socket),
+                  },
+            found,
           } satisfies AgentSetting;
         }),
       chooseAgent: (socket, confirm) =>

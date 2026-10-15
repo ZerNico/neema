@@ -434,8 +434,8 @@ export const executeDesktopTool = (
             return {
               v: 1 as const,
               ok: true,
-              summary: `Allowed local network services ${lasting}`,
-              detail: `Commands may now use local network services ${lasting}. You may now run or retry the command.`,
+              summary: `Allowed services on this computer ${lasting}`,
+              detail: `Commands may now use services on this computer ${lasting}. You may now run or retry the command.`,
               truncated: false,
             };
           },

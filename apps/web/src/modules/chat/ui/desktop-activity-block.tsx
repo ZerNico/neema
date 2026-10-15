@@ -191,7 +191,7 @@ const runningLabel = (
     case "request_path_access":
       return what ? `Requesting read access to ${what}` : "Requesting read access";
     case "request_local_services":
-      return "Requesting local network services";
+      return "Requesting services on this computer";
     case "request_ssh_agent":
       return "Requesting sign-in with SSH keys";
   }
@@ -265,7 +265,7 @@ const approvalTitle = (
     case "path":
       return "Let commands read this";
     case "local":
-      return "Let commands use local network services";
+      return "Let commands use services on this computer";
     case "ssh-agent":
       return "Let commands in this chat sign in with your SSH keys";
     case "network":

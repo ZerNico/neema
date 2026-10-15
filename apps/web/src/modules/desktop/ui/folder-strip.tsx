@@ -257,10 +257,10 @@ const permissionLabel = (permission: ChatPermission) =>
   permission.kind === "path"
     ? permission.path
     : permission.kind === "local"
-      ? "Local network services"
+      ? "Services on this computer"
       : permission.kind === "ssh-agent"
         ? "Signing in with your SSH keys"
-        : `${permission.host}:${permission.port}${permission.privateNetwork ? " (private network)" : ""}`;
+        : `${permission.host}:${permission.port}${permission.privateNetwork ? " (your network)" : ""}`;
 
 /**
  * What commands in this chat may reach beyond the defaults. Loaded when the

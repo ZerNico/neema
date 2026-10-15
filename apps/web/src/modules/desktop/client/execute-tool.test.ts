@@ -198,7 +198,7 @@ describe("desktop network tools", () => {
       capability: "local-services",
       scope: "always",
     });
-    expect(result.summary).toBe("Allowed local network services for every chat");
+    expect(result.summary).toBe("Allowed services on this computer for every chat");
   });
 
   it("asks for the SSH agent for this chat whatever scope was passed", async () => {

@@ -33,6 +33,46 @@ export const findAgent = async ({ os, env, chosen, exists }: AgentLookup) => {
   return agent && (await exists(agent)) ? agent : null;
 };
 
+/** An agent that sets its socket only in ssh's config, where it puts it on this system. */
+export interface KnownAgent {
+  readonly name: string;
+  readonly socket: string;
+}
+
+/**
+ * Where password managers and key apps put their agent's socket, so Settings can offer the ones
+ * found by name. A fixed list, never a path the page names.
+ */
+export const knownAgents = (os: NodeJS.Platform, home: string): KnownAgent[] =>
+  os === "darwin"
+    ? [
+        {
+          name: "1Password",
+          socket: join(home, "Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"),
+        },
+        {
+          name: "Secretive",
+          socket: join(
+            home,
+            "Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh",
+          ),
+        },
+        {
+          name: "Bitwarden",
+          socket: join(
+            home,
+            "Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock",
+          ),
+        },
+        { name: "Bitwarden", socket: join(home, ".bitwarden-ssh-agent.sock") },
+      ]
+    : os === "linux"
+      ? [
+          { name: "1Password", socket: join(home, ".1password/agent.sock") },
+          { name: "Bitwarden", socket: join(home, ".bitwarden-ssh-agent.sock") },
+        ]
+      : [];
+
 /** The most an identities answer may take before the socket counts as no agent. */
 const MAX_ANSWER = 256 * 1024;
 
@@ -56,15 +96,16 @@ export const isIdentitiesAnswer = (frame: Buffer) => {
 };
 
 /**
- * Whether `socket` answers as an SSH agent: asked for its identities, it answers with them.
- * Settings is a page the server serves, so a socket it names (Docker's) must prove it is one.
+ * How many keys `socket` holds, asked as an SSH agent is asked for its identities; null when it
+ * does not answer as one. Settings is a page the server serves, so a socket it names (Docker's)
+ * must prove it is an agent.
  */
-export const answersAsAgent = (socket: string, timeoutMs = 2_000) =>
-  new Promise<boolean>((resolve) => {
+export const agentKeyCount = (socket: string, timeoutMs = 2_000) =>
+  new Promise<number | null>((resolve) => {
     const connection = connect({ path: socket });
-    const timer = setTimeout(() => done(false), timeoutMs);
+    const timer = setTimeout(() => done(null), timeoutMs);
     timer.unref();
-    function done(answer: boolean) {
+    function done(answer: number | null) {
       clearTimeout(timer);
       connection.destroy();
       resolve(answer);
@@ -76,12 +117,17 @@ export const answersAsAgent = (socket: string, timeoutMs = 2_000) =>
       received = Buffer.concat([received, chunk]);
       if (received.length < 4) return;
       const whole = 4 + received.readUInt32BE(0);
-      if (whole > MAX_ANSWER || received.length > whole) done(false);
-      else if (received.length === whole) done(isIdentitiesAnswer(received));
+      if (whole > MAX_ANSWER || received.length > whole) done(null);
+      else if (received.length === whole)
+        done(isIdentitiesAnswer(received) ? received.readUInt32BE(5) : null);
     });
-    connection.on("error", () => done(false));
-    connection.on("close", () => done(false));
+    connection.on("error", () => done(null));
+    connection.on("close", () => done(null));
   });
+
+/** Whether `socket` answers as an SSH agent. */
+export const answersAsAgent = async (socket: string, timeoutMs = 2_000) =>
+  (await agentKeyCount(socket, timeoutMs)) !== null;
 
 /** The agent socket the person chose in Settings, kept in the profile. */
 export interface AgentChoice {

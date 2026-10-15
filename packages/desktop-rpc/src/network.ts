@@ -13,19 +13,27 @@ export const NETWORK_REVOKE = "chat-desktop:network-revoke" as const;
 export const PATHS_LIST = "chat-desktop:paths-list" as const;
 export const PATHS_REVOKE = "chat-desktop:paths-revoke" as const;
 export const LOCAL_GET = "chat-desktop:local-get" as const;
+export const LOCAL_ALLOW = "chat-desktop:local-allow" as const;
 export const LOCAL_REVOKE = "chat-desktop:local-revoke" as const;
 export const AGENT_GET = "chat-desktop:agent-get" as const;
 export const AGENT_CHOOSE = "chat-desktop:agent-choose" as const;
 
-/** The SSH agent commands sign in with: the socket chosen, and the one used when none is. */
+/** The SSH agent commands sign in with, and the known ones that could be chosen instead. */
 export interface AgentSetting {
-  /** The socket chosen, by its real path. */
-  readonly chosen: string | null;
-  /** Whether the chosen socket is there now; when it is not, commands get no agent. */
-  readonly chosenFound: boolean;
-  readonly fallback: string | null;
-  /** Where the fallback comes from: SSH_AUTH_SOCK, or Windows' own pipe. */
-  readonly fallbackFrom: "environment" | "windows" | null;
+  /** The agent in effect, or the chosen one while it isn't running. */
+  readonly current: {
+    readonly socket: string;
+    /** A known agent's name, such as 1Password. */
+    readonly name: string | null;
+    /** Chosen in Settings, named by SSH_AUTH_SOCK, or Windows' own. */
+    readonly source: "chosen" | "environment" | "windows";
+    /** False for a chosen agent that isn't running: commands then get none. */
+    readonly running: boolean;
+    /** How many keys it holds; null when unknown (Windows, or it didn't answer). */
+    readonly keys: number | null;
+  } | null;
+  /** Known agents running on this computer, by their real paths. */
+  readonly found: readonly { readonly name: string; readonly socket: string }[];
   /** False on Windows, whose commands use Windows' own agent. */
   readonly choosable: boolean;
 }
@@ -40,8 +48,13 @@ export interface DesktopNetwork {
   revoke(grant: NetworkGrant): Promise<void>;
   listPaths(): Promise<string[]>;
   revokePath(path: string): Promise<void>;
-  /** Whether every chat's commands may use local network services. */
-  localAllowed(): Promise<boolean>;
+  /**
+   * Whether every chat's commands may use services on this computer, or never may here (Linux
+   * commands have their own).
+   */
+  localServices(): Promise<"allowed" | "asked" | "unavailable">;
+  /** Allows them for every chat once the person confirms in the app's own dialog; false if not. */
+  allowLocal(): Promise<boolean>;
   revokeLocal(): Promise<void>;
   /** Absent in desktop builds that predate choosing an agent. */
   agent?(): Promise<AgentSetting>;
@@ -54,7 +67,15 @@ export function readDesktopNetwork(): DesktopNetwork | null {
   if (typeof channel !== "object" || channel === null) return null;
   const network = Reflect.get(channel, "network");
   if (typeof network !== "object" || network === null) return null;
-  for (const method of ["list", "revoke", "listPaths", "revokePath", "localAllowed", "revokeLocal"])
+  for (const method of [
+    "list",
+    "revoke",
+    "listPaths",
+    "revokePath",
+    "localServices",
+    "allowLocal",
+    "revokeLocal",
+  ])
     if (typeof Reflect.get(network, method) !== "function") return null;
   return network as DesktopNetwork;
 }

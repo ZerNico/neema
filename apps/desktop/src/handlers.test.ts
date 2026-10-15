@@ -107,14 +107,7 @@ const stubSandbox = Layer.succeed(
     approvePath: (_target, path) => Effect.succeed(path),
     approveCapability: () => Effect.void,
     revokeCapability: () => Effect.void,
-    agentSetting: () =>
-      Effect.succeed({
-        chosen: null,
-        chosenFound: false,
-        fallback: null,
-        fallbackFrom: null,
-        choosable: true,
-      }),
+    agentSetting: () => Effect.succeed({ current: null, found: [], choosable: true }),
     chooseAgent: () => Effect.succeed(false),
     revokePath: (target, path) =>
       Effect.sync(() => {

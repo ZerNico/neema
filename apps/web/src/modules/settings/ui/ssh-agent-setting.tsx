@@ -1,4 +1,4 @@
-import { Key01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, Key01Icon } from "@hugeicons/core-free-icons";
 import type { AgentChoiceReply, AgentSetting, DesktopNetwork } from "@chat/desktop-rpc";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,13 +6,30 @@ import { useId, useState } from "react";
 import { toastError } from "~/ui/error-toast.ts";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { Button } from "~/ui/primitives/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/ui/primitives/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
 
 const QUERY_KEY = ["desktop-ssh-agent"] as const;
 
 /**
  * Settings › This computer: the SSH agent commands sign in with. The app reads no ssh config to
- * find it, so an agent set only there (1Password, Secretive) is named here once. The desktop app
+ * find it, so an agent set only there (1Password, Secretive) is chosen here once. The desktop app
  * checks the socket answers as an agent and asks the person itself.
  */
 export function SshAgentSetting({ network }: { network: DesktopNetwork }) {
@@ -21,13 +38,26 @@ export function SshAgentSetting({ network }: { network: DesktopNetwork }) {
   return <AgentChoice load={() => agent()} choose={(socket) => chooseAgent(socket)} />;
 }
 
-/** What the row says under the agent: where it comes from, or that it is missing. */
-const note = (setting: AgentSetting) => {
-  if (setting.chosen) return setting.chosenFound ? null : "Not running";
-  if (setting.fallbackFrom === "environment") return "From SSH_AUTH_SOCK";
-  if (setting.fallbackFrom === "windows") return "Windows’ own agent";
-  return null;
-};
+/** The agent as a person knows it: by its app's name, else where it comes from. */
+const agentLabel = (current: NonNullable<AgentSetting["current"]>) =>
+  current.name ??
+  (current.source === "windows"
+    ? "Windows’ agent"
+    : current.source === "environment"
+      ? "System agent"
+      : current.socket);
+
+/** Whether it can sign anyone in: not running, empty, or how many keys it holds. */
+const agentNote = (current: NonNullable<AgentSetting["current"]>) =>
+  !current.running
+    ? "Not running"
+    : current.keys === 0
+      ? "No keys. Add yours with ssh-add."
+      : current.keys === null
+        ? null
+        : current.keys === 1
+          ? "1 key"
+          : `${current.keys} keys`;
 
 function AgentChoice({
   load,
@@ -36,9 +66,8 @@ function AgentChoice({
   load: () => Promise<AgentSetting>;
   choose: (socket: string | null) => Promise<AgentChoiceReply>;
 }) {
-  const id = useId();
   const queryClient = useQueryClient();
-  const [socket, setSocket] = useState("");
+  const [naming, setNaming] = useState(false);
   const setting = useQuery({ queryKey: QUERY_KEY, queryFn: load, retry: false });
   const change = useMutation({
     mutationFn: async (next: string | null) => {
@@ -48,18 +77,16 @@ function AgentChoice({
     },
     onSuccess: async (changed) => {
       if (!changed) return;
-      setSocket("");
+      setNaming(false);
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
     onError: (error) => toastError("Couldn’t change the agent.", error),
   });
-  const current = setting.data;
-  const detail = current ? note(current) : null;
+  const current = setting.data?.current ?? null;
+  const others = (setting.data?.found ?? []).filter((agent) => agent.socket !== current?.socket);
+  const chosen = current?.source === "chosen";
   return (
-    <Section
-      title="SSH agent"
-      description="Chats you allow to sign in with SSH use this agent. Name its socket here when it’s set only in your SSH config, as 1Password and Secretive do."
-    >
+    <Section title="SSH keys" description="Used when you let a chat sign in with SSH.">
       <ListCard>
         <ListRow>
           <HugeiconsIcon
@@ -73,54 +100,110 @@ function AgentChoice({
                 ? "Loading…"
                 : setting.isError
                   ? "Couldn’t load the agent."
-                  : (current?.chosen ?? current?.fallback ?? "No agent found")}
+                  : current
+                    ? agentLabel(current)
+                    : "No agent found"}
             </span>
-            {detail ? <span className="text-muted-foreground text-xs">{detail}</span> : null}
+            {current && agentNote(current) ? (
+              <span className="text-muted-foreground text-xs">{agentNote(current)}</span>
+            ) : null}
           </div>
-          {current?.chosen ? (
-            <PendingButton
-              variant="ghost"
-              size="sm"
-              pending={change.isPending && change.variables === null}
-              onClick={() => change.mutate(null)}
-            >
-              Use default
-            </PendingButton>
+          {setting.data?.choosable ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<PendingButton variant="secondary" size="sm" pending={change.isPending} />}
+              >
+                Change
+                <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {others.map((agent) => (
+                  <DropdownMenuItem key={agent.socket} onClick={() => change.mutate(agent.socket)}>
+                    {agent.name}
+                  </DropdownMenuItem>
+                ))}
+                {chosen ? (
+                  <DropdownMenuItem onClick={() => change.mutate(null)}>
+                    System agent
+                  </DropdownMenuItem>
+                ) : null}
+                {others.length > 0 || chosen ? <DropdownMenuSeparator /> : null}
+                <DropdownMenuItem onClick={() => setNaming(true)}>Other agent…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
         </ListRow>
-        {current?.choosable ? (
-          <ListRow>
-            <form
-              className="flex min-w-0 flex-1 items-center gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (socket.trim()) change.mutate(socket.trim());
-              }}
-            >
-              <label htmlFor={id} className="sr-only">
-                Agent socket
-              </label>
-              <Input
-                id={id}
-                value={socket}
-                onChange={(event) => setSocket(event.target.value)}
-                placeholder="/Users/you/.1password/agent.sock"
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <PendingButton
-                type="submit"
-                variant="secondary"
-                size="sm"
-                disabled={!socket.trim()}
-                pending={change.isPending && change.variables !== null}
-              >
-                Use
-              </PendingButton>
-            </form>
-          </ListRow>
-        ) : null}
       </ListCard>
+      <OtherAgentDialog
+        open={naming}
+        onOpenChange={setNaming}
+        pending={change.isPending}
+        onSubmit={(socket) => change.mutate(socket)}
+      />
     </Section>
+  );
+}
+
+/** An agent not on the known list, named by its socket's path. */
+function OtherAgentDialog({
+  open,
+  onOpenChange,
+  pending,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  pending: boolean;
+  onSubmit: (socket: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Use another agent</DialogTitle>
+          <DialogDescription>Paste the path of its socket.</DialogDescription>
+        </DialogHeader>
+        {/* Mounted while open, so each opening starts empty. */}
+        {open ? <OtherAgentForm pending={pending} onSubmit={onSubmit} /> : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function OtherAgentForm({
+  pending,
+  onSubmit,
+}: {
+  pending: boolean;
+  onSubmit: (socket: string) => void;
+}) {
+  const id = useId();
+  const [socket, setSocket] = useState("");
+  return (
+    <form
+      className="flex flex-col gap-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (socket.trim()) onSubmit(socket.trim());
+      }}
+    >
+      <label htmlFor={id} className="sr-only">
+        Agent socket
+      </label>
+      <Input
+        id={id}
+        value={socket}
+        onChange={(event) => setSocket(event.target.value)}
+        placeholder="/path/to/agent.sock"
+        spellCheck={false}
+        autoComplete="off"
+      />
+      <DialogFooter>
+        <DialogClose render={<Button variant="outline" disabled={pending} />}>Cancel</DialogClose>
+        <PendingButton type="submit" disabled={!socket.trim()} pending={pending}>
+          Use
+        </PendingButton>
+      </DialogFooter>
+    </form>
   );
 }

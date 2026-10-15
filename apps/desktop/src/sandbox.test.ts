@@ -876,7 +876,8 @@ describe("run", () => {
   });
 
   describe.runIf(process.platform !== "win32")("choosing the agent in Settings", () => {
-    const AGENT_REPLY = Buffer.from([0, 0, 0, 5, 12, 0, 0, 0, 0]);
+    // An identities answer holding one key: type 12, count 1, blob "k", comment "c".
+    const AGENT_REPLY = Buffer.from([0, 0, 0, 15, 12, 0, 0, 0, 1, 0, 0, 0, 1, 107, 0, 0, 0, 1, 99]);
     const setUp = async (
       launch: SandboxDependencies["launch"] = async () => fakeProcess().process,
       // Stands between a command and its agent lookup, to hold one at a chosen moment.
@@ -902,6 +903,8 @@ describe("run", () => {
       const env: { SSH_AUTH_SOCK?: string } = {};
       const harnessed = await harness(launch, "darwin", () => proxyCapable, {
         agentChoice,
+        // Where 1Password would put its socket; nothing is there until a test listens.
+        knownAgents: () => [{ name: "1Password", socket: join(folder, "1password.sock") }],
         // As the app wires it: the chosen socket, else SSH_AUTH_SOCK's.
         agent: () =>
           lookup(
@@ -942,10 +945,10 @@ describe("run", () => {
       expect(await Effect.runPromise(sandbox.chooseAgent(agent, async () => false))).toBe(false);
       expect(agentChoice.current()).toBeNull();
       expect(await choose(agent)).toMatchObject({ _tag: "Success", value: true });
-      expect(asked).toEqual([{ kind: "use", socket: agent }]);
+      expect(asked).toEqual([{ kind: "use", socket: agent, name: null }]);
       expect(await Effect.runPromise(sandbox.agentSetting())).toMatchObject({
-        chosen: agent,
-        chosenFound: true,
+        current: { socket: agent, name: null, source: "chosen", running: true },
+        found: [],
       });
       // Going back to the default is confirmed too: it may hold other keys.
       expect(await choose(null, false)).toMatchObject({ _tag: "Success", value: false });
@@ -958,6 +961,22 @@ describe("run", () => {
       const denied = (await launched).filesystem?.deniedPaths ?? [];
       expect(denied).not.toContain(folder);
       expect(denied).not.toContain(docker);
+      await done();
+    });
+
+    it("offers a known agent running here by name, and names a chosen one that has stopped", async () => {
+      const { listen, folder, asked, choose, sandbox, done } = await setUp();
+      const setting = () => Effect.runPromise(sandbox.agentSetting());
+      expect(await setting()).toMatchObject({ found: [] });
+      const onePassword = await listen("1password.sock", AGENT_REPLY);
+      expect((await setting()).found).toEqual([{ name: "1Password", socket: onePassword }]);
+      expect(await choose(onePassword)).toMatchObject({ _tag: "Success", value: true });
+      expect(asked).toEqual([{ kind: "use", socket: onePassword, name: "1Password" }]);
+      await rm(join(folder, "1password.sock"));
+      expect(await setting()).toMatchObject({
+        current: { socket: onePassword, name: "1Password", source: "chosen", running: false },
+        found: [],
+      });
       await done();
     });
 
@@ -1038,12 +1057,14 @@ describe("run", () => {
         await gate;
         return answer;
       });
-      // Which agent a relayed connection reaches, by the first to be connected to.
+      // Which agent a relayed connection reaches, by the first to be connected to once armed:
+      // granting and choosing ask the agents themselves first.
+      let armed = false;
       const serve = async (name: string) => {
         const { promise: reached, resolve: reach } = Promise.withResolvers<string>();
         const path = join(folder, name);
         const server = createServer((socket) => {
-          reach(name);
+          if (armed) reach(name);
           socket.on("data", () => socket.write(AGENT_REPLY));
         });
         await new Promise<void>((resolve) => server.listen(path, resolve));
@@ -1064,6 +1085,7 @@ describe("run", () => {
           return true;
         }),
       );
+      armed = true;
       release();
       const proxyUrl = (await launched).network?.runtimeConfig?.networkProxy ?? "";
       expect(await connectThrough(proxyUrl, "ssh-agent.invalid:1")).toMatch(/^HTTP\/1\.1 200/);
@@ -1490,10 +1512,14 @@ describe("denialLine", () => {
       "refused network-outbound git.corp.example:22: r",
     );
     // The grant store only takes these as private-network grants.
-    for (const host of ["10.0.0.5", "8.8.8.8", "build.corp.internal"])
+    for (const host of ["10.0.0.5", "build.corp.internal"])
       expect(denialLine({ host, port: 22, reason: "r", lift: "grant" })).toBe(
         `deny network-outbound ${host}:22 private-network`,
       );
+    // A public address takes an ordinary grant, like a name.
+    expect(denialLine({ host: "8.8.8.8", port: 22, reason: "r", lift: "grant" })).toBe(
+      "deny network-outbound 8.8.8.8:22",
+    );
     expect(denialLine({ host: "ssh-agent.invalid", port: 1, reason: "r", lift: "grant" })).toBe(
       "refused network-outbound ssh-agent.invalid:1: r",
     );
@@ -1798,9 +1824,7 @@ describe("the SSH agent", () => {
           none.sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"),
         ),
       ),
-    ).toContain(
-      "No SSH agent was found. Start one, or name its socket in Settings › This computer.",
-    );
+    ).toContain("No SSH agent was found. Start one, or choose it in Settings › This computer.");
     await none.close();
   });
 

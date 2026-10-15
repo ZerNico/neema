@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agentExists,
+  agentKeyCount,
   answersAsAgent,
   findAgent,
   isIdentitiesAnswer,
@@ -99,6 +100,19 @@ describe.runIf(process.platform !== "win32")("answersAsAgent", () => {
     // SSH_AGENT_IDENTITIES_ANSWER with no keys: type 12, count 0.
     const agent = await listen(() => identities([["ssh-ed25519 blob", "me@laptop"]]));
     expect(await answersAsAgent(agent)).toBe(true);
+  });
+
+  it("counts the keys an agent holds, and none for one that is no agent", async () => {
+    const two = await listen(() =>
+      identities([
+        ["ssh-ed25519 a", "me@laptop"],
+        ["ssh-rsa b", "me@work"],
+      ]),
+    );
+    expect(await agentKeyCount(two)).toBe(2);
+    expect(await agentKeyCount(await listen(() => identities([])))).toBe(0);
+    const http = await listen(() => Buffer.from("HTTP/1.1 400 Bad Request\r\n\r\n"));
+    expect(await agentKeyCount(http)).toBeNull();
   });
 
   it("refuses a socket that answers anything else, or nothing", async () => {

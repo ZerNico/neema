@@ -39,7 +39,8 @@ describe("ComputerPage", () => {
       revoke: vi.fn().mockResolvedValue(undefined),
       listPaths: vi.fn().mockResolvedValue([]),
       revokePath: vi.fn().mockResolvedValue(undefined),
-      localAllowed: vi.fn().mockResolvedValue(false),
+      localServices: vi.fn().mockResolvedValue("asked"),
+      allowLocal: vi.fn().mockResolvedValue(true),
       revokeLocal: vi.fn().mockResolvedValue(undefined),
       ...overrides,
     };
@@ -47,7 +48,7 @@ describe("ComputerPage", () => {
     return network;
   };
 
-  it("lists destinations with their ports and removes one only after confirming", async () => {
+  it("lists destinations, ports only past HTTPS's, and removes one only after confirming", async () => {
     const user = userEvent.setup();
     const ssh = { host: "github.com", port: 22, privateNetwork: false };
     const internal = { host: "git.internal", port: 443, privateNetwork: true };
@@ -55,12 +56,13 @@ describe("ComputerPage", () => {
     renderPage();
 
     expect(await screen.findByText("github.com:22")).toBeInTheDocument();
-    expect(screen.getByText("git.internal:443 (private network)")).toBeInTheDocument();
+    expect(screen.getByText("git.internal")).toBeInTheDocument();
+    expect(screen.getByText("Your network")).toBeInTheDocument();
     expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
       "This computer",
-      "Where commands can connect",
-      "Local network services",
-      "What commands can read",
+      "Internet access",
+      "Services on this computer",
+      "Files and folders",
     ]);
     await user.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
     const dialog = await screen.findByRole("alertdialog");
@@ -88,16 +90,31 @@ describe("ComputerPage", () => {
     await waitFor(() => expect(network.revokePath).toHaveBeenCalledWith("/opt/specs"));
   });
 
-  it("shows local services allowed for every chat and stops allowing them", async () => {
+  it("allows services on this computer through the app, and stops without asking", async () => {
     const user = userEvent.setup();
-    const network = desktop({ localAllowed: vi.fn().mockResolvedValue(true) });
+    const network = desktop({
+      localServices: vi.fn().mockResolvedValueOnce("asked").mockResolvedValue("allowed"),
+    });
     renderPage();
-    expect(await screen.findByText("Allowed for every chat")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Remove" }));
-    await user.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }),
-    );
+    const toggle = await screen.findByRole("switch", {
+      name: "Allow services on this computer in every chat",
+    });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    await user.click(toggle);
+    await waitFor(() => expect(network.allowLocal).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toggle).toBeChecked());
+    await user.click(toggle);
     await waitFor(() => expect(network.revokeLocal).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("leaves out services on this computer where commands have their own", async () => {
+    desktop({ localServices: vi.fn().mockResolvedValue("unavailable") });
+    renderPage();
+    expect(await screen.findByText("Internet access")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Services on this computer")).not.toBeInTheDocument(),
+    );
   });
 
   it("shows loading, failure and an empty list as rows of the same card", async () => {
@@ -108,18 +125,28 @@ describe("ComputerPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load this list.");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findAllByText("Nothing yet.")).toHaveLength(2);
-    expect(screen.getByText("Asked in each chat.")).toBeInTheDocument();
   });
-  it("names the agent in use and asks the app to use another socket or the default", async () => {
+  const agentSetting = (overrides: Record<string, unknown> = {}) => ({
+    current: {
+      socket: "/tmp/launchd/Listeners",
+      name: null,
+      source: "environment",
+      running: true,
+      keys: 0,
+    },
+    found: [],
+    choosable: true,
+    ...overrides,
+  });
+
+  it("names the agent in use and offers the known ones found, another socket or the default", async () => {
     const user = userEvent.setup();
-    const fallback = {
-      chosen: null,
-      chosenFound: false,
-      fallback: "/tmp/launchd/Listeners",
-      fallbackFrom: "environment",
-      choosable: true,
-    };
-    const chosen = { ...fallback, chosen: "/Users/me/op/agent.sock", chosenFound: true };
+    const onePassword = "/Users/me/Library/Group Containers/op/agent.sock";
+    const fallback = agentSetting({ found: [{ name: "1Password", socket: onePassword }] });
+    const chosen = agentSetting({
+      current: { socket: onePassword, name: "1Password", source: "chosen", running: true, keys: 2 },
+      found: [{ name: "1Password", socket: onePassword }],
+    });
     const chooseAgent = vi.fn().mockResolvedValue({ ok: true, changed: true });
     desktop({
       agent: vi.fn().mockResolvedValueOnce(fallback).mockResolvedValue(chosen),
@@ -127,15 +154,26 @@ describe("ComputerPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("/tmp/launchd/Listeners")).toBeInTheDocument();
-    expect(screen.getByText("From SSH_AUTH_SOCK")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Agent socket"), "/Users/me/op/agent.sock");
-    await user.click(screen.getByRole("button", { name: "Use" }));
-    expect(chooseAgent).toHaveBeenCalledWith("/Users/me/op/agent.sock");
-    expect(await screen.findByText("/Users/me/op/agent.sock")).toBeInTheDocument();
-    expect(screen.queryByText("From SSH_AUTH_SOCK")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Use default" }));
+    expect(await screen.findByText("System agent")).toBeInTheDocument();
+    expect(screen.getByText("No keys. Add yours with ssh-add.")).toBeInTheDocument();
+    expect(screen.queryByText("/tmp/launchd/Listeners")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    await user.click(await screen.findByRole("menuitem", { name: "1Password" }));
+    expect(chooseAgent).toHaveBeenCalledWith(onePassword);
+    expect(await screen.findByText("1Password")).toBeInTheDocument();
+    expect(screen.getByText("2 keys")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.queryByRole("menuitem", { name: "1Password" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "System agent" }));
     expect(chooseAgent).toHaveBeenLastCalledWith(null);
+
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Other agent…" }));
+    await user.type(await screen.findByLabelText("Agent socket"), "/Users/me/agent.sock");
+    await user.click(screen.getByRole("button", { name: "Use" }));
+    expect(chooseAgent).toHaveBeenLastCalledWith("/Users/me/agent.sock");
+    await waitFor(() => expect(screen.queryByLabelText("Agent socket")).not.toBeInTheDocument());
   });
 
   it("says why the app refused a socket, and nothing when the person cancelled", async () => {
@@ -149,18 +187,12 @@ describe("ComputerPage", () => {
         message: "/x didn’t answer as an SSH agent. Is it running?",
       })
       .mockResolvedValueOnce({ ok: true, changed: false });
-    desktop({
-      agent: vi.fn().mockResolvedValue({
-        chosen: null,
-        chosenFound: false,
-        fallback: null,
-        fallbackFrom: null,
-        choosable: true,
-      }),
-      chooseAgent,
-    });
+    desktop({ agent: vi.fn().mockResolvedValue(agentSetting({ current: null })), chooseAgent });
     renderPage();
 
+    expect(await screen.findByText("No agent found")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Other agent…" }));
     const input = await screen.findByLabelText("Agent socket");
     await user.type(input, "/x");
     await user.click(screen.getByRole("button", { name: "Use" }));
@@ -173,34 +205,43 @@ describe("ComputerPage", () => {
     expect(input).toHaveValue("/x");
   });
 
-  it("shows a chosen agent that has gone, and Windows' own agent with nothing to name", async () => {
+  it("shows a chosen agent that has stopped, and Windows' own agent with nothing to change", async () => {
     desktop({
-      agent: vi.fn().mockResolvedValue({
-        chosen: "/Users/me/op/agent.sock",
-        chosenFound: false,
-        fallback: null,
-        fallbackFrom: null,
-        choosable: true,
-      }),
+      agent: vi.fn().mockResolvedValue(
+        agentSetting({
+          current: {
+            socket: "/Users/me/op/agent.sock",
+            name: null,
+            source: "chosen",
+            running: false,
+            keys: null,
+          },
+        }),
+      ),
       chooseAgent: vi.fn(),
     });
     const { unmount } = renderPage();
     expect(await screen.findByText("Not running")).toBeInTheDocument();
+    expect(screen.getByText("/Users/me/op/agent.sock")).toBeInTheDocument();
     unmount();
 
     desktop({
-      agent: vi.fn().mockResolvedValue({
-        chosen: null,
-        chosenFound: false,
-        fallback: "\\\\.\\pipe\\openssh-ssh-agent",
-        fallbackFrom: "windows",
-        choosable: false,
-      }),
+      agent: vi.fn().mockResolvedValue(
+        agentSetting({
+          current: {
+            socket: "\\\\.\\pipe\\openssh-ssh-agent",
+            name: null,
+            source: "windows",
+            running: true,
+            keys: null,
+          },
+          choosable: false,
+        }),
+      ),
       chooseAgent: vi.fn(),
     });
     renderPage();
-    expect(await screen.findByText("Windows’ own agent")).toBeInTheDocument();
-    expect(screen.queryByText("From SSH_AUTH_SOCK")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Agent socket")).not.toBeInTheDocument();
+    expect(await screen.findByText("Windows’ agent")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change" })).not.toBeInTheDocument();
   });
 });

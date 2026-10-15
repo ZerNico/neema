@@ -584,13 +584,15 @@ menu; every-chat grants are removed in Settings › This computer. Both stores
 forget a chat when its workspace is discarded, which happens once the chat is
 purged and Undo is gone.
 
-Loopback is a grant of its own, local network services, in the same three
-scopes. Seatbelt has no private loopback: a command talking to itself, as Gradle
+Loopback is a grant of its own, services on this computer, in the same three
+scopes. Settings can also turn it on for every chat, confirmed in the app's own
+dialog like an agent choice, since the page asking is the server's. Seatbelt has no private loopback: a command talking to itself, as Gradle
 does with its daemon and file-lock socket, needs the host's, and the inbound
 half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
 from the network. Without the grant a command can bind nothing. On Linux every
 command has a loopback of its own and talks to itself without the grant, and
-bubblewrap cannot open the host's, so the grant is refused there. Windows proxy
+bubblewrap cannot open the host's, so the grant is refused there and Settings
+leaves it out. Windows proxy
 mode refuses even a command's own listener, so there the grant leaves proxy mode:
 loopback opens to the host, direct egress stays denied, and the proxy variables
 the command already carries reach the proxy as an ordinary local service, the
@@ -636,8 +638,9 @@ every chat, since the agent signs as the person. The agent is the socket chosen 
 Settings › This computer, else `SSH_AUTH_SOCK`, else on Windows its fixed pipe, looked up before
 each command. No ssh config is read to find it: finding the agent there meant running ssh over a
 config commands might redirect (`Include`s, links, `Match exec`), and every guard on that was
-another place to get wrong. An agent set only in the config (1Password, Secretive) is named
-once in Settings instead. The page that asks is the server's, so the app takes a socket only
+another place to get wrong. An agent set only in the config (1Password, Secretive) is chosen
+once in Settings instead: the app offers the known ones whose socket it finds at its usual place,
+a fixed list it only looks at, or takes a path. The page that asks is the server's, so the app takes a socket only
 when it answers an identities request as an agent would (Docker's does not) and the person
 confirms in the app's own dialog; going back to the default, which may hold other keys, is
 confirmed too. The socket is kept by its real path, since a link a command made could later

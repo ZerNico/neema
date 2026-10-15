@@ -46,6 +46,7 @@ import {
   PATHS_LIST,
   PATHS_REVOKE,
   LOCAL_GET,
+  LOCAL_ALLOW,
   LOCAL_REVOKE,
   AGENT_GET,
   AGENT_CHOOSE,
@@ -150,15 +151,17 @@ const confirmAgent = async (change: AgentChange) => {
     title: "Change the SSH agent?",
     message:
       change.kind === "use"
-        ? `Sign in with the keys in ${change.socket}?`
+        ? `Sign in with the keys in ${change.name ?? change.socket}?`
         : change.fallback
-          ? `Sign in with the keys in ${change.fallback}?`
+          ? `Sign in with the keys in ${change.name ?? "your system’s SSH agent"}?`
           : "Stop signing in with a chosen agent?",
     detail:
       change.kind === "use"
-        ? "Work chats you allow to sign in with SSH will use this agent. Only choose a socket your own agent made."
+        ? change.name
+          ? "Work chats you allow to sign in with SSH will use it."
+          : "Work chats you allow to sign in with SSH will use this agent. Only choose a socket your own agent made."
         : change.fallback
-          ? "Work chats you allow to sign in with SSH will use the agent SSH_AUTH_SOCK names."
+          ? "Work chats you allow to sign in with SSH will use it."
           : "No other agent was found, so commands won’t sign in with SSH.",
   });
   return response === 1;
@@ -646,7 +649,28 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(LOCAL_GET, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return (await permissions()).capabilities.includes("local-services");
+    // bubblewrap gives each command a loopback of its own; this computer's can't be opened.
+    if (process.platform === "linux") return "unavailable";
+    return (await permissions()).capabilities.includes("local-services") ? "allowed" : "asked";
+  });
+  // Opens what a server a command starts could be reached on, so the app asks itself.
+  ipcMain.handle(LOCAL_ALLOW, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: ["Cancel", "Allow"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "Allow services on this computer?",
+      message: "Let commands in every Work chat use services on this computer?",
+      detail:
+        "Some build tools like Gradle need this. A server a command starts could be reached from your network.",
+    });
+    if (response !== 1) return false;
+    await runtime.runPromise(
+      Effect.flatMap(Sandbox, (sandbox) => sandbox.approveCapability(always, "local-services")),
+    );
+    return true;
   });
   ipcMain.handle(LOCAL_REVOKE, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
