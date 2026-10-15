@@ -1172,6 +1172,28 @@ describe("once a folder is attached", () => {
     picked = root;
   });
 
+  it("never moves a root itself, which could leave it in the workspace", async () => {
+    const movable = join(root, "..", "movable");
+    await mkdir(movable, { recursive: true });
+    await writeFile(join(movable, "keep.txt"), "kept\n");
+    picked = movable;
+    await Effect.runPromise(handlers.chooseFolder({ conversationId: CONVERSATION }));
+    expect(
+      await failureOf(
+        handlers.movePath({
+          conversationId: CONVERSATION,
+          callId: "t",
+          from: movable,
+          to: join(workspaceDir(CONVERSATION), "movable"),
+        }),
+      ),
+    ).toBe("outside-folder");
+    expect(await readFile(join(movable, "keep.txt"), "utf8")).toBe("kept\n");
+    await Effect.runPromise(
+      handlers.detachFolder({ conversationId: CONVERSATION, name: "movable" }),
+    );
+  });
+
   it("forgets the folder on request", async () => {
     await Effect.runPromise(
       handlers.detachFolder({ conversationId: CONVERSATION, name: "elsewhere" }),

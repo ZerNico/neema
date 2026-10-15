@@ -61,6 +61,11 @@ const WALK_LIMIT = 50_000;
 
 const isBinary = (bytes: Buffer) => bytes.subarray(0, 8_000).includes(0);
 
+// `resolveInFolder` against the root yields `relative: "."`; across
+// folders it is the prefixed name. Either way, this is the root itself.
+const isRoot = (target: { absolute: string; root: string; relative: string }) =>
+  target.absolute === target.root || !target.relative.includes("/");
+
 /** Bytes already proven to be a regular file, capped so a huge log cannot OOM us. */
 const readPrefix = (absolute: string, maxBytes: number, relative: string) =>
   Effect.tryPromise({
@@ -214,10 +219,7 @@ export const makeHandlers = (shell: Shell) =>
     const removeAt = (conversationId: string, path: string) =>
       Effect.gen(function* () {
         const target = yield* locate(conversationId, path);
-        // `resolveInFolder` against the root yields `relative: "."`; across
-        // folders it is the prefixed name. Either way, the root itself is not
-        // a delete target.
-        if (target.absolute === target.root || !target.relative.includes("/")) {
+        if (isRoot(target)) {
           return yield* Effect.fail(
             new DesktopError({
               reason: "outside-folder",
@@ -698,6 +700,15 @@ export const makeHandlers = (shell: Shell) =>
           // Both ends are contained: a move is a read of one path and a write
           // of another, and either could be the one that escapes.
           const source = yield* locateForWrite(conversationId, from);
+          // Moved into the workspace, a root would go when the chat's folder does.
+          if (isRoot(source)) {
+            return yield* Effect.fail(
+              new DesktopError({
+                reason: "outside-folder",
+                message: "The folder itself cannot be moved.",
+              }),
+            );
+          }
           const destination = yield* locateForWrite(conversationId, to);
           yield* Effect.tryPromise({
             try: () => stat(source.absolute),
