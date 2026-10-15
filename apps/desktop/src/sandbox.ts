@@ -191,6 +191,7 @@ const toolchainRead = (os: NodeJS.Platform) =>
  */
 export const CREDENTIAL_DENIES = [
   inHome(".cache", "huggingface", "token"),
+  inHome(".cache", "huggingface", "stored_tokens"),
   inHome(".cache", "gh"),
   inHome(".config", "git", "credentials"),
   // git credential-cache's daemon socket answers whoever opens it.
@@ -207,6 +208,8 @@ export const CREDENTIAL_DENIES = [
   inHome(".kube"),
   inHome(".config", "gcloud"),
   inHome(".config", "gh"),
+  // RubyGems' API key, in the readable gem folder.
+  inHome(".gem", "credentials"),
   inHome(".cargo", "credentials"),
   inHome(".cargo", "credentials.toml"),
   inHome(".cargo", "config"),

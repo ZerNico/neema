@@ -89,6 +89,9 @@ describe("filesystemPolicy", () => {
       join(home, ".aws"),
       join(home, ".git-credentials"),
       join(home, ".config", "git", "credentials"),
+      // Inside readable toolchain folders.
+      join(home, ".gem", "credentials"),
+      join(home, ".cache", "huggingface", "stored_tokens"),
       "/profile/network-grants",
     ]) {
       expect(policy.deniedPaths).toContain(path);
