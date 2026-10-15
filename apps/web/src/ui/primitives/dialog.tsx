@@ -24,7 +24,10 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) {
   return (
+    // Also when nested: a dialog opened from another then dims it, and a click beside it
+    // closes it instead of reaching the dialog underneath and opening another on top.
     <DialogPrimitive.Backdrop
+      forceRender
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
