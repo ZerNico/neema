@@ -4471,6 +4471,52 @@ describe("queued turns", () => {
     expect(result).toEqual({ promoted: false, reason: "question" });
   });
 
+  it("holds queued turns behind a reserved Work send until it ends", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: seed.assistant.id,
+          status: "complete",
+          content: "ok",
+        });
+        yield* db
+          .update(conversations)
+          .set({ mode: "work" })
+          .where(eq(conversations.id, seed.conversation.id));
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "later",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const reservationId = uuidv7();
+        yield* repo.reserveWorkTurn({
+          id: reservationId,
+          userId: seed.userId,
+          conversation: { kind: "existing", id: seed.conversation.id },
+        });
+        const promote = repo.promoteNextQueuedTurn({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
+          resolve: plain,
+        });
+        const held = yield* promote;
+        yield* repo.abortWorkTurn(seed.userId, reservationId);
+        const released = yield* promote;
+        return { held, released: released.promoted };
+      }),
+    );
+
+    expect(result.held).toEqual({ promoted: false, reason: "busy" });
+    expect(result.released).toBe(true);
+  });
+
   const firstRound = "Checking the models. ";
   const secondRound = "Here is the ending.";
   /** What the fake model writes in one plain call. */

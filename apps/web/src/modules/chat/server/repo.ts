@@ -456,6 +456,20 @@ const readQueueGate = Effect.fn("ChatRepo.readQueueGate")(function* (
     .where(and(eq(messages.conversationId, conversationId), eq(messages.status, "streaming")))
     .pipe(Effect.orDie);
   if (streaming.length > 0) return "busy" as const;
+  // A send with workspace files holds its turn before any message exists.
+  const reserved = yield* tx
+    .select({ id: workTurnReservations.id })
+    .from(workTurnReservations)
+    .where(
+      and(
+        eq(workTurnReservations.conversationId, conversationId),
+        eq(workTurnReservations.status, "reserved"),
+        sql`${workTurnReservations.expiresAt} > now()`,
+      ),
+    )
+    .limit(1)
+    .pipe(Effect.orDie);
+  if (reserved.length > 0) return "busy" as const;
   const [tail] = yield* tx
     .select()
     .from(messages)
@@ -2276,6 +2290,8 @@ export class ChatRepo extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 yield* lockAccount(tx, input.userId);
+                // Before the conversation, in the order reservations take it.
+                yield* lockWorkTurn(tx, input.conversationId).pipe(Effect.orDie);
                 const [conversation] = yield* tx
                   .select()
                   .from(conversations)
