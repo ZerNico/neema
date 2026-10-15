@@ -110,6 +110,18 @@ describe("a run of work", () => {
     expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
   });
 
+  it("names an access request as one, not as looking through files", () => {
+    const desktop = (name: "request_network_access" | "request_path_access" | "find_files") => ({
+      kind: "tool" as const,
+      key: name,
+      activity: call(name, { family: "desktop", name }) as never,
+    });
+    expect(workSummary([desktop("request_network_access")])).toBe("Asked for access");
+    expect(workSummary([desktop("find_files"), desktop("request_path_access")])).toBe(
+      "Looked through files and asked for access",
+    );
+  });
+
   it("leaves a failed document step out of the summary unless it was all there was", () => {
     const document = (callId: string, outcome: "updated" | "conflict"): DocumentPart => ({
       kind: "document",

@@ -77,6 +77,7 @@ export function stepLabel(step: WorkStep): string {
             call.name === "delete_local_file"
           )
             return "Editing files";
+          if (call.name.startsWith("request_")) return "Asking for access";
           return "Looking through files";
         default:
           return "Working";
@@ -102,6 +103,7 @@ const PAST: Record<string, string> = {
   "Running a command": "Ran a command",
   "Editing files": "Edited files",
   "Looking through files": "Looked through files",
+  "Asking for access": "Asked for access",
 };
 
 const pastLabels = (step: WorkStep): string[] => {
