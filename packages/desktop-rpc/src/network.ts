@@ -17,6 +17,7 @@ export const LOCAL_ALLOW = "chat-desktop:local-allow" as const;
 export const LOCAL_REVOKE = "chat-desktop:local-revoke" as const;
 export const AGENT_GET = "chat-desktop:agent-get" as const;
 export const AGENT_CHOOSE = "chat-desktop:agent-choose" as const;
+export const AGENT_FORGET_KEYS = "chat-desktop:agent-forget-keys" as const;
 
 /** The SSH agent commands sign in with, and the known ones that could be chosen instead. */
 export interface AgentSetting {
@@ -36,6 +37,8 @@ export interface AgentSetting {
   readonly found: readonly { readonly name: string; readonly socket: string }[];
   /** False on Windows, whose commands use Windows' own agent. */
   readonly choosable: boolean;
+  /** The key files the app adds to an empty system agent, by name, as the person agreed. */
+  readonly added: readonly string[];
 }
 
 /** The outcome of choosing: changed, declined in the app's dialog, or refused with a reason. */
@@ -60,6 +63,8 @@ export interface DesktopNetwork {
   agent?(): Promise<AgentSetting>;
   /** Asks the app to use this socket (it confirms with its own dialog), or clears the choice. */
   chooseAgent?(socket: string | null): Promise<AgentChoiceReply>;
+  /** Stops adding the person's key files to the agent; the ones in it stay until it restarts. */
+  forgetKeys?(): Promise<void>;
 }
 
 export function readDesktopNetwork(): DesktopNetwork | null {

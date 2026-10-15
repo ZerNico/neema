@@ -9,6 +9,7 @@ import {
   LOCAL_REVOKE,
   AGENT_GET,
   AGENT_CHOOSE,
+  AGENT_FORGET_KEYS,
   type DesktopNetwork,
 } from "@chat/desktop-rpc";
 
@@ -23,4 +24,5 @@ export const makeNetworkBridge = (ipc: Pick<IpcRenderer, "invoke">): DesktopNetw
   revokeLocal: () => ipc.invoke(LOCAL_REVOKE),
   agent: () => ipc.invoke(AGENT_GET),
   chooseAgent: (socket) => ipc.invoke(AGENT_CHOOSE, { socket }),
+  forgetKeys: () => ipc.invoke(AGENT_FORGET_KEYS),
 });

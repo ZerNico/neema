@@ -657,7 +657,15 @@ that is gone means no agent, never a quiet fallback to `SSH_AUTH_SOCK`'s, which 
 keys. A chat that
 allowed the agent while none runs is told so, not asked again. Allowing it where none runs
 is refused at once, and so is allowing an agent that holds no keys, since logins with it only
-fail. Its socket is never named to a container, on any platform:
+fail. An empty system agent is the common case on macOS: ssh reads `~/.ssh/id_rsa` directly, and
+commands cannot. So when a chat is allowed it and the person has default key files, the app asks
+in its own dialog, once, to add them with ssh-add, outside the sandbox (Apple's keeps a
+passphrase in the Keychain, asked for in a system dialog that never passes through the app). The
+agent forgets its keys on a restart, so the agreed files are added again, unasked, before a
+command of a chat that may sign in, until Settings stops it. Commands can sign with a key in the
+agent but never read it, and only in chats allowed to; a key in the agent is no more exposed to
+programs outside the sandbox than its file already was, which is why no time limit is set. A
+chosen agent (1Password) is never added to. Its socket is never named to a container, on any platform:
 ssh, ssh-add and ssh-keygen (git signs commits with it) start under a bridge that listens on a socket (a pipe on Windows)
 of the command's own, names it to them as their agent, and has the egress proxy
 carry each connection to the reserved destination `ssh-agent.invalid:1`, which

@@ -22,6 +22,7 @@ import { makeCommandRoot } from "./command-root.ts";
 import { loadEgressGrants } from "./egress-grants.ts";
 import { credentialLinks, loadPathGrants } from "./path-grants.ts";
 import { findAgent, loadAgentChoice, pathExists } from "./ssh-agent.ts";
+import { loadKeyConsent } from "./ssh-keys.ts";
 import { loadScopedGrants } from "./scoped-grants.ts";
 import { commandEnvironment, jvmEnvironment } from "./sandbox-environment.ts";
 import {
@@ -883,17 +884,24 @@ describe("run", () => {
       launch: SandboxDependencies["launch"] = async () => fakeProcess().process,
       // Stands between a command and its agent lookup, to hold one at a chosen moment.
       lookup = (found: Promise<string | null>) => found,
+      keys?: SandboxDependencies["keys"],
     ) => {
       const folder = await realpath(await directory());
       const servers: ReturnType<typeof createServer>[] = [];
       const listen = async (
         name: string,
-        reply: Buffer,
+        reply: Buffer | (() => Buffer),
         answering: Promise<void> = Promise.resolve(),
       ) => {
         const path = join(folder, name);
         const server = createServer((socket) =>
-          socket.on("data", () => void answering.then(() => socket.write(reply))),
+          socket.on(
+            "data",
+            () =>
+              void answering.then(() =>
+                socket.write(typeof reply === "function" ? reply() : reply),
+              ),
+          ),
         );
         servers.push(server);
         await new Promise<void>((resolve) => server.listen(path, resolve));
@@ -906,6 +914,7 @@ describe("run", () => {
         agentChoice,
         // Where 1Password would put its socket; nothing is there until a test listens.
         knownAgents: () => [{ name: "1Password", socket: join(folder, "1password.sock") }],
+        ...(keys ? { keys } : {}),
         // As the app wires it: the chosen socket, else SSH_AUTH_SOCK's.
         agent: () =>
           lookup(
@@ -976,6 +985,120 @@ describe("run", () => {
       expect(
         (await Effect.runPromise(sandbox.permissions({ scope: "chat", chat }))).capabilities,
       ).toEqual([]);
+      await done();
+    });
+
+    it("adds the person's key to an empty agent once they agree, and again after a restart", async () => {
+      const launch = async () => {
+        const child = fakeProcess();
+        child.finish(0);
+        return child.process;
+      };
+      const folder = await directory();
+      const key = join(folder, "id_rsa");
+      await writeFile(key, "");
+      const consent = await loadKeyConsent(folder);
+      let holding = false;
+      let agreeing = false;
+      let cancelling = false;
+      const confirmed: (readonly string[])[] = [];
+      const added: (readonly string[])[] = [];
+      const { listen, env, sandbox, done } = await setUp(launch, undefined, {
+        consent,
+        found: async () => [key],
+        confirm: async (keys) => {
+          confirmed.push(keys);
+          return agreeing;
+        },
+        add: async (_socket, keys) => {
+          added.push(keys);
+          holding = !cancelling;
+        },
+      });
+      env.SSH_AUTH_SOCK = await listen("system.sock", () => (holding ? AGENT_REPLY : EMPTY_AGENT));
+      const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+      const approve = () =>
+        Effect.runPromiseExit(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
+      const granted = async () =>
+        (await Effect.runPromise(sandbox.permissions({ scope: "chat", chat }))).capabilities;
+
+      // Declined in the app's dialog: nothing is added, nothing granted, nothing remembered.
+      expect(JSON.stringify(await approve())).toContain("chose not to add their SSH key");
+      expect(confirmed).toEqual([[key]]);
+      expect(added).toEqual([]);
+      expect(await granted()).toEqual([]);
+      expect(consent.current()).toEqual([]);
+
+      // Agreed, then the passphrase dialog cancelled: the agent stays empty and nothing is
+      // remembered, so the next request asks again instead of reopening the passphrase dialog.
+      agreeing = true;
+      cancelling = true;
+      expect(JSON.stringify(await approve())).toContain("holds no keys");
+      expect(added).toEqual([[key]]);
+      expect(await granted()).toEqual([]);
+      expect(consent.current()).toEqual([]);
+
+      cancelling = false;
+      expect(await approve()).toMatchObject({ _tag: "Success" });
+      expect(confirmed).toHaveLength(3);
+      expect(added).toEqual([[key], [key]]);
+      expect(await granted()).toEqual(["ssh-agent"]);
+      expect(consent.current()).toEqual([key]);
+      expect(await Effect.runPromise(sandbox.agentSetting())).toMatchObject({ added: ["id_rsa"] });
+
+      // The agent restarted empty: the key goes back before the chat's next command, unasked.
+      holding = false;
+      await Effect.runPromise(sandbox.run(run()));
+      expect(added).toEqual([[key], [key], [key]]);
+      expect(confirmed).toHaveLength(3);
+
+      // Forgotten in Settings: an empty agent stays empty.
+      await Effect.runPromise(sandbox.forgetKeys());
+      holding = false;
+      await Effect.runPromise(sandbox.run(run()));
+      expect(added).toHaveLength(3);
+      expect(await Effect.runPromise(sandbox.agentSetting())).toMatchObject({ added: [] });
+      await done();
+    });
+
+    it("asks once and adds once when two chats ask to sign in together", async () => {
+      const folder = await directory();
+      const key = join(folder, "id_rsa");
+      await writeFile(key, "");
+      const { promise: answered, resolve: answer } = Promise.withResolvers<boolean>();
+      const { promise: asking, resolve: asked } = Promise.withResolvers<void>();
+      let holding = false;
+      const confirmed: (readonly string[])[] = [];
+      const added: (readonly string[])[] = [];
+      const { listen, env, sandbox, done } = await setUp(undefined, undefined, {
+        consent: await loadKeyConsent(folder),
+        found: async () => [key],
+        confirm: (keys) => {
+          confirmed.push(keys);
+          asked();
+          return answered;
+        },
+        add: async (_socket, keys) => {
+          added.push(keys);
+          holding = true;
+        },
+      });
+      env.SSH_AUTH_SOCK = await listen("system.sock", () => (holding ? AGENT_REPLY : EMPTY_AGENT));
+      const approve = (conversationId: string) =>
+        Effect.runPromiseExit(
+          sandbox.approveCapability(
+            { scope: "chat", chat: { origin: "https://chat.example", conversationId } },
+            "ssh-agent",
+          ),
+        );
+      const first = approve("chat-a");
+      await asking;
+      const second = approve("chat-b");
+      answer(true);
+      expect(await first).toMatchObject({ _tag: "Success" });
+      expect(await second).toMatchObject({ _tag: "Success" });
+      expect(confirmed).toHaveLength(1);
+      expect(added).toEqual([[key]]);
       await done();
     });
 

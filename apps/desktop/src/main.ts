@@ -12,7 +12,7 @@ import {
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   attachChrome,
@@ -50,6 +50,7 @@ import {
   LOCAL_REVOKE,
   AGENT_GET,
   AGENT_CHOOSE,
+  AGENT_FORGET_KEYS,
   type AgentChoiceReply,
   makeDesktopResponder,
   refusalReply,
@@ -167,6 +168,24 @@ const confirmAgent = async (change: AgentChange) => {
   return response === 1;
 };
 
+/** Asked once, before the person's key files first go into their SSH agent. */
+const confirmKeys = async (keys: readonly string[]) => {
+  const names = keys.map((key) => basename(key)).join(", ");
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    buttons: ["Cancel", keys.length === 1 ? "Add key" : "Add keys"],
+    defaultId: 1,
+    cancelId: 0,
+    title: "Add your SSH key?",
+    message: `Add ${names} to your SSH agent?`,
+    detail:
+      keys.length === 1
+        ? "Work chats you allow to sign in with SSH can use it but can’t read it. It’s added again after a restart."
+        : "Work chats you allow to sign in with SSH can use them but can’t read them. They’re added again after a restart.",
+  });
+  return response === 1;
+};
+
 const runExecution = (tag: string, payload: unknown, signal: AbortSignal) =>
   runtime.runPromise(respond(tag, payload), { signal });
 // Replaced on a server switch: a disposed instance refuses every later call.
@@ -212,7 +231,7 @@ const runtime = ManagedRuntime.make(
       if (serverOrigin === null) throw new Error("No server is configured.");
       return serverOrigin;
     }, app.getPath("userData")),
-    Sandbox.layerAt(networkGrantsDirectory(app.getPath("userData"))),
+    Sandbox.layerAt(networkGrantsDirectory(app.getPath("userData")), confirmKeys),
   ),
 );
 
@@ -697,6 +716,10 @@ void app.whenReady().then(async () => {
     return Result.isSuccess(outcome)
       ? { ok: true, changed: outcome.success }
       : { ok: false, message: outcome.failure.message };
+  });
+  ipcMain.handle(AGENT_FORGET_KEYS, async (event) => {
+    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.forgetKeys()));
   });
   ipcMain.handle(PATHS_LIST, async (event) => {
     if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");

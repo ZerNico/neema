@@ -42,6 +42,7 @@ describe("ComputerPage", () => {
       localServices: vi.fn().mockResolvedValue("asked"),
       allowLocal: vi.fn().mockResolvedValue(true),
       revokeLocal: vi.fn().mockResolvedValue(undefined),
+      forgetKeys: vi.fn().mockResolvedValue(undefined),
       ...overrides,
     };
     Reflect.set(globalThis, "__chatDesktop", { network });
@@ -136,6 +137,7 @@ describe("ComputerPage", () => {
     },
     found: [],
     choosable: true,
+    added: [],
     ...overrides,
   });
 
@@ -174,6 +176,24 @@ describe("ComputerPage", () => {
     await user.click(screen.getByRole("button", { name: "Use" }));
     expect(chooseAgent).toHaveBeenLastCalledWith("/Users/me/agent.sock");
     await waitFor(() => expect(screen.queryByLabelText("Agent socket")).not.toBeInTheDocument());
+  });
+
+  it("says which key files the app adds, and stops adding them", async () => {
+    const user = userEvent.setup();
+    const network = desktop({
+      agent: vi
+        .fn()
+        .mockResolvedValueOnce(agentSetting({ added: ["id_rsa"] }))
+        .mockResolvedValue(agentSetting()),
+      chooseAgent: vi.fn(),
+    });
+    renderPage();
+
+    expect(await screen.findByText("id_rsa is added when a chat signs in")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Stop adding id_rsa" }));
+    await waitFor(() => expect(network.forgetKeys).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("No keys. Add yours with ssh-add.")).toBeInTheDocument();
   });
 
   it("says why the app refused a socket, and nothing when the person cancelled", async () => {

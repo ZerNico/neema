@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, relative, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, relative, win32 } from "node:path";
 import type { Readable } from "node:stream";
 import {
   createEgressProxy,
@@ -73,10 +73,12 @@ import {
   loadAgentChoice,
   agentExists,
   knownAgents,
+  pathExists,
   WINDOWS_AGENT,
   type AgentChoice,
   type KnownAgent,
 } from "./ssh-agent.ts";
+import { addKeysToAgent, defaultKeyFiles, loadKeyConsent, type KeyConsent } from "./ssh-keys.ts";
 
 /** What the person is asked to confirm: a socket to use, or going back to the default. */
 export type AgentChange =
@@ -532,6 +534,14 @@ export interface SandboxDependencies {
   readonly agentChoice?: AgentChoice | null;
   /** Where known agents put their socket; the home directory's by default. */
   readonly knownAgents?: () => readonly KnownAgent[];
+  /** The person's own key files, added to an empty system agent once they agree. */
+  readonly keys?: {
+    readonly consent: KeyConsent;
+    readonly found: () => Promise<readonly string[]>;
+    /** The app's own question, asked once: the page asking is the server's. */
+    readonly confirm: (keys: readonly string[]) => Promise<boolean>;
+    readonly add: (socket: string, keys: readonly string[]) => Promise<void>;
+  };
   readonly userFolders: () => ReadonlyArray<string>;
   /**
    * Where each command's private folder is made: a place no command may read or write, never
@@ -580,6 +590,8 @@ export class Sandbox extends Context.Service<
     ): Effect.Effect<void, DesktopError>;
     /** The agent socket chosen in Settings, and the one used when none is. */
     agentSetting(): Effect.Effect<AgentSetting>;
+    /** Stops adding the person's key files to an empty agent. */
+    forgetKeys(): Effect.Effect<void>;
     /**
      * Chooses the agent socket, or clears the choice with null; false when the person declined.
      * A socket must answer as an agent, and `confirm` (the app's own dialog) must agree, since
@@ -591,7 +603,10 @@ export class Sandbox extends Context.Service<
     ): Effect.Effect<boolean, DesktopError>;
   }
 >()("desktop/Sandbox") {
-  static readonly layerAt = (directory: string) =>
+  static readonly layerAt = (
+    directory: string,
+    confirmKeys: (keys: readonly string[]) => Promise<boolean>,
+  ) =>
     Layer.effect(
       Sandbox,
       Effect.flatMap(
@@ -631,9 +646,10 @@ export class Sandbox extends Context.Service<
               CAPABILITIES.has(entry),
             ),
             loadAgentChoice(directory),
+            loadKeyConsent(directory),
           ]);
         }),
-        ([commandRoot, pathRules, appData, grants, paths, capabilities, agentChoice]) =>
+        ([commandRoot, pathRules, appData, grants, paths, capabilities, agentChoice, consent]) =>
           makeSandbox({
             os: platform(),
             support: getPlatformSupport,
@@ -650,6 +666,12 @@ export class Sandbox extends Context.Service<
                 exists: agentExists,
               }),
             agentChoice,
+            keys: {
+              consent,
+              found: () => defaultKeyFiles(home),
+              confirm: confirmKeys,
+              add: (socket, keys) => addKeysToAgent({ os: platform(), socket, keys, directory }),
+            },
             userFolders: () => (platform() === "darwin" ? macUserFolders() : []),
             developerDir: platform() === "darwin" ? macDeveloperDir() : null,
             commandRoot,
@@ -846,6 +868,48 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         if (found && relayFor !== undefined) relayedAgents.set(relayFor, found);
         return found;
       }
+    };
+    /**
+     * Adds the person's key files to the system agent when it holds none, asking them first unless
+     * they agreed before. A chosen agent (1Password) is left as it is. Resolves to its key count,
+     * null when it does not answer as an agent.
+     */
+    const fill = async (agent: string, ask: boolean) => {
+      const count = await agentKeyCount(agent);
+      const keys = dependencies.keys;
+      if (count !== 0 || !keys || dependencies.agentChoice?.current()) return count;
+      const agreed = (
+        await Promise.all(
+          keys.consent.current().map(async (file) => ((await pathExists(file)) ? file : null)),
+        )
+      ).filter((file): file is string => file !== null);
+      if (agreed.length === 0 && !ask) return 0;
+      const files = agreed.length > 0 ? agreed : await keys.found();
+      if (files.length === 0) return 0;
+      if (agreed.length === 0 && !(await keys.confirm(files)))
+        throw new Error(
+          "The person chose not to add their SSH key, so nothing can sign in with it.",
+        );
+      await keys.add(agent, files);
+      const added = await agentKeyCount(agent);
+      // Remembered only once a key went in: after a cancelled passphrase, commands would ask again.
+      if (agreed.length === 0 && added) await keys.consent.set(files);
+      return added;
+    };
+    // One adding per agent at a time, so commands starting together share one passphrase dialog.
+    // A later caller waits, then counts again: by then the keys are usually there.
+    const filling = new Map<string, Promise<number | null>>();
+    const fillAgent = (agent: string, ask: boolean) => {
+      const next = (filling.get(agent) ?? Promise.resolve(null))
+        .catch(() => null)
+        .then(() => fill(agent, ask));
+      filling.set(agent, next);
+      next
+        .finally(() => {
+          if (filling.get(agent) === next) filling.delete(agent);
+        })
+        .catch(() => {});
+      return next;
     };
     const agentGranted = (context: CommandContext) =>
       dependencies.capabilities
@@ -1183,6 +1247,14 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                     currentAgent(granted.has("ssh-agent") ? input.callId : undefined),
                   );
             const hostAgent = os === "win32" ? null : found;
+            // After a restart the system agent is empty again: the keys the person agreed to are
+            // added back, without asking, before a command that may sign in starts.
+            if (
+              hostAgent &&
+              granted.has("ssh-agent") &&
+              (dependencies.keys?.consent.current().length ?? 0) > 0
+            )
+              yield* Effect.promise(() => fillAgent(hostAgent, false).catch(() => null));
             const ssh = yield* Effect.tryPromise({
               try: async () => {
                 const binary = await findSsh(
@@ -1459,7 +1531,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
               );
             // An empty agent signs nobody in; retrying logins with it only fails. Windows' pipe is
             // left unasked: opening it takes one of the agent's instances.
-            if (os !== "win32" && (await agentKeyCount(agent)) === 0)
+            if (os !== "win32" && (await fillAgent(agent, true)) === 0)
               throw new Error(
                 "The SSH agent holds no keys, so nothing can sign in with it. Ask the person to add their key with ssh-add, then request it again.",
               );
@@ -1590,8 +1662,10 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                         : await agentKeyCount(socket),
                   },
             found,
+            added: (dependencies.keys?.consent.current() ?? []).map((file) => basename(file)),
           } satisfies AgentSetting;
         }),
+      forgetKeys: () => Effect.promise(async () => dependencies.keys?.consent.set([])),
       chooseAgent: (socket, confirm) =>
         Effect.tryPromise({
           try: async (): Promise<boolean> => {

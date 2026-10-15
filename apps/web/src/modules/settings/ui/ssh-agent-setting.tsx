@@ -33,9 +33,15 @@ const QUERY_KEY = ["desktop-ssh-agent"] as const;
  * checks the socket answers as an agent and asks the person itself.
  */
 export function SshAgentSetting({ network }: { network: DesktopNetwork }) {
-  const { agent, chooseAgent } = network;
-  if (!agent || !chooseAgent) return null;
-  return <AgentChoice load={() => agent()} choose={(socket) => chooseAgent(socket)} />;
+  const { agent, chooseAgent, forgetKeys } = network;
+  if (!agent || !chooseAgent || !forgetKeys) return null;
+  return (
+    <AgentChoice
+      load={() => agent()}
+      choose={(socket) => chooseAgent(socket)}
+      forget={() => forgetKeys()}
+    />
+  );
 }
 
 /** The agent as a person knows it: by its app's name, else where it comes from. */
@@ -48,11 +54,13 @@ const agentLabel = (current: NonNullable<AgentSetting["current"]>) =>
       : current.socket);
 
 /** Whether it can sign anyone in: not running, empty, or how many keys it holds. */
-const agentNote = (current: NonNullable<AgentSetting["current"]>) =>
+const agentNote = (current: NonNullable<AgentSetting["current"]>, added: readonly string[]) =>
   !current.running
     ? "Not running"
     : current.keys === 0
-      ? "No keys. Add yours with ssh-add."
+      ? current.source === "environment" && added.length > 0
+        ? `${added.join(", ")} ${added.length === 1 ? "is" : "are"} added when a chat signs in`
+        : "No keys. Add yours with ssh-add."
       : current.keys === null
         ? null
         : current.keys === 1
@@ -62,9 +70,11 @@ const agentNote = (current: NonNullable<AgentSetting["current"]>) =>
 function AgentChoice({
   load,
   choose,
+  forget,
 }: {
   load: () => Promise<AgentSetting>;
   choose: (socket: string | null) => Promise<AgentChoiceReply>;
+  forget: () => Promise<void>;
 }) {
   const queryClient = useQueryClient();
   const [naming, setNaming] = useState(false);
@@ -82,6 +92,12 @@ function AgentChoice({
     },
     onError: (error) => toastError("Couldn’t change the agent.", error),
   });
+  const stopAdding = useMutation({
+    mutationFn: forget,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onError: (error) => toastError("Couldn’t change the agent.", error),
+  });
+  const added = setting.data?.added ?? [];
   const current = setting.data?.current ?? null;
   const others = (setting.data?.found ?? []).filter((agent) => agent.socket !== current?.socket);
   const chosen = current?.source === "chosen";
@@ -104,14 +120,20 @@ function AgentChoice({
                     ? agentLabel(current)
                     : "No agent found"}
             </span>
-            {current && agentNote(current) ? (
-              <span className="text-muted-foreground text-xs">{agentNote(current)}</span>
+            {current && agentNote(current, added) ? (
+              <span className="text-muted-foreground text-xs">{agentNote(current, added)}</span>
             ) : null}
           </div>
           {setting.data?.choosable ? (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<PendingButton variant="secondary" size="sm" pending={change.isPending} />}
+                render={
+                  <PendingButton
+                    variant="secondary"
+                    size="sm"
+                    pending={change.isPending || stopAdding.isPending}
+                  />
+                }
               >
                 Change
                 <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
@@ -129,6 +151,14 @@ function AgentChoice({
                 ) : null}
                 {others.length > 0 || chosen ? <DropdownMenuSeparator /> : null}
                 <DropdownMenuItem onClick={() => setNaming(true)}>Other agent…</DropdownMenuItem>
+                {added.length > 0 ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => stopAdding.mutate()}>
+                      Stop adding {added.join(", ")}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}
