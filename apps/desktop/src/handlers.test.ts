@@ -525,6 +525,38 @@ describe("once a folder is attached", () => {
     expect(await readFile(bom, "utf8")).toBe("\uFEFFvalue = 2\n");
   });
 
+  it("matches lines written with \\n in a file with Windows line endings, and keeps them", async () => {
+    const path = join(root, "src", "windows.txt");
+    await writeFile(path, "first\r\nsecond\r\nthird\r\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path,
+        old: "first\nsecond",
+        new: "first\nnew\nsecond",
+        all: false,
+      }),
+    );
+    expect(await readFile(path, "utf8")).toBe("first\r\nnew\r\nsecond\r\nthird\r\n");
+  });
+
+  it("still matches \\n lines exactly in a file with a stray Windows line ending", async () => {
+    const path = join(root, "src", "mixed.txt");
+    await writeFile(path, "pasted\r\nfirst\nsecond\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path,
+        old: "first\nsecond",
+        new: "first\nnew\nsecond",
+        all: false,
+      }),
+    );
+    expect(await readFile(path, "utf8")).toBe("pasted\r\nfirst\nnew\nsecond\n");
+  });
+
   it("keeps both of two edits to one file made at once", async () => {
     const path = join(root, "src", "both.ts");
     await writeFile(path, "const a = 1;\nconst b = 2;\n");

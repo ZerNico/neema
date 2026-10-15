@@ -605,7 +605,7 @@ export const makeHandlers = (shell: Shell) =>
           };
         }),
 
-      editFile: ({ conversationId, path, old: before, new: after, all }) =>
+      editFile: ({ conversationId, path, old, new: replacement, all }) =>
         oneChangeAtATime(
           Effect.gen(function* () {
             const target = yield* locateForWrite(conversationId, path);
@@ -652,6 +652,15 @@ export const makeHandlers = (shell: Shell) =>
                   message: `${target.relative} is not UTF-8 text, so editing it would damage it. Rewrite it whole with write_local_file if that is what you mean.`,
                 }),
             });
+            // Models write lines with \n; a file with Windows line endings keeps its own.
+            // Lines that match as written win, so a stray \r\n elsewhere changes nothing.
+            const crlf =
+              text.includes("\r\n") &&
+              !old.includes("\r") &&
+              !replacement.includes("\r") &&
+              (!old.includes("\n") || !text.includes(old));
+            const before = crlf ? old.replaceAll("\n", "\r\n") : old;
+            const after = crlf ? replacement.replaceAll("\n", "\r\n") : replacement;
             if (before === "") {
               return yield* Effect.fail(
                 new DesktopError({
