@@ -1,5 +1,6 @@
 import { LIMITS, WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { Schema } from "effect";
+import { AiError } from "effect/unstable/ai";
 import {
   BROWSER_TOOL_NAMES,
   browserApprovalKind,
@@ -195,6 +196,19 @@ export const desktopFailure = (summary: string, detail: string): DesktopToolResu
   detail,
   truncated: false,
 });
+
+/**
+ * What the model reads when a desktop call has no usable result. Arguments the
+ * toolkit refused never reached the computer, and saying which one was wrong is
+ * what lets the model correct the call; anything else stays generic.
+ */
+export const unusableDesktopResult = (failure: unknown): DesktopToolResult =>
+  AiError.isAiError(failure) && failure.reason._tag === "ToolParameterValidationError"
+    ? desktopFailure(
+        "That did not run",
+        `The arguments were not valid, so nothing was sent to the computer: ${failure.reason.description}`,
+      )
+    : desktopFailure("That did not run", "The computer did not report a usable result.");
 
 export const desktopSuccess = (
   summary: string,
