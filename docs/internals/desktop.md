@@ -175,8 +175,9 @@ announcement, so a fast result can arrive before the handler starts waiting.
 Native and Hermes calls share this handoff and the normal prompt-folding loop.
 
 The wait must have its own deadline: the ordinary generation flusher renews the
-lease even when idle. Reads get two minutes; changes and commands get ten.
-The registration and handler share that deadline, and it starts at
+lease even when idle. Reads get two minutes; changes, commands and imports get
+ten. The registration and handler read that deadline from one table per tool
+(`desktopToolTimeout`), never each its own rule, and it starts at
 registration, before anyone has approved. The desktop's own command timeout
 is therefore derived from what is left of it when execution starts, minus a
 delivery margin, never a fixed ten minutes of its own: a command either

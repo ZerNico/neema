@@ -223,6 +223,48 @@ export const DESKTOP_TIMEOUTS = {
 } as const;
 
 /**
+ * The one wait per tool, read both where the call is registered and where its
+ * handler waits. Kept apart, they disagreed, and an import expired on the page
+ * while the server still waited. Waiting on a person, or on bytes, takes the long one.
+ */
+const TOOL_TIMEOUTS: Record<DesktopToolName, "quick" | "command"> = {
+  list_folder: "quick",
+  find_files: "quick",
+  search_files: "quick",
+  read_local_file: "quick",
+  // Up to 20 MB crosses from the machine through the page.
+  import_local_file: "command",
+  write_local_file: "command",
+  // A download plus a write; nobody is asked, but the bytes take time.
+  save_to_workspace: "command",
+  edit_local_file: "command",
+  move_local_file: "command",
+  delete_local_file: "command",
+  run_command: "command",
+  request_network_access: "command",
+  request_path_access: "command",
+  request_local_services: "command",
+  request_ssh_agent: "command",
+  browser_tabs: "quick",
+  // Opening a site can wait on a person deciding.
+  browser_open: "command",
+  browser_navigate: "command",
+  browser_snapshot: "quick",
+  browser_wait_for: "quick",
+  // Actions ask under the default approval level; scrolling is a read.
+  browser_click: "command",
+  browser_type: "command",
+  browser_press: "command",
+  browser_scroll: "quick",
+  browser_select: "command",
+  browser_evaluate: "command",
+  // Can wait on the user allowing another site, then on the downloads.
+  browser_save: "command",
+};
+
+export const desktopToolTimeout = (name: DesktopToolName) => DESKTOP_TIMEOUTS[TOOL_TIMEOUTS[name]];
+
+/**
  * What the model is told about the machine it is working on.
  *
  * Real absolute paths are the one address space: the tools take them, results

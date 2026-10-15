@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_TIMEOUTS,
   approvalKind,
   deletePathsOf,
+  desktopToolTimeout,
   desktopToolsSystemHint,
   forTranscript,
 } from "./tool-schema.ts";
@@ -116,6 +118,18 @@ describe("approvalKind", () => {
     expect(approvalKind("browser_navigate", { action: "back" })).toBeNull();
     expect(approvalKind("browser_scroll", {})).toBeNull();
     expect(approvalKind("browser_click", {})).toBe("browser-action");
+  });
+});
+
+describe("desktopToolTimeout", () => {
+  it("gives a tool that asks nobody the long wait when it moves bytes", () => {
+    // Registered by approval kind, these two once expired on the page after two minutes
+    // while the server waited ten.
+    expect(approvalKind("import_local_file", {})).toBeNull();
+    expect(approvalKind("save_to_workspace", {})).toBeNull();
+    expect(desktopToolTimeout("import_local_file")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("save_to_workspace")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("read_local_file")).toBe(DESKTOP_TIMEOUTS.quick);
   });
 });
 
