@@ -656,7 +656,8 @@ link led, so a changed choice or a retargeted link does not open the old one. A 
 that is gone means no agent, never a quiet fallback to `SSH_AUTH_SOCK`'s, which may hold other
 keys. A chat that
 allowed the agent while none runs is told so, not asked again. Allowing it where none runs
-is refused at once. Its socket is never named to a container, on any platform:
+is refused at once, and so is allowing an agent that holds no keys, since logins with it only
+fail. Its socket is never named to a container, on any platform:
 ssh, ssh-add and ssh-keygen (git signs commits with it) start under a bridge that listens on a socket (a pipe on Windows)
 of the command's own, names it to them as their agent, and has the egress proxy
 carry each connection to the reserved destination `ssh-agent.invalid:1`, which

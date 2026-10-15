@@ -878,6 +878,7 @@ describe("run", () => {
   describe.runIf(process.platform !== "win32")("choosing the agent in Settings", () => {
     // An identities answer holding one key: type 12, count 1, blob "k", comment "c".
     const AGENT_REPLY = Buffer.from([0, 0, 0, 15, 12, 0, 0, 0, 1, 0, 0, 0, 1, 107, 0, 0, 0, 1, 99]);
+    const EMPTY_AGENT = Buffer.from([0, 0, 0, 5, 12, 0, 0, 0, 0]);
     const setUp = async (
       launch: SandboxDependencies["launch"] = async () => fakeProcess().process,
       // Stands between a command and its agent lookup, to hold one at a chosen moment.
@@ -961,6 +962,20 @@ describe("run", () => {
       const denied = (await launched).filesystem?.deniedPaths ?? [];
       expect(denied).not.toContain(folder);
       expect(denied).not.toContain(docker);
+      await done();
+    });
+
+    it("refuses to let a chat sign in with an agent that holds no keys", async () => {
+      const { listen, env, sandbox, done } = await setUp();
+      env.SSH_AUTH_SOCK = await listen("empty.sock", EMPTY_AGENT);
+      const chat = { origin: "https://chat.example", conversationId: "chat-a" };
+      const exit = await Effect.runPromiseExit(
+        sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"),
+      );
+      expect(JSON.stringify(exit)).toContain("The SSH agent holds no keys");
+      expect(
+        (await Effect.runPromise(sandbox.permissions({ scope: "chat", chat }))).capabilities,
+      ).toEqual([]);
       await done();
     });
 

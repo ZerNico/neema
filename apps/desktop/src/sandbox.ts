@@ -1450,11 +1450,18 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           if (capability === "ssh-agent" && target.scope !== "chat")
             throw new Error("Signing in with SSH keys is allowed per chat only.");
           if (add && capability === "ssh-agent") {
-            if (!(await currentAgent()))
+            const agent = await currentAgent();
+            if (!agent)
               throw new Error(
                 os === "win32"
                   ? "No SSH agent was found. Start Windows’ OpenSSH Authentication Agent service."
                   : "No SSH agent was found. Start one, or choose it in Settings › This computer.",
+              );
+            // An empty agent signs nobody in; retrying logins with it only fails. Windows' pipe is
+            // left unasked: opening it takes one of the agent's instances.
+            if (os !== "win32" && (await agentKeyCount(agent)) === 0)
+              throw new Error(
+                "The SSH agent holds no keys, so nothing can sign in with it. Ask the person to add their key with ssh-add, then request it again.",
               );
           }
           // bubblewrap gives every command a loopback of its own and cannot open the host's.
