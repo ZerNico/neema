@@ -4,7 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   DesktopError,
-  UNOPENABLE_EXTENSIONS,
+  OPENABLE_EXTENSIONS,
   type DesktopClient,
   type RevealMode,
 } from "@chat/desktop-rpc";
@@ -67,7 +67,7 @@ export function LocalFileActions({
   // A button that can only ever refuse is worse than no button. The desktop
   // still checks, and still refuses a file marked executable, which no
   // extension reveals.
-  const openable = !UNOPENABLE_EXTENSIONS.has(`.${fileExtension(path)}`);
+  const openable = OPENABLE_EXTENSIONS.has(`.${fileExtension(path)}`);
   return (
     <>
       <PreviewAction

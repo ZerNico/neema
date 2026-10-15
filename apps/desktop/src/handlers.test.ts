@@ -972,16 +972,27 @@ describe("once a folder is attached", () => {
     expect(revealed).toHaveLength(1);
   });
 
-  it("will not hand a file this computer would run to its default application", async () => {
+  it("opens only a kind of file its default application displays", async () => {
     revealed = [];
     await writeFile(join(root, "install.command"), "rm -rf /\n");
     await writeFile(join(root, "drawing.svg"), '<svg onload="alert(1)"></svg>');
     await writeFile(join(root, "runme"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
-    for (const path of [
+    // Terminal runs a .terminal's command; a .webloc opens whatever it points at.
+    await writeFile(join(root, "summary.terminal"), "<plist/>");
+    await writeFile(join(root, "report.webloc"), "<plist/>");
+    await writeFile(join(root, "install.pkg"), "payload");
+    // A listed kind a command marked executable is still refused.
+    await writeFile(join(root, "notes.txt"), "#!/bin/sh\n", { mode: 0o755 });
+    const refused = [
       join(root, "install.command"),
       join(root, "drawing.svg"),
       join(root, "runme"),
-    ]) {
+      join(root, "summary.terminal"),
+      join(root, "report.webloc"),
+      join(root, "install.pkg"),
+      join(root, "notes.txt"),
+    ];
+    for (const path of refused) {
       expect(
         await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
       ).toBe("not-openable");
@@ -990,7 +1001,18 @@ describe("once a folder is attached", () => {
         handlers.revealPath({ conversationId: CONVERSATION, path, mode: "reveal" }),
       );
     }
-    expect(revealed.map((call) => call.mode)).toEqual(["reveal", "reveal", "reveal"]);
+    expect(revealed.map((call) => call.mode)).toEqual(refused.map(() => "reveal"));
+
+    // The extension is compared without case, as the system resolves it.
+    await writeFile(join(root, "photo.PNG"), "png");
+    await Effect.runPromise(
+      handlers.revealPath({
+        conversationId: CONVERSATION,
+        path: join(root, "photo.PNG"),
+        mode: "open",
+      }),
+    );
+    expect(revealed.at(-1)?.mode).toBe("open");
 
     // Two causes, two sentences, both naming the file the short way.
     const refusalFor = async (path: string) => {
@@ -1003,41 +1025,18 @@ describe("once a folder is attached", () => {
       "site/runme is marked executable, so opening it could run it. Show it in the folder instead.",
     );
     expect(await refusalFor(join(root, "drawing.svg"))).toBe(
-      "site/drawing.svg is a kind of file that can run when it is opened. Show it in the folder instead.",
+      "site/drawing.svg is not a kind of file the app opens directly. Show it in the folder instead.",
     );
-  });
-
-  it("will not open a macOS installer the model wrote", async () => {
-    revealed = [];
-    await writeFile(join(root, "install.pkg"), "payload");
-    await writeFile(join(root, "suite.mpkg"), "payload");
-    for (const path of [join(root, "install.pkg"), join(root, "suite.mpkg")]) {
-      expect(
-        await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
-      ).toBe("not-openable");
-      await Effect.runPromise(
-        handlers.revealPath({ conversationId: CONVERSATION, path, mode: "reveal" }),
-      );
-    }
-    expect(revealed.map((call) => call.mode)).toEqual(["reveal", "reveal"]);
-
-    await Effect.runPromise(
-      handlers.revealPath({
-        conversationId: CONVERSATION,
-        path: join(root, "src", "index.ts"),
-        mode: "open",
-      }),
-    );
-    expect(revealed.at(-1)?.mode).toBe("open");
   });
 
   it("reports the operating system's refusal instead of claiming it opened", async () => {
+    await writeFile(join(root, "notes.md"), "# Notes\n");
     revealComplaint = "no application knows this file";
     expect(
       await failureOf(
         handlers.revealPath({
           conversationId: CONVERSATION,
-          path: join(root, "src", "index.ts"),
+          path: join(root, "notes.md"),
           mode: "open",
         }),
       ),

@@ -105,7 +105,7 @@ const connect = (): DesktopClient => {
         // Folders have no entry here; a named file that has none is gone.
         if (path.includes(".") && files[path] === undefined)
           return refuse("not-found", `${path} does not exist.`);
-        return mode === "open" && path.endsWith("runme")
+        return mode === "open" && path.endsWith("runme.txt")
           ? refuse(
               "not-openable",
               `${path} is marked executable, so opening it could run it. Show it in the folder instead.`,
@@ -248,17 +248,17 @@ describe("a work file row on the desktop", () => {
   });
 
   it("offers Open for an ordinary file and reports what the machine says back", async () => {
-    files["site/runme"] = { text: "#!/bin/sh\n" };
-    const row = wrote("site/runme");
+    files["site/runme.txt"] = { text: "#!/bin/sh\n" };
+    const row = wrote("site/runme.txt");
     show(row);
     await click(row);
-    await screen.findByRole("heading", { name: "runme" });
+    await screen.findByRole("heading", { name: "runme.txt" });
 
-    // No extension to go on, so the site offers it and the machine decides.
+    // A kind the site offers; only the machine sees the execute bit.
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
     await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
     expect(sonner.error.mock.calls[0]![0]).toBe(
-      "site/runme is marked executable, so opening it could run it. Show it in the folder instead.",
+      "site/runme.txt is marked executable, so opening it could run it. Show it in the folder instead.",
     );
   });
 

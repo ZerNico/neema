@@ -15,7 +15,7 @@ import { Effect } from "effect";
 import {
   DesktopError,
   LIMITS,
-  UNOPENABLE_EXTENSIONS,
+  OPENABLE_EXTENSIONS,
   WORKSPACE_FOLDER_NAME,
   type ChatPermission,
   type DeleteFailure,
@@ -1033,19 +1033,18 @@ export const makeHandlers = (shell: Shell) =>
                 message: `${target.relative} does not exist.`,
               }),
           });
-          // The execute bit catches what the extension list cannot: a script
-          // with no extension, or one a command the model ran chmod-ed. The
-          // site hides its Open button for the list, so this is the case a
-          // reader actually meets.
+          // The execute bit catches what the extension list cannot: a file of
+          // a listed kind that a command the model ran chmod-ed. The site
+          // offers Open only for the list, so this is the case a reader meets.
           const executable = info.isFile() && (info.mode & 0o111) !== 0;
-          const listed = UNOPENABLE_EXTENSIONS.has(extname(target.absolute).toLowerCase());
-          if (mode === "open" && (executable || listed)) {
+          const listed = OPENABLE_EXTENSIONS.has(extname(target.absolute).toLowerCase());
+          if (mode === "open" && (executable || !listed)) {
             return yield* Effect.fail(
               new DesktopError({
                 reason: "not-openable",
                 message: executable
                   ? `${target.relative} is marked executable, so opening it could run it. Show it in the folder instead.`
-                  : `${target.relative} is a kind of file that can run when it is opened. Show it in the folder instead.`,
+                  : `${target.relative} is not a kind of file the app opens directly. Show it in the folder instead.`,
               }),
             );
           }
