@@ -903,7 +903,7 @@ describe("ChatInput preview", () => {
 
     expect(await screen.findByRole("heading", { name: "Title" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Plain" }));
+    fireEvent.click(screen.getByRole("button", { name: "Source" }));
 
     expect(screen.queryByRole("heading", { name: "Title" })).not.toBeInTheDocument();
     expect(screen.getByText(/# Title/)).toBeInTheDocument();
@@ -956,7 +956,7 @@ describe("ChatInput preview", () => {
     fireEvent.click(previewButton);
 
     // Source files go to CodeViewer, not through markdown: one line, numbered,
-    // coloured once the grammar lands. "Rendered/Plain" is markdown-only.
+    // coloured once the grammar lands. The Source/Preview toggle is markdown-only.
     await waitFor(() => {
       expect(document.querySelectorAll("[data-shiki-token]").length).toBeGreaterThan(1);
     });
@@ -965,7 +965,7 @@ describe("ChatInput preview", () => {
     // count the gutter cells next to the tokens rather than the whole document.
     const viewer = document.querySelector("[data-shiki-token]")!.closest(".font-mono")!;
     expect(viewer.querySelectorAll("[aria-hidden]")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Plain" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Source" })).not.toBeInTheDocument();
     fetchSpy.mockRestore();
   });
 
@@ -983,7 +983,7 @@ describe("ChatInput preview", () => {
     fireEvent.click(previewButton);
 
     expect(await screen.findByText("# not a heading")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Rendered" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
     fetchSpy.mockRestore();
   });
 

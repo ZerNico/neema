@@ -1,6 +1,7 @@
 import { Download01Icon, LinkSquare02Icon, PanelRightIcon } from "@hugeicons/core-free-icons";
 import { markdownTableComponents } from "~/ui/markdown-components.ts";
-import { use, useEffect, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Streamdown } from "streamdown";
 import { markdownPlugins } from "~/ui/markdown-plugins.ts";
 import { CodeViewer } from "./code-viewer.tsx";
@@ -14,7 +15,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { FieldError } from "~/ui/primitives/field";
 import { Spinner } from "~/ui/primitives/spinner";
-import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
+import { ViewToggle } from "~/ui/view-toggle.tsx";
 import type { OfficeFamily } from "~/modules/office/families.ts";
 import type { OfficeFile, OfficePreview } from "./office-preview.ts";
 import { PresentationPreview } from "./presentation-preview.tsx";
@@ -61,6 +62,12 @@ export interface AttachmentPreviewTarget {
   readonly unsupported?: boolean;
 }
 
+/**
+ * Where a body puts its own controls (a markdown file's view toggle): the dialog's header row,
+ * beside the actions. Null in a panel tab or a skill, which show them above the body.
+ */
+const PreviewToolbarContext = createContext<HTMLElement | null>(null);
+
 // Text files can be as large as any other attachment; the dialog is a peek,
 // not an editor, so cap what lands in the DOM.
 const TEXT_PREVIEW_CHAR_CAP = 200_000;
@@ -89,6 +96,7 @@ export function AttachmentPreviewDialog({
   // settings page has no panel and keeps the plain actions.
   const sidebar =
     useDesktop() !== null && panel && panelAvailable && hasPreview(target) ? panel : null;
+  const [toolbar, setToolbar] = useState<HTMLElement | null>(null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
@@ -100,6 +108,7 @@ export function AttachmentPreviewDialog({
           <div className="-mt-2 flex min-h-8 min-w-0 items-center gap-2 pr-10">
             <DialogTitle className="min-w-0 flex-1 truncate">{target.fileName}</DialogTitle>
             <div className="flex shrink-0 items-center gap-2">
+              <span ref={setToolbar} className="contents" />
               {actions ??
                 (sidebar ? (
                   <>
@@ -124,7 +133,9 @@ export function AttachmentPreviewDialog({
             <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
           )}
         </DialogHeader>
-        <FilePreviewBody target={target} linkable={!actions} />
+        <PreviewToolbarContext value={toolbar}>
+          <FilePreviewBody target={target} linkable={!actions} />
+        </PreviewToolbarContext>
       </DialogContent>
     </Dialog>
   );
@@ -226,6 +237,7 @@ function TextPreview({
 }) {
   const [state, setState] = useState<TextPreviewState>({ status: "loading" });
   const [rendered, setRendered] = useState(true);
+  const toolbar = use(PreviewToolbarContext);
 
   useEffect(() => {
     let stale = false;
@@ -259,9 +271,17 @@ function TextPreview({
   // is a file, and goes to the file viewer.
   const markdown = language === "markdown" && state.text.length <= RENDER_CHAR_CAP;
 
+  const toggle = markdown ? (
+    <ViewToggle preview={rendered} sourceLabel="Source" onChange={setRendered} />
+  ) : null;
+
   return (
     <div className="min-w-0 space-y-2">
-      {markdown ? <ViewToggle rendered={rendered} onChange={setRendered} /> : null}
+      {toggle && toolbar ? (
+        createPortal(toggle, toolbar)
+      ) : toggle ? (
+        <div className="flex justify-end">{toggle}</div>
+      ) : null}
       {markdown && rendered ? (
         // Streamdown's pipeline ignores raw HTML (no rehype-raw), so an
         // uploaded file cannot inject markup here.
@@ -286,30 +306,6 @@ function TextPreview({
             : "Shortened to fit."}
         </p>
       ) : null}
-    </div>
-  );
-}
-
-function ViewToggle({
-  rendered,
-  onChange,
-}: {
-  rendered: boolean;
-  onChange: (rendered: boolean) => void;
-}) {
-  return (
-    <div className="flex justify-end">
-      <SegmentedControl
-        aria-label="Preview mode"
-        value={[rendered ? "rendered" : "plain"]}
-        multiple={false}
-        onValueChange={(value) => {
-          if (value[0]) onChange(value[0] === "rendered");
-        }}
-      >
-        <SegmentedControlItem value="rendered">Rendered</SegmentedControlItem>
-        <SegmentedControlItem value="plain">Plain</SegmentedControlItem>
-      </SegmentedControl>
     </div>
   );
 }
