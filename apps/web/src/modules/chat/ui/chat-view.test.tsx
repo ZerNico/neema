@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PROTOCOL_VERSION, type BridgeReply } from "@chat/desktop-rpc";
 import type { ConversationMode } from "../schema.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Suspense } from "react";
+import { Suspense, use, useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { AskUserBlock } from "./ask-user-block.tsx";
@@ -50,6 +50,7 @@ import {
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
+import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
 
@@ -148,6 +149,27 @@ vi.mock("@tanstack/react-router", () => ({
 
 // The list itself is covered by message-list.test; here it only has to expose
 // what the view wired onto each row.
+/** What a file preview in the transcript does with a comment: hands it to the chat. */
+function FileCommentProbe() {
+  const send = use(FileCommentContext);
+  const [result, setResult] = useState<string>();
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          void send?.("Comment on “Data!A1” in book.xlsx (attachment:f1): Make it a total").then(
+            (sent) => setResult(sent ? "sent" : "refused"),
+          )
+        }
+      >
+        Comment on a file
+      </button>
+      {result ? <output data-testid="file-comment">{result}</output> : null}
+    </>
+  );
+}
+
 vi.mock("./virtual-message-list.tsx", () => ({
   VirtualMessageList: ({
     messages,
@@ -162,6 +184,7 @@ vi.mock("./virtual-message-list.tsx", () => ({
       <button type="button" onClick={onReachStart}>
         Reach start
       </button>
+      <FileCommentProbe />
       {messages.map((message) => (
         <div
           key={String(message.id)}
@@ -764,6 +787,36 @@ describe("reserved workspace sends", () => {
     expect(staged.rollback).not.toHaveBeenCalled();
     expect(staged.commit).not.toHaveBeenCalled();
   });
+});
+
+it("sends a comment on a file into this chat, and refuses it while an answer runs", async () => {
+  sendMock.mockResolvedValueOnce({} as never);
+  const view = renderView();
+  const content = "Comment on “Data!A1” in book.xlsx (attachment:f1): Make it a total";
+  fireEvent.click(screen.getByRole("button", { name: "Comment on a file" }));
+  await waitFor(() =>
+    expect(sendMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        conversation: { id: "01990f4e-6650-7a33-a768-611e2e4bf4c7", kind: "existing" },
+        content,
+        attachmentIds: [],
+        researchEnabled: false,
+      }),
+    }),
+  );
+  expect(await screen.findByTestId("file-comment")).toHaveTextContent("sent");
+  view.unmount();
+  sendMock.mockClear();
+  liveDraft.status = "streaming";
+  renderView(null, {
+    messages: [
+      message("m-user", "user", "u1"),
+      { ...message("m-answer", "assistant", ""), status: "streaming" as never },
+    ],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Comment on a file" }));
+  expect(await screen.findByTestId("file-comment")).toHaveTextContent("refused");
+  expect(sendMock).not.toHaveBeenCalled();
 });
 
 describe("toActivity", () => {

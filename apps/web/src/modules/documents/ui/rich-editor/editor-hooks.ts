@@ -30,16 +30,9 @@ export interface EditorHooks {
   ask: ((request: string, target: AskTarget) => Promise<boolean>) | null;
   /** Moves focus to the chat's input, the selection kept for the message. Null outside a chat. */
   focusComposer: (() => void) | null;
-  /** Opens another document of this chat or project in the panel, or null when it cannot. */
-  opener: (documentId: string) => (() => void) | null;
 }
 const hooks = new WeakMap<Editor, EditorHooks>();
-const NONE: EditorHooks = {
-  mentions: () => [],
-  ask: null,
-  focusComposer: null,
-  opener: () => null,
-};
+const NONE: EditorHooks = { mentions: () => [], ask: null, focusComposer: null };
 
 export const setEditorHooks = (editor: Editor, value: EditorHooks) => hooks.set(editor, value);
 export const editorHooks = (editor: Editor) => hooks.get(editor) ?? NONE;

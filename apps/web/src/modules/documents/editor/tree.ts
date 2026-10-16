@@ -69,7 +69,6 @@ const TAGS: Record<string, string> = {
   pending: "pending",
   callout: "callout",
   details: "details",
-  sheetEmbed: "sheet",
 };
 
 /** A heading's level as a tag number; anything a stray client set is read as 2. */
@@ -106,9 +105,6 @@ const render = (node: Node, seen: SeenBlock[]): string => {
       return `${head()}>${escapeText(String(node.attrs.latex ?? ""))}</${tag}>`;
     case "pending":
       return `${head({ intent: node.attrs.intent as string })}/>`;
-    case "sheetEmbed":
-      // `id` is the block's own, so the sheet it shows is `document`.
-      return `${head({ document: node.attrs.sheet as string | null, range: node.attrs.range as string | null, chart: node.attrs.chart as string | null })}/>`;
     case "listItem":
     case "taskItem": {
       const extra = name === "taskItem" ? { checked: Boolean(node.attrs.checked) } : {};
@@ -242,8 +238,8 @@ const COMMENT_CHARS = 600;
  * aimed. The thread a message was sent from (`asking`) is always shown and
  * marked, even once its text is gone. Empty when there are none.
  */
-/** Where a thread sits as its view says it: a block and the text it is on, or a sheet's cell. */
-export type ThreadPlace = { block?: string | null; cell?: string; quote?: string } | null;
+/** Where a thread sits as its view says it: a block and the text it is on. */
+export type ThreadPlace = { block?: string | null; quote?: string } | null;
 
 /**
  * Open threads and their comments as the model reads them. The thread a
@@ -284,7 +280,6 @@ export const threadsView = (
     return `<thread${attributes({
       id: thread.id,
       block: where?.block,
-      cell: where?.cell,
       quote: (where?.quote ?? thread.quote ?? "").slice(0, 200),
       detached: where ? null : true,
       resolved: thread.resolvedAt ? true : null,

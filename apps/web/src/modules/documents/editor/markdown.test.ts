@@ -143,45 +143,6 @@ describe("document Markdown", () => {
     expect(toMarkdown(doc)).toBe("Ship on 2026-10-20 with @Ada.");
   });
 
-  it("reads and writes sheet embeds as shortcodes for the model, and as a plain line for people", () => {
-    const markdown = [
-      "Totals:",
-      '[sheet id="sheet-1" range="\'Q3 \\"final\\"\'!A1:D9"]',
-      '[sheet id="sheet-1" chart="chart-2"]',
-      "After.",
-    ].join("\n\n");
-    const doc = parseMarkdown(markdown);
-    expect(doc.childCount).toBe(4);
-    expect(doc.child(1).type.name).toBe("sheetEmbed");
-    expect(doc.child(1).attrs).toMatchObject({
-      sheet: "sheet-1",
-      range: "'Q3 \"final\"'!A1:D9",
-      chart: null,
-    });
-    expect(doc.child(2).attrs).toMatchObject({ sheet: "sheet-1", range: null, chart: "chart-2" });
-    expect(toModelMarkdown(doc)).toBe(markdown);
-    // People's Markdown has no values to show, so it names what was there,
-    // and that line reads back as text, never as an embed.
-    const plain = toMarkdown(doc);
-    expect(plain).toBe("Totals:\n\n*Sheet range 'Q3 \"final\"'!A1:D9*\n\n*Sheet chart*\n\nAfter.");
-    const reread = parseMarkdown(plain);
-    reread.descendants((node) => {
-      expect(node.type.name).not.toBe("sheetEmbed");
-      return true;
-    });
-  });
-
-  it("leaves a sheet shortcode as text when it names both or neither of a range and a chart", () => {
-    for (const markdown of [
-      '[sheet id="s" range="A!A1" chart="c"]',
-      '[sheet id="s"]',
-      'Inline [sheet id="s" range="A!A1"] stays text',
-    ]) {
-      const doc = parseMarkdown(markdown);
-      expect(doc.firstChild!.type.name).toBe("paragraph");
-    }
-  });
-
   it("keeps raw HTML as text instead of markup", () => {
     const written = normalizeMarkdown("before <b>x</b>\n\n<script>alert(1)</script>");
     expect(written).toBe("before \\<b>x\\</b>\n\n\\<script>alert(1)\\</script>");
@@ -287,7 +248,7 @@ describe("the new blocks against ordinary text", () => {
     return doc;
   };
 
-  it("build valid trees for callouts, sections and embeds inside lists", () => {
+  it("build valid trees for callouts and sections inside lists", () => {
     for (const markdown of [
       "- a\n  > [!TIP]\n  > t",
       "> [!NOTE]\n> - a\n>   > [!TIP]\n>   > b",
@@ -296,7 +257,7 @@ describe("the new blocks against ordinary text", () => {
       roundTrips(markdown);
     // A list item must start with a paragraph; Markdown cannot say an empty one, so these
     // read back valid, not identical.
-    for (const markdown of ['- [sheet id="a" range="S!A1"]', "- > [!NOTE]\n  > x"]) {
+    for (const markdown of ["- > [!NOTE]\n  > x"]) {
       parseMarkdown(markdown).check();
       parseMarkdown(toModelMarkdown(parseMarkdown(markdown))).check();
     }
@@ -324,14 +285,11 @@ describe("the new blocks against ordinary text", () => {
   });
 
   it("never split a paragraph that starts with an escaped block's opening", () => {
-    for (const text of ['[sheet id="a" range="S!A1"]', "<details>", "> [!NOTE]"]) {
+    for (const text of ["<details>", "> [!NOTE]"]) {
       const doc = parseMarkdown(`${toMarkdown(paragraphOf(text))}\n\nAfter`);
       expect(doc.firstChild!.textContent).toBe(text);
       expect(doc.childCount).toBe(2);
     }
-    expect(parseMarkdown("[sheet music] is nice").firstChild!.textContent).toBe(
-      "[sheet music] is nice",
-    );
   });
 
   it("keep </u> inside underlined text", () => {

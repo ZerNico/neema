@@ -238,7 +238,6 @@ export function CommentThread({
   actions,
   expanded,
   onQuoteClick,
-  label,
 }: {
   root: DocumentComment;
   replies: DocumentComment[];
@@ -248,11 +247,9 @@ export function CommentThread({
   /** Shows the reply box; a list shows it only for the thread being read. */
   expanded: boolean;
   onQuoteClick?: (() => void) | undefined;
-  /** What the thread is about as it stands now, where that can change (a sheet's cell); else its quote. */
-  label?: string | undefined;
 }) {
   const all = [root, ...replies];
-  const about = label ?? root.quote ?? "";
+  const about = root.quote ?? "";
   const waiting = all.some((each) => each.toAssistant && !each.answered);
   const quote = (
     <span className="line-clamp-2 text-left">

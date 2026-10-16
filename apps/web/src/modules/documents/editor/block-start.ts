@@ -57,7 +57,7 @@ const firstStart = (src: string, pattern: RegExp) => {
 /**
  * Where a block of ours may start in text marked would otherwise read as one
  * paragraph: only after a line break. marked asks from the paragraph's second
- * character on, so a match at 0 would cut an escaped opening ("\[sheet")
+ * character on, so a match at 0 would cut an escaped opening ("\[date")
  * after its backslash. A block at the very start is found by its tokenizer.
  */
 export const blockStart = (pattern: RegExp) => {

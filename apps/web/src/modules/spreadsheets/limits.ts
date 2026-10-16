@@ -19,9 +19,15 @@ export const SPREADSHEET_LIMITS = {
   textChars: 32_767,
   formulaChars: 8_192,
   chartsPerSheet: 20,
-  /** A user preview grid. */
-  previewRows: 200,
-  previewColumns: 40,
+  /** Cells one sheet's preview sends; past them, whole rows are left out. */
+  previewCells: 100_000,
+  /** Pictures one sheet's preview sends, the data URL characters of each and of all. */
+  previewImages: 20,
+  previewImageChars: 600_000,
+  previewImagesChars: 3_000_000,
+  /** Merges and conditional formats one sheet's preview sends; past them the rest are left out. */
+  previewMerges: 10_000,
+  previewRules: 200,
 } as const;
 
 export const SPREADSHEET_WORKERS = {

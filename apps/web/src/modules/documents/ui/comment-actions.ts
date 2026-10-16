@@ -4,7 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { toastError } from "~/ui/error-toast.ts";
 import { commentsKey, type CommentsMeta } from "../client/comments-plugin.ts";
 import type { DocumentDiscussion } from "../client/use-document.ts";
-import { commentMessage } from "../comment-message.ts";
+import { commentMessage } from "~/modules/chat/comment-message.ts";
 import { BLOCK_ID } from "../editor/block-ids.ts";
 import { commentAnchors } from "../editor/comments.ts";
 import { editorHooks } from "./rich-editor/editor-hooks.ts";

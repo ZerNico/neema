@@ -15,13 +15,9 @@ that bug.
   classes come from `tw-animate-css`, and without it overlays pop with no transition and no error. `cn`
   (the package) is re-exported by `src/ui/utils.ts`; primitives import `"cn"` directly, as the CLI emits.
 - A package that draws (`packages/sheet-react`) styles with the app's semantic token classes and
-  imports nothing from `~/ui`; the app draws its menus and toolbars from data it exposes. `app.css`
-  lists the package with `@source`: without it Tailwind never sees its classes and they are
-  silently missing.
-- What sits over a sheet's cells (a chart) is selected, moved and resized by the grid, which
-  knows cell geometry; the app passes its content and turns the moves into operations. Its
-  options are edited in a pane beside the grid, never a dialog, so each change shows on the
-  chart as it is made, for everyone.
+  imports nothing from `~/ui`. `app.css` lists the package with `@source`: without it Tailwind
+  never sees its classes and they are silently missing. A workbook draws inside `.paper`, which
+  restores the light tokens, so a file's own dark text stays readable in the dark theme.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button

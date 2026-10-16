@@ -45,8 +45,6 @@ export const documents = pgTable(
       onDelete: "cascade",
     }),
     title: text().notNull(),
-    /** A text document (ProseMirror) or a live sheet; the snapshot and steps are that kind's. */
-    kind: text().$type<"text" | "sheet">().notNull().default("text"),
     revision: integer().notNull().default(0),
     lastEditedBy: text("last_edited_by").$type<"user" | "model">().notNull(),
     lastEditorUserId: text("last_editor_user_id").references(() => user.id, {
@@ -54,11 +52,6 @@ export const documents = pgTable(
     }),
     snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
     snapshotRevision: integer("snapshot_revision").notNull().default(0),
-    /**
-     * When `revision` was committed. A sheet's NOW() reads it, so it must stay
-     * the same across restarts and compaction, unlike `updated_at`.
-     */
-    committedAt: timestamp("committed_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -66,7 +59,6 @@ export const documents = pgTable(
     index("documents_conversation_idx").on(t.conversationId),
     index("documents_project_idx").on(t.projectId),
     check("documents_one_owner", sql`(${t.conversationId} is null) <> (${t.projectId} is null)`),
-    check("documents_kind", sql`${t.kind} in ('text', 'sheet')`),
     check(
       "documents_answer_in_conversation",
       sql`${t.createdByMessageId} is null or ${t.conversationId} is not null`,
@@ -95,26 +87,6 @@ export const documentSteps = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
-);
-
-/**
- * The last change applied from each client of a live sheet. Kept apart from
- * the steps, which are folded away, so a change resent after a long time is
- * still recognised as applied and never applied twice.
- */
-export const sheetClients = pgTable(
-  "sheet_clients",
-  {
-    documentId: text("document_id")
-      .notNull()
-      .references(() => documents.id, { onDelete: "cascade" }),
-    clientId: text("client_id").notNull(),
-    /** Who first wrote under this client; no one else may, or they could skip its changes. */
-    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    lastSeq: integer("last_seq").notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.documentId, t.clientId] })],
 );
 
 /**

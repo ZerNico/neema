@@ -1,9 +1,8 @@
 import { memo, type ReactNode } from "react";
-import { columnLetters } from "@chat/sheet/a1";
 import type { SheetLocale } from "@chat/sheet/locales";
-import type { Sheet } from "@chat/sheet/model";
-import type { SheetValues } from "@chat/sheet/model/calc";
-import type { CellLook } from "@chat/sheet/model/conditional";
+import type { Scalar } from "@chat/sheet/engine/values";
+import type { GridSheet } from "./grid-model.ts";
+import type { CellLook } from "./looks.ts";
 import { key, type mergeIndex } from "./grid-navigation.ts";
 import type { AxisLayout } from "./layout.ts";
 import { BAND_ROWS, CellBand, RowHeaderBand } from "./grid-bands.tsx";
@@ -11,15 +10,13 @@ import { BAND_ROWS, CellBand, RowHeaderBand } from "./grid-bands.tsx";
 /** The immutable inputs shared by every cell band in a pane. */
 export interface PaneDrawing {
   readonly gridId: string;
-  readonly sheet: string;
-  readonly cells: Sheet["cells"];
-  readonly values: SheetValues;
+  readonly cells: GridSheet["cells"];
+  readonly value: (r: string, c: string) => Scalar;
   readonly locale: SheetLocale;
   readonly looks: ReadonlyMap<string, CellLook>;
   readonly rows: AxisLayout;
   readonly cols: AxisLayout;
   readonly merges: ReturnType<typeof mergeIndex>;
-  readonly zoom: number;
   readonly frozenCols: number;
   readonly occupied: (row: number) => readonly number[];
 }
@@ -81,12 +78,14 @@ export const PaneCells = memo(function PaneCells({
       const takesMerges =
         firstVisible >= start &&
         firstVisible <= end &&
-        (merges.byRow.get(firstVisible) ?? []).some(
-          (merge) =>
-            rows.indexAt(rows.starts[merge.top]!) < start &&
-            merge.right >= colFirst &&
-            merge.left <= colLast,
-        );
+        merges
+          .inRow(firstVisible)
+          .some(
+            (merge) =>
+              rows.indexAt(rows.starts[merge.top]!) < start &&
+              merge.right >= colFirst &&
+              merge.left <= colLast,
+          );
       bands.push(
         <CellBand
           key={Math.floor(start / BAND_ROWS)}
@@ -133,9 +132,7 @@ export function rowHeaderBands(
   rows: AxisLayout,
   range: IndexRange,
   box: { top: number; bottom: number } | null,
-  gutter: number,
   offset: number,
-  resizable: boolean,
 ) {
   const bands: ReactNode[] = [];
   for (let start = range.first; start <= range.last;) {
@@ -150,69 +147,11 @@ export function rowHeaderBands(
           last={end}
           selectedFirst={selected ? Math.max(start, box.top) : -1}
           selectedLast={selected ? Math.min(end, box.bottom) : -1}
-          gutter={gutter}
           offset={offset}
-          resizable={resizable}
         />,
       );
     }
     start = end + 1;
   }
   return bands;
-}
-
-/** Kept outside bands so a menu anchor survives changes to the band owning its row. */
-export function FilterButtons({
-  rows,
-  cols,
-  rowIndex,
-  colIndex,
-  rowRange,
-  colRange,
-  filterButtons,
-  onFilterButton,
-}: {
-  rows: AxisLayout;
-  cols: AxisLayout;
-  rowIndex: ReadonlyMap<string, number>;
-  colIndex: ReadonlyMap<string, number>;
-  rowRange: IndexRange;
-  colRange: IndexRange;
-  filterButtons: {
-    readonly row: string;
-    readonly cols: readonly string[];
-    readonly active: ReadonlySet<string>;
-  } | null;
-  onFilterButton: ((col: string, button: HTMLElement) => void) | undefined;
-}) {
-  if (!filterButtons) return null;
-  const row = rowIndex.get(filterButtons.row);
-  if (row === undefined || row < rowRange.first || row > rowRange.last || !rows.size(row))
-    return null;
-  return filterButtons.cols.map((c) => {
-    const col = colIndex.get(c);
-    if (col === undefined || col < colRange.first || col > colRange.last || !cols.size(col))
-      return null;
-    const active = filterButtons.active.has(c);
-    return (
-      <button
-        key={c}
-        type="button"
-        aria-label={`Filter ${columnLetters(col + 1)}`}
-        aria-pressed={active}
-        tabIndex={-1}
-        className={`border-border absolute z-[3] flex size-4 items-center justify-center rounded-sm border ${active ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground"}`}
-        style={{
-          top: rows.starts[row]! + (rows.size(row) - 16) / 2,
-          left: cols.starts[col + 1]! - 18,
-        }}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => onFilterButton?.(c, event.currentTarget)}
-      >
-        <svg aria-hidden viewBox="0 0 10 10" className="size-2.5" fill="currentColor">
-          {active ? <path d="M1 2h8L6 5.5V9L4 8V5.5z" /> : <path d="M2 3.5h6L5 7z" />}
-        </svg>
-      </button>
-    );
-  });
 }

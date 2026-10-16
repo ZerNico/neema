@@ -5,7 +5,7 @@ import { documentExtensions } from "./extensions.ts";
 it("uses document block discovery when the editor imports and replaces Markdown", () => {
   const prefix = Array.from({ length: 1_000 }, (_, i) => `Paragraph ${i}`).join("\n\n");
   const section =
-    '<details>\n<summary>Totals</summary>\n\n> [!NOTE]\n> Read the sheet.\n\n[sheet id="s" range="S!A1"]\n\n</details>';
+    "<details>\n<summary>Totals</summary>\n\n> [!NOTE]\n> Read the table.\n\nThe rest.\n\n</details>";
   const editor = new Editor({
     extensions: documentExtensions,
     content: `${prefix}\n${section}`,
@@ -19,16 +19,13 @@ it("uses document block discovery when the editor imports and replaces Markdown"
     expect(details.type.name).toBe("details");
     expect(details.firstChild!.textContent).toBe("Totals");
     expect(details.lastChild!.child(0).type.name).toBe("callout");
-    expect(details.lastChild!.child(1).type.name).toBe("sheetEmbed");
-    expect(details.lastChild!.child(1).attrs.sheet).toBe("s");
+    expect(details.lastChild!.child(1).textContent).toBe("The rest.");
     expect(editor.getMarkdown()).toContain(section);
 
-    editor.commands.setContent('Before\n[sheet id="next" chart="c"]\n\nAfter', {
-      contentType: "markdown",
-    });
+    editor.commands.setContent("Before\n> [!TIP]\n> Next\n\nAfter", { contentType: "markdown" });
     expect(editor.state.doc.childCount).toBe(3);
-    expect(editor.state.doc.child(1).type.name).toBe("sheetEmbed");
-    expect(editor.state.doc.child(1).attrs.sheet).toBe("next");
+    expect(editor.state.doc.child(1).type.name).toBe("callout");
+    expect(editor.state.doc.child(1).attrs.kind).toBe("tip");
   } finally {
     editor.destroy();
   }

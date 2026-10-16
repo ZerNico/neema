@@ -1,10 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { emptyDoc } from "@chat/sheet/model";
-import { calculateSheet } from "@chat/sheet/model/calc";
 import { EN_US } from "@chat/sheet/locales";
-import { SheetGrid, type SheetSelection } from "./grid.tsx";
+import { SheetGrid, type GridSheet, type SheetSelection } from "./grid.tsx";
 
 const calls = vi.hoisted(() => ({
   cells: [] as { first: number; main: boolean }[],
@@ -34,27 +32,19 @@ vi.mock("./grid-bands.tsx", async (original) => {
   };
 });
 afterEach(cleanup);
-const base = emptyDoc();
-const rows = Array.from({ length: 280 }, (_, i) => ({ id: `r${i}` }));
-const cols = Array.from({ length: 16 }, (_, i) => ({ id: `c${i}` }));
-const doc = {
-  ...base,
-  sheet: {
-    s1: {
-      ...base.sheet.s1!,
-      rows,
-      cols,
-      cells: Object.fromEntries(
-        rows.map(({ id: r }) => [
-          r,
-          Object.fromEntries(cols.map(({ id: c }) => [c, { v: `${r}/${c}`, w: 1 }])),
-        ]),
-      ),
-      freeze: { row: "r1", col: "c1" },
-    },
-  },
+const rows = Array.from({ length: 280 }, (_, i) => `r${i}`);
+const cols = Array.from({ length: 16 }, (_, i) => `c${i}`);
+const sheet: GridSheet = {
+  name: "Sheet1",
+  rows,
+  cols,
+  cells: Object.fromEntries(rows.map((r) => [r, Object.fromEntries(cols.map((c) => [c, {}]))])),
+  rowProps: {},
+  colProps: {},
+  merges: [],
+  freeze: { row: "r1", col: "c1" },
 };
-const values = calculateSheet(doc, { revision: 1, epoch: 0, now: 45000, seed: 1 });
+const value = (r: string, c: string) => `${r}/${c}`;
 function Harness() {
   const [selection, setSelection] = useState<SheetSelection>({
     anchor: { r: "r3", c: "c3" },
@@ -62,9 +52,8 @@ function Harness() {
   });
   return (
     <SheetGrid
-      doc={doc}
-      sheet="s1"
-      values={values}
+      sheet={sheet}
+      value={value}
       locale={EN_US}
       selection={selection}
       onSelectionChange={setSelection}

@@ -3,7 +3,7 @@ import { boxRef, MAX_COLUMN, MAX_ROW, parseCell, type CellBox } from "../a1.ts";
 import { calculate, type CellStore, type StoredFormula } from "./calculate.ts";
 import { XError, type Scalar } from "./evaluate.ts";
 
-/** Plain storage, no workbook: what a live sheet will give the calculation. */
+/** Plain storage, no workbook: the calculation alone. */
 function memoryStore(
   cells: Record<string, Scalar | `=${string}`>,
   names: Record<string, string> = {},

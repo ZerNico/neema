@@ -19,27 +19,14 @@ import { browserEditorExtensions, browserEditorProps } from "./editor-extensions
 import { uploadAttachment } from "~/modules/attachments/server/functions.ts";
 import {
   addDocumentImage,
-  getDocument,
   getDocumentVersion,
   getDocumentVersions,
-  listDocuments,
 } from "../../server/document-functions.ts";
-import userEvent from "@testing-library/user-event";
-import { toModelMarkdown } from "../../editor/markdown.ts";
-import { applyChange } from "@chat/sheet/model/apply";
-import { parseFormula } from "@chat/sheet/model/formula";
-import { emptyDoc, type SheetDoc } from "@chat/sheet/model";
-import type { SheetChange, SheetOp } from "@chat/sheet/model/ops";
-import type { EditableDocument } from "../../schema.ts";
-import type { SheetFrame } from "../../sheet/schema.ts";
 
 // The network boundary for images: the upload and the claim the editor calls.
 vi.mock("~/modules/attachments/server/functions.ts", () => ({ uploadAttachment: vi.fn() }));
 vi.mock("../../server/document-functions.ts", () => ({
   addDocumentImage: vi.fn(),
-  getDocument: vi.fn(),
-  listDocuments: vi.fn(),
-  listProjectDocuments: vi.fn(),
   getDocumentVersions: vi.fn(),
   getDocumentVersion: vi.fn(),
 }));
@@ -571,7 +558,7 @@ describe("document editor", () => {
     expect(sync.markdown()).toBe("Plan v2, revised");
   });
 
-  it("keeps inserting and reviewing on their own tabs, as the sheet's ribbon does", async () => {
+  it("keeps inserting and reviewing on their own tabs", async () => {
     const sync = await replica("Plan the launch");
     mount(sync);
     const editor = await editorOf();
@@ -707,231 +694,5 @@ describe("images", () => {
     await adding;
     // Left unclaimed, the sweep takes it; claimed, it would be kept for the document's life.
     expect(vi.mocked(addDocumentImage)).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * Live sheets as the server's feed serves them to a reader: a reset with
- * the document, then each change. Only what the reader may read is found;
- * anything else is not found, as the document query and the feed both say.
- */
-const fakeSheets = () => {
-  const sheets = new Map<string, { row: EditableDocument; doc: SheetDoc; revision: number }>();
-  const feeds = new Set<{ id: string; emit: (frame: SheetFrame) => void; closed: boolean }>();
-  const MOMENT = { now: 45_000, seed: 1 };
-  class Feed {
-    #listeners = new Map<string, (event: MessageEvent<string>) => void>();
-    readonly state: { id: string; emit: (frame: SheetFrame) => void; closed: boolean };
-    constructor(url: string) {
-      const id = decodeURIComponent(new URL(url, "http://test").pathname.split("/")[3]!);
-      this.state = {
-        id,
-        closed: false,
-        emit: (frame) =>
-          this.#listeners.get(frame.type)?.(
-            new MessageEvent(frame.type, { data: JSON.stringify(frame) }),
-          ),
-      };
-      feeds.add(this.state);
-      queueMicrotask(() => {
-        const sheet = sheets.get(id);
-        this.state.emit(
-          sheet
-            ? {
-                type: "reset",
-                doc: sheet.doc,
-                revision: sheet.revision,
-                moment: MOMENT,
-                acked: null,
-              }
-            : { type: "gone" },
-        );
-      });
-    }
-    addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
-      this.#listeners.set(type, listener);
-    }
-    close() {
-      this.state.closed = true;
-      feeds.delete(this.state);
-    }
-  }
-  return {
-    Feed,
-    feeds,
-    seed: (id: string, doc: SheetDoc) =>
-      sheets.set(id, {
-        doc,
-        revision: 1,
-        row: {
-          id,
-          conversationId: "conversation",
-          projectId: null,
-          title: "Budget",
-          kind: "sheet",
-          revision: 1,
-          lastEditedBy: "user",
-          canEdit: true,
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-        },
-      }),
-    row: (id: string) => sheets.get(id)?.row ?? null,
-    change: (id: string, ops: SheetOp[]) => {
-      const sheet = sheets.get(id)!;
-      const change: SheetChange = { clientId: "someone", seq: sheet.revision, ops };
-      sheet.revision++;
-      sheet.doc = applyChange(sheet.doc, change, sheet.revision).doc;
-      for (const feed of feeds)
-        if (feed.id === id)
-          feed.emit({
-            type: "changes",
-            changes: [change],
-            revision: sheet.revision,
-            moment: MOMENT,
-          });
-    },
-  };
-};
-
-/** A sheet named Data: a label, 21 and twice it by formula, the label bold. */
-const budget = () => {
-  let doc = emptyDoc("Data");
-  const formula = parseFormula("B1*2", { doc, sheet: "s1" });
-  if (!("formula" in formula)) throw new Error("needs growth");
-  doc = applyChange(
-    doc,
-    {
-      clientId: "seed",
-      seq: 1,
-      ops: [
-        {
-          op: "set",
-          sh: "s1",
-          cells: [
-            { r: "s1.r1", c: "s1.c1", v: "Rent" },
-            { r: "s1.r1", c: "s1.c2", v: 21 },
-            { r: "s1.r2", c: "s1.c1", v: "Twice" },
-            { r: "s1.r2", c: "s1.c2", f: formula.formula },
-          ],
-        },
-        {
-          op: "format",
-          sh: "s1",
-          area: { r1: "s1.r1", r2: "s1.r2", c1: "s1.c1", c2: "s1.c1" },
-          patch: { bold: true },
-        },
-      ],
-    },
-    1,
-  ).doc;
-  return doc;
-};
-
-describe("sheet embeds", () => {
-  let sheets: ReturnType<typeof fakeSheets>;
-  // These tests wait on real sheet data and calculations, not compilation of the lazy source
-  // or picker.
-  beforeAll(async () => {
-    await Promise.all([import("./sheet-embed-live.tsx"), import("./sheet-embed-picker.tsx")]);
-  });
-  beforeEach(() => {
-    sheets = fakeSheets();
-    // The editor's own feed is passed in; only the sheet client reads the global one.
-    vi.stubGlobal("EventSource", sheets.Feed);
-    vi.mocked(getDocument).mockImplementation(
-      async ({ data }) => sheets.row(data.documentId) ?? server.row(data.documentId),
-    );
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  const cellsOf = (table: HTMLTableElement) =>
-    [...table.rows].map((row) => [...row.cells].map((cell) => cell.textContent));
-
-  it("draws a range from the sheet's calculated values and follows the sheet as it changes", async () => {
-    sheets.seed("sheet-1", budget());
-    const sync = await replica(
-      'Costs:\n\n[sheet id="sheet-1" range="Data!A1:B2"]\n\n[sheet id="sheet-1" range="Data!B2"]',
-    );
-    mount(sync);
-    const surface = await screen.findByRole("textbox", { name: "Document" });
-    await waitFor(() => expect(surface.querySelectorAll("table")).toHaveLength(2));
-    const [range, single] = [...surface.querySelectorAll("table")];
-    expect(cellsOf(range!)).toEqual([
-      ["Rent", "21"],
-      ["Twice", "42"],
-    ]);
-    expect(cellsOf(single!)).toEqual([["42"]]);
-    // Bold and alignment come from the cells: text left, numbers right.
-    expect(range!.rows[0]!.cells[0]).toHaveStyle({ fontWeight: "600", textAlign: "left" });
-    expect(range!.rows[0]!.cells[1]).toHaveStyle({ textAlign: "right" });
-    expect(surface).toHaveTextContent("Budget · Data!A1:B2");
-    // Two embeds of one sheet read it through one feed.
-    expect(sheets.feeds.size).toBe(1);
-
-    act(() => {
-      sheets.change("sheet-1", [
-        { op: "set", sh: "s1", cells: [{ r: "s1.r1", c: "s1.c2", v: 50 }] },
-      ]);
-    });
-    await waitFor(() =>
-      expect(cellsOf(range!)).toEqual([
-        ["Rent", "50"],
-        ["Twice", "100"],
-      ]),
-    );
-    expect(cellsOf(surface.querySelectorAll("table")[1]!)).toEqual([["100"]]);
-    // People's Markdown names the range; it has no values to show.
-    expect(sync.markdown()).toBe("Costs:\n\n*Sheet range Data!A1:B2*\n\n*Sheet range Data!B2*");
-  });
-
-  it("shows a quiet line for a sheet the reader cannot read, and for a range no longer there", async () => {
-    sheets.seed("sheet-1", budget());
-    // `private` is someone else's chat sheet: the server answers it as not found.
-    const sync = await replica(
-      '[sheet id="private" range="Data!A1:B2"]\n\n[sheet id="sheet-1" range="Gone!A1:B2"]\n\n[sheet id="sheet-1" chart="none"]\n\nStill here',
-    );
-    mount(sync);
-    const surface = await screen.findByRole("textbox", { name: "Document" });
-    expect(await within(surface).findByText("This sheet isn’t available")).toBeTruthy();
-    expect(await within(surface).findByText("This range isn’t in the sheet any more")).toBeTruthy();
-    expect(await within(surface).findByText("This chart isn’t in the sheet any more")).toBeTruthy();
-    expect(surface.querySelector("table")).toBeNull();
-    // The caption of an unreadable one names only what the document holds.
-    expect(surface).toHaveTextContent("Sheet range Data!A1:B2");
-    expect(surface).not.toHaveTextContent("Budget · Data!A1:B2");
-    expect(surface).toHaveTextContent("Still here");
-  });
-
-  it("inserts a range of a sheet from the chat, starting from the sheet's used area", async () => {
-    sheets.seed("sheet-1", budget());
-    vi.mocked(listDocuments).mockResolvedValue([sheets.row("sheet-1")!]);
-    const sync = await replica("Costs:");
-    mount(sync);
-    const editor = await editorOf();
-    act(() => {
-      editor.commands.focus("end");
-    });
-    const user = userEvent.setup();
-    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Sheet" }));
-    const dialog = await screen.findByRole("dialog", { name: "Insert from a sheet" });
-    await user.click(within(dialog).getByRole("combobox", { name: "Sheet" }));
-    await user.click(await screen.findByRole("option", { name: "Budget" }));
-    expect(listDocuments).toHaveBeenCalledWith({ data: { conversationId: "conversation" } });
-    const range = await within(dialog).findByRole("textbox", { name: "Range" });
-    await waitFor(() => expect(range).toHaveValue("Data!A1:B2"));
-    await user.clear(range);
-    await user.type(range, "Data!B1:B2");
-    await user.click(within(dialog).getByRole("button", { name: "Insert" }));
-    await waitFor(() =>
-      expect(toModelMarkdown(editor.state.doc)).toBe(
-        'Costs:\n\n[sheet id="sheet-1" range="Data!B1:B2"]',
-      ),
-    );
-    const surface = screen.getByRole("textbox", { name: "Document" });
-    await waitFor(() => expect(cellsOf(surface.querySelector("table")!)).toEqual([["21"], ["42"]]));
   });
 });

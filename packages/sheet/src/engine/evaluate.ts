@@ -59,17 +59,6 @@ export interface Scope {
   spill(sheet: string, row: number, column: number): CellBox | null;
   /** Text read as a formula in this workbook (INDIRECT), or null. */
   parse(text: string): Node | null;
-  /**
-   * Time and chance for NOW, TODAY and the RAND functions, the same on every
-   * replica of a live sheet. Without it they are not calculated, as for a
-   * file Excel recalculates on open.
-   */
-  readonly volatile?: {
-    /** The calculation's moment, as an Excel serial in the sheet's time zone. */
-    readonly now: number;
-    /** Numbers in [0, 1) for the formula's nth random call, one per element. */
-    random(call: number): () => number;
-  };
 }
 
 /**
@@ -90,10 +79,7 @@ class Evaluation {
   readonly scope: Scope;
   /** A range met a single-value place in a dynamic formula: legacy Excel would read it differently. */
   lifted = false;
-  /** The address a HYPERLINK in the formula gave its cell, the last one evaluated. */
-  link: string | null = null;
   private depth = 0;
-  private randomCalls = 0;
   private readonly locals: Array<Map<string, Value>> = [];
 
   constructor(scope: Scope) {
@@ -335,7 +321,6 @@ class Evaluation {
       case "RANDARRAY":
       case "NOW":
       case "TODAY":
-        return this.volatile(name, args, mode);
       case "CELL":
       case "INFO":
       case "LAMBDA":
@@ -418,58 +403,6 @@ class Evaluation {
       : groupBy(rowFields, values, fn, options);
   }
 
-  /** NOW, TODAY and the RAND functions, from the scope's time and chance. */
-  private volatile(name: string, args: readonly Node[], mode: Mode): Value {
-    const given = this.scope.volatile;
-    // Without a shared moment and seed the result would differ per reader; Excel computes it on open.
-    if (!given) throw new Unsupported(name);
-    if (name === "NOW") return given.now;
-    if (name === "TODAY") return Math.floor(given.now);
-    const draw = given.random(this.randomCalls++);
-    const number = (index: number, fallback: number): number | XError => {
-      const node = args[index];
-      if (!node || node.t === "missing") return fallback;
-      const value = this.single(this.evaluate(node, mode), mode);
-      return toNumber(value instanceof Grid ? (value.rows[0]?.[0] ?? null) : value);
-    };
-    const between = (low: number, high: number) => low + Math.floor(draw() * (high - low + 1));
-    if (name === "RAND") return draw();
-    if (name === "RANDBETWEEN") {
-      const [low, high] = [number(0, Number.NaN), number(1, Number.NaN)];
-      if (low instanceof XError) return low;
-      if (high instanceof XError) return high;
-      const [from, to] = [Math.ceil(low), Math.floor(high)];
-      return Number.isNaN(from) || Number.isNaN(to) || from > to ? NUM : between(from, to);
-    }
-    const rows = number(0, 1);
-    const cols = number(1, 1);
-    const low = number(2, 0);
-    const high = number(3, 1);
-    if (rows instanceof XError) return rows;
-    if (cols instanceof XError) return cols;
-    if (low instanceof XError) return low;
-    if (high instanceof XError) return high;
-    const wholeNode = args[4];
-    const wholeValue =
-      wholeNode && wholeNode.t !== "missing"
-        ? this.single(this.evaluate(wholeNode, mode), mode)
-        : false;
-    const whole = toBoolean(
-      wholeValue instanceof Grid ? (wholeValue.rows[0]?.[0] ?? null) : wholeValue,
-    );
-    if (whole instanceof XError) return whole;
-    const [height, width] = [Math.trunc(rows), Math.trunc(cols)];
-    if (height < 1 || width < 1 || low > high) return VALUE;
-    if (whole && Math.ceil(low) > Math.floor(high)) return VALUE;
-    return new Grid(
-      Array.from({ length: height }, () =>
-        Array.from({ length: width }, () =>
-          whole ? between(Math.ceil(low), Math.floor(high)) : low + draw() * (high - low),
-        ),
-      ),
-    );
-  }
-
   private call(name: string, nodes: readonly Node[], mode: Mode): Value {
     const special = this.special(name, nodes, mode);
     if (special !== undefined) return special;
@@ -505,9 +438,6 @@ class Evaluation {
       reference: (text, a1) => this.indirect(text, a1),
       isFormula: (sheet, row, column) => this.scope.isFormula(sheet, row, column),
       spill: (sheet, row, column) => this.scope.spill(sheet, row, column),
-      link: (address) => {
-        this.link = address;
-      },
     };
     const fn: Fn = own ?? {
       run: (values) => runLibrary(name, implementation!, values, nodes, call),
@@ -666,7 +596,7 @@ function operate(op: string, a: Scalar, b: Scalar): Scalar {
   return arithmetic(op, a, b);
 }
 
-/** A formula's value in `mode`, whether a dynamic formula relied on arrays to get it, and its link. */
+/** A formula's value in `mode`, and whether a dynamic formula relied on arrays to get it. */
 export function evaluateFormula(node: Node, scope: Scope, mode: Mode) {
   const evaluation = new Evaluation(scope);
   const raw = evaluation.evaluate(node, mode);
@@ -676,5 +606,5 @@ export function evaluateFormula(node: Node, scope: Scope, mode: Mode) {
       : raw instanceof Grid && raw.ref && mode === "legacy"
         ? evaluation.single(raw, mode)
         : raw;
-  return { value, lifted: evaluation.lifted, link: evaluation.link };
+  return { value, lifted: evaluation.lifted };
 }

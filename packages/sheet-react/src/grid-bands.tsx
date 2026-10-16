@@ -1,9 +1,8 @@
 import { memo } from "react";
 import type { ReactNode } from "react";
-import { cellStyle } from "@chat/sheet/model/style";
+import { cellStyle } from "@chat/sheet/style";
 import { GridCell } from "./grid-cell.tsx";
 import { key } from "./grid-navigation.ts";
-import { safeLink } from "./display.ts";
 import { precedingColumn } from "./grid-spill.ts";
 import { HEADER_COLUMN_PX, textWidth, type AxisLayout } from "./layout.ts";
 import type { PaneDrawing } from "./grid-cells.tsx";
@@ -37,15 +36,13 @@ export function CellBandBody({
 }: CellBandProps) {
   const {
     gridId,
-    sheet,
     cells: sheetCells,
-    values,
+    value,
     locale,
     looks,
     rows,
     cols,
     merges,
-    zoom,
     frozenCols,
   } = drawing;
   const cells: ReactNode[] = [];
@@ -84,36 +81,33 @@ export function CellBandBody({
         left={cols.starts[col]!}
         height={rows.starts[(span?.bottom ?? row) + 1]! - rows.starts[row]!}
         width={cols.starts[(span?.right ?? col) + 1]! - cols.starts[col]!}
-        value={values.value(sheet, r, c)}
+        value={value(r, c)}
         styleKey={sheetCells[r]?.[c]?.s}
         look={looks.get(`${r}|${c}`)}
         locale={locale}
-        zoom={zoom}
         spills={spills}
         merged={!!span}
-        linked={!!safeLink(values.link(sheet, r, c) ?? undefined)}
       />,
     );
   };
   const spillEnd = (row: number, col: number) => {
     const r = rows.ids[row]!;
-    const value = values.value(sheet, r, cols.ids[col]!);
+    const held = value(r, cols.ids[col]!);
     const style = cellStyle(sheetCells[r]?.[cols.ids[col]!]?.s);
     if (
-      typeof value !== "string" ||
+      typeof held !== "string" ||
       style.wrap ||
       (style.horizontal ?? "left") !== "left" ||
       merges.spans.has(key(row, col))
     )
       return col;
-    const needed =
-      (textWidth(value, style.fontSize ? (style.fontSize * 4) / 3 : 14, style.bold) + 8) * zoom;
+    const needed = textWidth(held, style.fontSize ? (style.fontSize * 4) / 3 : 14, style.bold) + 8;
     const limit = col < frozenCols ? Math.min(colLast, frozenCols - 1) : colLast;
     let end = col;
     while (end < limit && cols.starts[end + 1]! - cols.starts[col]! < needed) {
       const next = end + 1;
-      if (merges.covered.has(key(row, next)) || merges.spans.has(key(row, next))) break;
-      if (cols.size(next) && values.value(sheet, r, cols.ids[next]!) !== null) break;
+      if (merges.covered(row, next) || merges.spans.has(key(row, next))) break;
+      if (cols.size(next) && value(r, cols.ids[next]!) !== null) break;
       end = next;
     }
     return end;
@@ -124,9 +118,7 @@ export function CellBandBody({
     // Search occupied columns, not the empty distance back to the frozen boundary.
     const boundary = colFirst >= frozenCols ? frozenCols : 0;
     const origin = colFirst > boundary ? precedingColumn(drawing.occupied(row), colFirst) : -1;
-    const blocked = (merges.byRow.get(row) ?? []).some(
-      (span) => span.right >= origin && span.left < colFirst,
-    );
+    const blocked = merges.inRow(row).some((span) => span.right >= origin && span.left < colFirst);
     if (origin >= boundary && !blocked) {
       const end = spillEnd(row, origin);
       if (end >= colFirst) {
@@ -135,20 +127,19 @@ export function CellBandBody({
       }
     }
     for (let col = start; col <= colLast; col++) {
-      if (!cols.size(col) || merges.covered.has(key(row, col)) || merges.spans.has(key(row, col)))
-        continue;
+      if (!cols.size(col) || merges.covered(row, col) || merges.spans.has(key(row, col))) continue;
       const end = spillEnd(row, col);
       draw(row, col, end);
       col = end;
     }
-    for (const span of merges.byRow.get(row) ?? []) {
+    for (const span of merges.inRow(row)) {
       const owner = rows.indexAt(rows.starts[span.top]!);
       if (owner >= first && owner <= last && span.right >= colFirst && span.left <= colLast)
         draw(span.top, span.left);
     }
   }
   if (mergeRow >= 0)
-    for (const span of merges.byRow.get(mergeRow) ?? []) {
+    for (const span of merges.inRow(mergeRow)) {
       if (
         rows.indexAt(rows.starts[span.top]!) < first &&
         span.right >= colFirst &&
@@ -168,9 +159,7 @@ export interface RowHeaderBandProps {
   last: number;
   selectedFirst: number;
   selectedLast: number;
-  gutter: number;
   offset: number;
-  resizable: boolean;
 }
 export function RowHeaderBandBody({
   rows,
@@ -178,9 +167,7 @@ export function RowHeaderBandBody({
   last,
   selectedFirst,
   selectedLast,
-  gutter,
   offset,
-  resizable,
 }: RowHeaderBandProps) {
   const headers: ReactNode[] = [];
   for (let row = first; row <= last; row++) {
@@ -192,22 +179,15 @@ export function RowHeaderBandBody({
         role="rowheader"
         data-sheet-axis="rows"
         data-sheet-index={row}
-        className={`border-border text-muted-foreground absolute flex items-center justify-center border-r border-b text-xs ${selected ? "bg-accent text-accent-foreground" : "bg-muted"}`}
+        className={`border-border text-muted-foreground absolute flex cursor-default items-center justify-center border-r border-b text-xs ${selected ? "bg-accent text-accent-foreground" : "bg-muted"}`}
         style={{
           top: offset + rows.starts[row]!,
-          left: gutter,
+          left: 0,
           height: rows.size(row),
           width: HEADER_COLUMN_PX,
         }}
       >
         {row + 1}
-        {resizable ? (
-          <div
-            aria-hidden
-            data-sheet-resize=""
-            className="absolute -bottom-1 left-0 z-10 h-2 w-full cursor-row-resize"
-          />
-        ) : null}
       </div>,
     );
   }

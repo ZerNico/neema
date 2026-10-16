@@ -11,7 +11,6 @@ export const LAZY_FAMILY_TOOLS: Record<LazyToolFamily, ReadonlyArray<string>> = 
   presentation: OFFICE_FAMILIES.presentation.names.literals,
   spreadsheet: OFFICE_FAMILIES.spreadsheet.names.literals,
   word: OFFICE_FAMILIES.word.names.literals,
-  sheet: ["create_sheet", "edit_sheet"],
   "agent-draft": AgentDraftToolName.literals,
   "schedule-draft": ScheduleDraftToolName.literals,
 };
@@ -21,8 +20,6 @@ const LAZY_FAMILY_SUMMARIES: Record<LazyToolFamily, string> = {
   presentation: "Create, inspect, edit and render PowerPoint decks (.pptx).",
   spreadsheet: "Create, inspect and edit Excel workbooks (.xlsx) with live formulas.",
   word: "Create, inspect and edit Word files (.docx), including templates, when the person asks for one or gives you one.",
-  sheet:
-    "Create and edit live sheets beside the chat: tables with formulas the person edits alongside you.",
   "agent-draft": "Draft a new saved agent or edit an existing one for the user to save.",
   "schedule-draft": "Draft a scheduled task that runs a prompt on a recurring schedule.",
 };

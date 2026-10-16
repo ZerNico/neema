@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
-// Pressing a ribbon control must not take focus from the grid, the cell being typed in or the text;
+// Pressing a ribbon control must not take focus from the text;
 // a field in a menu, such as a colour's hex code, still takes it.
 const keepFocus = (event: { preventDefault: () => void; target: EventTarget }) => {
   if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
@@ -142,7 +142,7 @@ export function ColorMenu({
           <span
             aria-hidden
             className="border-border absolute right-1.5 bottom-1 left-1.5 h-1 rounded-full border"
-            // The sheet's own colour, which is data rather than a theme token.
+            // The text's own colour, which is data rather than a theme token.
             style={{ backgroundColor: value ?? "transparent" }}
           />
         </TooltipTrigger>

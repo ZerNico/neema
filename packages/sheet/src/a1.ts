@@ -1,6 +1,6 @@
 /**
  * A1 addresses: Excel's column letters, cell and range references and the
- * grid's bounds. Shared by the engine, the Excel file tools and live sheets.
+ * grid's bounds. Shared by the engine, the Excel file tools and the grid.
  */
 
 const CELL = /^\$?([A-Z]{1,3})\$?([1-9]\d{0,6})$/;

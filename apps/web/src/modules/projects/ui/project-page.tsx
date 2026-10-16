@@ -2,7 +2,6 @@ import {
   BubbleChatIcon,
   Delete02Icon,
   File01Icon,
-  FileSpreadsheetIcon,
   FileAddIcon,
   Folder01Icon,
   MoreHorizontalIcon,
@@ -63,9 +62,6 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
-import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
-import { sheetLocale } from "@chat/sheet/locales";
-import { createProjectSheet } from "~/modules/documents/sheet/server/sheet-functions.ts";
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
 import { projectChatsQuery, projectQuery } from "../client/queries.ts";
@@ -408,11 +404,7 @@ function ProjectDocumentRow({
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-        <HugeiconsIcon
-          icon={document.kind === "sheet" ? FileSpreadsheetIcon : File01Icon}
-          strokeWidth={2}
-          className="size-4"
-        />
+        <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" />
       </div>
       <button
         type="button"
@@ -479,7 +471,6 @@ function NewDocumentDialog({
   const id = useId();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
-  const [kind, setKind] = useState<"text" | "sheet">("text");
   // A text document may start from a Word file instead of blank.
   const [file, setFile] = useState<File | null>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -489,7 +480,7 @@ function NewDocumentDialog({
   };
   const save = useMutation({
     mutationFn: async () => {
-      if (kind === "text" && file) {
+      if (file) {
         const data = new FormData();
         data.set("file", file);
         data.set("projectId", projectId);
@@ -498,17 +489,7 @@ function NewDocumentDialog({
         if (imported.dropped.length) toast(`Left out: ${imported.dropped.join(", ")}`);
         return imported.document;
       }
-      return kind === "sheet"
-        ? createProjectSheet({
-            data: {
-              projectId,
-              title: title.trim(),
-              // A new sheet types and shows numbers as this person does, and NOW reads their clock.
-              locale: sheetLocale(navigator.language).id,
-              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            },
-          })
-        : createProjectDocument({ data: { projectId, title: title.trim() } });
+      return createProjectDocument({ data: { projectId, title: title.trim() } });
     },
     onSuccess: async (document) => {
       onCreated(document.id);
@@ -529,9 +510,7 @@ function NewDocumentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
-          <DialogDescription>
-            A blank document or sheet everyone in the project can edit.
-          </DialogDescription>
+          <DialogDescription>A document everyone in the project can edit.</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -541,64 +520,39 @@ function NewDocumentDialog({
           }}
         >
           <FieldGroup>
-            <RadioGroup
-              value={kind}
-              onValueChange={(value) => setKind(value === "sheet" ? "sheet" : "text")}
-              aria-label="Kind of document"
-              className="grid-cols-2"
-            >
-              {(
-                [
-                  ["text", "Document", "Text to write and format"],
-                  ["sheet", "Sheet", "Rows and columns with formulas"],
-                ] as const
-              ).map(([value, name, about]) => (
-                <Field key={value} orientation="horizontal">
-                  <RadioGroupItem value={value} id={`${id}-${value}`} disabled={save.isPending} />
-                  <FieldLabel htmlFor={`${id}-${value}`}>
-                    <span className="flex flex-col gap-0.5">
-                      <span>{name}</span>
-                      <span className="text-muted-foreground text-xs font-normal">{about}</span>
-                    </span>
-                  </FieldLabel>
-                </Field>
-              ))}
-            </RadioGroup>
-            {kind === "text" ? (
-              <Field>
-                <FieldLabel htmlFor={`${id}-file`}>Start from a Word file</FieldLabel>
-                <div className="flex items-center gap-2">
-                  <Input
-                    ref={picker}
-                    id={`${id}-file`}
-                    type="file"
-                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            <Field>
+              <FieldLabel htmlFor={`${id}-file`}>Start from a Word file</FieldLabel>
+              <div className="flex items-center gap-2">
+                <Input
+                  ref={picker}
+                  id={`${id}-file`}
+                  type="file"
+                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  disabled={save.isPending}
+                  onChange={(event) => {
+                    const picked = event.target.files?.[0] ?? null;
+                    setFile(picked);
+                    if (picked && !title.trim())
+                      setTitle(picked.name.replace(/\.[^.]+$/, "").slice(0, 200));
+                  }}
+                />
+                {file ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
                     disabled={save.isPending}
-                    onChange={(event) => {
-                      const picked = event.target.files?.[0] ?? null;
-                      setFile(picked);
-                      if (picked && !title.trim())
-                        setTitle(picked.name.replace(/\.[^.]+$/, "").slice(0, 200));
+                    onClick={() => {
+                      setFile(null);
+                      if (picker.current) picker.current.value = "";
                     }}
-                  />
-                  {file ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={save.isPending}
-                      onClick={() => {
-                        setFile(null);
-                        if (picker.current) picker.current.value = "";
-                      }}
-                    >
-                      Clear
-                    </Button>
-                  ) : null}
-                </div>
-                <FieldDescription>Optional</FieldDescription>
-              </Field>
-            ) : null}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+              <FieldDescription>Optional</FieldDescription>
+            </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
               <Input
@@ -606,7 +560,7 @@ function NewDocumentDialog({
                 value={title}
                 maxLength={200}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder={kind === "sheet" ? "Budget" : "Launch checklist"}
+                placeholder="Launch checklist"
                 disabled={save.isPending}
                 autoFocus
               />
@@ -614,7 +568,7 @@ function NewDocumentDialog({
           </FieldGroup>
           {save.isError ? (
             <FieldError>
-              {kind === "text" && file && save.error instanceof Error && save.error.message
+              {file && save.error instanceof Error && save.error.message
                 ? save.error.message
                 : "Could not create the document."}
             </FieldError>
@@ -624,7 +578,7 @@ function NewDocumentDialog({
               Cancel
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!title.trim()}>
-              {kind === "sheet" ? "Create sheet" : "Create document"}
+              Create document
             </PendingButton>
           </DialogFooter>
         </form>

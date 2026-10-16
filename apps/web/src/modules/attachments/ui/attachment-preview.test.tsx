@@ -72,11 +72,18 @@ describe("AttachmentPreviewDialog", () => {
     expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
   });
 
-  it("links to the original in a browser", () => {
-    renderPreview(image);
-    expect(screen.queryByRole("button", { name: "Open in sidebar" })).toBeNull();
+  it("opens in the sidebar or links to the original in a browser", () => {
+    const { open } = renderPreview(image);
     expect(screen.getByRole("link", { name: "Open original" }).getAttribute("target")).toBe(
       "_blank",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Open in sidebar" }));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "file:/api/files/a1" }));
+  });
+
+  it("only downloads a file without a preview in a browser", () => {
+    renderPreview(archive);
+    expect(screen.queryByRole("button", { name: "Open in sidebar" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Download" })).toBeTruthy();
   });
 });

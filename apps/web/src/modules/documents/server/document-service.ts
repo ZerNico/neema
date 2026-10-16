@@ -32,7 +32,6 @@ import { overCap } from "../editor/limits.ts";
 import { presenceUser } from "../presence-user.ts";
 import { detachedThreads, quoteRange } from "../editor/comments.ts";
 import { squareTables } from "../editor/tables.ts";
-import { embedAttrs } from "../editor/sheet-embed.ts";
 import { CALLOUT_KINDS } from "../editor/blocks.ts";
 import {
   documentSchema,
@@ -220,9 +219,6 @@ const wellTyped = (node: Node) => {
       return typeof start === "number" && Number.isInteger(start) && start >= 0;
     case "taskItem":
       return typeof checked === "boolean";
-    // A sheet and exactly one of a range and a chart; the sheet is checked when read, not here.
-    case "sheetEmbed":
-      return embedAttrs(node.attrs) !== null;
     case "callout":
       return (CALLOUT_KINDS as ReadonlyArray<unknown>).includes(node.attrs.kind);
     default:
@@ -528,9 +524,7 @@ export class DocumentService extends Context.Service<
             return { entry: cached, document };
           }
           const state = yield* documents.loadState(userId, documentId);
-          // A sheet's snapshot is not ProseMirror JSON: the sheet service owns it.
-          if (!state || state.document.kind !== "text")
-            return yield* new DocumentNotAvailable({ documentId });
+          if (!state) return yield* new DocumentNotAvailable({ documentId });
           const snapshot = Node.fromJSON(documentSchema, state.snapshot);
           // Stored steps were checked when they arrived; one that no longer
           // applies means storage is corrupt, which is a defect.
@@ -1525,7 +1519,7 @@ export class DocumentService extends Context.Service<
         }),
         addImage: Effect.fn("DocumentService.addImage")(function* (userId, input) {
           const found = yield* documents.get(userId, input.documentId);
-          const plan = yield* planImages(userId, found?.kind === "text" ? ownerOf(found) : null, [
+          const plan = yield* planImages(userId, found ? ownerOf(found) : null, [
             input.attachmentId,
           ]);
           const spent = yield* transaction((tx) =>
@@ -1533,7 +1527,6 @@ export class DocumentService extends Context.Service<
               yield* requireDocuments(userId, tx);
               // The row lock holds off a delete until the claim commits.
               const document = yield* documents.lock(tx, userId, input.documentId);
-              if (document.kind !== "text") return null;
               return yield* claimImages(tx, userId, document.id, ownerOf(document), plan, [
                 input.attachmentId,
               ]);

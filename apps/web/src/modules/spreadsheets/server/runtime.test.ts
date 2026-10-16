@@ -21,7 +21,7 @@ describe("spreadsheet worker runtime", () => {
       const inspected = await runtime.run({ kind: "inspect", bytes: edited.bytes });
       expect(inspected.sheets[0]).toMatchObject({ name: "Sheet1", usedRange: "A1:C1" });
       const preview = await runtime.run({ kind: "preview", bytes: edited.bytes });
-      expect(preview.rows[0]!.map((cell) => cell?.text)).toEqual(["2", "3", "6"]);
+      expect(preview.cells.map((cell) => cell.value)).toEqual([2, 3, 6]);
     } finally {
       await runtime.close();
     }

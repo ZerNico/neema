@@ -9,7 +9,6 @@ export const LazyToolFamily = Schema.Literals([
   "presentation",
   "spreadsheet",
   "word",
-  "sheet",
   "agent-draft",
   "schedule-draft",
 ]);

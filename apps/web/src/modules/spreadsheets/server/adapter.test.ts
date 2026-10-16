@@ -5,14 +5,8 @@ import { workbookToBytes } from "@office-kit/xlsx/io";
 import { addWorksheet, createWorkbook } from "@office-kit/xlsx/workbook";
 import { setCell } from "@office-kit/xlsx/worksheet";
 import { describe, expect, it } from "vitest";
-import {
-  createSpreadsheet,
-  editSpreadsheet,
-  importLiveSheet,
-  inspectSpreadsheet,
-  previewChart,
-  previewSpreadsheet,
-} from "./adapter.ts";
+import { createSpreadsheet, editSpreadsheet, inspectSpreadsheet } from "./adapter.ts";
+import { previewChart, previewSpreadsheet } from "./preview.ts";
 
 const edit = async (bytes: Uint8Array, operations: unknown[]) => editSpreadsheet(bytes, operations);
 const cellsOf = async (bytes: Uint8Array, sheet?: string, range?: string) =>
@@ -89,8 +83,11 @@ describe("spreadsheet adapter", () => {
     const [sheet] = (await inspectSpreadsheet(start.bytes)).sheets;
     expect(sheet).toMatchObject({ frozenAt: "A2", filter: "A1:B1", merged: ["C1:D1"], charts: 1 });
     const preview = await previewSpreadsheet(start.bytes);
-    expect(preview.rows[0]![0]).toMatchObject({ text: "1,234.50", bold: true });
-    expect(preview.columnWidths[0]).toBe(18);
+    const a1 = preview.cells.find((cell) => cell.row === 1 && cell.col === 1)!;
+    expect(a1.value).toBe(1234.5);
+    expect(preview.styles[a1.style!]).toMatchObject({ bold: true, numberFormat: "#,##0.00" });
+    expect(preview.widths).toContainEqual([1, 18]);
+    expect(preview).toMatchObject({ freeze: "A2", merges: ["C1:D1"] });
   });
 
   it("draws borders in the line and colour asked for, along one edge or around", async () => {
@@ -114,9 +111,11 @@ describe("spreadsheet adapter", () => {
         borderColor: "#C00000",
       },
     ]);
-    const { cells } = (await importLiveSheet(bytes)).sheets[0]!;
-    const style = (row: number, column: number) =>
-      cells.find((cell) => cell.row === row && cell.column === column)?.style;
+    const { cells, styles } = await previewSpreadsheet(bytes);
+    const style = (row: number, column: number) => {
+      const at = cells.find((cell) => cell.row === row && cell.col === column)?.style;
+      return at === undefined ? undefined : styles[at];
+    };
     expect(style(1, 2)).toEqual({ borderTop: { style: "dashed" } });
     expect(style(2, 1)).toEqual({ borderBottom: { style: "double", color: "#C00000" } });
   });
@@ -229,7 +228,7 @@ describe("spreadsheet adapter", () => {
       /<c:numCache>.*<c:v>50<\/c:v>.*<c:v>100<\/c:v>/,
     );
     const preview = await previewSpreadsheet(edited.bytes);
-    expect(preview).toMatchObject({ charts: 1, otherCharts: 0 });
+    expect(preview).toMatchObject({ charts: [{ index: 0 }], otherCharts: 0 });
     const drawn = await previewChart(edited.bytes, undefined, 0);
     expect(drawn.chart).toContain("<c:v>100</c:v>");
     expect(drawn.width).toBeGreaterThan(drawn.height);
@@ -310,7 +309,8 @@ describe("spreadsheet adapter", () => {
         '</sheetData><mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells>',
       ),
     );
-    expect((await previewSpreadsheet(zipSync(files))).merged).toEqual(["A1:B2"]);
+    // Sent as written; the grid clips it to what it draws.
+    expect((await previewSpreadsheet(zipSync(files))).merges).toEqual(["A1:XFD1048576"]);
   });
 
   it("keeps series names across edits, which the chart library does not read", async () => {
@@ -344,7 +344,7 @@ describe("spreadsheet adapter", () => {
     );
   });
 
-  it("counts a chart it cannot locate rather than hiding it", async () => {
+  it("finds a chart whatever prefix its drawing's namespace has", async () => {
     const made = await edit(await createSpreadsheet(), [
       { kind: "setCells", sheet: "Sheet1", start: "A1", rows: [["Jan", 1]] },
       {
@@ -363,7 +363,17 @@ describe("spreadsheet adapter", () => {
         .replaceAll("xdr:", "sd:")
         .replace("xmlns:xdr=", "xmlns:sd="),
     );
-    expect(await previewSpreadsheet(zipSync(files))).toMatchObject({ charts: 0, otherCharts: 1 });
+    expect(await previewSpreadsheet(zipSync(files))).toMatchObject({
+      charts: [{ index: 0, row: 2, col: 4 }],
+      otherCharts: 0,
+    });
+    // And with none, as openpyxl writes it.
+    files["xl/drawings/drawing1.xml"] = strToU8(
+      strFromU8(files["xl/drawings/drawing1.xml"]!)
+        .replaceAll("sd:", "")
+        .replace("xmlns:sd=", "xmlns="),
+    );
+    expect(await previewSpreadsheet(zipSync(files))).toMatchObject({ charts: [{ index: 0 }] });
   });
 
   it("checks a package like every Office file before the library parses it", async () => {

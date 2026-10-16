@@ -2,11 +2,8 @@ import type { ExternalOwner } from "~/modules/tools/server/external-completion.t
 import { desktopToolTimeout, unusableDesktopResult } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
-import { readSheetFile } from "~/modules/documents/sheet/server/file-import.ts";
 import type { WordDocumentFile } from "~/modules/documents/server/document-tools.ts";
 import { readWordDocument } from "~/modules/documents/server/word-import.ts";
-import type { LiveSheetImport } from "~/modules/spreadsheets/server/adapter.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import {
   ProjectFileToolName,
@@ -483,7 +480,6 @@ export class StreamEngine extends Context.Service<
         drafts: yield* ScheduleDraftService,
       };
       const documentService = yield* DocumentService;
-      const sheetService = yield* SheetService;
       const analytics = yield* AnalyticsRepo;
       const memory = yield* MemoryService;
       const projectMemory = yield* ProjectMemoryService;
@@ -1030,24 +1026,12 @@ export class StreamEngine extends Context.Service<
             writeGuard,
           });
           // Set once the attempt's file resolver exists, below; a call reads it when it runs.
-          let sheetFiles:
-            | ((
-                reference: string,
-              ) => Effect.Effect<{ name: string; read: LiveSheetImport }, string>)
-            | null = null;
           let wordFiles: ((reference: string) => Effect.Effect<WordDocumentFile, string>) | null =
             null;
           const documents = yield* prepareDocumentTools({
             service: documentService,
-            readSheetFile: (reference) =>
-              sheetFiles
-                ? sheetFiles(reference)
-                : Effect.fail("Files cannot be read in this chat."),
             readWordFile: (reference) =>
               wordFiles ? wordFiles(reference) : Effect.fail("Files cannot be read in this chat."),
-            sheets: sheetService,
-            generationId: fence?.generationId,
-            timeZone: input.timeZone,
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,
@@ -1342,15 +1326,6 @@ export class StreamEngine extends Context.Service<
                   : {}),
               })
             : undefined;
-          if (toolFiles)
-            sheetFiles = (reference) =>
-              toolFiles
-                .resolve(reference)
-                .pipe(
-                  Effect.flatMap((file) =>
-                    readSheetFile(file, Option.getOrNull(processors.spreadsheet), input.userId),
-                  ),
-                );
           if (toolFiles)
             wordFiles = (reference) =>
               toolFiles.resolve(reference).pipe(
@@ -1741,9 +1716,7 @@ export class StreamEngine extends Context.Service<
               ? permissions.agentsCreate
               : family === "schedule-draft"
                 ? permissions.schedules
-                : family === "sheet"
-                  ? permissions.documents
-                  : offeredOffice.has(family),
+                : offeredOffice.has(family),
           );
           const unlockedFamilies = new Set<LazyToolFamily>();
           const unlockTool = (name: string) => {
@@ -4978,7 +4951,6 @@ export class StreamEngine extends Context.Service<
     Layer.provideMerge(ScheduleDraftService.layer),
     Layer.provideMerge(AgentDraftService.layer),
     Layer.provideMerge(DocumentService.layer),
-    Layer.provideMerge(SheetService.layer),
     Layer.provideMerge(ProjectMemoryService.layer),
     Layer.provideMerge(AgentRepo.layer),
     Layer.provideMerge(KnowledgeRepo.layer),

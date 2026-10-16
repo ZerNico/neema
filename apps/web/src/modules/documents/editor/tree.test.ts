@@ -333,15 +333,4 @@ describe("new blocks in the model's view", () => {
     );
     expect(seen.map((block) => block.id)).toEqual(["b1", "b2", "b3", "b4"]);
   });
-
-  it("shows a sheet embed with its block id and the sheet it shows as its document", () => {
-    const doc = withIds(
-      'Totals:\n\n[sheet id="sheet-1" range="Data!A1:D9"]\n\n[sheet id="sheet-1" chart="c1"]',
-    );
-    const { xml, seen } = blockView(doc, { budget: 5_000 });
-    expect(xml).toBe(
-      '<p id="b1">Totals:</p>\n<sheet id="b2" document="sheet-1" range="Data!A1:D9"/>\n<sheet id="b3" document="sheet-1" chart="c1"/>',
-    );
-    expect(seen.map((block) => block.id)).toEqual(["b1", "b2", "b3"]);
-  });
 });
