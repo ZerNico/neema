@@ -493,7 +493,7 @@ const features = [
   "WEEKNUM(DATE(2025,1,1),21)",
 ];
 
-/** Number format codes through TEXT: the reading live sheets also show cells with. */
+/** Number format codes through TEXT: the reading the grid also shows cells with. */
 const formats = [
   'TEXT(0.00001234,"General")',
   'TEXT(0.0001234,"General")',

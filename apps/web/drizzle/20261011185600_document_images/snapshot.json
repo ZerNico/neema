@@ -212,12 +212,6 @@
     },
     {
       "isRlsEnabled": false,
-      "name": "sheet_clients",
-      "entityType": "tables",
-      "schema": "public"
-    },
-    {
-      "isRlsEnabled": false,
       "name": "conversation_drafts",
       "entityType": "tables",
       "schema": "public"
@@ -4256,19 +4250,6 @@
       "table": "documents"
     },
     {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "'text'",
-      "generated": null,
-      "identity": null,
-      "name": "kind",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
       "type": "integer",
       "typeSchema": null,
       "notNull": true,
@@ -4341,19 +4322,6 @@
       "default": "now()",
       "generated": null,
       "identity": null,
-      "name": "committed_at",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
-      "type": "timestamp with time zone",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "now()",
-      "generated": null,
-      "identity": null,
       "name": "created_at",
       "entityType": "columns",
       "schema": "public",
@@ -4371,71 +4339,6 @@
       "entityType": "columns",
       "schema": "public",
       "table": "documents"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "document_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "client_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "user_id",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "type": "integer",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "last_seq",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "type": "timestamp with time zone",
-      "typeSchema": null,
-      "notNull": true,
-      "dimensions": 0,
-      "default": "now()",
-      "generated": null,
-      "identity": null,
-      "name": "updated_at",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "sheet_clients"
     },
     {
       "type": "text",
@@ -14070,40 +13973,6 @@
     {
       "nameExplicit": false,
       "columns": [
-        "document_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "documents",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "sheet_clients_document_id_documents_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
-        "user_id"
-      ],
-      "schemaTo": "public",
-      "tableTo": "user",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "CASCADE",
-      "name": "sheet_clients_user_id_user_id_fkey",
-      "entityType": "fks",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "nameExplicit": false,
-      "columns": [
         "conversation_id"
       ],
       "schemaTo": "public",
@@ -15731,17 +15600,6 @@
     },
     {
       "columns": [
-        "document_id",
-        "client_id"
-      ],
-      "nameExplicit": false,
-      "name": "sheet_clients_pkey",
-      "entityType": "pks",
-      "schema": "public",
-      "table": "sheet_clients"
-    },
-    {
-      "columns": [
         "group_id",
         "user_id"
       ],
@@ -16641,13 +16499,6 @@
     {
       "value": "(\"conversation_id\" is null) <> (\"project_id\" is null)",
       "name": "documents_one_owner",
-      "entityType": "checks",
-      "schema": "public",
-      "table": "documents"
-    },
-    {
-      "value": "\"kind\" in ('text', 'sheet')",
-      "name": "documents_kind",
       "entityType": "checks",
       "schema": "public",
       "table": "documents"

@@ -1,35 +1,22 @@
-import type { BorderLine, CellStyle } from "@chat/sheet/model/style";
+import type { BorderLine, CellStyle } from "@chat/sheet/style";
 import type { CSSProperties } from "react";
 import { XError, type Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
-import { localizeFormula } from "@chat/sheet/formula-locale";
-import { renderFormula } from "@chat/sheet/model/formula";
-import { positions, type Sheet, type SheetDoc } from "@chat/sheet/model";
+import type { GridSheet } from "./grid-model.ts";
 import type { CellRef } from "./selection.ts";
 import { formatValue, generalText } from "@chat/sheet/number-format";
 
 /** Covered coordinates show the merge anchor's content, including its link. */
-export function mergeAnchor(sheet: Sheet, at: CellRef): CellRef {
-  const rows = positions(sheet.rows);
-  const cols = positions(sheet.cols);
-  const row = rows.at(at.r);
-  const col = cols.at(at.c);
-  if (row === undefined || col === undefined) return at;
+export function mergeAnchor(sheet: GridSheet, at: CellRef): CellRef {
+  const row = sheet.rows.indexOf(at.r);
+  const col = sheet.cols.indexOf(at.c);
+  if (row < 0 || col < 0) return at;
   for (const span of sheet.merges) {
-    const top = rows.at(span.r1);
-    const bottom = rows.at(span.r2);
-    const left = cols.at(span.c1);
-    const right = cols.at(span.c2);
-    if (
-      top !== undefined &&
-      bottom !== undefined &&
-      left !== undefined &&
-      right !== undefined &&
-      row >= top &&
-      row <= bottom &&
-      col >= left &&
-      col <= right
-    )
+    const top = sheet.rows.indexOf(span.r1);
+    const bottom = sheet.rows.indexOf(span.r2);
+    const left = sheet.cols.indexOf(span.c1);
+    const right = sheet.cols.indexOf(span.c2);
+    if (row >= top && row <= bottom && col >= left && col <= right)
       return { r: span.r1, c: span.c1 };
   }
   return at;
@@ -102,21 +89,4 @@ export function cellCss(style: CellStyle): CSSProperties {
     ...(style.borderLeft ? { borderLeft: edgeCss(style.borderLeft) } : {}),
     ...(style.borderRight ? { borderRight: edgeCss(style.borderRight) } : {}),
   };
-}
-
-/** What the formula bar shows for a cell: its formula as the locale types it, else its value. */
-export function cellSource(
-  doc: SheetDoc,
-  sheet: string,
-  r: string,
-  c: string,
-  locale: SheetLocale,
-) {
-  const cell = doc.sheet[sheet]?.cells[r]?.[c];
-  if (!cell) return "";
-  if (cell.f) return `=${localizeFormula(renderFormula(cell.f, { doc, sheet }), locale)}`;
-  if (cell.v === undefined || cell.v === null) return "";
-  if (typeof cell.v === "boolean") return cell.v ? "TRUE" : "FALSE";
-  if (typeof cell.v === "number") return generalText(cell.v, locale);
-  return cell.v;
 }

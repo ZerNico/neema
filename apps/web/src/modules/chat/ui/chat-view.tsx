@@ -96,6 +96,7 @@ import { PLACED_CALL_PREFIX } from "./live-message.ts";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
+import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
 import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
 import { useMarkRead } from "./use-mark-read.ts";
@@ -969,6 +970,17 @@ export function ChatView({
     },
     [generationDisabled, sendAsk],
   );
+  // A comment on a file the messages show: sent like the composer's, with nothing selected.
+  const askAboutFile = useRef<(message: string) => Promise<boolean>>(async () => false);
+  useEffect(() => {
+    askAboutFile.current = async (message) => {
+      if (generationDisabled) return false;
+      await sendAsk({ content: message, attachmentIds: [], researchEnabled: false, skillIds: [] });
+      return true;
+    };
+  }, [generationDisabled, sendAsk]);
+  // Stable, so a panel tab opened with it sends under the chat's state when used, not when opened.
+  const sendFileComment = useCallback((message: string) => askAboutFile.current(message), []);
   const respondToQuestion = useCallback(
     async (callId: string, response: QuestionResponse) => {
       if (actionsDisabled || !effectiveModelId || answerInFlight.current) {
@@ -1695,13 +1707,15 @@ export function ChatView({
                 >
                   <FileReferenceContext value={fileReferences}>
                     <GenuiActionsContext value={genuiActions}>
-                      <VirtualMessageList
-                        messages={withPlacedCards}
-                        anchorId={anchorId}
-                        onReleaseAnchor={releaseAnchor}
-                        onReachStart={loadOlder}
-                        loadingOlder={loadingOlder}
-                      />
+                      <FileCommentContext value={sendFileComment}>
+                        <VirtualMessageList
+                          messages={withPlacedCards}
+                          anchorId={anchorId}
+                          onReleaseAnchor={releaseAnchor}
+                          onReachStart={loadOlder}
+                          loadingOlder={loadingOlder}
+                        />
+                      </FileCommentContext>
                     </GenuiActionsContext>
                   </FileReferenceContext>
                 </WritableChatProjectProvider>

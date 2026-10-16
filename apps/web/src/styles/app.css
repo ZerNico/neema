@@ -67,7 +67,9 @@
   --radius-composer-inner: calc(var(--radius-composer) - 0.25rem);
 }
 
-:root {
+/* `.paper` is a page in its own colours (a workbook): light in both themes. */
+:root,
+.paper {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -103,17 +105,11 @@
      cycle. Slot 4 is magenta, not the amber a 4-colour palette reaches for
      first: amber sits ~6 ΔE from slot 2 under deuteranopia, and slot 4 stacks
      directly on slot 2. Magenta holds the trio's own 13.7 ΔE floor in normal,
-     deuteranopic, protanopic and tritanopic simulation. Slots 5 to 8 are
-     for sheet charts with more series than that; past four, a legend's order
-     tells series apart as much as their hue. */
+     deuteranopic, protanopic and tritanopic simulation. */
   --chart-1: #2a78d6;
   --chart-2: #eb6834;
   --chart-3: #1baf7a;
   --chart-4: #cc2f9e;
-  --chart-5: #7b5cd6;
-  --chart-6: #b08414;
-  --chart-7: #0f7f8a;
-  --chart-8: #6b7280;
   /* Text on a chart colour, as a person's name on their cursor. */
   --chart-foreground: oklch(0.985 0 0);
 }
@@ -153,10 +149,6 @@
   --chart-2: #d95926;
   --chart-3: #199e70;
   --chart-4: #e874bd;
-  --chart-5: #9d84ec;
-  --chart-6: #d1a338;
-  --chart-7: #2fa7b3;
-  --chart-8: #9ca3af;
   --chart-foreground: oklch(0.145 0 0);
 }
 
@@ -166,10 +158,6 @@
   --ts-chart-2: var(--chart-2);
   --ts-chart-3: var(--chart-3);
   --ts-chart-4: var(--chart-4);
-  --ts-chart-5: var(--chart-5);
-  --ts-chart-6: var(--chart-6);
-  --ts-chart-7: var(--chart-7);
-  --ts-chart-8: var(--chart-8);
 }
 
 /* Window chrome is optional and independent of authenticated route lifetime. */
@@ -674,25 +662,6 @@ html[data-panel-resizing] webview {
     }
     &[aria-expanded="false"]::before {
       @apply -rotate-45;
-    }
-  }
-  /* A range or chart of a live sheet: a caption naming it, then the cells, compact and read-only. */
-  .rich-editor .sheet-embed {
-    @apply flex flex-col gap-1.5 rounded-xl;
-    &[data-selected] {
-      @apply ring-ring/50 ring-2;
-    }
-    & .sheet-embed-caption {
-      @apply text-muted-foreground flex max-w-full items-center gap-1.5 self-start text-xs [&_svg]:size-3.5 [&_svg]:shrink-0;
-    }
-    & .sheet-embed-table {
-      @apply max-w-full overflow-x-auto rounded-lg border;
-    }
-    & table {
-      @apply w-auto min-w-full tabular-nums;
-    }
-    & td {
-      @apply min-w-0 px-2 py-1 whitespace-pre;
     }
   }
   /* Footnotes number themselves by their order in the text. */

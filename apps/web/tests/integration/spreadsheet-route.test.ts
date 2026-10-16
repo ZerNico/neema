@@ -12,11 +12,8 @@ import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts"
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
-import {
-  createSpreadsheet,
-  editSpreadsheet,
-  previewSpreadsheet,
-} from "~/modules/spreadsheets/server/adapter.ts";
+import { createSpreadsheet, editSpreadsheet } from "~/modules/spreadsheets/server/adapter.ts";
+import { previewSpreadsheet } from "~/modules/spreadsheets/server/preview.ts";
 import {
   SpreadsheetProcessor,
   type SpreadsheetWork,
@@ -148,13 +145,18 @@ describe("spreadsheet preview route", () => {
     expect(await first.json()).toMatchObject({
       sheet: "Sheet1",
       sheets: [{ name: "Sheet1" }, { name: "Totals" }],
-      rows: [
-        [{ text: "Item" }, { text: "Cost" }],
-        [{ text: "Rent" }, { text: "900" }],
+      cells: [
+        { row: 1, col: 1, value: "Item" },
+        { row: 1, col: 2, value: "Cost" },
+        { row: 2, col: 1, value: "Rent" },
+        { row: 2, col: 2, value: 900 },
       ],
     });
     const totals = await get("attachment", attachment.id, owner, "Totals");
-    expect(await totals.json()).toMatchObject({ sheet: "Totals", rows: [[{ text: "10800" }]] });
+    expect(await totals.json()).toMatchObject({
+      sheet: "Totals",
+      cells: [{ row: 1, col: 1, value: 10800, formula: "=Sheet1!B2*12" }],
+    });
     expect(work).toHaveBeenCalledTimes(2);
 
     // The cached grid is served only after the request's own access check.

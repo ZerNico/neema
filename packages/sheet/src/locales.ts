@@ -1,29 +1,20 @@
 /**
- * What a sheet's locale changes: separators, names and the order dates are
- * typed in. Tables of our own rather than Intl, so every browser and the
- * server write the same text for the same value. Function names stay
- * English in every locale; a formula's separators follow it only where a
- * person reads or types one (`formula-locale.ts`).
+ * What a locale changes in how a value shows: separators and the names of
+ * months and days. Tables of our own rather than Intl, so every browser and
+ * the server write the same text for the same value.
  */
 export interface SheetLocale {
   readonly id: string;
   readonly decimal: string;
   readonly group: string;
-  /** Between a function's arguments as a person types them: ";" where "," is the decimal. */
-  readonly listSeparator: "," | ";";
   readonly dateSeparator: string;
   readonly timeSeparator: string;
-  /** How a typed date with three numbers is read, and the short date it is shown in. */
-  readonly dateOrder: "MDY" | "DMY" | "YMD";
-  readonly shortDate: string;
   readonly months: readonly string[];
   readonly monthsShort: readonly string[];
   readonly days: readonly string[];
   readonly daysShort: readonly string[];
   readonly am: string;
   readonly pm: string;
-  /** The local currency, as a typed amount carries it and a currency format writes it. */
-  readonly currency: { readonly symbol: string; readonly before: boolean; readonly lcid: string };
 }
 
 const ENGLISH_MONTHS = [
@@ -47,26 +38,19 @@ export const EN_US: SheetLocale = {
   id: "en-US",
   decimal: ".",
   group: ",",
-  listSeparator: ",",
   dateSeparator: "/",
   timeSeparator: ":",
-  dateOrder: "MDY",
-  shortDate: "m/d/yyyy",
   months: ENGLISH_MONTHS,
   monthsShort: short(ENGLISH_MONTHS),
   days: ENGLISH_DAYS,
   daysShort: short(ENGLISH_DAYS),
   am: "AM",
   pm: "PM",
-  currency: { symbol: "$", before: true, lcid: "409" },
 };
 
 export const EN_GB: SheetLocale = {
   ...EN_US,
   id: "en-GB",
-  dateOrder: "DMY",
-  shortDate: "dd/mm/yyyy",
-  currency: { symbol: "£", before: true, lcid: "809" },
 };
 
 const GERMAN_MONTHS = [
@@ -96,18 +80,14 @@ export const DE_DE: SheetLocale = {
   id: "de-DE",
   decimal: ",",
   group: ".",
-  listSeparator: ";",
   dateSeparator: ".",
   timeSeparator: ":",
-  dateOrder: "DMY",
-  shortDate: "dd/mm/yyyy",
   months: GERMAN_MONTHS,
   monthsShort: short(GERMAN_MONTHS),
   days: GERMAN_DAYS,
   daysShort: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
   am: "AM",
   pm: "PM",
-  currency: { symbol: "€", before: false, lcid: "407" },
 };
 
 const FRENCH_MONTHS = [
@@ -129,11 +109,8 @@ export const FR_FR: SheetLocale = {
   decimal: ",",
   // A narrow no-break space, as French Excel groups thousands.
   group: "\u202f",
-  listSeparator: ";",
   dateSeparator: "/",
   timeSeparator: ":",
-  dateOrder: "DMY",
-  shortDate: "dd/mm/yyyy",
   months: FRENCH_MONTHS,
   monthsShort: [
     "janv.",
@@ -153,7 +130,6 @@ export const FR_FR: SheetLocale = {
   daysShort: ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."],
   am: "AM",
   pm: "PM",
-  currency: { symbol: "€", before: false, lcid: "40C" },
 };
 
 export const SHEET_LOCALES: readonly SheetLocale[] = [EN_US, EN_GB, DE_DE, FR_FR];

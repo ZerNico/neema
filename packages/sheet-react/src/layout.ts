@@ -1,11 +1,9 @@
-import { positions, type AxisEntry, type AxisProps } from "@chat/sheet/model";
+import type { AxisProps } from "./grid-model.ts";
 
 /** Excel's defaults on screen: a row of 15 points, a column of 8.43 characters. */
 export const ROW_PX = 20;
 export const COLUMN_PX = 64;
 export const HEADER_ROW_PX = 24;
-/** The outline gutter's width per level. */
-export const OUTLINE_STEP = 14;
 export const HEADER_COLUMN_PX = 48;
 
 /** A row's stored height is in points, a column's width in characters, as Excel keeps them. */
@@ -14,7 +12,7 @@ export const rowPx = (props: AxisProps | undefined) =>
 export const columnPx = (props: AxisProps | undefined) =>
   props?.hidden ? 0 : props?.size === undefined ? COLUMN_PX : Math.round(props.size * 7 + 5);
 
-/** One axis laid out: each live entry's start, so a pixel finds its row or column. */
+/** One axis laid out: each entry's start, so a pixel finds its row or column. */
 export interface AxisLayout {
   readonly ids: readonly string[];
   /** `starts[i]` is where entry i begins; `starts[ids.length]` is the total. */
@@ -26,11 +24,10 @@ export interface AxisLayout {
 }
 
 export function axisLayout(
-  entries: readonly AxisEntry[],
+  ids: readonly string[],
   props: Readonly<Record<string, AxisProps>>,
   measure: (props: AxisProps | undefined) => number,
 ): AxisLayout {
-  const { ids } = positions(entries);
   const starts = new Float64Array(ids.length + 1);
   for (let index = 0; index < ids.length; index++)
     starts[index + 1] = starts[index]! + measure(props[ids[index]!]);
@@ -50,24 +47,6 @@ export function axisLayout(
     },
     size: (index) => starts[index + 1]! - starts[index]!,
   };
-}
-
-/**
- * An axis as the grid draws it: IDs a filter or a collapsed group hides
- * measure as hidden ones do, without being stored so.
- */
-export function drawnLayout(
-  entries: readonly AxisEntry[],
-  props: Readonly<Record<string, AxisProps>>,
-  hidden: Iterable<string>,
-  measure: (props: AxisProps | undefined) => number,
-): AxisLayout {
-  let shown = props;
-  for (const id of hidden) {
-    if (shown === props) shown = { ...props };
-    (shown as Record<string, AxisProps>)[id] = { ...props[id], hidden: true };
-  }
-  return axisLayout(entries, shown, measure);
 }
 
 /** The entries a viewport shows, with a few beyond each edge so scrolling never shows a gap. */

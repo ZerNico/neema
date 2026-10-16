@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble, type DisplayMessage } from "./message-list.tsx";
 import { PLACED_CALL_PREFIX, withLiveText } from "./live-message.ts";
 import { createLiveText, type LiveTextSnapshot } from "../client/live-text.ts";
@@ -25,6 +25,7 @@ const render = (ui: Parameters<typeof renderUnwrapped>[0]) =>
   renderUnwrapped(ui, { wrapper: DetailPanelProvider });
 import { composerText, setComposerText } from "./composer-test-utils.ts";
 import { FileReferenceContext } from "./file-reference-context.ts";
+import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
 
 // Sources an earlier message registered, as the view hands them to a row.
 const inheritedFrom = (sources: ToolSource[]) => inheritSources([sources, []])[1]!;
@@ -936,6 +937,7 @@ describe("MessageBubble", () => {
 });
 
 describe("MessageBubble attachments", () => {
+  afterEach(() => vi.unstubAllGlobals());
   const attachment = (overrides: Partial<MessageAttachment> = {}): MessageAttachment => ({
     id: "a-1",
     fileName: "notes.txt",
@@ -1017,6 +1019,62 @@ describe("MessageBubble attachments", () => {
       "href",
       "/api/files/a-deck",
     );
+  });
+
+  it("hands a comment on a sent workbook's cells to the chat, naming the file", async () => {
+    const book = attachment({
+      id: "0199a000-0000-7000-8000-000000000001",
+      fileName: "book.xlsx",
+      mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      kind: "file",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          sheets: [{ name: "Data" }],
+          sheet: "Data",
+          rows: 1,
+          cols: 1,
+          cells: [{ row: 1, col: 1, value: "Price" }],
+          styles: [],
+          widths: [],
+          heights: [],
+          merges: [],
+          hiddenRows: [],
+          hiddenCols: [],
+          conditional: [],
+          charts: [],
+          otherCharts: 0,
+          images: [],
+          truncated: false,
+        }),
+      ),
+    );
+    const send = vi.fn(async () => true);
+    const view = render(
+      <FileCommentContext value={send}>
+        <MessageBubble message={userMessage("", [book])} />
+      </FileCommentContext>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: /book\.xlsx/ }));
+    const dialog = screen.getByRole("dialog");
+    await within(dialog).findByRole("gridcell", { name: "Price" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Comment" }));
+    const box = await screen.findByRole("textbox", { name: "Comment on A1" });
+    fireEvent.change(box, { target: { value: "Make it a total" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledExactlyOnceWith(
+        `Comment on “Data!A1 · Price” in book.xlsx (attachment:${book.id}): Make it a total`,
+      ),
+    );
+    // Outside a chat, as in a project's files, there is nobody to comment to.
+    view.unmount();
+    render(<MessageBubble message={userMessage("", [book])} />);
+    fireEvent.click(screen.getByRole("link", { name: /book\.xlsx/ }));
+    await within(screen.getByRole("dialog")).findByRole("gridcell", { name: "Price" });
+    expect(screen.queryByRole("button", { name: "Comment" })).toBeNull();
   });
 
   it("draws no text bubble for an attachment-only turn", () => {

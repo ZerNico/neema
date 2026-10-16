@@ -24,7 +24,7 @@ export const spreadsheetWorkerUrl = workerEntry(
 
 /** Checks what the parent can before any worker is involved. */
 function admit(request: SpreadsheetWork) {
-  if (request.kind === "create" || request.kind === "exportLive") return;
+  if (request.kind === "create") return;
   if (request.bytes.length > SPREADSHEET_LIMITS.compressedBytes)
     throw new SpreadsheetError(
       "limit",

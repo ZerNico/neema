@@ -1,9 +1,5 @@
-import type { SheetLocale } from "@chat/sheet/locales";
-import type { Sheet, SheetDoc } from "@chat/sheet/model";
-import type { SheetValues } from "@chat/sheet/model/calc";
-import { cellStyle } from "@chat/sheet/model/style";
-import { cellDisplay } from "./display.ts";
-import { textWidth, type AxisLayout } from "./layout.ts";
+import type { GridSheet } from "./grid-model.ts";
+import type { AxisLayout } from "./layout.ts";
 import type { CellRef, SheetSelection } from "./selection.ts";
 
 /** A cell by its row and column indexes, as merges and drawn cells are keyed. */
@@ -76,7 +72,7 @@ export function regionAround(cells: FilledCells, row: number, col: number) {
 
 /** The last row and column anything is written in, where Ctrl+End goes. */
 export function usedEnd(
-  cells: Sheet["cells"],
+  cells: GridSheet["cells"],
   rowIndex: ReadonlyMap<string, number>,
   colIndex: ReadonlyMap<string, number>,
 ) {
@@ -94,47 +90,24 @@ export function usedEnd(
   return [row, col] as const;
 }
 
-/**
- * What a double-click on a header's edge sizes it to, as Excel's AutoFit:
- * a column as wide as its widest shown text, a row as tall as its largest
- * font. Null when it holds nothing to fit.
- */
-export function autofit(
-  of: {
-    cells: Sheet["cells"];
-    values: SheetValues;
-    sheet: string;
-    locale: SheetLocale;
-  },
-  axis: "rows" | "columns",
-  id: string,
-): number | null {
-  let largest = 0;
-  for (const [r, row] of Object.entries(of.cells)) {
-    if (axis === "rows" && r !== id) continue;
-    for (const [c, cell] of Object.entries(row)) {
-      if (axis === "columns" && c !== id) continue;
-      const style = cellStyle(cell.s);
-      const fontPx = style.fontSize ? (style.fontSize * 4) / 3 : 14;
-      if (axis === "rows") {
-        largest = Math.max(largest, Math.ceil(fontPx * 1.4));
-        continue;
-      }
-      const shown = cellDisplay(of.values.value(of.sheet, r, c), style, of.locale).text;
-      if (shown) largest = Math.max(largest, textWidth(shown, fontPx, style.bold) + 10);
-    }
-  }
-  return largest ? Math.ceil(Math.max(axis === "columns" ? 24 : 20, largest)) : null;
+/** A merged range by row and column index, its corners included. */
+interface Span {
+  readonly top: number;
+  readonly left: number;
+  readonly bottom: number;
+  readonly right: number;
 }
 
-/** Row and column indexes of every merged range, and the cells each hides. */
-export function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols: AxisLayout) {
+/**
+ * Every merged range by its anchor's indexes, and the ones over a row. A
+ * row's are found when first asked and kept, never by listing each cell a
+ * merge covers: one merge may cover the whole sheet.
+ */
+export function mergeIndex(sheet: GridSheet, rows: AxisLayout, cols: AxisLayout) {
   const rowAt = new Map(rows.ids.map((id, index) => [id, index]));
   const colAt = new Map(cols.ids.map((id, index) => [id, index]));
-  const spans = new Map<string, { top: number; left: number; bottom: number; right: number }>();
-  const covered = new Set<string>();
-  const byRow = new Map<number, { top: number; left: number; bottom: number; right: number }[]>();
-  for (const merge of doc.sheet[sheet]!.merges) {
+  const spans = new Map<string, Span>();
+  for (const merge of sheet.merges) {
     const [top, bottom, left, right] = [
       rowAt.get(merge.r1),
       rowAt.get(merge.r2),
@@ -143,15 +116,22 @@ export function mergeIndex(doc: SheetDoc, sheet: string, rows: AxisLayout, cols:
     ];
     if (top === undefined || bottom === undefined || left === undefined || right === undefined)
       continue;
-    const span = { top, left, bottom, right };
-    spans.set(key(top, left), span);
-    for (let row = top; row <= bottom; row++) {
-      const inRow = byRow.get(row) ?? [];
-      inRow.push(span);
-      byRow.set(row, inRow);
-      for (let col: number = left; col <= right; col++)
-        if (row !== top || col !== left) covered.add(key(row, col));
-    }
+    spans.set(key(top, left), { top, left, bottom, right });
   }
-  return { spans, covered, byRow };
+  const all = [...spans.values()];
+  const rowsSeen = new Map<number, readonly Span[]>();
+  const inRow = (row: number): readonly Span[] => {
+    let found = rowsSeen.get(row);
+    if (!found) {
+      found = all.filter((span) => span.top <= row && span.bottom >= row);
+      rowsSeen.set(row, found);
+    }
+    return found;
+  };
+  /** Whether a merge hides the cell: inside one, but not its anchor. */
+  const covered = (row: number, col: number) =>
+    inRow(row).some(
+      (span) => col >= span.left && col <= span.right && (row !== span.top || col !== span.left),
+    );
+  return { spans, covered, inRow };
 }

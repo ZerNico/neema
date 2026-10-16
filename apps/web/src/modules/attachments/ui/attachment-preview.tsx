@@ -26,17 +26,31 @@ import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 import { DetailPanelAvailableContext, DetailPanelContext } from "~/ui/detail-panel-context.ts";
 import type { DetailPanelRequest } from "~/ui/detail-panel-state.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
+import { commentMessage } from "~/modules/chat/comment-message.ts";
+import { FileCommentContext, type SendFileComment } from "./file-comment.ts";
 
 /** Each Office family's preview; the compiler keeps the table complete. */
 const OFFICE_PREVIEWS = {
   presentation: PresentationPreview,
   spreadsheet: SpreadsheetPreview,
   word: WordPreview,
-} satisfies Record<OfficeFamily, (props: { source: OfficeFile }) => ReactNode>;
+} satisfies Record<
+  OfficeFamily,
+  (props: { source: OfficeFile; onComment?: FileComment | undefined }) => ReactNode
+>;
 
-function OfficeFilePreview({ office }: { office: OfficePreview }) {
+/** A comment on part of a file, by a quote of that part; false when it could not be sent. */
+type FileComment = (quote: string, body: string) => Promise<boolean>;
+
+function OfficeFilePreview({
+  office,
+  onComment,
+}: {
+  office: OfficePreview;
+  onComment: FileComment | undefined;
+}) {
   const Preview = OFFICE_PREVIEWS[office.type];
-  return <Preview source={office.source} />;
+  return <Preview source={office.source} onComment={onComment} />;
 }
 
 /** What the preview needs to render an attachment's content. */
@@ -90,12 +104,13 @@ export function AttachmentPreviewDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const panel = use(DetailPanelContext);
+  const comment = use(FileCommentContext);
   const panelAvailable = use(DetailPanelAvailableContext);
-  // In the desktop app a new tab is the computer's browser, which may not be
-  // signed in, so a file with a preview opens beside the chat instead. A
-  // settings page has no panel and keeps the plain actions.
-  const sidebar =
-    useDesktop() !== null && panel && panelAvailable && hasPreview(target) ? panel : null;
+  // A file with a preview can open beside the chat, to read alongside it; a
+  // settings page has no panel. In the desktop app a new tab is the computer's
+  // browser, which may not be signed in, so there the file downloads instead.
+  const desktop = useDesktop() !== null;
+  const sidebar = panel && panelAvailable && hasPreview(target) ? panel : null;
   const [toolbar, setToolbar] = useState<HTMLElement | null>(null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -109,24 +124,29 @@ export function AttachmentPreviewDialog({
             <DialogTitle className="min-w-0 flex-1 truncate">{target.fileName}</DialogTitle>
             <div className="flex shrink-0 items-center gap-2">
               <span ref={setToolbar} className="contents" />
-              {actions ??
-                (sidebar ? (
-                  <>
+              {actions ?? (
+                <>
+                  {sidebar ? (
                     <PreviewAction
                       icon={PanelRightIcon}
                       label="Open in sidebar"
                       onClick={() => {
-                        sidebar.open(filePanelRequest(target));
+                        sidebar.open(filePanelRequest(target, comment));
                         onOpenChange(false);
                       }}
                     />
+                  ) : null}
+                  {desktop || target.kind === "file" ? (
                     <DownloadAction target={target} />
-                  </>
-                ) : target.kind === "file" ? (
-                  <DownloadAction target={target} />
-                ) : (
-                  <PreviewAction icon={LinkSquare02Icon} label="Open original" href={target.url} />
-                ))}
+                  ) : (
+                    <PreviewAction
+                      icon={LinkSquare02Icon}
+                      label="Open original"
+                      href={target.url}
+                    />
+                  )}
+                </>
+              )}
             </div>
           </div>
           {target.size === undefined ? null : (
@@ -134,7 +154,7 @@ export function AttachmentPreviewDialog({
           )}
         </DialogHeader>
         <PreviewToolbarContext value={toolbar}>
-          <FilePreviewBody target={target} linkable={!actions} />
+          <FilePreviewBody target={target} linkable={!actions} comment={comment} />
         </PreviewToolbarContext>
       </DialogContent>
     </Dialog>
@@ -159,7 +179,10 @@ function DownloadAction({ target }: { target: AttachmentPreviewTarget }) {
  * A stored file as a panel tab, keyed by its address so the dialog and a
  * delivered document open the same one.
  */
-export const filePanelRequest = (target: AttachmentPreviewTarget): DetailPanelRequest => ({
+export const filePanelRequest = (
+  target: AttachmentPreviewTarget,
+  comment: SendFileComment | null = null,
+): DetailPanelRequest => ({
   id: `file:${target.url}`,
   title: target.fileName,
   actions: (
@@ -167,7 +190,7 @@ export const filePanelRequest = (target: AttachmentPreviewTarget): DetailPanelRe
       <DownloadAction target={target} />
     </div>
   ),
-  body: <FilePreviewBody target={target} linkable={false} />,
+  body: <FilePreviewBody target={target} linkable={false} comment={comment} />,
 });
 
 /**
@@ -178,14 +201,27 @@ export const filePanelRequest = (target: AttachmentPreviewTarget): DetailPanelRe
 export function FilePreviewBody({
   target,
   linkable,
+  comment = null,
 }: {
   target: AttachmentPreviewTarget;
   linkable: boolean;
+  /** Where a comment on the file goes, as a message to the chat it is in; none outside one. */
+  comment?: SendFileComment | null;
 }) {
+  const source = target.office?.source;
+  // Only a chat's own attachment: the model reads it by that reference.
+  const onComment =
+    comment && source?.kind === "attachment"
+      ? (quote: string, body: string) =>
+          comment(
+            commentMessage(quote, body, { name: target.fileName, ref: `attachment:${source.id}` }),
+          )
+      : undefined;
   return target.kind === "file" && target.office && !target.unsupported ? (
     <OfficeFilePreview
       key={`${target.office.source.kind}:${target.office.source.id}`}
       office={target.office}
+      onComment={onComment}
     />
   ) : target.unsupported || target.kind === "file" ? (
     <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>

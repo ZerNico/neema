@@ -48,10 +48,10 @@ edit the wrong thing.
   resolves to one. Numbers are conversation-scoped and never shown to the reader.
 - **collection / knowledge document / version**: knowledge is collections of documents;
   each document has immutable versions; search runs over the current version's chunks.
-- **document** (conversation or project document): editable content owned by one chat or
-  one project, edited live by people and the model in an order the server sets. Of two kinds:
-  text, a ProseMirror tree written as Markdown, and a live sheet of cells and formulas held by
-  stable IDs. Never knowledge versions or transcript content.
+- **document** (conversation or project document): editable text owned by one chat or one
+  project, a ProseMirror tree written as Markdown, edited live by people and the model in an
+  order the server sets. Never knowledge versions or transcript content. An Excel workbook is
+  never a document: it is a file, edited by the spreadsheet tools and shown read-only.
 - **project**: instructions, documents, files and memory shared by members (owner,
   editor, viewer) for continuing work. Chats in it stay their owner's alone; each attempt
   re-resolves the project like an agent. Project memory holds facts about the work,
@@ -268,12 +268,9 @@ skipped one on purpose.
   start queued Work.
 - `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
   text replacement, measuring the package before the parser, structured previews.
-- `docs/internals/sheets.md`: live sheets. Rows, columns and sheets by stable ID, formulas held by
-  them, deletes as marks that move range endpoints inward, total deterministic apply, per-client
-  sequence numbers.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
   (dependency order, legacy versus dynamic-array formulas, parity with real Excel),
-  containment and previews.
+  containment, the read-only viewer of stored values, and comments on cells as messages.
 - `docs/internals/streaming.md`: answers generated apart from the request, numbered chunks,
   subscribe before replay so a reload or a second tab joins a running answer.
 - `docs/internals/deployment.md`: the image, migrations on start, the shell-mode trap, and
@@ -341,7 +338,7 @@ All release candidates. Pin exactly; never float to `latest`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
 - `@tanstack/charts` is pinned exact (1.x, after an API that moved every pre-1.0
-  release); re-probe the analytics charts and sheet charts on a bump.
+  release); re-probe the analytics charts on a bump.
 - `@office-kit/xlsx` (pre-1.0, in apps/web) and `@formulajs/formulajs` (the one dependency
   of `packages/sheet`) are pinned exact. Formulas are calculated by our own engine on
   formula.js, not HyperFormula, which is GPL-3.0; keep the calculation MIT unless that

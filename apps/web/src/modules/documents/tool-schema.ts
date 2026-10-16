@@ -7,17 +7,11 @@ export const DocumentToolName = Schema.Literals([
   "read_chat_document",
   "list_chat_documents",
   "comment_on_document",
-  "create_sheet",
-  "edit_sheet",
 ]);
 export type DocumentToolName = typeof DocumentToolName.Type;
 /** Calls that write into a document while their arguments stream, so they show as running from the start. */
 export const isDocumentWrite = (name: string): name is DocumentToolName =>
-  name === "create_document" ||
-  name === "edit_document" ||
-  name === "comment_on_document" ||
-  name === "create_sheet" ||
-  name === "edit_sheet";
+  name === "create_document" || name === "edit_document" || name === "comment_on_document";
 export const DocumentToolOutcome = Schema.Literals([
   "created",
   "updated",

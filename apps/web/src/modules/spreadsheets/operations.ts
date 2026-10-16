@@ -17,18 +17,18 @@ type OwnField = {
   readonly type: "sheet" | "cell" | "range" | "columns" | "rowSpan" | "color" | "rows";
   readonly about: string;
 };
-export type Definition = OfficeDefinition<OwnField>;
+type Definition = OfficeDefinition<OwnField>;
 
-export const sheet = {
+const sheet = {
   type: "sheet",
   about: "Sheet name, exactly as inspect_spreadsheet lists it.",
 } as const;
-export const range = {
+const range = {
   type: "range",
   about: 'A cell or rectangle on the sheet, e.g. "B2" or "A1:D20".',
 } as const;
 
-export const SPREADSHEET_OPERATIONS = {
+const SPREADSHEET_OPERATIONS = {
   setCells: {
     about:
       'Write values starting at one cell: rows[0] fills the start row left to right, rows[1] the next. A string starting with "=" is a formula (e.g. "=SUM(B2:B9)"); start with an apostrophe to write text that begins with "=". null clears a cell.',
@@ -220,7 +220,7 @@ export const SPREADSHEET_OPERATIONS = {
 
 type Catalog = typeof SPREADSHEET_OPERATIONS;
 export type SpreadsheetOperationKind = keyof Catalog;
-export type CellInput = string | number | boolean | null;
+type CellInput = string | number | boolean | null;
 
 type ValueOf<F> = F extends { type: "integer" | "number" }
   ? number
@@ -238,11 +238,12 @@ type ValueOf<F> = F extends { type: "integer" | "number" }
 type Shape<Fs, R> = { -readonly [K in keyof Fs & R]: ValueOf<Fs[K]> } & {
   -readonly [K in Exclude<keyof Fs, R>]?: ValueOf<Fs[K]>;
 };
-/** One operation of a catalog, typed from its table. */
-export type OperationOf<T extends Record<string, Definition>> = {
-  [K in keyof T & string]: { kind: K } & Shape<T[K]["fields"], T[K]["required"][number]>;
-}[keyof T & string];
-export type SpreadsheetOperation = OperationOf<Catalog>;
+export type SpreadsheetOperation = {
+  [K in keyof Catalog & string]: { kind: K } & Shape<
+    Catalog[K]["fields"],
+    Catalog[K]["required"][number]
+  >;
+}[keyof Catalog & string];
 
 const COLUMN = /^[A-Z]{1,3}$/;
 const ROW = /^[1-9]\d{0,6}$/;
@@ -344,32 +345,26 @@ function value(field: OwnField, raw: unknown, path: string, wrong: () => never):
   }
 }
 
-/** The engine for a table of spreadsheet operations: the Excel tools' or a live sheet's. */
-export const spreadsheetEngine = (
-  operations: Readonly<Record<string, Definition>>,
-  maxOperations: number,
-) =>
-  operationEngine({
-    operations,
-    maxOperations,
-    Error: SpreadsheetError,
-    own: {
-      describe,
-      value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
-      schema: (field) =>
-        field.type === "rows"
-          ? {
+const engine = operationEngine({
+  operations: SPREADSHEET_OPERATIONS,
+  maxOperations: SPREADSHEET_LIMITS.operationsPerCall,
+  Error: SpreadsheetError,
+  own: {
+    describe,
+    value: (field, raw, path, _stage, wrong) => value(field, raw, path, wrong),
+    schema: (field) =>
+      field.type === "rows"
+        ? {
+            type: "array",
+            description: field.about,
+            items: {
               type: "array",
-              description: field.about,
-              items: {
-                type: "array",
-                items: { type: ["string", "number", "boolean", "null"] },
-              },
-            }
-          : { type: "string", description: field.about },
-    },
-  });
-const engine = spreadsheetEngine(SPREADSHEET_OPERATIONS, SPREADSHEET_LIMITS.operationsPerCall);
+              items: { type: ["string", "number", "boolean", "null"] },
+            },
+          }
+        : { type: "string", description: field.about },
+  },
+});
 
 /** Validates a batch before any worker opens the workbook. */
 export function parseSpreadsheetOperations(input: unknown): SpreadsheetOperation[] {

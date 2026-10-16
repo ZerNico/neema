@@ -83,7 +83,7 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
           aria-label="Find in document"
           placeholder="Find in document"
           value={query}
-          // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the sheet's find bar does.
+          // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the bar's other controls do.
           className="h-7 border-0 text-xs shadow-none focus-visible:ring-0"
           onChange={(event) => searchFor(event.target.value)}
           onKeyDown={(event) =>

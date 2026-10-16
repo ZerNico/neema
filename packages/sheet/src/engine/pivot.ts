@@ -1,6 +1,6 @@
 import { CALC, DIV0, Grid, SPILL, VALUE, XError, compare, extent, type Scalar } from "./values.ts";
 
-/** The most cells a PIVOTBY makes, as many as a live sheet lets one formula spill into. */
+/** The most cells a PIVOTBY makes, as many as one formula may spill into. */
 export const PIVOT_CELLS = 200_000;
 
 /**

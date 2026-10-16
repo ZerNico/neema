@@ -10,7 +10,7 @@ import {
   Comment01Icon,
   RefreshIcon,
 } from "@hugeicons/core-free-icons";
-import { readCommentMessage } from "~/modules/documents/comment-message.ts";
+import { readCommentMessage } from "../comment-message.ts";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   createContext,
@@ -104,6 +104,7 @@ import {
   AttachmentPreviewDialog,
   filePanelRequest,
 } from "~/modules/attachments/ui/attachment-preview.tsx";
+import { FileCommentContext, type SendFileComment } from "~/modules/attachments/ui/file-comment.ts";
 import {
   useDetailPanel,
   useDetailPanelAvailable,
@@ -501,7 +502,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
             <div className="bg-card text-card-foreground flex max-w-[80%] flex-col gap-1.5 rounded-2xl border px-4 py-3 text-sm">
               <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                 <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} className="size-3.5" />
-                <span className="truncate">Comment on “{comment.quote}”</span>
+                <span className="truncate">
+                  Comment on “{comment.quote}”{comment.file ? ` in ${comment.file}` : null}
+                </span>
               </span>
               <span className="whitespace-pre-wrap wrap-anywhere leading-relaxed">
                 {comment.body}
@@ -573,14 +576,17 @@ function StoredAttachmentChip({
 // Files this page already opened by itself: the list remounts rows on scroll.
 const AUTO_OPENED_FILES = new Set<string>();
 
-const attachmentPanelRequest = (attachment: Attachment) =>
-  filePanelRequest({
-    fileName: attachment.fileName,
-    size: attachment.size,
-    kind: attachment.kind,
-    url: attachmentUrl(attachment.id),
-    office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
-  });
+const attachmentPanelRequest = (attachment: Attachment, comment: SendFileComment | null) =>
+  filePanelRequest(
+    {
+      fileName: attachment.fileName,
+      size: attachment.size,
+      kind: attachment.kind,
+      url: attachmentUrl(attachment.id),
+      office: officePreview(attachment, { kind: "attachment", id: attachment.id }),
+    },
+    comment,
+  );
 
 /**
  * A document an answer delivers opens beside the chat as it arrives, as
@@ -590,7 +596,8 @@ const attachmentPanelRequest = (attachment: Attachment) =>
 function useDeliveredFilePanel(attachment: Attachment, fresh: boolean) {
   const panel = useDetailPanel();
   const available = useDetailPanelAvailable();
-  const request = useMemo(() => attachmentPanelRequest(attachment), [attachment]);
+  const comment = use(FileCommentContext);
+  const request = useMemo(() => attachmentPanelRequest(attachment, comment), [attachment, comment]);
   const { id } = request;
   const open = useDetailPanelTabIds().includes(id);
   useDetailPanelTabContent(id, open ? request : null);

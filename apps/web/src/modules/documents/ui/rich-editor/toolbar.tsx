@@ -42,7 +42,6 @@ import {
   TextUnderlineIcon,
   HighlighterIcon,
   Image01Icon,
-  FileSpreadsheetIcon,
   TextStrikethroughIcon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -77,7 +76,6 @@ import { OutlineMenu } from "./outline-menu.tsx";
 import { Ribbon, type RibbonTab } from "../ribbon.tsx";
 import { isoDay } from "./dates.ts";
 import { pickImages } from "./image-upload.ts";
-import { openSheetPicker } from "./sheet-embeds.ts";
 import { VersionHistoryDialog } from "./version-history.tsx";
 
 type Chain = ReturnType<Editor["chain"]>;
@@ -237,7 +235,7 @@ const insert = (content: Parameters<Chain["insertContent"]>[0]) => (chain: Chain
   chain.insertContent(content);
 
 /**
- * The document's ribbon, as the sheet's. Every control is a command on the
+ * The document's ribbon. Every control is a command on the
  * shared tree, so what it does syncs like typing.
  */
 export function DocumentToolbar({ editor, documentId }: { editor: Editor; documentId: string }) {
@@ -382,12 +380,6 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
                 label="Image"
                 disabled={false}
                 onPress={() => pickImages(editor)}
-              />
-              <Action
-                icon={FileSpreadsheetIcon}
-                label="Sheet"
-                disabled={false}
-                onPress={() => openSheetPicker(editor)}
               />
               {action("Divider", MinusSignIcon, (c) => c.setHorizontalRule())}
               {action(

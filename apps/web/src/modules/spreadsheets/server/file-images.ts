@@ -1,84 +1,43 @@
-import { parseCell } from "@chat/sheet/a1";
-import { IMAGE_LIMITS } from "@chat/sheet/model/image";
-import { addImageAt, makeOneCellAnchor, type DrawingItem } from "@office-kit/xlsx/drawing";
+import type { DrawingItem } from "@office-kit/xlsx/drawing";
 import type { Worksheet } from "@office-kit/xlsx/worksheet";
+import { SPREADSHEET_LIMITS } from "../limits.ts";
+import type { SpreadsheetPreview } from "../preview.ts";
 import { anchorSize, EMU_PER_PIXEL } from "./file-anchors.ts";
 
-/**
- * Pictures as Excel files keep them: embedded bytes on a drawing, anchored
- * to a cell. Live sheets keep a picture as a data URL, so this turns one
- * into the other; kinds a live sheet does not show are left out.
- */
-export interface FileImage {
-  readonly sheet: string;
-  readonly at: string;
-  readonly offset?: { readonly x: number; readonly y: number };
-  readonly width: number;
-  readonly height: number;
-  /** The picture as a data URL, as the live sheet keeps it. */
-  readonly src: string;
-  readonly alt?: string;
-}
-
+/** Picture formats a browser draws; others are left out of a preview. */
 const KINDS = new Set(["png", "jpeg", "gif", "webp"]);
+/** How far into its cell a picture's corner may sit, and how large it may draw, in pixels. */
+const OFFSET = 2_000;
+const SIZE = { min: 16, max: 2_000 };
 
-/** Places a picture on its sheet, offset into its cell when it has one. */
-export function writeImage(sheet: Worksheet, image: FileImage) {
-  const parsed = /^data:image\/(png|jpeg|gif|webp);base64,(.+)$/.exec(image.src);
-  const corner = parseCell(image.at);
-  if (!parsed || !corner) return;
-  const bytes = new Uint8Array(Buffer.from(parsed[2]!, "base64"));
-  const item = addImageAt(sheet, image.at, bytes, {
-    widthPx: image.width,
-    heightPx: image.height,
-  });
-  if (item.content.kind === "picture" && image.alt) item.content.picture.descr = image.alt;
-  if (image.offset)
-    item.anchor = makeOneCellAnchor({
-      from: {
-        col: corner.column - 1,
-        row: corner.row - 1,
-        colOff: Math.round(image.offset.x * EMU_PER_PIXEL),
-        rowOff: Math.round(image.offset.y * EMU_PER_PIXEL),
-      },
-      widthPx: image.width,
-      heightPx: image.height,
-    });
-}
+const clamp = (value: number, min: number, max: number) =>
+  Math.round(Math.min(max, Math.max(min, value)));
 
-const cellRef = (row: number, col: number) => {
-  let letters = "";
-  for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26))
-    letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
-  return `${letters}${row + 1}`;
-};
-
-/** A picture Excel wrote, as a live sheet keeps one; null for a kind it does not show or one too large. */
-export function readImage(sheet: Worksheet, item: DrawingItem): FileImage | null {
+/**
+ * A picture Excel embedded, as a preview draws it over the cells: its corner
+ * cell, its size and its bytes as a data URL. Null for a kind a browser does
+ * not draw, one placed by absolute position, or one too large to send.
+ */
+export function readImage(
+  sheet: Worksheet,
+  item: DrawingItem,
+): SpreadsheetPreview["images"][number] | null {
   if (item.content.kind !== "picture") return null;
   const picture = item.content.picture;
   const image = picture.image;
   if (!image || !KINDS.has(image.format) || item.anchor.kind === "absolute") return null;
   const src = `data:image/${image.format};base64,${Buffer.from(image.bytes).toString("base64")}`;
-  if (src.length > IMAGE_LIMITS.src) return null;
+  if (src.length > SPREADSHEET_LIMITS.previewImageChars) return null;
   const { anchor } = item;
-  const from = anchor.from;
   const [width, height] = anchorSize(sheet, anchor);
-  const { width: wide, height: tall } = IMAGE_LIMITS;
   return {
-    sheet: sheet.title,
-    at: cellRef(from.row, from.col),
-    ...(from.colOff || from.rowOff
-      ? {
-          offset: {
-            x: Math.min(2_000, Math.max(0, Math.round(from.colOff / EMU_PER_PIXEL))),
-            y: Math.min(2_000, Math.max(0, Math.round(from.rowOff / EMU_PER_PIXEL))),
-          },
-        }
-      : {}),
-    width: Math.round(Math.min(wide.max, Math.max(wide.min, width))),
-    height: Math.round(Math.min(tall.max, Math.max(tall.min, height))),
+    row: anchor.from.row + 1,
+    col: anchor.from.col + 1,
+    x: clamp(anchor.from.colOff / EMU_PER_PIXEL, 0, OFFSET),
+    y: clamp(anchor.from.rowOff / EMU_PER_PIXEL, 0, OFFSET),
+    width: clamp(width, SIZE.min, SIZE.max),
+    height: clamp(height, SIZE.min, SIZE.max),
     src,
-    ...(picture.descr ? { alt: picture.descr.slice(0, IMAGE_LIMITS.alt) } : {}),
+    ...(picture.descr ? { alt: picture.descr.slice(0, 500) } : {}),
   };
 }

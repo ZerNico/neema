@@ -85,9 +85,8 @@ export interface DocumentPart {
   named?: boolean;
 }
 
-/** Whether a document call makes one: a text document or a sheet. */
-export const createsDocument = (name: string) =>
-  name === "create_document" || name === "create_sheet";
+/** Whether a document call makes one. */
+export const createsDocument = (name: string) => name === "create_document";
 
 /** A call that made a document: drawn as its card, which is what the person receives. */
 export const isDocumentCard = (activity: DocumentToolActivity) =>

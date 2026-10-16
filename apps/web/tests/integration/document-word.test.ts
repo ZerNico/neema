@@ -9,18 +9,15 @@ import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { attachments, conversations, documentImages, documents, user } from "~/db/schema/index.ts";
+import { attachments, documentImages, documents, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { Node } from "@tiptap/pm/model";
 import { documentSchema, parseMarkdown, toMarkdown } from "~/modules/documents/editor/markdown.ts";
-import { DOCUMENT_LIMITS } from "~/modules/documents/schema.ts";
 import { createFromWord } from "~/modules/documents/server/create-from-word.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { wordExportInput } from "~/modules/documents/server/word-export.ts";
-import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -50,7 +47,6 @@ type Services =
   | AttachmentRepo
   | AttachmentService
   | DocumentService
-  | SheetService
   | ProjectService
   | FeaturePolicy
   | WordProcessor;
@@ -84,13 +80,9 @@ beforeAll(async () => {
     Layer.provideMerge(infrastructure),
   );
   runtime = ManagedRuntime.make(
-    Layer.mergeAll(
-      DocumentService.layer,
-      SheetService.layer,
-      ProjectService.layer,
-      AttachmentService.layer,
-      word,
-    ).pipe(Layer.provideMerge(core)),
+    Layer.mergeAll(DocumentService.layer, ProjectService.layer, AttachmentService.layer, word).pipe(
+      Layer.provideMerge(core),
+    ),
   );
 }, 180_000);
 afterAll(async () => {
@@ -256,118 +248,6 @@ describe("downloading a document as Word", () => {
     expect((await download(document.id, outsider)).status).toBe(404);
     expect((await download(uuidv7(), owner)).status).toBe(404);
     expect((await download(document.id)).status).toBe(401);
-    // A live sheet is downloaded as Excel, not here.
-    const sheet = await run(
-      Effect.flatMap(SheetService, (s) => s.create(owner, { projectId, title: "Budget" })),
-    );
-    expect((await download(sheet.id, owner)).status).toBe(404);
-  });
-});
-
-describe("a sheet embedded in a document", () => {
-  /** A sheet with a label in A1 and a number in B1, written as its owner's editor would. */
-  const sheetWith = async (
-    owner: string,
-    where: { projectId: string } | { conversationId: string },
-    name: string,
-    value: number,
-  ) => {
-    const sheet = await run(
-      Effect.flatMap(SheetService, (s) => s.create(owner, { ...where, title: name })),
-    );
-    await run(
-      Effect.gen(function* () {
-        const service = yield* SheetService;
-        const { doc } = (yield* service.read(owner, sheet.id))!;
-        const sheetId = doc.sheets[0]!.id;
-        const [r] = doc.sheet[sheetId]!.rows;
-        const [a, b] = doc.sheet[sheetId]!.cols;
-        const change = {
-          clientId: "editor",
-          seq: 1,
-          ops: [
-            {
-              op: "set",
-              sh: sheetId,
-              cells: [
-                { r: r!.id, c: a!.id, v: "Rent" },
-                { r: r!.id, c: b!.id, v: value },
-              ],
-            },
-          ],
-        };
-        yield* service.push(owner, {
-          documentId: sheet.id,
-          clientId: "editor",
-          changes: [JSON.stringify(change)],
-        });
-      }),
-    );
-    return sheet;
-  };
-  const markdownOf = async (response: Response) => {
-    const read = wordToDocument(new Uint8Array(await response.arrayBuffer()), {
-      blocks: DOCUMENT_LIMITS.blocks,
-      chars: DOCUMENT_LIMITS.chars,
-      imageBytes: 1024 * 1024,
-      comments: DOCUMENT_LIMITS.comments,
-      comment: DOCUMENT_LIMITS.comment,
-      quote: DOCUMENT_LIMITS.quote,
-    });
-    return toMarkdown(Node.fromJSON(documentSchema, read.tree));
-  };
-
-  it("writes each reader only the sheets they may read, never the author's private chat", async () => {
-    const { owner, viewer, projectId } = await project();
-    // The author's own chat in the project: private to them, as every project chat is.
-    const conversationId = uuidv7();
-    await run(
-      Effect.flatMap(Db, (db) =>
-        db.insert(conversations).values({ id: conversationId, userId: owner, projectId }),
-      ),
-    );
-    const secret = await sheetWith(owner, { conversationId }, "Salaries", 9_100);
-    const shared = await sheetWith(owner, { projectId }, "Budget", 900);
-    const { document } = await run(
-      Effect.flatMap(DocumentService, (s) =>
-        s.create(owner, {
-          projectId,
-          title: "Plan",
-          content: `[sheet id="${secret.id}" range="Sheet1!A1:B1"]\n\n[sheet id="${shared.id}" range="Sheet1!A1:B1"]`,
-          by: "user",
-        }),
-      ),
-    );
-
-    expect(await markdownOf(await download(document.id, owner))).toBe(
-      [
-        "*Salaries · Sheet1!A1:B1*",
-        "| Rent | 9100 |\n| ---- | ---- |",
-        "*Budget · Sheet1!A1:B1*",
-        "| Rent | 900 |\n| ---- | --- |",
-      ].join("\n\n"),
-    );
-    // The member reads the document, and the embed names only what it holds.
-    const theirs = await markdownOf(await download(document.id, viewer));
-    expect(theirs).toBe(
-      [
-        "*Sheet range Sheet1!A1:B1*",
-        "*Budget · Sheet1!A1:B1*",
-        "| Rent | 900 |\n| ---- | --- |",
-      ].join("\n\n"),
-    );
-    expect(theirs).not.toContain("Salaries");
-    // The browser reads an embed through the same two doors, and both stay shut to them.
-    const [meta, feed] = await run(
-      Effect.all([
-        Effect.flatMap(DocumentService, (s) => s.get(viewer, secret.id)),
-        Effect.flatMap(SheetService, (s) =>
-          s.subscribe(viewer, secret.id, { sessionId: viewer, revision: null, clientId: null }),
-        ),
-      ]),
-    );
-    expect(meta).toBeNull();
-    expect(feed).toBeNull();
   });
 });
 

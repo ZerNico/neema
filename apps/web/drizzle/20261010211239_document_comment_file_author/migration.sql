@@ -1,0 +1,1 @@
+ALTER TABLE "document_comments" ADD COLUMN "file_author" text;

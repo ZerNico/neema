@@ -6,11 +6,7 @@ import { documentExtensions } from "./extensions.ts";
 import { isolatedMarked } from "./isolated-marked.ts";
 import { parseMarkdown, toModelMarkdown } from "./markdown.ts";
 
-const BLOCK_PATTERNS = new Set([
-  /\n {0,3}> ?\[!/.source,
-  /\n<details>[ \t]*\n/i.source,
-  /\n\[sheet[ \t]/.source,
-]);
+const BLOCK_PATTERNS = new Set([/\n {0,3}> ?\[!/.source, /\n<details>[ \t]*\n/i.source]);
 
 /** Search spans, not time or regex-engine instructions. Spies always call the real methods. */
 const measureDiscovery = <T>(parse: () => T) => {
@@ -86,9 +82,9 @@ describe("document Markdown discovery work", () => {
     expect(doc.childCount).toBe(count);
     expect(doc.firstChild!.textContent).toBe("Paragraph 0");
     expect(doc.lastChild!.textContent).toBe(`Paragraph ${count - 1}`);
-    expect(work.calls).toBe(3);
-    expect(work.suffixCharacters).toBeLessThanOrEqual(3 * markdown.length);
-    expect(work.searchedCharacters).toBeLessThanOrEqual(3 * markdown.length);
+    expect(work.calls).toBe(2);
+    expect(work.suffixCharacters).toBeLessThanOrEqual(2 * markdown.length);
+    expect(work.searchedCharacters).toBeLessThanOrEqual(2 * markdown.length);
   });
 
   it("rejects the former repeated-suffix algorithm with the same work bound", () => {
@@ -96,9 +92,9 @@ describe("document Markdown discovery work", () => {
     // A regular marked lexer runs the unchanged search patterns on every suffix.
     const { result: doc, work } = measureDiscovery(() => unindexed.parse(markdown));
     expect(doc.content).toHaveLength(1_000);
-    expect(work.calls).toBe(3_000);
-    expect(work.suffixCharacters).toBe(22_498_185);
-    expect(work.searchedCharacters).toBeGreaterThan(3 * markdown.length);
+    expect(work.calls).toBe(2_000);
+    expect(work.suffixCharacters).toBe(14_998_790);
+    expect(work.searchedCharacters).toBeGreaterThan(2 * markdown.length);
   });
 
   // The suite's runner timeout stays separate from these correctness and work assertions.
@@ -174,13 +170,13 @@ describe("document Markdown discovery work", () => {
   it("keeps search linear when custom interruptions have no blank lines between them", () => {
     const markdown = Array.from(
       { length: 1_000 },
-      (_, i) => `Paragraph ${i}\n[sheet id="s${i}" range="S!A1"]`,
+      (_, i) => `Paragraph ${i}\n<details>\n<summary>S${i}</summary>\n\nBody\n\n</details>`,
     ).join("\n");
     const { result: doc, work } = measureDiscovery(() => parseMarkdown(markdown));
     expect(doc.childCount).toBe(2_000);
     doc.forEach((node, _offset, index) => {
-      expect(node.type.name).toBe(index % 2 ? "sheetEmbed" : "paragraph");
-      if (index % 2) expect(node.attrs.sheet).toBe(`s${(index - 1) / 2}`);
+      expect(node.type.name).toBe(index % 2 ? "details" : "paragraph");
+      if (index % 2) expect(node.firstChild!.textContent).toBe(`S${(index - 1) / 2}`);
     });
     expect(work.searchedCharacters).toBeLessThanOrEqual(6 * markdown.length);
   });
@@ -188,7 +184,6 @@ describe("document Markdown discovery work", () => {
   it.each([
     ["callout", "> [!NOTE]\n> Body"],
     ["details", "<details>\n<summary>S</summary>\n\nBody\n\n</details>"],
-    ["sheetEmbed", '[sheet id="s" chart="c"]'],
   ])("finds a distant %s that interrupts a single paragraph", (type, block) => {
     const prefix = "ordinary text ".repeat(2_000).trimEnd();
     const markdown = `${prefix}\n${block}\n\nAfter`;
@@ -202,12 +197,12 @@ describe("document Markdown discovery work", () => {
 
   it.each([
     [
-      "nested details, fenced openings and a later embed",
-      'Before\n\n<details>\n<summary>Outer</summary>\n\nBody\n\n<details>\n<summary>Inner</summary>\n\nText\n\n</details>\n\n```html\n<details>\n</details>\n[sheet id="code" chart="c"]\n> [!TIP]\n```\n\n</details>\n\nAfter\n[sheet id="live" chart="c"]',
+      "nested details, fenced openings and a later callout",
+      "Before\n\n<details>\n<summary>Outer</summary>\n\nBody\n\n<details>\n<summary>Inner</summary>\n\nText\n\n</details>\n\n```html\n<details>\n</details>\n> [!TIP]\n```\n\n</details>\n\nAfter\n> [!NOTE]\n> Last",
     ],
     [
       "rewritten list and quote bodies",
-      'Before\n\n- item\n  > [!TIP]\n  > Text\n  >\n  > [sheet id="quoted" range="S!A1"]\n\nAfter\n[sheet id="tail" chart="c"]',
+      "Before\n\n- item\n  > [!TIP]\n  > Text\n  >\n  > More\n\nAfter\n> [!NOTE]\n> Tail",
     ],
     [
       "overlapping details discovery newlines",
@@ -225,32 +220,29 @@ describe("document Markdown discovery work", () => {
     expect(toModelMarkdown(parseMarkdown(canonical))).toBe(canonical);
   });
 
-  it("leaves indexed openings inside a fence as code, then finds the real embed", () => {
-    const code =
-      '<details>\n<summary>S</summary>\n> [!TIP]\n[sheet id="code" chart="c"]\n</details>';
-    const markdown = `Before\n\n~~~markdown\n${code}\n~~~\n\nAfter\n[sheet id="real" chart="c"]`;
+  it("leaves indexed openings inside a fence as code, then finds the real callout", () => {
+    const code = "<details>\n<summary>S</summary>\n> [!TIP]\n</details>";
+    const markdown = `Before\n\n~~~markdown\n${code}\n~~~\n\nAfter\n> [!NOTE]\n> Real`;
     const doc = parseMarkdown(markdown);
     expect(doc.childCount).toBe(4);
     expect(doc.child(1).type.name).toBe("codeBlock");
     expect(doc.child(1).textContent).toBe(code);
-    expect(doc.child(3).type.name).toBe("sheetEmbed");
-    expect(doc.child(3).attrs.sheet).toBe("real");
+    expect(doc.child(3).type.name).toBe("callout");
+    expect(doc.child(3).textContent).toBe("Real");
     expect(indexed.parse(markdown)).toEqual(unindexed.parse(markdown));
   });
 
   it("leaves escaped openings as text before a real interruption", () => {
-    const markdown =
-      'Before\n\\[sheet id="text" chart="c"]\n\\<details>\n\\> [!NOTE]\n[sheet id="real" chart="c"]\n\nAfter';
+    const markdown = "Before\n\\<details>\n\\> [!NOTE]\n> [!TIP]\n> Real\n\nAfter";
     expect(indexed.parse(markdown)).toEqual(unindexed.parse(markdown));
     const doc = parseMarkdown(markdown);
     doc.check();
     expect(doc.childCount).toBe(3);
     expect(doc.child(0).type.name).toBe("paragraph");
-    expect(doc.child(0).textContent).toContain('[sheet id="text" chart="c"]');
     expect(doc.child(0).textContent).toContain("<details>");
     expect(doc.child(0).textContent).toContain("> [!NOTE]");
-    expect(doc.child(1).type.name).toBe("sheetEmbed");
-    expect(doc.child(1).attrs.sheet).toBe("real");
+    expect(doc.child(1).type.name).toBe("callout");
+    expect(doc.child(1).textContent).toBe("Real");
   });
 
   it("does not keep discovery indexes after a call or failed nested tokenization", () => {
@@ -269,13 +261,13 @@ describe("document Markdown discovery work", () => {
       ],
     });
     const lexer = new DocumentLexer(marked.defaults);
-    lexer.blockTokens('Before\n[sheet id="first" chart="c"]');
+    lexer.blockTokens("Before\n> [!NOTE]\n> first");
     expect(Reflect.get(lexer, "starts")).toBeNull();
     expect(() =>
       lexer.blockTokens("Before\n\n<details>\n<summary>S</summary>\n\nBody\n\nfail\n\n</details>"),
     ).toThrow("nested tokenizer failure");
     expect(Reflect.get(lexer, "starts")).toBeNull();
-    const recovered = 'Before\n[sheet id="other" chart="c"]';
+    const recovered = "Before\n> [!NOTE]\n> other";
     expect(lexer.blockTokens(recovered)).toEqual(
       new DocumentLexer(marked.defaults).blockTokens(recovered),
     );

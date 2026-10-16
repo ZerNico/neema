@@ -1,9 +1,9 @@
 import { memo } from "react";
 import type { Scalar } from "@chat/sheet/engine/values";
 import type { SheetLocale } from "@chat/sheet/locales";
-import type { CellLook } from "@chat/sheet/model/conditional";
-import { cellStyle } from "@chat/sheet/model/style";
+import { cellStyle } from "@chat/sheet/style";
 import { cellCss, cellDisplay } from "./display.ts";
+import type { CellLook } from "./looks.ts";
 
 /**
  * One drawn cell, given only plain values, so a redraw of the grid passes over
@@ -23,10 +23,8 @@ export const GridCell = memo(function GridCell({
   styleKey,
   look,
   locale,
-  zoom,
   spills,
   merged,
-  linked,
 }: {
   id: string | undefined;
   /** Only the scrolling pane's cells are named for assistive tech; frozen ones repeat them. */
@@ -42,12 +40,9 @@ export const GridCell = memo(function GridCell({
   styleKey: string | undefined;
   look: CellLook | undefined;
   locale: SheetLocale;
-  zoom: number;
   /** Its text runs on over the empty cells to its right. */
   spills: boolean;
   merged: boolean;
-  /** Its formula's HYPERLINK gives it an address to open. */
-  linked: boolean;
 }) {
   // Conditional formats show over the cell's own style, as Excel draws them.
   const own = cellStyle(styleKey);
@@ -86,7 +81,7 @@ export const GridCell = memo(function GridCell({
         // Its fill and borders stay in its own column; only its text runs on, above the spill.
         zIndex: spills ? 2 : merged ? 1 : undefined,
         ...cellCss(style),
-        fontSize: (style.fontSize ? (style.fontSize * 4) / 3 : 14) * zoom,
+        fontSize: style.fontSize ? (style.fontSize * 4) / 3 : 14,
         ...(shown.color ? { color: shown.color } : {}),
       }}
     >
@@ -103,7 +98,7 @@ export const GridCell = memo(function GridCell({
       ) : null}
       <span
         className={
-          own.link || linked
+          own.link
             ? `relative underline underline-offset-2${style.fontColor || shown.color ? "" : " text-primary"}`
             : "relative"
         }

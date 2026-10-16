@@ -1,5 +1,3 @@
-import type { Worksheet } from "@office-kit/xlsx/worksheet";
-import { anchorSize, EMU_PER_PIXEL } from "./file-anchors.ts";
 import {
   makeAreaChart,
   makeBarChart,
@@ -15,7 +13,6 @@ import {
   type CategoryAxis,
   type ChartKind as FileKind,
   type ChartSpace,
-  type ChartTitle,
   type DataLabelList,
   type LegendPosition,
   type LineSeries,
@@ -27,15 +24,12 @@ import {
   makeSolidFill,
   makeSrgbColor,
   type ChartReference,
-  type DrawingItem,
   type ShapeProperties,
 } from "@office-kit/xlsx/drawing";
 
 /**
- * A chart as a file keeps it: ranges as A1 text naming their sheet, placed by
- * cell and pixels. Live sheets export to it and import from it, and the
- * Excel tools build theirs through it, so one mapping to Excel's chart parts
- * serves all three.
+ * A chart the Excel tools add: ranges as A1 text naming their sheet, placed
+ * by cell and pixels, mapped once to Excel's chart parts.
  */
 export interface FileChart {
   readonly sheet: string;
@@ -310,164 +304,4 @@ export function chartReference(
     ...(chart.legend ? { legend: { position: LEGEND[chart.legend] } } : {}),
   });
   return { space };
-}
-
-const textOf = (title: ChartTitle | undefined) =>
-  title?.text ??
-  title?.tx?.paragraphs
-    .map((paragraph) =>
-      paragraph.runs.map((run) => ("t" in run && typeof run.t === "string" ? run.t : "")).join(""),
-    )
-    .join(" ")
-    .trim() ??
-  undefined;
-const readAxis = (axis: CategoryAxis | ValueAxis | undefined): FileAxis | undefined => {
-  if (!axis) return undefined;
-  const title = textOf(axis.title);
-  const read: FileAxis = {
-    ...(title ? { title } : {}),
-    ...(axis.scaling?.min !== undefined ? { min: axis.scaling.min } : {}),
-    ...(axis.scaling?.max !== undefined ? { max: axis.scaling.max } : {}),
-    ...(axis.scaling?.logBase ? { log: true } : {}),
-    ...(axis.scaling?.orientation === "maxMin" ? { reverse: true } : {}),
-    ...(axis.delete ? { hidden: true } : {}),
-    ...(axis.numFmt && !axis.numFmt.sourceLinked && axis.numFmt.formatCode !== "General"
-      ? { format: axis.numFmt.formatCode }
-      : {}),
-    ...(axis.majorGridlines ? { gridlines: true } : {}),
-  };
-  return Object.keys(read).length ? read : undefined;
-};
-const colorOf = (shape: ShapeProperties | undefined) => {
-  const fill = shape?.fill ?? shape?.ln?.fill;
-  return fill?.kind === "solidFill" && fill.color.base.kind === "srgb"
-    ? `#${fill.color.base.value.toUpperCase()}`
-    : undefined;
-};
-const cellRef = (row: number, col: number) => {
-  let letters = "";
-  for (let n = col + 1; n > 0; n = Math.floor((n - 1) / 26))
-    letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
-  return `${letters}${row + 1}`;
-};
-
-/**
- * A chart Excel wrote, read back as a file chart; null for a kind a live
- * sheet does not draw (radar, stock, surface, 3-D and the like).
- */
-export function readFileChart(sheet: Worksheet, item: DrawingItem): FileChart | null {
-  if (item.content.kind !== "chart") return null;
-  const { anchor } = item;
-  if (anchor.kind === "absolute") return null;
-  const from = anchor.from;
-  const [width, height] = anchorSize(sheet, anchor);
-  const place = {
-    sheet: sheet.title,
-    at: cellRef(from.row, from.col),
-    ...(from.colOff || from.rowOff
-      ? {
-          offset: {
-            x: Math.min(2000, Math.max(0, Math.round(from.colOff / EMU_PER_PIXEL))),
-            y: Math.min(2000, Math.max(0, Math.round(from.rowOff / EMU_PER_PIXEL))),
-          },
-        }
-      : {}),
-    width: Math.round(Math.min(2000, Math.max(160, width))),
-    height: Math.round(Math.min(1600, Math.max(120, height))),
-  };
-  const { cxSpace, space } = item.content.chart;
-  if (cxSpace) {
-    const series = cxSpace.chart.plotArea.series[0];
-    const kind =
-      series?.layoutId === "waterfall"
-        ? "waterfall"
-        : series?.layoutId === "clusteredColumn" && series.layoutPr?.kind === "binning"
-          ? "histogram"
-          : null;
-    const data = cxSpace.chartData.data.find((each) => each.id === (series?.dataId ?? 0));
-    const values = data?.dims.find((dim) => dim.kind === "num")?.f;
-    const categories = data?.dims.find((dim) => dim.kind === "str")?.f;
-    if (!kind || !values) return null;
-    return {
-      ...place,
-      kind,
-      ...(cxSpace.chart.title?.text ? { title: cxSpace.chart.title.text } : {}),
-      series: [{ values, ...(categories ? { categories } : {}) }],
-    };
-  }
-  if (!space) return null;
-  const plot = space.plotArea.chart;
-  const grouping =
-    "grouping" in plot
-      ? plot.grouping === "stacked"
-        ? { stack: "stacked" as const }
-        : plot.grouping === "percentStacked"
-          ? { stack: "percent" as const }
-          : {}
-      : {};
-  const kind =
-    plot.kind === "bar"
-      ? plot.barDir === "col"
-        ? "column"
-        : "bar"
-      : plot.kind === "line" ||
-          plot.kind === "area" ||
-          plot.kind === "pie" ||
-          plot.kind === "doughnut" ||
-          plot.kind === "scatter" ||
-          plot.kind === "bubble"
-        ? plot.kind
-        : null;
-  if (!kind) return null;
-  const read = plot.series.flatMap((each): FileSeries[] => {
-    const values = "val" in each ? each.val?.ref : "yVal" in each ? each.yVal.ref : undefined;
-    if (!values) return [];
-    const categories = "cat" in each ? each.cat?.ref : "xVal" in each ? each.xVal?.ref : undefined;
-    const name =
-      each.tx?.kind === "literal"
-        ? { text: each.tx.value }
-        : each.tx?.kind === "ref"
-          ? { ref: each.tx.ref }
-          : undefined;
-    const color = colorOf(each.spPr);
-    const marker = "marker" in each ? each.marker : undefined;
-    return [
-      {
-        values,
-        ...(categories ? { categories } : {}),
-        ...("bubbleSize" in each && each.bubbleSize.ref ? { sizes: each.bubbleSize.ref } : {}),
-        ...(name ? { name } : {}),
-        ...(color ? { color } : {}),
-        ...(each.dLbls && !each.dLbls.delete && (each.dLbls.showVal || each.dLbls.showPercent)
-          ? { labels: true }
-          : {}),
-        ...("smooth" in each && each.smooth ? { smooth: true } : {}),
-        ...(kind === "line" && marker && marker.symbol !== "none" ? { markers: true } : {}),
-        ...(each.spPr?.ln?.dash ? { dashed: true } : {}),
-        ...(each.trendline?.length ? { trendline: true } : {}),
-      },
-    ];
-  });
-  if (!read.length) return null;
-  const horizontal = kind === "bar";
-  const [x, y] = horizontal
-    ? [readAxis(space.plotArea.valAx), readAxis(space.plotArea.catAx)]
-    : [readAxis(space.plotArea.catAx), readAxis(space.plotArea.valAx)];
-  const title = textOf(space.title);
-  const legend = space.legend
-    ? (Object.entries(LEGEND).find(([, code]) => code === space.legend!.position)?.[0] ?? "right")
-    : undefined;
-  return {
-    ...place,
-    kind,
-    ...grouping,
-    ...(title ? { title } : {}),
-    ...(legend ? { legend: legend as NonNullable<FileChart["legend"]> } : {}),
-    ...(x || y ? { axes: { ...(x ? { x } : {}), ...(y ? { y } : {}) } } : {}),
-    ...(plot.kind === "doughnut" && plot.holeSize ? { hole: plot.holeSize / 100 } : {}),
-    ...(plot.kind === "bar" && plot.gapWidth !== undefined
-      ? { gap: plot.gapWidth / (100 + plot.gapWidth) }
-      : {}),
-    series: kind === "pie" || kind === "doughnut" ? read.slice(0, 1) : read,
-  };
 }

@@ -8,7 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 
 /**
- * A ribbon as Excel's, shared by sheets and text documents: Undo and Redo,
+ * A ribbon as Word's: Undo and Redo,
  * tabs, and what the caller keeps at the row's end, then the selected tab's
  * groups on one line.
  */

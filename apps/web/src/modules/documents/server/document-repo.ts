@@ -26,7 +26,7 @@ import {
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
-  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId" | "committedAt">
+  Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
 type Reader = Pick<DbTx, "select">;
 
@@ -47,7 +47,6 @@ const documentColumns = (userId: string) => ({
   projectId: documents.projectId,
   createdByMessageId: documents.createdByMessageId,
   title: documents.title,
-  kind: documents.kind,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
   lastEditorUserId: documents.lastEditorUserId,
@@ -55,7 +54,7 @@ const documentColumns = (userId: string) => ({
   updatedAt: documents.updatedAt,
   access: accessSql(userId),
 });
-type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision" | "committedAt"> & {
+type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
   access: ProjectRole | null;
 };
 const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
@@ -76,8 +75,6 @@ export interface StoredDocumentState {
   document: EditableDocument;
   snapshot: Record<string, unknown>;
   snapshotRevision: number;
-  /** When the document's current revision was committed. */
-  committedAt: Date;
   steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
@@ -92,7 +89,6 @@ export class DocumentRepo extends Context.Service<
       owner: DocumentOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
         createdByMessageId?: string | null;
-        kind?: "text" | "sheet";
         /** Given when the snapshot already names the document, as an imported image's address does. */
         id?: string;
       },
@@ -242,7 +238,6 @@ export class DocumentRepo extends Context.Service<
                 ? { conversationId: owner.conversationId }
                 : { projectId: owner.projectId }),
               title: values.title,
-              kind: values.kind ?? "text",
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
               createdByMessageId: values.createdByMessageId ?? null,
@@ -297,14 +292,13 @@ export class DocumentRepo extends Context.Service<
                     ...documentColumns(userId),
                     snapshot: documents.snapshot,
                     snapshotRevision: documents.snapshotRevision,
-                    committedAt: documents.committedAt,
                   })
                   .from(documents)
                   .where(and(eq(documents.id, documentId), isNotNull(accessSql(userId))))
                   .for("share", { of: documents })
                   .pipe(Effect.orDie);
                 if (!row) return null;
-                const { snapshot, snapshotRevision, committedAt, ...document } = row;
+                const { snapshot, snapshotRevision, ...document } = row;
                 const steps = yield* tx
                   .select({
                     revision: documentSteps.revision,
@@ -326,7 +320,6 @@ export class DocumentRepo extends Context.Service<
                   document: toDocument(document),
                   snapshot,
                   snapshotRevision,
-                  committedAt,
                   steps,
                 };
               }),

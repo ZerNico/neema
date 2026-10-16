@@ -1,6 +1,6 @@
 import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AskPopover } from "./ask-popover.tsx";
 import { DocumentBubbleMenu } from "./bubble-menu.tsx";
@@ -12,11 +12,6 @@ import { DocumentFindBar } from "./find-bar.tsx";
 import { WordCount } from "./word-count.tsx";
 import { DocumentToolbar } from "./toolbar.tsx";
 import { setImageTarget } from "./image-upload.ts";
-import { SheetEmbedSources } from "./sheet-embed-sources.tsx";
-import { setSheetPicker } from "./sheet-embeds.ts";
-
-// Opened rarely: the picker and the sheet model it reads load when it opens.
-const SheetEmbedPicker = lazy(() => import("./sheet-embed-picker.tsx"));
 
 /** The connection's editor; the connection itself stays with the caller. */
 export interface DocumentEditorSync {
@@ -80,15 +75,8 @@ function RichEditor({
   discussion: DocumentDiscussion | undefined;
 }) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
-  const [pickingSheet, setPickingSheet] = useState(false);
   useEffect(() => {
     editor.setEditable(!readOnly);
-  }, [editor, readOnly]);
-  // The ribbon and the `/` menu open the sheet picker through the editor.
-  useEffect(() => {
-    if (readOnly) return;
-    setSheetPicker(editor, () => setPickingSheet(true));
-    return () => setSheetPicker(editor, null);
   }, [editor, readOnly]);
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -117,16 +105,6 @@ function RichEditor({
         />
       </div>
       <WordCount editor={editor} />
-      <SheetEmbedSources editor={editor} />
-      {pickingSheet && !readOnly ? (
-        <Suspense fallback={null}>
-          <SheetEmbedPicker
-            editor={editor}
-            documentId={documentId}
-            onClose={() => setPickingSheet(false)}
-          />
-        </Suspense>
-      ) : null}
       {readOnly ? null : (
         <>
           <DocumentBubbleMenu editor={editor} scroller={scroller} />
