@@ -223,14 +223,17 @@ describe("claiming a document image", () => {
     expect(results.map(refusal).toSorted()).toEqual(["DocumentRejected", "claimed"]);
     const held = claimedId(results.find(Exit.isSuccess)!);
     expect(await claimOf(held)).toHaveLength(1);
-    // Both copied before their transactions; the refused one's copy is the sweep's.
+    // Each copies before its transaction, unless the other's claim already committed. A
+    // refused one's copy is the sweep's.
     const ownersFiles = () =>
       run(
         Effect.flatMap(Db, (db) =>
           db.select({ id: attachments.id }).from(attachments).where(eq(attachments.userId, owner)),
         ),
       ).then((rows) => rows.map((row) => row.id));
-    expect(await ownersFiles()).toHaveLength(2);
+    const copied = await ownersFiles();
+    expect(copied).toContain(held);
+    expect(copied.length).toBeLessThanOrEqual(2);
     await sweep();
     expect(await ownersFiles()).toEqual([held]);
     const winner = Exit.isSuccess(results[0]!) ? documentId : other.document.id;
