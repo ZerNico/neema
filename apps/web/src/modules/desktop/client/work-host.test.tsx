@@ -105,7 +105,7 @@ beforeEach(() => {
   api.rollbackPromotion.mockReset().mockResolvedValue(undefined);
   api.discardSubmission.mockReset().mockResolvedValue(undefined);
   api.reservationStatus.mockReset();
-  api.abortReservation.mockReset().mockResolvedValue(undefined);
+  api.abortReservation.mockReset().mockResolvedValue({ status: "aborted" });
   render(<DesktopChromeFrame />);
   vi.stubGlobal("__chatDesktop", {
     chrome: {
@@ -342,6 +342,29 @@ it("aborts and rolls back an orphaned reserved promotion", async () => {
     reservationId: pending.reservationId,
   });
   expect(api.commitPromotion).not.toHaveBeenCalled();
+});
+
+it("commits instead when the turn activated before its abort landed", async () => {
+  const pending = {
+    conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
+    reservationId: "550e8400-e29b-41d4-a716-446655440001",
+    submissionId: "550e8400-e29b-41d4-a716-446655440000",
+  };
+  api.pendingPromotions.mockResolvedValue([pending]);
+  api.reservationStatus.mockResolvedValue({ ...pending, status: "reserved" });
+  api.abortReservation.mockResolvedValue({ ...pending, status: "activated" });
+  api.snapshot.mockResolvedValue({ attempts: [], calls: [], settings: [] });
+
+  renderHost("/settings");
+
+  await waitFor(() =>
+    expect(api.commitPromotion).toHaveBeenCalledWith({
+      conversationId: pending.conversationId,
+      reservationId: pending.reservationId,
+    }),
+  );
+  expect(api.rollbackPromotion).not.toHaveBeenCalled();
+  expect(api.discardSubmission).not.toHaveBeenCalled();
 });
 
 it("retains an orphaned reserved promotion when abort is ambiguous", async () => {

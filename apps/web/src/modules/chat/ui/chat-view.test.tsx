@@ -688,7 +688,11 @@ describe("reserved workspace sends", () => {
       status: "reserved",
       assistantMessageId: null,
     } as never);
-    abortReservationMock.mockResolvedValue(undefined as never);
+    abortReservationMock.mockResolvedValue({
+      conversationId: "conversation",
+      status: "aborted",
+      assistantMessageId: null,
+    } as never);
     const activationError = new Error("Activation rejected");
     const activate = vi.fn().mockRejectedValue(activationError);
     const staged = stagedImports();
@@ -706,6 +710,32 @@ describe("reserved workspace sends", () => {
     expect(abortReservationMock).toHaveBeenCalledTimes(1);
     expect(staged.rollback).toHaveBeenCalledTimes(1);
     expect(staged.commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the files of a turn that activated before its abort landed", async () => {
+    reserveMock.mockResolvedValue({} as never);
+    reservationStatusMock.mockResolvedValue({
+      conversationId: "conversation",
+      status: "reserved",
+      assistantMessageId: null,
+    } as never);
+    abortReservationMock.mockResolvedValue({
+      conversationId: "conversation",
+      status: "activated",
+      assistantMessageId: "assistant",
+    } as never);
+    const activate = vi.fn().mockRejectedValue(new Error("Response lost"));
+    const staged = stagedImports();
+
+    await expect(
+      sendReservedWorkspaceTurn({
+        conversation: { kind: "existing", id: "conversation" },
+        imports: staged.imports,
+        activate,
+      }),
+    ).resolves.toEqual({ conversationId: "conversation", assistantMessageId: "assistant" });
+    expect(staged.rollback).not.toHaveBeenCalled();
+    expect(staged.commit).toHaveBeenCalledTimes(1);
   });
 
   it("retains promotion evidence when the activation retry is ambiguous", async () => {

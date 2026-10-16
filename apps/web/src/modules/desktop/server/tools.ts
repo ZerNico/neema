@@ -4,7 +4,12 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { advertisedParameter } from "~/modules/tools/server/toolset.ts";
-import { DESKTOP_TIMEOUTS, DesktopToolResult, desktopFailure } from "../tool-schema.ts";
+import {
+  DesktopToolResult,
+  desktopFailure,
+  desktopToolTimeout,
+  type DesktopToolName,
+} from "../tool-schema.ts";
 
 /**
  * Tools that run on the user's machine instead of the server.
@@ -28,12 +33,23 @@ export const listFolderTool = Tool.make("list_folder", {
   failureMode: "return",
 });
 
+const LineNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a file on the user's computer by its absolute path. Text comes back as " +
-    "text, truncated when long; an image or PDF comes back for you to look at when you can take " +
-    "it, otherwise as extracted text or a note that you cannot.",
-  parameters: Schema.Struct({ path: Path }),
+    "Read a file on the user's computer by its absolute path. Text comes back as text; a " +
+    "long file comes back in part, saying the offset to continue from. Give offset and limit " +
+    "to read just those lines of a large file. An image or PDF comes back for you to look at " +
+    "when you can take it, otherwise as extracted text or a note that you cannot.",
+  parameters: Schema.Struct({
+    path: Path,
+    offset: Schema.optionalKey(LineNumber).annotate({
+      description: "The first line to read, counting from 1.",
+    }),
+    limit: Schema.optionalKey(LineNumber).annotate({
+      description: "How many lines to read at most.",
+    }),
+  }),
   success: DesktopToolResult,
   failureMode: "return",
 });
@@ -274,8 +290,8 @@ export const awaitDesktopCall =
     });
 
 export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
-  const handle = (name: string, timeoutMs: number) =>
-    awaitDesktopCall(deps.rowIdFor, name, timeoutMs);
+  const handle = (name: DesktopToolName) =>
+    awaitDesktopCall(deps.rowIdFor, name, desktopToolTimeout(name));
 
   const files = [
     listFolderTool,
@@ -301,26 +317,23 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
         )
       : Toolkit.make(...files),
     handlers: {
-      list_folder: handle("list_folder", DESKTOP_TIMEOUTS.quick),
-      find_files: handle("find_files", DESKTOP_TIMEOUTS.quick),
-      search_files: handle("search_files", DESKTOP_TIMEOUTS.quick),
-      read_local_file: handle("read_local_file", DESKTOP_TIMEOUTS.quick),
-      // Up to 20 MB crosses from the machine through the page.
-      import_local_file: handle("import_local_file", DESKTOP_TIMEOUTS.command),
-      // Changes wait on a person as well as a machine.
-      write_local_file: handle("write_local_file", DESKTOP_TIMEOUTS.command),
-      // A download plus a write; nobody is asked, but the bytes take time.
-      save_to_workspace: handle("save_to_workspace", DESKTOP_TIMEOUTS.command),
-      edit_local_file: handle("edit_local_file", DESKTOP_TIMEOUTS.command),
-      move_local_file: handle("move_local_file", DESKTOP_TIMEOUTS.command),
-      delete_local_file: handle("delete_local_file", DESKTOP_TIMEOUTS.command),
+      list_folder: handle("list_folder"),
+      find_files: handle("find_files"),
+      search_files: handle("search_files"),
+      read_local_file: handle("read_local_file"),
+      import_local_file: handle("import_local_file"),
+      write_local_file: handle("write_local_file"),
+      save_to_workspace: handle("save_to_workspace"),
+      edit_local_file: handle("edit_local_file"),
+      move_local_file: handle("move_local_file"),
+      delete_local_file: handle("delete_local_file"),
       ...(deps.commands
         ? {
-            run_command: handle("run_command", DESKTOP_TIMEOUTS.command),
-            request_network_access: handle("request_network_access", DESKTOP_TIMEOUTS.command),
-            request_path_access: handle("request_path_access", DESKTOP_TIMEOUTS.command),
-            request_local_services: handle("request_local_services", DESKTOP_TIMEOUTS.command),
-            request_ssh_agent: handle("request_ssh_agent", DESKTOP_TIMEOUTS.command),
+            run_command: handle("run_command"),
+            request_network_access: handle("request_network_access"),
+            request_path_access: handle("request_path_access"),
+            request_local_services: handle("request_local_services"),
+            request_ssh_agent: handle("request_ssh_agent"),
           }
         : {}),
     },

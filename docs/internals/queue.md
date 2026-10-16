@@ -18,7 +18,7 @@ A message sent while an answer is generating becomes a queue entry instead of be
 - The desktop work snapshot lists Work chats with an entry ready to start. The work host, mounted for the whole desktop app, starts each one with its own executor id and the folders attached at that moment, read through `folderStatus`. Queue entries store no executor, device session or folder list, since all three can be stale by the time an entry reaches the front. A queued Work message reads local files when it runs, not when it was queued.
 - In a browser, the strip says to open Chat Desktop rather than offering a button that cannot work.
 - Files dropped into the workspace never queue. Their send reserves the turn before any file becomes visible, and a live generation refuses that reservation, so a Work draft holding them keeps Stop until the answer ends. The entry would otherwise need the reservation protocol to span the wait.
-- The work host starts queued Work only after pending file promotions are reconciled, like tool work. An activation still owed to a reserved turn must not lose its conversation to a queued message.
+- An activation still owed to a reserved turn must not lose its conversation to a queued message. `readQueueGate` reads a live reservation as busy, and promotion takes the reservation lock before the conversation, as reserving does, so another tab or device cannot start one in between. The work host also waits for pending file promotions to be reconciled, like tool work.
 
 ## Steering
 

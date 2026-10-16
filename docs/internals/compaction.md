@@ -18,8 +18,10 @@ touched: compaction only shapes what one attempt sends (`chat/server/compaction.
 
 - **Clear before summarizing, inside an answer.** A chat answer over the trigger first
   replaces older tool results with a short stub, all at once so the cache breaks once. The
-  newest three results and every call stay, so the model knows what it did and can ask
-  again. Only if that is not enough is anything summarized. Clearing beat or matched LLM
+  newest three results, every receipt short enough that clearing saves nothing, and every
+  call stay, so the model knows what it did and can read again. The stub never invites
+  repeating a call, since a cleared call may have written, deleted or run something. Only
+  if that is not enough is anything summarized. Clearing beat or matched LLM
   summaries at a fraction of the cost on agent runs (JetBrains, "The Complexity Trap", 2025).
   Research never clears: its workers cite those results.
 - **The summary is a handoff in fixed sections** (goal, rules kept verbatim, decisions, files

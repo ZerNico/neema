@@ -1,5 +1,6 @@
 import { LIMITS, WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { Schema } from "effect";
+import { AiError } from "effect/unstable/ai";
 import {
   BROWSER_TOOL_NAMES,
   browserApprovalKind,
@@ -196,6 +197,19 @@ export const desktopFailure = (summary: string, detail: string): DesktopToolResu
   truncated: false,
 });
 
+/**
+ * What the model reads when a desktop call has no usable result. Arguments the
+ * toolkit refused never reached the computer, and saying which one was wrong is
+ * what lets the model correct the call; anything else stays generic.
+ */
+export const unusableDesktopResult = (failure: unknown): DesktopToolResult =>
+  AiError.isAiError(failure) && failure.reason._tag === "ToolParameterValidationError"
+    ? desktopFailure(
+        "That did not run",
+        `The arguments were not valid, so nothing was sent to the computer: ${failure.reason.description}`,
+      )
+    : desktopFailure("That did not run", "The computer did not report a usable result.");
+
 export const desktopSuccess = (
   summary: string,
   detail: string,
@@ -204,6 +218,9 @@ export const desktopSuccess = (
 
 /** A string argument as the model sent it, or empty for anything else. */
 export const stringArg = (value: unknown) => (typeof value === "string" ? value : "");
+/** A line number the model gave, or nothing when it gave none that could be one. */
+export const lineArg = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : undefined;
 
 /**
  * How long a handler waits for the machine before telling the model it did not
@@ -221,6 +238,48 @@ export const DESKTOP_TIMEOUTS = {
    */
   deliveryMargin: 15_000,
 } as const;
+
+/**
+ * The one wait per tool, read both where the call is registered and where its
+ * handler waits. Kept apart, they disagreed, and an import expired on the page
+ * while the server still waited. Waiting on a person, or on bytes, takes the long one.
+ */
+const TOOL_TIMEOUTS: Record<DesktopToolName, "quick" | "command"> = {
+  list_folder: "quick",
+  find_files: "quick",
+  search_files: "quick",
+  read_local_file: "quick",
+  // Up to 20 MB crosses from the machine through the page.
+  import_local_file: "command",
+  write_local_file: "command",
+  // A download plus a write; nobody is asked, but the bytes take time.
+  save_to_workspace: "command",
+  edit_local_file: "command",
+  move_local_file: "command",
+  delete_local_file: "command",
+  run_command: "command",
+  request_network_access: "command",
+  request_path_access: "command",
+  request_local_services: "command",
+  request_ssh_agent: "command",
+  browser_tabs: "quick",
+  // Opening a site can wait on a person deciding.
+  browser_open: "command",
+  browser_navigate: "command",
+  browser_snapshot: "quick",
+  browser_wait_for: "quick",
+  // Actions ask under the default approval level; scrolling is a read.
+  browser_click: "command",
+  browser_type: "command",
+  browser_press: "command",
+  browser_scroll: "quick",
+  browser_select: "command",
+  browser_evaluate: "command",
+  // Can wait on the user allowing another site, then on the downloads.
+  browser_save: "command",
+};
+
+export const desktopToolTimeout = (name: DesktopToolName) => DESKTOP_TIMEOUTS[TOOL_TIMEOUTS[name]];
 
 /**
  * What the model is told about the machine it is working on.

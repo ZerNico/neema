@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { Tool } from "effect/unstable/ai";
+import { unusableDesktopResult } from "../tool-schema.ts";
 import { prepareDesktopTools, requestNetworkAccessTool, requestPathAccessTool } from "./tools.ts";
 
 const owner = {
@@ -107,5 +108,23 @@ describe("desktop handler registration", () => {
       expect(yield* external.pending("row")).toBe(false);
       expect((yield* external.snapshot(owner.userId, owner.executorId)).calls).toEqual([]);
     }).pipe(Effect.scoped, Effect.provide(ExternalCompletion.layer)),
+  );
+});
+
+describe("refused arguments", () => {
+  it.effect("reach the model as what was wrong, not as a silent failure", () =>
+    Effect.gen(function* () {
+      const toolkit = yield* mergeToolGroups([
+        prepareDesktopTools({ commands: false, rowIdFor: () => Effect.die("never sent") }),
+      ]);
+      const parts = yield* toolkit!
+        .handle("list_folder", { path: "" }, "provider-call")
+        .pipe(Stream.unwrap, Stream.runCollect);
+      const [part] = [...parts];
+      expect(part?.isFailure).toBe(true);
+      expect(unusableDesktopResult(part?.result).detail).toMatch(
+        /^The arguments were not valid, so nothing was sent to the computer: .*path/s,
+      );
+    }),
   );
 });

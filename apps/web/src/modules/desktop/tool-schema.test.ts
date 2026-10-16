@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { AiError } from "effect/unstable/ai";
 import {
+  DESKTOP_TIMEOUTS,
   approvalKind,
   deletePathsOf,
+  desktopToolTimeout,
   desktopToolsSystemHint,
   forTranscript,
+  unusableDesktopResult,
 } from "./tool-schema.ts";
 
 describe("desktop tools system hint", () => {
@@ -116,6 +120,39 @@ describe("approvalKind", () => {
     expect(approvalKind("browser_navigate", { action: "back" })).toBeNull();
     expect(approvalKind("browser_scroll", {})).toBeNull();
     expect(approvalKind("browser_click", {})).toBe("browser-action");
+  });
+});
+
+describe("desktopToolTimeout", () => {
+  it("gives a tool that asks nobody the long wait when it moves bytes", () => {
+    // Registered by approval kind, these two once expired on the page after two minutes
+    // while the server waited ten.
+    expect(approvalKind("import_local_file", {})).toBeNull();
+    expect(approvalKind("save_to_workspace", {})).toBeNull();
+    expect(desktopToolTimeout("import_local_file")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("save_to_workspace")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("read_local_file")).toBe(DESKTOP_TIMEOUTS.quick);
+  });
+});
+
+describe("unusableDesktopResult", () => {
+  it("tells the model which argument the toolkit refused", () => {
+    // Built as the toolkit builds it when a call's parameters do not decode.
+    const refused = AiError.make({
+      module: "Toolkit",
+      method: "read_local_file.handle",
+      reason: new AiError.ToolParameterValidationError({
+        toolName: "read_local_file",
+        description: 'Expected a value with a length of at least 1, got ""\n  at ["path"]',
+      }),
+    });
+    expect(unusableDesktopResult(refused)).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/arguments were not valid.*at \["path"\]/s),
+    });
+    expect(unusableDesktopResult(new Error("socket closed")).detail).toBe(
+      "The computer did not report a usable result.",
+    );
   });
 });
 

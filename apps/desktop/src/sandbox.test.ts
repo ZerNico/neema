@@ -14,7 +14,7 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import type { ContainerRequest } from "@microsoft/mxc-sdk/v1";
 import { Effect, Exit, Fiber, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +89,9 @@ describe("filesystemPolicy", () => {
       join(home, ".aws"),
       join(home, ".git-credentials"),
       join(home, ".config", "git", "credentials"),
+      // Inside readable toolchain folders.
+      join(home, ".gem", "credentials"),
+      join(home, ".cache", "huggingface", "stored_tokens"),
       "/profile/network-grants",
     ]) {
       expect(policy.deniedPaths).toContain(path);
@@ -689,16 +692,22 @@ describe("run", () => {
     await close();
   });
 
-  it("keeps the first output characters and says it truncated", async () => {
+  it("keeps the start and the end of long output, where an error usually is", async () => {
     const child = fakeProcess();
     const { launch, launched } = launcher(child.process);
     const { sandbox, close } = await harness(launch);
     const result = Effect.runPromise(sandbox.run(run()));
     await launched;
+    child.stdout.write("compiling\n");
     child.stdout.write("x".repeat(40_000));
-    child.finish(0);
+    // Interleaved as it arrives, stderr included, even when stdout is long.
+    child.stderr.write("\nerror: missing semicolon");
+    child.finish(1);
     const finished = await result;
-    expect(finished.output).toHaveLength(32_000);
+    expect(finished.output.length).toBeLessThanOrEqual(32_000);
+    expect(finished.output.startsWith("compiling\n")).toBe(true);
+    expect(finished.output.endsWith("error: missing semicolon")).toBe(true);
+    expect(finished.output).toMatch(/\[… \d+ characters left out …\]/);
     expect(finished.truncated).toBe(true);
     await close();
   });
@@ -1412,9 +1421,9 @@ describe("run", () => {
     },
   );
 
-  it("fails with a timeout when MXC reports one", async () => {
+  it("fails with a timeout when MXC reports one, keeping what was printed", async () => {
     const { sandbox, close } = await harness(async () => ({
-      standardOutput: null,
+      standardOutput: Readable.from(["waiting for port 5432\n"]),
       standardError: null,
       wait: async () => ({ exitCode: 1, timedOut: true }),
       kill: () => {},
@@ -1422,6 +1431,19 @@ describe("run", () => {
     const exit = await Effect.runPromiseExit(sandbox.run(run({ timeoutMs: 5_000 })));
     expect(exit).toMatchObject({ _tag: "Failure" });
     expect(JSON.stringify(exit)).toContain("timed-out");
+    expect(JSON.stringify(exit)).toContain("waiting for port 5432");
+    await close();
+  });
+
+  it("keeps what was printed when its own deadline stops a command", async () => {
+    const child = fakeProcess();
+    // Printed before the deadline, then never finishing: only the deadline ends it.
+    child.stdout.write("still building\n");
+    const { sandbox, close } = await harness(async () => child.process);
+    const exit = await Effect.runPromiseExit(sandbox.run(run({ timeoutMs: 300 })));
+    expect(JSON.stringify(exit)).toContain("timed-out");
+    expect(JSON.stringify(exit)).toContain("still building");
+    expect(child.killed()).toBe(1);
     await close();
   });
 

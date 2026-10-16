@@ -191,6 +191,7 @@ const toolchainRead = (os: NodeJS.Platform) =>
  */
 export const CREDENTIAL_DENIES = [
   inHome(".cache", "huggingface", "token"),
+  inHome(".cache", "huggingface", "stored_tokens"),
   inHome(".cache", "gh"),
   inHome(".config", "git", "credentials"),
   // git credential-cache's daemon socket answers whoever opens it.
@@ -207,6 +208,8 @@ export const CREDENTIAL_DENIES = [
   inHome(".kube"),
   inHome(".config", "gcloud"),
   inHome(".config", "gh"),
+  // RubyGems' API key, in the readable gem folder.
+  inHome(".gem", "credentials"),
   inHome(".cargo", "credentials"),
   inHome(".cargo", "credentials.toml"),
   inHome(".cargo", "config"),
@@ -712,10 +715,16 @@ const setupFailed = (cause: unknown) =>
 const expired = () =>
   new DesktopError({ reason: "timed-out", message: "The command’s time limit was reached." });
 
-/** Keeps the first `limit` characters across both streams and drains the rest. */
+/**
+ * Keeps the start and the end of both streams, `limit` characters in all, and drains the
+ * middle: a build's error is usually its last lines, and its first say what ran.
+ */
 const collect = (streams: ReadonlyArray<Readable | null>, limit: number) => {
-  const chunks: string[] = [];
-  let kept = 0;
+  const headLimit = Math.floor(limit / 4);
+  // Room for the line that says how much was left out.
+  const tailLimit = limit - headLimit - 80;
+  let head = "";
+  let tail = "";
   let seen = 0;
   const done = streams.map(
     (stream) =>
@@ -724,10 +733,10 @@ const collect = (streams: ReadonlyArray<Readable | null>, limit: number) => {
         stream.setEncoding("utf8");
         stream.on("data", (chunk: string) => {
           seen += chunk.length;
-          if (kept >= limit) return;
-          const piece = chunk.slice(0, limit - kept);
-          chunks.push(piece);
-          kept += piece.length;
+          const toHead = chunk.slice(0, Math.max(0, headLimit - head.length));
+          head += toHead;
+          const rest = chunk.slice(toHead.length);
+          if (rest) tail = (tail + rest).slice(-tailLimit);
         });
         stream.once("end", () => resolve());
         stream.once("close", () => resolve());
@@ -736,9 +745,23 @@ const collect = (streams: ReadonlyArray<Readable | null>, limit: number) => {
   );
   return {
     finished: Promise.all(done),
-    result: () => ({ output: chunks.join(""), truncated: seen > kept }),
+    result: () => {
+      const omitted = seen - head.length - tail.length;
+      return omitted > 0
+        ? { output: `${head}\n[… ${omitted} characters left out …]\n${tail}`, truncated: true }
+        : { output: head + tail, truncated: false };
+    },
   };
 };
+
+/** A stopped command's error, with what it printed before it was stopped. */
+const stoppedAfter = (seconds: number, output: string) =>
+  new DesktopError({
+    reason: "timed-out",
+    message: `The command was still running after ${seconds}s and was stopped. ${
+      output ? `What it printed:\n${output}` : "It printed nothing."
+    }`,
+  });
 
 /**
  * One line per refused tunnel. One a grant would allow is in the form the site reads to offer
@@ -1184,6 +1207,8 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
         };
         // Every resource is released as soon as it is acquired, so a Stop or a failure during
         // setup leaves no live token, listener or credential-bearing folder behind.
+        // Outside the scope, so a deadline that interrupts it still has the output.
+        let collected: ReturnType<typeof collect> | null = null;
         const finished = yield* Effect.scoped(
           Effect.gen(function* () {
             // bubblewrap refuses a proxy URL carrying credentials (bwrap's arguments are readable
@@ -1459,6 +1484,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
                 [child.standardOutput, child.standardError],
                 LIMITS.outputChars,
               );
+              collected = output;
               const [exit] = await Promise.all([child.wait(), output.finished]);
               return {
                 ...exit,
@@ -1471,15 +1497,17 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           Effect.timeoutOrElse({
             // What the checks above left of the command's own deadline.
             duration: Duration.millis(Math.max(0, input.timeoutMs - (Date.now() - started))),
-            orElse: () => Effect.fail(expired()),
+            orElse: () =>
+              Effect.fail(
+                collected
+                  ? stoppedAfter(Math.round(input.timeoutMs / 1000), collected.result().output)
+                  : expired(),
+              ),
           }),
         );
         if (finished.timedOut) {
           return yield* Effect.fail(
-            new DesktopError({
-              reason: "timed-out",
-              message: `The command was still running after ${Math.round(input.timeoutMs / 1000)}s and was stopped.`,
-            }),
+            stoppedAfter(Math.round(input.timeoutMs / 1000), finished.output),
           );
         }
         return {

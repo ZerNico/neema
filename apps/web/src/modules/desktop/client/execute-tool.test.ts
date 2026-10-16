@@ -27,7 +27,8 @@ const execute = (
     | "request_network_access"
     | "request_path_access"
     | "request_local_services"
-    | "request_ssh_agent",
+    | "request_ssh_agent"
+    | "read_local_file",
   args: Record<string, unknown>,
   scope: "answer" | "chat" | "always" = "answer",
 ) =>
@@ -228,5 +229,66 @@ describe("desktop network tools", () => {
     const result = await execute(client, "run_command", { command: "touch /tmp/example.com:443" });
     expect(result.detail).not.toContain("request_network_access");
     expect(result.violations).toEqual(["deny file-write /tmp/example.com:443"]);
+  });
+});
+
+describe("reading a file", () => {
+  it("asks for the lines given and says where to read on", async () => {
+    const { client, request } = clientFor({
+      path: "site/app.log",
+      text: "line 3\nline 4\n",
+      truncated: true,
+      startLine: 3,
+      nextLine: 5,
+    });
+    const result = await execute(client, "read_local_file", {
+      path: "/work/site/app.log",
+      offset: 3,
+      limit: 2,
+    });
+    expect(request).toHaveBeenCalledWith("readFile", {
+      callId: "call",
+      conversationId: CONVERSATION,
+      path: "/work/site/app.log",
+      offset: 3,
+      limit: 2,
+    });
+    expect(result.summary).toBe("Read site/app.log, lines 3–4");
+    expect(result.detail).toBe("line 3\nline 4\n\n[More follows: read on with offset 5.]");
+  });
+
+  it("reads the whole file when given nothing that could be a line", async () => {
+    const { client, request } = clientFor({
+      path: "site/a.txt",
+      text: "a\n",
+      truncated: false,
+      startLine: 1,
+      lineCount: 1,
+    });
+    const result = await execute(client, "read_local_file", {
+      path: "/work/site/a.txt",
+      offset: 0,
+    });
+    expect(request).toHaveBeenCalledWith("readFile", {
+      callId: "call",
+      conversationId: CONVERSATION,
+      path: "/work/site/a.txt",
+    });
+    expect(result).toMatchObject({ summary: "Read site/a.txt", detail: "a\n" });
+  });
+
+  it("says when the offset is past the end", async () => {
+    const { client } = clientFor({
+      path: "site/a.txt",
+      text: "",
+      truncated: false,
+      startLine: 9,
+      lineCount: 2,
+    });
+    const result = await execute(client, "read_local_file", {
+      path: "/work/site/a.txt",
+      offset: 9,
+    });
+    expect(result.detail).toBe("(site/a.txt has 2 lines, none from line 9 on.)");
   });
 });

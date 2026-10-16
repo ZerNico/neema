@@ -67,12 +67,22 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
           }
           if (status.status === "reserved") {
             try {
-              await abortWorkTurn({ data: { reservationId: item.reservationId } });
+              status = await abortWorkTurn({ data: { reservationId: item.reservationId } });
             } catch {
               // The server may have accepted the abort. Keep the journal until
               // its state can be observed instead of deleting live files.
               continue;
             }
+          }
+          // Activated between the read and the abort: the turn owns the files now.
+          if (status.status === "activated") {
+            await Effect.runPromise(
+              client.commitPromotion({
+                conversationId: item.conversationId,
+                reservationId: item.reservationId,
+              }),
+            ).catch(() => {});
+            continue;
           }
           await Effect.runPromise(
             client.rollbackPromotion({

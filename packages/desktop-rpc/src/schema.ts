@@ -104,8 +104,14 @@ export type DirectoryListing = typeof DirectoryListing.Type;
 export const FileContents = Schema.Struct({
   path: Schema.String,
   text: Schema.String,
-  /** True when the file was longer than `LIMITS.readChars`. */
+  /** True when more of the file follows what was read. */
   truncated: Schema.Boolean,
+  /** The first line read, counting from 1. */
+  startLine: Schema.optionalKey(Schema.Int),
+  /** Where the next read continues, when more follows. */
+  nextLine: Schema.optionalKey(Schema.Int),
+  /** The file's lines in all, known once a read reached its end. */
+  lineCount: Schema.optionalKey(Schema.Int),
 });
 export type FileContents = typeof FileContents.Type;
 
@@ -287,59 +293,61 @@ export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopErr
 }) {}
 
 /**
- * Extensions whose default application runs the file rather than displays it.
- * `openPath` chooses that application by extension, so opening one would run
- * what the model wrote. Markup is here for the same reason: an `.svg` or an
- * `.html` handed to a browser runs its script from `file:`.
+ * Extensions whose default application displays the file: documents, pictures,
+ * sound and video. `openPath` picks that application by extension, and what
+ * would run a file instead (`.terminal`, `.webloc`, `.py` on Windows) differs per
+ * machine and keeps growing, so anything not named here is only shown in its
+ * folder. Markup stays out: a browser runs an `.svg`'s or `.html`'s script from `file:`.
  *
- * Shared, so the site can hide an action the desktop would refuse rather than
- * keep a second list that drifts from this one. The desktop still decides:
- * a file marked executable is refused whatever it is called, and the site
- * cannot see that bit.
+ * Shared, so the site offers Open only where the desktop would. The desktop
+ * still decides: a file marked executable is refused whatever it is called,
+ * and the site cannot see that bit.
  */
-export const UNOPENABLE_EXTENSIONS = new Set([
-  ".app",
-  ".appimage",
-  ".bat",
-  ".bin",
-  ".cmd",
-  ".com",
-  ".command",
-  ".cpl",
-  ".desktop",
-  ".dll",
-  ".exe",
-  ".hta",
-  ".htm",
-  ".html",
-  ".inf",
-  ".jar",
-  ".js",
-  ".jse",
-  ".lnk",
-  ".msc",
-  ".msi",
-  ".mpkg",
-  ".pif",
-  ".pkg",
-  ".ps1",
-  ".reg",
-  ".run",
-  ".scpt",
-  ".scr",
-  ".sh",
-  ".so",
-  ".svg",
-  ".svgz",
-  ".url",
-  ".vb",
-  ".vbe",
-  ".vbs",
-  ".workflow",
-  ".wsf",
-  ".wsh",
-  ".xht",
-  ".xhtml",
+export const OPENABLE_EXTENSIONS = new Set([
+  // Documents
+  ".pdf",
+  ".txt",
+  ".md",
+  ".markdown",
+  ".csv",
+  ".tsv",
+  ".json",
+  ".log",
+  ".yaml",
+  ".yml",
+  ".rtf",
+  ".docx",
+  ".xlsx",
+  ".pptx",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".pages",
+  ".numbers",
+  ".key",
+  // Pictures
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".heif",
+  ".avif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+  // Sound and video
+  ".mp3",
+  ".m4a",
+  ".wav",
+  ".flac",
+  ".aac",
+  ".ogg",
+  ".mp4",
+  ".m4v",
+  ".mov",
+  ".webm",
 ]);
 
 /**

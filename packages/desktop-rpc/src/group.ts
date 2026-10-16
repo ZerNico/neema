@@ -118,6 +118,10 @@ export const DesktopRpcs = RpcGroup.make(
       conversationId: WorkspaceId,
       path: Schema.String,
       callId: Schema.String,
+      /** The first line to read, counting from 1. */
+      offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+      /** How many lines to read at most. */
+      limit: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
     },
     success: FileContents,
     error: DesktopError,

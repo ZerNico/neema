@@ -1,6 +1,10 @@
 import { Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
-import { DESKTOP_TIMEOUTS, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
+import {
+  DesktopToolResult,
+  desktopToolTimeout,
+  type DesktopToolName,
+} from "~/modules/desktop/tool-schema.ts";
 import { awaitDesktopCall, type DesktopToolDeps } from "~/modules/desktop/server/tools.ts";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 
@@ -158,8 +162,8 @@ export const browserEvaluateTool = Tool.make("browser_evaluate", {
  * file tools, the handlers only wait: the page runs each call in its own tabs.
  */
 export const prepareBrowserTools = (deps: Pick<DesktopToolDeps, "rowIdFor">): ToolGroup => {
-  const handle = (name: string, timeoutMs: number) =>
-    awaitDesktopCall(deps.rowIdFor, name, timeoutMs);
+  const handle = (name: DesktopToolName) =>
+    awaitDesktopCall(deps.rowIdFor, name, desktopToolTimeout(name));
   return {
     toolkit: Toolkit.make(
       browserTabsTool,
@@ -176,22 +180,18 @@ export const prepareBrowserTools = (deps: Pick<DesktopToolDeps, "rowIdFor">): To
       browserSaveTool,
     ),
     handlers: {
-      browser_tabs: handle("browser_tabs", DESKTOP_TIMEOUTS.quick),
-      // Opening a site can wait on a person deciding.
-      browser_open: handle("browser_open", DESKTOP_TIMEOUTS.command),
-      browser_navigate: handle("browser_navigate", DESKTOP_TIMEOUTS.command),
-      browser_snapshot: handle("browser_snapshot", DESKTOP_TIMEOUTS.quick),
-      browser_wait_for: handle("browser_wait_for", DESKTOP_TIMEOUTS.quick),
-      // Actions ask under the default approval level, so they get the longer
-      // wait; scrolling is a read, which asks only under manual approval.
-      browser_click: handle("browser_click", DESKTOP_TIMEOUTS.command),
-      browser_type: handle("browser_type", DESKTOP_TIMEOUTS.command),
-      browser_press: handle("browser_press", DESKTOP_TIMEOUTS.command),
-      browser_scroll: handle("browser_scroll", DESKTOP_TIMEOUTS.quick),
-      browser_select: handle("browser_select", DESKTOP_TIMEOUTS.command),
-      browser_evaluate: handle("browser_evaluate", DESKTOP_TIMEOUTS.command),
-      // Can wait on the user allowing another site, then on the downloads.
-      browser_save: handle("browser_save", DESKTOP_TIMEOUTS.command),
+      browser_tabs: handle("browser_tabs"),
+      browser_open: handle("browser_open"),
+      browser_navigate: handle("browser_navigate"),
+      browser_snapshot: handle("browser_snapshot"),
+      browser_wait_for: handle("browser_wait_for"),
+      browser_click: handle("browser_click"),
+      browser_type: handle("browser_type"),
+      browser_press: handle("browser_press"),
+      browser_scroll: handle("browser_scroll"),
+      browser_select: handle("browser_select"),
+      browser_evaluate: handle("browser_evaluate"),
+      browser_save: handle("browser_save"),
     },
   };
 };

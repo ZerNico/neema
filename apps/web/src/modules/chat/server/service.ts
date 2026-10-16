@@ -58,6 +58,7 @@ import {
   type TurnContent,
   type TurnFields,
   type ResolveError,
+  type WorkTurnReservationRow,
 } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
 import { resumeFirstTurn } from "./prompt.ts";
@@ -144,6 +145,15 @@ export type DesktopDispatch = {
   deviceSessionId?: string | undefined;
 };
 
+/** What the page learns of a Work turn reservation. */
+const reservationView = (row: WorkTurnReservationRow) => ({
+  reservationId: row.id,
+  conversationId: row.conversationId,
+  status: row.status,
+  assistantMessageId: row.assistantMessageId,
+});
+type WorkTurnReservationView = ReturnType<typeof reservationView>;
+
 /** What the queue strip says when a queued message could not start. */
 const queueFailure = (error: { readonly _tag: string }) => {
   switch (error._tag) {
@@ -171,16 +181,15 @@ export class ChatService extends Context.Service<
       { reservationId: string; conversationId: string },
       ConversationNotFound | ConversationBusy | InvalidMessage
     >;
-    getWorkTurnReservation(input: { userId: string; reservationId: string }): Effect.Effect<
-      {
-        reservationId: string;
-        conversationId: string;
-        status: "reserved" | "activated" | "aborted" | "expired";
-        assistantMessageId: string | null;
-      },
-      ConversationNotFound
-    >;
-    abortWorkTurn(input: { userId: string; reservationId: string }): Effect.Effect<void>;
+    getWorkTurnReservation(input: {
+      userId: string;
+      reservationId: string;
+    }): Effect.Effect<WorkTurnReservationView, ConversationNotFound>;
+    /** Answers with the state the reservation is left in, which may be activated. */
+    abortWorkTurn(input: {
+      userId: string;
+      reservationId: string;
+    }): Effect.Effect<WorkTurnReservationView, ConversationNotFound>;
     sendMessage(
       input: SendTurnInput,
     ): Effect.Effect<
@@ -896,13 +905,9 @@ function makeChatService() {
 
     const getWorkTurnReservation = Effect.fn("ChatService.getWorkTurnReservation")(
       function* (input: { userId: string; reservationId: string }) {
-        const row = yield* repo.getWorkTurnReservation(input.userId, input.reservationId);
-        return {
-          reservationId: row.id,
-          conversationId: row.conversationId,
-          status: row.status,
-          assistantMessageId: row.assistantMessageId,
-        };
+        return reservationView(
+          yield* repo.getWorkTurnReservation(input.userId, input.reservationId),
+        );
       },
     );
 
@@ -910,7 +915,7 @@ function makeChatService() {
       userId: string;
       reservationId: string;
     }) {
-      yield* repo.abortWorkTurn(input.userId, input.reservationId);
+      return reservationView(yield* repo.abortWorkTurn(input.userId, input.reservationId));
     });
 
     /**

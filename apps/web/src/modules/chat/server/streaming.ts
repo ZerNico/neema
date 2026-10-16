@@ -1,5 +1,5 @@
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
-import { DESKTOP_TIMEOUTS, approvalKind } from "~/modules/desktop/tool-schema.ts";
+import { desktopToolTimeout, unusableDesktopResult } from "~/modules/desktop/tool-schema.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { SheetService } from "~/modules/documents/sheet/server/sheet-service.ts";
@@ -3098,9 +3098,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }
                                 : {}),
-                              timeoutMs: approvalKind(part.name as DesktopToolName, args)
-                                ? DESKTOP_TIMEOUTS.command
-                                : DESKTOP_TIMEOUTS.quick,
+                              timeoutMs: desktopToolTimeout(part.name as DesktopToolName),
                             });
                             yield* Deferred.succeed(ready, {
                               rowId,
@@ -3479,13 +3477,7 @@ export class StreamEngine extends Context.Service<
                             const result: DesktopToolResult =
                               !part.isFailure && Option.isSome(decoded)
                                 ? decoded.value
-                                : {
-                                    v: 1,
-                                    ok: false,
-                                    summary: "That did not run",
-                                    detail: "The computer did not report a usable result.",
-                                    truncated: false,
-                                  };
+                                : unusableDesktopResult(part.isFailure ? part.result : null);
                             // Every file a machine tool returns becomes a working
                             // file of this attempt, for other tools and for
                             // publish_file, the only way one is stored. Anything

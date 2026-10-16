@@ -175,8 +175,9 @@ announcement, so a fast result can arrive before the handler starts waiting.
 Native and Hermes calls share this handoff and the normal prompt-folding loop.
 
 The wait must have its own deadline: the ordinary generation flusher renews the
-lease even when idle. Reads get two minutes; changes and commands get ten.
-The registration and handler share that deadline, and it starts at
+lease even when idle. Reads get two minutes; changes, commands and imports get
+ten. The registration and handler read that deadline from one table per tool
+(`desktopToolTimeout`), never each its own rule, and it starts at
 registration, before anyone has approved. The desktop's own command timeout
 is therefore derived from what is left of it when execution starts, minus a
 delivery margin, never a fixed ten minutes of its own: a command either
@@ -433,6 +434,12 @@ supplied, never a host absolute the caller did not already know. Only
 `ENOENT` allows walking to a parent. Moves check both ends. This does not
 claim protection against every concurrent filesystem replacement or
 hard-link alias.
+
+Inside an attached folder, commands and file tools may change anything, `.git`
+included. A hook or `core.fsmonitor` they plant runs outside the sandbox the next
+time git runs there, an editor's background `git status` too. That is accepted:
+attaching a folder trusts the model with what runs from it, as with its scripts and
+source, and guarding one tool's files would not change that.
 
 Commands run in Microsoft's execution containers (`@microsoft/mxc-sdk`), with no
 unsandboxed fallback: Seatbelt on macOS, bubblewrap on Linux, an AppContainer

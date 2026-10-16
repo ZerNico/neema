@@ -4471,6 +4471,52 @@ describe("queued turns", () => {
     expect(result).toEqual({ promoted: false, reason: "question" });
   });
 
+  it("holds queued turns behind a reserved Work send until it ends", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const seed = yield* setupConversation;
+        yield* repo.finalizeMessage({
+          messageId: seed.assistant.id,
+          status: "complete",
+          content: "ok",
+        });
+        yield* db
+          .update(conversations)
+          .set({ mode: "work" })
+          .where(eq(conversations.id, seed.conversation.id));
+        const entry = yield* repo.enqueue({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          content: "later",
+          attachmentIds: [],
+          input: queuedInput(),
+        });
+        const reservationId = uuidv7();
+        yield* repo.reserveWorkTurn({
+          id: reservationId,
+          userId: seed.userId,
+          conversation: { kind: "existing", id: seed.conversation.id },
+        });
+        const promote = repo.promoteNextQueuedTurn({
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          expectedEntryId: entry.id,
+          expectedRevision: entry.revision,
+          resolve: plain,
+        });
+        const held = yield* promote;
+        yield* repo.abortWorkTurn(seed.userId, reservationId);
+        const released = yield* promote;
+        return { held, released: released.promoted };
+      }),
+    );
+
+    expect(result.held).toEqual({ promoted: false, reason: "busy" });
+    expect(result.released).toBe(true);
+  });
+
   const firstRound = "Checking the models. ";
   const secondRound = "Here is the ending.";
   /** What the fake model writes in one plain call. */
@@ -8810,8 +8856,10 @@ describe("local tools on the user's machine", () => {
           const replay = yield* service.sendMessage(input);
           yield* (yield* StreamEngine).subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
           const status = yield* service.getWorkTurnReservation({ userId, reservationId });
+          // A recovery abort arriving after activation must say so and change nothing.
+          const lateAbort = yield* service.abortWorkTurn({ userId, reservationId });
           const config = yield* repo.getGenerationConfig(first.assistantMessageId);
-          return { beforeConversation, beforeMessages, first, replay, status, config };
+          return { beforeConversation, beforeMessages, first, replay, status, lateAbort, config };
         }),
       );
 
@@ -8823,6 +8871,7 @@ describe("local tools on the user's machine", () => {
         conversationId: result.first.conversationId,
         assistantMessageId: result.first.assistantMessageId,
       });
+      expect(result.lateAbort).toEqual(result.status);
       expect(result.config.workspaceFiles).toEqual(["report.pdf"]);
       expect(result.config.desktopFolders).toEqual(["workspace", "acme-site"]);
       expect(JSON.stringify(result.config)).not.toContain("/data/workspaces/");
@@ -8937,8 +8986,9 @@ describe("local tools on the user's machine", () => {
             .select({ id: conversations.id })
             .from(conversations)
             .where(eq(conversations.userId, seed.userId));
-          yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
+          const aborted = yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
           return {
+            aborted: aborted.status,
             failures: [retry, edit, branch].map((result) =>
               result._tag === "Failure" ? result.failure._tag : "Success",
             ),
@@ -8955,6 +9005,7 @@ describe("local tools on the user's machine", () => {
         "ConversationBusy",
         "ConversationBusy",
       ]);
+      expect(outcome.aborted).toBe("aborted");
       expect(outcome.afterMessages).toEqual(outcome.beforeMessages);
       expect(outcome.afterConversations).toEqual(outcome.beforeConversations);
     } finally {

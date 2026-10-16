@@ -356,6 +356,73 @@ describe("once a folder is attached", () => {
     expect(await readFile(join(root, "src", "new", "note.md"), "utf8")).toBe("hello");
   });
 
+  it("reads a window of lines and says where more follows", async () => {
+    const path = join(root, "src", "lines.txt");
+    const numbered = Array.from({ length: 10 }, (_, index) => `line ${index + 1}\n`);
+    await writeFile(path, numbered.join(""));
+    const read = (window: { offset?: number; limit?: number }) =>
+      Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path, ...window }),
+      );
+
+    expect(await read({ offset: 3, limit: 2 })).toMatchObject({
+      text: "line 3\nline 4\n",
+      truncated: true,
+      startLine: 3,
+      nextLine: 5,
+    });
+    // To the end: the file exactly, final newline included, and its length known.
+    expect(await read({ offset: 9 })).toMatchObject({
+      text: "line 9\nline 10\n",
+      truncated: false,
+      lineCount: 10,
+    });
+    expect(await read({ offset: 40 })).toMatchObject({ text: "", lineCount: 10 });
+  });
+
+  it("pages a file longer than one read, and a line with no end", async () => {
+    const path = join(root, "src", "long.txt");
+    const content = `${"x".repeat(999)}\n`.repeat(200) + "tail";
+    await writeFile(path, content);
+    let paged = "";
+    let reads = 0;
+    let offset: number | undefined;
+    for (;;) {
+      const page = await Effect.runPromise(
+        handlers.readFile({
+          conversationId: CONVERSATION,
+          callId: "r",
+          path,
+          ...(offset ? { offset } : {}),
+        }),
+      );
+      expect(page.text.length).toBeLessThanOrEqual(LIMITS.readChars);
+      paged += page.text;
+      reads += 1;
+      if (!page.truncated) {
+        expect(page.lineCount).toBe(201);
+        break;
+      }
+      offset = page.nextLine;
+    }
+    expect(reads).toBeGreaterThan(1);
+    expect(paged).toBe(content);
+
+    // Minified: one line far longer than a read is cut, and the line after it can be reached.
+    const minified = join(root, "src", "min.js");
+    await writeFile(minified, `${"y".repeat(LIMITS.readChars * 3)}\nafter\n`);
+    expect(
+      await Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path: minified }),
+      ),
+    ).toMatchObject({ truncated: true, nextLine: 2 });
+    expect(
+      await Effect.runPromise(
+        handlers.readFile({ conversationId: CONVERSATION, callId: "r", path: minified, offset: 2 }),
+      ),
+    ).toMatchObject({ text: "after\n", lineCount: 2 });
+  });
+
   it("refuses to read a binary file as text", async () => {
     await writeFile(
       join(root, "src", "logo.png"),
@@ -488,6 +555,91 @@ describe("once a folder is attached", () => {
       }),
     );
     expect(every.replacements).toBe(2);
+  });
+
+  it("refuses to edit a file that is not UTF-8 rather than damage it", async () => {
+    const path = join(root, "src", "latin1.txt");
+    // "café = 1" in Latin-1, whose é is not UTF-8.
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x3d, 0x20, 0x31, 0x0a]);
+    await writeFile(path, latin1);
+    expect(
+      await failureOf(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "e",
+          path,
+          old: "= 1",
+          new: "= 2",
+          all: false,
+        }),
+      ),
+    ).toBe("not-text");
+    expect(await readFile(path)).toEqual(latin1);
+
+    // A byte order mark survives an edit.
+    const bom = join(root, "src", "bom.txt");
+    await writeFile(bom, "\uFEFFvalue = 1\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path: bom,
+        old: "= 1",
+        new: "= 2",
+        all: false,
+      }),
+    );
+    expect(await readFile(bom, "utf8")).toBe("\uFEFFvalue = 2\n");
+  });
+
+  it("matches lines written with \\n in a file with Windows line endings, and keeps them", async () => {
+    const path = join(root, "src", "windows.txt");
+    await writeFile(path, "first\r\nsecond\r\nthird\r\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path,
+        old: "first\nsecond",
+        new: "first\nnew\nsecond",
+        all: false,
+      }),
+    );
+    expect(await readFile(path, "utf8")).toBe("first\r\nnew\r\nsecond\r\nthird\r\n");
+  });
+
+  it("still matches \\n lines exactly in a file with a stray Windows line ending", async () => {
+    const path = join(root, "src", "mixed.txt");
+    await writeFile(path, "pasted\r\nfirst\nsecond\n");
+    await Effect.runPromise(
+      handlers.editFile({
+        conversationId: CONVERSATION,
+        callId: "e",
+        path,
+        old: "first\nsecond",
+        new: "first\nnew\nsecond",
+        all: false,
+      }),
+    );
+    expect(await readFile(path, "utf8")).toBe("pasted\r\nfirst\nnew\nsecond\n");
+  });
+
+  it("keeps both of two edits to one file made at once", async () => {
+    const path = join(root, "src", "both.ts");
+    await writeFile(path, "const a = 1;\nconst b = 2;\n");
+    const edit = (old: string, replacement: string) =>
+      Effect.runPromise(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "e",
+          path,
+          old,
+          new: replacement,
+          all: false,
+        }),
+      );
+    await Promise.all([edit("a = 1", "a = 10"), edit("b = 2", "b = 20")]);
+    expect(await readFile(path, "utf8")).toBe("const a = 10;\nconst b = 20;\n");
   });
 
   it("moves without overwriting and deletes, but never a root itself", async () => {
@@ -875,7 +1027,7 @@ describe("once a folder is attached", () => {
     }
   });
 
-  it("counts nonoverlapping matches and refuses UTF-8 expansion from malformed source", async () => {
+  it("counts nonoverlapping matches and leaves malformed source untouched", async () => {
     const path = join(root, "malformed-edit.txt");
     const source = Buffer.concat([Buffer.from("TARGET"), Buffer.alloc(666_665, 0xff)]);
     await writeFile(path, source);
@@ -891,7 +1043,7 @@ describe("once a folder is attached", () => {
             all: false,
           }),
         ),
-      ).toBe("too-large");
+      ).toBe("not-text");
       expect(await readFile(path)).toEqual(source);
       await writeFile(path, "aaaaa");
       const receipt = await Effect.runPromise(
@@ -972,16 +1124,27 @@ describe("once a folder is attached", () => {
     expect(revealed).toHaveLength(1);
   });
 
-  it("will not hand a file this computer would run to its default application", async () => {
+  it("opens only a kind of file its default application displays", async () => {
     revealed = [];
     await writeFile(join(root, "install.command"), "rm -rf /\n");
     await writeFile(join(root, "drawing.svg"), '<svg onload="alert(1)"></svg>');
     await writeFile(join(root, "runme"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
-    for (const path of [
+    // Terminal runs a .terminal's command; a .webloc opens whatever it points at.
+    await writeFile(join(root, "summary.terminal"), "<plist/>");
+    await writeFile(join(root, "report.webloc"), "<plist/>");
+    await writeFile(join(root, "install.pkg"), "payload");
+    // A listed kind a command marked executable is still refused.
+    await writeFile(join(root, "notes.txt"), "#!/bin/sh\n", { mode: 0o755 });
+    const refused = [
       join(root, "install.command"),
       join(root, "drawing.svg"),
       join(root, "runme"),
-    ]) {
+      join(root, "summary.terminal"),
+      join(root, "report.webloc"),
+      join(root, "install.pkg"),
+      join(root, "notes.txt"),
+    ];
+    for (const path of refused) {
       expect(
         await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
       ).toBe("not-openable");
@@ -990,7 +1153,18 @@ describe("once a folder is attached", () => {
         handlers.revealPath({ conversationId: CONVERSATION, path, mode: "reveal" }),
       );
     }
-    expect(revealed.map((call) => call.mode)).toEqual(["reveal", "reveal", "reveal"]);
+    expect(revealed.map((call) => call.mode)).toEqual(refused.map(() => "reveal"));
+
+    // The extension is compared without case, as the system resolves it.
+    await writeFile(join(root, "photo.PNG"), "png");
+    await Effect.runPromise(
+      handlers.revealPath({
+        conversationId: CONVERSATION,
+        path: join(root, "photo.PNG"),
+        mode: "open",
+      }),
+    );
+    expect(revealed.at(-1)?.mode).toBe("open");
 
     // Two causes, two sentences, both naming the file the short way.
     const refusalFor = async (path: string) => {
@@ -1003,41 +1177,18 @@ describe("once a folder is attached", () => {
       "site/runme is marked executable, so opening it could run it. Show it in the folder instead.",
     );
     expect(await refusalFor(join(root, "drawing.svg"))).toBe(
-      "site/drawing.svg is a kind of file that can run when it is opened. Show it in the folder instead.",
+      "site/drawing.svg is not a kind of file the app opens directly. Show it in the folder instead.",
     );
-  });
-
-  it("will not open a macOS installer the model wrote", async () => {
-    revealed = [];
-    await writeFile(join(root, "install.pkg"), "payload");
-    await writeFile(join(root, "suite.mpkg"), "payload");
-    for (const path of [join(root, "install.pkg"), join(root, "suite.mpkg")]) {
-      expect(
-        await failureOf(handlers.revealPath({ conversationId: CONVERSATION, path, mode: "open" })),
-      ).toBe("not-openable");
-      await Effect.runPromise(
-        handlers.revealPath({ conversationId: CONVERSATION, path, mode: "reveal" }),
-      );
-    }
-    expect(revealed.map((call) => call.mode)).toEqual(["reveal", "reveal"]);
-
-    await Effect.runPromise(
-      handlers.revealPath({
-        conversationId: CONVERSATION,
-        path: join(root, "src", "index.ts"),
-        mode: "open",
-      }),
-    );
-    expect(revealed.at(-1)?.mode).toBe("open");
   });
 
   it("reports the operating system's refusal instead of claiming it opened", async () => {
+    await writeFile(join(root, "notes.md"), "# Notes\n");
     revealComplaint = "no application knows this file";
     expect(
       await failureOf(
         handlers.revealPath({
           conversationId: CONVERSATION,
-          path: join(root, "src", "index.ts"),
+          path: join(root, "notes.md"),
           mode: "open",
         }),
       ),
@@ -1171,6 +1322,28 @@ describe("once a folder is attached", () => {
       handlers.detachFolder({ conversationId: CONVERSATION, name: "elsewhere" }),
     );
     picked = root;
+  });
+
+  it("never moves a root itself, which could leave it in the workspace", async () => {
+    const movable = join(root, "..", "movable");
+    await mkdir(movable, { recursive: true });
+    await writeFile(join(movable, "keep.txt"), "kept\n");
+    picked = movable;
+    await Effect.runPromise(handlers.chooseFolder({ conversationId: CONVERSATION }));
+    expect(
+      await failureOf(
+        handlers.movePath({
+          conversationId: CONVERSATION,
+          callId: "t",
+          from: movable,
+          to: join(workspaceDir(CONVERSATION), "movable"),
+        }),
+      ),
+    ).toBe("outside-folder");
+    expect(await readFile(join(movable, "keep.txt"), "utf8")).toBe("kept\n");
+    await Effect.runPromise(
+      handlers.detachFolder({ conversationId: CONVERSATION, name: "movable" }),
+    );
   });
 
   it("forgets the folder on request", async () => {
