@@ -937,6 +937,18 @@ describe("MessageBubble", () => {
 });
 
 describe("MessageBubble attachments", () => {
+  /**
+   * A grid cell by what it shows, once it does. Querying by role and name would work out an
+   * accessible name for every drawn cell, which takes seconds in jsdom.
+   */
+  const cellShowing = (text: string) =>
+    waitFor(() => {
+      const cell = [...document.querySelectorAll('[role="gridcell"]')].find(
+        (node) => node.textContent === text,
+      );
+      expect(cell).toBeDefined();
+      return cell!;
+    });
   afterEach(() => vi.unstubAllGlobals());
   const attachment = (overrides: Partial<MessageAttachment> = {}): MessageAttachment => ({
     id: "a-1",
@@ -1059,7 +1071,7 @@ describe("MessageBubble attachments", () => {
     );
     fireEvent.click(screen.getByRole("link", { name: /book\.xlsx/ }));
     const dialog = screen.getByRole("dialog");
-    await within(dialog).findByRole("gridcell", { name: "Price" });
+    await cellShowing("Price");
     fireEvent.click(within(dialog).getByRole("button", { name: "Comment" }));
     const box = await screen.findByRole("textbox", { name: "Comment on A1" });
     fireEvent.change(box, { target: { value: "Make it a total" } });
@@ -1073,7 +1085,7 @@ describe("MessageBubble attachments", () => {
     view.unmount();
     render(<MessageBubble message={userMessage("", [book])} />);
     fireEvent.click(screen.getByRole("link", { name: /book\.xlsx/ }));
-    await within(screen.getByRole("dialog")).findByRole("gridcell", { name: "Price" });
+    await cellShowing("Price");
     expect(screen.queryByRole("button", { name: "Comment" })).toBeNull();
   });
 

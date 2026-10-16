@@ -5,6 +5,19 @@ import { SpreadsheetPreview } from "./spreadsheet-preview.tsx";
 
 afterEach(() => vi.unstubAllGlobals());
 
+/**
+ * A grid cell by what it shows, once it does. Querying by role and name would work out an
+ * accessible name for every drawn cell, which takes seconds in jsdom.
+ */
+const cellShowing = (text: string) =>
+  waitFor(() => {
+    const cell = [...document.querySelectorAll('[role="gridcell"]')].find(
+      (node) => node.textContent === text,
+    );
+    expect(cell).toBeDefined();
+    return cell!;
+  });
+
 const sheet = (name: string, over: Partial<Preview> = {}): Preview => ({
   sheets: [{ name: "Data" }, { name: "Summary" }, { name: "Secret", hidden: true }],
   sheet: name,
@@ -44,13 +57,13 @@ it("shows a sheet's stored values in a grid, its formulas above, and switches sh
   );
   vi.stubGlobal("fetch", fetch);
   render(<SpreadsheetPreview source={{ kind: "attachment", id: "book" }} />);
-  expect(await screen.findByRole("gridcell", { name: "Month" })).toBeInTheDocument();
+  await cellShowing("Month");
   const bar = screen.getByRole("textbox", { name: "Formula bar" });
   expect(bar).toHaveValue("Month");
   // The active cell's formula, as the file stored it, while the grid shows its result.
   fireEvent.keyDown(screen.getByRole("grid"), { key: "ArrowDown" });
   await waitFor(() => expect(bar).toHaveValue("=1+2"));
-  expect(screen.getByRole("gridcell", { name: "3" })).toBeInTheDocument();
+  await cellShowing("3");
   // A chart the server draws is an image laid where it sits; one it cannot is counted.
   expect(screen.getByRole("img", { name: "Chart 1 on Data" })).toHaveAttribute(
     "src",
@@ -64,7 +77,7 @@ it("shows a sheet's stored values in a grid, its formulas above, and switches sh
   // Hidden sheets are not offered as tabs.
   expect(screen.queryByRole("button", { name: "Secret" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Summary" }));
-  expect(await screen.findByRole("gridcell", { name: "Total" })).toBeInTheDocument();
+  await cellShowing("Total");
   expect(fetch).toHaveBeenLastCalledWith(
     "/api/spreadsheets/attachment/book?sheet=Summary",
     expect.anything(),
@@ -87,7 +100,7 @@ it("sends a comment on the selected cells, quoting them, and keeps it when it ca
   );
   const onComment = vi.fn(async () => true).mockResolvedValueOnce(false);
   render(<SpreadsheetPreview source={{ kind: "attachment", id: "book" }} onComment={onComment} />);
-  await screen.findByRole("gridcell", { name: "Month" });
+  await cellShowing("Month");
   fireEvent.keyDown(screen.getByRole("grid"), { key: "ArrowRight", shiftKey: true });
   fireEvent.click(screen.getByRole("button", { name: "Comment" }));
   const box = await screen.findByRole("textbox", { name: "Comment on A1:B1" });
@@ -119,7 +132,7 @@ it("copies and comments on whole columns from the right-click menu", async () =>
   vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
   const onComment = vi.fn(async () => true);
   render(<SpreadsheetPreview source={{ kind: "attachment", id: "book" }} onComment={onComment} />);
-  await screen.findByRole("gridcell", { name: "Price" });
+  await cellShowing("Price");
   const header = screen.getByRole("columnheader", { name: "B" });
   fireEvent.pointerDown(header, { button: 2 });
   fireEvent.pointerUp(window);
@@ -145,7 +158,7 @@ it("moves focus where the menu sends it, and works from the keyboard alone", asy
   vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
   const onComment = vi.fn(async () => true);
   render(<SpreadsheetPreview source={{ kind: "attachment", id: "book" }} onComment={onComment} />);
-  await screen.findByRole("gridcell", { name: "Price" });
+  await cellShowing("Price");
   const grid = screen.getByRole("grid");
   // Shift+F10 or the menu key: the browser fires contextmenu on the focused grid.
   grid.focus();
