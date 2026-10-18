@@ -14,6 +14,7 @@ import {
   groups,
   projectMemories,
   user,
+  userApprovals,
 } from "~/db/schema/index.ts";
 import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
@@ -212,6 +213,47 @@ describe("roles", () => {
       s.changeMembers(editor, project.id, { action: "removeUser", userId: editor }),
     );
     expect(await role(editor, project.id)).toBeNull();
+  });
+
+  it("adds only accounts that may use the app, refusing pending, turned-down and banned ones", async () => {
+    const owner = await createUser();
+    const project = await newProject(owner);
+    const add = (id: string) =>
+      run(
+        Effect.match(
+          Effect.flatMap(ProjectService, (s) =>
+            s.changeMembers(owner, project.id, {
+              action: "addUser",
+              email: email(id),
+              role: "viewer",
+            }),
+          ),
+          { onSuccess: () => "added", onFailure: (error) => error._tag },
+        ),
+      );
+    const pending = await createUser();
+    await db((d) =>
+      d.update(userApprovals).set({ status: "pending" }).where(eq(userApprovals.userId, pending)),
+    );
+    const rejected = await createUser();
+    await db((d) =>
+      d.update(userApprovals).set({ status: "rejected" }).where(eq(userApprovals.userId, rejected)),
+    );
+    const banned = await createUser();
+    await db((d) => d.update(user).set({ banned: true }).where(eq(user.id, banned)));
+    const active = await createUser();
+    expect({
+      pending: await add(pending),
+      rejected: await add(rejected),
+      banned: await add(banned),
+      active: await add(active),
+    }).toEqual({
+      pending: "ProjectRejected",
+      rejected: "ProjectRejected",
+      banned: "ProjectRejected",
+      active: "added",
+    });
+    expect(await role(pending, project.id)).toBeNull();
   });
 
   it("suspends a project for everyone once its owner loses the right to create projects", async () => {
