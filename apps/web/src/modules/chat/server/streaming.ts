@@ -68,7 +68,7 @@ import {
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { acceptGeneratedFile, acceptGeneratedImage, acceptSearchImage } from "./generated-files.ts";
-import { lookupsOf, type UiLookups } from "../assistant-output.ts";
+import { lookupsOf } from "../assistant-output.ts";
 import { fetchImage, ImageFetcher } from "~/modules/genui/server/image-fetcher.ts";
 import {
   INTERACTIVE_UI_TOOL,
@@ -110,7 +110,6 @@ import {
   Schedule,
   Schema,
   Stream,
-  Semaphore,
   type Scope,
 } from "effect";
 import {
@@ -126,12 +125,7 @@ import { PlanSnapshot, PlanToolResult, renderPlanReminder } from "~/modules/tool
 import { Prompt, type Response } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import {
-  addFinishUsage,
-  emptyUsageTotals,
-  providerCostOf,
-  resolveCost,
-} from "~/modules/analytics/server/usage.ts";
+import { addFinishUsage, providerCostOf } from "~/modules/analytics/server/usage.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { Db } from "~/server/db.ts";
 import { makeToolFileResolver } from "./tool-files.ts";
@@ -393,7 +387,7 @@ import {
   DesktopToolResult,
   forTranscript,
 } from "~/modules/desktop/tool-schema.ts";
-import type { CompactionChunkEnvelope, SteerChunkEnvelope } from "../schema.ts";
+import type { SteerChunkEnvelope } from "../schema.ts";
 import {
   calibrationFactor,
   compileActivePrompt,
@@ -436,70 +430,22 @@ import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schem
 import { runtimeContextMessage } from "./runtime-context.ts";
 import { uiStateContextMessage } from "~/modules/genui/server/ui-state-context.ts";
 import { buildSearchReminder, MAX_PRIOR_SOURCES, systemReminderMessage } from "./search-prompt.ts";
-import { ChatRepo, type ChunkKind } from "./repo.ts";
+import { ChatRepo } from "./repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
+import type { PreviewEvent, StatusEvent, StreamEvent } from "./generation/events.ts";
+import { makeAttemptUsage, makeGenerationSink, shortErrorMessage } from "./generation/sink.ts";
 
 /** Faces one answer's loaded skills may add to its previews. */
 const SKILL_FONT_FACES = 24;
 
-/**
- * Live chunk events fanned out to SSE subscribers on this instance.
- * Replay across instances/reloads always comes from Postgres, so this PubSub
- * only needs to carry chunks for in-flight generations.
- */
-export interface ChunkEvent {
-  readonly messageId: string;
-  readonly runId?: string;
-  readonly seq: number;
-  readonly chunkKind: ChunkKind;
-  readonly delta: string;
-  /** When it was written; absent on a live chunk, which is sent as it happens. */
-  readonly at?: number;
-}
-
-export interface DoneEvent {
-  readonly messageId: string;
-  readonly runId?: string;
-  readonly status: "complete" | "error" | "aborted";
-}
-
-/**
- * What a generation is doing before it has anything to show, such as reading
- * scanned pages. Live only: never a chunk, so it takes no `seq`; null clears it.
- */
-export interface StatusEvent {
-  readonly messageId: string;
-  readonly runId?: string;
-  readonly reading: { readonly read: number; readonly total: number } | null;
-}
-
-/**
- * What the answer's ```ui blocks looked up so far: images, places, routes.
- * Like status, never a chunk: the row holds them and a late subscriber gets
- * a snapshot, so a repeated event only restates what the client has.
- */
-export interface LookupsEvent {
-  readonly messageId: string;
-  readonly runId?: string;
-  readonly lookups: UiLookups;
-}
-
-/** The latest in-progress image of a running image call, by its row id. Never persisted. */
-export interface PreviewEvent {
-  readonly messageId: string;
-  readonly runId?: string;
-  readonly callId: string;
-  readonly mediaType: string;
-  /** Base64; the client draws it as a data URI. */
-  readonly data: string;
-}
-
-export type StreamEvent =
-  | ({ readonly kind: "chunk" } & ChunkEvent)
-  | ({ readonly kind: "status" } & StatusEvent)
-  | ({ readonly kind: "lookups" } & LookupsEvent)
-  | ({ readonly kind: "preview" } & PreviewEvent)
-  | ({ readonly kind: "done" } & DoneEvent);
+export type {
+  ChunkEvent,
+  DoneEvent,
+  LookupsEvent,
+  PreviewEvent,
+  StatusEvent,
+  StreamEvent,
+} from "./generation/events.ts";
 
 // One assistant message may span several model turns when tools are involved:
 // model → tool_calls → execute → feed results back → model continues. One
@@ -546,12 +492,6 @@ const returnedLine = (
 /** Same boundary for a decoded Prompt: its content is already message-shaped. */
 const promptMessages = (prompt: { content: unknown }) =>
   prompt.content as ReadonlyArray<Prompt.MessageEncoded>;
-
-// Message and tool-call rows are shipped to the client wholesale, so the
-// stored error must not carry provider stack traces or internal URLs. The
-// full cause goes to the server log instead (see finalize).
-const shortErrorMessage = (error: unknown): string =>
-  String(error).split("\n", 1)[0]!.slice(0, 200);
 
 // A block's first line names it ("Application-provided documents…"),
 // so an updated block is matched to its earlier snapshot by that line.
@@ -953,12 +893,7 @@ export class StreamEngine extends Context.Service<
 
         const earlierUsage = resuming ? currentMessage.usage : null;
         // The resume claim set the row's text to what its chunks spell.
-        let seq = resuming ? yield* repo.lastChunkSeq(input.messageId) : 0;
-        let assembled = resuming ? currentMessage.content : "";
-        let assembledReasoning = resuming ? (currentMessage.reasoning ?? "") : "";
-        // Anything the answer delivered counts as output, including what a
-        // resumed answer already holds, so a files-only answer is not empty.
-        let deliveredFiles = resuming ? (currentMessage.assistantOutput?.files?.length ?? 0) : 0;
+        const startSeq = resuming ? yield* repo.lastChunkSeq(input.messageId) : 0;
         // A resumed answer keeps the replay units its model wrote; the resume
         // transaction already cleared them for a different model.
         let replay: ProviderReplay | null = resuming
@@ -972,86 +907,29 @@ export class StreamEngine extends Context.Service<
           model?.capabilities.imageOutput === true &&
           provider !== undefined &&
           supportsImageOutput(provider);
-        let imageCostIncomplete = false;
-        let modelCallOpen = false;
-        let buffer: Array<{ seq: number; kind: ChunkKind; delta: string }> = [];
-
-        // Persist first, then publish: a subscriber's one-shot DB replay must
-        // never miss a chunk already announced live. Uninterruptible from the
-        // buffer swap on: the flusher races the generation finishing, and an
-        // interrupt between clearing the buffer and inserting would lose that
-        // seq range, breaking the contiguity resume relies on.
-        const writer = yield* Semaphore.make(1);
-        const flush = writer.withPermits(1)(
-          Effect.uninterruptible(
-            Effect.suspend(() => {
-              const batch = buffer;
-              buffer = [];
-              // Nothing to write still renews the lease for ordinary chat, so a
-              // slow first token or a long tool round cannot get the row reaped
-              // mid-answer. Research keeps its own lease on the run.
-              if (batch.length === 0)
-                return fence
-                  ? repo.renewGenerationLease(input.messageId, fence.generationId)
-                  : Effect.void;
-              return repo.appendChunks(input.messageId, batch).pipe(
-                Effect.flatMap(() =>
-                  Effect.forEach(
-                    batch,
-                    (chunk) =>
-                      PubSub.publish(pubsub, {
-                        kind: "chunk",
-                        ...(fence ? { runId: fence.generationId } : {}),
-                        messageId: input.messageId,
-                        seq: chunk.seq,
-                        chunkKind: chunk.kind,
-                        delta: chunk.delta,
-                      }),
-                    { discard: true },
-                  ),
-                ),
-              );
-            }),
-          ),
-        );
-
-        const pushChunk = (kind: ChunkKind, delta: string) => {
-          seq += 1;
-          if (kind === "reasoning") assembledReasoning += delta;
-          else if (kind === "text") assembled += delta;
-          buffer.push({ seq, kind, delta });
-        };
-
-        /** Stores lookups under the fence, then tells subscribers everything found so far. */
-        const recordLookups = (
-          owner: GenerationIdentity,
-          update: Parameters<typeof repo.recordUiLookups>[1],
-        ) =>
-          repo.recordUiLookups(owner, update).pipe(
-            Effect.flatMap((lookups) =>
-              PubSub.publish(pubsub, {
-                kind: "lookups",
-                messageId: input.messageId,
-                runId: owner.generationId,
-                lookups,
-              }),
-            ),
-            Effect.asVoid,
-          );
-
-        const publishStatus = (reading: StatusEvent["reading"]) =>
-          Effect.suspend(() => {
-            const event: StatusEvent = {
-              ...(fence ? { runId: fence.generationId } : {}),
-              messageId: input.messageId,
-              reading,
-            };
-            if (reading) statuses.set(input.messageId, event);
-            // Only this attempt's own line: a stale attempt must not clear a newer one's.
-            else if (statuses.get(input.messageId)?.runId === event.runId)
-              statuses.delete(input.messageId);
-            return PubSub.publish(pubsub, { kind: "status", ...event });
-          });
+        const usage = makeAttemptUsage();
+        const sink = yield* makeGenerationSink({
+          repo,
+          sync,
+          pubsub,
+          statuses,
+          previews,
+          fence,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          modelId: input.modelId,
+          model,
+          imageOutput,
+          usage,
+          earlierUsage,
+          start: {
+            seq: startSeq,
+            text: resuming ? currentMessage.content : "",
+            reasoning: resuming ? (currentMessage.reasoning ?? "") : "",
+            deliveredFiles: resuming ? (currentMessage.assistantOutput?.files?.length ?? 0) : 0,
+          },
+        });
         // Scanned pages this answer needs are read in the sender's queue,
         // billed to them, and reported live while the answer waits.
         const promptDeps: PromptDeps = {
@@ -1062,134 +940,11 @@ export class StreamEngine extends Context.Service<
               basePromptDeps.parser.parsePdf({
                 owner: input.userId,
                 onScanProgress: (read, total) =>
-                  publishStatus(read < total ? { read, total } : null),
+                  sink.publishStatus(read < total ? { read, total } : null),
                 ...pdf,
               }),
           },
         };
-
-        const pushToolChunk = (envelope: ToolChunkEnvelope) =>
-          Effect.suspend(() => {
-            pushChunk("tool", JSON.stringify(envelope));
-            return flush; // tool markers flush immediately so the UI reacts
-          });
-
-        const pushCompactionChunk = (envelope: CompactionChunkEnvelope) =>
-          Effect.suspend(() => {
-            pushChunk("compaction", JSON.stringify(envelope));
-            return flush; // same reason as tool markers, only more so: this
-          }); //          is the only thing on screen while it runs
-
-        // Each call's full arguments, kept for a week only if it ends in error.
-        const debugArgs = new Map<string, JsonValue>();
-        const finalize = (status: "complete" | "error" | "aborted", error?: unknown) =>
-          Effect.gen(function* () {
-            yield* flush;
-            if (error) {
-              yield* Effect.logError("generation failed", {
-                messageId: input.messageId,
-                cause: String(error),
-              });
-              yield* repo.failRunningToolCalls(input.messageId, shortErrorMessage(error));
-              yield* repo.failRunningCompactionEvents(input.messageId, shortErrorMessage(error));
-            } else if (status === "aborted") {
-              // A tool interrupted mid-flight never reports back; without this
-              // its row would stay "running" forever.
-              yield* repo.failRunningToolCalls(input.messageId, "stopped");
-              yield* repo.failRunningCompactionEvents(input.messageId, "stopped");
-            }
-            // Every call is settled by now, those interrupted included.
-            yield* repo
-              .keepFailedCallArguments(
-                [...debugArgs].map(([id, value]) => ({ id, arguments: value })),
-              )
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logError("keeping failed call arguments failed", cause),
-                ),
-              );
-            yield* repo.finalizeMessage({
-              messageId: input.messageId,
-              status,
-              content: assembled,
-              reasoning: assembledReasoning,
-              ...(totals.sawUsage
-                ? {
-                    usage: {
-                      // The row's text spans every attempt of a resumed answer,
-                      // so its usage does too; the ledger keeps one row per attempt.
-                      inputTokens: (earlierUsage?.inputTokens ?? 0) + totals.inputTokens,
-                      outputTokens: (earlierUsage?.outputTokens ?? 0) + totals.outputTokens,
-                      // Only useful as a pair; either alone calibrates nothing.
-                      ...(firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
-                        ? { firstInputTokens, estimatedFirstInputTokens }
-                        : {}),
-                    },
-                  }
-                : {}),
-              ...(error
-                ? { error: { tag: "GenerationFailed", message: shortErrorMessage(error) } }
-                : {}),
-              ledger: {
-                userId: input.userId,
-                kind: "chat",
-                modelId: input.modelId,
-                modelName: model?.displayName ?? input.modelId,
-                conversationId: input.conversationId,
-                messageId: input.messageId,
-                status,
-                inputTokens: totals.inputTokens,
-                outputTokens: totals.outputTokens,
-                cachedInputTokens: totals.cachedInputTokens,
-                cacheWriteTokens: totals.cacheWriteTokens,
-                reasoningTokens: totals.reasoningTokens,
-                // Stopped or failed inside a model call: that call's tokens were
-                // billed but never reported, so the row is a floor, not a total.
-                // The rounds that did finish keep their known cost.
-                usageComplete: !modelCallOpen,
-                ...resolveCost(
-                  totals,
-                  model?.pricing,
-                  imageOutput && (imageCostIncomplete || modelCallOpen)
-                    ? "incomplete-images"
-                    : imageOutput
-                      ? "images"
-                      : "text",
-                ),
-              },
-            });
-            yield* PubSub.publish(pubsub, {
-              kind: "done",
-              messageId: input.messageId,
-              ...(fence ? { runId: fence.generationId } : {}),
-              status,
-            });
-            yield* sync.publish(input.userId, {
-              type: "message.status",
-              conversationId: input.conversationId,
-              messageId: input.messageId,
-              status,
-            });
-            yield* (yield* GenerationSettled)({
-              userId: input.userId,
-              conversationId: input.conversationId,
-              messageId: input.messageId,
-              status,
-            });
-          });
-
-        // Outside `generate`: a stopped generation is interrupted mid-effect,
-        // and the tokens it already burned still have to be recorded. A turn
-        // interrupted before its finish part contributes nothing, since the
-        // provider never sent the numbers.
-        const totals = emptyUsageTotals();
-        // The estimator's calibration pair, persisted at finalize: what the
-        // provider counted for the first model call, and what we predicted for
-        // that same prompt. Only the first call maps onto one prompt;
-        // `totals.inputTokens` sums every tool round.
-        let sawFirstFinish = false;
-        let firstInputTokens: number | undefined;
-        let estimatedFirstInputTokens: number | undefined;
 
         const generate = Effect.gen(function* () {
           if (selectedFeatureUnavailable)
@@ -1301,10 +1056,11 @@ export class StreamEngine extends Context.Service<
                       mediaType: image.mediaType,
                       bytes: image.bytes,
                     }),
-                  record: (query, result) => recordLookups(fence, { images: { [query]: result } }),
+                  record: (query, result) =>
+                    sink.recordLookups(fence, { images: { [query]: result } }),
                 })
               : null;
-          if (imageResolver) yield* imageResolver.observe(assembled);
+          if (imageResolver) yield* imageResolver.observe(sink.text());
           // Places and routes on the answer's maps. Not web search: they go to
           // the map services an admin configured, and only place names leave.
           const earlier = (resuming && currentMessage?.assistantOutput) || null;
@@ -1325,10 +1081,10 @@ export class StreamEngine extends Context.Service<
                   ),
                   geocode: (query) => mapLookups.value.geocode(maps.services, query),
                   route: (mode, stops) => mapLookups.value.route(maps.services, mode, stops),
-                  record: (update) => recordLookups(fence, update),
+                  record: (update) => sink.recordLookups(fence, update),
                 })
               : null;
-          if (mapResolver) yield* mapResolver.observe(assembled);
+          if (mapResolver) yield* mapResolver.observe(sink.text());
 
           // Knowledge: one authorized session over the saved manifest for the
           // whole generation. Access loss anywhere fails the generation rather
@@ -1667,17 +1423,7 @@ export class StreamEngine extends Context.Service<
                 preview: (callId, image) =>
                   Effect.gen(function* () {
                     if (!fence) return;
-                    const event: PreviewEvent = {
-                      messageId: input.messageId,
-                      runId: fence.generationId,
-                      callId,
-                      mediaType: image.mediaType,
-                      data: Buffer.from(image.data).toString("base64"),
-                    };
-                    const calls = previews.get(input.messageId) ?? new Map();
-                    calls.set(callId, event);
-                    previews.set(input.messageId, calls);
-                    yield* PubSub.publish(pubsub, { kind: "preview", ...event });
+                    yield* sink.publishPreview(callId, image);
                   }),
                 record: (operation) =>
                   analytics
@@ -1866,8 +1612,8 @@ export class StreamEngine extends Context.Service<
                   modelId: input.modelId,
                   rowFor: (providerCallId) =>
                     Effect.suspend(() => Deferred.await(callRowReady(providerCallId))),
-                  emit: pushToolChunk,
-                  emitCompaction: pushCompactionChunk,
+                  emit: sink.pushTool,
+                  emitCompaction: sink.pushCompaction,
                 })
               : null;
           // Offered by name only until loaded; see `tool-load.ts`. The set grows
@@ -2374,7 +2120,7 @@ export class StreamEngine extends Context.Service<
               contextLength: model?.contextLength,
               toolSchemaTokens,
               existingCheckpoint: selected?.checkpoint ?? null,
-              textOffset: assembled.length,
+              textOffset: sink.text().length,
               beforeTurnIndex: firstTurn,
               maxStartIndex,
               messages: historySuffix,
@@ -2384,7 +2130,7 @@ export class StreamEngine extends Context.Service<
               trailingMessages: historyBudgetTail(false),
               webToolsEnabled: webTools !== undefined,
               priorUsage,
-              onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+              onCompaction: (event) => sink.pushCompaction({ v: 1, ...event }),
               // The tools and settings the first request will most likely send,
               // so a summary over this prompt reads it from the provider cache.
               ...(budgetToolkit
@@ -2480,7 +2226,11 @@ export class StreamEngine extends Context.Service<
               // an application-authored activity: replay, reload and branch all
               // render these citations from the same durable row.
               const rowId = uuidv7();
-              const position = { turnIndex: firstTurn, callIndex: 0, textOffset: assembled.length };
+              const position = {
+                turnIndex: firstTurn,
+                callIndex: 0,
+                textOffset: sink.text().length,
+              };
               yield* repo.insertToolCall({
                 id: rowId,
                 messageId: input.messageId,
@@ -2489,7 +2239,7 @@ export class StreamEngine extends Context.Service<
                 toolName: "knowledge_context",
                 arguments: {},
               });
-              yield* pushToolChunk({
+              yield* sink.pushTool({
                 v: 1,
                 family: "knowledge",
                 phase: "start",
@@ -2502,7 +2252,7 @@ export class StreamEngine extends Context.Service<
                 result: json(prepared.activity),
                 status: "complete",
               });
-              yield* pushToolChunk({
+              yield* sink.pushTool({
                 v: 1,
                 phase: "result",
                 callId: rowId,
@@ -2540,12 +2290,12 @@ export class StreamEngine extends Context.Service<
               messageId: input.messageId,
               turnIndex: firstTurn,
               callIndex: -5 + index,
-              textOffset: assembled.length,
+              textOffset: sink.text().length,
               providerCallId: `skill-context:${rowId}`,
               toolName: "load_skill",
               arguments: {},
             });
-            yield* pushToolChunk({
+            yield* sink.pushTool({
               v: 1,
               family: "skill",
               phase: "start",
@@ -2553,13 +2303,13 @@ export class StreamEngine extends Context.Service<
               name: "load_skill",
               turnIndex: firstTurn,
               callIndex: -5 + index,
-              textOffset: assembled.length,
+              textOffset: sink.text().length,
               skillId: entry.skillId,
               skillName: entry.name,
               path: "SKILL.md",
             });
             yield* repo.completeToolCall({ id: rowId, result: activity, status: "complete" });
-            yield* pushToolChunk({ v: 1, phase: "result", callId: rowId, ...activity });
+            yield* sink.pushTool({ v: 1, phase: "result", callId: rowId, ...activity });
           }
           const executionGroups = [
             ...commonGroups,
@@ -2649,7 +2399,7 @@ export class StreamEngine extends Context.Service<
             loadedBytes,
           });
           let activeRounds: ReadonlyArray<ActiveRound> = resumedRounds({
-            content: assembled,
+            content: sink.text(),
             calls: ownCalls,
             files: ownFiles,
             imageParts,
@@ -2684,7 +2434,7 @@ export class StreamEngine extends Context.Service<
           };
           // Persist the raw estimate of the exact first request. The provider's
           // actual/raw pair then learns one stable calibration multiplier.
-          estimatedFirstInputTokens = estimateRequestPrompt(false);
+          usage.estimatedFirstInputTokens = estimateRequestPrompt(false);
           // Pass indexes are local to one before-turn position. The first turn
           // reserves pass 0 for the initial history planner, emitted or not.
           const nextPassByTurn = new Map<number, number>([[firstTurn, 1]]);
@@ -2699,7 +2449,7 @@ export class StreamEngine extends Context.Service<
               const position = {
                 beforeTurnIndex,
                 passIndex: nextPassIndex(beforeTurnIndex),
-                textOffset: assembled.length,
+                textOffset: sink.text().length,
                 scope: "history" as const,
               };
               yield* repo.createCompactionEvent({
@@ -2707,13 +2457,13 @@ export class StreamEngine extends Context.Service<
                 messageId: input.messageId,
                 ...position,
               });
-              yield* pushCompactionChunk({ v: 1, phase: "start", eventId, ...position });
+              yield* sink.pushCompaction({ v: 1, phase: "start", eventId, ...position });
               yield* repo.completeCompactionEvent({
                 id: eventId,
                 status: "complete",
                 outcome: "hard_truncation",
               });
-              yield* pushCompactionChunk({
+              yield* sink.pushCompaction({
                 v: 1,
                 phase: "result",
                 eventId,
@@ -2737,8 +2487,11 @@ export class StreamEngine extends Context.Service<
             // just after the previous batch, so the next call sees current data.
             transcript = buildTranscript();
             const factor =
-              firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
-                ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
+              usage.firstInputTokens !== undefined && usage.estimatedFirstInputTokens !== undefined
+                ? calibrationFactor({
+                    firstInputTokens: usage.firstInputTokens,
+                    estimatedFirstInputTokens: usage.estimatedFirstInputTokens,
+                  })
                 : calibrationFactor(priorUsage);
             const schemaReserve =
               round < roundLimit ? (schemaTokensWith(unlockedFamilies) ?? 0) : 0;
@@ -2758,12 +2511,12 @@ export class StreamEngine extends Context.Service<
                   summary: activeSummary,
                   rounds: activeRounds,
                   beforeTurnIndex: turn,
-                  textOffset: assembled.length,
+                  textOffset: sink.text().length,
                   passIndex: nextPassIndex(turn),
                   calibrationFactor: factor,
                   sourceManifest: sourceManifest(),
                   ...(trailing ? { trailingPrompt: trailing } : {}),
-                  onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                  onCompaction: (event) => sink.pushCompaction({ v: 1, ...event }),
                   clearOldResults: true,
                   summaryTokens: summaryTokensFor(model?.contextLength),
                 },
@@ -2810,7 +2563,7 @@ export class StreamEngine extends Context.Service<
               transcript = buildTranscript();
               yield* recordHardTruncation(turn);
             }
-            if (round === 0) estimatedFirstInputTokens = estimateRequestPrompt(false);
+            if (round === 0) usage.estimatedFirstInputTokens = estimateRequestPrompt(false);
             if (skillTools) yield* skillTools.authorize();
             if (knowledgeTools) yield* knowledgeTools.authorize();
             else if (knowledgeSession) yield* knowledgeSession.authorize();
@@ -2823,7 +2576,7 @@ export class StreamEngine extends Context.Service<
             // file part appended to the round, the way an attachment would.
             const turnFiles: Array<Prompt.UserMessagePartEncoded> = [];
             previewTurnFiles = turnFiles;
-            const turnStartOffset = assembled.length;
+            const turnStartOffset = sink.text().length;
             // One fenced registration for every file an answer delivers (a
             // publish, a custom tool's output, a shared screenshot): the
             // attachment and its file chunk land together, under the fence.
@@ -2844,43 +2597,30 @@ export class StreamEngine extends Context.Service<
               Effect.gen(function* () {
                 if (!fence || Option.isNone(imageAttachments))
                   return { reason: "File delivery is unavailable." } as const;
-                yield* flush;
-                const accepted = yield* writer.withPermits(1)(
-                  acceptGeneratedFile(imageAttachments.value, {
-                    fence,
-                    fileName: file.name,
-                    mediaType: file.mediaType,
-                    bytes: file.bytes,
-                    origin: { toolCallId },
-                    source: file.fileSource ?? "tool",
-                    ...(file.reserved ? { reserved: true } : {}),
-                    ...(inTransaction
-                      ? { inTransaction: (tx: DbTx) => inTransaction(tx, fence) }
-                      : {}),
-                    textOffset: assembled.length,
-                    turnIndex: turn,
-                    callIndex,
-                    eventIndex: seq + 1,
-                    seq: seq + 1,
-                  }).pipe(
-                    Effect.tap((delivered) =>
-                      Effect.gen(function* () {
-                        seq += 1;
-                        deliveredFiles += 1;
-                        yield* PubSub.publish(pubsub, {
-                          kind: "chunk",
-                          messageId: input.messageId,
-                          runId: fence.generationId,
-                          seq,
-                          chunkKind: "file",
-                          delta: JSON.stringify(delivered),
-                        });
+                yield* sink.flush;
+                const accepted = yield* sink
+                  .fileChunk(
+                    (at) =>
+                      acceptGeneratedFile(imageAttachments.value, {
+                        fence,
+                        fileName: file.name,
+                        mediaType: file.mediaType,
+                        bytes: file.bytes,
+                        origin: { toolCallId },
+                        source: file.fileSource ?? "tool",
+                        ...(file.reserved ? { reserved: true } : {}),
+                        ...(inTransaction
+                          ? { inTransaction: (tx: DbTx) => inTransaction(tx, fence) }
+                          : {}),
+                        textOffset: at.textOffset,
+                        turnIndex: turn,
+                        callIndex,
+                        eventIndex: at.seq,
+                        seq: at.seq,
                       }),
-                    ),
-                    Effect.uninterruptible,
-                    Effect.result,
-                  ),
-                );
+                    { countsAsDelivered: true },
+                  )
+                  .pipe(Effect.result);
                 return accepted._tag === "Success"
                   ? ({ attachment: accepted.success.attachment } as const)
                   : ({ reason: accepted.failure.reason } as const);
@@ -2919,7 +2659,7 @@ export class StreamEngine extends Context.Service<
                       (readerAdvertised || name !== "read_attachment"),
                   )
                 : [];
-              modelCallOpen = true;
+              usage.modelCallOpen = true;
               const prompt = requestPrompt();
               // Only what this request carries counts as what the model saw of a document.
               documents.sent(prompt);
@@ -2963,34 +2703,20 @@ export class StreamEngine extends Context.Service<
                             return yield* Effect.die(
                               new Error("Image output is unavailable for this call."),
                             );
-                          yield* flush;
-                          const image = yield* writer.withPermits(1)(
-                            acceptGeneratedImage(imageAttachments.value, {
-                              fence,
-                              mediaType: part.mediaType,
-                              data: part.data,
-                              textOffset: assembled.length,
-                              turnIndex: turn,
-                              callIndex,
-                              eventIndex: seq + 1,
-                              seq: seq + 1,
-                            }).pipe(
-                              Effect.flatMap((accepted) =>
-                                Effect.gen(function* () {
-                                  seq += 1;
-                                  yield* PubSub.publish(pubsub, {
-                                    kind: "chunk",
-                                    messageId: input.messageId,
-                                    runId: fence.generationId,
-                                    seq,
-                                    chunkKind: "file",
-                                    delta: JSON.stringify(accepted),
-                                  });
-                                  return accepted;
-                                }),
-                              ),
-                              Effect.uninterruptible,
-                            ),
+                          yield* sink.flush;
+                          const image = yield* sink.fileChunk(
+                            (at) =>
+                              acceptGeneratedImage(imageAttachments.value, {
+                                fence,
+                                mediaType: part.mediaType,
+                                data: part.data,
+                                textOffset: at.textOffset,
+                                turnIndex: turn,
+                                callIndex,
+                                eventIndex: at.seq,
+                                seq: at.seq,
+                              }),
+                            { countsAsDelivered: false },
                           );
                           turnFiles.push({
                             type: "text",
@@ -2998,31 +2724,31 @@ export class StreamEngine extends Context.Service<
                           });
                           // Held for good, so a later tool call does not draw what cannot be kept.
                           imageBudget.reserve(1);
-                          deliveredFiles += 1;
+                          sink.countDeliveredFile();
                           return;
                         }
                         case "text-delta": {
-                          pushChunk("text", part.delta);
+                          sink.push("text", part.delta);
                           // Only a fence line can close a block.
                           if (/[`~]/.test(part.delta)) {
-                            if (imageResolver) yield* imageResolver.observe(assembled);
-                            if (mapResolver) yield* mapResolver.observe(assembled);
+                            if (imageResolver) yield* imageResolver.observe(sink.text());
+                            if (mapResolver) yield* mapResolver.observe(sink.text());
                           }
-                          if (buffer.length >= 16) yield* flush;
+                          if (sink.buffered() >= 16) yield* sink.flush;
                           return;
                         }
                         case "reasoning-delta": {
                           // The adapter writes encrypted reasoning as the text
                           // "[REDACTED]"; the encrypted part still rides the
                           // replay, so the reader gets the bare thinking marker.
-                          pushChunk("reasoning", part.delta === "[REDACTED]" ? "" : part.delta);
-                          if (buffer.length >= 16) yield* flush;
+                          sink.push("reasoning", part.delta === "[REDACTED]" ? "" : part.delta);
+                          if (sink.buffered() >= 16) yield* sink.flush;
                           return;
                         }
                         case "reasoning-start": {
                           // Hidden-reasoning marker: an empty reasoning chunk lets
                           // the UI show "Thinking…" even if no readable trace follows.
-                          pushChunk("reasoning", "");
+                          sink.push("reasoning", "");
                           return;
                         }
                         case "tool-call": {
@@ -3092,7 +2818,7 @@ export class StreamEngine extends Context.Service<
                             family === "ask"
                               ? Schema.decodeUnknownOption(AskUserParams)(args)
                               : null;
-                          const textOffset = assembled.length;
+                          const textOffset = sink.text().length;
                           callTextOffsets.set(part.id, textOffset);
                           const shownArgs = shownBrowserArgs(part.name, args);
                           if (part.name === "browser_snapshot" && args.share === true)
@@ -3126,9 +2852,9 @@ export class StreamEngine extends Context.Service<
                           });
                           // Typed browser text may be a password; owned content has its own row.
                           if (STORED_ARGUMENTS[family] !== "none")
-                            debugArgs.set(rowId, debugArguments(shownArgs));
+                            sink.keepDebugArguments(rowId, debugArguments(shownArgs));
                           const start = (fields: StartFields) =>
-                            pushToolChunk({
+                            sink.pushTool({
                               v: 1,
                               phase: "start",
                               callId: rowId,
@@ -3365,7 +3091,7 @@ export class StreamEngine extends Context.Service<
                                 : {}),
                             });
                             if (run)
-                              yield* pushToolChunk({
+                              yield* sink.pushTool({
                                 v: 1,
                                 family: "research",
                                 phase: "result",
@@ -3391,7 +3117,7 @@ export class StreamEngine extends Context.Service<
                               status: outcome.ok ? "complete" : "error",
                               ...(outcome.error ? { error: outcome.error } : {}),
                             });
-                            yield* pushToolChunk(outcome.envelope);
+                            yield* sink.pushTool(outcome.envelope);
                             return;
                           }
                           if (Schema.is(DesktopToolName)(part.name)) {
@@ -3508,7 +3234,7 @@ export class StreamEngine extends Context.Service<
                                     error: { code: "DesktopToolFailed", message: answer.summary },
                                   }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "desktop",
                               phase: "result",
@@ -3538,7 +3264,7 @@ export class StreamEngine extends Context.Service<
                                 ? {}
                                 : { error: { code: "QuestionRejected", message: result.message } }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "ask",
                               phase: "result",
@@ -3562,7 +3288,7 @@ export class StreamEngine extends Context.Service<
                                 ? { error: { code: office.failure, message } }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: office.family,
                               phase: "result",
@@ -3632,7 +3358,7 @@ export class StreamEngine extends Context.Service<
                                   }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "tool-file",
                               phase: "result",
@@ -3661,7 +3387,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "attachment",
                               phase: "result",
@@ -3690,7 +3416,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "tool-load",
                               phase: "result",
@@ -3723,7 +3449,7 @@ export class StreamEngine extends Context.Service<
                                 ? {}
                                 : { error: { code: "PlanRejected", message: result.message } }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "plan",
                               phase: "result",
@@ -3752,7 +3478,7 @@ export class StreamEngine extends Context.Service<
                                 ? {}
                                 : { error: { code: "NotifyRejected", message: result.message } }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "notify",
                               phase: "result",
@@ -3780,7 +3506,7 @@ export class StreamEngine extends Context.Service<
                                 ? { error: { code: "RouteNotFound", message: result.message } }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "map",
                               phase: "result",
@@ -3820,7 +3546,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "memory",
                               phase: "result",
@@ -3852,7 +3578,7 @@ export class StreamEngine extends Context.Service<
                               result: json(activity),
                               status: activity.status === "complete" ? "complete" : "error",
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               phase: "result",
                               callId: rowId,
@@ -3885,7 +3611,7 @@ export class StreamEngine extends Context.Service<
                                     },
                                   }),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               phase: "result",
                               callId: rowId,
@@ -3982,7 +3708,7 @@ export class StreamEngine extends Context.Service<
                                   }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "integration",
                               phase: "result",
@@ -4006,7 +3732,7 @@ export class StreamEngine extends Context.Service<
                               imageCalls.get(part.id) ??
                               runningImageActivity(imageCallShape(imageModel, {}));
                             imageCalls.delete(part.id);
-                            previews.get(input.messageId)?.delete(rowId);
+                            sink.clearPreview(rowId);
                             const staged = imageTool.take(part.id);
                             const attachmentIds: string[] = [];
                             const failures: string[] = [];
@@ -4098,7 +3824,7 @@ export class StreamEngine extends Context.Service<
                                   }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               phase: "result",
                               callId: rowId,
@@ -4212,7 +3938,7 @@ export class StreamEngine extends Context.Service<
                                 ? { error: { code: "CustomToolFailed", message: activity.error } }
                                 : {}),
                             });
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "custom",
                               phase: "result",
@@ -4251,7 +3977,7 @@ export class StreamEngine extends Context.Service<
 
                           if (isPreliminary) {
                             // Live progress: hits found / page fetch transitions.
-                            yield* pushToolChunk({
+                            yield* sink.pushTool({
                               v: 1,
                               family: "web",
                               phase: "progress",
@@ -4300,7 +4026,7 @@ export class StreamEngine extends Context.Service<
                                   },
                                 }),
                           });
-                          yield* pushToolChunk({
+                          yield* sink.pushTool({
                             v: 1,
                             family: "web",
                             phase: "result",
@@ -4317,10 +4043,10 @@ export class StreamEngine extends Context.Service<
                         }
                         case "finish": {
                           finishReason = part.reason;
-                          addFinishUsage(totals, part);
-                          modelCallOpen = false;
+                          addFinishUsage(usage.totals, part);
+                          usage.modelCallOpen = false;
                           if (imageOutput && providerCostOf(part.metadata) === null)
-                            imageCostIncomplete = true;
+                            usage.imageCostIncomplete = true;
                           // The round's opaque reasoning state, kept with the
                           // answer so its history replays it to the same model.
                           const unit = replayUnitOf(replayOf(part.metadata));
@@ -4328,7 +4054,7 @@ export class StreamEngine extends Context.Service<
                             const next = appendReplay(replay, {
                               turnIndex: turn,
                               startOffset: turnStartOffset,
-                              endOffset: assembled.length,
+                              endOffset: sink.text().length,
                               unit,
                             });
                             if (next && next !== replay) {
@@ -4336,9 +4062,9 @@ export class StreamEngine extends Context.Service<
                               yield* repo.saveProviderReplay(input.messageId, next);
                             }
                           }
-                          if (!sawFirstFinish) {
-                            sawFirstFinish = true;
-                            firstInputTokens = part.usage.inputTokens.total;
+                          if (!usage.sawFirstFinish) {
+                            usage.sawFirstFinish = true;
+                            usage.firstInputTokens = part.usage.inputTokens.total;
                           }
                           return;
                         }
@@ -4357,20 +4083,20 @@ export class StreamEngine extends Context.Service<
                             part.name === "deep_research" ||
                             isDocumentWrite(part.name)
                           ) {
-                            pushChunk(
+                            sink.push(
                               "writing",
                               JSON.stringify({
                                 v: 1,
                                 id: part.id,
                                 name: part.name,
-                                textOffset: assembled.length,
+                                textOffset: sink.text().length,
                                 turnIndex: turn,
                                 // A resumed answer replays this chunk; the attempt
                                 // it names tells the client it is no longer writing.
                                 ...(fence ? { runId: fence.generationId } : {}),
                               }),
                             );
-                            yield* flush;
+                            yield* sink.flush;
                           }
                           return;
                         case "tool-params-delta":
@@ -4391,8 +4117,11 @@ export class StreamEngine extends Context.Service<
             });
 
             const currentCalibration = () =>
-              firstInputTokens !== undefined && estimatedFirstInputTokens !== undefined
-                ? calibrationFactor({ firstInputTokens, estimatedFirstInputTokens })
+              usage.firstInputTokens !== undefined && usage.estimatedFirstInputTokens !== undefined
+                ? calibrationFactor({
+                    firstInputTokens: usage.firstInputTokens,
+                    estimatedFirstInputTokens: usage.estimatedFirstInputTokens,
+                  })
                 : calibrationFactor(priorUsage);
 
             // Two bounded recovery stages: first reduce complete active rounds,
@@ -4433,7 +4162,7 @@ export class StreamEngine extends Context.Service<
                             summary: activeSummary,
                             rounds: activeRounds,
                             beforeTurnIndex: turn,
-                            textOffset: assembled.length,
+                            textOffset: sink.text().length,
                             passIndex: nextPassIndex(turn),
                             calibrationFactor: overflowFactor,
                             sourceManifest: sourceManifest(),
@@ -4441,7 +4170,7 @@ export class StreamEngine extends Context.Service<
                               ? { trailingPrompt: currentReminderPrompt()! }
                               : {}),
                             force: true,
-                            onCompaction: (event) => pushCompactionChunk({ v: 1, ...event }),
+                            onCompaction: (event) => sink.pushCompaction({ v: 1, ...event }),
                             summaryTokens: summaryTokensFor(model?.contextLength),
                           },
                         );
@@ -4478,7 +4207,7 @@ export class StreamEngine extends Context.Service<
                     syncEarlierSkills(compaction.startIndex);
                     transcript = buildTranscript();
                     if (round === 0) {
-                      estimatedFirstInputTokens = estimateRequestPrompt(!toolRoundsLeft);
+                      usage.estimatedFirstInputTokens = estimateRequestPrompt(!toolRoundsLeft);
                     }
                     yield* recordHardTruncation(turn);
                     yield* Effect.logInfo("context overflow, retrying with fewer history turns", {
@@ -4521,7 +4250,7 @@ export class StreamEngine extends Context.Service<
                 ? yield* repo.claimSteeredEntries({
                     conversationId: input.conversationId,
                     messageId: input.messageId,
-                    textOffset: assembled.length,
+                    textOffset: sink.text().length,
                     turnIndex: turn,
                   })
                 : { steered: [], held: false };
@@ -4583,15 +4312,15 @@ export class StreamEngine extends Context.Service<
                   id: message.id,
                   queueEntryId: message.queueEntryId,
                   content: message.content,
-                  textOffset: message.steerTextOffset ?? assembled.length,
+                  textOffset: message.steerTextOffset ?? sink.text().length,
                   turnIndex: message.steerTurnIndex ?? turn,
                   attachments: files
                     .filter((file) => file.messageId === message.id)
                     .map(toAttachmentDto),
                 };
-                pushChunk("steer", JSON.stringify(envelope));
+                sink.push("steer", JSON.stringify(envelope));
               }
-              yield* flush;
+              yield* sink.flush;
               yield* Effect.forEach(
                 steered,
                 (message) =>
@@ -4617,12 +4346,12 @@ export class StreamEngine extends Context.Service<
           // Internal tool rounds need no prose. A validated question is itself the
           // answer; research returns through its own runner before this chat loop.
           // A resumed answer starts from its earlier text, so it is never empty.
-          if (!questionPresented && assembled.trim().length === 0 && deliveredFiles === 0)
+          if (!questionPresented && sink.text().trim().length === 0 && sink.deliveredFiles() === 0)
             return yield* Effect.fail(new Error("[ResponseEmpty]"));
         });
 
         // Periodic flusher so slow generations still persist promptly.
-        const flusher = flush.pipe(Effect.delay(Duration.millis(250)), Effect.forever);
+        const flusher = sink.flush.pipe(Effect.delay(Duration.millis(250)), Effect.forever);
 
         // Stopping wins the race by *succeeding*, not by interrupting from the
         // outside: the model stream is interrupted but finalize still runs, so
@@ -4631,9 +4360,9 @@ export class StreamEngine extends Context.Service<
         const ran = generate.pipe(Effect.scoped, Effect.as(false));
 
         yield* Effect.raceFirst(Effect.raceFirst(ran, stopped), flusher).pipe(
-          Effect.flatMap((wasStopped) => finalize(wasStopped ? "aborted" : "complete")),
-          Effect.catchCause((cause) => finalize("error", cause)),
-          Effect.onInterrupt(() => finalize("error")),
+          Effect.flatMap((wasStopped) => sink.finalize(wasStopped ? "aborted" : "complete")),
+          Effect.catchCause((cause) => sink.finalize("error", cause)),
+          Effect.onInterrupt(() => sink.finalize("error")),
         );
       });
 
