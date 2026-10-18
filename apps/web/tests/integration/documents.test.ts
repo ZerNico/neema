@@ -167,7 +167,6 @@ const seenNow = (userId: string, document: Pick<EditableDocument, "id">) =>
         blockView(read!.doc, { budget: 1_000_000 }).seen.map((block) => [block.id, block.hash]),
       ),
   );
-/** A person's editor on the document, opened from its live feed like the panel's. */
 /** An editor's live feed, open until the returned fiber is interrupted, as a tab's is. */
 const openFeed = async (userId: string, documentId: string, clientId: string) => {
   const feed = await service((s) =>
@@ -183,6 +182,7 @@ const openFeed = async (userId: string, documentId: string, clientId: string) =>
   return fiber;
 };
 
+/** A person's editor on the document, opened from its live feed like the panel's. */
 const openEditor = async (userId: string, document: Pick<EditableDocument, "id">) => {
   const editor = await collabEditor(run, userId, document.id);
   if (!editor) throw new Error("expected a feed");

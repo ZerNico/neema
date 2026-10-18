@@ -39,8 +39,10 @@ export class DraftRepo extends Context.Service<
       targetRevision?: number | null,
     ): Effect.Effect<ConversationDraft, DraftNotAvailable>;
     get(userId: string, draftId: string, kind: DraftKind): Effect.Effect<ConversationDraft | null>;
-    /** Oldest first, so a chat's drafts keep the order they were started in. */
-    /** Pass the transaction when one is open: a second pool connection could starve. */
+    /**
+     * Oldest first, so a chat's drafts keep the order they were started in. Pass
+     * the transaction when one is open: a second pool connection could starve.
+     */
     listForConversation(
       userId: string,
       conversationId: string,

@@ -1216,8 +1216,10 @@ export class ChatRepo extends Context.Service<
       turns: number,
       beforeId?: string,
     ): Effect.Effect<string | null>;
-    /** Messages from `fromId` (or the start) up to, not including, `beforeId` (or the end). */
-    /** Rows for display: without provider replay, which is private and can be a megabyte. */
+    /**
+     * Messages from `fromId` (or the start) up to, not including, `beforeId` (or
+     * the end), for display: without provider replay, which is private and large.
+     */
     listMessageWindow(
       conversationId: string,
       range: { fromId?: string | null; beforeId?: string },

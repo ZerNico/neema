@@ -12,8 +12,9 @@ Custom tool source and installed dependencies are **trusted server code**. They 
 read files and environment variables, make network requests, open database
 connections, start subprocesses, or terminate the process. Worker threads protect
 the chat event loop from a stuck invocation, and a heap ceiling per worker turns a
-runaway allocation into one failed call rather than a fatal out-of-memory for the
-server; they are not a security sandbox or a permission boundary.
+runaway JavaScript allocation into one failed call rather than a fatal out-of-memory
+for the server. Buffers and other memory outside the heap are not counted. Workers are
+not a security sandbox or a permission boundary.
 
 Creation, editing, dependency installation, checking and testing all require an
 admin session. Being offered a module grants no new authority to the user: it only
