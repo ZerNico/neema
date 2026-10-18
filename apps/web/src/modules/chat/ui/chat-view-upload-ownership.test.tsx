@@ -157,6 +157,8 @@ const message = (id: string, role: "user" | "assistant", content: string) => ({
   steeredIntoMessageId: null,
   steerTextOffset: null,
   steerTurnIndex: null,
+  originClientId: null,
+  originClientName: null,
 });
 function setup() {
   const payload: Awaited<ReturnType<typeof getConversationWithMessages>> = {

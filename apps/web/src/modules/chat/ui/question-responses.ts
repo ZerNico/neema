@@ -10,6 +10,8 @@ export interface ResolvedQuestionResponse {
   callId: string;
   messageId: string;
   response: QuestionResponse;
+  /** The connected app that answered, when one did; the reply itself is folded away. */
+  originClientName?: string | null;
 }
 
 /** Fail visible: only explicit, valid metadata on the immediate raw reply folds into a card. */
@@ -21,6 +23,7 @@ export function associateQuestionResponses(
     content: string;
     questionResponse?: unknown;
     steeredIntoMessageId?: string | null;
+    originClientName?: string | null;
   }>,
   toolCalls: ReadonlyArray<{
     id: string;
@@ -77,7 +80,12 @@ export function associateQuestionResponses(
     )
       continue;
     if (formatQuestionResponse(questions, response) !== answer.content) continue;
-    byAssistant.set(assistant.id, { callId: ask.id, messageId: answer.id, response });
+    byAssistant.set(assistant.id, {
+      callId: ask.id,
+      messageId: answer.id,
+      response,
+      ...(answer.originClientName ? { originClientName: answer.originClientName } : {}),
+    });
     hiddenMessageIds.add(answer.id);
   }
   return { byAssistant, hiddenMessageIds };

@@ -193,7 +193,7 @@ export class ChatService extends Context.Service<
     sendMessage(
       input: SendTurnInput,
     ): Effect.Effect<
-      { conversationId: string; assistantMessageId: string },
+      { conversationId: string; assistantMessageId: string; generationId: string | null },
       | ModelNotFound
       | ConversationNotFound
       | ConversationBusy
@@ -291,7 +291,7 @@ export class ChatService extends Context.Service<
         openDocument?: OpenDocument | undefined;
       },
     ): Effect.Effect<
-      { assistantMessageId: string },
+      { assistantMessageId: string; generationId: string },
       | ConversationNotFound
       | MessageNotFound
       | ModelNotFound
@@ -1224,6 +1224,7 @@ function makeChatService() {
         attachmentIds: input.attachmentIds,
         ...(input.collectionIds !== undefined ? { collectionIds: input.collectionIds } : {}),
         ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+        ...(input.origin ? { origin: input.origin } : {}),
         associateAgentId: agentId ?? undefined,
         saveIntegrationChoices: input.integrationChoices?.length
           ? (tx, conversationId) =>
@@ -1350,7 +1351,11 @@ function makeChatService() {
         );
       }
 
-      return { conversationId: turn.conversation.id, assistantMessageId: turn.assistant.id };
+      return {
+        conversationId: turn.conversation.id,
+        assistantMessageId: turn.assistant.id,
+        generationId: turn.assistant.generationId ?? null,
+      };
     });
 
     const runScheduledTurn = Effect.fn("ChatService.runScheduledTurn")(function* (input: {
@@ -1567,7 +1572,7 @@ function makeChatService() {
         });
       // Only after the commit: a rollback must never orphan live rows' bytes.
       yield* attachmentService.deleteBlobs(orphanedKeys);
-      if (!claimed) return null;
+      if (!claimed || generationId === undefined) return null;
 
       yield* sync.publish(input.userId, {
         type: "message.status",
@@ -1592,7 +1597,7 @@ function makeChatService() {
           status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
 
-      return { assistantMessageId: input.assistantMessageId };
+      return { assistantMessageId: input.assistantMessageId, generationId };
     });
 
     // Reuses the message row so ids stay stable for subscribers and the

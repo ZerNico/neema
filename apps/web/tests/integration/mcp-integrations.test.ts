@@ -917,11 +917,13 @@ describe("an MCP server set up by an admin", () => {
           handlerOf(prepared, `int_${id}__delete_page`)!({ id: long }, { toolCallId: "l" }),
         );
         const [asked] = yield* waitForPending(admin);
-        yield* approvals.decide(admin, asked!.callId, "deny");
+        yield* approvals.decide(admin, asked!.callId, "deny", { via: "Claude" });
         yield* Fiber.join(waiting);
         return asked;
       }),
     );
+    // Declined in a connected app: the stored activity names it.
+    expect(prepared!.take("l").decided).toEqual({ decision: "deny", app: "Claude" });
     expect(pending?.details?.[0]?.value).not.toContain("and-also-the-archive");
     expect(pending?.inFull).toContain(`"id": "${long}"`);
   });

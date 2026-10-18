@@ -9,15 +9,17 @@ import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts"
 // Dev only. Nitro's Vite middleware guesses static-vs-app from `sec-fetch-dest`:
 // neither `empty` nor document dest reaches Vite's static layer, so
 // `<img src="/api/files/:id">` 404s while `fetch()` on the same URL works
-// (nitro/dist/_build/vite.dev.mjs). /api routes are always app routes, so
-// strip the hint first; the built server needs none of this.
+// (nitro/dist/_build/vite.dev.mjs). /api and /.well-known are always app
+// routes, so strip the hint first; the built server needs none of this.
 const apiRoutesAreNeverAssets = (): Plugin => ({
   name: "api-routes-are-never-assets",
   apply: "serve",
   enforce: "pre",
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
-      if (req.url?.startsWith("/api/")) delete req.headers["sec-fetch-dest"];
+      if (req.url?.startsWith("/api/") || req.url?.startsWith("/.well-known/")) {
+        delete req.headers["sec-fetch-dest"];
+      }
       next();
     });
   },

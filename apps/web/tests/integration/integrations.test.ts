@@ -1049,6 +1049,7 @@ describe("approvals", () => {
     messageId: "m",
     integrationId: "outline",
     tool: "create_document",
+    label: "Create a document",
     access: "write" as const,
     summary: "“Plan”",
     targets: [],
@@ -1070,8 +1071,31 @@ describe("approvals", () => {
         return yield* Fiber.join(waiting);
       }),
     );
-    expect(answer).toBe("deny");
+    expect(answer).toEqual({ answer: "deny", via: null });
     expect(await run(Effect.flatMap(IntegrationApprovals, (a) => a.pending("owner")))).toEqual([]);
+  });
+
+  it("takes a decision naming the question it answers, and records the app it came from", async () => {
+    const answer = await run(
+      Effect.gen(function* () {
+        const approvals = yield* IntegrationApprovals;
+        const waiting = yield* Effect.forkChild(approvals.request("owner", call("k3")));
+        const [pending] = yield* waitForPending("owner");
+        // Every approval is parked under its own nonce.
+        expect(pending?.promptId).toEqual(expect.any(String));
+        expect(
+          yield* approvals.decide("owner", "k3", "allow", { promptId: "stale", via: "Claude" }),
+        ).toBe(false);
+        expect(
+          yield* approvals.decide("owner", "k3", "allow", {
+            promptId: pending!.promptId!,
+            via: "Claude",
+          }),
+        ).toBe(true);
+        return yield* Fiber.join(waiting);
+      }),
+    );
+    expect(answer).toEqual({ answer: "allow", via: "Claude" });
   });
 
   it("leaves nothing to approve once the answer is stopped", async () => {

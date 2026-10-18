@@ -1467,6 +1467,7 @@ describe("ChatView question handoff", () => {
       resolve({
         conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         assistantMessageId: "next",
+        generationId: null,
       }),
     );
     await waitFor(() =>

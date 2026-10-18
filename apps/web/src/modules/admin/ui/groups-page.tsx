@@ -191,6 +191,16 @@ const featureGroups: ReadonlyArray<{
         description: "Let the desktop app read and change files on their computer.",
         key: "work",
       },
+      {
+        label: "Connected apps",
+        description: "Let apps like Claude Desktop use their chats, agents and knowledge.",
+        key: "mcp",
+      },
+      {
+        label: "API keys",
+        description: "Let them make keys for scripts and services that can’t sign in.",
+        key: "apiKeys",
+      },
     ],
   },
 ];

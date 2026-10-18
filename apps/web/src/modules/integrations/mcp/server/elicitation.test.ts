@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { promptOf, resultOf } from "./elicitation.ts";
+import { promptOf, resultOf, schemaOf } from "./elicitation.ts";
 
 describe("elicitation prompts", () => {
   const form = promptOf({
@@ -55,6 +55,16 @@ describe("elicitation prompts", () => {
         },
       ],
     });
+  });
+
+  it("writes a form back as the schema it was read from", () => {
+    if (form?.mode !== "form") throw new Error("expected a form");
+    const again = promptOf({
+      mode: "form",
+      message: form.message,
+      requestedSchema: schemaOf(form.fields),
+    });
+    expect(again).toEqual(form);
   });
 
   it("declines what it cannot show faithfully", () => {

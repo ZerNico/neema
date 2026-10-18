@@ -19,6 +19,7 @@ const call = (prompt: NonNullable<PendingIntegrationCall["prompt"]>): PendingInt
   messageId: "m",
   integrationId: "mcp",
   tool: "release",
+  label: "Create issue",
   access: "write",
   summary: null,
   targets: [],

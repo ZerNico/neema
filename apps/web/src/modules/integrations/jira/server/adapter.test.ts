@@ -430,7 +430,7 @@ describe("a connection limited to some projects", () => {
       ],
       indexer: createSourceIndexer([]),
       approvals: {
-        request: () => Effect.succeed("allow"),
+        request: () => Effect.succeed({ answer: "allow" as const, via: null }),
         elicit: () => Effect.succeed({ action: "cancel" as const }),
         answer: () => Effect.succeed(false),
         decide: () => Effect.succeed(false),
@@ -478,7 +478,7 @@ describe("a connection limited to some projects", () => {
   });
 
   it("refuses a change outside them in the tool layer, before anyone is asked", async () => {
-    const request = vi.fn(() => Effect.succeed("allow" as const));
+    const request = vi.fn(() => Effect.succeed({ answer: "allow" as const, via: null }));
     const approvals: IntegrationApprovals["Service"] = {
       request,
       elicit: () => Effect.succeed({ action: "cancel" as const }),

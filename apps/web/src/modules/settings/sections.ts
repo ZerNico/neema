@@ -3,7 +3,9 @@ import {
   Archive02Icon,
   Brain02Icon,
   ComputerIcon,
+  Key01Icon,
   LaptopPhoneSyncIcon,
+  McpServerIcon,
   Notification03Icon,
   PlugSocketIcon,
   UserCircleIcon,
@@ -41,6 +43,18 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     label: "Devices",
     icon: LaptopPhoneSyncIcon,
     matchPrefix: "/settings/devices",
+  },
+  {
+    to: "/settings/connected-apps",
+    label: "Connected apps",
+    icon: McpServerIcon,
+    matchPrefix: "/settings/connected-apps",
+  },
+  {
+    to: "/settings/api-keys",
+    label: "API keys",
+    icon: Key01Icon,
+    matchPrefix: "/settings/api-keys",
   },
   {
     to: "/settings/computer",

@@ -15,6 +15,8 @@ export const CAPABILITY_KEYS = [
   "customTools",
   "work",
   "attachments",
+  "mcp",
+  "apiKeys",
 ] as const;
 
 export type Capability = (typeof CAPABILITY_KEYS)[number];

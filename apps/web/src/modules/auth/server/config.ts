@@ -7,13 +7,18 @@ import {
 } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, genericOAuth } from "better-auth/plugins";
+import { cimd } from "@better-auth/cimd";
+import { mcp as mcpProvider } from "@better-auth/mcp";
+import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { count, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
+import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
+import { mcpAccess } from "./mcp-access.ts";
 
 export interface ImpersonationEvent {
   action: "impersonation.start" | "impersonation.stop";
@@ -120,6 +125,20 @@ const providerFromContext = (context: { path?: string; params?: unknown } | null
   return typeof id === "string" ? id : null;
 };
 
+/**
+ * This instance as an OAuth authorization server for its own MCP endpoint.
+ * Absent without a public URL, since tokens are bound to that address.
+ */
+export interface McpAuthorization {
+  /** The MCP endpoint's absolute URL, the audience of every token. */
+  resource: string;
+  allowed: (userId: string) => Promise<boolean>;
+  /** Resolve-once, pinned, redirect-refusing fetch for client metadata documents. */
+  fetchClientMetadata: ClientMetadataResourceFetch;
+}
+
+const MCP_GRANT_SCOPES = [...MCP_SCOPES, OFFLINE_ACCESS];
+
 type Operation = Omit<ImpersonationEvent, "timestamp">;
 const startPath = "/admin/impersonate-user";
 const stopPath = "/admin/stop-impersonating";
@@ -133,6 +152,7 @@ export function createAppAuth({
   oauthProviders = [],
   signup = openSignup,
   onDesktopRedeemed = async () => {},
+  mcp,
   // Better Auth's own default; named so a test can turn the limiter on.
   rateLimit = process.env.NODE_ENV === "production",
   log = (event) => Effect.runPromise(Effect.logInfo("auth impersonation", event)),
@@ -145,6 +165,7 @@ export function createAppAuth({
   signup?: SignupGate;
   /** Announces a redeemed desktop ticket to the user's open tabs. */
   onDesktopRedeemed?: (userId: string, ticketId: string) => Promise<void>;
+  mcp?: McpAuthorization | undefined;
   rateLimit?: boolean;
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
@@ -276,6 +297,38 @@ export function createAppAuth({
           })),
       }),
       desktopSessions({ approved: signup.approved, onRedeemed: onDesktopRedeemed }),
+      ...(mcp
+        ? [
+            mcpProvider({
+              resource: mcp.resource,
+              loginPage: "/oauth/sign-in",
+              consentPage: "/oauth/consent",
+              // Opaque tokens, checked in-process: no JWKS to serve, no call
+              // back to our own public URL, and a revoke takes effect at once.
+              disableJwtPlugin: true,
+              scopes: MCP_GRANT_SCOPES,
+              // Every token acts for a person; client_credentials would not.
+              grantTypes: ["authorization_code", "refresh_token"],
+              // Everything is requested by default; consent is where it narrows.
+              clientRegistrationDefaultScopes: MCP_GRANT_SCOPES,
+              clientRegistrationAllowedScopes: MCP_GRANT_SCOPES,
+              // MCP 2026-07-28 registers through metadata documents; older
+              // clients still register dynamically.
+              allowDynamicClientRegistration: true,
+              allowUnauthenticatedClientRegistration: true,
+              // Cursor and older Claude Code omit `application_type`; as "web"
+              // their loopback redirects would be refused.
+              clientRegistrationDefaultApplicationType: "infer",
+              accessTokenExpiresIn: 60 * 60,
+              refreshTokenExpiresIn: 30 * 24 * 60 * 60,
+            }),
+            cimd({
+              fetchClientMetadataResource: mcp.fetchClientMetadata,
+              metadataProfile: "mcp-2026-07-28",
+            }),
+            mcpAccess({ allowed: mcp.allowed }),
+          ]
+        : []),
       tanstackStartCookies(),
     ],
   });

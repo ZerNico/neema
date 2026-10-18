@@ -2,7 +2,7 @@ import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { findTags, tagWords } from "../tags.ts";
 import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
-import { responseFailureCopy } from "../generation-failure.ts";
+import { generationFailureDetails, responseFailureCopy } from "../generation-failure.ts";
 import { NO_LOOKUPS, type AssistantFile, type UiLookups } from "../assistant-output.ts";
 import {
   Alert02Icon,
@@ -235,6 +235,8 @@ export interface DisplayMessage {
   collectionIds?: ReadonlyArray<string>;
   skills?: ReadonlyArray<{ id: string; name: string }>;
   editedAt?: Date | null;
+  /** The connected app that sent this user message, as it was named then. */
+  originClientName?: string | null;
   /**
    * Sources from earlier messages in the conversation. Citation numbering is
    * conversation-scoped, so a message may cite a source it didn't search for
@@ -515,9 +517,14 @@ function UserBubble({ message }: { message: DisplayMessage }) {
               <MessageTagText text={text} />
             </div>
           ) : null}
-          {message.editedAt ? (
+          {message.editedAt || message.originClientName ? (
             <span className="text-muted-foreground mr-1 mt-1 text-2xs leading-[inherit]">
-              edited
+              {[
+                message.originClientName ? `via ${message.originClientName}` : null,
+                message.editedAt ? "edited" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           ) : null}
           {/* Hover-revealed on pointer devices; always visible on touch, where
@@ -1033,25 +1040,6 @@ function generationFailureCopy(error: string | null | undefined) {
     title: "Couldn’t generate a response",
     description: "Try again, or choose another model if the problem continues.",
   };
-}
-
-const FAILURE_DETAIL_PREFIXES = [
-  /^ProviderUnreachable:\s*/i,
-  /^effect\/ai\/AiError\/AiError:\s*/i,
-  /^[A-Za-z][\w]*Client\.[A-Za-z][\w]*:\s*/,
-];
-
-function generationFailureDetails(error: string): string {
-  let details = error
-    .trim()
-    .replace(/^Cause\(\[Fail\(/, "")
-    .replace(/\)\]\)$/, "");
-
-  for (const prefix of FAILURE_DETAIL_PREFIXES) {
-    details = details.replace(prefix, "");
-  }
-
-  return details || error;
 }
 
 function GenerationFailure({

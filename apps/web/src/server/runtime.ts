@@ -48,6 +48,8 @@ import { SkillService } from "~/modules/skills/server/service.ts";
 import { DraftService } from "~/modules/drafts/server/service.ts";
 import { ScheduleFire } from "~/modules/schedules/server/fire.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ApiKeys } from "~/modules/api-keys/server/service.ts";
+import { ConnectedApps } from "~/modules/mcp-server/server/connected-apps.ts";
 import { ScheduleService } from "~/modules/schedules/server/service.ts";
 import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
@@ -87,6 +89,8 @@ const ReposLayer = Layer.mergeAll(
   KnowledgeRepo.layer,
   SkillRepo.layer,
   ScheduleRepo.layer,
+  ConnectedApps.layer,
+  ApiKeys.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(
   WebSearchExecutor.layer,

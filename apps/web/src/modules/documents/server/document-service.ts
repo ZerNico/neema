@@ -363,6 +363,11 @@ export class DocumentService extends Context.Service<
         seen: SeenBlocks | null;
         /** A person asked for text under open comments to go. */
         allowDetach?: boolean | undefined;
+        /**
+         * The person's own edit, made through a connected app: stored as theirs
+         * and needing no generation, still checked against `seen`.
+         */
+        asPerson?: { readonly clientId: string } | undefined;
       },
       guard?: DocumentWriteGuard<E, R>,
     ): Effect.Effect<ApplyDocumentResult, DocumentError | E, R>;
@@ -771,6 +776,7 @@ export class DocumentService extends Context.Service<
           /** Open threads, which a model edit may not strip of all their text. */
           open: ReadonlySet<string>,
         ) => Effect.Effect<{ result: A; tr: Transform | null }, DocumentRejected>,
+        author: Author = { origin: "model", userId, clientId: MODEL_CLIENT },
       ) => {
         const attempt = exclusive(documentId)(
           Effect.gen(function* () {
@@ -787,11 +793,7 @@ export class DocumentService extends Context.Service<
                 // A table still streaming has a short last row; new cells need IDs too.
                 ensureIds(squareTables(tr));
                 yield* withinTreeCap(tr.doc);
-                const stored = yield* store(tx, documentId, entry, tr.doc, tr.steps, {
-                  origin: "model",
-                  userId,
-                  clientId: MODEL_CLIENT,
-                });
+                const stored = yield* store(tx, documentId, entry, tr.doc, tr.steps, author);
                 return { result: { ...decided.result, document: stored.document }, stored };
               }),
             );
@@ -902,6 +904,7 @@ export class DocumentService extends Context.Service<
           edit: TreeEdit;
           seen: SeenBlocks | null;
           allowDetach?: boolean | undefined;
+          asPerson?: { readonly clientId: string } | undefined;
         },
         guard?: DocumentWriteGuard<E, R>,
       ) =>
@@ -924,6 +927,9 @@ export class DocumentService extends Context.Service<
                 tr: applied.tr,
               };
             }),
+          input.asPerson
+            ? { origin: "user", userId, clientId: input.asPerson.clientId }
+            : undefined,
         );
 
       const rewrite = <E = never, R = never>(

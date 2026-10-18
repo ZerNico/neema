@@ -1724,6 +1724,13 @@ describe("MessageBubble actions", () => {
     );
     expect(screen.getByText("edited")).toBeInTheDocument();
   });
+
+  it("names the connected app that sent a message", () => {
+    renderPlain({ role: "user", originClientName: "Claude" });
+    expect(screen.getByText("via Claude")).toBeInTheDocument();
+    renderPlain({ role: "user", originClientName: "Cursor", editedAt: new Date() });
+    expect(screen.getByText("via Cursor · edited")).toBeInTheDocument();
+  });
   it("renders the send time as a machine-readable <time> element", () => {
     const { container } = renderPlain({
       time: {

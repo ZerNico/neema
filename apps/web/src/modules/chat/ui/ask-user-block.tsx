@@ -289,6 +289,11 @@ export function AskUserBlock({
               {resolution.response.kind === "skip" ? (
                 <span className="text-muted-foreground text-xs">Skipped</span>
               ) : null}
+              {resolution.originClientName ? (
+                <span className="text-muted-foreground text-xs">
+                  Answered via {resolution.originClientName}
+                </span>
+              ) : null}
               {resolution.onEdit ? (
                 <Button
                   size="sm"

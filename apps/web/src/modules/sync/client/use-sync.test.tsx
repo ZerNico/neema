@@ -102,6 +102,8 @@ describe("useSync", () => {
         messageId: "message",
         integrationId: "service",
         tool: "read",
+        label: "Search",
+        promptId: "prompt",
         access: "read",
         summary: null,
         targets: [],

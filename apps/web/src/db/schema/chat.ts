@@ -178,6 +178,10 @@ export const messages = pgTable(
     assistantOutput: jsonb("assistant_output").$type<AssistantOutput>(),
     providerReplay: jsonb("provider_replay").$type<ProviderReplay>(),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
+    // A user message a connected app sent, by OAuth client id, with its name
+    // as it was then, since the client may be deleted. Never changes.
+    originClientId: text("origin_client_id"),
+    originClientName: text("origin_client_name"),
     // Set on a user message delivered into a generation that was already
     // running. A steer belongs to that attempt, like its tool rows: it renders
     // inside the answer where it arrived, and goes when the attempt is

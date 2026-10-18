@@ -289,6 +289,8 @@ export interface PendingIntegrationCall {
   messageId: string;
   integrationId: string;
   tool: string;
+  /** The tool as the person knows it, as the activity row names it. */
+  label: string;
   /** The call's own: destructive when it would contact people. */
   access: "read" | "write" | "destructive";
   summary: string | null;
@@ -299,7 +301,13 @@ export interface PendingIntegrationCall {
   /** Everything the call sends, when `details` had to shorten or leave something out. */
   inFull?: string;
   prompt?: ElicitationPrompt;
-  /** Which question this is: one call may ask several, one after another. */
-  promptId?: string;
+  /** Which entry this is: one call may ask several questions, one after another. */
+  promptId: string;
   expiresAt: number;
 }
+
+/** What deciding a call would do, in the words the card and a connected app both show. */
+export const approvalConsequence = (call: PendingIntegrationCall, service: string) =>
+  call.targets.length > 0
+    ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from your ${service} account.`
+    : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with your ${service} account.`;

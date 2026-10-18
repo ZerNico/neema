@@ -138,6 +138,74 @@ export const promptOf = (params: ElicitRequest["params"]): ElicitationPrompt | n
   return { mode: "form", message, fields };
 };
 
+const FORMATS: Partial<Record<ElicitationField["kind"], string>> = {
+  email: "email",
+  url: "uri",
+  date: "date",
+  datetime: "date-time",
+};
+
+const choicesOf = (options: ElicitationField["options"]) =>
+  (options ?? []).map((option) => ({ const: option.value, title: option.label }));
+
+/**
+ * The form again as an elicitation schema, for passing a service's question
+ * on to another client. Only what `promptOf` read is written back, so the
+ * form it draws is the one this app would have drawn.
+ */
+export const schemaOf = (
+  fields: ReadonlyArray<ElicitationField>,
+): Extract<ElicitRequest["params"], { requestedSchema: unknown }>["requestedSchema"] => {
+  const properties: Record<string, Json> = {};
+  for (const field of fields) {
+    const base: Json = {
+      title: field.label,
+      ...(field.description ? { description: field.description } : {}),
+      ...(field.default !== undefined ? { default: field.default } : {}),
+    };
+    switch (field.kind) {
+      case "boolean":
+        properties[field.key] = { ...base, type: "boolean" };
+        break;
+      case "number":
+      case "integer":
+        properties[field.key] = {
+          ...base,
+          type: field.kind,
+          ...(field.min !== undefined ? { minimum: field.min } : {}),
+          ...(field.max !== undefined ? { maximum: field.max } : {}),
+        };
+        break;
+      case "choice":
+        properties[field.key] = { ...base, type: "string", oneOf: choicesOf(field.options) };
+        break;
+      case "choices":
+        properties[field.key] = {
+          ...base,
+          type: "array",
+          items: { anyOf: choicesOf(field.options) },
+          ...(field.min !== undefined ? { minItems: field.min } : {}),
+          ...(field.max !== undefined ? { maxItems: field.max } : {}),
+        };
+        break;
+      default:
+        properties[field.key] = {
+          ...base,
+          type: "string",
+          ...(FORMATS[field.kind] ? { format: FORMATS[field.kind] } : {}),
+          ...(field.min !== undefined ? { minLength: field.min } : {}),
+          ...(field.max !== undefined ? { maxLength: field.max } : {}),
+        };
+    }
+  }
+  return {
+    type: "object",
+    // Each property is one `promptOf` reads back, which is what the spec allows.
+    properties: properties as never,
+    required: fields.filter((field) => field.required).map((field) => field.key),
+  };
+};
+
 const answerable = (field: ElicitationField) => {
   if (TEXT_KINDS.has(field.kind)) return (field.min ?? 0) <= MAX_TEXT;
   const options = field.options ?? [];

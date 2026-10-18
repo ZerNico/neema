@@ -22,7 +22,7 @@ import {
 } from "../manifest.ts";
 import { REVIEWABLE_CHARS } from "../mcp/catalog.ts";
 import type { ElicitationAnswer } from "../schema.ts";
-import type { IntegrationModelResult } from "../tool-schema.ts";
+import type { IntegrationDecidedIn, IntegrationModelResult } from "../tool-schema.ts";
 import type {
   AdapterFailure,
   AdapterFile,
@@ -31,7 +31,7 @@ import type {
   OfferedTool,
   PreparedCall,
 } from "./adapter.ts";
-import type { ApprovalAnswer, IntegrationApprovals } from "./approvals.ts";
+import type { IntegrationApprovals } from "./approvals.ts";
 import type { ConnectedSession } from "./service.ts";
 import type { IntegrationAuthFailed } from "../errors.ts";
 
@@ -81,6 +81,8 @@ export interface PreparedIntegrationTools {
     access: ToolAccess | null;
     /** Files the call returned, for the engine to store under the generation fence. */
     files: ReadonlyArray<AdapterFile>;
+    /** The approval, when the person gave it in a connected app rather than here. */
+    decided: IntegrationDecidedIn | null;
   };
 }
 
@@ -145,6 +147,7 @@ export function prepareIntegrationTools(input: {
   const pendingSources = new Map<string, IntegrationSource[]>();
   const pendingFiles = new Map<string, ReadonlyArray<AdapterFile>>();
   const effectiveAccessByCall = new Map<string, ToolAccess>();
+  const decidedByCall = new Map<string, IntegrationDecidedIn>();
 
   for (const offer of input.offered) {
     const manifest = findIntegrationType(offer.session.integration.kind);
@@ -310,6 +313,7 @@ export function prepareIntegrationTools(input: {
                           messageId: input.owner.messageId,
                           integrationId: offer.integrationId,
                           tool: tool.name,
+                          label: tool.label,
                           access: tool.access,
                           summary: tool.summarize(args),
                           targets: [],
@@ -345,18 +349,21 @@ export function prepareIntegrationTools(input: {
                 `This action sends more than can be shown for approval (${inFull.length} characters), so it did not run. Send less at once.`,
                 true,
               );
-            const answer: ApprovalAnswer = yield* input.approvals.request(input.owner.userId, {
+            const { answer, via } = yield* input.approvals.request(input.owner.userId, {
               callId,
               conversationId: input.owner.conversationId,
               messageId: input.owner.messageId,
               integrationId: offer.integrationId,
               tool: tool.name,
+              label: tool.label,
               access,
               summary: prepared.success.summary ?? tool.summarize(args),
               targets: reach ? [...reach.targets] : [],
               ...(tool.details ? { details: tool.details(args) } : {}),
               ...(inFull !== null ? { inFull } : {}),
             });
+            if (via && answer !== "timeout")
+              decidedByCall.set(context.toolCallId, { decision: answer, app: via });
             if (answer === "deny")
               return failure("The user declined this action. Do not retry it unasked.", true);
             if (answer === "timeout")
@@ -458,10 +465,12 @@ export function prepareIntegrationTools(input: {
       const sources = pendingSources.get(providerCallId) ?? [];
       const access = effectiveAccessByCall.get(providerCallId) ?? null;
       const files = pendingFiles.get(providerCallId) ?? [];
+      const decided = decidedByCall.get(providerCallId) ?? null;
       pendingSources.delete(providerCallId);
       pendingFiles.delete(providerCallId);
       effectiveAccessByCall.delete(providerCallId);
-      return { sources, access, files };
+      decidedByCall.delete(providerCallId);
+      return { sources, access, files, decided };
     },
   };
 }

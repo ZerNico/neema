@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { integrationActivityFromRow } from "~/modules/chat/client/use-message-stream.ts";
 import { IntegrationToolActivity, projectIntegrationToolResult } from "./tool-schema.ts";
 
 const base = {
@@ -34,6 +35,21 @@ describe("integration row projection", () => {
     });
     expect(JSON.stringify(activity)).not.toContain("secret");
     expect(Schema.is(IntegrationToolActivity)(activity)).toBe(true);
+  });
+
+  it("names the connected app a decision was made in, on the row and its reload projection", () => {
+    const activity = projectIntegrationToolResult({
+      ...base,
+      raw: { ok: false, refused: true, error: "The user declined this action." },
+      isFailure: false,
+      decided: { decision: "deny", app: "Claude" },
+    });
+    expect(activity.decidedIn).toEqual({ decision: "deny", app: "Claude" });
+    expect(Schema.is(IntegrationToolActivity)(activity)).toBe(true);
+    expect(integrationActivityFromRow("row-1", activity).decidedIn).toEqual({
+      decision: "deny",
+      app: "Claude",
+    });
   });
 
   it("tells a refusal apart from a failure", () => {

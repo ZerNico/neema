@@ -203,6 +203,10 @@ its finalizer removes the entry, so a late Allow finds nothing. Reads wait two m
 changes ten. Deny, timeout and refusal return a model-visible result marked `refused`;
 nothing ran. The list of waiting calls is in memory and announced by
 `integration.approval.changed`; the card and the off-route toast both read it, never poll.
+Every entry is parked under its own nonce (`promptId`). A decision from outside the app must
+name it, so an answer carried back later settles nothing newer; only the in-app card, which
+shows the live entry, decides without one. A decision made in a connected app names that app
+on the tool row ("Approved in Claude"), as the person made it there and not here.
 
 ## Schedules decide in advance
 

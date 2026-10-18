@@ -3943,7 +3943,9 @@ export class StreamEngine extends Context.Service<
                           const integrationEntry = integrationTools?.names.get(part.name);
                           if (integrationEntry) {
                             if (isPreliminary) return;
-                            const { sources, access, files } = integrationTools!.take(part.id);
+                            const { sources, access, files, decided } = integrationTools!.take(
+                              part.id,
+                            );
                             // Files a service returned become attachments of the answer,
                             // stored under the fence like a custom tool's; a failed one is noted.
                             // By position: the result lists the files in the order returned,
@@ -4007,6 +4009,7 @@ export class StreamEngine extends Context.Service<
                               raw: part.result,
                               isFailure: part.isFailure,
                               sources,
+                              decided,
                             });
                             yield* repo.completeToolCall({
                               id: rowId,

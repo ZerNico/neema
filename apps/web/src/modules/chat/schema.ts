@@ -372,9 +372,14 @@ export const UpdateWorkSettingsInput = Schema.Struct({
   permissionLevel: PermissionLevel,
 });
 
+export const ConversationTitle = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_SEARCH_LENGTH),
+);
+
 export const RenameConversationInput = Schema.Struct({
   conversationId: Schema.String,
-  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SEARCH_LENGTH)),
+  title: ConversationTitle,
 });
 
 // Envelope persisted in message_chunks.delta for kind:"compaction" markers.

@@ -78,6 +78,11 @@ edit the wrong thing.
   knowledge source mirrors part of an integration into a collection as the collection owner.
   An allowance is a manifest-declared way calls reach people (sending mail, inviting); a
   schedule grants it for exact addresses only, capped per run.
+- **connected app**: an outside MCP client (Claude Desktop, Cursor) one person let in through
+  OAuth to this instance's own MCP endpoint, listed and revoked in Settings. The reverse of an
+  MCP integration, never one. Gated by the `mcp` capability on every request. An **API key**
+  is the same grant without a browser: made in Settings, client id `key:<id>`, also gated by
+  `apiKeys`.
 - **skill**: a `SKILL.md` package the model can load on demand. Not a tool, not a
   permission. `ambient` skills are offered automatically; explicit ones are pinned.
 - **memory**: a saved user fact the model may reference or write. One save attempt
@@ -263,6 +268,11 @@ skipped one on purpose.
 - `docs/internals/mcp.md`: remote MCP servers as an integration type. Approved tool
   catalogs and drift, access from untrusted hints, discovered OAuth, origin locking,
   elicitation, the shared key that only reads.
+- `docs/internals/mcp-server.md`: this instance as an MCP server. The OAuth provider inside
+  the auth instance, opaque tokens checked in-process, what every request re-checks, grants
+  that outlive the consenting browser, and why the router never sees a signed query. Delegated
+  turns: accepted whole, watched not owned, read by attempt; approvals put to the app's person
+  under sealed request state; documents written as the person, still held to `seen`.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
   boundary, queued files as a second owner kind, and why only a desktop app can
   start queued Work.
@@ -351,10 +361,14 @@ All release candidates. Pin exactly; never float to `latest`.
   install script only fetches CUDA files and is denied in `allowBuilds`. On a bump, run the OCR
   test in `pdf/server/pages.test.ts` with model files present and `pnpm build`, whose PDF worker
   smoke proves the natives load from the output. See [PDFs](docs/internals/pdf.md).
-- `@modelcontextprotocol/client` (and `@modelcontextprotocol/server`, tests only) are v2, pinned
-  exact as a pair; v1 is the separate `@modelcontextprotocol/sdk`. On a bump, run
+- `@modelcontextprotocol/client` and `@modelcontextprotocol/server` are v2, pinned exact as a
+  pair; v1 is the separate `@modelcontextprotocol/sdk`. On a bump, run
   `src/modules/integrations/mcp/server/*.test.ts`, which drive real servers of both protocol
-  eras and an authorization server. See [MCP](docs/internals/mcp.md).
+  eras and an authorization server, and `tests/integration/mcp-server-auth.test.ts`, which
+  drives ours with the real client. See [MCP](docs/internals/mcp.md).
+- `better-auth`, `@better-auth/oauth-provider`, `@better-auth/mcp` and `@better-auth/cimd` are
+  pinned exact as one set; the plugins share Better Auth's core and its tables. See
+  [MCP server](docs/internals/mcp-server.md).
 - `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
   reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
   component uncompiled, which is most of them. On a bump, count compiled components, not test results.
@@ -449,9 +463,9 @@ Differs from most Effect 3 material online.
   streamed, on a timer and whenever a subscriber, the detail loader or Stop meets
   one. Research has its own lease on `research_runs`.
 - Better Auth owns its tables' columns; `src/db/schema/auth.ts` tracks the
-  installed version only (1.7.1 added `account.issuer`, 1.7.3 removed it). After
-  an upgrade, diff `@better-auth/core`'s `dist/db/get-tables.mjs` and verify a
-  fresh signup.
+  installed version only (1.7.1 added `account.issuer`, 1.7.3 removed it), its OAuth
+  provider's tables included. After an upgrade, diff the tables `getAuthTables` reports for
+  the configured plugins, not only core's `dist/db/get-tables.mjs`, and verify a fresh signup.
 - Stored credentials (provider and tool API keys, OAuth client secrets, integration
   accounts) are AES-256-GCM at rest (`ENCRYPTION_KEY`); ciphertext
   never leaves the server.

@@ -249,6 +249,8 @@ export interface IntegrationToolActivity extends ToolActivityBase {
   refused?: boolean;
   link?: { title: string; url: string };
   sources?: ReadonlyArray<IntegrationSource>;
+  /** Approved or declined in a connected app, which this names. */
+  decidedIn?: { decision: "allow" | "deny"; app: string };
 }
 
 export type ToolActivity =
@@ -1616,4 +1618,5 @@ export const integrationActivityFromRow = (
   ...(activity.error ? { error: activity.error } : {}),
   ...(activity.link ? { link: activity.link } : {}),
   ...(activity.sources?.length ? { sources: activity.sources } : {}),
+  ...(activity.decidedIn ? { decidedIn: activity.decidedIn } : {}),
 });

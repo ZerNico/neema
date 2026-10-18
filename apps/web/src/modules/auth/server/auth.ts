@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { mcpResourceFor } from "~/modules/mcp-server/resource.ts";
+import { fetchClientMetadata } from "~/modules/mcp-server/server/client-metadata-fetch.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -37,6 +40,23 @@ const onDesktopRedeemed = (userId: string, ticketId: string) =>
     ),
   );
 
+/** Whether this account may connect an app now: the same check every MCP request makes. */
+export const mayConnectApps = (userId: string) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      if (!(yield* accountEligible(userId))) return false;
+      return yield* Effect.flatMap(FeaturePolicy, (policy) => policy.can(userId, "mcp"));
+    }),
+  );
+
+/** Tokens are bound to the public address, so there is no MCP server without a secure one. */
+export const mcpResource = () => mcpResourceFor(publicUrl());
+
+const mcpAuthorization = () => {
+  const resource = mcpResource();
+  return resource ? { resource, allowed: mayConnectApps, fetchClientMetadata } : undefined;
+};
+
 const build = async (): Promise<Auth> =>
   createAppAuth({
     // The Better Auth pool is memoized, so a rebuild costs one provider query
@@ -47,6 +67,7 @@ const build = async (): Promise<Auth> =>
     purgeUserFiles,
     signup,
     onDesktopRedeemed,
+    mcp: mcpAuthorization(),
     oauthProviders: await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) => repo.listForAuth()),
     ),

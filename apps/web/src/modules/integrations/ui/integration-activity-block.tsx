@@ -16,7 +16,11 @@ import { Button } from "~/ui/primitives/button";
 import { Card, CardContent } from "~/ui/primitives/card";
 import { cn } from "~/ui/utils";
 import { pendingIntegrationCallsQuery } from "../client/queries.ts";
-import type { IntegrationDecision, PendingIntegrationCall } from "../schema.ts";
+import {
+  approvalConsequence,
+  type IntegrationDecision,
+  type PendingIntegrationCall,
+} from "../schema.ts";
 import { decideIntegrationCall } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { useIntegrationDirectory } from "../client/directory.ts";
@@ -49,6 +53,9 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   const detail = [
     activity.summary,
     activity.sources?.length ? `${activity.sources.length} results` : null,
+    activity.decidedIn
+      ? `${activity.decidedIn.decision === "allow" ? "Approved" : "Declined"} in ${activity.decidedIn.app}`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -138,10 +145,7 @@ function ApprovalCard({
       queryClient.invalidateQueries({ queryKey: pendingIntegrationCallsQuery.queryKey }),
     onError: (error) => toastError("Could not send your answer.", error),
   });
-  const consequence =
-    call.targets.length > 0
-      ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from your ${name} account.`
-      : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with your ${name} account.`;
+  const consequence = approvalConsequence(call, name);
   return (
     <Card className="mb-3 gap-0 py-4">
       <CardContent className="flex min-w-0 flex-col gap-3 px-4">

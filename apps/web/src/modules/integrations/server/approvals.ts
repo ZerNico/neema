@@ -5,6 +5,12 @@ import type { ElicitationAnswer, PendingIntegrationCall } from "../schema.ts";
 
 export type ApprovalAnswer = "allow" | "deny" | "timeout";
 
+/** A decision, and the connected app it was made in when not this app. */
+export interface ApprovalOutcome {
+  readonly answer: ApprovalAnswer;
+  readonly via: string | null;
+}
+
 /** Reads wait less: a person approving every lookup is at the keyboard anyway. */
 export const APPROVAL_TIMEOUTS = {
   read: Duration.minutes(2),
@@ -14,7 +20,7 @@ export const APPROVAL_TIMEOUTS = {
 } as const;
 
 type Answer =
-  | { readonly kind: "decision"; readonly value: "allow" | "deny" }
+  | { readonly kind: "decision"; readonly value: "allow" | "deny"; readonly via: string | null }
   | { readonly kind: "elicitation"; readonly value: ElicitationAnswer };
 
 interface Waiting {
@@ -24,6 +30,13 @@ interface Waiting {
 }
 
 type Pending = Omit<PendingIntegrationCall, "expiresAt" | "kind" | "promptId">;
+
+export interface DecideOptions {
+  /** The parked entry's nonce; a decision naming an older one is refused. */
+  readonly promptId?: string;
+  /** The connected app the person decided in. */
+  readonly via?: string;
+}
 
 /**
  * Integration calls parked on a person: an approval before a call runs, or a
@@ -35,7 +48,7 @@ type Pending = Omit<PendingIntegrationCall, "expiresAt" | "kind" | "promptId">;
 export class IntegrationApprovals extends Context.Service<
   IntegrationApprovals,
   {
-    request(userId: string, call: Pending): Effect.Effect<ApprovalAnswer>;
+    request(userId: string, call: Pending): Effect.Effect<ApprovalOutcome>;
     /**
      * Asks the person on a service's behalf; no answer in time cancels. One
      * question per call at a time: the caller asks the next once this returns.
@@ -45,7 +58,12 @@ export class IntegrationApprovals extends Context.Service<
       call: Pending & { prompt: NonNullable<PendingIntegrationCall["prompt"]> },
     ): Effect.Effect<ElicitationAnswer>;
     /** False when there is no such waiting call for this person any more. */
-    decide(userId: string, callId: string, answer: "allow" | "deny"): Effect.Effect<boolean>;
+    decide(
+      userId: string,
+      callId: string,
+      answer: "allow" | "deny",
+      options?: DecideOptions,
+    ): Effect.Effect<boolean>;
     answer(
       userId: string,
       callId: string,
@@ -92,7 +110,14 @@ export class IntegrationApprovals extends Context.Service<
           const entry = waiting.get(callId);
           if (!entry || entry.userId !== userId) return false;
           if ((entry.call.kind === "elicitation") !== (answer.kind === "elicitation")) return false;
-          if (entry.call.promptId !== promptId) return false;
+          // A question is always answered by name. An approval may be decided
+          // without one only by the in-app card, which shows the live entry.
+          if (
+            promptId !== undefined
+              ? entry.call.promptId !== promptId
+              : answer.kind === "elicitation"
+          )
+            return false;
           return yield* Deferred.succeed(entry.answer, answer);
         });
 
@@ -100,12 +125,12 @@ export class IntegrationApprovals extends Context.Service<
         request: Effect.fn("IntegrationApprovals.request")(function* (userId, call) {
           const decided = yield* park(
             userId,
-            { ...call, kind: "approval", expiresAt: 0 },
+            { ...call, kind: "approval", promptId: uuidv7(), expiresAt: 0 },
             call.access === "read" ? APPROVAL_TIMEOUTS.read : APPROVAL_TIMEOUTS.change,
           );
           return decided._tag === "Some" && decided.value.kind === "decision"
-            ? decided.value.value
-            : "timeout";
+            ? { answer: decided.value.value, via: decided.value.via }
+            : { answer: "timeout", via: null };
         }),
 
         elicit: Effect.fn("IntegrationApprovals.elicit")(function* (userId, call) {
@@ -119,8 +144,13 @@ export class IntegrationApprovals extends Context.Service<
             : { action: "cancel" };
         }),
 
-        decide: (userId, callId, answer) =>
-          settle(userId, callId, { kind: "decision", value: answer }),
+        decide: (userId, callId, answer, options) =>
+          settle(
+            userId,
+            callId,
+            { kind: "decision", value: answer, via: options?.via ?? null },
+            options?.promptId,
+          ),
 
         answer: (userId, callId, promptId, answer) =>
           settle(userId, callId, { kind: "elicitation", value: answer }, promptId),

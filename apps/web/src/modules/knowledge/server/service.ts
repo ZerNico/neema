@@ -441,7 +441,9 @@ export class KnowledgeService extends Context.Service<
           if (!version || version.status !== "ready" || version.charCount === null)
             return yield* new KnowledgeNotAvailable({ resourceId: input.versionId });
           if (input.startOffset > version.charCount)
-            return yield* new KnowledgeRejected({ reason: "invalid document range" });
+            return yield* new KnowledgeRejected({
+              reason: `startOffset is past the end of the document, which has ${version.charCount} characters`,
+            });
           const requestedEnd = Math.min(version.charCount, input.startOffset + input.maxChars);
           const from = Math.max(0, input.startOffset - 1);
           const range = yield* repo.readVersionRange(

@@ -321,6 +321,8 @@ export type TurnFields = {
     | undefined;
   /** Absent means a plain generation; the service always supplies one. */
   resolve?: ResolveGeneration | undefined;
+  /** The connected app that sent this message, recorded on it for good. */
+  origin?: { clientId: string; clientName: string } | undefined;
 };
 export type CreateTurnInput = TurnFields & TurnContent;
 export type WorkTurnReservationRow = typeof workTurnReservations.$inferSelect;
@@ -1238,6 +1240,15 @@ export class ChatRepo extends Context.Service<
     }): Effect.Effect<MessageRow>;
     isDesktopAttemptLive(owner: ExternalOwner): Effect.Effect<boolean>;
     getMessage(messageId: string): Effect.Effect<MessageRow | null>;
+    /**
+     * The clarification a structured answer could reply to now: the tail
+     * answer's one presented batch, by the same rule `createTurn` accepts.
+     */
+    openQuestion(conversationId: string): Effect.Effect<{
+      callId: string;
+      messageId: string;
+      questions: AskUserParams["questions"];
+    } | null>;
     appendChunks(
       messageId: string,
       chunks: ReadonlyArray<{ seq: number; kind: ChunkKind; delta: string }>,
@@ -2139,6 +2150,8 @@ export class ChatRepo extends Context.Service<
                     status: "complete",
                     content: content!,
                     questionResponse,
+                    originClientId: input.origin?.clientId ?? null,
+                    originClientName: input.origin?.clientName ?? null,
                   })
                   .returning()
                   .pipe(Effect.orDie);
@@ -3499,6 +3512,19 @@ export class ChatRepo extends Context.Service<
           return rows.length > 0;
         }),
 
+        openQuestion: Effect.fn("ChatRepo.openQuestion")(function* (conversationId) {
+          const [tail] = yield* db
+            .select()
+            .from(messages)
+            .where(turnMessagesOf(conversationId))
+            .orderBy(desc(messages.createdAt), desc(messages.id))
+            .limit(1)
+            .pipe(Effect.orDie);
+          const batch = yield* questionForMessage(db, tail);
+          return batch && tail
+            ? { callId: batch.call.id, messageId: tail.id, questions: batch.questions }
+            : null;
+        }),
         getMessage: Effect.fn("ChatRepo.getMessage")(function* (messageId) {
           const rows = yield* db
             .select()

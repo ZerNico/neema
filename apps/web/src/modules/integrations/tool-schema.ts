@@ -13,6 +13,13 @@ export const INTEGRATION_ACTIVITY_LIMITS = {
 const Access = Schema.Literals(["read", "write", "destructive"]);
 const Status = Schema.Literals(["complete", "error", "refused"]);
 
+/** An approval the person gave in a connected app, named as it was then. */
+export const IntegrationDecidedIn = Schema.Struct({
+  decision: Schema.Literals(["allow", "deny"]),
+  app: bounded(INTEGRATION_ACTIVITY_LIMITS.name),
+});
+export type IntegrationDecidedIn = typeof IntegrationDecidedIn.Type;
+
 /**
  * What a row keeps: who did what, how it ended, and the sources it produced.
  * Arguments and page bodies never land here, since a create call can carry a
@@ -38,6 +45,7 @@ export const IntegrationToolActivity = Schema.Struct({
   ),
   error: Schema.optional(bounded(INTEGRATION_ACTIVITY_LIMITS.error)),
   sources: Schema.optional(Schema.Array(IntegrationSource)),
+  decidedIn: Schema.optional(IntegrationDecidedIn),
 });
 export type IntegrationToolActivity = typeof IntegrationToolActivity.Type;
 
@@ -94,6 +102,7 @@ export function projectIntegrationToolResult(input: {
   raw: unknown;
   isFailure: boolean;
   sources: ReadonlyArray<IntegrationSource>;
+  decided?: IntegrationDecidedIn | null;
 }): IntegrationToolActivity {
   const result = (input.raw ?? {}) as IntegrationModelResult;
   const ok = !input.isFailure && result.ok === true;
@@ -122,5 +131,13 @@ export function projectIntegrationToolResult(input: {
     ...(link ? { link } : {}),
     ...(error ? { error: clamp(error, INTEGRATION_ACTIVITY_LIMITS.error) } : {}),
     ...(input.sources.length ? { sources: [...input.sources] } : {}),
+    ...(input.decided
+      ? {
+          decidedIn: {
+            decision: input.decided.decision,
+            app: clamp(input.decided.app, INTEGRATION_ACTIVITY_LIMITS.name),
+          },
+        }
+      : {}),
   };
 }

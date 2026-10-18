@@ -33,6 +33,15 @@ const user = (response: QuestionResponse = answers) => ({
 });
 
 describe("associateQuestionResponses", () => {
+  it("keeps which connected app answered, since the reply itself is folded away", () => {
+    const result = associateQuestionResponses(
+      [assistant, { ...user(), originClientName: "Claude" }],
+      [call],
+      [],
+    );
+    expect(result.byAssistant.get(assistant.id)?.originClientName).toBe("Claude");
+  });
+
   it("folds a reply to a steered answer's questions past the steer between them", () => {
     const steer = {
       id: "steer",
