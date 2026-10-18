@@ -115,7 +115,7 @@ describe("main browser authority", () => {
     });
     await begin();
     const pending = adapter.snapshot(7, { screenshot: true }, "call");
-    const rejected = expect(pending).rejects.toThrow();
+    const rejected = expect(pending).rejects.toThrow("The browser call ended.");
     await started.promise;
     adapter.cancel("call");
     await rejected;

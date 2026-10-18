@@ -110,7 +110,11 @@ describe("the desktop channel", () => {
           scope: "answer",
         }),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({
+      _tag: "DesktopError",
+      reason: "failed",
+      message: "Could not send the request.",
+    });
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -133,7 +137,11 @@ describe("the desktop channel", () => {
           scope: "answer",
         }),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({
+      _tag: "DesktopError",
+      reason: "failed",
+      message: "Could not send the request.",
+    });
     expect(request).not.toHaveBeenCalled();
   });
 

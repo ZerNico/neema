@@ -109,7 +109,9 @@ it("bounded file reading checks cancellation", async () => {
   await writeFile(path, "tiny");
   const controller = new AbortController();
   controller.abort();
-  await expect(readDownload(path, 8, controller.signal)).rejects.toThrow();
+  await expect(readDownload(path, 8, controller.signal)).rejects.toThrow(
+    expect.objectContaining({ name: "AbortError" }),
+  );
 });
 
 it("cancels the native item when its staging cannot be set up", async () => {

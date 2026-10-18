@@ -27,7 +27,7 @@ describe("model operation identity", () => {
   it.each(cases)("requires callId on $tag", ({ tag, payload }) => {
     const rpc = DesktopRpcs.requests.get(tag)!;
     const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
-    expect(() => decode(payload)).toThrow();
+    expect(() => decode(payload)).toThrow('Missing key\n  at ["callId"]');
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
   });
 
@@ -40,7 +40,7 @@ describe("model operation identity", () => {
       command: "true",
       timeoutMs: 100,
     };
-    expect(() => decode(payload)).toThrow();
+    expect(() => decode(payload)).toThrow('Missing key\n  at ["callId"]');
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
   });
 });
@@ -107,7 +107,9 @@ describe("user-driven workspace operations", () => {
     (conversationId) => {
       const rpc = DesktopRpcs.requests.get("folderStatus")!;
       const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
-      expect(() => decode({ conversationId })).toThrow();
+      expect(() => decode({ conversationId })).toThrow(
+        'Expected a canonical UUIDv7.\n  at ["conversationId"]',
+      );
     },
   );
 });

@@ -38,7 +38,9 @@ describe("pageHandler", () => {
     expect(() => pageHandler(allowed, AgentChoicePayload, run)(page, {})).toThrow(
       "Malformed request.",
     );
-    expect(() => pageHandler(allowed, NoPayload, run)(page, { extra: true })).toThrow();
+    expect(() => pageHandler(allowed, NoPayload, run)(page, { extra: true })).toThrow(
+      "Malformed request.",
+    );
     expect(run).not.toHaveBeenCalled();
   });
 });

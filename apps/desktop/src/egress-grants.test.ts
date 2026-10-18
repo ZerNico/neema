@@ -171,8 +171,12 @@ describe("changes", () => {
 
   it("refuses a grant that is not already canonical", async () => {
     const grants = await loadEgressGrants(await directory());
-    await expect(grants.add({ scope: "always" }, site("Example.com"))).rejects.toThrow();
-    await expect(grants.add({ scope: "always" }, site("10.0.0.1"))).rejects.toThrow();
+    await expect(grants.add({ scope: "always" }, site("Example.com"))).rejects.toThrow(
+      "Invalid network permission.",
+    );
+    await expect(grants.add({ scope: "always" }, site("10.0.0.1"))).rejects.toThrow(
+      "Invalid network permission.",
+    );
     expect(grants.list({ scope: "always" })).toEqual([]);
   });
 

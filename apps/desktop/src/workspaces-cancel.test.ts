@@ -57,7 +57,11 @@ it("cancels after writing temp bytes but before workspace publication", async ()
   const pending = Effect.runPromise(
     registry.landFile(CONVERSATION, "x", new Uint8Array([1]), controller.signal),
   );
-  const refused = expect(pending).rejects.toThrow();
+  const refused = expect(pending).rejects.toMatchObject({
+    _tag: "DesktopError",
+    reason: "failed",
+    message: "Could not save that file.",
+  });
   await written.promise;
   controller.abort();
   release.resolve();
@@ -74,7 +78,11 @@ it("rechecks cancellation before retrying a colliding publication name", async (
   barriers.beforeLink = () => controller.abort();
   await expect(
     Effect.runPromise(registry.landFile(CONVERSATION, "x", new Uint8Array([1]), controller.signal)),
-  ).rejects.toThrow();
+  ).rejects.toMatchObject({
+    _tag: "DesktopError",
+    reason: "failed",
+    message: "Could not save that file.",
+  });
   expect(barriers.links).toBe(1);
   expect(await readdir(registry.path(CONVERSATION))).toEqual(["x"]);
 });

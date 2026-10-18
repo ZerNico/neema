@@ -25,7 +25,7 @@ it("refuses late start after cancellation and changes to an active identity", ()
   const context = calls.get("live");
   calls.end("live");
   expect(context.signal.aborted).toBe(true);
-  expect(() => context.check()).toThrow();
+  expect(() => context.check()).toThrow("The browser call ended.");
   expect(() => calls.begin("live", "chat", deadline)).toThrow("ended");
 });
 

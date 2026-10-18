@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
-import { Effect, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { runOwnedProcess, terminateProcessTree, type ProcessDependencies } from "./process.ts";
 
@@ -48,7 +48,8 @@ describe("owned subprocesses", () => {
     test.child.emit("close", null);
     expect(settled).toBe(false);
     test.stopped.resolve();
-    expect(Exit.isFailure(await completed)).toBe(true);
+    const exit = await completed;
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
   });
 
   it("times out through the same owned-tree cleanup path", async () => {
@@ -119,7 +120,8 @@ describe("owned subprocesses", () => {
       await ready.promise;
       controller.abort();
       // close cannot arrive while the grandchild still owns the inherited stdout pipe.
-      expect(Exit.isFailure(await completed)).toBe(true);
+      const exit = await completed;
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     },
   );
 });

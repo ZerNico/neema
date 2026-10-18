@@ -1925,7 +1925,7 @@ describe("JVM settings", () => {
     // The settings file goes with the command.
     expect(env.MAVEN_ARGS).toContain("-Daether.connector.basic.threads=1");
     const file = /^-s (\S+)/.exec(env.MAVEN_ARGS ?? "")?.[1] ?? "";
-    await expect(readFile(file, "utf8")).rejects.toThrow();
+    await expect(readFile(file, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await close();
   });
 

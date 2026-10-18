@@ -1,5 +1,5 @@
 import { Worker, type WorkerOptions } from "node:worker_threads";
-import { Effect, Exit } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withRegexMatcher } from "./regex-matcher.ts";
 
@@ -102,7 +102,8 @@ describe("isolated regexp matching", () => {
     try {
       await observed.matching;
       controller.abort();
-      expect(Exit.isFailure(await result)).toBe(true);
+      const exit = await result;
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
       expect(terminate).toHaveBeenCalledTimes(1);
       expect(observed.workers[0]!.threadId).toBe(-1);
       const next = await Effect.runPromise(withRegexMatcher("ok", (match) => match("ok", 10)));
