@@ -664,9 +664,11 @@ function textAround(args: Value[], call: Call, after: boolean): Value {
 type Library = Record<string, unknown>;
 // A namespace import is an object of its exports, so it widens without narrowing.
 const libraryTable: Library = { ...library };
+/** Excel's legacy names formula.js keeps only under their current name. */
+const LIBRARY_ALIASES = new Map([["PERCENTRANK", "PERCENTRANK.INC"]]);
 /** "STDEV.S" lives at library.STDEV.S; a plain name at the top. */
 export function libraryFunction(name: string): ((...args: unknown[]) => unknown) | null {
-  const found = name
+  const found = (LIBRARY_ALIASES.get(name) ?? name)
     .split(".")
     .reduce<unknown>((node, part) => (node as Library | undefined)?.[part], libraryTable);
   return typeof found === "function" ? (found as (...args: unknown[]) => unknown) : null;

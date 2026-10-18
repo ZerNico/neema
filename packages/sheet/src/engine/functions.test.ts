@@ -299,6 +299,7 @@ const cases: Record<string, Case[]> = {
     { formula: "PERCENTRANK.INC(A1:A10,2)", cells: ranked, expected: 0.333, digits: 12 },
     { formula: "PERCENTRANK.INC(A1:A10,5)", cells: ranked, expected: 0.583, digits: 12 },
   ],
+  PERCENTRANK: [{ formula: "PERCENTRANK(A1:A10,8)", cells: ranked, expected: 0.666, digits: 12 }],
   // PERCENTRANK.EXC example.
   "PERCENTRANK.EXC": [
     {
