@@ -396,7 +396,7 @@ function make(background: boolean) {
                 lte(knowledgeSources.nextSyncAt, sql`now()`),
                 or(
                   isNull(knowledgeSources.leaseUntil),
-                  lte(knowledgeSources.leaseUntil, sql`now()`),
+                  lte(knowledgeSources.leaseUntil, sql`clock_timestamp()`),
                 ),
                 // One sync per collection at a time: overlapping sources decide
                 // who keeps a shared page by what is already stored.
@@ -408,7 +408,7 @@ function make(background: boolean) {
                       and(
                         eq(sibling.collectionId, knowledgeSources.collectionId),
                         ne(sibling.id, knowledgeSources.id),
-                        sql`${sibling.leaseUntil} > now()`,
+                        sql`${sibling.leaseUntil} > clock_timestamp()`,
                       ),
                     ),
                 ),

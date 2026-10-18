@@ -921,7 +921,7 @@ export class KnowledgeRepo extends Context.Service<
                 .select({ id: knowledgeDocuments.id })
                 .from(knowledgeDocuments)
                 .where(sql`exists (select 1 from knowledge_document_versions v where v.document_id = ${knowledgeDocuments.id}
-                  and v.attempts >= ${MAX_ATTEMPTS} and (v.status = 'queued' or (v.status = 'extracting' and (v.lease_until is null or v.lease_until < now()))))`)
+                  and v.attempts >= ${MAX_ATTEMPTS} and (v.status = 'queued' or (v.status = 'extracting' and (v.lease_until is null or v.lease_until <= clock_timestamp()))))`)
                 .orderBy(asc(knowledgeDocuments.id))
                 .limit(50)
                 .for("update", { skipLocked: true });
@@ -946,7 +946,7 @@ export class KnowledgeRepo extends Context.Service<
                         eq(knowledgeDocumentVersions.status, "extracting"),
                         or(
                           isNull(knowledgeDocumentVersions.leaseUntil),
-                          sql`${knowledgeDocumentVersions.leaseUntil} < now()`,
+                          sql`${knowledgeDocumentVersions.leaseUntil} <= clock_timestamp()`,
                         ),
                       ),
                     ),
@@ -984,7 +984,7 @@ export class KnowledgeRepo extends Context.Service<
                         eq(knowledgeEmbeddingJobs.status, "running"),
                         or(
                           isNull(knowledgeEmbeddingJobs.leaseUntil),
-                          sql`${knowledgeEmbeddingJobs.leaseUntil} < now()`,
+                          sql`${knowledgeEmbeddingJobs.leaseUntil} <= clock_timestamp()`,
                         ),
                       ),
                     ),
@@ -1007,15 +1007,15 @@ export class KnowledgeRepo extends Context.Service<
               update knowledge_document_versions
               set status = 'extracting',
                   lease_token = ${leaseToken},
-                  lease_until = now() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
+                  lease_until = clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
                   attempts = attempts + 1
               where id = (
                 select id from knowledge_document_versions
                 where attempts < ${MAX_ATTEMPTS}
                   -- On a queued row lease_until is the earliest retry, set by a
                   -- failure worth waiting out (a scan reader's rate limit).
-                  and ((status = 'queued' and (lease_until is null or lease_until <= now()))
-                   or (status = 'extracting' and (lease_until is null or lease_until < now())))
+                  and ((status = 'queued' and (lease_until is null or lease_until <= clock_timestamp()))
+                   or (status = 'extracting' and (lease_until is null or lease_until <= clock_timestamp())))
                 order by created_at
                 for update skip locked
                 limit 1
@@ -1131,7 +1131,7 @@ export class KnowledgeRepo extends Context.Service<
                     eq(knowledgeDocumentVersions.id, input.versionId),
                     eq(knowledgeDocumentVersions.leaseToken, input.leaseToken),
                     eq(knowledgeDocumentVersions.status, "extracting"),
-                    sql`${knowledgeDocumentVersions.leaseUntil} > now()`,
+                    sql`${knowledgeDocumentVersions.leaseUntil} > clock_timestamp()`,
                   ),
                 )
                 .returning({ documentId: knowledgeDocumentVersions.documentId });
@@ -1188,13 +1188,15 @@ export class KnowledgeRepo extends Context.Service<
         function* (input: { versionId: string; leaseToken: string }) {
           const renewed = yield* db
             .update(knowledgeDocumentVersions)
-            .set({ leaseUntil: sql`now() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'` })
+            .set({
+              leaseUntil: sql`clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'`,
+            })
             .where(
               and(
                 eq(knowledgeDocumentVersions.id, input.versionId),
                 eq(knowledgeDocumentVersions.leaseToken, input.leaseToken),
                 eq(knowledgeDocumentVersions.status, "extracting"),
-                sql`${knowledgeDocumentVersions.leaseUntil} > now()`,
+                sql`${knowledgeDocumentVersions.leaseUntil} > clock_timestamp()`,
               ),
             )
             .returning({ id: knowledgeDocumentVersions.id })
@@ -1245,7 +1247,7 @@ export class KnowledgeRepo extends Context.Service<
                     eq(knowledgeDocumentVersions.id, input.versionId),
                     eq(knowledgeDocumentVersions.leaseToken, input.leaseToken),
                     eq(knowledgeDocumentVersions.status, "extracting"),
-                    sql`${knowledgeDocumentVersions.leaseUntil} > now()`,
+                    sql`${knowledgeDocumentVersions.leaseUntil} > clock_timestamp()`,
                   ),
                 )
                 .returning({
@@ -1287,7 +1289,7 @@ export class KnowledgeRepo extends Context.Service<
               update knowledge_embedding_jobs
               set status = 'running',
                   lease_token = ${leaseToken},
-                  lease_until = now() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
+                  lease_until = clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
                   attempts = attempts + 1,
                   updated_at = now()
               where version_id = (
@@ -1297,7 +1299,7 @@ export class KnowledgeRepo extends Context.Service<
                   and exists (select 1 from knowledge_document_versions v where v.id = version_id and v.status = 'ready')
                   and (
                     status = 'queued'
-                    or (status = 'running' and (lease_until is null or lease_until < now()))
+                    or (status = 'running' and (lease_until is null or lease_until <= clock_timestamp()))
                   )
                 order by updated_at
                 for update skip locked
@@ -1342,14 +1344,16 @@ export class KnowledgeRepo extends Context.Service<
       ) {
         const rows = yield* db
           .update(knowledgeEmbeddingJobs)
-          .set({ leaseUntil: sql`now() + interval '120 seconds'` })
+          .set({
+            leaseUntil: sql`clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'`,
+          })
           .where(
             and(
               eq(knowledgeEmbeddingJobs.versionId, versionId),
               eq(knowledgeEmbeddingJobs.leaseToken, leaseToken),
               eq(knowledgeEmbeddingJobs.connectionRevision, connectionRevision),
               eq(knowledgeEmbeddingJobs.status, "running"),
-              sql`${knowledgeEmbeddingJobs.leaseUntil} > now()`,
+              sql`${knowledgeEmbeddingJobs.leaseUntil} > clock_timestamp()`,
             ),
           )
           .returning({ id: knowledgeEmbeddingJobs.versionId })
@@ -1445,7 +1449,7 @@ export class KnowledgeRepo extends Context.Service<
                     eq(knowledgeEmbeddingJobs.spaceId, input.spaceId),
                     eq(knowledgeEmbeddingJobs.connectionRevision, input.connectionRevision),
                     eq(knowledgeEmbeddingJobs.status, "running"),
-                    sql`${knowledgeEmbeddingJobs.leaseUntil} > now()`,
+                    sql`${knowledgeEmbeddingJobs.leaseUntil} > clock_timestamp()`,
                   ),
                 )
                 .returning({ versionId: knowledgeEmbeddingJobs.versionId });
@@ -1518,7 +1522,7 @@ export class KnowledgeRepo extends Context.Service<
                     eq(knowledgeEmbeddingJobs.versionId, input.versionId),
                     eq(knowledgeEmbeddingJobs.leaseToken, input.leaseToken),
                     eq(knowledgeEmbeddingJobs.status, "running"),
-                    sql`${knowledgeEmbeddingJobs.leaseUntil} > now()`,
+                    sql`${knowledgeEmbeddingJobs.leaseUntil} > clock_timestamp()`,
                   ),
                 )
                 .returning({ status: knowledgeEmbeddingJobs.status })

@@ -902,7 +902,7 @@ export class IntegrationRepo extends Context.Service<
                       lte(integrationToolCatalogs.nextCheckAt, sql`now()`),
                       or(
                         isNull(integrationToolCatalogs.checkLeaseUntil),
-                        lte(integrationToolCatalogs.checkLeaseUntil, sql`now()`),
+                        lte(integrationToolCatalogs.checkLeaseUntil, sql`clock_timestamp()`),
                       ),
                       sql`${integrationConfigs.kind} in (${sql.join(
                         input.kinds.map((kind) => sql`${kind}`),
@@ -917,7 +917,7 @@ export class IntegrationRepo extends Context.Service<
                 return yield* tx
                   .update(integrationToolCatalogs)
                   .set({
-                    checkLeaseUntil: sql`now() + ${`${input.leaseMs} milliseconds`}::interval`,
+                    checkLeaseUntil: sql`clock_timestamp() + ${`${input.leaseMs} milliseconds`}::interval`,
                   })
                   .where(
                     sql`${integrationToolCatalogs.integrationId} in (${sql.join(
