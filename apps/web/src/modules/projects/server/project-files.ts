@@ -15,8 +15,8 @@ import {
 } from "~/db/schema/index.ts";
 import { classifyFile, sanitizeFileName } from "~/modules/attachments/server/validation.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
-import { BlobStore, blobStorageKey } from "~/modules/attachments/server/blob-store.ts";
-import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -32,7 +32,6 @@ import { projectCan } from "../schema.ts";
 import { projectAudience, projectRole } from "./access.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { fileText } from "~/modules/attachments/server/file-text.ts";
-import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
 
 type ProjectFileError = ProjectNotAvailable | ProjectRejected;
@@ -223,7 +222,6 @@ export class ProjectFileService extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const blobs = yield* BlobStore;
-      const registry = yield* AttachmentRepo;
       const attachmentService = yield* AttachmentService;
       const parser = yield* DocumentParser;
       const bus = yield* SyncBus;
@@ -312,16 +310,6 @@ export class ProjectFileService extends Context.Service<
           }),
         );
 
-      /** Registers bytes under the project owner; returns the blob and any key to discard. */
-      const storeBytes = (ownerId: string, bytes: Uint8Array) =>
-        Effect.gen(function* () {
-          const sha256 = sha256Hex(bytes);
-          const storageKey = blobStorageKey(ownerId, sha256);
-          yield* registry.recordBlobCandidate(storageKey);
-          yield* blobs.put(storageKey, bytes).pipe(Effect.orDie);
-          return { sha256, storageKey };
-        });
-
       const writeVersion = Effect.fn("ProjectFileService.writeVersion")(function* (
         writer: FileWriter,
         input: {
@@ -346,7 +334,7 @@ export class ProjectFileService extends Context.Service<
           .where(eq(projects.id, input.projectId))
           .pipe(Effect.orDie);
         if (!project) return yield* new ProjectNotAvailable({ projectId: input.projectId });
-        const stored = yield* storeBytes(project.ownerId, input.bytes);
+        const stored = yield* attachmentService.storeBlob(project.ownerId, input.bytes);
         const { maxProjectBytes } = yield* settings();
         const result = yield* transaction((tx) =>
           Effect.gen(function* () {
@@ -487,9 +475,7 @@ export class ProjectFileService extends Context.Service<
         );
         // On failure the bytes stay a candidate, and the reconciler removes
         // them once it sees no row owns them.
-        yield* attachmentService.deleteBlobs(result.discard);
-        if (!result.discard.includes(stored.storageKey))
-          yield* registry.clearBlobIntents([stored.storageKey]);
+        yield* attachmentService.settleBlobs([stored.storageKey], result.discard);
         yield* changed(input.projectId);
         return result.summary;
       });

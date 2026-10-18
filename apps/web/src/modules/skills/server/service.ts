@@ -1,7 +1,7 @@
 import { Context, Duration, Effect, Layer, Schedule, Semaphore } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { BlobStore, blobStorageKey } from "~/modules/attachments/server/blob-store.ts";
+import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { SkillSource } from "~/db/schema/skills.ts";
@@ -236,10 +236,7 @@ export class SkillService extends Context.Service<
                   }
                   const bytes =
                     known ?? new TextEncoder().encode(isBinarySkillFile(file) ? "" : file.content);
-                  const sha256 = sha256Hex(bytes);
-                  const storageKey = blobStorageKey(userId, sha256);
-                  yield* registry.recordBlobCandidate(storageKey);
-                  yield* blobs.put(storageKey, bytes).pipe(Effect.orDie);
+                  const { sha256, storageKey } = yield* attachments.storeBlob(userId, bytes);
                   files.push({
                     path: file.path,
                     storageKey,
@@ -272,11 +269,11 @@ export class SkillService extends Context.Service<
                 ...(input.source ? { source: input.source } : {}),
               };
               const result = yield* repo.save(userId, save);
-              yield* attachments.deleteBlobs([...result.unusedKeys, ...result.orphanKeys]);
-              yield* registry.clearBlobIntents(
+              yield* attachments.settleBlobs(
                 [...files, ...baselineFiles]
-                  .filter((file) => !file.existing && !result.unusedKeys.includes(file.storageKey))
+                  .filter((file) => !file.existing)
                   .map((file) => file.storageKey),
+                [...result.unusedKeys, ...result.orphanKeys],
               );
               // The skill now references the uploaded bytes; the upload's own row is
               // spent. Its bytes stay, since a skill file still points at them.

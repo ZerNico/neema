@@ -82,6 +82,16 @@ export class AttachmentService extends Context.Service<
      * Callers pass the keys those repo methods returned.
      */
     deleteBlobs(keys: ReadonlyArray<string>): Effect.Effect<void>;
+    /**
+     * Writes bytes under a user's content-addressed key, recorded first as a
+     * cleanup candidate so bytes no row comes to own are still removed.
+     */
+    storeBlob(userId: string, bytes: Uint8Array): Effect.Effect<StoredBlob>;
+    /**
+     * After the owning rows commit: deletes the keys left unused (a dedupe
+     * loser, pruned versions) and settles the candidates rows now own.
+     */
+    settleBlobs(stored: ReadonlyArray<string>, unused: ReadonlyArray<string>): Effect.Effect<void>;
     /** Physical cleanup for a deleted user; DB rows go via FK cascade. */
     purgeUserFiles(userId: string): Effect.Effect<void>;
   }
@@ -92,7 +102,10 @@ export class AttachmentService extends Context.Service<
       const repo = yield* AttachmentRepo;
       const store = yield* BlobStore;
 
-      const { deleteBlobs, upload, copyImage } = attachmentWriter(repo, store);
+      const { deleteBlobs, storeBlob, settleBlobs, upload, copyImage } = attachmentWriter(
+        repo,
+        store,
+      );
 
       const remove = Effect.fn("AttachmentService.remove")(function* (input: {
         userId: string;
@@ -203,6 +216,8 @@ export class AttachmentService extends Context.Service<
         open,
         readDocumentImage,
         deleteBlobs,
+        storeBlob,
+        settleBlobs,
         purgeUserFiles,
       });
     }),
@@ -232,6 +247,31 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
       { discard: true },
     );
 
+  const storeBlob = Effect.fn("AttachmentService.storeBlob")(function* (
+    userId: string,
+    bytes: Uint8Array,
+  ) {
+    // Hashed here, over the bytes we actually received: a client-supplied
+    // hash would be both untrustworthy and a free existence oracle.
+    const sha256 = sha256Hex(bytes);
+    const storageKey = blobStorageKey(userId, sha256);
+    // Before the bytes exist: an interrupted upload leaves an object whose
+    // row never landed, and nothing that follows rows could ever find it.
+    yield* repo.recordBlobCandidate(storageKey);
+    yield* store.put(storageKey, bytes).pipe(Effect.orDie);
+    return { sha256, storageKey } satisfies StoredBlob;
+  });
+
+  // A dedupe winner owns a different key, so only our unused candidate goes;
+  // never the shared winner's bytes. What a row owns is no longer a candidate.
+  const settleBlobs = (stored: ReadonlyArray<string>, unused: ReadonlyArray<string>) =>
+    deleteBlobs(unused).pipe(
+      Effect.andThen(() => {
+        const owned = stored.filter((key) => !unused.includes(key));
+        return owned.length > 0 ? repo.clearBlobIntents(owned) : Effect.void;
+      }),
+    );
+
   const upload = Effect.fn("AttachmentService.upload")(function* (input: {
     userId: string;
     fileName: string;
@@ -254,16 +294,7 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
 
     if (input.association) yield* repo.admitAssociation(input.association);
 
-    // Hashed here, over the bytes we actually received: a client-supplied
-    // hash would be both untrustworthy and a free existence oracle.
-    const sha256 = sha256Hex(input.bytes);
-    const storageKey = blobStorageKey(input.userId, sha256);
-
-    // Before the bytes exist: an interrupted upload leaves an object whose
-    // row never landed, and nothing that follows rows could ever find it.
-    yield* repo.recordBlobCandidate(storageKey);
-    yield* store.put(storageKey, input.bytes).pipe(Effect.orDie);
-
+    const { sha256, storageKey } = yield* storeBlob(input.userId, input.bytes);
     const { attachment, unusedStorageKey } = yield* repo.create({
       ...(input.association ? { association: input.association } : {}),
       userId: input.userId,
@@ -273,11 +304,7 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
       mediaType: validated.mediaType,
       fileName: validated.fileName,
     });
-    // A concurrent dedup winner owns a different key. Only our unreferenced
-    // candidate is disposable; never delete the shared winner's bytes.
-    if (unusedStorageKey) yield* deleteBlobs([unusedStorageKey]);
-    // The key a row now owns is no longer a candidate for removal.
-    else yield* repo.clearBlobIntents([storageKey]);
+    yield* settleBlobs([storageKey], unusedStorageKey ? [unusedStorageKey] : []);
     return attachment;
   });
 
@@ -304,8 +331,14 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
     );
   });
 
-  return { deleteBlobs, upload, copyImage };
+  return { deleteBlobs, storeBlob, settleBlobs, upload, copyImage };
 };
+
+/** Bytes written under their content key, not yet owned by a committed row. */
+export interface StoredBlob {
+  readonly sha256: string;
+  readonly storageKey: string;
+}
 
 const logBlobFailure = (error: BlobStoreError) =>
   Effect.logError(`failed to delete blob ${error.key}: ${error.message}`);
