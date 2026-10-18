@@ -101,6 +101,7 @@ export class ScheduleService extends Context.Service<
           }
           if (!(yield* policy.can(row.userId, "schedules"))) {
             yield* repo.finishRun(runId, "skipped", "schedule access is not permitted");
+            yield* settlement.settle;
             yield* runChanged(row.userId, row.id, runId);
             return;
           }
