@@ -510,3 +510,28 @@ describe("ordinary image attempt identity", () => {
     expect(result.current.live.lastSeq).toBe(0);
   });
 });
+
+describe("a stream whose answer goes away", () => {
+  it("stops streaming when its row is gone before done", () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | null }) => useMessageStream(id, null, "c1"),
+      { wrapper, initialProps: { id: "m1" as string | null } },
+    );
+    expect(result.current.status).toBe("streaming");
+    rerender({ id: null });
+    expect(result.current.status).toBe("idle");
+  });
+
+  it("reads the row again when the server refuses the stream, and not on a retry", () => {
+    const { invalidate, source } = renderStream();
+    act(() => source.emit("error"));
+    expect(invalidate).not.toHaveBeenCalled();
+    source.readyState = FakeEventSource.CLOSED;
+    act(() => source.emit("error"));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
+  });
+});

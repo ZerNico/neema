@@ -302,7 +302,8 @@ type Action =
   | { kind: "reading"; reading: StreamState["reading"] }
   | { kind: "lookups"; lookups: UiLookups }
   | { kind: "preview"; callId: string; uri: string }
-  | { kind: "done"; status: "complete" | "error" | "aborted" };
+  | { kind: "done"; status: "complete" | "error" | "aborted" }
+  | { kind: "idle" };
 
 /**
  * Parses a tool chunk envelope defensively: malformed rows must not crash the
@@ -653,6 +654,8 @@ export function streamReducer(state: StreamState, action: Action): StreamState {
         reading: null,
         previews: {},
       };
+    case "idle":
+      return { ...state, status: "idle", reading: null, previews: {} };
   }
 }
 
@@ -722,6 +725,9 @@ export function useMessageStream(
       lookups: initial?.lookups ?? NO_LOOKUPS,
     });
   }
+  // The row went away before its done arrived (rewound, or removed elsewhere):
+  // nothing is streaming any more, or the chat would wait on it until reload.
+  if (!messageId && state.status === "streaming") dispatch({ kind: "idle" });
   const activeRef = useRef<string | null>(null);
   const terminalFailure =
     canonicalStatus === "error" || canonicalStatus === "aborted" ? canonicalStatus : null;
@@ -838,8 +844,11 @@ export function useMessageStream(
     });
 
     source.addEventListener("error", () => {
-      // EventSource auto-reconnects; nothing to do. If the server is gone the
-      // browser keeps retrying, which is the desired resume behavior.
+      // EventSource reconnects by itself while the server is unreachable. A
+      // refused response (404 after a delete, 401) closes it for good, so the
+      // row is read again to learn how the answer stands.
+      if (source.readyState === EventSource.CLOSED && conversationId)
+        void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
     });
 
     return () => {

@@ -5,6 +5,9 @@ import { vi } from "vitest";
  */
 export class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  static readonly CLOSED = 2;
+  /** Open unless a test closes it, as a refused response does. */
+  readyState = 1;
   private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
   readonly close = vi.fn();
 
