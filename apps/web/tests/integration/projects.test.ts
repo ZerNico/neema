@@ -12,6 +12,7 @@ import {
   documents,
   groupMembers,
   groups,
+  projectGroupGrants,
   projectMemories,
   user,
   userApprovals,
@@ -25,6 +26,7 @@ import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
 import { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
+import { PROJECT_LIMITS } from "~/modules/projects/schema.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -188,6 +190,39 @@ describe("roles", () => {
     );
     expect(result).toMatchObject({ _tag: "Failure" });
     expect((await projects((s) => s.members(owner, project.id))).eligibleGroups).toEqual([]);
+  });
+
+  it("shares a project with at most as many groups as it may have members", async () => {
+    const owner = await createUser();
+    const project = await newProject(owner);
+    const ids = Array.from({ length: PROJECT_LIMITS.members + 1 }, () => uuidv7());
+    await db((d) => d.insert(groups).values(ids.map((id) => ({ id, name: `Group ${id}` }))));
+    await db((d) =>
+      d
+        .insert(groupMembers)
+        .values(ids.map((groupId) => ({ groupId, userId: owner, shareProjects: true }))),
+    );
+    await db((d) =>
+      d.insert(projectGroupGrants).values(
+        ids.slice(0, PROJECT_LIMITS.members).map((groupId) => ({
+          projectId: project.id,
+          groupId,
+          role: "viewer" as const,
+        })),
+      ),
+    );
+    const grant = (groupId: string, given: "viewer" | "editor") =>
+      run(
+        Effect.match(
+          Effect.flatMap(ProjectService, (s) =>
+            s.changeMembers(owner, project.id, { action: "addGroup", groupId, role: given }),
+          ),
+          { onSuccess: () => "granted", onFailure: (error) => error._tag },
+        ),
+      );
+    // One more is refused; changing the role of one already there is not.
+    expect(await grant(ids.at(-1)!, "viewer")).toBe("ProjectRejected");
+    expect(await grant(ids[0]!, "editor")).toBe("granted");
   });
 
   it("lets only the owner manage members, and anyone leave", async () => {

@@ -1,5 +1,5 @@
 import { activeAccountSql } from "~/modules/auth/server/account-eligibility.ts";
-import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -458,6 +458,20 @@ export class ProjectService extends Context.Service<
                   if (!member?.canShare)
                     return yield* new ProjectRejected({ reason: "that group is not available" });
                 }
+                const [granted] = yield* tx
+                  .select({ value: sql<number>`count(*)::int` })
+                  .from(projectGroupGrants)
+                  .where(
+                    and(
+                      eq(projectGroupGrants.projectId, projectId),
+                      ne(projectGroupGrants.groupId, change.groupId),
+                    ),
+                  )
+                  .pipe(Effect.orDie);
+                if ((granted?.value ?? 0) >= PROJECT_LIMITS.members)
+                  return yield* new ProjectRejected({
+                    reason: "this project is shared with as many groups as it can be",
+                  });
                 yield* tx
                   .insert(projectGroupGrants)
                   .values({ projectId, groupId: change.groupId, role: change.role })
