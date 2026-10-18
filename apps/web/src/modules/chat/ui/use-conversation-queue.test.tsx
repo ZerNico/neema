@@ -8,7 +8,11 @@ import {
   sendQueuedNow,
   steerQueuedMessage,
 } from "../server/functions.ts";
+import { toast } from "sonner";
+import { AlreadyTold } from "~/ui/error-toast.ts";
 import { useConversationQueue, type QueueRow, type QueueState } from "./use-conversation-queue.ts";
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("../server/functions.ts", () => ({
   queueMessage: vi.fn(),
@@ -65,7 +69,7 @@ function render(
     settings: settings(),
     ...overrides,
   };
-  return { props, ...renderHook(() => useConversationQueue(props), { wrapper }) };
+  return { props, client, ...renderHook(() => useConversationQueue(props), { wrapper }) };
 }
 
 beforeEach(() => {
@@ -218,5 +222,31 @@ describe("useConversationQueue", () => {
     await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
     expect(sendQueuedNow).not.toHaveBeenCalled();
     expect(dispatchQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it("adds no second toast to a start the page already explained", async () => {
+    vi.mocked(sendQueuedNow).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const refuse = (error: Error) => {
+      const view = render({
+        prepare: async () => {
+          throw error;
+        },
+      });
+      act(() => view.result.current.queue.onSendNow("a"));
+      return waitFor(() =>
+        expect(
+          view.client
+            .getMutationCache()
+            .getAll()
+            .map((m) => m.state.status),
+        ).toEqual(["error"]),
+      );
+    };
+    await refuse(new AlreadyTold("draft has unresolved changes"));
+    expect(toast.error).not.toHaveBeenCalled();
+    await refuse(new Error("The folder is gone."));
+    expect(vi.mocked(toast.error).mock.calls).toEqual([["The folder is gone."]]);
+    expect(sendQueuedNow).not.toHaveBeenCalled();
   });
 });

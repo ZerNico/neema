@@ -71,7 +71,7 @@ import {
 import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
-import { StartBlocked, useConversationQueue } from "./use-conversation-queue.ts";
+import { useConversationQueue } from "./use-conversation-queue.ts";
 import { createsDocument, type AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
@@ -113,7 +113,7 @@ import { useAppReducedMotion, prefersReducedMotion } from "~/ui/reduced-motion.t
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { cn } from "~/ui/utils";
-import { toastError } from "~/ui/error-toast.ts";
+import { AlreadyTold, toastError } from "~/ui/error-toast.ts";
 import {
   GenuiActionsContext,
   type UiMapLookup,
@@ -607,19 +607,19 @@ export function ChatView({
   const flushAgentDraft = async () => {
     if (hasAgentDraft && !(await agentDraft.current?.flush())) {
       toast.error("Resolve the changes in your agent draft before continuing.");
-      throw new StartBlocked("agent draft has unresolved changes");
+      throw new AlreadyTold("agent draft has unresolved changes");
     }
   };
   const flushScheduleDraft = async () => {
     if (hasScheduleDraft && !(await scheduleDraft.current?.flush())) {
       toast.error("Resolve the changes in your schedule draft before continuing.");
-      throw new StartBlocked("schedule draft has unresolved changes");
+      throw new AlreadyTold("schedule draft has unresolved changes");
     }
   };
   const flushDocuments = async () => {
     if (hasDocument && !(await documents.current?.flush())) {
       toast.error("Resolve the changes in your document before continuing.");
-      throw new StartBlocked("document has unresolved changes");
+      throw new AlreadyTold("document has unresolved changes");
     }
   };
   const checkWorkReady = () => work.check();

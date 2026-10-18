@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { AlreadyTold } from "~/ui/error-toast.ts";
 import {
   desktopAttemptFields,
   folderUsable,
@@ -22,7 +23,7 @@ export function useWorkGate(conversationId: string, working: boolean) {
   const check = (nowWorking = working) => {
     if (nowWorking && !folderUsable(folder)) {
       toast.error(WORK_FOLDER_UNAVAILABLE);
-      throw new Error("Work folder status unavailable");
+      throw new AlreadyTold("Work folder status unavailable");
     }
   };
   const attemptFields = (nowWorking = working) =>

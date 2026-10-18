@@ -24,12 +24,16 @@ export const errorReport = (input: {
     input.raw,
   ].join("\n");
 
+/** A refusal the page already explained in its own toast, so nothing reports it again. */
+export class AlreadyTold extends Error {}
+
 /**
  * The one way to report a failed request. The title is always the caller's
  * plain "Could not …" line; a reason the server gave becomes the description,
  * and an unexpected failure offers its reference for a report instead.
  */
 export function toastError(title: string, error: unknown) {
+  if (error instanceof AlreadyTold) return;
   const { reason, reference, raw } = readServerError(error);
   if (reference) {
     toast.error(title, {

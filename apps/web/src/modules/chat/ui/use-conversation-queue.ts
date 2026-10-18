@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { toast } from "sonner";
+import { AlreadyTold } from "~/ui/error-toast.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import {
   dispatchQueuedMessage,
@@ -57,11 +58,8 @@ interface Draft {
 }
 
 /** Shows the server's reason for a refused queue action, or a fallback. */
-/** A start the page refused after saying why itself, so it needs no second toast. */
-export class StartBlocked extends Error {}
-
 const failed = (fallback: string) => (error: unknown) => {
-  if (error instanceof StartBlocked) return;
+  if (error instanceof AlreadyTold) return;
   toast.error(error instanceof Error && error.message ? error.message : fallback);
 };
 
