@@ -36,6 +36,7 @@ import {
   toOrigin,
   writeConfig,
 } from "./config.ts";
+import { guardWindowPermissions } from "./window-permissions.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime, Result, Schema } from "effect";
@@ -579,6 +580,7 @@ void app.whenReady().then(async () => {
   session.defaultSession.setUserAgent(
     `${app.userAgentFallback} ${userAgentToken(__BUILD_STAMP__)}`,
   );
+  guardWindowPermissions(session.defaultSession, () => serverOrigin);
   machine = await loadMachineIdentity(app.getPath("userData"));
   siteGrants = await loadSiteGrants(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));

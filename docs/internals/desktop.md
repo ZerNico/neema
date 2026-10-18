@@ -166,6 +166,9 @@ The initiating session is a binding mechanism, not cryptographic attestation.
 trusted: its page has the bridge, and consent given in that page is the consent.
 Grants scope what a chat or an answer may do; they are not a defence against the
 server itself, so main does not ask a second time what the page already asked.
+Trust is in what the app does, not in everything Chromium can: the window grants
+the server's own pages only the web permissions the app uses (notifications, the
+clipboard, fullscreen), so a frame or script it carries reaches no camera or device.
 
 ## Bounded waits and cancellation
 
