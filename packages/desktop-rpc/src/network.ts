@@ -1,12 +1,24 @@
+import { Schema } from "effect";
+import { NetworkPort } from "./schema.ts";
+
 /**
  * What Work may reach on this computer for every chat: network destinations
  * and readable paths. Machine-local, independent of the Work protocol version.
+ * Main decodes each payload below before acting on it.
  */
-export interface NetworkGrant {
-  readonly host: string;
-  readonly port: number;
-  readonly privateNetwork: boolean;
-}
+export const NetworkGrant = Schema.Struct({
+  host: Schema.String,
+  port: NetworkPort,
+  privateNetwork: Schema.Boolean,
+});
+export type NetworkGrant = typeof NetworkGrant.Type;
+
+/** The payload of `PATHS_REVOKE`. */
+export const PathRevokePayload = Schema.Struct({ path: Schema.String });
+/** The payload of `AGENT_CHOOSE`: a socket to use, or null to go back to the default. */
+export const AgentChoicePayload = Schema.Struct({ socket: Schema.NullOr(Schema.String) });
+/** Every other settings channel carries nothing. */
+export const NoPayload = Schema.Undefined;
 
 export const NETWORK_LIST = "chat-desktop:network-list" as const;
 export const NETWORK_REVOKE = "chat-desktop:network-revoke" as const;

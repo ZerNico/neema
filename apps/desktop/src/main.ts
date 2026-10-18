@@ -38,7 +38,7 @@ import {
 } from "./config.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Effect, Layer, ManagedRuntime, Result } from "effect";
+import { Effect, Layer, ManagedRuntime, Result, Schema } from "effect";
 import {
   DROPPED_FILE_CHANNEL,
   NETWORK_LIST,
@@ -51,6 +51,11 @@ import {
   AGENT_GET,
   AGENT_CHOOSE,
   AGENT_FORGET_KEYS,
+  AgentChoicePayload,
+  DesktopTheme,
+  NetworkGrant,
+  NoPayload,
+  PathRevokePayload,
   type AgentChoiceReply,
   makeDesktopResponder,
   refusalReply,
@@ -69,7 +74,8 @@ import { disposeOwnedProcesses } from "./process.ts";
 import { grantsFile, GrantStore } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
-import { networkGrantsDirectory, normalizeEgressGrant } from "./egress-grants.ts";
+import { networkGrantsDirectory } from "./egress-grants.ts";
+import { pageHandler } from "./page-ipc.ts";
 import { Sandbox, type AgentChange } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import {
@@ -136,6 +142,12 @@ const isRemoteSender = (event: IpcMainInvokeEvent) =>
 const fromPage = (event: IpcMainInvokeEvent) => {
   if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
 };
+const onPage = <S extends Schema.Decoder<unknown>>(
+  channel: string,
+  payload: S,
+  run: (input: S["Type"]) => unknown,
+  invalid?: string,
+) => ipcMain.handle(channel, pageHandler(isRemoteSender, payload, run, invalid));
 const isConnectSender = (event: IpcMainInvokeEvent) =>
   isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
 let tray: Tray | undefined;
@@ -641,43 +653,36 @@ void app.whenReady().then(async () => {
     if (!chrome) throw new Error("Not allowed from this page.");
     return chrome.getState();
   });
-  ipcMain.handle(CHROME_SET_THEME, (event, theme: unknown) => {
-    if (!isRemoteSender(event) || !mainWindow) throw new Error("Not allowed from this page.");
+  // Every onPage channel is the configured page's alone, and each payload is decoded, never cast.
+  onPage(CHROME_SET_THEME, DesktopTheme, (theme) => {
+    if (!mainWindow) throw new Error("Not allowed from this page.");
     windowChrome.get(mainWindow)?.setTheme(theme);
   });
   // Only the server's page asks, when someone clicks one of its notifications.
-  ipcMain.handle(CHROME_SHOW_WINDOW, (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    restoreWindow();
-  });
+  onPage(CHROME_SHOW_WINDOW, NoPayload, () => restoreWindow());
   // Settings › This computer: what every chat may reach. The page is trusted to
   // ask, never to name something else: each payload is held to the grant rules.
   const always = { scope: "always" } as const;
   const permissions = () =>
     runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.permissions(always)));
-  ipcMain.handle(NETWORK_LIST, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return (await permissions()).network;
-  });
-  ipcMain.handle(NETWORK_REVOKE, async (event, payload: unknown) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    const input =
-      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-    const grant = normalizeEgressGrant(input.host, input.port, input.privateNetwork === true);
-    if (!grant || grant.host !== input.host) throw new Error("Invalid network permission.");
-    await runtime.runPromise(
-      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(always, grant)),
-    );
-  });
-  ipcMain.handle(LOCAL_GET, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+  onPage(NETWORK_LIST, NoPayload, async () => (await permissions()).network);
+  // The store refuses a grant that is not already canonical.
+  onPage(
+    NETWORK_REVOKE,
+    NetworkGrant,
+    (grant) =>
+      runtime.runPromise(
+        Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(always, grant)),
+      ),
+    "Invalid network permission.",
+  );
+  onPage(LOCAL_GET, NoPayload, async () => {
     // bubblewrap gives each command a loopback of its own; this computer's can't be opened.
     if (process.platform === "linux") return "unavailable";
     return (await permissions()).capabilities.includes("local-services") ? "allowed" : "asked";
   });
   // Opens what a server a command starts could be reached on, so the app asks itself.
-  ipcMain.handle(LOCAL_ALLOW, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
+  onPage(LOCAL_ALLOW, NoPayload, async () => {
     const { response } = await dialog.showMessageBox({
       type: "question",
       buttons: ["Cancel", "Allow"],
@@ -694,49 +699,42 @@ void app.whenReady().then(async () => {
     );
     return true;
   });
-  ipcMain.handle(LOCAL_REVOKE, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    await runtime.runPromise(
+  onPage(LOCAL_REVOKE, NoPayload, () =>
+    runtime.runPromise(
       Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeCapability(always, "local-services")),
-    );
-  });
-  ipcMain.handle(AGENT_GET, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.agentSetting()));
-  });
+    ),
+  );
+  onPage(AGENT_GET, NoPayload, () =>
+    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.agentSetting())),
+  );
   // The page only asks: a socket must answer as an agent, and the person confirms here, also
   // before going back to the default, which may hold other keys.
-  ipcMain.handle(AGENT_CHOOSE, async (event, payload: unknown): Promise<AgentChoiceReply> => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    const socket =
-      payload && typeof payload === "object" ? (payload as { socket?: unknown }).socket : null;
-    if (socket !== null && typeof socket !== "string") throw new Error("Invalid agent socket.");
-    const outcome = await runtime.runPromise(
-      Effect.result(
-        Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket, confirmAgent)),
-      ),
-    );
-    return Result.isSuccess(outcome)
-      ? { ok: true, changed: outcome.success }
-      : { ok: false, message: outcome.failure.message };
-  });
-  ipcMain.handle(AGENT_FORGET_KEYS, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    await runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.forgetKeys()));
-  });
-  ipcMain.handle(PATHS_LIST, async (event) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    return (await permissions()).paths;
-  });
-  ipcMain.handle(PATHS_REVOKE, async (event, payload: unknown) => {
-    if (!isRemoteSender(event)) throw new Error("Not allowed from this page.");
-    const path =
-      payload && typeof payload === "object" ? (payload as { path?: unknown }).path : null;
-    if (typeof path !== "string") throw new Error("Invalid path permission.");
-    await runtime.runPromise(
-      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokePath(always, path)),
-    );
-  });
+  onPage(
+    AGENT_CHOOSE,
+    AgentChoicePayload,
+    async ({ socket }): Promise<AgentChoiceReply> => {
+      const outcome = await runtime.runPromise(
+        Effect.result(
+          Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket, confirmAgent)),
+        ),
+      );
+      return Result.isSuccess(outcome)
+        ? { ok: true, changed: outcome.success }
+        : { ok: false, message: outcome.failure.message };
+    },
+    "Invalid agent socket.",
+  );
+  onPage(AGENT_FORGET_KEYS, NoPayload, () =>
+    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.forgetKeys())),
+  );
+  onPage(PATHS_LIST, NoPayload, async () => (await permissions()).paths);
+  onPage(
+    PATHS_REVOKE,
+    PathRevokePayload,
+    ({ path }) =>
+      runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokePath(always, path))),
+    "Invalid path permission.",
+  );
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {

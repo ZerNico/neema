@@ -1,4 +1,7 @@
-export type DesktopTheme = "light" | "dark" | "system";
+import { Schema } from "effect";
+
+export const DesktopTheme = Schema.Literals(["light", "dark", "system"]);
+export type DesktopTheme = typeof DesktopTheme.Type;
 export type DesktopPlatform = "darwin" | "win32" | "linux";
 export interface DesktopChromeState {
   readonly fullscreen: boolean;
