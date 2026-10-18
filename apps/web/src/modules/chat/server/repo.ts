@@ -1298,6 +1298,11 @@ export class ChatRepo extends Context.Service<
     ): Effect.Effect<void>;
     /** Drops failed calls' full arguments older than a week, by the database clock. */
     sweepFailedCallArguments(): Effect.Effect<number>;
+    /**
+     * Drops the stream chunks of answers that completed over an hour ago, by the
+     * database clock. Errored and stopped answers keep theirs for resume.
+     */
+    sweepCompletedChunks(): Effect.Effect<number>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
     /** Saved ```ui block state for these answers; the client drops rows whose hash no longer matches. */
     listUiStates(messageIds: ReadonlyArray<string>): Effect.Effect<UiStateRow[]>;
@@ -3775,6 +3780,54 @@ export class ChatRepo extends Context.Service<
             .returning({ id: toolCallDebugArguments.toolCallId })
             .pipe(Effect.orDie);
           return removed.length;
+        }),
+        sweepCompletedChunks: Effect.fn("ChatRepo.sweepCompletedChunks")(function* () {
+          let swept = 0;
+          // Bounded batches so a first run over a large backlog never holds one
+          // long delete. Every answer's chunks start at seq 1, so that row finds
+          // each answer once.
+          for (let batch = 0; batch < 10; batch++) {
+            const answers = yield* db
+              .select({ id: messageChunks.messageId })
+              .from(messageChunks)
+              .innerJoin(messages, eq(messages.id, messageChunks.messageId))
+              .where(
+                and(
+                  eq(messageChunks.seq, 1),
+                  eq(messages.status, "complete"),
+                  sql`${messages.completedAt} <= now() - interval '1 hour'`,
+                ),
+              )
+              .limit(500)
+              .pipe(Effect.orDie);
+            if (answers.length === 0) break;
+            // Re-checked in the delete itself: a retry since the select has
+            // reset the row, and its new chunks stay for their own hour.
+            yield* db
+              .delete(messageChunks)
+              .where(
+                inArray(
+                  messageChunks.messageId,
+                  db
+                    .select({ id: messages.id })
+                    .from(messages)
+                    .where(
+                      and(
+                        inArray(
+                          messages.id,
+                          answers.map((answer) => answer.id),
+                        ),
+                        eq(messages.status, "complete"),
+                        sql`${messages.completedAt} <= now() - interval '1 hour'`,
+                      ),
+                    ),
+                ),
+              )
+              .pipe(Effect.orDie);
+            swept += answers.length;
+            if (answers.length < 500) break;
+          }
+          return swept;
         }),
         failRunningToolCalls: Effect.fn("ChatRepo.failRunningToolCalls")(
           function* (messageId, message) {

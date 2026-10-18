@@ -18,6 +18,11 @@ already complete. Detail and history reread their message window after dependent
 reads and retry when its attempt changes, keeping tools and pending chunks with
 the captured generation. SSE retains its generation-mismatch repair.
 
+Chunks serve a running answer and a late reconnect, never a settled one, which reads
+its row. The conversation sweep drops a complete answer's chunks an hour after it
+finished, judged by the database clock. An errored or stopped answer keeps them,
+since [resume](resume.md) continues its `seq` and its tool markers.
+
 A tool call reaches the client twice: as `tool` chunks while it runs and as its
 `message_tool_calls` row on reload. Each family is projected once
 (`chat/client/tool-families.ts`). The stream reads an envelope as the row it was

@@ -286,8 +286,8 @@ export const conversationQueueEntries = pgTable(
 );
 
 /**
- * Ordered stream chunks for resumable replay. Retained until the message is
- * complete + a grace period (cleanup job), so late resumers can still replay.
+ * Ordered stream chunks for resumable replay. A complete answer's are swept an
+ * hour after it finished; errored and stopped answers keep theirs for resume.
  */
 export const messageChunks = pgTable(
   "message_chunks",
@@ -305,7 +305,14 @@ export const messageChunks = pgTable(
     delta: text().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.messageId, t.seq] })],
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.seq] }),
+    // One entry per answer that still has chunks, so the sweep starts from
+    // those instead of every message ever written.
+    index("message_chunks_first_idx")
+      .on(t.messageId)
+      .where(sql`${t.seq} = 1`),
+  ],
 );
 
 /**

@@ -1,0 +1,1 @@
+CREATE INDEX "message_chunks_first_idx" ON "message_chunks" ("message_id") WHERE "seq" = 1;

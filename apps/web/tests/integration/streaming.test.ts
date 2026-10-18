@@ -11837,3 +11837,46 @@ describe("image generation tool", () => {
     }
   });
 });
+
+describe("chunk retention", () => {
+  it("drops a settled answer's chunks after an hour, and keeps them for resume", async () => {
+    const left = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const { conversation } = yield* setupConversation;
+        const answer = (status: "complete" | "error" | "aborted", minutesAgo: number) =>
+          Effect.gen(function* () {
+            const id = uuidv7();
+            yield* db.insert(messages).values({
+              id,
+              conversationId: conversation.id,
+              role: "assistant",
+              status,
+              content: "done",
+              completedAt: sql`now() - make_interval(mins => ${minutesAgo})`,
+            });
+            yield* db.insert(messageChunks).values([
+              { messageId: id, seq: 1, delta: "do" },
+              { messageId: id, seq: 2, delta: "ne" },
+            ]);
+            return id;
+          });
+        const ids = {
+          old: yield* answer("complete", 61),
+          recent: yield* answer("complete", 59),
+          failed: yield* answer("error", 120),
+          stopped: yield* answer("aborted", 120),
+        };
+        yield* repo.sweepCompletedChunks();
+        const kept = yield* db
+          .selectDistinct({ id: messageChunks.messageId })
+          .from(messageChunks)
+          .where(sql`${messageChunks.messageId} in ${Object.values(ids)}`);
+        const names = Object.entries(ids);
+        return kept.map((row) => names.find(([, id]) => id === row.id)?.[0]).toSorted();
+      }),
+    );
+    expect(left).toEqual(["failed", "recent", "stopped"]);
+  });
+});

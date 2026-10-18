@@ -2321,6 +2321,13 @@ function makeChatService() {
               ),
             ),
         ),
+        // A settled answer is read from its row, so its chunks only serve a
+        // late reconnect, and an hour covers that.
+        Effect.andThen(
+          repo
+            .sweepCompletedChunks()
+            .pipe(Effect.catchCause((cause) => Effect.logError("chunk sweep failed", cause))),
+        ),
         Effect.repeat(Schedule.spaced(conversationSweepInterval)),
         Effect.forkScoped,
       );
