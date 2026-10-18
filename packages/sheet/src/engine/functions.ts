@@ -831,6 +831,12 @@ const workdays = (name: "NETWORKDAYS" | "WORKDAY", intl: boolean): Fn => ({
     const second = number(args[1]);
     if (second instanceof XError) return second;
     const weekend = intl && !call.omitted(2) ? scalar(args[2]) : 1;
+    // formula.js reads 0 as no weekend at all; Excel takes only codes 1 to 7 and 11 to 17.
+    if (
+      typeof weekend === "number" &&
+      !((weekend >= 1 && weekend <= 7) || (weekend >= 11 && weekend <= 17))
+    )
+      return NUM;
     const holidaysAt = intl ? 3 : 2;
     const holidays = holidaysOf(call.omitted(holidaysAt) ? undefined : args[holidaysAt]);
     if (holidays instanceof XError) return holidays;

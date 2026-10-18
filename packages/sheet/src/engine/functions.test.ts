@@ -356,6 +356,12 @@ const cases: Record<string, Case[]> = {
       expected: 39938,
     },
   ],
+  // WORKDAY.INTL example: serials 41013 (4/14/2012) and 40944 (2/5/2012).
+  "WORKDAY.INTL": [
+    { formula: "WORKDAY.INTL(DATE(2012,1,1),30,0)", expected: new XError("#NUM!") },
+    { formula: "WORKDAY.INTL(DATE(2012,1,1),90,11)", expected: 41013 },
+    { formula: "WORKDAY.INTL(DATE(2012,1,1),30,17)", expected: 40944 },
+  ],
   // TRIMMEAN example (3.777777778): one value off each end leaves nine adding up to 34.
   TRIMMEAN: [
     {
