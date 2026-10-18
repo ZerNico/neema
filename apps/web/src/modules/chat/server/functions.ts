@@ -158,6 +158,8 @@ export const sendMessage = createServerFn({ method: "POST" })
           AgentNotAvailable: selectedAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: selectedKnowledgeGone,
+          SkillNotAvailable: selectedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ModelNotFound: unknownModel,
           ConversationNotFound: missing,
@@ -233,6 +235,8 @@ export const activateWorkTurn = createServerFn({ method: "POST" })
           AgentNotAvailable: selectedAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: selectedKnowledgeGone,
+          SkillNotAvailable: selectedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ModelNotFound: unknownModel,
           ConversationNotFound: missing,
@@ -347,8 +351,10 @@ const attachmentGone = () => refuse(409, "An attachment is no longer available")
 const selectedAgentGone = () => refuse(404, "The selected agent is not available");
 const selectedIntegrationGone = () => refuse(404, "A selected integration is not available");
 const selectedKnowledgeGone = () => refuse(404, "A selected collection is not available");
+const selectedSkillGone = () => refuse(404, "A selected skill is not available");
 const chatAgentGone = () => refuse(409, "This chat’s agent is no longer available");
 const usedKnowledgeGone = () => refuse(409, "Knowledge this answer used is no longer available");
+const usedSkillGone = () => refuse(409, "A skill this answer used is no longer available");
 
 export const queueMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -510,6 +516,8 @@ export const answerQuestion = createServerFn({ method: "POST" })
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
+          SkillNotAvailable: usedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ConversationNotFound: missing,
           ModelNotFound: unknownModel,
@@ -554,6 +562,8 @@ export const retryMessage = createServerFn({ method: "POST" })
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
+          SkillNotAvailable: usedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ConversationNotFound: missing,
           ModelNotFound: unknownModel,
@@ -596,6 +606,8 @@ export const resumeMessage = createServerFn({ method: "POST" })
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
+          SkillNotAvailable: usedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ConversationNotFound: missing,
           ModelNotFound: unknownModel,
@@ -665,6 +677,8 @@ export const editMessage = createServerFn({ method: "POST" })
           AgentNotAvailable: chatAgentGone,
           WorkDesktopRequired: workChat,
           KnowledgeNotAvailable: usedKnowledgeGone,
+          SkillNotAvailable: usedSkillGone,
+          SkillRejected: rejected,
           KnowledgeRejected: rejected,
           ConversationNotFound: missing,
           ModelNotFound: unknownModel,
