@@ -35,6 +35,7 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 5).toString("base64");
@@ -201,6 +202,7 @@ const newUser = () =>
     Effect.gen(function* () {
       const id = uuidv7();
       yield* (yield* Db).insert(user).values({ id, name: "Ada", email: `${id}@t.io` });
+      yield* seedEligibleSession(id);
       return id;
     }),
   );
@@ -1551,6 +1553,25 @@ describe("knowledge sync", () => {
       }
     },
   );
+
+  it("stops syncing for an owner who has been banned, without reaching the service", async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    const collectionId = await collectionFor(userId);
+    const source = await sources((s) =>
+      s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+    );
+    await insert((db) => db.update(user).set({ banned: true }).where(eq(user.id, userId)));
+    const before = apiCalls.length;
+    await sources((s) => s.tick);
+    expect(apiCalls.length).toBe(before);
+    expect(await mirrored(collectionId)).toEqual([]);
+    const [current] = await insert((db) =>
+      db.select().from(knowledgeSources).where(eq(knowledgeSources.id, source.id)),
+    );
+    expect(current).toMatchObject({ status: "error", leaseToken: null });
+  });
 
   it("keeps a successor's publication when an expired parked worker resumes", async () => {
     await configure();

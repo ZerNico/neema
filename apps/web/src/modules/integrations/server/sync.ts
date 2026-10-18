@@ -16,6 +16,8 @@ import {
   lockKnowledgeSource,
   type SourceFence,
 } from "~/modules/knowledge/server/repo.ts";
+import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
@@ -109,8 +111,13 @@ function make(background: boolean) {
       db
         .select({ id: knowledgeCollections.id })
         .from(knowledgeCollections)
+        // The same edit rule as notes and uploads: the owner, while they may create knowledge.
         .where(
-          and(eq(knowledgeCollections.id, collectionId), eq(knowledgeCollections.userId, userId)),
+          and(
+            eq(knowledgeCollections.id, collectionId),
+            eq(knowledgeCollections.userId, userId),
+            capabilityAllowedSql(userId, "knowledgeCreate"),
+          ),
         )
         .pipe(
           Effect.orDie,
@@ -190,6 +197,23 @@ function make(background: boolean) {
         .pipe(Effect.orDie);
       if (!collection) return yield* finish({ status: "error", lastError: null });
       const owner = collection.userId;
+      // A sync acts as the owner with their credentials, so it stops when they
+      // could not act themselves: banned, rejected, or no longer creating knowledge.
+      const [mayCreate] = yield* db
+        .select({ id: knowledgeCollections.id })
+        .from(knowledgeCollections)
+        .where(
+          and(
+            eq(knowledgeCollections.id, source.collectionId),
+            capabilityAllowedSql(owner, "knowledgeCreate"),
+          ),
+        )
+        .pipe(Effect.orDie);
+      if (!mayCreate || !(yield* accountEligible(owner).pipe(Effect.provideService(Db, db))))
+        return yield* finish({
+          status: "error",
+          lastError: "The collection’s owner can no longer sync it.",
+        });
       // Always the owner's own connection as it is now; never anyone else's.
       const outcome = yield* Effect.gen(function* () {
         const session = yield* integrations.session(owner, source.integrationId);
@@ -493,7 +517,13 @@ function make(background: boolean) {
         .select({ source: knowledgeSources })
         .from(knowledgeSources)
         .innerJoin(knowledgeCollections, eq(knowledgeCollections.id, knowledgeSources.collectionId))
-        .where(and(eq(knowledgeSources.id, sourceId), eq(knowledgeCollections.userId, userId)))
+        .where(
+          and(
+            eq(knowledgeSources.id, sourceId),
+            eq(knowledgeCollections.userId, userId),
+            capabilityAllowedSql(userId, "knowledgeCreate"),
+          ),
+        )
         .pipe(
           Effect.orDie,
           Effect.map((rows) => rows[0]?.source ?? null),
