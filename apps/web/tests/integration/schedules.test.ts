@@ -199,6 +199,32 @@ describe("schedule claims", () => {
     expect(result).toEqual([]);
   });
 
+  it("gives a paused schedule no next fire when it is edited, and a running one its next", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ScheduleRepo;
+        const paused = yield* insert(userId, { nextFireAt: null, paused: true });
+        const running = yield* insert(userId, { nextFireAt: null });
+        const next = new Date(Date.now() + 3_600_000);
+        yield* repo.update(userId, paused.id, { nextFireAt: next });
+        yield* repo.update(userId, running.id, { nextFireAt: next });
+        // Resuming sets both at once, and the given time stands.
+        const resumed = yield* insert(userId, { nextFireAt: null, paused: true });
+        yield* repo.update(userId, resumed.id, { paused: false, nextFireAt: next });
+        return {
+          paused: (yield* repo.get(userId, paused.id))!.nextFireAt,
+          running: (yield* repo.get(userId, running.id))!.nextFireAt?.getTime(),
+          resumed: (yield* repo.get(userId, resumed.id))!.nextFireAt?.getTime(),
+          next: next.getTime(),
+        };
+      }),
+    );
+    expect(result.paused).toBeNull();
+    expect(result.running).toBe(result.next);
+    expect(result.resumed).toBe(result.next);
+  });
+
   it("terminates a one-shot whose next fire after now is past endAt", async () => {
     const result = await run(
       Effect.gen(function* () {

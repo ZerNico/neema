@@ -183,9 +183,19 @@ export class ScheduleRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
         update: Effect.fn("ScheduleRepo.update")(function* (userId, scheduleId, changes, tx) {
+          const next = changes.nextFireAt;
+          // A paused schedule has no next fire, whichever edit sets one.
+          const nextFireAt =
+            next instanceof Date && changes.paused === undefined
+              ? sql`case when ${schedules.paused} then null else ${next.toISOString()}::timestamptz end`
+              : next;
           const [row] = yield* (tx ?? db)
             .update(schedules)
-            .set({ ...changes, updatedAt: new Date() })
+            .set({
+              ...changes,
+              ...(nextFireAt === undefined ? {} : { nextFireAt }),
+              updatedAt: new Date(),
+            })
             .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
             .returning()
             .pipe(Effect.orDie);
