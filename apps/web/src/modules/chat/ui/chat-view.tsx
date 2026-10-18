@@ -15,7 +15,6 @@ import { inheritSources } from "./inherited-sources.ts";
 import {
   useInfiniteQuery,
   useMutation,
-  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
@@ -29,6 +28,7 @@ import { lossSentence } from "./rewind-loss.ts";
 import { placeStranded, placed, shownIds } from "./stranded-cards.ts";
 import { useChatArtifacts } from "./use-chat-artifacts.ts";
 import { useLiveAnswer } from "./use-live-answer.ts";
+import { useMessageEdit } from "./use-message-edit.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import { type ToolActivity } from "../client/use-message-stream.ts";
 import {
@@ -71,7 +71,7 @@ import { ownsDocument } from "./use-discovered-artifacts.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
-import { skillsQuery } from "~/modules/skills/client/queries.ts";
+
 import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 
@@ -83,7 +83,7 @@ import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
 import { useMarkRead } from "./use-mark-read.ts";
 import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
-import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
+
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 
 import { type QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
@@ -162,23 +162,6 @@ export function ChatView({
   // A pick in this view; the chat's own lock shows until one is made.
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const imagePick = imageModelId ? { imageModelId } : {};
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editResearchEnabled, setEditResearchEnabled] = useState(false);
-  // One instance, mounted for the whole view: an edit opens by seeding it, so
-  // the chips survive the ChatInput remount that swapping the bubble causes.
-  const editUploads = useAttachmentUploads();
-  const seedEditUploads = editUploads.seed;
-  const resetEditUploads = editUploads.reset;
-  const submitEditUploads = editUploads.submit;
-  const beginEditSubmission = editUploads.beginSubmission;
-  const editUploadCount = editUploads.items.length;
-  // Seeded from the edited message, like the uploads above: an edit changes the
-  // message's own skills and collections, never the composer's live selection.
-  const [editSkillIds, setEditSkillIds] = useState<ReadonlyArray<string>>([]);
-  const activeEditingMessage =
-    editingMessageId === null
-      ? null
-      : (data.messages.find((message) => message.id === editingMessageId) ?? null);
   // One folder state for the strip and the send, so attaching in the strip is
   // what the very next message reports. A plain chat never offers the tools.
   const work = useWorkGate(conversationId, data.conversation.mode === "work");
@@ -263,27 +246,42 @@ export function ChatView({
   } = useSearchMode(data.agent?.searchEnabled ?? true);
   const context = useContextSelection({ mode: "installed", agent: data.agent });
   const integrations = useChatIntegrations(conversationId);
-  const editContext = useContextSelection({ mode: "installed", agent: data.agent });
-  // The composer loads the same list inside itself; the editor is a second
-  // consumer, and one shared query key means one fetch.
-  const editableSkills = useQuery(skillsQuery);
-  const seedEditContext = editContext.seed;
-  const settleEditContext = editContext.settle;
-
-  // Declared above the mutations: sending, answering, retrying and branching all
-  // abandon an open edit, and each has to drop its uploads and selections rather
-  // than just forgetting which message was being edited.
-  const closeEdit = useCallback(() => {
-    // Runs on every send/answer/retry/branch, so it must cost nothing when no
-    // edit is open: resetting then would throw away the composer's own uploads.
-    if (!editingMessageId) return;
-    setEditingMessageId(null);
-    setEditSkillIds([]);
-    setEditResearchEnabled(false);
-    settleEditContext();
-    // Structured edits have no upload lifecycle of their own.
-    if (!questionResponses.hiddenMessageIds.has(editingMessageId)) resetEditUploads();
-  }, [resetEditUploads, editingMessageId, questionResponses, settleEditContext]);
+  const {
+    machinesByMessage,
+    attachmentsByMessage,
+    steersByAnswer,
+    uiStatesByMessage,
+    toolCallsByMessage,
+    compactionsByMessage,
+    nextAssistantAfter,
+    modelByMessage,
+    collectionsByUserMessage,
+    skillsByUserMessage,
+    workspaceFilesByUserMessage,
+  } = useMessageRows(data);
+  const {
+    activeEditingMessage,
+    editResearchEnabled,
+    setEditResearchEnabled,
+    editUploads,
+    submitEditUploads,
+    beginEditSubmission,
+    editUploadCount,
+    editSkillIds,
+    setEditSkillIds,
+    editContext,
+    settleEditContext,
+    editableSkills,
+    setEditingMessageId,
+    closeEdit,
+    openEdit,
+  } = useMessageEdit({
+    data,
+    questionResponses,
+    attachmentsByMessage,
+    skillsByUserMessage,
+    collectionsByUserMessage,
+  });
 
   const checkWorkReady = () => work.check();
   /** What every way of starting an answer saves first, so it reads current drafts. */
@@ -792,20 +790,6 @@ export function ChatView({
     },
   });
 
-  const {
-    machinesByMessage,
-    attachmentsByMessage,
-    steersByAnswer,
-    uiStatesByMessage,
-    toolCallsByMessage,
-    compactionsByMessage,
-    nextAssistantAfter,
-    modelByMessage,
-    collectionsByUserMessage,
-    skillsByUserMessage,
-    workspaceFilesByUserMessage,
-  } = useMessageRows(data);
-
   // Associate in raw order, then filter display rows before computing day headings.
   // Raw messages remain authoritative for retry, edit, branching and history.
   const visibleMessages = useMemo(
@@ -955,44 +939,6 @@ export function ChatView({
     }
     return result;
   }, [data.generations, data.conversation.mode, folder]);
-  // Below the per-message maps it seeds from. Opening an editor while another is
-  // open is an ordinary switch: the previous draft goes with its unmounted row.
-  const openEdit = useCallback(
-    (messageId: string) => {
-      setEditingMessageId(messageId);
-      // The offer belongs to the edit being written, not to the one before it.
-      setEditResearchEnabled(false);
-      if (questionResponses.hiddenMessageIds.has(messageId)) {
-        // An answer edit has no uploads of its own, so there is nothing to seed.
-        // Only a switch away from another editor leaves chips needing clearing.
-        if (editingMessageId !== null && editingMessageId !== messageId) resetEditUploads();
-      } else {
-        // Seeded as existing/claimed: removing one only drops it from the
-        // replacement set, it is released by the save itself.
-        seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
-      }
-      setEditSkillIds((skillsByUserMessage.get(messageId) ?? []).map((skill) => skill.id));
-      // A message records the *effective* collections. The agent's own are in the
-      // selection already; reseeding them as standalone would rewrite the turn's
-      // provenance, so only the standalone remainder is seeded.
-      const fromAgent = new Set(data.agent?.collectionIds ?? []);
-      seedEditContext(
-        (collectionsByUserMessage.get(messageId) ?? []).filter((id) => !fromAgent.has(id)),
-      );
-    },
-    [
-      attachmentsByMessage,
-      seedEditUploads,
-      resetEditUploads,
-      questionResponses,
-      editingMessageId,
-      skillsByUserMessage,
-      collectionsByUserMessage,
-      seedEditContext,
-      data.agent,
-    ],
-  );
-
   const baseDisplay = useMemo(() => {
     const inherited = inheritSources(
       visibleMessages.map((message) => collectSources(toolCallsByMessage.get(message.id) ?? [])),
@@ -1205,6 +1151,8 @@ export function ChatView({
     reasoningEffort,
     setReasoningEffort,
     editResearchEnabled,
+    setEditResearchEnabled,
+    setEditSkillIds,
     stream.compactions,
     stream.files,
     stream.lookups,
