@@ -1,7 +1,7 @@
 import { Option, Schema, Struct } from "effect";
 import type { Response } from "effect/unstable/ai";
+import { EntityId } from "~/entity-id.ts";
 
-const ActivityId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /** Outcomes every draft kind's tools can report; a kind adds its own (agents' "options"). */
 const COMMON_OUTCOMES = [
   "drafted",
@@ -46,8 +46,8 @@ export function defineDraftToolSchema<
   const ActivityResult = Schema.Struct({
     outcome: ToolOutcome,
     /** Which draft this row refers to, and the conversation that owns it. */
-    draftId: Schema.optionalKey(ActivityId),
-    draftConversationId: Schema.optionalKey(ActivityId),
+    draftId: Schema.optionalKey(EntityId),
+    draftConversationId: Schema.optionalKey(EntityId),
     revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
     changedFields: Schema.optionalKey(Schema.Array(Field).check(Schema.isMaxLength(fields.length))),
   });

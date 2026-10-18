@@ -5,6 +5,7 @@ import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { Attachment, AttachmentIds } from "~/modules/attachments/schema.ts";
 import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
 import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
+import { EntityId } from "~/entity-id.ts";
 
 // Blank content is allowed when the turn carries attachments; the service
 // rejects the turn that has neither.
@@ -12,15 +13,14 @@ const MessageContent = Schema.String.check(Schema.isMaxLength(32_000));
 
 const TimeZone = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)));
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /**
  * The document open in the panel when the message was sent, which the model
  * reads first, the blocks the person had selected in it, and the comment
  * thread the message was sent from.
  */
 export const OpenDocument = Schema.Struct({
-  id: ResourceId,
-  thread: Schema.optionalKey(ResourceId),
+  id: EntityId,
+  thread: Schema.optionalKey(EntityId),
   selected: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))).check(
       Schema.isMaxLength(50),
@@ -47,13 +47,13 @@ export const desktopSubmissionFields = {
   desktopCommands: Schema.optionalKey(Schema.Boolean),
   desktopBrowser: Schema.optionalKey(Schema.Boolean),
   fromDesktop: Schema.optionalKey(Schema.Boolean),
-  desktopExecutorId: Schema.optionalKey(ResourceId),
+  desktopExecutorId: Schema.optionalKey(EntityId),
   /**
    * Which machine sent the attempt. Stored per generation so the client can
    * tell "this chat last worked here" from "elsewhere" and offer take-over.
    * Display text only; names are never an address.
    */
-  desktopMachineId: Schema.optionalKey(ResourceId),
+  desktopMachineId: Schema.optionalKey(EntityId),
   desktopMachineName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
 };
 const DesktopSubmission = Schema.Struct(desktopSubmissionFields);
@@ -79,18 +79,18 @@ const generationFields = {
    * Installs the fixed agent association on the first message only.
    * Each later attempt resolves its current settings; the association cannot change.
    */
-  agentId: Schema.optionalKey(Schema.NullOr(ResourceId)),
-  skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),
+  agentId: Schema.optionalKey(Schema.NullOr(EntityId)),
+  skillIds: Schema.optionalKey(Schema.Array(EntityId).check(Schema.isMaxLength(5))),
   /** Standalone collections beside the agent's; omitted keeps the current selection. */
   collectionIds: Schema.optionalKey(
-    Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
+    Schema.Array(EntityId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
   ),
   /**
    * Integration toggles made before the chat existed. An existing chat saves
    * each toggle as it happens, so this only matters for a first message.
    */
   integrationChoices: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ integrationId: ResourceId, enabled: Schema.Boolean })).check(
+    Schema.Array(Schema.Struct({ integrationId: EntityId, enabled: Schema.Boolean })).check(
       Schema.isMaxLength(20),
     ),
   ),
@@ -115,9 +115,7 @@ export const ConversationReference = Schema.Union([
     mode: ConversationMode,
     temporary: Schema.optionalKey(Schema.Boolean),
     /** Starts the chat inside a project; authorized in the attempt that creates it. */
-    projectId: Schema.optionalKey(
-      Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
-    ),
+    projectId: Schema.optionalKey(EntityId),
   }),
   Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
 ]);
@@ -264,9 +262,9 @@ export const QueueMessageInput = Schema.Struct({
   attachmentIds: AttachmentIds,
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
-  skillIds: Schema.optionalKey(Schema.Array(ResourceId).check(Schema.isMaxLength(5))),
+  skillIds: Schema.optionalKey(Schema.Array(EntityId).check(Schema.isMaxLength(5))),
   collectionIds: Schema.optionalKey(
-    Schema.Array(ResourceId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
+    Schema.Array(EntityId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
   ),
 });
 

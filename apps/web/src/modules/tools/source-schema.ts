@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 const sourceFields = {
   index: Schema.Int,
@@ -15,11 +16,10 @@ export const WebSource = Schema.Struct({
 });
 export type WebSource = typeof WebSource.Type;
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const DocumentLocation = Schema.Struct({
-  collectionId: ResourceId,
-  documentId: ResourceId,
-  versionId: ResourceId,
+  collectionId: EntityId,
+  documentId: EntityId,
+  versionId: EntityId,
   startOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   endOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 });

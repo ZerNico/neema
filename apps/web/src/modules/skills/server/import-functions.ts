@@ -9,6 +9,7 @@ import { withoutBytes } from "../package.ts";
 import { changesWithoutBytes, compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
 import { SkillService } from "./service.ts";
 import { discoverSkills, reviewGitHubSkill, type RemoteSkillPackage } from "./remote.ts";
+import { EntityId } from "~/entity-id.ts";
 
 /**
  * Reviews hold no server state. A reviewed package is identified by its pinned
@@ -120,11 +121,7 @@ export const importReviewedSkill = createServerFn({ method: "POST" })
   });
 export const reviewSkillUpdate = createServerFn({ method: "POST" })
   .middleware([requireSkillAuthoring])
-  .validator(
-    Schema.toStandardSchemaV1(
-      Schema.Struct({ skillId: Schema.String.check(Schema.isMaxLength(100)) }),
-    ),
-  )
+  .validator(Schema.toStandardSchemaV1(Schema.Struct({ skillId: EntityId })))
   .handler(async ({ context, data }) => {
     const userId = context.session.user.id;
     const local = await runServerFn(
@@ -155,7 +152,7 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
   .validator(
     Schema.toStandardSchemaV1(
       Schema.Struct({
-        skillId: Schema.String.check(Schema.isMaxLength(100)),
+        skillId: EntityId,
         expectedRevision: Schema.Number,
         source: reviewedSource,
         choices: Schema.Array(

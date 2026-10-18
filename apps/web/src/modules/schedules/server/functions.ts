@@ -4,9 +4,10 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { ScheduleSettings } from "../schema.ts";
 import { ScheduleService } from "./service.ts";
+import { EntityId } from "~/entity-id.ts";
 
 const ScheduleIdInput = Schema.Struct({
-  scheduleId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  scheduleId: EntityId,
 });
 const UpdateScheduleInput = Schema.Struct({
   ...ScheduleIdInput.fields,

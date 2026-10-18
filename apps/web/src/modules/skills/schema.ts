@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import type { SkillSource } from "~/db/schema/skills.ts";
 import type { SkillFile, SkillFinding } from "./package.ts";
+import { EntityId } from "~/entity-id.ts";
 
 /**
  * skills.sh ignores `offset`/`page`, so more results means a larger page. The
@@ -47,7 +48,7 @@ export interface SkillManifestEntry {
   ambient?: boolean;
 }
 export const SkillIdInput = Schema.Struct({
-  skillId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  skillId: EntityId,
 });
 const SkillPath = Schema.String.check(Schema.isMaxLength(240));
 /**

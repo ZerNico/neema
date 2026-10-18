@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 export const DOCUMENT_LIMITS = {
   chars: 200_000,
@@ -19,33 +20,32 @@ export const DOCUMENT_LIMITS = {
   comments: 1_000,
 } as const;
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const DocumentTitle = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isPattern(/\S/),
   Schema.isMaxLength(DOCUMENT_LIMITS.title),
 );
 
-export const DocumentIdInput = Schema.Struct({ documentId: ResourceId });
+export const DocumentIdInput = Schema.Struct({ documentId: EntityId });
 export type DocumentIdInput = typeof DocumentIdInput.Type;
-export const ConversationIdInput = Schema.Struct({ conversationId: ResourceId });
-export const ProjectDocumentsInput = Schema.Struct({ projectId: ResourceId });
+export const ConversationIdInput = Schema.Struct({ conversationId: EntityId });
+export const ProjectDocumentsInput = Schema.Struct({ projectId: EntityId });
 export const CreateProjectDocumentInput = Schema.Struct({
-  projectId: ResourceId,
+  projectId: EntityId,
   title: DocumentTitle,
 });
 export const RenameDocumentInput = Schema.Struct({
-  documentId: ResourceId,
+  documentId: EntityId,
   title: DocumentTitle,
 });
 /** An upload a document's editor puts into its text. */
 export const DocumentVersionInput = Schema.Struct({
-  documentId: ResourceId,
+  documentId: EntityId,
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export const DocumentImageInput = Schema.Struct({
-  documentId: ResourceId,
-  attachmentId: ResourceId,
+  documentId: EntityId,
+  attachmentId: EntityId,
 });
 export type DocumentImageInput = typeof DocumentImageInput.Type;
 /** Where a document's claimed image is served, to that document's readers only. */
@@ -55,10 +55,10 @@ export const documentImagePath = (documentId: string, attachmentId: string) =>
 export const IMAGE_REFUSED = "That file can’t go in this document";
 /** Exactly one owner: a chat, or a project. */
 export const CreateDocumentInput = Schema.Struct({
-  conversationId: Schema.optionalKey(ResourceId),
-  projectId: Schema.optionalKey(ResourceId),
+  conversationId: Schema.optionalKey(EntityId),
+  projectId: Schema.optionalKey(EntityId),
   /** A chat document's answer; rewinding past it deletes the document. */
-  createdByMessageId: Schema.optionalKey(ResourceId),
+  createdByMessageId: Schema.optionalKey(EntityId),
   title: DocumentTitle,
   content: Schema.String,
   /** Planned sections after the content, each one placeholder's intent. */
@@ -94,7 +94,7 @@ export type DocumentPresence = typeof DocumentPresence.Type;
  * brings and sends them again.
  */
 export const PushDocumentInput = Schema.Struct({
-  documentId: ResourceId,
+  documentId: EntityId,
   /** The editor's collab client id, so it recognises its own steps coming back. */
   clientId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -114,8 +114,8 @@ const CommentBody = Schema.String.check(
  * with it as it sends; naming an existing thread replies to it.
  */
 export const CommentInput = Schema.Struct({
-  documentId: ResourceId,
-  threadId: ResourceId,
+  documentId: EntityId,
+  threadId: EntityId,
   body: CommentBody,
   /** A new thread's text, as the reader saw it. */
   quote: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DOCUMENT_LIMITS.quote))),
@@ -124,14 +124,14 @@ export const CommentInput = Schema.Struct({
 });
 export type CommentInput = typeof CommentInput.Type;
 export const ResolveThreadInput = Schema.Struct({
-  documentId: ResourceId,
-  threadId: ResourceId,
+  documentId: EntityId,
+  threadId: EntityId,
   resolved: Schema.Boolean,
 });
 export type ResolveThreadInput = typeof ResolveThreadInput.Type;
 export const DeleteCommentInput = Schema.Struct({
-  documentId: ResourceId,
-  commentId: ResourceId,
+  documentId: EntityId,
+  commentId: EntityId,
 });
 export type DeleteCommentInput = typeof DeleteCommentInput.Type;
 

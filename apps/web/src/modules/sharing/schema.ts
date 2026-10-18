@@ -1,17 +1,17 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const SharedResource = Schema.Struct({
   kind: Schema.Literals(["agent", "collection", "skill", "customTool", "integration"]),
-  id: Id,
+  id: EntityId,
 });
 export type SharedResource = typeof SharedResource.Type;
 export const ShareEmailInput = Schema.Struct({
   ...SharedResource.fields,
   email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
 });
-export const ShareGroupInput = Schema.Struct({ ...SharedResource.fields, groupId: Id });
-export const RevokeUserInput = Schema.Struct({ ...SharedResource.fields, userId: Id });
+export const ShareGroupInput = Schema.Struct({ ...SharedResource.fields, groupId: EntityId });
+export const RevokeUserInput = Schema.Struct({ ...SharedResource.fields, userId: EntityId });
 export const RecipientSearchInput = Schema.Struct({
   q: Schema.String.check(Schema.isMaxLength(200)),
 });

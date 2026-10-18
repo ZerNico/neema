@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 /** Shared by the file picker and the server; no node or browser imports. */
 export const PROJECT_FILE_LIMITS = {
@@ -18,18 +19,20 @@ export const PROJECT_FILE_LIMITS = {
   readChars: 60_000,
 } as const;
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const Version = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
-export const ProjectFileIdInput = Schema.Struct({ fileId: Id });
-export const RestoreProjectFileInput = Schema.Struct({ versionId: Id, basedOnVersion: Version });
+export const ProjectFileIdInput = Schema.Struct({ fileId: EntityId });
+export const RestoreProjectFileInput = Schema.Struct({
+  versionId: EntityId,
+  basedOnVersion: Version,
+});
 export const PinProjectFileVersionInput = Schema.Struct({
-  versionId: Id,
+  versionId: EntityId,
   pinned: Schema.Boolean,
   label: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(80))),
 });
 export const SaveAttachmentToProjectInput = Schema.Struct({
-  projectId: Id,
-  attachmentId: Id,
+  projectId: EntityId,
+  attachmentId: EntityId,
 });
 export const ProjectFileSettingsInput = Schema.Struct({
   maxProjectBytes: Schema.Int.check(

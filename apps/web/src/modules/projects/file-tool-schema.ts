@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 export const ProjectFileToolName = Schema.Literals([
   "list_project_files",
@@ -14,14 +15,13 @@ export const ProjectFileOutcome = Schema.Literals([
   "invalid",
   "unavailable",
 ]);
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /**
  * What a project file call leaves on its row and in the stream: which file,
  * which version, never its content. Handler-authored text only.
  */
 export const ProjectFileActivityResult = Schema.Struct({
   outcome: ProjectFileOutcome,
-  fileId: Schema.optionalKey(Id),
+  fileId: Schema.optionalKey(EntityId),
   fileName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   version: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),

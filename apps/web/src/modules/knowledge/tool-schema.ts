@@ -1,5 +1,6 @@
 import { Option, Schema } from "effect";
 import { DocumentSource } from "~/modules/tools/source-schema.ts";
+import { EntityId } from "~/entity-id.ts";
 
 export const KNOWLEDGE_TOOL_LIMITS = {
   operations: 64,
@@ -14,7 +15,6 @@ export const KNOWLEDGE_TOOL_LIMITS = {
    */
   searchExcerptChars: 800,
 } as const;
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const ListDocumentsParams = Schema.Struct({
   cursor: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
 });
@@ -27,8 +27,8 @@ export const SearchKnowledgeParams = Schema.Struct({
 export const ReadDocumentParams = Schema.Struct({
   documents: Schema.Array(
     Schema.Struct({
-      documentId: Id,
-      versionId: Id,
+      documentId: EntityId,
+      versionId: EntityId,
       startOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       maxChars: Schema.Int.check(
         Schema.isBetween({ minimum: 1, maximum: KNOWLEDGE_TOOL_LIMITS.readChars }),
@@ -38,9 +38,9 @@ export const ReadDocumentParams = Schema.Struct({
 });
 
 const ListedDocument = Schema.Struct({
-  collectionId: Id,
-  documentId: Id,
-  versionId: Schema.NullOr(Id),
+  collectionId: EntityId,
+  documentId: EntityId,
+  versionId: Schema.NullOr(EntityId),
   title: Schema.String,
   status: Schema.Literals(["ready", "pending", "failed"]),
   charCount: Schema.NullOr(Schema.Int),

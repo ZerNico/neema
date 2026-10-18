@@ -1,9 +1,9 @@
 import { Effect, Schema } from "effect";
 import { decodeToolInput } from "~/modules/tools/server/toolset.ts";
 import type { ConversationDraft } from "../draft-schema.ts";
+import { EntityId } from "~/entity-id.ts";
 
-export const DraftId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-export const ReadDraftParams = Schema.Struct({ draftId: Schema.optionalKey(DraftId) });
+export const ReadDraftParams = Schema.Struct({ draftId: Schema.optionalKey(EntityId) });
 
 // Names a model reaches for when it has read the field list once and then
 // paraphrases it. The advertised schema is the source of truth; these only

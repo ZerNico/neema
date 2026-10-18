@@ -4,6 +4,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "~/modules/attachments/constants.ts";
+import { EntityId } from "~/entity-id.ts";
 
 export const CUSTOM_TOOL_LIMITS = {
   slug: 27,
@@ -99,9 +100,8 @@ const Description = Schema.String.check(Schema.isMaxLength(CUSTOM_TOOL_LIMITS.de
 const Dependencies = Schema.Array(CustomToolDependency).check(
   Schema.isMaxLength(CUSTOM_TOOL_LIMITS.dependencies),
 );
-const ToolId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 
-export const CustomToolIdInput = Schema.Struct({ toolId: ToolId });
+export const CustomToolIdInput = Schema.Struct({ toolId: EntityId });
 
 /** The identity fields the editor validates itself; source and dependencies are checked by the build. */
 export const CustomToolIdentityInput = Schema.Struct({
@@ -119,11 +119,11 @@ export const CreateCustomToolInput = Schema.Struct({
 });
 
 export const UpdateCustomToolInput = Schema.Struct({
-  toolId: ToolId,
+  toolId: EntityId,
   /** Renaming re-derives the model-facing names, so a save always rebuilds. */
   slug: CustomToolSlug,
   /** The `version` the editor loaded; a save against another one is refused. */
-  expectedVersion: ToolId,
+  expectedVersion: EntityId,
   name: Name,
   description: Description,
   source: Source,

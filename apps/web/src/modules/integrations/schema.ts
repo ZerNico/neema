@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 import type { IntegrationToolInfo } from "./manifest.ts";
 import type { McpToolEntry } from "./mcp/catalog.ts";
+import { EntityId } from "~/entity-id.ts";
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const IntegrationId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$/));
 
 export const INTEGRATION_LIMITS = {
@@ -159,18 +159,18 @@ export const UpdateConnectionInput = Schema.Struct({
 });
 
 export const ConversationIntegrationInput = Schema.Struct({
-  conversationId: Id,
+  conversationId: EntityId,
   integrationId: IntegrationId,
   /** Null returns the chat to the connection's default. */
   enabled: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 
-export const ConversationIdInput = Schema.Struct({ conversationId: Id });
+export const ConversationIdInput = Schema.Struct({ conversationId: EntityId });
 
 export const IntegrationDecision = Schema.Literals(["once", "conversation", "deny"]);
 export type IntegrationDecision = typeof IntegrationDecision.Type;
 export const DecideIntegrationCallInput = Schema.Struct({
-  callId: Id,
+  callId: EntityId,
   decision: IntegrationDecision,
 });
 
@@ -183,9 +183,9 @@ const ElicitationValue = Schema.Union([
 export type ElicitationValue = typeof ElicitationValue.Type;
 
 export const AnswerElicitationInput = Schema.Struct({
-  callId: Id,
+  callId: EntityId,
   /** The question answered, so a tab still showing an earlier one cannot answer the next. */
-  promptId: Id,
+  promptId: EntityId,
   action: Schema.Literals(["accept", "decline", "cancel"]),
   values: Schema.optionalKey(
     Schema.Record(Schema.String.check(Schema.isMaxLength(100)), ElicitationValue).check(
@@ -228,14 +228,14 @@ export type ElicitationAnswer =
   | { action: "cancel" };
 
 export const SourceRule = Schema.Struct({
-  nodeId: Id,
+  nodeId: EntityId,
   title: Schema.String.check(Schema.isMaxLength(200)),
   mode: Schema.Literals(["include", "exclude"]),
 });
 export type SourceRule = typeof SourceRule.Type;
 
 export const SourceRoot = Schema.Struct({
-  nodeId: Id,
+  nodeId: EntityId,
   title: Schema.String.check(Schema.isMaxLength(200)),
   mode: Schema.Literals(["all", "selected"]),
   rules: Schema.Array(SourceRule).check(Schema.isMaxLength(INTEGRATION_LIMITS.maxRules)),
@@ -244,18 +244,18 @@ export type SourceRoot = typeof SourceRoot.Type;
 
 export const BrowseInput = Schema.Struct({
   integrationId: IntegrationId,
-  parentId: Schema.optionalKey(Id),
+  parentId: Schema.optionalKey(EntityId),
 });
 
 export const SaveKnowledgeSourceInput = Schema.Struct({
-  collectionId: Id,
+  collectionId: EntityId,
   integrationId: IntegrationId,
   /** Absent adds a new source; present edits that one. */
-  sourceId: Schema.optionalKey(Id),
+  sourceId: Schema.optionalKey(EntityId),
   root: SourceRoot,
 });
 
-export const SourceIdInput = Schema.Struct({ sourceId: Id });
+export const SourceIdInput = Schema.Struct({ sourceId: EntityId });
 
 /** One node of an integration's tree, as the source picker lists it. */
 export interface BrowseNode {

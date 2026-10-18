@@ -6,11 +6,11 @@ import { SkillToolResult } from "../tool-schema.ts";
 import type { SkillManifestEntry } from "../schema.ts";
 import { formatFileRef } from "~/modules/custom-tools/authoring.ts";
 import { SkillReader, type SkillFileRead } from "./reader.ts";
+import { EntityId } from "~/entity-id.ts";
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-const LoadParams = Schema.Struct({ skillId: Id });
+const LoadParams = Schema.Struct({ skillId: EntityId });
 const ReadParams = Schema.Struct({
-  skillId: Id,
+  skillId: EntityId,
   path: Schema.String.check(Schema.isMaxLength(240)),
   offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });

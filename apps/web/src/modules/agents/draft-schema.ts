@@ -8,6 +8,7 @@ import {
   AgentStarter,
   type AgentDetail,
 } from "./schema.ts";
+import { EntityId } from "~/entity-id.ts";
 
 /** Working input retains unfinished text; only the explicit Save validates an agent. */
 export const DraftSettings = Schema.Struct({
@@ -52,8 +53,7 @@ export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   integrationIds: [...(agent.integrationIds ?? [])],
 });
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-export const AgentDraftIdInput = Schema.Struct({ draftId: ResourceId });
+export const AgentDraftIdInput = Schema.Struct({ draftId: EntityId });
 export const AgentDraftRevisionInput = Schema.Struct({
   ...AgentDraftIdInput.fields,
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -61,9 +61,9 @@ export const AgentDraftRevisionInput = Schema.Struct({
 export type AgentDraftRevisionInput = typeof AgentDraftRevisionInput.Type;
 /** Opening is per conversation; the draft it resolves to may already exist. */
 export const OpenAgentDraftInput = Schema.Struct({
-  conversationId: ResourceId,
-  createdByMessageId: ResourceId,
-  agentId: Schema.optionalKey(ResourceId),
+  conversationId: EntityId,
+  createdByMessageId: EntityId,
+  agentId: Schema.optionalKey(EntityId),
   changes: Schema.optionalKey(AgentDraftPatch),
 });
 export type OpenAgentDraftInput = typeof OpenAgentDraftInput.Type;

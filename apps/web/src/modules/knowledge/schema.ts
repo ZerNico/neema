@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 /** Bounds. Deliberately engineering constants, not admin settings. */
 export const KNOWLEDGE_LIMITS = {
@@ -131,16 +132,15 @@ export const KnowledgeSearchConfig = Schema.Struct({
 });
 export type KnowledgeSearchConfig = typeof KnowledgeSearchConfig.Type;
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 export const EmbeddingConfigurationChange = Schema.Struct({
-  modelId: ResourceId,
+  modelId: EntityId,
   dimensions: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8192 })),
   decision: Schema.Literals(["keep", "rebuild"]),
-  expectedRevision: Schema.NullOr(ResourceId),
+  expectedRevision: Schema.NullOr(EntityId),
 });
 export type EmbeddingConfigurationChange = typeof EmbeddingConfigurationChange.Type;
 export const DisableEmbeddingInput = Schema.Struct({
-  expectedRevision: Schema.NullOr(ResourceId),
+  expectedRevision: Schema.NullOr(EntityId),
 });
 export type DisableEmbeddingInput = typeof DisableEmbeddingInput.Type;
 export interface EmbeddingConfigurationStatus {
@@ -149,8 +149,8 @@ export interface EmbeddingConfigurationStatus {
   config: KnowledgeSearchConfig;
 }
 
-export const CollectionIdInput = Schema.Struct({ collectionId: ResourceId });
-export const KnowledgeDocumentIdInput = Schema.Struct({ documentId: ResourceId });
+export const CollectionIdInput = Schema.Struct({ collectionId: EntityId });
+export const KnowledgeDocumentIdInput = Schema.Struct({ documentId: EntityId });
 export const CollectionIdentityInput = Schema.Struct({
   name: Schema.String.check(
     Schema.isMinLength(1),
@@ -176,7 +176,7 @@ export const AddKnowledgeNoteInput = Schema.Struct({
 export const ReadKnowledgeDocumentInput = Schema.Struct({
   ...CollectionIdInput.fields,
   ...KnowledgeDocumentIdInput.fields,
-  versionId: ResourceId,
+  versionId: EntityId,
   startOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   maxChars: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16_000 })),
 });

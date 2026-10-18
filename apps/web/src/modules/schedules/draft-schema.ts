@@ -1,6 +1,7 @@
 import { Schema, Struct } from "effect";
 import { ScheduleSettings } from "./schema.ts";
 import type { ConversationDraft } from "~/modules/drafts/draft-schema.ts";
+import { EntityId } from "~/entity-id.ts";
 
 /** Working input retains unfinished text; only the explicit Save validates a schedule. */
 export const ScheduleDraftSettings = ScheduleSettings;
@@ -37,8 +38,7 @@ export interface ScheduleDraft extends ConversationDraft<ScheduleDraftSettings> 
   kind: "schedule";
 }
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-export const ScheduleDraftIdInput = Schema.Struct({ draftId: ResourceId });
+export const ScheduleDraftIdInput = Schema.Struct({ draftId: EntityId });
 export const ScheduleDraftRevisionInput = Schema.Struct({
   ...ScheduleDraftIdInput.fields,
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -46,9 +46,9 @@ export const ScheduleDraftRevisionInput = Schema.Struct({
 export type ScheduleDraftRevisionInput = typeof ScheduleDraftRevisionInput.Type;
 /** Opening is per conversation; the draft it resolves to may already exist. */
 export const OpenScheduleDraftInput = Schema.Struct({
-  conversationId: ResourceId,
-  createdByMessageId: ResourceId,
-  scheduleId: Schema.optionalKey(ResourceId),
+  conversationId: EntityId,
+  createdByMessageId: EntityId,
+  scheduleId: Schema.optionalKey(EntityId),
   changes: Schema.optionalKey(ScheduleDraftPatch),
 });
 export type OpenScheduleDraftInput = typeof OpenScheduleDraftInput.Type;

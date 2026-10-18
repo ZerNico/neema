@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 export const PROJECT_LIMITS = {
   name: 120,
@@ -21,7 +22,6 @@ export const projectCan = {
   manage: (role: ProjectRole | null) => role === "owner",
 } as const;
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const Name = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(PROJECT_LIMITS.name),
@@ -30,7 +30,7 @@ const Name = Schema.String.check(
 const Description = Schema.String.check(Schema.isMaxLength(PROJECT_LIMITS.description));
 const Instructions = Schema.String.check(Schema.isMaxLength(PROJECT_LIMITS.instructions));
 
-export const ProjectIdInput = Schema.Struct({ projectId: Id });
+export const ProjectIdInput = Schema.Struct({ projectId: EntityId });
 export const CreateProjectInput = Schema.Struct({
   name: Name,
   description: Schema.optionalKey(Description),
@@ -38,35 +38,35 @@ export const CreateProjectInput = Schema.Struct({
 });
 export type CreateProjectInput = typeof CreateProjectInput.Type;
 export const UpdateProjectInput = Schema.Struct({
-  projectId: Id,
+  projectId: EntityId,
   name: Schema.optionalKey(Name),
   description: Schema.optionalKey(Description),
   instructions: Schema.optionalKey(Instructions),
 });
 export type UpdateProjectInput = typeof UpdateProjectInput.Type;
 export const AddProjectMemberInput = Schema.Struct({
-  projectId: Id,
+  projectId: EntityId,
   email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
   role: ProjectMemberRole,
 });
 export const SetProjectMemberRoleInput = Schema.Struct({
-  projectId: Id,
-  userId: Id,
+  projectId: EntityId,
+  userId: EntityId,
   role: ProjectMemberRole,
 });
-export const RemoveProjectMemberInput = Schema.Struct({ projectId: Id, userId: Id });
+export const RemoveProjectMemberInput = Schema.Struct({ projectId: EntityId, userId: EntityId });
 export const AddProjectGroupInput = Schema.Struct({
-  projectId: Id,
-  groupId: Id,
+  projectId: EntityId,
+  groupId: EntityId,
   role: ProjectMemberRole,
 });
-export const RemoveProjectGroupInput = Schema.Struct({ projectId: Id, groupId: Id });
+export const RemoveProjectGroupInput = Schema.Struct({ projectId: EntityId, groupId: EntityId });
 export const MoveConversationInput = Schema.Struct({
-  conversationId: Id,
-  projectId: Schema.NullOr(Id),
+  conversationId: EntityId,
+  projectId: Schema.NullOr(EntityId),
 });
 export const CreateProjectDocumentInput = Schema.Struct({
-  projectId: Id,
+  projectId: EntityId,
   title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
 });
 
@@ -104,21 +104,21 @@ export interface ResolvedProject {
 }
 
 export const ProjectMemoryInput = Schema.Struct({
-  projectId: Id,
+  projectId: EntityId,
   content: Schema.String.check(
     Schema.isMinLength(1),
     Schema.isMaxLength(PROJECT_MEMORY_LIMITS.content),
   ),
 });
 export const UpdateProjectMemoryInput = Schema.Struct({
-  projectId: Id,
-  memoryId: Id,
+  projectId: EntityId,
+  memoryId: EntityId,
   content: Schema.String.check(
     Schema.isMinLength(1),
     Schema.isMaxLength(PROJECT_MEMORY_LIMITS.content),
   ),
 });
-export const DeleteProjectMemoryInput = Schema.Struct({ projectId: Id, memoryId: Id });
+export const DeleteProjectMemoryInput = Schema.Struct({ projectId: EntityId, memoryId: EntityId });
 /** A fact the project keeps; who added it is shown, never where it came from. */
 export interface ProjectMemory {
   id: string;

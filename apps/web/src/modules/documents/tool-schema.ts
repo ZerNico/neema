@@ -1,5 +1,6 @@
 import { Option, Schema } from "effect";
 import type { Response } from "effect/unstable/ai";
+import { EntityId } from "~/entity-id.ts";
 
 export const DocumentToolName = Schema.Literals([
   "create_document",
@@ -28,7 +29,6 @@ export const DocumentToolOutcome = Schema.Literals([
   "unavailable",
 ]);
 export type DocumentToolOutcome = typeof DocumentToolOutcome.Type;
-const ActivityId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /**
  * Handler-authored text only: schema paths and fixed sentences. Never document
  * content and never provider output, which goes to the server log instead.
@@ -37,9 +37,9 @@ export const DocumentFailureReason = Schema.String.check(Schema.isMaxLength(600)
 export const DocumentActivityResult = Schema.Struct({
   outcome: DocumentToolOutcome,
   /** Which document this row refers to, and the chat or project that owns it. */
-  documentId: Schema.optionalKey(ActivityId),
-  documentConversationId: Schema.optionalKey(ActivityId),
-  documentProjectId: Schema.optionalKey(ActivityId),
+  documentId: Schema.optionalKey(EntityId),
+  documentConversationId: Schema.optionalKey(EntityId),
+  documentProjectId: Schema.optionalKey(EntityId),
   title: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   message: Schema.optionalKey(DocumentFailureReason),

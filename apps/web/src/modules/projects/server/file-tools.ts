@@ -6,12 +6,12 @@ import { ProjectFileActivityResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import type { ProjectFileService } from "./project-files.ts";
+import { EntityId } from "~/entity-id.ts";
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const Name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 const Version = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const FileEntry = Schema.Struct({
-  id: Id,
+  id: EntityId,
   name: Schema.String,
   version: Schema.Int,
   mediaType: Schema.String,
@@ -28,7 +28,7 @@ const Result = Schema.Struct({
 type Result = typeof Result.Type;
 
 const ReadParams = Schema.Struct({
-  fileId: Schema.optionalKey(Id),
+  fileId: Schema.optionalKey(EntityId),
   name: Schema.optionalKey(Name),
 });
 const SaveParams = Schema.Struct({

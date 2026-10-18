@@ -1,11 +1,11 @@
 import { Schema } from "effect";
+import { EntityId } from "~/entity-id.ts";
 
 export const ALLOWANCE_LIMITS = {
   /** Addresses one allowance may name. */
   targets: 20,
 } as const;
 
-const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const AllowanceId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$/));
 
 /**
@@ -14,7 +14,7 @@ const AllowanceId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$
  * the exact people each of its allowances may reach.
  */
 export const IntegrationGrant = Schema.Struct({
-  integrationId: Id,
+  integrationId: EntityId,
   access: Schema.Literals(["read", "write"]),
   allowances: Schema.optionalKey(
     Schema.Record(

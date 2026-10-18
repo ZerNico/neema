@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+import { EntityId } from "~/entity-id.ts";
 
 export const AGENT_LIMITS = { maxPerUser: 100, maxInstructions: 20_000, maxStarters: 4 } as const;
 export const AgentIcon = Schema.Literals([
@@ -13,14 +14,13 @@ export const AgentIcon = Schema.Literals([
   "briefcase",
 ]);
 export type AgentIcon = typeof AgentIcon.Type;
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-export const AgentIdInput = Schema.Struct({ agentId: ResourceId });
+export const AgentIdInput = Schema.Struct({ agentId: EntityId });
 export const AgentName = Schema.String.check(Schema.isMaxLength(120));
 export const AgentInstructions = Schema.String.check(
   Schema.isMaxLength(AGENT_LIMITS.maxInstructions),
 );
 export const AgentStarter = Schema.String.check(Schema.isMaxLength(200));
-export const AgentResourceIds = Schema.Array(ResourceId).check(Schema.isMaxLength(20));
+export const AgentResourceIds = Schema.Array(EntityId).check(Schema.isMaxLength(20));
 export const AgentSettings = Schema.Struct({
   name: AgentName.check(Schema.isMinLength(1, { message: "Enter a name." })),
   description: Schema.String.check(Schema.isMaxLength(500)),
@@ -28,9 +28,9 @@ export const AgentSettings = Schema.Struct({
   instructions: AgentInstructions.check(
     Schema.isMinLength(1, { message: "Enter the instructions." }),
   ),
-  modelId: Schema.NullOr(ResourceId),
+  modelId: Schema.NullOr(EntityId),
   /** Preferred image model; absent keeps what is saved, null leaves it to each chat. */
-  imageModelId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  imageModelId: Schema.optionalKey(Schema.NullOr(EntityId)),
   searchEnabled: Schema.Boolean,
   planEnabled: Schema.Boolean,
   starters: Schema.Array(AgentStarter.check(Schema.isMinLength(1))).check(
@@ -43,7 +43,7 @@ export const AgentSettings = Schema.Struct({
    * connection; a sender without one simply is not offered them.
    */
   integrationIds: Schema.optional(AgentResourceIds),
-  collectionIds: Schema.Array(ResourceId).check(
+  collectionIds: Schema.Array(EntityId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),
 });

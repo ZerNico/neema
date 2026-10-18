@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import { EntityId } from "~/entity-id.ts";
 
-const ResourceId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 /** 5-field cron expression; the module's cron.ts validates it parses. */
 export const CronExpression = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100));
 /** IANA timezone name; validated with Intl at write time. */
@@ -19,21 +19,21 @@ export const ScheduleSettings = Schema.Struct({
   endAt: Schema.NullOr(Schema.String),
   prompt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8000)),
   /** Retained selections, never permissions: both degrade explicitly at fire time. */
-  modelId: Schema.NullOr(ResourceId),
-  agentId: Schema.NullOr(ResourceId),
+  modelId: Schema.NullOr(EntityId),
+  agentId: Schema.NullOr(EntityId),
   /** Absent keeps what is saved; null leaves the choice to each chat. */
-  imageModelId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  imageModelId: Schema.optionalKey(Schema.NullOr(EntityId)),
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
-  collectionIds: Schema.Array(ResourceId).check(Schema.isMaxLength(5)),
-  skillIds: Schema.Array(ResourceId).check(Schema.isMaxLength(20)),
+  collectionIds: Schema.Array(EntityId).check(Schema.isMaxLength(5)),
+  skillIds: Schema.Array(EntityId).check(Schema.isMaxLength(20)),
   /**
    * `new`: a fresh chat each fire. `same`: one chat every fire, `chatId`, or one
    * the next fire creates when that is null. Optional so drafts written before
    * these existed still decode; absent means `new`.
    */
   chatMode: Schema.optionalKey(Schema.Literals(["new", "same"])),
-  chatId: Schema.optionalKey(Schema.NullOr(ResourceId)),
+  chatId: Schema.optionalKey(Schema.NullOr(EntityId)),
   /**
    * The most each integration may do during a fire, granted here because
    * nobody is present to approve then. Only the editor sets it; a draft
@@ -52,7 +52,7 @@ export const ScheduleSettings = Schema.Struct({
 export type ScheduleSettings = typeof ScheduleSettings.Type;
 
 export const ScheduleSummary = Schema.Struct({
-  id: ResourceId,
+  id: EntityId,
   name: Schema.String,
   scheduleText: Schema.String,
   cron: Schema.String,
