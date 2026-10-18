@@ -903,13 +903,16 @@ describe("scheduled account eligibility", () => {
         }),
       );
       const published = Effect.runSync(Deferred.make<void>());
-      const fire = vi.fn(() =>
-        Effect.succeed({
+      // The service's own tick may claim another test's due schedule; only this one counts.
+      const fired: string[] = [];
+      const fire = (row: ScheduleRow) => {
+        fired.push(row.id);
+        return Effect.succeed({
           conversationId: null,
           status: "error" as const,
           reason: "unexpected fire",
-        }),
-      );
+        });
+      };
       const serviceRuntime = ManagedRuntime.make(
         ScheduleService.layer.pipe(
           Layer.provideMerge(FeaturePolicy.layer),
@@ -941,7 +944,7 @@ describe("scheduled account eligibility", () => {
             yield* Deferred.await(published);
           }),
         );
-        expect(fire).not.toHaveBeenCalled();
+        expect(fired).not.toContain(schedule.id);
         const [row] = await run(
           Effect.gen(function* () {
             const db = yield* Db;
