@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { Effect, Layer, ManagedRuntime, Redacted, Duration } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   messageChunks,
@@ -315,8 +315,8 @@ describe("durable blob cleanup", () => {
         );
         const claimed = yield* repo.claimBlobCleanup({
           limit: 10,
-          candidateCutoff: new Date(),
-          retryAfter: new Date(Date.now() + 60_000),
+          candidateGrace: Duration.zero,
+          retryBackoff: Duration.minutes(1),
         });
         yield* service.deleteBlobs(claimed);
 
@@ -364,8 +364,8 @@ describe("durable blob cleanup", () => {
         // An orphan is due immediately: the row is already gone.
         const claimed = yield* repo.claimBlobCleanup({
           limit: 10,
-          candidateCutoff: new Date(Date.now() - 60_000),
-          retryAfter: new Date(Date.now() + 60_000),
+          candidateGrace: Duration.minutes(1),
+          retryBackoff: Duration.minutes(1),
         });
         yield* service.deleteBlobs(claimed);
         const remaining = yield* db.execute(
@@ -399,14 +399,14 @@ describe("durable blob cleanup", () => {
         // First claim hands the key over and defers it.
         const first = yield* repo.claimBlobCleanup({
           limit: 10,
-          candidateCutoff: new Date(),
-          retryAfter: new Date(Date.now() + 3_600_000),
+          candidateGrace: Duration.zero,
+          retryBackoff: Duration.hours(1),
         });
         // A concurrent pass must not take the same key while it is deferred.
         const second = yield* repo.claimBlobCleanup({
           limit: 10,
-          candidateCutoff: new Date(),
-          retryAfter: new Date(Date.now() + 3_600_000),
+          candidateGrace: Duration.zero,
+          retryBackoff: Duration.hours(1),
         });
         const row = yield* db.execute(
           `select attempts from blob_cleanup_intents where storage_key = '${key}'` as never,
@@ -823,7 +823,7 @@ describe("attachment cleanup", () => {
           .storageKey;
 
         const service = yield* AttachmentService;
-        const keys = yield* attachmentRepo.sweepUnclaimed(new Date(Date.now() - 60 * 60 * 1000));
+        const keys = yield* attachmentRepo.sweepUnclaimed(Duration.hours(1));
         yield* service.deleteBlobs(keys);
 
         const left = yield* db.select().from(attachments).where(eq(attachments.userId, userId));
@@ -1068,7 +1068,7 @@ describe("queued message files", () => {
           .set({ createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000) })
           .where(eq(attachments.id, file.id));
 
-        const swept = yield* attachmentRepo.sweepUnclaimed(new Date(Date.now() - 60 * 60 * 1000));
+        const swept = yield* attachmentRepo.sweepUnclaimed(Duration.hours(1));
         const deleted = yield* attachmentRepo.deleteUnclaimed(userId, file.id).pipe(Effect.flip);
         const sent = yield* repo
           .createTurn({

@@ -61,7 +61,7 @@ export const collectOrphanedBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
                   // decision; the reconciler re-checks ownership regardless.
                   .onConflictDoUpdate({
                     target: blobCleanupIntents.storageKey,
-                    set: { kind: "orphan", attempts: 0, notBefore: new Date() },
+                    set: { kind: "orphan", attempts: 0, notBefore: sql`now()` },
                   }),
           ),
         );

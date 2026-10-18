@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Context, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
 import {
@@ -84,6 +84,9 @@ const withBlobColumns = {
  * abandoned, or claimed a second time. Once an owner row cascades away with
  * its chat, answer or document, the sweep takes the attachment and its bytes.
  */
+/** A time `span` before (-1) or after (1) the database's now. */
+const sinceNow = (span: Duration.Duration, direction: 1 | -1) =>
+  sql`now() + make_interval(secs => ${(direction * Duration.toMillis(span)) / 1000})`;
 const UNCLAIMED_BATCH = 100;
 const UNCLAIMED_BATCHES = 10;
 
@@ -320,8 +323,8 @@ export class AttachmentRepo extends Context.Service<
       documentId: string,
       attachmentId: string,
     ): Effect.Effect<AttachmentWithBlob | null>;
-    /** Unclaimed uploads older than the cutoff (tab closed before sending). */
-    sweepUnclaimed(olderThan: Date): Effect.Effect<ReadonlyArray<string>>;
+    /** Unclaimed uploads older than `grace` by the database clock (tab closed before sending). */
+    sweepUnclaimed(grace: Duration.Duration): Effect.Effect<ReadonlyArray<string>>;
     /**
      * Records that bytes are about to be written for a key no row owns yet.
      * Written before the store call, so a crash in between is still recoverable.
@@ -337,8 +340,10 @@ export class AttachmentRepo extends Context.Service<
      */
     claimBlobCleanup(input: {
       limit: number;
-      candidateCutoff: Date;
-      retryAfter: Date;
+      /** How long a candidate is left alone: its upload may still be in flight. */
+      candidateGrace: Duration.Duration;
+      /** How long a claimed key waits before it is offered again. */
+      retryBackoff: Duration.Duration;
     }): Effect.Effect<ReadonlyArray<string>>;
   }
 >()("chat/attachments/AttachmentRepo") {
@@ -943,15 +948,15 @@ export class AttachmentRepo extends Context.Service<
 
       const claimBlobCleanup = Effect.fn("AttachmentRepo.claimBlobCleanup")(function* (input: {
         limit: number;
-        candidateCutoff: Date;
-        retryAfter: Date;
+        candidateGrace: Duration.Duration;
+        retryBackoff: Duration.Duration;
       }) {
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              // Due-ness uses the database's clock (matches not_before/created_at),
-              // never a JS Date: skew would hide rows that are already due, and a
-              // silent reconciler is the failure this ledger exists to prevent.
+              // Every time here is the database's clock (as not_before and
+              // created_at are), never a JS Date: skew would hide rows already
+              // due, or delete an upload still in flight.
               const due = yield* tx
                 .select()
                 .from(blobCleanupIntents)
@@ -961,7 +966,7 @@ export class AttachmentRepo extends Context.Service<
                     // An upload in flight is not yet evidence of anything.
                     or(
                       eq(blobCleanupIntents.kind, "orphan"),
-                      lte(blobCleanupIntents.createdAt, input.candidateCutoff),
+                      lte(blobCleanupIntents.createdAt, sinceNow(input.candidateGrace, -1)),
                     ),
                   ),
                 )
@@ -998,7 +1003,7 @@ export class AttachmentRepo extends Context.Service<
                   .update(blobCleanupIntents)
                   .set({
                     attempts: sql`${blobCleanupIntents.attempts} + 1`,
-                    notBefore: input.retryAfter,
+                    notBefore: sinceNow(input.retryBackoff, 1),
                   })
                   .where(inArray(blobCleanupIntents.storageKey, removable));
               return removable;
@@ -1082,7 +1087,7 @@ export class AttachmentRepo extends Context.Service<
       });
 
       const sweepUnclaimed = Effect.fn("AttachmentRepo.sweepUnclaimed")(function* (
-        olderThan: Date,
+        grace: Duration.Duration,
       ) {
         const keys: string[] = [];
         for (let batch = 0; batch < UNCLAIMED_BATCHES; batch++) {
@@ -1092,7 +1097,7 @@ export class AttachmentRepo extends Context.Service<
                 const stale = yield* tx
                   .select({ id: attachments.id })
                   .from(attachments)
-                  .where(and(unclaimed, lt(attachments.createdAt, olderThan)))
+                  .where(and(unclaimed, lt(attachments.createdAt, sinceNow(grace, -1))))
                   .orderBy(asc(attachments.id))
                   .limit(UNCLAIMED_BATCH);
                 const discard = yield* deleteAttachmentRows(

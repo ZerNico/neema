@@ -162,8 +162,7 @@ export class AttachmentService extends Context.Service<
       });
 
       const sweep = Effect.gen(function* () {
-        const cutoff = new Date(Date.now() - Duration.toMillis(ORPHAN_GRACE));
-        const keys = yield* repo.sweepUnclaimed(cutoff);
+        const keys = yield* repo.sweepUnclaimed(ORPHAN_GRACE);
         if (keys.length > 0) {
           yield* Effect.logInfo(`swept ${keys.length} abandoned attachment(s)`);
           yield* deleteBlobs(keys);
@@ -175,11 +174,10 @@ export class AttachmentService extends Context.Service<
       // Ownership decides, so a registration that committed after its caller
       // failed keeps its bytes.
       const reconcile = Effect.gen(function* () {
-        const now = Date.now();
         const keys = yield* repo.claimBlobCleanup({
           limit: RECONCILE_BATCH,
-          candidateCutoff: new Date(now - Duration.toMillis(CANDIDATE_GRACE)),
-          retryAfter: new Date(now + Duration.toMillis(RECONCILE_BACKOFF)),
+          candidateGrace: CANDIDATE_GRACE,
+          retryBackoff: RECONCILE_BACKOFF,
         });
         if (keys.length === 0) return;
         yield* Effect.logInfo(`reconciling ${keys.length} unreferenced blob object(s)`);

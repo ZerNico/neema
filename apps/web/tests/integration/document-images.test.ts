@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream, Duration } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { attachmentBlobs, attachments, documentImages, user } from "~/db/schema/index.ts";
@@ -165,9 +165,7 @@ const storedBytes = (storageKey: string) =>
 const sweep = () =>
   run(
     Effect.gen(function* () {
-      const keys = yield* AttachmentRepo.use((repo) =>
-        repo.sweepUnclaimed(new Date(Date.now() + 60_000)),
-      );
+      const keys = yield* AttachmentRepo.use((repo) => repo.sweepUnclaimed(Duration.zero));
       yield* AttachmentService.use((service) => service.deleteBlobs(keys));
       return keys;
     }),

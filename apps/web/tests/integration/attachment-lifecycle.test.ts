@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { PgClient } from "@effect/sql-pg";
 import { eq, sql } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
+import { Effect, Layer, ManagedRuntime, Redacted, Duration } from "effect";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -163,7 +163,9 @@ it("commits modest independent sweep batches and rechecks claims after acquiring
   await locker.query("begin");
   await locker.query("select id from attachment_blobs where id = $1 for update", [secondBlob]);
   const { pid } = (await locker.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!;
-  const sweeping = run(Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(new Date())));
+  const sweeping = run(
+    Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(Duration.zero)),
+  );
   try {
     const deadline = Date.now() + 10_000;
     let observed = false;

@@ -1,5 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Redacted, Stream, Duration } from "effect";
 import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
@@ -582,7 +582,7 @@ describe("portable skill storage and ACLs", () => {
     try {
       const skillPid = await waitForBlocker(pid);
       attachmentResult = Promise.allSettled([
-        run(Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(new Date()))),
+        run(Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(Duration.zero))),
       ]);
       await waitForBlocker(skillPid);
       // The attachment sweep has acquired the smaller blob and is waiting on the larger one.
@@ -760,7 +760,7 @@ describe("portable skill storage and ACLs", () => {
     try {
       const savePid = await waitForBlocker(pid);
       cleaned = Promise.allSettled([
-        run(Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(new Date()))),
+        run(Effect.flatMap(AttachmentRepo, (repo) => repo.sweepUnclaimed(Duration.zero))),
       ]);
       await waitForBlocker(savePid);
       // Cleanup holds A while waiting for save's B. Publication must not next lock A.
