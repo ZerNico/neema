@@ -1,5 +1,10 @@
-import { Context, Effect, Layer, Schema } from "effect";
-import { DraftService, type DraftKindConfig } from "~/modules/drafts/server/service.ts";
+import { Context, Effect, Layer } from "effect";
+import {
+  DraftService,
+  allowedDraftReads,
+  decodeDraftRequest,
+  type DraftKindConfig,
+} from "~/modules/drafts/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -116,41 +121,28 @@ export class AgentDraftService extends Context.Service<
           );
       const providers = yield* ProviderRepo;
       const bus = yield* SyncBus;
-      const revisionInput = Schema.decodeUnknownEffect(AgentDraftRevisionInput);
+      const revisionInput = decodeDraftRequest(
+        AgentDraftRevisionInput,
+        "invalid agent draft revision",
+      );
+      const openInput = decodeDraftRequest(OpenAgentDraftInput, "invalid agent draft request", {
+        onExcessProperty: "error",
+      });
+      const patchInput = decodeDraftRequest(PatchAgentDraftInput, "invalid agent draft changes", {
+        onExcessProperty: "error",
+      });
       const config = (userId: string) => agentConfig(agents, userId);
       return AgentDraftService.of({
-        get: (userId, draftId) =>
-          policy
-            .can(userId, "agentsCreate")
-            .pipe(
-              Effect.flatMap((allowed) =>
-                allowed
-                  ? core
-                      .get(userId, draftId, "agent")
-                      .pipe(Effect.map((draft) => (draft ? asAgent(draft) : null)))
-                  : Effect.succeed(null),
-              ),
-            ),
-        list: (userId, conversationId) =>
-          policy
-            .can(userId, "agentsCreate")
-            .pipe(
-              Effect.flatMap((allowed) =>
-                allowed
-                  ? core
-                      .list(userId, conversationId, "agent")
-                      .pipe(Effect.map((rows) => rows.map(asAgent)))
-                  : Effect.succeed([]),
-              ),
-            ),
+        ...allowedDraftReads({
+          core,
+          kind: "agent",
+          allowed: (userId) => policy.can(userId, "agentsCreate"),
+          cast: asAgent,
+        }),
         open: (userId, input, guard) =>
           Effect.gen(function* () {
             yield* requireAuthoring(userId);
-            const parsed = yield* Schema.decodeUnknownEffect(OpenAgentDraftInput)(input, {
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft request" })),
-            );
+            const parsed = yield* openInput(input);
             const result = yield* core.open<DraftSettings, never, never>(
               userId,
               config(userId),
@@ -169,11 +161,7 @@ export class AgentDraftService extends Context.Service<
         patch: (userId, input, guard) =>
           Effect.gen(function* () {
             yield* requireAuthoring(userId);
-            const parsed = yield* Schema.decodeUnknownEffect(PatchAgentDraftInput)(input, {
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft changes" })),
-            );
+            const parsed = yield* patchInput(input);
             const result = yield* core.patch<DraftSettings, never, never>(
               userId,
               config(userId),
@@ -184,9 +172,7 @@ export class AgentDraftService extends Context.Service<
           }),
         save: Effect.fn("AgentDraftService.save")(function* (userId, input) {
           yield* requireAuthoring(userId);
-          const parsed = yield* revisionInput(input).pipe(
-            Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft revision" })),
-          );
+          const parsed = yield* revisionInput(input);
           let changed = false;
           const result = yield* db
             .transaction((tx) =>
@@ -267,9 +253,7 @@ export class AgentDraftService extends Context.Service<
         }),
         reload: Effect.fn("AgentDraftService.reload")(function* (userId, input) {
           yield* requireAuthoring(userId);
-          const parsed = yield* revisionInput(input).pipe(
-            Effect.mapError(() => new DraftRejected({ reason: "invalid agent draft revision" })),
-          );
+          const parsed = yield* revisionInput(input);
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {

@@ -1,11 +1,16 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import {
   DraftNotAvailable,
   DraftRejected,
   type ConversationDraft,
 } from "~/modules/drafts/draft-schema.ts";
-import { DraftService, type DraftKindConfig } from "~/modules/drafts/server/service.ts";
+import {
+  DraftService,
+  allowedDraftReads,
+  decodeDraftRequest,
+  type DraftKindConfig,
+} from "~/modules/drafts/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -98,7 +103,20 @@ export class ScheduleDraftService extends Context.Service<
       const providers = yield* ProviderRepo;
       const agents = yield* AgentRepo;
       const bus = yield* SyncBus;
-      const revisionInput = Schema.decodeUnknownEffect(ScheduleDraftRevisionInput);
+      const revisionInput = decodeDraftRequest(
+        ScheduleDraftRevisionInput,
+        "invalid schedule draft revision",
+      );
+      const openInput = decodeDraftRequest(
+        OpenScheduleDraftInput,
+        "invalid schedule draft request",
+        { onExcessProperty: "error" },
+      );
+      const patchInput = decodeDraftRequest(
+        PatchScheduleDraftInput,
+        "invalid schedule draft changes",
+        { onExcessProperty: "error" },
+      );
 
       // A schedule draft's save receipt is the draft revision it last wrote;
       // schedules have no config revision, so targetRevision stays null.
@@ -121,41 +139,17 @@ export class ScheduleDraftService extends Context.Service<
           .pipe(Effect.catchCause(() => Effect.logWarning("schedule invalidation failed")));
 
       return ScheduleDraftService.of({
-        get: (userId, draftId) =>
-          policy
-            .can(userId, "schedules")
-            .pipe(
-              Effect.flatMap((allowed) =>
-                allowed
-                  ? core
-                      .get(userId, draftId, "schedule")
-                      .pipe(Effect.map((draft) => (draft ? asSchedule(draft) : null)))
-                  : Effect.succeed(null),
-              ),
-            ),
-        list: (userId, conversationId) =>
-          policy
-            .can(userId, "schedules")
-            .pipe(
-              Effect.flatMap((allowed) =>
-                allowed
-                  ? core
-                      .list(userId, conversationId, "schedule")
-                      .pipe(Effect.map((rows) => rows.map(asSchedule)))
-                  : Effect.succeed([]),
-              ),
-            ),
+        ...allowedDraftReads({
+          core,
+          kind: "schedule",
+          allowed: (userId) => policy.can(userId, "schedules"),
+          cast: asSchedule,
+        }),
         open: (userId, input, guard) =>
           Effect.gen(function* () {
             if (!(yield* policy.can(userId, "schedules")))
               return yield* new ScheduleNotAvailable({ scheduleId: "" });
-            const parsed = yield* Schema.decodeUnknownEffect(OpenScheduleDraftInput)(input, {
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError(
-                () => new DraftRejected({ reason: "invalid schedule draft request" }),
-              ),
-            );
+            const parsed = yield* openInput(input);
             const result = yield* core.open<ScheduleDraftSettings, never, never>(
               userId,
               config(userId),
@@ -175,13 +169,7 @@ export class ScheduleDraftService extends Context.Service<
           Effect.gen(function* () {
             if (!(yield* policy.can(userId, "schedules")))
               return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
-            const parsed = yield* Schema.decodeUnknownEffect(PatchScheduleDraftInput)(input, {
-              onExcessProperty: "error",
-            }).pipe(
-              Effect.mapError(
-                () => new DraftRejected({ reason: "invalid schedule draft changes" }),
-              ),
-            );
+            const parsed = yield* patchInput(input);
             const result = yield* core.patch<ScheduleDraftSettings, never, never>(
               userId,
               config(userId),
@@ -191,9 +179,7 @@ export class ScheduleDraftService extends Context.Service<
             return { outcome: result.outcome, draft: asSchedule(result.draft) };
           }),
         save: Effect.fn("ScheduleDraftService.save")(function* (userId, input) {
-          const parsed = yield* revisionInput(input).pipe(
-            Effect.mapError(() => new DraftRejected({ reason: "invalid schedule draft revision" })),
-          );
+          const parsed = yield* revisionInput(input);
           let savedId: string | null = null;
           const result = yield* db
             .transaction((tx) =>
@@ -268,9 +254,7 @@ export class ScheduleDraftService extends Context.Service<
         reload: Effect.fn("ScheduleDraftService.reload")(function* (userId, input) {
           if (!(yield* policy.can(userId, "schedules")))
             return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
-          const parsed = yield* revisionInput(input).pipe(
-            Effect.mapError(() => new DraftRejected({ reason: "invalid schedule draft revision" })),
-          );
+          const parsed = yield* revisionInput(input);
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {

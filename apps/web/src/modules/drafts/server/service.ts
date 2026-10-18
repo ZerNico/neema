@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schema, type SchemaAST } from "effect";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -292,3 +292,52 @@ export class DraftService extends Context.Service<
     }),
   ).pipe(Layer.provide(DraftRepo.layer));
 }
+
+/** Decodes a kind's request; a malformed one is rejected with the kind's own text. */
+export const decodeDraftRequest =
+  <S extends Schema.Codec<unknown, unknown, never, never>>(
+    schema: S,
+    reason: string,
+    options?: SchemaAST.ParseOptions,
+  ) =>
+  (input: unknown) =>
+    Schema.decodeUnknownEffect(schema)(input, options).pipe(
+      Effect.mapError(() => new DraftRejected({ reason })),
+    );
+
+/**
+ * A kind's `get` and `list`: a reader who may not author the kind sees no
+ * drafts rather than an error, so a revoked capability empties the panel.
+ */
+export const allowedDraftReads = <D>(config: {
+  core: DraftService["Service"];
+  kind: DraftKind;
+  allowed: (userId: string) => Effect.Effect<boolean>;
+  /** The kind's view of a stored row, whose settings the store keeps opaque. */
+  cast: (draft: ConversationDraft) => D;
+}) => ({
+  get: (userId: string, draftId: string): Effect.Effect<D | null> =>
+    config
+      .allowed(userId)
+      .pipe(
+        Effect.flatMap((allowed) =>
+          allowed
+            ? config.core
+                .get(userId, draftId, config.kind)
+                .pipe(Effect.map((draft) => (draft ? config.cast(draft) : null)))
+            : Effect.succeed(null),
+        ),
+      ),
+  list: (userId: string, conversationId: string): Effect.Effect<D[]> =>
+    config
+      .allowed(userId)
+      .pipe(
+        Effect.flatMap((allowed) =>
+          allowed
+            ? config.core
+                .list(userId, conversationId, config.kind)
+                .pipe(Effect.map((rows) => rows.map(config.cast)))
+            : Effect.succeed([]),
+        ),
+      ),
+});
