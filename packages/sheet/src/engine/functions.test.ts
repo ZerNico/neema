@@ -371,6 +371,22 @@ const cases: Record<string, Case[]> = {
       digits: 12,
     },
   ],
+  // T.TEST example: paired, two-tailed.
+  "T.TEST": [
+    {
+      formula: "T.TEST(A1:A9,B1:B9,2,1)",
+      cells: {
+        ...column("A", [3, 4, 5, 8, 9, 1, 2, 4, 5]),
+        ...column("B", [6, 19, 3, 2, 14, 4, 5, 17, 1]),
+      },
+      expected: 0.196016,
+      digits: 6,
+    },
+    // Equal means make t zero, so each tail is exactly one half.
+    { formula: "T.TEST({1,2,3},{3,2,1},2,2)", expected: 1, digits: 12 },
+    { formula: "T.TEST({1,2,3},{2,2,2,2},1,3)", expected: 0.5, digits: 12 },
+    { formula: "T.TEST({1,2,3},{3,2,1},3,2)", expected: new XError("#NUM!") },
+  ],
   // F.TEST example.
   "F.TEST": [
     {

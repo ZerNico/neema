@@ -225,6 +225,52 @@ function fTest(args: Value[], call: Call): Value {
   return typeof below === "number" ? 2 * Math.min(below, 1 - below) : below;
 }
 
+const numbersAmong = (items: Scalar[]) => items.filter((item) => typeof item === "number");
+/** The t statistic and its degrees of freedom for T.TEST's type: paired, equal or unequal variances. */
+function tStatistic(first: Scalar[], second: Scalar[], type: number) {
+  if (type === 1) {
+    if (first.length !== second.length) return NA;
+    const differences = first.flatMap((item, at) => {
+      const other = second[at];
+      return typeof item === "number" && typeof other === "number" ? [item - other] : [];
+    });
+    const spread = variance(differences, true);
+    if (spread instanceof XError) return spread;
+    const n = differences.length;
+    return { t: sum(differences) / n / Math.sqrt(spread / n), df: n - 1 };
+  }
+  const [a, b] = [numbersAmong(first), numbersAmong(second)];
+  const [va, vb] = [variance(a, true), variance(b, true)];
+  if (va instanceof XError) return va;
+  if (vb instanceof XError) return vb;
+  const gap = sum(a) / a.length - sum(b) / b.length;
+  if (type === 2) {
+    const df = a.length + b.length - 2;
+    const pooled = ((a.length - 1) * va + (b.length - 1) * vb) / df;
+    return { t: gap / Math.sqrt(pooled * (1 / a.length + 1 / b.length)), df };
+  }
+  const [ea, eb] = [va / a.length, vb / b.length];
+  const df = (ea + eb) ** 2 / (ea ** 2 / (a.length - 1) + eb ** 2 / (b.length - 1));
+  return { t: gap / Math.sqrt(ea + eb), df };
+}
+/** formula.js's T.TEST ignores its tails and type and always runs one unpaired test. */
+function tTest(args: Value[]): Value {
+  const tails = number(args[2]);
+  if (tails instanceof XError) return tails;
+  const type = number(args[3]);
+  if (type instanceof XError) return type;
+  const [t, k] = [Math.trunc(tails), Math.trunc(type)];
+  if ((t !== 1 && t !== 2) || k < 1 || k > 3) return NUM;
+  const [first, second] = [flat(args[0] ?? null), flat(args[1] ?? null)];
+  const error = firstError([...first, ...second]);
+  if (error) return error;
+  const statistic = tStatistic(first, second, k);
+  if (statistic instanceof XError) return statistic;
+  if (!Number.isFinite(statistic.t)) return DIV0;
+  const tail = fromLibrary(libraryFunction("T.DIST.RT")!(Math.abs(statistic.t), statistic.df));
+  return typeof tail === "number" ? t * tail : tail;
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -763,7 +809,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   PROB: "rrss",
   TRIMMEAN: "rs",
   "CHISQ.TEST": "rr",
-  "T.TEST": "rrss",
   "Z.TEST": "rss",
   SERIESSUM: "sssr",
 };
@@ -903,6 +948,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
   "F.TEST": { kinds: "rr", run: fTest },
+  "T.TEST": { kinds: "rrss", run: tTest },
   FREQUENCY: { kinds: "rr", run: frequency },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },
   HARMEAN: { kinds: "|r", run: libraryStat("HARMEAN") },
