@@ -53,8 +53,9 @@ switch at all, the menu item is absent, and the IPC still refuses as a backstop.
 `CHAT_DESKTOP_PROFILE` selects userData before services or sessions open; the root
 dev runner supplies a checkout-local directory. The installed profile is unchanged.
 See [development isolation](development.md). An address must be https, or plain http
-on this machine: whoever sits on the network path of a plain-http server could inject
-the script that drives commands and files.
+on this machine, whether typed or saved: whoever sits on the network path of a plain-http
+server could inject the script that drives commands and files. A saved one that is not
+opens the chooser.
 
 ## Sign-in happens in the browser
 

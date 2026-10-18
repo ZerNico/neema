@@ -111,6 +111,13 @@ describe("the stored server", () => {
     expect(await readConfig(file)).toEqual({ serverUrl: "https://chat.example.com" });
   });
 
+  it("reads a saved plain-http address on the network as not configured", async () => {
+    await writeFile(file, JSON.stringify({ serverUrl: "http://chat.lan" }));
+    expect(await readConfig(file)).toBeNull();
+    await writeFile(file, JSON.stringify({ serverUrl: "http://localhost:3000" }));
+    expect(await readConfig(file)).toEqual({ serverUrl: "http://localhost:3000" });
+  });
+
   it("reads a missing, corrupt or unusable file as not configured", async () => {
     expect(await readConfig(join(dir, "absent.json"))).toBeNull();
 

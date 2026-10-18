@@ -71,7 +71,8 @@ export const readConfig = async (file: string): Promise<DesktopConfig | null> =>
     const url = (parsed as { serverUrl?: unknown }).serverUrl;
     if (typeof url !== "string") return null;
     const origin = toOrigin(url);
-    return origin === null ? null : { serverUrl: origin };
+    // A saved plain-http address on the network is treated as none: the chooser opens.
+    return origin === null || !bridgeableOrigin(origin) ? null : { serverUrl: origin };
   } catch {
     return null;
   }
