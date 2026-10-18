@@ -1,3 +1,5 @@
+import type { getConversationWithMessages } from "../server/functions.ts";
+
 /** The per-message lists a head and every older page carry. */
 interface Rows {
   messages: ReadonlyArray<unknown>;
@@ -35,3 +37,8 @@ export function withHistory<Head extends Rows & { window: { olderCursor: string 
     hasOlder: pages.at(-1)!.olderCursor !== null,
   };
 }
+
+/** A conversation's loaded messages and their rows, as the chat shows them. */
+export type ConversationData = Awaited<ReturnType<typeof getConversationWithMessages>> & {
+  hasOlder: boolean;
+};

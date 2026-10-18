@@ -10,8 +10,8 @@ import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.
 import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 
-import { applyFileChunk, learnServerClock } from "../client/use-message-stream.ts";
-import { lookupsOf, mergeLookups, NO_LOOKUPS, type AssistantFile } from "../assistant-output.ts";
+import { learnServerClock } from "../client/use-message-stream.ts";
+import { lookupsOf, mergeLookups, NO_LOOKUPS } from "../assistant-output.ts";
 import { collectSources } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
 
@@ -28,16 +28,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { toast } from "sonner";
 import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
 import { withHistory } from "./conversation-window.ts";
+import { lossSentence } from "./rewind-loss.ts";
+import { placeStranded, placed, shownIds } from "./stranded-cards.ts";
+import { streamSeed } from "./stream-seed.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
-import {
-  applyCompactionChunk,
-  applySteerChunk,
-  applyToolActivityChunk,
-  isStaleWriting,
-  useMessageStream,
-  type CompactionActivity,
-  type ToolActivity,
-} from "../client/use-message-stream.ts";
+import { useMessageStream, type ToolActivity } from "../client/use-message-stream.ts";
 import {
   activateWorkTurn,
   answerQuestion,
@@ -50,7 +45,6 @@ import {
   sendMessage,
   stopGeneration,
   updateWorkSettings,
-  type getConversationWithMessages,
 } from "../server/functions.ts";
 import type { PermissionLevel } from "../schema.ts";
 
@@ -64,7 +58,7 @@ import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
 import { useConversationQueue } from "./use-conversation-queue.ts";
-import { createsDocument, type AssistantSteer } from "./assistant-body.ts";
+import { createsDocument } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { FileReferenceContext } from "./file-reference-context.ts";
@@ -82,7 +76,7 @@ import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import type { DisplayMessage } from "./message-list.tsx";
-import { PLACED_CALL_PREFIX } from "./live-message.ts";
+
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
@@ -110,89 +104,8 @@ import {
   type UiStateSave,
 } from "~/modules/genui/ui/context.ts";
 import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
-import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
+
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
-
-/**
- * " The document “Plan” will also be deleted." for one casualty; counts per
- * kind for several. Empty when a rewind takes nothing of the sort.
- */
-function lossSentence(items: ReadonlyArray<{ noun: string; name: string }>) {
-  if (items.length === 0) return "";
-  if (items.length === 1) {
-    const [item] = items;
-    return item!.name
-      ? ` The ${item!.noun} “${item!.name}” will also be deleted.`
-      : ` An untitled ${item!.noun} will also be deleted.`;
-  }
-  const counts = new Map<string, number>();
-  for (const item of items) counts.set(item.noun, (counts.get(item.noun) ?? 0) + 1);
-  const parts = [...counts].map(([noun, count]) => `${count} ${noun}${count === 1 ? "" : "s"}`);
-  const list =
-    parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
-  return ` ${list} will also be deleted.`;
-}
-
-/** Something the transcript should show a card for, but no tool row names yet. */
-interface Stranded {
-  /** Names what the card shows, so an unchanged host row keeps its placed copy. */
-  key: string;
-  /** The answer that created it, when known. */
-  messageId: string | null | undefined;
-  activity: (message: DisplayMessage, index: number) => ToolActivity;
-}
-
-/**
- * Puts a card with no tool row of its own at the end of the answer that made
- * it: a document whose `create_document` row predates the column, or a draft
- * the loader reports before the tool rows arrive. Never under the transcript,
- * where it would read as belonging to the whole chat.
- */
-function placeStranded(
-  messages: DisplayMessage[],
-  stranded: ReadonlyArray<Stranded>,
-  /** Older turns are not loaded, so an unknown answer may simply be further up. */
-  partial: boolean,
-) {
-  if (stranded.length === 0) return messages;
-  const answers = messages.filter((message) => message.role === "assistant");
-  const fallback = answers.at(-1)?.id;
-  const byMessage = new Map<string, Stranded[]>();
-  for (const item of stranded) {
-    const anchor = item.messageId;
-    const loaded = !!anchor && answers.some((message) => message.id === anchor);
-    // Its answer is somewhere above: it appears there once that page loads.
-    if (anchor && !loaded && partial) continue;
-    const host = loaded ? anchor : fallback;
-    if (!host) continue;
-    const list = byMessage.get(host);
-    if (list) list.push(item);
-    else byMessage.set(host, [item]);
-  }
-  if (byMessage.size === 0) return messages;
-  return messages.map((message) => {
-    const items = byMessage.get(message.id);
-    if (!items) return message;
-    const key = items.map((item) => item.key).join("\n");
-    const cached = placedRows.get(message);
-    if (cached?.key === key) return cached.row;
-    const row = {
-      ...message,
-      toolActivities: [
-        ...message.toolActivities,
-        ...items.map((item, index) => item.activity(message, index)),
-      ],
-    };
-    placedRows.set(message, { key, row });
-    return row;
-  });
-}
-
-/**
- * A host row with its placed cards, kept while neither changes: the display is
- * rebuilt on every live chunk, and a new copy would re-render a settled answer.
- */
-const placedRows = new WeakMap<DisplayMessage, { key: string; row: DisplayMessage }>();
 
 /** The person's own message an answer replies to: the nearest one before it that is not a steer. */
 const questionBefore = (
@@ -207,84 +120,8 @@ const questionBefore = (
   return null;
 };
 
-/** The ids a family's rows already show, so only the rest need placing. */
-const shownIds = (
-  messages: DisplayMessage[],
-  pick: (activity: ToolActivity) => string | undefined,
-) => new Set(messages.flatMap((message) => message.toolActivities.flatMap((a) => pick(a) ?? [])));
-
-const placed = (message: DisplayMessage, index: number, id: string) => ({
-  status: "complete" as const,
-  callId: `${PLACED_CALL_PREFIX}${id}`,
-  turnIndex: Number.MAX_SAFE_INTEGER,
-  callIndex: index,
-  textOffset: message.content.length,
-});
-
 /** Shared, so a conversation with nothing forgotten keeps its memos stable. */
 const NO_IDS: ReadonlySet<string> = new Set();
-
-/** A conversation's loaded messages and their rows, as the chat shows them. */
-type ConversationData = Awaited<ReturnType<typeof getConversationWithMessages>>;
-
-/** What a streaming answer starts from: its chunks so far, over its durable rows. */
-function streamSeed(
-  streamingMessage: ConversationData["messages"][number],
-  data: ConversationData,
-) {
-  const text = data.pendingChunks
-    .filter((c) => c.kind === "text")
-    .map((c) => c.delta)
-    .join("");
-  const reasoningChunks = data.pendingChunks.filter((c) => c.kind === "reasoning");
-  const reasoning = reasoningChunks.map((c) => c.delta).join("");
-  const lastSeq = data.pendingChunks.at(-1)?.seq ?? 0;
-  // Seed tool activity from durable rows; live envelopes upsert on top.
-  const durableTools = data.toolCalls
-    .filter((t) => t.messageId === streamingMessage.id)
-    .map(timedActivity);
-  // Starts can land between snapshots. Replay explicit anchors for every
-  // family; terminal durable activities ignore older progress in the reducer.
-  // A deck edit still being written replays too, until its call starts.
-  const tools = data.pendingChunks.reduce<ToolActivity[]>(
-    (current, chunk) =>
-      chunk.kind === "tool" ||
-      (chunk.kind === "writing" &&
-        !isStaleWriting(chunk.delta, streamingMessage.generationId ?? null))
-        ? applyToolActivityChunk(current, chunk.kind, chunk.delta, epoch(chunk.createdAt))
-        : current,
-    durableTools,
-  );
-  // Seed durable activity first; replayed chunks then idempotently overlay
-  // any terminal marker that landed after the query snapshot.
-  const durableCompactions = data.compactionEvents
-    .filter((event) => event.messageId === streamingMessage.id)
-    .map(toCompactionActivity);
-  const compactions = data.pendingChunks
-    .filter((c) => c.kind === "compaction")
-    .reduce<CompactionActivity[]>(
-      (current, c) => applyCompactionChunk(current, c.delta),
-      durableCompactions,
-    );
-  return {
-    steers: data.pendingChunks
-      .filter((chunk) => chunk.kind === "steer")
-      .reduce<AssistantSteer[]>((steers, chunk) => applySteerChunk(steers, chunk.delta), []),
-    files: data.pendingChunks
-      .filter((chunk) => chunk.kind === "file")
-      .reduce<AssistantFile[]>(
-        (files, chunk) => applyFileChunk(files, chunk.delta),
-        [...(streamingMessage.assistantOutput?.files ?? [])],
-      ),
-    text,
-    reasoning,
-    reasoningSeen: reasoningChunks.length > 0,
-    tools,
-    compactions,
-    lookups: lookupsOf(streamingMessage.assistantOutput),
-    lastSeq,
-  };
-}
 
 export function ChatView({
   conversationId,
