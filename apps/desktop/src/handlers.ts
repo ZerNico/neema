@@ -185,6 +185,25 @@ export interface Shell {
   networkGrantsDirectory?: string;
 }
 
+/** The stats of the file a tool was pointed at, or why there is no such file. */
+const statFile = (target: { readonly absolute: string; readonly relative: string }) =>
+  Effect.tryPromise({
+    try: () => stat(target.absolute),
+    catch: () =>
+      new DesktopError({ reason: "not-found", message: `${target.relative} does not exist.` }),
+  }).pipe(
+    Effect.flatMap((info) =>
+      info.isFile()
+        ? Effect.succeed(info)
+        : Effect.fail(
+            new DesktopError({
+              reason: "not-a-file",
+              message: `${target.relative} is not a file.`,
+            }),
+          ),
+    ),
+  );
+
 const alreadyAttached = (name: string) =>
   new DesktopError({
     reason: "already-exists",
@@ -570,44 +589,14 @@ export const makeHandlers = (shell: Shell) =>
       fileInfo: ({ conversationId, path }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);
-          const info = yield* Effect.tryPromise({
-            try: () => stat(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${target.relative} does not exist.`,
-              }),
-          });
-          if (!info.isFile()) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-a-file",
-                message: `${target.relative} is not a file.`,
-              }),
-            );
-          }
+          const info = yield* statFile(target);
           return { path: target.relative, bytes: info.size };
         }),
 
       readFile: ({ conversationId, path, offset, limit }) =>
         Effect.gen(function* () {
           const target = yield* locate(conversationId, path);
-          const info = yield* Effect.tryPromise({
-            try: () => stat(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${target.relative} does not exist.`,
-              }),
-          });
-          if (!info.isFile()) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-a-file",
-                message: `${target.relative} is not a file.`,
-              }),
-            );
-          }
+          yield* statFile(target);
           // A NUL in the first few kilobytes is what `file` and git use to
           // call something binary. Decoding it anyway would hand the model
           // noise and the server a string Postgres refuses.
@@ -657,22 +646,7 @@ export const makeHandlers = (shell: Shell) =>
               }),
             );
           }
-          const info = yield* Effect.tryPromise({
-            try: () => stat(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "not-found",
-                message: `${target.relative} does not exist.`,
-              }),
-          });
-          if (!info.isFile()) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-a-file",
-                message: `${target.relative} is not a file.`,
-              }),
-            );
-          }
+          const info = yield* statFile(target);
           if (info.size > LIMITS.binaryBytes) {
             return yield* Effect.fail(
               new DesktopError({
@@ -701,22 +675,7 @@ export const makeHandlers = (shell: Shell) =>
         oneChangeAtATime(
           Effect.gen(function* () {
             const target = yield* locateForWrite(conversationId, path);
-            const info = yield* Effect.tryPromise({
-              try: () => stat(target.absolute),
-              catch: () =>
-                new DesktopError({
-                  reason: "not-found",
-                  message: `${target.relative} does not exist.`,
-                }),
-            });
-            if (!info.isFile()) {
-              return yield* Effect.fail(
-                new DesktopError({
-                  reason: "not-a-file",
-                  message: `${target.relative} is not a file.`,
-                }),
-              );
-            }
+            const info = yield* statFile(target);
             if (info.size > LIMITS.writeBytes) {
               return yield* Effect.fail(
                 new DesktopError({
