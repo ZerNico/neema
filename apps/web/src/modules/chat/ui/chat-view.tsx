@@ -726,6 +726,7 @@ export function ChatView({
           ...input,
           modelId: effectiveModelId!,
           searchEnabled,
+          reasoningEffort,
           // The composer's research toggle belongs to a send, and no other
           // surface offers it. An answer to a clarification still keeps the
           // offer: the server inherits it from the attempt that asked.

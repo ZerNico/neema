@@ -1455,6 +1455,8 @@ describe("ChatView question handoff", () => {
           modelId: "m2",
           // Model Two has no native tool calling; search is still offered.
           searchEnabled: true,
+          // The composer's effort goes along, as it does for a send and an edit.
+          reasoningEffort: null,
           // Answering a clarification is its own submission and has no toggle.
           researchEnabled: false,
           timeZone: "Europe/Berlin",
