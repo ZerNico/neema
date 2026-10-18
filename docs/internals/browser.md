@@ -194,8 +194,9 @@ Domains come from `browser/site-grants.ts` (`tldts` with private suffixes, so
   site.
 - **Storage:** grants live on the machine in `browser-sites.json`, per server origin. Like
   folder and network grants, the server never learns which sites a person trusts. "Always"
-  sites are listed and removable in Settings › This computer. The machine never learns that a chat
-  was deleted, so per-chat grants are kept for the 500 chats granted to most recently.
+  sites are listed and removable in Settings › This computer. A chat's sites go when the chat is
+  purged, with its folder, network and path grants. One purged while the app was closed is never
+  named to it, so per-chat grants are also kept only for the 500 chats granted to most recently.
 
 While a call drives a tab, main gates its page: a `will-navigate` or main-frame `will-redirect`
 to a site neither allowed for the chat nor the one this call was allowed to open is cancelled,

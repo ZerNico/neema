@@ -255,6 +255,9 @@ const desktopShell: Shell = {
     machineName: machine.name,
   }),
   cancelCall: (callId) => executions.cancelCall(callId),
+  forgetChatSites: async (conversationId) => {
+    if (serverOrigin !== null) await siteGrants?.forgetChat(serverOrigin, conversationId);
+  },
   setWorkState: (state) => {
     workState = state;
     const status =

@@ -59,6 +59,16 @@ describe("site grants", () => {
     expect(grants.allowed(origin, "last", "https://a.test")).toBe(true);
   });
 
+  it("forgets a deleted chat's sites, and only that chat's", async () => {
+    const grants = await loadSiteGrants(directory);
+    await grants.allow(origin, "gone", "https://example.org", "chat");
+    await grants.allow(origin, "kept", "https://example.org", "chat");
+    await grants.forgetChat(origin, "gone");
+    const reloaded = await loadSiteGrants(directory);
+    expect(reloaded.allowed(origin, "gone", "https://example.org")).toBe(false);
+    expect(reloaded.allowed(origin, "kept", "https://example.org")).toBe(true);
+  });
+
   it("grants nothing from a damaged file", async () => {
     await writeFile(join(directory, "browser-sites.json"), "{not json");
     const grants = await loadSiteGrants(directory);

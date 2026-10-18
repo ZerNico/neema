@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { getDomain, getHostname } from "tldts";
 import { serialWrites, writeJsonAtomic } from "../json-file.ts";
 
-// The machine never learns that a chat was deleted, so per-chat grants are kept
-// for the chats granted to most recently and the oldest fall away.
+// A chat deleted while the app was closed is never forgotten by name, so per-chat
+// grants are also kept only for the chats granted to most recently.
 const CHATS_KEPT = 500;
 
 /**
@@ -65,6 +65,8 @@ export interface SiteGrants {
   ): Promise<void>;
   always(origin: string): string[];
   revoke(origin: string, site: string): Promise<void>;
+  /** Drops every site one chat was allowed, once the chat is gone. */
+  forgetChat(origin: string, conversationId: string): Promise<void>;
 }
 
 /**
@@ -119,6 +121,11 @@ export async function loadSiteGrants(directory: string): Promise<SiteGrants> {
     revoke: (origin, site) =>
       save((current) => {
         current.always[origin] = (current.always[origin] ?? []).filter((entry) => entry !== site);
+        return current;
+      }),
+    forgetChat: (origin, conversationId) =>
+      save((current) => {
+        if (current.chats[origin]) delete current.chats[origin][conversationId];
         return current;
       }),
   };

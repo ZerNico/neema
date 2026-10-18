@@ -180,6 +180,8 @@ export interface Shell {
   executionSession(): { id: string; machineId: string; machineName: string };
   cancelCall(callId: string): boolean;
   setWorkState(state: { active: number; needsApproval: number }): void;
+  /** Forgets the sites one chat's browser was allowed; the browser keeps them. */
+  forgetChatSites(conversationId: string): Promise<void>;
   networkGrantsDirectory?: string;
 }
 
@@ -475,9 +477,18 @@ export const makeHandlers = (shell: Shell) =>
           return yield* status(toConversationId);
         }),
 
-      // Called once the chat is gone for good, after Undo is no longer offered.
+      // Called once the chat is gone for good, after Undo is no longer offered:
+      // nothing this machine kept for the chat outlives it.
       discardWorkspace: ({ conversationId }) =>
-        Effect.andThen(sandbox.forgetChat(key(conversationId)), workspaces.discard(conversationId)),
+        Effect.all(
+          [
+            sandbox.forgetChat(key(conversationId)),
+            store.forgetAll(key(conversationId)),
+            Effect.promise(() => shell.forgetChatSites(conversationId)),
+            workspaces.discard(conversationId),
+          ],
+          { discard: true },
+        ),
 
       chatPermissions: ({ conversationId }) =>
         Effect.gen(function* () {

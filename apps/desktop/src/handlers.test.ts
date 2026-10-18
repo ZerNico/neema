@@ -63,6 +63,7 @@ const ORIGIN = "https://chat.test";
 let approvedNetwork: Array<{ target: GrantTarget; grant: EgressGrant }> = [];
 let keptAnswers: Array<{ origin: string; live: AnswerKey[] }> = [];
 let forgotten: ChatKey[] = [];
+const forgottenSites: string[] = [];
 const revokedPaths: Array<{ target: GrantTarget; path: string }> = [];
 
 const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
@@ -156,6 +157,9 @@ beforeAll(async () => {
     }),
     cancelCall: () => false,
     setWorkState: () => {},
+    forgetChatSites: async (conversationId) => {
+      forgottenSites.push(conversationId);
+    },
     networkGrantsDirectory: join(root, "network-grants"),
   };
 
@@ -1602,8 +1606,17 @@ describe("once a folder is attached", () => {
     picked = root;
   });
 
-  it("discards a conversation's workspace", async () => {
+  it("discards a conversation's workspace, and the folders and sites it was granted", async () => {
+    const attached = await Effect.runPromise(
+      handlers.folderStatus({ conversationId: BRANCH_CONVERSATION }),
+    );
+    expect(attached.folders.length).toBeGreaterThan(0);
     await Effect.runPromise(handlers.discardWorkspace({ conversationId: BRANCH_CONVERSATION }));
+    const after = await Effect.runPromise(
+      handlers.folderStatus({ conversationId: BRANCH_CONVERSATION }),
+    );
+    expect(after.folders).toEqual([]);
+    expect(forgottenSites).toContain(BRANCH_CONVERSATION);
     expect(
       await failureOf(
         handlers.readFile({
