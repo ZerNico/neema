@@ -402,7 +402,7 @@ describe("project files", () => {
     };
     await expect(
       files((s) => s.write(stale, { projectId, name: "stopped.txt", bytes: text("late") })),
-    ).rejects.toThrow();
+    ).rejects.toThrow("All fibers interrupted without error");
     expect((await files((s) => s.list(owner, projectId))).files).toEqual([]);
     expect(puts.length).toBe(before);
     expect(await db((d) => d.select().from(blobCleanupIntents))).toEqual(intentsBefore);
@@ -412,7 +412,10 @@ describe("project files", () => {
     const { owner, editor, viewer, projectId } = await setup();
     const stranger = await createUser();
     const before = puts.length;
-    for (const writerId of [viewer, stranger]) {
+    for (const [writerId, refusal] of [
+      [viewer, { _tag: "ProjectRejected", reason: "project files are read-only for you" }],
+      [stranger, { _tag: "ProjectNotAvailable", projectId }],
+    ] as const) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each denial must precede physical storage.
       await expect(
         files((s) =>
@@ -422,7 +425,7 @@ describe("project files", () => {
             bytes: text("denied"),
           }),
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(refusal);
     }
     expect(puts.length).toBe(before);
     beforePut = () =>

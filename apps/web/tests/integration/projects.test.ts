@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -40,6 +40,9 @@ type Services = Db | ProjectService | ProjectMemoryService | DocumentService | F
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const exit = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromiseExit(effect);
+/** The typed failure a refused call ended with, or the exit itself when it did not fail. */
+const failureOf = (result: Exit.Exit<unknown, unknown>) =>
+  Exit.isFailure(result) ? Cause.squash(result.cause) : result;
 const events: Array<{ userId: string | null; event: SyncEvent }> = [];
 const TestBus = Layer.succeed(SyncBus, {
   publish: (userId, event) => Effect.sync(() => void events.push({ userId, event })),
@@ -141,7 +144,7 @@ describe("roles", () => {
     const admin = await createUser("admin");
     // An admin may grant to any group, but only as the project's owner would: not theirs.
     expect(
-      Exit.isFailure(
+      failureOf(
         await exit(
           Effect.flatMap(ProjectService, (s) =>
             s.changeMembers(admin, project.id, {
@@ -152,7 +155,7 @@ describe("roles", () => {
           ),
         ),
       ),
-    ).toBe(true);
+    ).toMatchObject({ _tag: "ProjectNotAvailable", projectId: project.id });
     await db((d) =>
       d.insert(groupMembers).values({ groupId: group, userId: owner, shareProjects: true }),
     );
@@ -208,7 +211,10 @@ describe("roles", () => {
         }),
       ),
     );
-    expect(Exit.isFailure(byEditor)).toBe(true);
+    expect(failureOf(byEditor)).toMatchObject({
+      _tag: "ProjectRejected",
+      reason: "your role in this project does not allow that",
+    });
     await projects((s) =>
       s.changeMembers(editor, project.id, { action: "removeUser", userId: editor }),
     );
@@ -442,16 +448,14 @@ describe("chats in a project", () => {
     await projects((s) => s.move(owner, mine, project.id));
     await projects((s) => s.move(member, theirs, project.id));
     expect(
-      Exit.isFailure(
+      failureOf(
         await exit(Effect.flatMap(ProjectService, (s) => s.move(owner, temporary, project.id))),
       ),
-    ).toBe(true);
+    ).toMatchObject({ _tag: "ProjectRejected", reason: "a temporary chat cannot join a project" });
     // Someone else's chat is not theirs to move.
     expect(
-      Exit.isFailure(
-        await exit(Effect.flatMap(ProjectService, (s) => s.move(owner, theirs, null))),
-      ),
-    ).toBe(true);
+      failureOf(await exit(Effect.flatMap(ProjectService, (s) => s.move(owner, theirs, null)))),
+    ).toMatchObject({ _tag: "ProjectRejected", reason: "that chat is not available" });
     expect((await projects((s) => s.chats(owner, project.id))).map((c) => c.id)).toEqual([mine]);
     expect((await projects((s) => s.chats(member, project.id))).map((c) => c.id)).toEqual([theirs]);
     await projects((s) => s.move(owner, mine, null));
