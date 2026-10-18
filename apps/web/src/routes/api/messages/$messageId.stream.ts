@@ -1,8 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect, Stream } from "effect";
-import { sessionEnded } from "~/modules/auth/server/account-eligibility.ts";
-import { ChatRepo } from "~/modules/chat/server/repo.ts";
-import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { openMessageStream } from "~/modules/chat/server/message-stream.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
 import { approvedSession, unauthorized } from "~/server/approved-route.ts";
@@ -22,20 +19,13 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
         const afterSeq = Number.isFinite(after) && after >= 0 ? after : 0;
 
         const stream = await runtime.runPromise(
-          Effect.gen(function* () {
-            const repo = yield* ChatRepo;
-            const engine = yield* StreamEngine;
-
-            const message = yield* repo.getMessage(params.messageId);
-            if (!message) return null;
-            // Ownership check: the conversation must belong to the caller.
-            yield* repo.getConversation(session.user.id, message.conversationId);
-
-            const ended = yield* sessionEnded(session.session.id, session.user.id);
-            return engine
-              .subscribe(params.messageId, afterSeq, url.searchParams.get("runId") ?? undefined)
-              .pipe(Stream.interruptWhen(ended));
-          }).pipe(Effect.catchTag("ConversationNotFound", () => Effect.succeed(null))),
+          openMessageStream({
+            userId: session.user.id,
+            sessionId: session.session.id,
+            messageId: params.messageId,
+            afterSeq,
+            runId: url.searchParams.get("runId") ?? undefined,
+          }),
         );
 
         if (!stream) return new Response("Not found", { status: 404 });

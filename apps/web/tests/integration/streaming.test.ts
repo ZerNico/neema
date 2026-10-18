@@ -61,6 +61,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
+import { openMessageStream } from "~/modules/chat/server/message-stream.ts";
 import { ASSISTANT_FILE_LIMITS } from "~/modules/chat/assistant-output.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { hashSource } from "~/modules/genui/fences.ts";
@@ -12006,5 +12007,30 @@ describe("list hints", () => {
       { type: "message.status", ...about, status: "streaming" },
       { type: "message.status", ...about, status: "complete" },
     ]);
+  });
+});
+
+describe("the message stream route's owner check", () => {
+  it("opens an answer's stream for its owner alone", async () => {
+    const opened = await runtime.runPromise(
+      Effect.gen(function* () {
+        const owner = yield* setupConversation;
+        const stranger = yield* setupConversation;
+        const open = (userId: string, messageId: string) =>
+          openMessageStream({
+            userId,
+            sessionId: userId,
+            messageId,
+            afterSeq: 0,
+            runId: undefined,
+          }).pipe(Effect.map((stream) => stream !== null));
+        return {
+          owner: yield* open(owner.userId, owner.assistant.id),
+          stranger: yield* open(stranger.userId, owner.assistant.id),
+          unknown: yield* open(owner.userId, uuidv7()),
+        };
+      }),
+    );
+    expect(opened).toEqual({ owner: true, stranger: false, unknown: false });
   });
 });
