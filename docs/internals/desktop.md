@@ -44,10 +44,9 @@ while a main window exists just closes it. Local work belongs to the server that
 started it, so opening the chooser or confirming a new address while Work is
 active asks first, with the same wording family as Quit, and disposes
 executions and owned processes only after a yes. A chooser opened while idle
-does not skip that question if work starts before connect. Draft folder grants
-are forgotten with that dispose, so the next server does not inherit the
-previous compose-time folders; durable conversation mappings stay on the
-machine. `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
+does not skip that question if work starts before connect. Folder and other grants
+are keyed by server origin, so the next server inherits none of them.
+`CHAT_DESKTOP_SERVER` pins the server for development: main tells every
 preload through a process argument, the site and recovery page then show no
 switch at all, the menu item is absent, and the IPC still refuses as a backstop.
 `connect-flow.ts` holds this logic electron-free. During dev reload,
