@@ -146,7 +146,8 @@ const heldRow = async (
   const { pid } = (await client.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!;
   return {
     wait: async (count: number) => {
-      const deadline = Date.now() + 10_000;
+      // A safety stop, not a wait: under a full parallel run the queue can take a while to form.
+      const deadline = Date.now() + 30_000;
       while (Date.now() < deadline) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- Wait on actual database blockers, not elapsed time.
         const result = await client.query<{ count: number }>(
