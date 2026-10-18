@@ -1,13 +1,10 @@
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 
-import { AgentDraftOwner, type AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
-import {
-  ScheduleDraftOwner,
-  type ScheduleDraftHandle,
-} from "~/modules/schedules/ui/schedule-draft-owner.tsx";
-import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
+import { AgentDraftOwner } from "~/modules/agents/ui/agent-draft-owner.tsx";
+import { ScheduleDraftOwner } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
+import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
 import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
-import { useDetailPanelSelectedId } from "~/ui/detail-panel-context.ts";
+
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 
 import { learnServerClock } from "../client/use-message-stream.ts";
@@ -24,12 +21,13 @@ import {
 } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
 import { withHistory } from "./conversation-window.ts";
 import { lossSentence } from "./rewind-loss.ts";
 import { placeStranded, placed, shownIds } from "./stranded-cards.ts";
+import { useChatArtifacts } from "./use-chat-artifacts.ts";
 import { useLiveAnswer } from "./use-live-answer.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import { type ToolActivity } from "../client/use-message-stream.ts";
@@ -69,7 +67,7 @@ import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { buildMessageStamps } from "./timestamps.ts";
 import { useMessageRows } from "./use-message-rows.ts";
-import { ownsDocument, useDiscoveredArtifacts } from "./use-discovered-artifacts.ts";
+import { ownsDocument } from "./use-discovered-artifacts.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -97,7 +95,7 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 
-import { AlreadyTold, toastError } from "~/ui/error-toast.ts";
+import { toastError } from "~/ui/error-toast.ts";
 import {
   GenuiActionsContext,
   type UiMapLookup,
@@ -107,9 +105,6 @@ import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
 
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
-/** Shared, so a conversation with nothing forgotten keeps its memos stable. */
-const NO_IDS: ReadonlySet<string> = new Set();
-
 export function ChatView({
   conversationId,
   anchorFirstTurn = false,
@@ -118,10 +113,6 @@ export function ChatView({
   /** Opened by the new-chat page right after sending, so the answer arriving is ours. */
   anchorFirstTurn?: boolean;
 }) {
-  const agentDraft = useRef<AgentDraftHandle>(null);
-  const scheduleDraft = useRef<ScheduleDraftHandle>(null);
-  const documents = useRef<DocumentOwnerHandle>(null);
-  const selectedPanelId = useDetailPanelSelectedId();
   const composer = useRef<ComposerHandle>(null);
   const isMobile = useIsMobile();
   // Opening a chat should leave the caret ready to type. Not on a phone: that
@@ -206,18 +197,27 @@ export function ChatView({
 
   const { streamingMessage, stream, liveId, anchorId, releaseAnchor, requestAnchor, cancelAnchor } =
     useLiveAnswer({ data, conversationId, anchorFirstTurn });
+  const {
+    agentDraft,
+    scheduleDraft,
+    documents,
+    draftIds,
+    scheduleDraftIds,
+    documentIds,
+    scopedForgottenDocuments,
+    forgetDraft,
+    forgetDocument,
+    liveCreated,
+    documentFocus,
+    flushArtifacts,
+  } = useChatArtifacts({
+    data,
+    conversationId,
+    tools: stream.tools,
+    streamingId: streamingMessage?.id,
+    isMobile,
+  });
 
-  // The chat's own documents, and its project's while the person may still use it.
-  const projectId = data.project?.role ? data.project.id : null;
-  const { discoveredDrafts, discoveredScheduleDrafts, discoveredDocuments, liveCreated } =
-    useDiscoveredArtifacts({
-      data,
-      conversationId,
-      projectId,
-      tools: stream.tools,
-      streamingId: streamingMessage?.id,
-      isMobile,
-    });
   const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
     mutationFn: (permissionLevel: PermissionLevel) =>
@@ -241,90 +241,6 @@ export function ChatView({
       ),
     [desktopApprovals],
   );
-  // A draft goes with the answer that opened it, like a document, so the loader
-  // summary plus live results are the whole truth. A discarded one is held out
-  // until the refreshed loader and tool rows stop naming it.
-  const [forgottenDrafts, setForgottenDrafts] = useState<{
-    conversationId: string;
-    ids: ReadonlySet<string>;
-  }>({ conversationId, ids: new Set() });
-  const scopedForgottenDrafts =
-    forgottenDrafts.conversationId === conversationId ? forgottenDrafts.ids : NO_IDS;
-  const draftIds = useMemo(
-    () => [...discoveredDrafts].filter((draftId) => !scopedForgottenDrafts.has(draftId)).toSorted(),
-    [discoveredDrafts, scopedForgottenDrafts],
-  );
-  const scheduleDraftIds = useMemo(
-    () =>
-      [...discoveredScheduleDrafts]
-        .filter((draftId) => !scopedForgottenDrafts.has(draftId))
-        .toSorted(),
-    [discoveredScheduleDrafts, scopedForgottenDrafts],
-  );
-  // Draft ids are UUIDs, so one set serves both kinds.
-  const forgetDraft = useCallback(
-    (draftId: string) =>
-      setForgottenDrafts((current) => {
-        const ids =
-          current.conversationId === conversationId ? new Set(current.ids) : new Set<string>();
-        ids.add(draftId);
-        return { conversationId, ids };
-      }),
-    [conversationId],
-  );
-  const hasAgentDraft = draftIds.length > 0;
-  const hasScheduleDraft = scheduleDraftIds.length > 0;
-  // Unlike a draft, a document does not outlive the answer that created it: a
-  // rewind deletes it, so the loader summary plus live results are the whole
-  // truth and there is nothing to retain across a retry.
-  const [forgottenDocuments, setForgottenDocuments] = useState<{
-    conversationId: string;
-    ids: ReadonlySet<string>;
-  }>({ conversationId, ids: new Set() });
-  const scopedForgottenDocuments =
-    forgottenDocuments.conversationId === conversationId ? forgottenDocuments.ids : NO_IDS;
-  const documentIds = useMemo(
-    () =>
-      [...discoveredDocuments]
-        .filter((documentId) => !scopedForgottenDocuments.has(documentId))
-        .toSorted(),
-    [discoveredDocuments, scopedForgottenDocuments],
-  );
-  const forgetDocument = useCallback(
-    (documentId: string) =>
-      setForgottenDocuments((current) => {
-        const ids =
-          current.conversationId === conversationId ? new Set(current.ids) : new Set<string>();
-        ids.add(documentId);
-        return { conversationId, ids };
-      }),
-    [conversationId],
-  );
-  const hasDocument = documentIds.length > 0;
-  const openDocumentId =
-    selectedPanelId?.startsWith("document:") &&
-    documentIds.includes(selectedPanelId.slice("document:".length))
-      ? selectedPanelId.slice("document:".length)
-      : undefined;
-  // Read by sends after their awaits, when this render's value may be stale: the latest
-  // committed one.
-  const openDocument = useRef<string | undefined>(undefined);
-  useLayoutEffect(() => {
-    openDocument.current = openDocumentId;
-  }, [openDocumentId]);
-  const documentFocus = (asked?: AskTarget & { documentId: string }) => {
-    const id = asked?.documentId ?? openDocument.current;
-    if (!id) return {};
-    const selected = asked ? [...asked.blocks] : (documents.current?.selectedBlocks(id) ?? []);
-    return {
-      openDocument: {
-        id,
-        ...(selected.length ? { selected } : {}),
-        ...(asked?.thread ? { thread: asked.thread } : {}),
-      },
-    };
-  };
-
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
     [data.messages, data.toolCalls, data.attachments],
@@ -369,34 +285,11 @@ export function ChatView({
     if (!questionResponses.hiddenMessageIds.has(editingMessageId)) resetEditUploads();
   }, [resetEditUploads, editingMessageId, questionResponses, settleEditContext]);
 
-  // Blocking a generation has to say so: onMutate throwing cancels the mutation,
-  // and send/retry/branch carry no onError of their own, so without this the
-  // button would simply do nothing.
-  const flushAgentDraft = async () => {
-    if (hasAgentDraft && !(await agentDraft.current?.flush())) {
-      toast.error("Resolve the changes in your agent draft before continuing.");
-      throw new AlreadyTold("agent draft has unresolved changes");
-    }
-  };
-  const flushScheduleDraft = async () => {
-    if (hasScheduleDraft && !(await scheduleDraft.current?.flush())) {
-      toast.error("Resolve the changes in your schedule draft before continuing.");
-      throw new AlreadyTold("schedule draft has unresolved changes");
-    }
-  };
-  const flushDocuments = async () => {
-    if (hasDocument && !(await documents.current?.flush())) {
-      toast.error("Resolve the changes in your document before continuing.");
-      throw new AlreadyTold("document has unresolved changes");
-    }
-  };
   const checkWorkReady = () => work.check();
   /** What every way of starting an answer saves first, so it reads current drafts. */
   const flushPending = async () => {
     await flushBlockSaves();
-    await flushAgentDraft();
-    await flushScheduleDraft();
-    await flushDocuments();
+    await flushArtifacts();
   };
   const prepareGeneration = async () => {
     checkWorkReady();
