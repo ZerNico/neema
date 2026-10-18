@@ -8977,6 +8977,44 @@ describe("local tools on the user's machine", () => {
     expect(outcome.expired.status).toBe("expired");
   });
 
+  it("settles only its own chat's lapsed reservation when it reserves", async () => {
+    const statuses = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const reserveLapsed = Effect.gen(function* () {
+          const seed = yield* desktopChat;
+          const conversation = { kind: "existing" as const, id: seed.conversation.id };
+          const row = yield* repo.reserveWorkTurn({
+            id: uuidv7(),
+            userId: seed.userId,
+            conversation,
+          });
+          yield* db
+            .update(workTurnReservations)
+            .set({ expiresAt: sql`now() - interval '1 second'` })
+            .where(eq(workTurnReservations.id, row.id));
+          return { seed, conversation, row };
+        });
+        const mine = yield* reserveLapsed;
+        const theirs = yield* reserveLapsed;
+        yield* repo.reserveWorkTurn({
+          id: uuidv7(),
+          userId: mine.seed.userId,
+          conversation: mine.conversation,
+        });
+        const status = (id: string) =>
+          db
+            .select({ status: workTurnReservations.status })
+            .from(workTurnReservations)
+            .where(eq(workTurnReservations.id, id))
+            .pipe(Effect.map(([row]) => row?.status));
+        return { mine: yield* status(mine.row.id), theirs: yield* status(theirs.row.id) };
+      }),
+    );
+    expect(statuses).toEqual({ mine: "expired", theirs: "reserved" });
+  });
+
   it("fences retry, edit, and branch inside their mutation transactions", async () => {
     authoringScript = () =>
       Stream.make(

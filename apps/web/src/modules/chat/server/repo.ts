@@ -851,12 +851,18 @@ export const joinChunks = (
 
 const lockWorkTurn = (tx: DbTx, conversationId: string) =>
   tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${conversationId}, 94731))`);
-const expireWorkTurns = (tx: DbTx) =>
+/**
+ * Settles this conversation's lapsed reservations, under its work-turn lock.
+ * Others' wait for their own next attempt: every reader checks expires_at
+ * itself, and touching them here would hold their rows under this account's lock.
+ */
+const expireWorkTurns = (tx: DbTx, conversationId: string) =>
   tx
     .update(workTurnReservations)
     .set({ status: "expired", updatedAt: sql`now()` })
     .where(
       and(
+        eq(workTurnReservations.conversationId, conversationId),
         eq(workTurnReservations.status, "reserved"),
         sql`${workTurnReservations.expiresAt} <= now()`,
       ),
@@ -864,7 +870,7 @@ const expireWorkTurns = (tx: DbTx) =>
 const rejectReservedWorkTurn = (tx: DbTx, conversationId: string) =>
   Effect.gen(function* () {
     yield* lockWorkTurn(tx, conversationId).pipe(Effect.orDie);
-    yield* expireWorkTurns(tx).pipe(Effect.orDie);
+    yield* expireWorkTurns(tx, conversationId).pipe(Effect.orDie);
     const live = yield* tx
       .select({ id: workTurnReservations.id })
       .from(workTurnReservations)
@@ -1841,7 +1847,7 @@ export class ChatRepo extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 yield* lockWorkTurn(tx, input.conversation.id);
-                yield* expireWorkTurns(tx);
+                yield* expireWorkTurns(tx, input.conversation.id);
                 if (input.conversation.kind === "new") {
                   if (input.conversation.mode !== "work")
                     return yield* new InvalidMessage({
@@ -2006,7 +2012,7 @@ export class ChatRepo extends Context.Service<
                     });
                 }
                 yield* lockWorkTurn(tx, conversationId);
-                yield* expireWorkTurns(tx);
+                yield* expireWorkTurns(tx, conversationId);
                 let reservation: WorkTurnReservationRow | null = null;
                 if (input.reservationId) {
                   const rows = yield* tx
