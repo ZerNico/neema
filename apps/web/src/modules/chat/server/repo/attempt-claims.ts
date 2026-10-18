@@ -65,6 +65,38 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
     );
   });
 
+/**
+ * The locks retry, resume and edit open with, in the order every attempt takes
+ * them: the account, then the work-turn reservation, then the conversation.
+ * Answers the conversation, or null when the message is gone or the chat is not
+ * the reader's. A live reservation fails the claim as busy.
+ */
+const lockAttemptConversation = Effect.fn("ChatRepo.lockAttemptConversation")(function* (
+  tx: DbTx,
+  input: { userId: string } & ({ conversationId: string } | { messageId: string }),
+) {
+  yield* lockAccount(tx, input.userId);
+  // Resolve the parent without locking a message first. Every path
+  // that changes eligibility takes the conversation lock before rows.
+  const target =
+    "conversationId" in input
+      ? { conversationId: input.conversationId }
+      : (yield* tx
+          .select({ conversationId: messages.conversationId })
+          .from(messages)
+          .where(eq(messages.id, input.messageId))
+          .pipe(Effect.orDie))[0];
+  if (!target) return null;
+  yield* rejectReservedWorkTurn(tx, target.conversationId);
+  const owned = yield* tx
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(ownedConversationById(target.conversationId, input.userId))
+    .for("update")
+    .pipe(Effect.orDie);
+  return owned.length === 0 ? null : target;
+});
+
 const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
   tx: DbTx,
   current: ReadonlyArray<MessageRow>,
@@ -501,24 +533,12 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
-            yield* lockAccount(tx, input.userId);
             const lost = { claimed: false, orphanedKeys: [] as ReadonlyArray<string> };
-            // Resolve the parent without locking a message first. Every path
-            // that changes eligibility takes the conversation lock before rows.
-            const target = (yield* tx
-              .select({ conversationId: messages.conversationId })
-              .from(messages)
-              .where(eq(messages.id, input.messageId))
-              .pipe(Effect.orDie))[0];
+            const target = yield* lockAttemptConversation(tx, {
+              userId: input.userId,
+              messageId: input.messageId,
+            });
             if (!target) return lost;
-            yield* rejectReservedWorkTurn(tx, target.conversationId);
-            const owned = yield* tx
-              .select({ id: conversations.id })
-              .from(conversations)
-              .where(ownedConversationById(target.conversationId, input.userId))
-              .for("update")
-              .pipe(Effect.orDie);
-            if (owned.length === 0) return lost;
             const current = yield* tx
               .select()
               .from(messages)
@@ -687,22 +707,12 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
-            yield* lockAccount(tx, input.userId);
             const lost = { claimed: false as const };
-            const target = (yield* tx
-              .select({ conversationId: messages.conversationId })
-              .from(messages)
-              .where(eq(messages.id, input.messageId))
-              .pipe(Effect.orDie))[0];
+            const target = yield* lockAttemptConversation(tx, {
+              userId: input.userId,
+              messageId: input.messageId,
+            });
             if (!target) return lost;
-            yield* rejectReservedWorkTurn(tx, target.conversationId);
-            const owned = yield* tx
-              .select({ id: conversations.id })
-              .from(conversations)
-              .where(ownedConversationById(target.conversationId, input.userId))
-              .for("update")
-              .pipe(Effect.orDie);
-            if (owned.length === 0) return lost;
             const streaming = yield* tx
               .select({ id: messages.id })
               .from(messages)
@@ -834,15 +844,11 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
-            yield* lockAccount(tx, input.userId);
-            yield* rejectReservedWorkTurn(tx, input.conversationId);
-            const owned = yield* tx
-              .select({ id: conversations.id })
-              .from(conversations)
-              .where(ownedConversationById(input.conversationId, input.userId))
-              .for("update")
-              .pipe(Effect.orDie);
-            if (owned.length === 0) return null;
+            const owned = yield* lockAttemptConversation(tx, {
+              userId: input.userId,
+              conversationId: input.conversationId,
+            });
+            if (!owned) return null;
             const current = yield* tx
               .select()
               .from(messages)
