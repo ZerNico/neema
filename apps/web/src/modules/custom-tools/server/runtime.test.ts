@@ -156,6 +156,32 @@ describe("custom tool runtime", () => {
     ),
   );
 
+  it.live("fails a call that runs out of memory and keeps serving the next", () =>
+    withRuntime(
+      Effect.gen(function* () {
+        const runtime = yield* CustomToolRuntime;
+        const compiled = module(
+          tool("hoard", "() => { const kept = []; for (;;) kept.push(new Array(1e6).fill(1)); }") +
+            tool("ping", '() => "pong"'),
+        );
+        const hoard = yield* runtime.run({
+          compiled,
+          functionKey: "hoard",
+          args: {},
+          timeoutMs: 60_000,
+        });
+        expect(hoard).toMatchObject({ ok: false });
+        const ping = yield* runtime.run({
+          compiled,
+          functionKey: "ping",
+          args: {},
+          timeoutMs: 5_000,
+        });
+        expect(ping).toMatchObject({ ok: true, output: "pong" });
+      }),
+    ),
+  );
+
   it.live("interrupts an acknowledged spinning handler and awaits its exact worker exit", () => {
     const observed = observeWorkers();
     return withRuntime(

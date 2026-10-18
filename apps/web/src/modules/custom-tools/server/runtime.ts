@@ -63,12 +63,21 @@ const failure = (reason: WorkerFailure) => {
   }
 };
 
+/** One tool call's heap. Generous for real tools; small against the server's. */
+const WORKER_HEAP_MB = 512;
+
 const createPool = (size: number) => {
   const pool = createWorkerPool({
     size,
     // Tool calls are bounded by the attempt, not by a queue.
     queue: Number.POSITIVE_INFINITY,
-    spawn: () => new Worker(workerEntry, { eval: true }),
+    // Without a ceiling a runaway allocation is a fatal OOM for the whole
+    // server; with one, the worker alone dies and its job fails.
+    spawn: () =>
+      new Worker(workerEntry, {
+        eval: true,
+        resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
+      }),
     failure,
   });
   const submit = <T>(
