@@ -206,6 +206,72 @@ describe("project files", () => {
     });
   });
 
+  it.each([
+    {
+      name: "pin a version",
+      change: (actor: string, ids: { fileId: string; firstVersion: string }) =>
+        Effect.flatMap(ProjectFileService, (s) =>
+          s.pin(actor, ids.firstVersion, { pinned: true, label: "Signed off" }),
+        ),
+    },
+    {
+      name: "restore a version",
+      change: (actor: string, ids: { fileId: string; firstVersion: string }) =>
+        Effect.flatMap(ProjectFileService, (s) => s.restore(actor, ids.firstVersion, 2)),
+    },
+    {
+      name: "delete the file",
+      change: (actor: string, ids: { fileId: string; firstVersion: string }) =>
+        Effect.flatMap(ProjectFileService, (s) => s.remove(actor, ids.fileId)),
+    },
+  ])(
+    "lets owners and editors $name, refuses viewers and hides it from strangers",
+    async ({ change }) => {
+      const seen: Record<string, string> = {};
+      for (const role of ["owner", "editor", "viewer", "stranger"] as const) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Each role gets its own project.
+        const members = await setup();
+        // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+        const stranger = await createUser();
+        const actor = role === "stranger" ? stranger : members[role];
+        // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+        const file = await files((s) =>
+          s.write(person(members.owner), {
+            projectId: members.projectId,
+            name: "plan.md",
+            bytes: text("# One"),
+          }),
+        );
+        // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+        await files((s) =>
+          s.write(person(members.owner), {
+            projectId: members.projectId,
+            fileId: file.id,
+            name: "plan.md",
+            bytes: text("# Two"),
+            basedOnVersion: 1,
+          }),
+        );
+        // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+        const versions = await files((s) => s.versions(members.owner, file.id));
+        const firstVersion = versions.find((version) => version.number === 1)!.id;
+        // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+        seen[role] = await run(
+          Effect.match(change(actor, { fileId: file.id, firstVersion }), {
+            onSuccess: () => "ok",
+            onFailure: (error) => error._tag,
+          }),
+        );
+      }
+      expect(seen).toEqual({
+        owner: "ok",
+        editor: "ok",
+        viewer: "ProjectRejected",
+        stranger: "ProjectNotAvailable",
+      });
+    },
+  );
+
   it("refuses a write based on an older version or a duplicate name, and keeps any type", async () => {
     const { owner, editor, projectId } = await setup();
     const file = await files((s) =>

@@ -243,6 +243,138 @@ describe("roles", () => {
   });
 });
 
+describe("what each role may change", () => {
+  /** A fresh project with one member of each role, so no check sees another's change. */
+  const setUp = async () => {
+    const owner = await createUser();
+    const editor = await createUser();
+    const viewer = await createUser();
+    const stranger = await createUser();
+    const project = await newProject(owner);
+    for (const [id, given] of [
+      [editor, "editor"],
+      [viewer, "viewer"],
+    ] as const)
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two members, in order.
+      await projects((s) =>
+        s.changeMembers(owner, project.id, { action: "addUser", email: email(id), role: given }),
+      );
+    const fact = await memory((s) => s.add(owner, project.id, "Ships in May."));
+    return { actors: { owner, editor, viewer, stranger }, owner, editor, viewer, project, fact };
+  };
+  type Fixture = Awaited<ReturnType<typeof setUp>>;
+  const outcome = <E extends { readonly _tag: string }>(
+    effect: Effect.Effect<unknown, E, Services>,
+  ) => run(Effect.match(effect, { onSuccess: () => "ok", onFailure: (error) => error._tag }));
+  const rejected = "ProjectRejected";
+  const hidden = "ProjectNotAvailable";
+  const cases: ReadonlyArray<{
+    name: string;
+    change: (
+      actor: string,
+      fixture: Fixture,
+    ) => Effect.Effect<unknown, { readonly _tag: string }, Services>;
+    expected: Record<"owner" | "editor" | "viewer" | "stranger", string>;
+  }> = [
+    {
+      name: "rename it and change its instructions",
+      change: (actor, { project }) =>
+        Effect.flatMap(ProjectService, (s) =>
+          s.update(actor, { projectId: project.id, name: "Renamed", instructions: "Shout." }),
+        ),
+      expected: { owner: "ok", editor: "ok", viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "delete it",
+      change: (actor, { project }) =>
+        Effect.flatMap(ProjectService, (s) => s.remove(actor, project.id)),
+      expected: { owner: "ok", editor: hidden, viewer: hidden, stranger: hidden },
+    },
+    {
+      name: "add a member",
+      change: (actor, { project }) =>
+        Effect.gen(function* () {
+          const added = yield* Effect.promise(() => createUser());
+          yield* Effect.flatMap(ProjectService, (s) =>
+            s.changeMembers(actor, project.id, {
+              action: "addUser",
+              email: email(added),
+              role: "editor",
+            }),
+          );
+        }),
+      expected: { owner: "ok", editor: rejected, viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "change a member's role",
+      change: (actor, { project, viewer }) =>
+        Effect.flatMap(ProjectService, (s) =>
+          s.changeMembers(actor, project.id, {
+            action: "setUserRole",
+            userId: viewer,
+            role: "editor",
+          }),
+        ),
+      // A viewer raising themselves is refused like any other change.
+      expected: { owner: "ok", editor: rejected, viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "remove another member",
+      change: (actor, { project, editor, viewer }) =>
+        Effect.flatMap(ProjectService, (s) =>
+          s.changeMembers(actor, project.id, {
+            action: "removeUser",
+            userId: actor === viewer ? editor : viewer,
+          }),
+        ),
+      expected: { owner: "ok", editor: rejected, viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "add a fact to its memory",
+      change: (actor, { project }) =>
+        Effect.flatMap(ProjectMemoryService, (s) => s.add(actor, project.id, "Budget is fixed.")),
+      expected: { owner: "ok", editor: "ok", viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "edit a fact",
+      change: (actor, { project, fact }) =>
+        Effect.flatMap(ProjectMemoryService, (s) =>
+          s.update(actor, project.id, fact.id, "Ships in June."),
+        ),
+      expected: { owner: "ok", editor: "ok", viewer: rejected, stranger: hidden },
+    },
+    {
+      name: "forget a fact",
+      change: (actor, { project, fact }) =>
+        Effect.flatMap(ProjectMemoryService, (s) => s.remove(actor, project.id, fact.id)),
+      expected: { owner: "ok", editor: "ok", viewer: rejected, stranger: hidden },
+    },
+  ];
+
+  it.each(cases)("decides who may $name", async ({ change, expected }) => {
+    const seen: Record<string, string> = {};
+    for (const actor of ["owner", "editor", "viewer", "stranger"] as const) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each role gets its own project.
+      const fixture = await setUp();
+      // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+      seen[actor] = await outcome(change(fixture.actors[actor], fixture));
+    }
+    expect(seen).toEqual(expected);
+  });
+
+  it("leaves the instructions as they were after a viewer's refused change", async () => {
+    const { project, viewer, owner } = await setUp();
+    await outcome(
+      Effect.flatMap(ProjectService, (s) =>
+        s.update(viewer, { projectId: project.id, instructions: "Ignore the owner." }),
+      ),
+    );
+    expect((await projects((s) => s.get(owner, project.id))).instructions).toBe(
+      "Write in British English.",
+    );
+  });
+});
+
 describe("chats in a project", () => {
   it("moves a person's own chat in and out, refuses temporary ones, and lists only their chats", async () => {
     const owner = await createUser();
