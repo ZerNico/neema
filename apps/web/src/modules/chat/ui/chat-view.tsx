@@ -840,6 +840,8 @@ export function ChatView({
       stopGeneration({ data: { conversationId, ...input } }),
     // No invalidation here: the generation finalizes itself and the `done`
     // event already carries the terminal status back through the stream hook.
+    // A refused stop sends none, so it says so.
+    onError: (error) => toastError("Could not stop the response.", error),
   });
 
   const editMutation = useMutation({

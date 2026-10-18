@@ -2267,6 +2267,21 @@ describe("ChatView agent drafts", () => {
     await act(async () => blocked.release());
     await waitFor(() => expect(current.settings.name).toBe("Still persisting"));
   });
+
+  it("says so when Stop itself is refused, since no done event will", async () => {
+    liveDraft.status = "streaming";
+    renderView(null, {
+      messages: [
+        message("m-user", "user", "u1"),
+        { ...message("m-answer", "assistant", ""), status: "streaming" },
+      ],
+    });
+    vi.mocked(stopGeneration).mockRejectedValueOnce(new Error("generation changed"));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop test generation" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not stop the response.", expect.anything()),
+    );
+  });
 });
 
 const documentReference = (
