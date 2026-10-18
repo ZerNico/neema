@@ -81,6 +81,8 @@ const envelope = (phase: string, progress: unknown) =>
     phase,
     textOffset: 4,
     progress,
+    // The server's verdict, which only the result carries.
+    ...(phase === "result" ? { ok: true } : {}),
   });
 
 describe("research activity", () => {

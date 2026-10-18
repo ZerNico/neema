@@ -1,60 +1,32 @@
-import {
-  AgentDraftToolEnvelope,
-  projectAgentDraftResult,
-  agentDraftResultOk,
-  type AgentDraftActivityResult,
-} from "~/modules/agents/tool-schema.ts";
+import type { AgentDraftActivityResult } from "~/modules/agents/tool-schema.ts";
 import {
   isOfficeFamily,
   OFFICE_FAMILIES,
   officeFamilyOfEdit,
   type OfficeFamily,
 } from "~/modules/office/families.ts";
-import {
-  DocumentToolEnvelope,
-  documentResultOk,
-  isDocumentWrite,
-  projectDocumentResult,
-  type DocumentActivityResult,
-} from "~/modules/documents/tool-schema.ts";
-import {
-  ProjectFileToolEnvelope,
-  projectFileResultOk,
-  projectProjectFileResult,
-  type ProjectFileActivityResult,
-} from "~/modules/projects/file-tool-schema.ts";
-import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
-import {
-  ScheduleDraftToolEnvelope,
-  projectScheduleDraftResult,
-  scheduleDraftResultOk,
-  type ScheduleDraftActivityResult,
-} from "~/modules/schedules/tool-schema.ts";
-import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
-import { ImageToolEnvelope } from "~/modules/images/tool-schema.ts";
+import { isDocumentWrite, type DocumentActivityResult } from "~/modules/documents/tool-schema.ts";
+import type { ProjectFileActivityResult } from "~/modules/projects/file-tool-schema.ts";
+import type { ScheduleDraftActivityResult } from "~/modules/schedules/tool-schema.ts";
 import type { ImageQuality } from "@chat/model-client";
-import { IntegrationToolEnvelope } from "~/modules/integrations/tool-schema.ts";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
 import { AssistantFile, mergeLookups, NO_LOOKUPS, type UiLookups } from "../assistant-output.ts";
 import { SteerChunkEnvelope } from "../schema.ts";
 import type { AssistantSteer } from "../ui/assistant-body.ts";
-import {
-  KnowledgeToolEnvelope,
-  type KnowledgeActivitySummary,
-} from "~/modules/knowledge/tool-schema.ts";
+import type { KnowledgeActivitySummary } from "~/modules/knowledge/tool-schema.ts";
 import { useQueryClient } from "@tanstack/react-query";
-import { Option, Schema } from "effect";
-import { ResearchProgress } from "../research-schema.ts";
-import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
+import { Schema } from "effect";
+import type { ResearchProgress } from "../research-schema.ts";
+import type { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createLiveText, type LiveText } from "./live-text.ts";
-import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
-import { ToolFileEnvelope } from "../tool-file-schema.ts";
-import { readPresentedQuestions, type AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
-import { PlanStep } from "~/modules/tools/plan-schema.ts";
-import { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
-import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
-import { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
+import type { MemoryActivityReason, MemoryActivityOutcome } from "~/modules/tools/schema.ts";
+import type { AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
+import type { PlanStep } from "~/modules/tools/plan-schema.ts";
+import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import type { AttachmentReadActivity } from "../attachment-tool-schema.ts";
+import type { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
+import { isToolFamily, projectToolCall, readLiveCall, readTextOffset } from "./tool-families.ts";
 
 export interface ToolPageStatus {
   url: string;
@@ -160,9 +132,6 @@ export interface ResearchToolActivity extends ToolActivityBase {
   /** Stands in while the model writes the brief; replaced when the run starts. */
   writing?: true;
 }
-
-export const readResearchProgress = (value: unknown): ResearchProgress | null =>
-  Option.getOrNull(Schema.decodeUnknownOption(ResearchProgress)(value));
 
 export interface AgentDraftToolActivity extends ToolActivityBase {
   family: "agent-draft";
@@ -341,38 +310,11 @@ type Action =
   | { kind: "preview"; callId: string; uri: string }
   | { kind: "done"; status: "complete" | "error" | "aborted" };
 
-const MEMORY_OUTCOMES = new Set<MemoryActivityOutcome>([
-  "created",
-  "updated",
-  "unchanged",
-  "rejected",
-]);
-
-export const toMemoryActivityReason = (value: unknown): MemoryActivityReason | undefined =>
-  Option.getOrUndefined(Schema.decodeUnknownOption(MemoryActivityReason)(value));
-
-export const toMemoryActivityOutcome = (value: unknown): MemoryActivityOutcome | undefined => {
-  if (typeof value !== "string") return undefined;
-  if (MEMORY_OUTCOMES.has(value as MemoryActivityOutcome)) return value as MemoryActivityOutcome;
-  if (value === "duplicate") return "unchanged";
-  if (
-    value === "limit_reached" ||
-    value === "not_found" ||
-    value === "protected" ||
-    value === "disabled" ||
-    value === "source_changed"
-  ) {
-    return "rejected";
-  }
-  return undefined;
-};
-
-export const readTextOffset = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-
 /**
  * Parses a tool chunk envelope defensively: malformed rows must not crash the
  * stream; the chunk still advances lastSeq so resume cursors stay correct.
+ * Each family reads the envelope as the call its row records, and the same
+ * projection a reload uses builds the activity from it.
  */
 export function applyToolChunk(
   tools: ToolActivity[],
@@ -386,688 +328,30 @@ export function applyToolChunk(
     return tools;
   }
   if (typeof envelope !== "object" || envelope === null) return tools;
-  const e = envelope as {
-    result?: unknown;
-    progress?: unknown;
-    runId?: string;
-    taskId?: string;
-    v?: number;
-    family?: string;
-    phase?: string;
-    callId?: string;
-    name?: string;
-    turnIndex?: number;
-    callIndex?: number;
-    textOffset?: unknown;
-    args?: { targets?: string[] };
-    ok?: boolean;
-    route?: unknown;
-    outcome?: unknown;
-    reason?: unknown;
-    scope?: unknown;
-    summary?: {
-      targets?: string[];
-      resultCount?: number;
-      pagesFetched?: number;
-      outcome?: unknown;
-    };
-    pages?: ToolPageStatus[];
-    sources?: ToolSource[];
-    error?: string;
-  };
-  if (e.v !== 1 || !e.callId || !e.name) return tools;
-  if (
-    e.family !== "agent-draft" &&
-    e.family !== "schedule-draft" &&
-    e.family !== "custom" &&
-    e.family !== "image" &&
-    e.family !== "tool-file" &&
-    !isOfficeFamily(e.family) &&
-    e.family !== "integration" &&
-    e.family !== "document" &&
-    e.family !== "project-file" &&
-    e.family !== "web" &&
-    e.family !== "memory" &&
-    e.family !== "ask" &&
-    e.family !== "plan" &&
-    e.family !== "notify" &&
-    e.family !== "map" &&
-    e.family !== "tool-load" &&
-    e.family !== "attachment" &&
-    e.family !== "research" &&
-    e.family !== "knowledge" &&
-    e.family !== "skill" &&
-    e.family !== "desktop"
-  )
-    return tools;
-
-  const family = e.family;
+  const e = envelope as Record<string, unknown>;
+  const { callId, name, family } = e;
+  if (e.v !== 1 || typeof callId !== "string" || !callId) return tools;
+  if (typeof name !== "string" || !name || !isToolFamily(family)) return tools;
   if (onlyFamily !== undefined && family !== onlyFamily) return tools;
-  const index = tools.findIndex((activity) => activity.callId === e.callId);
+  const index = tools.findIndex((activity) => activity.callId === callId);
   const existing = index === -1 ? undefined : tools[index];
   if (existing && existing.family !== family) return tools;
-  const textOffset =
-    existing?.textOffset ??
-    (e.phase === "start" && !existing ? readTextOffset(e.textOffset) : undefined);
-  const position = textOffset === undefined ? {} : { textOffset };
   // Bootstrap can replay older progress after a terminal durable row was read.
   if (existing && existing.status !== "running") return tools;
-
-  if (family === "agent-draft") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(AgentDraftToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const result = parsed.phase === "result" ? projectAgentDraftResult(parsed) : undefined;
-    const next: AgentDraftToolActivity = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: result ? (agentDraftResultOk(result) ? "complete" : "error") : "running",
-      ...(result ? { result } : {}),
-      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "schedule-draft") {
-    const parsed = Option.getOrNull(
-      Schema.decodeUnknownOption(ScheduleDraftToolEnvelope)(envelope),
-    );
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const result = parsed.phase === "result" ? projectScheduleDraftResult(parsed) : undefined;
-    const next: ScheduleDraftToolActivity = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: result ? (scheduleDraftResultOk(result) ? "complete" : "error") : "running",
-      ...(result ? { result } : {}),
-      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (isOfficeFamily(family)) {
-    const parsed = Option.getOrNull(
-      Schema.decodeUnknownOption(OFFICE_FAMILIES[family].envelope)(envelope),
-    );
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status:
-        parsed.phase === "start" ? "running" : parsed.outcome === "error" ? "error" : "complete",
-      ...(parsed.phase === "result"
-        ? (({
-            v: _v,
-            family: _family,
-            phase: _phase,
-            callId: _callId,
-            name: _name,
-            ...summary
-          }) => ({
-            ...summary,
-            ...(summary.outcome === "error" ? { error: summary.message } : {}),
-          }))(parsed)
-        : {}),
-    } as OfficeActivity;
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "tool-file") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ToolFileEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next: ToolFileActivity = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: parsed.phase === "start" ? "running" : parsed.ok ? "complete" : "error",
-      ...(parsed.phase === "result" && parsed.attachmentId
-        ? { attachmentId: parsed.attachmentId }
-        : {}),
-      ...(parsed.phase === "result" && parsed.workingFileId
-        ? { workingFileId: parsed.workingFileId }
-        : {}),
-      ...(parsed.phase === "result" && parsed.error ? { error: parsed.error } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "image") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ImageToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const previous = existing?.family === "image" ? existing : undefined;
-    const next: ImageToolActivity =
-      parsed.phase === "start"
-        ? {
-            family: "image",
-            ...position,
-            callId: parsed.callId,
-            name: parsed.name,
-            turnIndex: parsed.turnIndex,
-            callIndex: parsed.callIndex,
-            status: "running",
-            model: parsed.model,
-            editing: parsed.editing,
-            ...(parsed.aspectRatio ? { aspectRatio: parsed.aspectRatio } : {}),
-            requested: parsed.count,
-          }
-        : {
-            family: "image",
-            ...position,
-            callId: parsed.callId,
-            name: parsed.name,
-            turnIndex: previous?.turnIndex ?? 0,
-            callIndex: previous?.callIndex ?? tools.length,
-            status: parsed.status,
-            model: parsed.model,
-            editing: parsed.editing,
-            ...(parsed.aspectRatio ? { aspectRatio: parsed.aspectRatio } : {}),
-            requested: parsed.requested,
-            attachmentIds: parsed.attachmentIds,
-            ...(parsed.quality ? { quality: parsed.quality } : {}),
-            ...(parsed.adjustments?.length ? { adjustments: parsed.adjustments } : {}),
-            ...(parsed.refusal ? { refusal: parsed.refusal } : {}),
-            ...(parsed.error ? { error: parsed.error } : {}),
-          };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "custom") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(CustomToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next: CustomToolActivity = {
-      family: "custom",
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      displayName: parsed.displayName,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: parsed.phase === "start" ? "running" : parsed.status,
-      ...(parsed.phase === "result"
-        ? {
-            ...(parsed.resultPreview !== undefined ? { resultPreview: parsed.resultPreview } : {}),
-            ...(parsed.resultChars !== undefined ? { resultChars: parsed.resultChars } : {}),
-            ...(parsed.error ? { error: parsed.error } : {}),
-            ...(parsed.fileIds?.length ? { fileIds: parsed.fileIds } : {}),
-            ...(parsed.workingFiles?.length ? { workingFiles: parsed.workingFiles } : {}),
-          }
-        : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "integration") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(IntegrationToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const previous = existing?.family === "integration" ? existing : undefined;
-    const next: IntegrationToolActivity =
-      parsed.phase === "start"
-        ? {
-            family: "integration",
-            ...position,
-            callId: parsed.callId,
-            name: parsed.name,
-            turnIndex: parsed.turnIndex,
-            callIndex: parsed.callIndex,
-            status: "running",
-            integrationId: parsed.integrationId,
-            tool: parsed.tool,
-            label: parsed.label,
-            access: parsed.access,
-            summary: parsed.summary,
-          }
-        : {
-            ...integrationActivityFromRow(parsed.callId, parsed.activity),
-            ...position,
-            turnIndex: previous?.turnIndex ?? 0,
-            callIndex: previous?.callIndex ?? tools.length,
-          };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "document") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(DocumentToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const result = parsed.phase === "result" ? projectDocumentResult(parsed) : undefined;
-    const next: DocumentToolActivity = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: result ? (documentResultOk(result) ? "complete" : "error") : "running",
-      ...(result ? { result } : {}),
-      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "project-file") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(ProjectFileToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const result = parsed.phase === "result" ? projectProjectFileResult(parsed) : undefined;
-    const next: ProjectFileToolActivity = {
-      family,
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: result ? (projectFileResultOk(result) ? "complete" : "error") : "running",
-      ...(result ? { result } : {}),
-      ...(parsed.phase === "result" && parsed.reason ? { error: parsed.reason } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "skill") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(SkillToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next: SkillToolActivity = {
-      family: "skill",
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      skillId: parsed.skillId,
-      skillName: parsed.skillName,
-      path: parsed.path,
-      ...(parsed.runId ? { runId: parsed.runId } : {}),
-      ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: parsed.phase === "start" ? "running" : parsed.status,
-      ...(parsed.phase === "result" && parsed.error ? { error: parsed.error } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-  if (family === "knowledge") {
-    const parsed = Option.getOrNull(Schema.decodeUnknownOption(KnowledgeToolEnvelope)(envelope));
-    if (!parsed || (existing && parsed.phase === "start")) return tools;
-    const next: KnowledgeToolActivity = {
-      family: "knowledge",
-      ...position,
-      callId: parsed.callId,
-      name: parsed.name,
-      ...(parsed.runId ? { runId: parsed.runId } : {}),
-      ...(parsed.taskId ? { taskId: parsed.taskId } : {}),
-      turnIndex: existing?.turnIndex ?? (parsed.phase === "start" ? parsed.turnIndex : 0),
-      callIndex:
-        existing?.callIndex ?? (parsed.phase === "start" ? parsed.callIndex : tools.length),
-      status: parsed.phase === "start" ? "running" : parsed.ok ? "complete" : "error",
-      // A running search names its queries from the start envelope; the
-      // result replaces this with the full summary.
-      ...(parsed.phase === "start" && parsed.targets
-        ? {
-            summary: {
-              targets: parsed.targets,
-              documentsListed: 0,
-              passagesReturned: 0,
-              remainingOps: 0,
-              coverage: "",
-            },
-          }
-        : {}),
-      ...(parsed.phase === "result"
-        ? {
-            summary: parsed.summary,
-            sources: [...parsed.sources],
-            ...(parsed.error ? { error: parsed.error } : {}),
-          }
-        : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-
-  if (family === "desktop") {
-    const decodedResult =
-      e.phase === "result"
-        ? Option.getOrNull(Schema.decodeUnknownOption(DesktopToolResult)(e.result))
-        : null;
-    // A result that does not decode leaves the activity alone rather than
-    // dropping it to a state the transcript cannot explain.
-    if (e.phase === "result" && !decodedResult) return tools;
-    if (!Schema.is(DesktopToolName)(e.name)) return tools;
-    const next: DesktopToolActivity = {
-      family: "desktop",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? 0,
-      status: decodedResult ? (decodedResult.ok ? "complete" : "error") : "running",
-      ...(e.args && typeof e.args === "object"
-        ? { args: e.args as Record<string, unknown> }
-        : existing?.family === "desktop" && existing.args
-          ? { args: existing.args }
-          : {}),
-      ...(decodedResult ? { result: decodedResult } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-
-  if (family === "research") {
-    const progress = readResearchProgress(e.progress);
-    if (
-      !progress ||
-      e.name !== "deep_research" ||
-      // The row id and the run id are different things: the call is minted by
-      // the stream observer, the run by the handler it released. Only the
-      // envelope's own `runId` correlates with the progress it carries.
-      (e.runId !== undefined && e.runId !== progress.runId) ||
-      (e.phase !== "start" && e.phase !== "progress" && e.phase !== "result")
-    )
-      return tools;
-    if (existing && e.phase === "start") return tools;
-    const failed = ["error", "interrupted", "aborted"].includes(progress.phase);
-    const next: ResearchToolActivity = {
-      family: "research",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      runId: progress.runId,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? 0,
-      status: e.phase === "result" ? (failed ? "error" : "complete") : "running",
-      progress,
-      ...(e.sources
-        ? { sources: e.sources }
-        : existing?.family === "research" && existing.sources
-          ? { sources: existing.sources }
-          : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, i) => (i === index ? next : activity));
-  }
-
-  if (family === "ask") {
-    if (
-      typeof e.callId !== "string" ||
-      e.name !== "ask_user" ||
-      (e.phase !== "start" && e.phase !== "result")
-    )
-      return tools;
-    // The durable result is immutable. Late/replayed chunks cannot replace it.
-    if (existing && (e.phase === "start" || existing.status !== "running")) return tools;
-    const questions = e.phase === "result" ? readPresentedQuestions(e.result) : null;
-    const next: AskToolActivity = {
-      family: "ask",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : questions ? "complete" : "error",
-      ...(questions ? { questions } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "map") {
-    if (
-      e.name !== "map_route" ||
-      (e.phase !== "start" && e.phase !== "result") ||
-      (existing && e.phase === "start")
-    )
-      return tools;
-    const route =
-      e.phase === "result"
-        ? Option.getOrUndefined(Schema.decodeUnknownOption(MapRouteSummary)(e.route))
-        : undefined;
-    const next: MapToolActivity = {
-      family: "map",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : e.ok && route ? "complete" : "error",
-      ...(route ? { route } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "attachment") {
-    if (e.name !== "read_attachment" || (e.phase !== "start" && e.phase !== "result")) return tools;
-    if (existing && e.phase === "start") return tools;
-    const read =
-      e.phase === "result"
-        ? Option.getOrNull(Schema.decodeUnknownOption(AttachmentReadActivity)(e))
-        : null;
-    const next: AttachmentToolActivity = {
-      family: "attachment",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : read?.ok ? "complete" : "error",
-      ...(read ? { read } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "tool-load") {
-    if (e.name !== "load_tools" || (e.phase !== "start" && e.phase !== "result")) return tools;
-    if (existing && e.phase === "start") return tools;
-    const loaded =
-      e.phase === "result"
-        ? Option.getOrNull(
-            Schema.decodeUnknownOption(Schema.Array(LazyToolFamily))(
-              (e as { loaded?: unknown }).loaded ?? null,
-            ),
-          )
-        : null;
-    const next: ToolLoadActivity = {
-      family: "tool-load",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : e.ok && loaded ? "complete" : "error",
-      ...(loaded ? { loaded } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "notify") {
-    if (
-      e.name !== "notify_user" ||
-      (e.phase !== "start" && e.phase !== "result") ||
-      (e.phase === "result" && typeof e.ok !== "boolean") ||
-      (existing && e.phase === "start")
-    )
-      return tools;
-    const message =
-      e.phase === "result" && typeof (e as { message?: unknown }).message === "string"
-        ? (e as { message: string }).message
-        : undefined;
-    const next: NotifyToolActivity = {
-      family: "notify",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : e.ok && message ? "complete" : "error",
-      ...(message ? { message } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "plan") {
-    if (
-      e.name !== "update_plan" ||
-      (e.phase !== "start" && e.phase !== "result") ||
-      (e.phase === "result" && typeof e.ok !== "boolean")
-    )
-      return tools;
-    // A terminal row stays terminal; a later call is its own activity, and the
-    // list it carries is the whole current checklist.
-    if (existing && (e.phase === "start" || existing.status !== "running")) return tools;
-    const steps =
-      e.phase === "result"
-        ? Option.getOrNull(
-            Schema.decodeUnknownOption(Schema.Array(PlanStep))(
-              (e as { steps?: unknown }).steps ?? null,
-            ),
-          )
-        : null;
-    const next: PlanToolActivity = {
-      family: "plan",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.phase === "start" ? "running" : e.ok && steps ? "complete" : "error",
-      ...(steps ? { steps } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  if (family === "memory") {
-    if (e.phase === "start") {
-      if (existing) return tools;
-      return [
-        ...tools,
-        {
-          family: "memory",
-          ...position,
-          callId: e.callId,
-          name: e.name,
-          turnIndex: e.turnIndex ?? 0,
-          callIndex: e.callIndex ?? tools.length,
-          status: "running",
-        },
-      ];
-    }
-    if (e.phase !== "result" || typeof e.ok !== "boolean") return tools;
-
-    const outcome = toMemoryActivityOutcome(e.summary?.outcome ?? e.outcome);
-    const reason = toMemoryActivityReason(e.reason);
-    const next: MemoryToolActivity = {
-      family: "memory",
-      ...position,
-      callId: e.callId,
-      name: e.name,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      status: e.ok ? "complete" : "error",
-      ...(outcome ? { outcome } : {}),
-      ...(reason ? { reason } : {}),
-      ...(e.scope === "project" ? { scope: "project" as const } : {}),
-      ...(typeof e.error === "string" ? { error: e.error } : {}),
-    };
-    return index === -1
-      ? [...tools, next]
-      : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
-  }
-
-  const upsertWeb = (next: Partial<WebToolActivity>): ToolActivity[] => {
-    const activity: WebToolActivity = {
-      family: "web",
-      ...position,
-      ...(existing?.runId
-        ? { runId: existing.runId }
-        : typeof e.runId === "string"
-          ? { runId: e.runId }
-          : {}),
-      ...(existing?.taskId
-        ? { taskId: existing.taskId }
-        : typeof e.taskId === "string"
-          ? { taskId: e.taskId }
-          : {}),
-      callId: e.callId!,
-      name: e.name!,
-      turnIndex: existing?.turnIndex ?? e.turnIndex ?? 0,
-      callIndex: existing?.callIndex ?? e.callIndex ?? tools.length,
-      targets: existing && isWebToolActivity(existing) ? existing.targets : [],
-      status: existing?.status ?? "running",
-      ...next,
-    };
-    return index === -1
-      ? [...tools, activity]
-      : tools.map((current, activityIndex) => (activityIndex === index ? activity : current));
-  };
-
-  if (e.phase === "start") {
-    if (existing) return tools;
-    return upsertWeb({
-      targets: e.args?.targets ?? [],
-      status: "running",
-    });
-  }
-  if (e.phase === "progress") {
-    return upsertWeb({
-      status: "running",
-      ...(e.summary?.targets ? { targets: e.summary.targets } : {}),
-      ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
-      ...(e.pages !== undefined ? { pages: e.pages } : {}),
-    });
-  }
-  if (e.phase === "result" && typeof e.ok === "boolean") {
-    return upsertWeb({
-      targets: e.summary?.targets ?? [],
-      status: e.ok ? "complete" : "error",
-      ...(e.summary?.resultCount !== undefined ? { resultCount: e.summary.resultCount } : {}),
-      ...(e.summary?.pagesFetched !== undefined ? { pagesFetched: e.summary.pagesFetched } : {}),
-      ...(e.pages !== undefined ? { pages: e.pages } : {}),
-      ...(e.sources !== undefined ? { sources: e.sources } : {}),
-      ...(typeof e.error === "string" ? { error: e.error } : {}),
-    });
-  }
-  return tools;
+  const event = readLiveCall(family, { ...e, name }, existing);
+  if (!event || (existing && event.start)) return tools;
+  const next = projectToolCall(family, event.call, {
+    callId,
+    turnIndex: existing?.turnIndex ?? event.turnIndex ?? 0,
+    callIndex: existing?.callIndex ?? event.callIndex ?? tools.length,
+    textOffset:
+      existing?.textOffset ?? (event.start ? readTextOffset(event.textOffset) : undefined),
+    runId: existing?.runId ?? event.runId,
+    taskId: existing?.taskId ?? event.taskId,
+  });
+  return index === -1
+    ? [...tools, next]
+    : tools.map((activity, activityIndex) => (activityIndex === index ? next : activity));
 }
 
 /**
@@ -1599,24 +883,3 @@ export function useMessageStream(
     status: complete && !drained ? ("streaming" as const) : state.status,
   };
 }
-
-/** A finished integration row, live or reloaded; both read the same projection. */
-export const integrationActivityFromRow = (
-  callId: string,
-  activity: import("~/modules/integrations/tool-schema.ts").IntegrationToolActivity,
-): IntegrationToolActivity => ({
-  family: "integration",
-  callId,
-  name: activity.name,
-  status: activity.status === "complete" ? "complete" : "error",
-  integrationId: activity.integrationId,
-  tool: activity.tool,
-  label: activity.label,
-  access: activity.access,
-  summary: activity.summary,
-  ...(activity.status === "refused" ? { refused: true } : {}),
-  ...(activity.error ? { error: activity.error } : {}),
-  ...(activity.link ? { link: activity.link } : {}),
-  ...(activity.sources?.length ? { sources: activity.sources } : {}),
-  ...(activity.decidedIn ? { decidedIn: activity.decidedIn } : {}),
-});

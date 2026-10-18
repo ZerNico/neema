@@ -6,11 +6,8 @@ import {
   selectAnswerSources,
 } from "./citations.ts";
 import { inheritSources } from "./inherited-sources.ts";
-import {
-  integrationActivityFromRow,
-  type ToolActivity,
-  type ToolSource,
-} from "../client/use-message-stream.ts";
+import { integrationActivityFromRow } from "../client/tool-families.ts";
+import type { ToolActivity, ToolSource } from "../client/use-message-stream.ts";
 import { projectIntegrationToolResult } from "~/modules/integrations/tool-schema.ts";
 import { toActivity } from "./stored-activities.ts";
 

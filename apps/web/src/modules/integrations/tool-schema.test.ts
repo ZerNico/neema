@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { integrationActivityFromRow } from "~/modules/chat/client/use-message-stream.ts";
+import { integrationActivityFromRow } from "~/modules/chat/client/tool-families.ts";
 import { IntegrationToolActivity, projectIntegrationToolResult } from "./tool-schema.ts";
 
 const base = {

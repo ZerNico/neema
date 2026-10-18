@@ -867,6 +867,7 @@ describe("toActivity", () => {
         runId: progress.runId,
         phase: "result",
         progress: { ...progress, phase: "complete" },
+        ok: true,
       }),
     );
     expect(completed[0]).toMatchObject({ status: "complete", runId: "run-1" });
