@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { contentKind, fileNameOf, readCapped, textBody } from "./extraction.ts";
+import { Effect } from "effect";
+import { contentKind, fileNameOf, textBody } from "./extraction.ts";
+import { readCapped } from "./public-fetch.ts";
 
 describe("what read_url can read", () => {
   it("classifies by declared type, and a .pdf path a server calls octet-stream", () => {
@@ -21,17 +23,19 @@ describe("what read_url can read", () => {
         controller.close();
       },
     });
-    const read = await readCapped(body, 8);
+    const read = await Effect.runPromise(readCapped(body, 8));
     expect(read.data).toEqual(new Uint8Array([1, 1, 1, 1, 1, 1, 2, 2]));
     expect(read.truncated).toBe(true);
-    const exact = await readCapped(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(new Uint8Array(4));
-          controller.close();
-        },
-      }),
-      4,
+    const exact = await Effect.runPromise(
+      readCapped(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(4));
+            controller.close();
+          },
+        }),
+        4,
+      ),
     );
     expect(exact.truncated).toBe(false);
   });

@@ -1,8 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { IMAGE_MEDIA_TYPES } from "~/modules/attachments/constants.ts";
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
-import { readCapped } from "~/modules/tools/server/extraction.ts";
-import { fetchPinned, resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
+import { fetchPublic, readCapped } from "~/modules/tools/server/public-fetch.ts";
 import { acceptableImageSize, readImageSize, type ImageSize } from "./image-header.ts";
 
 export class ImageFetchFailed extends Schema.TaggedError<ImageFetchFailed>()("ImageFetchFailed", {
@@ -40,40 +39,19 @@ export class ImageFetcher extends Context.Service<
 /** The network fetch the engine uses unless a test provides its own `ImageFetcher`. */
 export const fetchImage = Effect.fn("ImageFetcher.fetch")(function* (url: string) {
   const fail = (message: string) => new ImageFetchFailed({ url, message });
-  let current = url;
-  let response: Response | null = null;
-  for (let hop = 0; hop <= IMAGE_FETCH_LIMITS.redirects; hop++) {
-    const target = yield* resolvePublicHttpUrl(current).pipe(
-      Effect.mapError((e) => fail(e.reason)),
-    );
-    const res = yield* Effect.tryPromise({
-      try: (signal) =>
-        fetchPinned(target, {
-          signal: AbortSignal.any([signal, AbortSignal.timeout(IMAGE_FETCH_LIMITS.timeoutMs)]),
-          headers: { accept: IMAGE_MEDIA_TYPES.join(", ") },
-        }),
-      catch: (e) => fail(`fetch failed: ${String(e)}`),
-    });
-    if (res.status >= 300 && res.status < 400) {
-      void res.body?.cancel();
-      const location = res.headers.get("location");
-      if (!location) return yield* fail(`redirect without location (${res.status})`);
-      current = new URL(location, target.url).toString();
-      continue;
-    }
-    if (!res.ok) {
-      void res.body?.cancel();
-      return yield* fail(`HTTP ${res.status}`);
-    }
-    response = res;
-    break;
+  const { response } = yield* fetchPublic(url, {
+    headers: { accept: IMAGE_MEDIA_TYPES.join(", ") },
+    timeoutMs: IMAGE_FETCH_LIMITS.timeoutMs,
+    redirects: IMAGE_FETCH_LIMITS.redirects,
+  }).pipe(Effect.mapError((error) => fail(error.reason)));
+  if (!response.ok) {
+    void response.body?.cancel();
+    return yield* fail(`HTTP ${response.status}`);
   }
-  if (!response) return yield* fail("too many redirects");
   const body = response.body;
-  const read = yield* Effect.tryPromise({
-    try: () => readCapped(body, IMAGE_FETCH_LIMITS.bytes),
-    catch: (e) => fail(`body read failed: ${String(e)}`),
-  });
+  const read = yield* readCapped(body, IMAGE_FETCH_LIMITS.bytes).pipe(
+    Effect.mapError((error) => fail(error.reason)),
+  );
   if (read.truncated) return yield* fail("image too large");
   const mediaType = sniffBinaryMediaType(read.data);
   if (!mediaType || !(IMAGE_MEDIA_TYPES as ReadonlyArray<string>).includes(mediaType))

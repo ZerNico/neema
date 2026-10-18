@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { fetchPinned, resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
+import { fetchPublic, readCapped } from "~/modules/tools/server/public-fetch.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import {
   classifySkillFile,
@@ -64,71 +64,52 @@ export async function fetchSkillBytes(
   limit: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  const timeout = AbortSignal.timeout(15_000);
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  let current = rawUrl;
-  for (let hop = 0; hop < 4; hop++) {
-    // Cancellation has to be observed here: an aborted caller must not reach
-    // the network at all, and each redirect hop is its own request.
-    combined.throwIfAborted();
-    const parsed = new URL(current);
-    if (parsed.protocol !== "https:" || parsed.port || !allowedHosts.has(parsed.hostname))
-      throw new SkillRemoteError("Unsupported upstream host.");
-    const target = await Effect.runPromise(resolvePublicHttpUrl(current), { signal: combined });
-    const response = await fetchPinned(target, {
-      signal: combined,
+  // A caller already gone must not reach the network at all.
+  signal?.throwIfAborted();
+  const github = new URL(rawUrl).hostname === "api.github.com";
+  const fetched = Effect.gen(function* () {
+    const { response } = yield* fetchPublic(rawUrl, {
       headers: {
-        Accept:
-          parsed.hostname === "api.github.com"
-            ? "application/vnd.github+json"
-            : "application/json, text/plain",
+        Accept: github ? "application/vnd.github+json" : "application/json, text/plain",
         "User-Agent": "portable-skills",
       },
+      timeoutMs: 15_000,
+      redirects: 3,
+      refuseHop: (url) =>
+        url.protocol !== "https:" || url.port || !allowedHosts.has(url.hostname)
+          ? "Unsupported upstream host."
+          : null,
     });
-    if (response.status >= 300 && response.status < 400) {
-      await response.body?.cancel();
-      const location = response.headers.get("location");
-      if (!location) throw new SkillRemoteError("Upstream returned a redirect without a location.");
-      current = new URL(location, current).href;
-      continue;
-    }
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new SkillRemoteError(
-        response.status === 429 || response.status === 403
-          ? "Upstream rate limit reached. Try again later or upload a file."
-          : "Upstream service is unavailable. URL and file imports remain independent of discovery.",
+      void response.body?.cancel();
+      return yield* Effect.fail(
+        new SkillRemoteError(
+          response.status === 429 || response.status === 403
+            ? "Upstream rate limit reached. Try again later or upload a file."
+            : "Upstream service is unavailable. URL and file imports remain independent of discovery.",
+        ),
       );
     }
     if (Number(response.headers.get("content-length")) > limit) {
-      await response.body?.cancel();
-      throw new SkillRemoteError("Upstream response exceeds the size limit.");
+      void response.body?.cancel();
+      return yield* Effect.fail(new SkillRemoteError("Upstream response exceeds the size limit."));
     }
-    if (!response.body) throw new SkillRemoteError("Upstream returned no body.");
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        size += next.value.length;
-        if (size > limit) throw new SkillRemoteError("Upstream response exceeds the size limit.");
-        chunks.push(next.value);
-      }
-    } finally {
-      await reader.cancel();
-      reader.releaseLock();
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return bytes;
-  }
-  throw new SkillRemoteError("Too many upstream redirects.");
+    if (!response.body)
+      return yield* Effect.fail(new SkillRemoteError("Upstream returned no body."));
+    const read = yield* readCapped(response.body, limit);
+    if (read.truncated)
+      return yield* Effect.fail(new SkillRemoteError("Upstream response exceeds the size limit."));
+    return read.data;
+  }).pipe(
+    Effect.catchTag("PublicFetchFailed", (error) =>
+      Effect.fail(
+        error.reason === "Unsupported upstream host."
+          ? new SkillRemoteError(error.reason)
+          : new SkillRemoteError("Upstream service is unavailable."),
+      ),
+    ),
+  );
+  return Effect.runPromise(fetched, signal ? { signal } : undefined);
 }
 const json = async (
   url: string,

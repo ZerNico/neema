@@ -3,7 +3,7 @@ import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
-import { fetchPinned, resolvePublicHttpUrl } from "./url-safety.ts";
+import { fetchPublic, readCapped } from "./public-fetch.ts";
 
 export class PageExtractionError extends Schema.TaggedError<PageExtractionError>()(
   "PageExtractionError",
@@ -46,36 +46,15 @@ export class PageExtractor extends Context.Service<
         extract: Effect.fn("PageExtractor.extract")(function* (input) {
           const fail = (message: string) => new PageExtractionError({ url: input.url, message });
 
-          // Follow redirects manually so each hop is re-validated and pinned.
-          let current = input.url;
-          let response: Response | null = null;
-          for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-            const target = yield* resolvePublicHttpUrl(current).pipe(
-              Effect.mapError((e) => fail(e.reason)),
-            );
-            const res = yield* Effect.tryPromise({
-              try: () =>
-                fetchPinned(target, {
-                  signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-                  headers: { accept: ACCEPT },
-                }),
-              catch: (e) => fail(`fetch failed: ${String(e)}`),
-            });
-            if (res.status >= 300 && res.status < 400) {
-              void res.body?.cancel();
-              const location = res.headers.get("location");
-              if (!location) return yield* fail(`redirect without location (${res.status})`);
-              current = new URL(location, target.url).toString();
-              continue;
-            }
-            if (!res.ok) {
-              void res.body?.cancel();
-              return yield* fail(`HTTP ${res.status}`);
-            }
-            response = res;
-            break;
+          const { response, url: current } = yield* fetchPublic(input.url, {
+            headers: { accept: ACCEPT },
+            timeoutMs: FETCH_TIMEOUT_MS,
+            redirects: MAX_REDIRECTS,
+          }).pipe(Effect.mapError((error) => fail(error.reason)));
+          if (!response.ok) {
+            void response.body?.cancel();
+            return yield* fail(`HTTP ${response.status}`);
           }
-          if (!response) return yield* fail("too many redirects");
 
           const kind = contentKind(response.headers.get("content-type") ?? "", current);
           if (!kind) {
@@ -85,10 +64,10 @@ export class PageExtractor extends Context.Service<
             );
           }
           const body = response.body;
-          const bytes = yield* Effect.tryPromise({
-            try: () => readCapped(body, kind === "pdf" ? MAX_PDF_BYTES : MAX_TEXT_BYTES),
-            catch: (e) => fail(`body read failed: ${String(e)}`),
-          });
+          const bytes = yield* readCapped(
+            body,
+            kind === "pdf" ? MAX_PDF_BYTES : MAX_TEXT_BYTES,
+          ).pipe(Effect.mapError((error) => fail(error.reason)));
           if (kind === "pdf" && bytes.truncated)
             return yield* fail(`PDF larger than ${MAX_PDF_BYTES / (1024 * 1024)} MB`);
 
@@ -186,31 +165,4 @@ export const fileNameOf = (url: string, fallback: string) => {
   } catch {
     return segment || fallback;
   }
-};
-
-export const readCapped = async (body: ReadableStream<Uint8Array> | null, cap: number) => {
-  const reader = body?.getReader();
-  if (!reader) return { data: new Uint8Array(), truncated: false };
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let truncated = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    size += value.byteLength;
-    if (size >= cap) {
-      truncated = size > cap;
-      await reader.cancel();
-      break;
-    }
-  }
-  const data = new Uint8Array(Math.min(size, cap));
-  let offset = 0;
-  for (const chunk of chunks) {
-    const part = chunk.subarray(0, Math.min(chunk.byteLength, data.byteLength - offset));
-    data.set(part, offset);
-    offset += part.byteLength;
-  }
-  return { data, truncated };
 };
