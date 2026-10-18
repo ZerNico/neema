@@ -254,6 +254,12 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
         });
         continue;
       }
+      // An earlier upload, sent to a model chosen since that cannot see it:
+      // named instead, as the model's own images are, so the turn still runs.
+      if (kind === "image" && input.modelSupportsVision === false) {
+        parts.push({ type: "text", text: imageStandIn(row.fileName) });
+        continue;
+      }
       if (kind === "image" || (kind === "pdf" && input.modelSupportsFiles)) {
         parts.push({
           type: "file",

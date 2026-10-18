@@ -359,6 +359,26 @@ describe("buildHistoryMessages with attachments", () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 
+  it("names an earlier upload to a model without vision instead of sending its bytes", async () => {
+    const { deps, get } = harness({
+      rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "chart.png" })],
+    });
+    const [message] = await Effect.runPromise(
+      buildHistoryMessages(deps, {
+        messages: [user("m1", "what does it show?")],
+        modelSupportsFiles: false,
+        modelSupportsVision: false,
+      }),
+    );
+    expect(JSON.stringify(message)).toContain(
+      JSON.stringify(imageStandIn("chart.png")).slice(1, -1),
+    );
+    expect((message as Prompt.UserMessageEncoded).content).not.toContainEqual(
+      expect.objectContaining({ type: "file" }),
+    );
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("omits the trailing text part for an attachment-only turn", async () => {
     const { deps } = harness({
       rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "a.png" })],
