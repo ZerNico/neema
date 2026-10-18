@@ -828,14 +828,7 @@ export const ChatInput = forwardRef<
             onChange={onModelChange}
             side="bottom"
             disabled={noModels || controlsDisabled}
-            trigger={
-              <Button
-                variant="ghost"
-                size="sm"
-                // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
-                className="text-muted-foreground hover:text-foreground hover:bg-accent min-w-0 max-w-64 gap-1.5"
-              />
-            }
+            trigger={<Button variant="chip" size="sm" className="min-w-0 max-w-64" />}
           >
             <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
           </ModelPicker>
@@ -844,11 +837,9 @@ export const ChatInput = forwardRef<
               <DropdownMenuTrigger
                 render={
                   <Button
-                    variant="ghost"
+                    variant="chip"
                     size="sm-collapsible"
                     disabled={controlsDisabled}
-                    // oxlint-disable-next-line shadcn/no-restyle -- ghost halves its hover in dark mode, which is too faint for a chip on the composer
-                    className="text-muted-foreground hover:text-foreground hover:bg-accent"
                     aria-label={`Reasoning: ${reasoningEffort ? effortLabels[reasoningEffort] : "Default"}`}
                   />
                 }

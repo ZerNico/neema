@@ -18,6 +18,9 @@ const buttonVariantClasses = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
+        // A quiet control on the composer: ghost's hover halves in dark mode,
+        // too faint for a chip there, so this one keeps the accent.
+        chip: "text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
         // Popover surface for controls floating over scrolling content: the
         // outline variant is transparent in dark mode, which reads fine on a
         // surface but not over messages.
