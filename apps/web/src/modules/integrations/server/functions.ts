@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { publicUrl } from "~/server/public-url.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   AnswerElicitationInput,
   ApproveCatalogInput,
@@ -46,7 +46,7 @@ export const appOrigin = (request?: Request) =>
 export const listAdminIntegrations = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(async () => {
-    const integrations = await runtime.runPromise(
+    const integrations = await runServerFn(
       IntegrationService.use((service) => service.adminList()),
     );
     const origin = appOrigin();
@@ -61,13 +61,13 @@ export const listAdminIntegrations = createServerFn({ method: "GET" })
 /** Every integration's id, type and name, so any stored reference can be named and drawn. */
 export const listIntegrationDirectory = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .handler(() => runtime.runPromise(IntegrationService.use((service) => service.directory())));
+  .handler(() => runServerFn(IntegrationService.use((service) => service.directory())));
 
 export const createIntegration = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateIntegrationInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.createIntegration({ kind: data.kind, name: data.name }),
       ).pipe(
@@ -81,7 +81,7 @@ export const deleteIntegration = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(IntegrationIdInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(IntegrationService.use((service) => service.deleteIntegration(data.integrationId))),
     ),
   );
@@ -90,7 +90,7 @@ export const saveIntegrationConfig = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SaveIntegrationConfigInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         IntegrationService.use((service) =>
           service.saveConfig({
@@ -115,16 +115,14 @@ export const saveIntegrationConfig = createServerFn({ method: "POST" })
 export const listMyIntegrations = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>
-    runtime.runPromise(
-      IntegrationService.use((service) => service.listForUser(context.session.user.id)),
-    ),
+    runServerFn(IntegrationService.use((service) => service.listForUser(context.session.user.id))),
   );
 
 export const connectIntegrationApiKey = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(ConnectApiKeyInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         IntegrationService.use((service) =>
           service.connectApiKey(context.session.user.id, data.integrationId, data.values),
@@ -138,7 +136,7 @@ export const connectIntegrationOpen = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         IntegrationService.use((service) =>
           service.connectOpen(context.session.user.id, data.integrationId),
@@ -152,7 +150,7 @@ export const checkIntegrationCatalog = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.checkCatalog(data.integrationId, context.session.user.id),
       ).pipe(
@@ -166,7 +164,7 @@ export const approveIntegrationCatalog = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(ApproveCatalogInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.approveCatalog(context.session.user.id, data.integrationId, {
           version: data.version,
@@ -183,7 +181,7 @@ export const updateIntegrationConnection = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(UpdateConnectionInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         IntegrationService.use((service) =>
           service.updatePreferences(context.session.user.id, data.integrationId, {
@@ -202,7 +200,7 @@ export const disconnectIntegration = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.disconnect(context.session.user.id, data.integrationId),
       ),
@@ -214,7 +212,7 @@ export const listChatIntegrations = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(Schema.Struct({ conversationId: Schema.NullOr(Schema.String) })))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.chatIntegrations(context.session.user.id, data.conversationId),
       ),
@@ -225,7 +223,7 @@ export const setConversationIntegration = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(ConversationIntegrationInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         IntegrationService.use((service) =>
           service.setConversationIntegration(
@@ -242,7 +240,7 @@ export const setConversationIntegration = createServerFn({ method: "POST" })
 export const listPendingIntegrationCalls = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationApprovals.use((approvals) => approvals.pending(context.session.user.id)),
     ),
   );
@@ -252,7 +250,7 @@ export const decideIntegrationCall = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(DecideIntegrationCallInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const approvals = yield* IntegrationApprovals;
         const userId = context.session.user.id;
@@ -281,7 +279,7 @@ export const answerIntegrationElicitation = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(AnswerElicitationInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationApprovals.use((approvals) =>
         approvals.answer(
           context.session.user.id,
@@ -299,7 +297,7 @@ export const listKnowledgeSources = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(Schema.Struct({ collectionId: Schema.String })))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       KnowledgeSourceService.use((sources) =>
         sources.list(context.session.user.id, data.collectionId),
       ),
@@ -311,7 +309,7 @@ export const listIntegrationScopeOptions = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       IntegrationService.use((service) =>
         service.scopeOptions(context.session.user.id, data.integrationId),
       ).pipe(
@@ -331,7 +329,7 @@ export const browseIntegration = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(BrowseInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       KnowledgeSourceService.use((sources) =>
         sources.browse(context.session.user.id, data.integrationId, data.parentId ?? null),
       ).pipe(
@@ -350,7 +348,7 @@ export const saveKnowledgeSource = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SaveKnowledgeSourceInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       outcome(
         KnowledgeSourceService.use((sources) => sources.save(context.session.user.id, data)).pipe(
           Effect.asVoid,
@@ -363,7 +361,7 @@ export const removeKnowledgeSource = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SourceIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       KnowledgeSourceService.use((sources) =>
         sources.remove(context.session.user.id, data.sourceId),
       ),
@@ -374,7 +372,7 @@ export const syncKnowledgeSource = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SourceIdInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       KnowledgeSourceService.use((sources) =>
         sources.syncNow(context.session.user.id, data.sourceId),
       ),

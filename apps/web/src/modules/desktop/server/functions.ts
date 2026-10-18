@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { acceptDesktopToolResult } from "./result.ts";
 import { DesktopToolResult } from "../tool-schema.ts";
 
@@ -22,7 +22,7 @@ export const desktopWorkSnapshot = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(Schema.Struct({ executorId: Id })))
   .handler(({ data, context }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const external = yield* ExternalCompletion;
         const repo = yield* ChatRepo;
@@ -68,7 +68,7 @@ export const claimDesktopTool = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(CallInput))
   .handler(({ data, context }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const external = yield* ExternalCompletion;
         const repo = yield* ChatRepo;
@@ -87,7 +87,7 @@ export const submitDesktopToolResult = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SubmitDesktopToolResultInput))
   .handler(({ data, context }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* ChatRepo;
         const external = yield* ExternalCompletion;

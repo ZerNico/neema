@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { UsageRangeInput } from "../schema.ts";
 import { AnalyticsRepo } from "./repo.ts";
 import { previousUsageWindow, resolveUsageWindow, type UsageWindow } from "./range.ts";
@@ -24,7 +24,7 @@ export const getUsageAnalytics = createServerFn({ method: "GET" })
   .handler(({ data }) => {
     const window = resolveUsageWindow(data, new Date());
     const previous = previousUsageWindow(window);
-    return runtime.runPromise(
+    return runServerFn(
       AnalyticsRepo.use((repo) =>
         Effect.all(
           {
@@ -50,7 +50,7 @@ export const getMyUsage = createServerFn({ method: "GET" })
     const window = resolveUsageWindow(data, new Date());
     const scope = { ...window, userId };
     const previousScope = { ...previousUsageWindow(window), userId };
-    return runtime.runPromise(
+    return runServerFn(
       AnalyticsRepo.use((repo) =>
         Effect.all(
           {

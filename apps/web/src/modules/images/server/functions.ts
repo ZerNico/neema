@@ -12,7 +12,7 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { connectionOf } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { IMAGE_GENERATION_TOOL } from "../settings.ts";
 import { availableImageModels } from "./resolve.ts";
 
@@ -22,20 +22,20 @@ const standard = Schema.toStandardSchemaV1;
 export const listImageModels = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>
-    runtime.runPromise(
+    runServerFn(
       availableImageModels(context.session.user.id).pipe(Effect.map((models) => [...models])),
     ),
   );
 
 export const getImageGenerationTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(IMAGE_GENERATION_TOOL))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool(IMAGE_GENERATION_TOOL))));
 
 export const updateImageGenerationTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(Schema.Struct({ enabled: Schema.Boolean })))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       ToolsRepo.use((repo) => repo.updateTool(IMAGE_GENERATION_TOOL, { enabled: data.enabled })),
     ),
   );
@@ -56,7 +56,7 @@ export const testImageModel = createServerFn({ method: "POST" })
     ),
   )
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const provider = yield* (yield* ProviderRepo).getProviderWithKey(data.providerId);
         if (!provider) return { ok: false as const, error: "Provider not found." };

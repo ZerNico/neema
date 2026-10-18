@@ -3,7 +3,8 @@ import { INTERACTIVE_UI_TOOL, MAPS_TOOL } from "~/modules/genui/settings.ts";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { runtime } from "~/server/runtime.ts";
+import { refuse } from "~/server/refusal.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   CreateSearchProviderInput,
   SearchProviderOrderInput,
@@ -22,7 +23,7 @@ import { mistralBaseUrl, mistralOcr } from "~/modules/pdf/server/scan-readers.ts
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { ToolsRepo } from "./repo.ts";
-import { SearchProviderRepo, type InvalidSearchProvider } from "./search-provider-repo.ts";
+import { SearchProviderRepo } from "./search-provider-repo.ts";
 import { SearchProviders } from "./search-providers/chain.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor } from "./web-search.ts";
@@ -31,13 +32,13 @@ const standard = Schema.toStandardSchemaV1;
 
 export const getMemoryTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("memory"))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("memory"))));
 
 export const updateMemoryTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateMemoryToolInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* ToolsRepo;
         const sync = yield* SyncBus;
@@ -58,7 +59,7 @@ export const updateMemoryTool = createServerFn({ method: "POST" })
 
 export const getWebSearchTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("web_search"))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("web_search"))));
 
 export const updateWebSearchTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -68,7 +69,7 @@ export const updateWebSearchTool = createServerFn({ method: "POST" })
     const configPatch = Object.fromEntries(
       Object.entries(config).filter(([, v]) => v !== undefined),
     );
-    return runtime.runPromise(
+    return runServerFn(
       ToolsRepo.use((repo) =>
         repo.updateTool("web_search", {
           ...(enabled !== undefined ? { enabled } : {}),
@@ -78,9 +79,6 @@ export const updateWebSearchTool = createServerFn({ method: "POST" })
     );
   });
 
-const badRequest = (error: InvalidSearchProvider) =>
-  Effect.die(new Response(error.reason, { status: 400 }));
-
 /**
  * Providers in order with what this process last saw of each: health is
  * process memory and belongs to one version of a provider.
@@ -88,7 +86,7 @@ const badRequest = (error: InvalidSearchProvider) =>
 export const listSearchProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const providers = yield* (yield* SearchProviderRepo).list();
         const health = yield* (yield* SearchProviders).status();
@@ -111,48 +109,28 @@ export const listSearchProviders = createServerFn({ method: "GET" })
 export const createSearchProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateSearchProviderInput))
-  .handler(({ data }) =>
-    runtime.runPromise(
-      SearchProviderRepo.use((repo) => repo.create(data)).pipe(
-        Effect.catchTag("InvalidSearchProvider", badRequest),
-      ),
-    ),
-  );
+  .handler(({ data }) => runServerFn(SearchProviderRepo.use((repo) => repo.create(data))));
 
 export const updateSearchProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateSearchProviderInput))
-  .handler(({ data }) =>
-    runtime.runPromise(
-      SearchProviderRepo.use((repo) => repo.update(data)).pipe(
-        Effect.catchTag("InvalidSearchProvider", badRequest),
-      ),
-    ),
-  );
+  .handler(({ data }) => runServerFn(SearchProviderRepo.use((repo) => repo.update(data))));
 
 export const deleteSearchProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(Schema.Struct({ id: Schema.String })))
-  .handler(({ data }) =>
-    runtime.runPromise(SearchProviderRepo.use((repo) => repo.remove(data.id))),
-  );
+  .handler(({ data }) => runServerFn(SearchProviderRepo.use((repo) => repo.remove(data.id))));
 
 export const setSearchProviderOrder = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SearchProviderOrderInput))
-  .handler(({ data }) =>
-    runtime.runPromise(
-      SearchProviderRepo.use((repo) => repo.setOrder(data.ids)).pipe(
-        Effect.catchTag("InvalidSearchProvider", badRequest),
-      ),
-    ),
-  );
+  .handler(({ data }) => runServerFn(SearchProviderRepo.use((repo) => repo.setOrder(data.ids))));
 
 export const testSearchProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(TestSearchProviderInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* SearchProviderRepo;
         const stored = data.id ? yield* repo.snapshot(data.id) : null;
@@ -188,7 +166,7 @@ export const testSearchProvider = createServerFn({ method: "POST" })
 export const getWebSearchAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(() =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const search = yield* (yield* WebSearchExecutor).availability();
         return { configured: search.configured, enabled: search.configured && search.enabled };
@@ -198,7 +176,7 @@ export const getWebSearchAvailability = createServerFn({ method: "GET" })
 
 export const getUrlReaderTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("read_url"))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("read_url"))));
 
 export const updateUrlReaderTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -208,7 +186,7 @@ export const updateUrlReaderTool = createServerFn({ method: "POST" })
     const configPatch = Object.fromEntries(
       Object.entries(config).filter(([, v]) => v !== undefined),
     );
-    return runtime.runPromise(
+    return runServerFn(
       ToolsRepo.use((repo) =>
         repo.updateTool("read_url", {
           ...(enabled !== undefined ? { enabled } : {}),
@@ -220,13 +198,13 @@ export const updateUrlReaderTool = createServerFn({ method: "POST" })
 
 export const getOfficeFilesTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("office_files"))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("office_files"))));
 
 export const updateOfficeFilesTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(Schema.Struct({ enabled: Schema.Boolean })))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       ToolsRepo.use((repo) => repo.updateTool("office_files", { enabled: data.enabled })),
     ),
   );
@@ -239,7 +217,7 @@ const MapServiceUrl = Schema.String.check(
 
 export const getInteractiveUiTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
 
 export const updateInteractiveUiTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -253,7 +231,7 @@ export const updateInteractiveUiTool = createServerFn({ method: "POST" })
   )
   .handler(({ data }) => {
     const { enabled, ...config } = data;
-    return runtime.runPromise(
+    return runServerFn(
       ToolsRepo.use((repo) =>
         repo.updateTool(INTERACTIVE_UI_TOOL, {
           ...(enabled !== undefined ? { enabled } : {}),
@@ -265,7 +243,7 @@ export const updateInteractiveUiTool = createServerFn({ method: "POST" })
 
 export const getMapsTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool(MAPS_TOOL))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool(MAPS_TOOL))));
 
 export const updateMapsTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -282,7 +260,7 @@ export const updateMapsTool = createServerFn({ method: "POST" })
   )
   .handler(({ data }) => {
     const { enabled, ...config } = data;
-    return runtime.runPromise(
+    return runServerFn(
       ToolsRepo.use((repo) =>
         repo.updateTool(MAPS_TOOL, {
           ...(enabled !== undefined ? { enabled } : {}),
@@ -294,7 +272,7 @@ export const updateMapsTool = createServerFn({ method: "POST" })
 
 export const getDocumentParserTool = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(ToolsRepo.use((repo) => repo.getTool("document_parser"))));
+  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("document_parser"))));
 
 export const updateDocumentParserTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -304,7 +282,7 @@ export const updateDocumentParserTool = createServerFn({ method: "POST" })
     const configPatch = Object.fromEntries(
       Object.entries(config).filter(([, v]) => v !== undefined),
     );
-    return runtime.runPromise(
+    return runServerFn(
       ToolsRepo.use((repo) =>
         repo.updateTool("document_parser", {
           ...(enabled !== undefined ? { enabled } : {}),
@@ -314,9 +292,6 @@ export const updateDocumentParserTool = createServerFn({ method: "POST" })
     );
   });
 
-/** A choice the admin can fix, said as the reason. */
-const refuse = (reason: string) => Effect.die(new Response(reason, { status: 400 }));
-
 /**
  * How scanned pages are read, with what the admin page needs to show for it:
  * the model files' state, the vision models one could choose, and whether a
@@ -325,7 +300,7 @@ const refuse = (reason: string) => Effect.die(new Response(reason, { status: 400
 export const getScanReading = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* ToolsRepo;
         const ocrModels = yield* OcrModels;
@@ -381,7 +356,7 @@ export const updateScanReading = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(UpdateScanReadingInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* ToolsRepo;
         const db = yield* Db;
@@ -389,22 +364,22 @@ export const updateScanReading = createServerFn({ method: "POST" })
         if (data.scans.mode === "model") {
           const approved = yield* readVisionConnection(db, data.scans.modelId);
           if (!approved)
-            return yield* refuse("Choose an enabled, public model that can see images.");
+            return yield* refuse(400, "Choose an enabled, public model that can see images.");
           scans = { mode: "model" as const, modelId: data.scans.modelId, approved };
         } else if (data.scans.mode === "mistral") {
           const baseUrl = mistralBaseUrl(data.scans.baseUrl);
           if (!baseUrl)
-            return yield* refuse("Enter the OCR service’s base URL, starting with https://.");
+            return yield* refuse(400, "Enter the OCR service’s base URL, starting with https://.");
           scans = { mode: "mistral" as const, baseUrl };
         } else scans = data.scans;
         if (
           scans.mode === "local" &&
           (yield* (yield* OcrModels).status(scans.quality)).state === "unsupported"
         )
-          return yield* refuse("This server’s platform can’t read scanned pages itself.");
+          return yield* refuse(400, "This server’s platform can’t read scanned pages itself.");
         if (data.scans.mode === "mistral" && !data.secret?.trim()) {
           const current = yield* repo.getDocumentParser();
-          if (!current?.secret) return yield* refuse("Enter an API key for the OCR service.");
+          if (!current?.secret) return yield* refuse(400, "Enter an API key for the OCR service.");
         }
         yield* repo.updateTool("document_parser", {
           config: { scans },
@@ -419,9 +394,7 @@ export const updateScanReading = createServerFn({ method: "POST" })
 export const retryOcrModelDownload = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(Schema.Struct({ quality: Schema.Literals(["accurate", "fast"]) })))
-  .handler(({ data }) =>
-    runtime.runPromise(OcrModels.use((models) => models.ensure(data.quality))),
-  );
+  .handler(({ data }) => runServerFn(OcrModels.use((models) => models.ensure(data.quality))));
 
 /** A one-page PDF with known words, so a test reads something real and cheap. */
 const samplePdf = Effect.promise(async () => {
@@ -438,7 +411,7 @@ export const testMistralOcr = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(TestScanReaderInput))
   .handler(({ data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const repo = yield* ToolsRepo;
         const typed = data.secret?.trim();
@@ -466,7 +439,7 @@ export const testMistralOcr = createServerFn({ method: "POST" })
 export const getResearchAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(() =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const search = yield* (yield* WebSearchExecutor).availability();
         const reader = yield* (yield* UrlReaderExecutor).availability();

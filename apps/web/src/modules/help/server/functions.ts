@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect";
 import { userSeenFeatures } from "~/db/schema/index.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { Db } from "~/server/db.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { FEATURE_KEYS } from "../features.ts";
 
 // Only keys the app knows, so a client can't fill the table with arbitrary rows.
@@ -15,7 +15,7 @@ const MarkSeenInput = Schema.Struct({
 export const listSeenFeatures = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(({ context }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         const db = yield* Db;
         const rows = yield* db
@@ -32,7 +32,7 @@ export const markFeaturesSeen = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(Schema.toStandardSchemaV1(MarkSeenInput))
   .handler(({ context, data }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.gen(function* () {
         if (data.keys.length === 0) return;
         const db = yield* Db;

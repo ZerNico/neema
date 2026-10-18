@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   findBuiltin,
   OAuthProviderId,
@@ -46,7 +47,7 @@ export const listOAuthProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(async () => ({
     baseURL: publicUrl() ?? null,
-    providers: await runtime.runPromise(OAuthRepo.use((repo) => repo.list())),
+    providers: await runServerFn(OAuthRepo.use((repo) => repo.list())),
   }));
 
 export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
@@ -121,7 +122,7 @@ export const deleteOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(OAuthProviderId))
   .handler(async ({ data }) => {
-    await runtime.runPromise(OAuthRepo.use((repo) => repo.remove(data.id)));
+    await runServerFn(OAuthRepo.use((repo) => repo.remove(data.id)));
     invalidateAuth();
   });
 
@@ -130,5 +131,5 @@ export const deleteOAuthProvider = createServerFn({ method: "POST" })
  * is signed in. Ids and labels only; nothing about a client or its secret.
  */
 export const getSignInProviders = createServerFn({ method: "GET" }).handler(() =>
-  runtime.runPromise(OAuthRepo.use((repo) => repo.listForSignIn())),
+  runServerFn(OAuthRepo.use((repo) => repo.listForSignIn())),
 );

@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { Effect, Schema } from "effect";
-import { runtime } from "~/server/runtime.ts";
+import { refuse } from "~/server/refusal.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { DecideApprovalInput, SetSignupPolicyInput } from "../signup.ts";
 import { sessionFromHeaders } from "./auth.ts";
 import { requireAdmin } from "./middleware.ts";
@@ -16,7 +17,7 @@ const standard = Schema.toStandardSchemaV1;
 export const getApprovalStatus = createServerFn({ method: "GET" }).handler(async () => {
   const current = await sessionFromHeaders(getRequestHeaders());
   if (!current) return null;
-  const status = await runtime.runPromise(
+  const status = await runServerFn(
     Effect.flatMap(SignupRepo, (repo) => repo.statusOf(current.session.user.id)),
   );
   return status ?? "pending";
@@ -24,23 +25,23 @@ export const getApprovalStatus = createServerFn({ method: "GET" }).handler(async
 
 /** Public: a signed-out visitor has to know whether to set up or sign in. */
 export const getNeedsSetup = createServerFn({ method: "GET" }).handler(() =>
-  runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.needsSetup())),
+  runServerFn(Effect.flatMap(SignupRepo, (repo) => repo.needsSetup())),
 );
 
 export const getSignupPolicy = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.policy())));
+  .handler(() => runServerFn(Effect.flatMap(SignupRepo, (repo) => repo.policy())));
 
 export const setSignupPolicy = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SetSignupPolicyInput))
   .handler(({ data }) =>
-    runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.setPolicy(data.policy))),
+    runServerFn(Effect.flatMap(SignupRepo, (repo) => repo.setPolicy(data.policy))),
   );
 
 export const listPendingAccounts = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runtime.runPromise(Effect.flatMap(SignupRepo, (repo) => repo.listPending())));
+  .handler(() => runServerFn(Effect.flatMap(SignupRepo, (repo) => repo.listPending())));
 
 /**
  * A rejected account is kept rather than deleted: deleting it would let the
@@ -51,7 +52,7 @@ export const decideAccount = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(DecideApprovalInput))
   .handler(({ data, context }) =>
-    runtime.runPromise(
+    runServerFn(
       Effect.flatMap(SignupRepo, (repo) =>
         repo.decide({
           userId: data.userId,
@@ -62,11 +63,7 @@ export const decideAccount = createServerFn({ method: "POST" })
         Effect.flatMap((decided) =>
           decided
             ? Effect.void
-            : Effect.die(
-                new Response("You can’t decide on your own account or the owner’s", {
-                  status: 409,
-                }),
-              ),
+            : refuse(409, "You can’t decide on your own account or the owner’s"),
         ),
       ),
     ),

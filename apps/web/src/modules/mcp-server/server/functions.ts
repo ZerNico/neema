@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { currentAuth, mayConnectApps, mcpResource } from "~/modules/auth/server/auth.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
-import { runtime } from "~/server/runtime.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { isMcpScope, OFFLINE_ACCESS } from "../scopes.ts";
 import { ConnectedApps } from "./connected-apps.ts";
 
@@ -38,7 +38,7 @@ export const getConsentRequest = createServerFn({ method: "GET" })
     }
     if (!(await mayConnectApps(user.id))) return { state: "not-allowed" as const };
     const params = new URLSearchParams(data.query);
-    const client = await runtime.runPromise(
+    const client = await runServerFn(
       ConnectedApps.use((apps) => apps.client(params.get("client_id") ?? "")),
     );
     if (!client) return { state: "invalid" as const };
@@ -57,7 +57,7 @@ export const listConnectedApps = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const userId = context.session.user.id;
     const [apps, allowed] = await Promise.all([
-      runtime.runPromise(ConnectedApps.use((service) => service.list(userId))),
+      runServerFn(ConnectedApps.use((service) => service.list(userId))),
       mayConnectApps(userId),
     ]);
     return { apps, allowed, serverUrl: mcpResource() ?? null };
@@ -67,7 +67,7 @@ export const revokeConnectedApp = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(Schema.Struct({ clientId: Schema.String })))
   .handler(({ data, context }) =>
-    runtime.runPromise(
+    runServerFn(
       ConnectedApps.use((apps) => apps.revoke(context.session.user.id, data.clientId)).pipe(
         Effect.as({ ok: true as const }),
       ),
