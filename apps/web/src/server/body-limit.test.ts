@@ -16,13 +16,13 @@ describe("server function body limit", () => {
     expect(oversizedBody(post({ "content-length": "lots" }))?.status).toBe(413);
   });
 
-  it("asks for a length when a body declares none", () => {
+  it("lets a body through that declares no length, as a proxy may forward it", () => {
     const streamed = new Request("https://chat.test/_serverFn/x", {
       method: "POST",
       body: new ReadableStream(),
       duplex: "half",
     } as RequestInit);
-    expect(oversizedBody(streamed)?.status).toBe(411);
+    expect(oversizedBody(streamed)).toBeNull();
   });
 
   it("ignores a request without a body", () => {

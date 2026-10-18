@@ -7,11 +7,13 @@ import { PROJECT_FILE_LIMITS } from "~/modules/projects/files.ts";
  */
 export const MAX_SERVER_FN_BODY = PROJECT_FILE_LIMITS.fileBytes + 1024 * 1024;
 
-/** The refusal for a body too large to read, judged by its declared length, or null. */
+/** The refusal for a body whose declared length is too large to read, or null. */
 export const oversizedBody = (request: Request): Response | null => {
   if (request.body === null) return null;
   const declared = request.headers.get("content-length");
-  if (declared === null) return new Response("Length required", { status: 411 });
+  // Browsers always declare it; a proxy may forward a body chunked, and that
+  // must not refuse every call behind it.
+  if (declared === null) return null;
   const length = Number(declared);
   return Number.isSafeInteger(length) && length <= MAX_SERVER_FN_BODY
     ? null
