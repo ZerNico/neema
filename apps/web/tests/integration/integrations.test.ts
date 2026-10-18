@@ -1014,6 +1014,19 @@ describe("what a chat is offered", () => {
       db.insert(agentIntegrations).values({ agentId, integrationId: "outline" }),
     );
     expect((await chat())[0]).toMatchObject({ enabled: true, defaultEnabled: true });
+    // Another person naming this chat learns nothing of it, not even its own
+    // switch: they get their own defaults.
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.setConversationIntegration(userId, conversationId, "outline", { enabled: false }),
+      ),
+    );
+    expect((await chat())[0]).toMatchObject({ enabled: false });
+    const stranger = await newUser();
+    await connectKey(stranger);
+    const asked = (conversation: string | null) =>
+      run(Effect.flatMap(IntegrationService, (s) => s.chatIntegrations(stranger, conversation)));
+    expect(await asked(conversationId)).toEqual(await asked(null));
   });
 
   it("merges per-tool permissions and keeps a chat's allowances to that chat", async () => {

@@ -2,7 +2,13 @@ import { isIP } from "node:net";
 import { and, eq, gt } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Semaphore } from "effect";
 import { uuidv7 } from "uuidv7";
-import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
+import {
+  conversations,
+  integrationConfigs,
+  integrationConnections,
+  verification,
+} from "~/db/schema/index.ts";
+import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import { eligibleAdmin } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
@@ -833,8 +839,17 @@ export class IntegrationService extends Context.Service<
         conversationId: string | null,
       ) {
         const usable = yield* usableConnections(userId);
-        const settings = conversationId ? yield* repo.conversationSettings(conversationId) : [];
-        const attached = conversationId ? yield* repo.agentIntegrationIds(conversationId) : null;
+        // Another person's chat reads as no chat: its toggles and agent are theirs.
+        const [owned] = conversationId
+          ? yield* db
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(ownedConversationById(conversationId, userId))
+              .pipe(Effect.orDie)
+          : [];
+        const chatId = owned?.id ?? null;
+        const settings = chatId ? yield* repo.conversationSettings(chatId) : [];
+        const attached = chatId ? yield* repo.agentIntegrationIds(chatId) : null;
         const result: ChatIntegration[] = [];
         for (const { connection, config } of [...usable.values()].toSorted((a, b) =>
           byName(a.config, b.config),
