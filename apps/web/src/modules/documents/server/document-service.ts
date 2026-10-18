@@ -97,9 +97,23 @@ const CHANGED_THROTTLE = Duration.seconds(1);
 /** The collab client id of every model write, and of the server's own repairs. */
 const MODEL_CLIENT = "model";
 const SERVER_CLIENT = "server";
-/** Ids the server writes under; a connected app's are `app:<client>`. Never a person's. */
-const reservedClient = (clientId: string) =>
-  clientId === MODEL_CLIENT || clientId === SERVER_CLIENT || clientId.startsWith("app:");
+/**
+ * A person's collab id as stored and relayed: theirs, scoped by who sent it,
+ * so nobody can take over another's, nor the server's own `model`, `server`
+ * and `app:<client>` ids. Each person's own feed sees their ids unscoped.
+ */
+const personClient = (userId: string, clientId: string) => `${userId}:${clientId}`;
+const asSeenBy = (userId: string) => {
+  const prefix = `${userId}:`;
+  const id = (clientId: string) =>
+    clientId.startsWith(prefix) ? clientId.slice(prefix.length) : clientId;
+  return (frame: DocumentFrame): DocumentFrame =>
+    frame.type === "steps"
+      ? { ...frame, clientIds: frame.clientIds.map(id) }
+      : frame.type === "presence"
+        ? { ...frame, clientId: id(frame.clientId) }
+        : frame;
+};
 
 interface KeptStep {
   readonly json: Record<string, unknown>;
@@ -116,11 +130,6 @@ interface Entry {
   revision: number;
   readonly presence: Map<string, DocumentPresence>;
   /**
-   * Who each collab client id belongs to. An editor counts steps under its own
-   * id as its confirmations, so a step under another person's id would desync them.
-   */
-  readonly clients: Map<string, string>;
-  /**
    * Open feeds per client id. A caret is kept only while its feed is open, so
    * a push landing after its tab left cannot leave one behind for good.
    */
@@ -133,13 +142,6 @@ interface Entry {
   touched: number;
   changedPending: boolean;
 }
-/** Binds a client id to the person using it first; false when it is not theirs. */
-const claimClient = (entry: Entry, clientId: string, userId: string) => {
-  if (reservedClient(clientId)) return false;
-  const owner = entry.clients.get(clientId);
-  if (owner === undefined) entry.clients.set(clientId, userId);
-  return owner === undefined || owner === userId;
-};
 
 interface Author {
   origin: "user" | "model";
@@ -570,13 +572,6 @@ export class DocumentService extends Context.Service<
             revision: state.document.revision,
             presence: new Map(),
             feeds: new Map(),
-            clients: new Map(
-              state.steps.flatMap((row) =>
-                row.userId === null || reservedClient(row.clientId)
-                  ? []
-                  : [[row.clientId, row.userId] as const],
-              ),
-            ),
             comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
             conversationId: state.document.conversationId,
@@ -1051,23 +1046,18 @@ export class DocumentService extends Context.Service<
           Effect.gen(function* () {
             yield* requireDocuments(userId);
             const { entry, document } = yield* load(userId, parsed.documentId);
-            if (!claimClient(entry, parsed.clientId, userId))
-              return yield* new DocumentRejected({ reason: "that editor belongs to someone else" });
+            const clientId = personClient(userId, parsed.clientId);
             // Refused before the steps touch anything: a reader's cursor may move, their text may not.
             if (parsed.steps && !document.canEdit)
               return yield* new DocumentRejected({ reason: "this document is read-only for you" });
-            if (parsed.presence && entry.feeds.has(parsed.clientId)) {
+            if (parsed.presence && entry.feeds.has(clientId)) {
               // Labelled by who is signed in, never by what the client says.
               const presence = {
                 ...parsed.presence,
                 user: presenceUser({ id: userId, name: yield* nameOf(userId) }),
               };
-              entry.presence.set(parsed.clientId, presence);
-              yield* PubSub.publish(entry.frames, {
-                type: "presence",
-                clientId: parsed.clientId,
-                presence,
-              });
+              entry.presence.set(clientId, presence);
+              yield* PubSub.publish(entry.frames, { type: "presence", clientId, presence });
             }
             if (!parsed.steps) return { revision: entry.revision, conflict: false };
             // Built on an older revision: the editor rebases over what its feed brings, then resends.
@@ -1083,7 +1073,7 @@ export class DocumentService extends Context.Service<
               catch: () => new DocumentRejected({ reason: "invalid document step" }),
             });
             const { doc, steps } = yield* applySteps(entry.doc, json, { checked: true });
-            const author: Author = { origin: "user", userId, clientId: parsed.clientId };
+            const author: Author = { origin: "user", userId, clientId };
             const stored = yield* transaction((tx) =>
               Effect.gen(function* () {
                 const locked = yield* documents.lock(tx, userId, parsed.documentId);
@@ -1129,11 +1119,9 @@ export class DocumentService extends Context.Service<
             Effect.gen(function* () {
               if (!(yield* canSubscribe)) return gone;
               const { entry } = yield* load(userId, documentId);
-              // Another person's id would hide their caret here and remove it on close.
               const clientId =
-                options.clientId !== null && claimClient(entry, options.clientId, userId)
-                  ? options.clientId
-                  : null;
+                options.clientId === null ? null : personClient(userId, options.clientId);
+              const seen = asSeenBy(userId);
               const ownPresence = (frame: DocumentFrame) =>
                 frame.type === "presence" && frame.clientId === clientId;
               // Subscribed before the catch-up is taken, and under the lock, so
@@ -1201,6 +1189,7 @@ export class DocumentService extends Context.Service<
                     Stream.interruptWhen(revoked),
                   ),
                 ),
+                Stream.map(seen),
                 Stream.concat(Stream.suspend(() => (lostAccess ? gone : Stream.empty))),
               );
             }),

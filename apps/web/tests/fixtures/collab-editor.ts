@@ -20,8 +20,12 @@ type Run = <A, E>(effect: Effect.Effect<A, E, DocumentService>) => Promise<A>;
  * service's own feed, making changes as the smallest edit and pushing them
  * like the panel does, rebasing over whatever landed first when refused.
  */
-export async function collabEditor(run: Run, userId: string, documentId: string) {
-  const clientId = uuidv7();
+export async function collabEditor(
+  run: Run,
+  userId: string,
+  documentId: string,
+  clientId: string = uuidv7(),
+) {
   const firstFrame = (revision: number | null) =>
     run(
       Effect.gen(function* () {
@@ -42,8 +46,11 @@ export async function collabEditor(run: Run, userId: string, documentId: string)
     doc: Node.fromJSON(documentSchema, opened.doc),
     plugins: [collab({ version: opened.revision, clientID: clientId })],
   });
+  /** Whose steps this editor was told of, by collab id, in order. */
+  const heard: string[] = [];
   const receive = (frame: Extract<DocumentFrame, { type: "steps" }>) => {
     const skip = getVersion(state) - (frame.revision - frame.steps.length);
+    heard.push(...frame.clientIds.slice(skip));
     const steps = frame.steps.slice(skip).map((json) => Step.fromJSON(documentSchema, json));
     state = state.apply(receiveTransaction(state, steps, frame.clientIds.slice(skip)));
   };
@@ -110,6 +117,7 @@ export async function collabEditor(run: Run, userId: string, documentId: string)
   };
   return {
     clientId,
+    heard: () => [...heard],
     mark,
     markdown: () => toMarkdown(state.doc),
     revision: () => getVersion(state),

@@ -525,27 +525,26 @@ describe("project documents", () => {
     );
     const ownerEditor = (await openEditor(owner, document.id))!;
     await ownerEditor.type((markdown) => `${markdown}\n- [ ] announce`);
-    const current = (await docs((s) => s.get(editor, document.id)))!.revision;
-    const pushAs = (clientId: string) =>
-      docs((s) =>
-        s.push(editor, {
-          documentId: document.id,
-          clientId,
-          revision: current,
-          presence: {
-            anchor: 1,
-            head: 1,
-            revision: current,
-            user: { name: "Editor", color: "red", colorLight: "red" },
-          },
-        }),
-      );
-    for (const taken of [ownerEditor.clientId, "model", "server", "app:claude"])
-      await expect(pushAs(taken)).rejects.toMatchObject({
-        _tag: "DocumentRejected",
-        reason: "that editor belongs to someone else",
-      });
-    await expect(pushAs("editor-own")).resolves.toMatchObject({ conflict: false });
+    // Another member under the owner's id, then the model's: each is still theirs alone.
+    for (const [taken, line] of [
+      [ownerEditor.clientId, "review"],
+      ["model", "invoice"],
+    ] as const) {
+      // Level with the server, so the impostor's step is the next the owner hears.
+      // oxlint-disable-next-line eslint/no-await-in-loop -- One impostor at a time.
+      await ownerEditor.catchUp();
+      const before = ownerEditor.heard().length;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+      const impostor = (await collabEditor(run, editor, document.id, taken))!;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+      await impostor.type((markdown) => `${markdown}\n- [ ] ${line}`);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- As above.
+      await ownerEditor.catchUp();
+      // Taken as the owner's own step, the line would never reach the owner's editor.
+      expect(ownerEditor.markdown()).toContain(line);
+      expect(ownerEditor.heard().slice(before)).not.toContain(taken);
+    }
+    expect(ownerEditor.markdown()).toBe(await markdownOf(owner, document.id));
   });
 
   it("lets editors write together and viewers read, move a cursor, but never change the text", async () => {
