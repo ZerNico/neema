@@ -37,6 +37,7 @@ import type {
   GroupNameTaken,
   GroupNotFound,
 } from "~/modules/groups/errors.ts";
+import type { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import type {
   KnowledgeNotAvailable,
   KnowledgeRejected,
@@ -95,6 +96,7 @@ export type Refusable =
   | GroupMemberNotFound
   | GroupNameTaken
   | GroupNotFound
+  | IntegrationNotAvailable
   | InvalidDefaultModelOrder
   | InvalidMessage
   | InvalidSearchProvider
@@ -171,6 +173,7 @@ const refusals: RefusalTable = {
   GroupMemberNotFound: notFound,
   GroupNameTaken: () => ({ status: 409, body: "Group name already taken" }),
   GroupNotFound: notFound,
+  IntegrationNotAvailable: notFound,
   InvalidDefaultModelOrder: because(400),
   InvalidMessage: because(400),
   InvalidSearchProvider: because(400),

@@ -149,6 +149,13 @@ export const loadConversationHistory = Effect.fn("chat.loadConversationHistory")
   }
 });
 
+// Outside the loader's generator: inline, its error type was inferred as any.
+const branchSource = (repo: ChatRepo["Service"], userId: string, sourceId: string) =>
+  repo.getConversation(userId, sourceId).pipe(
+    Effect.map((source) => ({ conversationId: source.id, title: source.title })),
+    Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
+  );
+
 /**
  * Everything the chat view needs for one conversation, in three dependency
  * stages rather than one serial chain of round trips.
@@ -201,10 +208,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
               ? repo.latestMachineAttempt(conversation.id)
               : Effect.succeed(null),
           branchedFrom: conversation.branchedFrom
-            ? repo.getConversation(userId, conversation.branchedFrom).pipe(
-                Effect.map((source) => ({ conversationId: source.id, title: source.title })),
-                Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)),
-              )
+            ? branchSource(repo, userId, conversation.branchedFrom)
             : Effect.succeed(null),
           // The schedule behind this chat, for the banner link back: one that keeps
           // running here first, else the one whose fire created it. Read optionally
