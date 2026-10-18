@@ -1,5 +1,5 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
-import { Effect, Schema, type Scope } from "effect";
+import { Effect, Result as EffectResult, Schema, type Scope } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
@@ -30,6 +30,29 @@ export const advertisedParameter = (jsonSchema: Record<string, unknown>) =>
   Schema.optionalKey(
     Schema.Any.check(Schema.makeFilter(() => true, { toJsonSchema: () => jsonSchema })),
   );
+
+/** An `advertisedParameter` offering the model the JSON Schema of `schema` itself. */
+export const advertisedAs = (schema: Schema.Top) =>
+  advertisedParameter(Schema.toJsonSchemaDocument(schema).schema);
+
+/**
+ * Decodes what the model sent for an `advertisedAs` parameter, strictly. The
+ * issue names paths and expected shapes, never the submitted values, so it can
+ * go back to the model as a correction hint.
+ */
+export const decodeToolInput = <S extends Schema.Codec<unknown, unknown, never, never>>(
+  schema: S,
+  input: unknown,
+): { ok: true; value: S["Type"] } | { ok: false; issue: string } => {
+  const result = Effect.runSync(
+    Effect.result(
+      Schema.decodeUnknownEffect(schema)(input, { onExcessProperty: "error", errors: "all" }),
+    ),
+  );
+  return EffectResult.isSuccess(result)
+    ? { ok: true, value: result.success }
+    : { ok: false, issue: result.failure.message.replace(/\s+/g, " ").slice(0, 600) };
+};
 
 type DynamicToolkit = Toolkit.Toolkit<Record<string, Tool.Any>>;
 
