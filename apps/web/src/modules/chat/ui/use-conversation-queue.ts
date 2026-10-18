@@ -57,8 +57,13 @@ interface Draft {
 }
 
 /** Shows the server's reason for a refused queue action, or a fallback. */
-const failed = (fallback: string) => (error: unknown) =>
+/** A start the page refused after saying why itself, so it needs no second toast. */
+export class StartBlocked extends Error {}
+
+const failed = (fallback: string) => (error: unknown) => {
+  if (error instanceof StartBlocked) return;
   toast.error(error instanceof Error && error.message ? error.message : fallback);
+};
 
 /**
  * Everything the chat view does with its queue: queueing, editing, steering,

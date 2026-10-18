@@ -71,7 +71,7 @@ import {
 import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
-import { useConversationQueue } from "./use-conversation-queue.ts";
+import { StartBlocked, useConversationQueue } from "./use-conversation-queue.ts";
 import { createsDocument, type AssistantSteer } from "./assistant-body.ts";
 import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
@@ -607,19 +607,19 @@ export function ChatView({
   const flushAgentDraft = async () => {
     if (hasAgentDraft && !(await agentDraft.current?.flush())) {
       toast.error("Resolve the changes in your agent draft before continuing.");
-      throw new Error("agent draft has unresolved changes");
+      throw new StartBlocked("agent draft has unresolved changes");
     }
   };
   const flushScheduleDraft = async () => {
     if (hasScheduleDraft && !(await scheduleDraft.current?.flush())) {
       toast.error("Resolve the changes in your schedule draft before continuing.");
-      throw new Error("schedule draft has unresolved changes");
+      throw new StartBlocked("schedule draft has unresolved changes");
     }
   };
   const flushDocuments = async () => {
     if (hasDocument && !(await documents.current?.flush())) {
       toast.error("Resolve the changes in your document before continuing.");
-      throw new Error("document has unresolved changes");
+      throw new StartBlocked("document has unresolved changes");
     }
   };
   const checkWorkReady = () => work.check();
