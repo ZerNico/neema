@@ -961,15 +961,20 @@ export class StreamEngine extends Context.Service<
                 cachedInputTokens: totals.cachedInputTokens,
                 cacheWriteTokens: totals.cacheWriteTokens,
                 reasoningTokens: totals.reasoningTokens,
-                ...resolveCost(
-                  totals,
-                  model?.pricing,
-                  imageOutput && (imageCostIncomplete || modelCallOpen)
-                    ? "incomplete-images"
-                    : imageOutput
-                      ? "images"
-                      : "text",
-                ),
+                // Stopped or failed inside a model call: that call's tokens were
+                // billed but never reported, so the row is a floor, not a total.
+                usageComplete: !modelCallOpen,
+                ...(modelCallOpen
+                  ? { cost: null, costSource: null }
+                  : resolveCost(
+                      totals,
+                      model?.pricing,
+                      imageOutput && imageCostIncomplete
+                        ? "incomplete-images"
+                        : imageOutput
+                          ? "images"
+                          : "text",
+                    )),
               },
             });
             yield* PubSub.publish(pubsub, {

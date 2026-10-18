@@ -632,6 +632,8 @@ const recordCompactionUsage = Effect.fn("chat.recordCompactionUsage")(function* 
   if (outcome.usage) {
     addFinishUsage(totals, { usage: outcome.usage, metadata: outcome.finishMetadata });
   }
+  // Without a finish the call may still have been billed: a floor, priced at nothing.
+  const complete = outcome.usage !== undefined;
   const model = yield* deps.providers.getModel(input.modelId);
   yield* deps.analytics.record({
     userId: input.userId,
@@ -646,7 +648,8 @@ const recordCompactionUsage = Effect.fn("chat.recordCompactionUsage")(function* 
     cachedInputTokens: totals.cachedInputTokens,
     cacheWriteTokens: totals.cacheWriteTokens,
     reasoningTokens: totals.reasoningTokens,
-    ...resolveCost(totals, model?.pricing),
+    usageComplete: complete,
+    ...(complete ? resolveCost(totals, model?.pricing) : { cost: null, costSource: null }),
   });
 });
 

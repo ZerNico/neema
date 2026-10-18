@@ -354,7 +354,7 @@ describe("usage ledger capture", () => {
       const events = await run(
         Effect.gen(function* () {
           const userId = yield* makeUser();
-          const model = yield* makeModel();
+          const model = yield* makeModel({ pricing: { input: 2, output: 10 } });
           const turn = yield* generateOnce(userId, model.id);
           return yield* eventsForMessage(turn.assistantMessageId);
         }),
@@ -363,6 +363,8 @@ describe("usage ledger capture", () => {
       // attempt itself is on the ledger.
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ status: "error", inputTokens: 0, outputTokens: 0 });
+      // The open call was billed but never reported: a floor with no price, not a zero total.
+      expect(events[0]).toMatchObject({ usageComplete: false, cost: null, costSource: null });
     } finally {
       failStream = false;
     }
