@@ -1,7 +1,7 @@
-// Image dimensions from the header bytes alone. Search images are stored as
-// fetched and decoded only by the reader's browser, so untrusted image data
-// never reaches a native decoder in the server process. This reads just
-// enough to refuse a decompression bomb before it is stored.
+// Worker processes load this file under plain Node: no imports, no `~` alias.
+// Image type and dimensions from the header bytes alone, so untrusted image
+// data is judged without a decoder: enough to refuse a decompression bomb
+// before a reader's browser is handed it.
 
 export const IMAGE_SIZE_LIMITS = {
   side: 6000,
@@ -98,4 +98,27 @@ export function acceptableImageSize(size: ImageSize | null): size is ImageSize {
     size.height <= IMAGE_SIZE_LIMITS.side &&
     size.width * size.height <= IMAGE_SIZE_LIMITS.pixels
   );
+}
+
+/** The type a file's own first bytes say it is, of the four a browser draws. */
+function sniff(b: Uint8Array): string | null {
+  if (b.length >= 8 && b[0] === 0x89 && String.fromCharCode(...b.subarray(1, 4)) === "PNG")
+    return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length >= 6 && /^GIF8[79]a$/.test(String.fromCharCode(...b.subarray(0, 6))))
+    return "image/gif";
+  if (
+    b.length >= 12 &&
+    String.fromCharCode(...b.subarray(0, 4)) === "RIFF" &&
+    String.fromCharCode(...b.subarray(8, 12)) === "WEBP"
+  )
+    return "image/webp";
+  return null;
+}
+
+/** Type and size as the bytes themselves give them, or null for anything else or unreadable. */
+export function imageHeader(bytes: Uint8Array): (ImageSize & { mediaType: string }) | null {
+  const mediaType = sniff(bytes);
+  const size = mediaType ? readImageSize(bytes, mediaType) : null;
+  return mediaType && size ? { mediaType, ...size } : null;
 }

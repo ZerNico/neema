@@ -2,7 +2,11 @@ import { Context, Effect, Layer, Schema } from "effect";
 import { IMAGE_MEDIA_TYPES } from "~/modules/attachments/constants.ts";
 import { sniffBinaryMediaType } from "~/modules/attachments/server/validation.ts";
 import { fetchPublic, readCapped } from "~/modules/tools/server/public-fetch.ts";
-import { acceptableImageSize, readImageSize, type ImageSize } from "./image-header.ts";
+import {
+  acceptableImageSize,
+  readImageSize,
+  type ImageSize,
+} from "~/modules/attachments/image-header.ts";
 
 export class ImageFetchFailed extends Schema.TaggedError<ImageFetchFailed>()("ImageFetchFailed", {
   url: Schema.String,

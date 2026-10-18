@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptableImageSize, readImageSize } from "./image-header.ts";
+import { acceptableImageSize, imageHeader, readImageSize } from "./image-header.ts";
 
 const bytes = (...parts: Array<number[] | string>) =>
   Uint8Array.from(
@@ -78,5 +78,24 @@ describe("readImageSize", () => {
     expect(acceptableImageSize(readImageSize(png(5000, 5001), "image/png"))).toBe(false);
     expect(acceptableImageSize(readImageSize(gif(65535, 65535), "image/gif"))).toBe(false);
     expect(acceptableImageSize(null)).toBe(false);
+  });
+});
+
+describe("imageHeader", () => {
+  it("takes the type from the bytes, whatever a file claims", () => {
+    expect(imageHeader(png(4, 3))).toEqual({ mediaType: "image/png", width: 4, height: 3 });
+    expect(imageHeader(gif(4, 3))).toEqual({ mediaType: "image/gif", width: 4, height: 3 });
+    expect(imageHeader(vp8x(4, 3))).toEqual({ mediaType: "image/webp", width: 4, height: 3 });
+    expect(imageHeader(bytes("<svg/>"))).toBeNull();
+  });
+
+  it("reads a JPEG past fill bytes and standalone markers before its frame", () => {
+    const padded = bytes(
+      [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00],
+      // Fill bytes, then a restart marker with no length, then the frame.
+      [0xff, 0xff, 0xff, 0xd0],
+      [0xff, 0xc2, 0x00, 0x11, 0x08, 0x00, 0x30, 0x00, 0x40, 0x03],
+    );
+    expect(imageHeader(padded)).toEqual({ mediaType: "image/jpeg", width: 64, height: 48 });
   });
 });
