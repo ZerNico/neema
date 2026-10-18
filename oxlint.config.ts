@@ -78,6 +78,20 @@ export default defineConfig({
       rules: { "unicorn/consistent-function-scoping": "off" },
     },
     {
+      // A refusal asserted as "anything threw" also passes on a crash or a decode error.
+      files: ["**/*.test.ts", "**/*.test.tsx"],
+      plugins: ["vitest"],
+      rules: {
+        "vitest/require-to-throw-message": "error",
+        // The plugin's category rules come with it; each needs its own review first.
+        "vitest/require-mock-type-parameters": "off",
+        "vitest/no-standalone-expect": "off",
+        "vitest/no-conditional-expect": "off",
+        "vitest/valid-expect": "off",
+        "vitest/expect-expect": "off",
+      },
+    },
+    {
       // Generated from the shadcn registry; edits would be lost on regenerate.
       files: ["apps/web/src/ui/primitives/**"],
       rules: {
