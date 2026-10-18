@@ -745,10 +745,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   "PERCENTRANK.EXC": "rss",
   PERCENTRANK: "rss",
   PROB: "rrss",
-  NETWORKDAYS: "ssr",
-  "NETWORKDAYS.INTL": "sssr",
-  WORKDAY: "ssr",
-  "WORKDAY.INTL": "sssr",
   TRIMMEAN: "rs",
   "CHISQ.TEST": "rr",
   "T.TEST": "rrss",
@@ -812,6 +808,33 @@ const ofClock = (pick: (clock: ReturnType<typeof clockOf>) => number): Fn => ({
     const serial = number(args[0]);
     if (serial instanceof XError) return serial;
     return serial < 0 ? NUM : pick(clockOf(serial));
+  },
+});
+
+/** Holidays as serials from any range or array: formula.js reads a list of rows as no dates at all. */
+function holidaysOf(value: Value | undefined): number[] | XError {
+  const serials: number[] = [];
+  for (const item of value === undefined ? [] : flat(value)) {
+    if (item === null) continue;
+    const serial = toNumber(item);
+    if (serial instanceof XError) return serial;
+    serials.push(serial);
+  }
+  return serials;
+}
+/** NETWORKDAYS and WORKDAY, with or without a weekend argument, through formula.js's INTL forms. */
+const workdays = (name: "NETWORKDAYS" | "WORKDAY", intl: boolean): Fn => ({
+  kinds: intl ? "sssr" : "ssr",
+  run: (args, call) => {
+    const start = number(args[0]);
+    if (start instanceof XError) return start;
+    const second = number(args[1]);
+    if (second instanceof XError) return second;
+    const weekend = intl && !call.omitted(2) ? scalar(args[2]) : 1;
+    const holidaysAt = intl ? 3 : 2;
+    const holidays = holidaysOf(call.omitted(holidaysAt) ? undefined : args[holidaysAt]);
+    if (holidays instanceof XError) return holidays;
+    return fromLibrary(libraryFunction(`${name}.INTL`)!(start, second, weekend, holidays));
   },
 });
 
@@ -1621,6 +1644,10 @@ export const FUNCTIONS: Record<string, Fn> = {
   HOUR: ofClock((clock) => clock.hour),
   MINUTE: ofClock((clock) => clock.minute),
   SECOND: ofClock((clock) => clock.second),
+  NETWORKDAYS: workdays("NETWORKDAYS", false),
+  "NETWORKDAYS.INTL": workdays("NETWORKDAYS", true),
+  WORKDAY: workdays("WORKDAY", false),
+  "WORKDAY.INTL": workdays("WORKDAY", true),
 
   ISERROR: is((value) => value instanceof XError),
   ISERR: is((value) => value instanceof XError && value.code !== "#N/A"),

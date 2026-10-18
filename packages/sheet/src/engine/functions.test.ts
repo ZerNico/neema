@@ -336,6 +336,25 @@ const cases: Record<string, Case[]> = {
       digits: 12,
     },
   ],
+  // NETWORKDAYS.INTL example.
+  "NETWORKDAYS.INTL": [
+    { formula: "NETWORKDAYS.INTL(DATE(2006,1,1),DATE(2006,1,31))", expected: 22 },
+    {
+      formula: 'NETWORKDAYS.INTL(DATE(2006,1,1),DATE(2006,2,1),7,{"2006/1/2","2006/1/16"})',
+      expected: 22,
+    },
+    {
+      formula: 'NETWORKDAYS.INTL(DATE(2006,1,1),DATE(2006,2,1),"0010001",{"2006/1/2","2006/1/16"})',
+      expected: 20,
+    },
+  ],
+  // WORKDAY example (5/5/2009), its three holidays given across one row as text.
+  WORKDAY: [
+    {
+      formula: 'WORKDAY(DATE(2008,10,1),151,{"2008/11/26","2008/12/4","2009/1/21"})',
+      expected: 39938,
+    },
+  ],
   // TRIMMEAN example (3.777777778): one value off each end leaves nine adding up to 34.
   TRIMMEAN: [
     {
