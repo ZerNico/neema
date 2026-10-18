@@ -100,6 +100,13 @@ export const conversations = pgTable(
     ),
     index("conversations_project_id_idx").on(t.projectId),
     index("conversations_user_id_idx").on(t.userId),
+    // Deleting a model nulls these; partial, since most rows name none.
+    index("conversations_model_idx")
+      .on(t.modelId)
+      .where(sql`${t.modelId} is not null`),
+    index("conversations_image_model_idx")
+      .on(t.imageModelId)
+      .where(sql`${t.imageModelId} is not null`),
     // Postgres does not index the referencing side of a foreign key, and
     // `on delete set null` scans it for every deleted conversation.
     index("conversations_branched_from_idx").on(t.branchedFrom),
@@ -218,6 +225,9 @@ export const messages = pgTable(
   },
   (t) => [
     index("messages_conversation_id_idx").on(t.conversationId),
+    index("messages_model_idx")
+      .on(t.modelId)
+      .where(sql`${t.modelId} is not null`),
     // An expression index, not a stored column: every full-row message read
     // would otherwise carry the vector. Queries must repeat this expression
     // exactly (`messageSearchVector` in ChatRepo). See docs/internals/search.md.
@@ -402,6 +412,9 @@ export const conversationCompactionCheckpoints = pgTable(
     ),
     // Referencing side of the FK, scanned on every message delete.
     index("compaction_checkpoints_through_message_idx").on(t.throughMessageId),
+    index("compaction_checkpoints_model_idx")
+      .on(t.modelId)
+      .where(sql`${t.modelId} is not null`),
   ],
 );
 

@@ -60,6 +60,7 @@ export const researchRuns = pgTable(
       .on(t.userId)
       .where(sql`${t.status} in ('queued', 'running')`),
     index("research_runs_message_idx").on(t.messageId),
+    index("research_runs_conversation_idx").on(t.conversationId),
     index("research_runs_tool_call_idx").on(t.toolCallId),
     index("research_runs_lease_idx")
       .on(t.leaseUntil)
@@ -102,5 +103,10 @@ export const researchCalls = pgTable(
     usageComplete: boolean("usage_complete").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("research_calls_run_ordinal_idx").on(t.runId, t.ordinal)],
+  (t) => [
+    uniqueIndex("research_calls_run_ordinal_idx").on(t.runId, t.ordinal),
+    index("research_calls_task_idx")
+      .on(t.taskId)
+      .where(sql`${t.taskId} is not null`),
+  ],
 );

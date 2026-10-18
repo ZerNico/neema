@@ -58,6 +58,10 @@ export const documents = pgTable(
   (t) => [
     index("documents_conversation_idx").on(t.conversationId),
     index("documents_project_idx").on(t.projectId),
+    // Each deleted message cascades here; retry deletes by it too.
+    index("documents_created_by_message_idx")
+      .on(t.createdByMessageId)
+      .where(sql`${t.createdByMessageId} is not null`),
     check("documents_one_owner", sql`(${t.conversationId} is null) <> (${t.projectId} is null)`),
     check(
       "documents_answer_in_conversation",
