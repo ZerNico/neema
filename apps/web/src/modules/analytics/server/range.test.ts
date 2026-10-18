@@ -111,17 +111,19 @@ describe("UsageRangeInput", () => {
       from: "2026-08-16T00:00:00.000Z",
       to: "2026-08-10T00:00:00.000Z",
     };
-    expect(() => decode(reversed)).toThrow();
+    expect(() => decode(reversed)).toThrow(/\nfrom must be before to$/);
     // from === to would scan nothing; the filter is `<`, not `<=`.
     const empty = {
       kind: "custom",
       from: "2026-08-10T00:00:00.000Z",
       to: "2026-08-10T00:00:00.000Z",
     };
-    expect(() => decode(empty)).toThrow();
+    expect(() => decode(empty)).toThrow(/\nfrom must be before to$/);
   });
 
   it("rejects a preset outside the offered set", () => {
-    expect(() => decode({ kind: "preset", days: 5 })).toThrow();
+    expect(() => decode({ kind: "preset", days: 5 })).toThrow(
+      /^Expected 7 \| 30 \| 90\n  at \["days"\]/,
+    );
   });
 });

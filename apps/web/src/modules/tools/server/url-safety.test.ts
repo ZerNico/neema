@@ -161,7 +161,7 @@ describe("fetchPinned", () => {
 
   it("rejects a status a Response cannot hold instead of crashing", async () => {
     const server = await serve(600);
-    await expect(fetchPinned(pinned(server))).rejects.toThrow();
+    await expect(fetchPinned(pinned(server))).rejects.toThrow(RangeError);
     server.close();
   });
 });

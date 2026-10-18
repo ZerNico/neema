@@ -25,8 +25,9 @@ describe("research search configuration", () => {
   it.each([11, 121, 12.5, null, "80"])(
     "rejects invalid budget %s in both boundaries",
     (researchMaxSearchQueries) => {
-      expect(() => decodeConfig({ ...config, researchMaxSearchQueries })).toThrow();
-      expect(() => decodeUpdate({ researchMaxSearchQueries })).toThrow();
+      const atBudget = /\n  at \["researchMaxSearchQueries"\]$/;
+      expect(() => decodeConfig({ ...config, researchMaxSearchQueries })).toThrow(atBudget);
+      expect(() => decodeUpdate({ researchMaxSearchQueries })).toThrow(atBudget);
     },
   );
 });
@@ -39,12 +40,12 @@ describe("search provider settings", () => {
       kind: "searxng",
       baseUrl: "http://searx",
     });
-    expect(() => decode({ kind: "searxng" })).toThrow();
+    expect(() => decode({ kind: "searxng" })).toThrow(/^Missing key\n  at \["baseUrl"\]/);
     expect(decode({ kind: "tavily" })).toEqual({ kind: "tavily" });
   });
 
   it("keeps a hosted provider on its fixed endpoint", () => {
     expect(decode({ kind: "brave", baseUrl: "http://elsewhere" })).toEqual({ kind: "brave" });
-    expect(() => decode({ kind: "bing" })).toThrow();
+    expect(() => decode({ kind: "bing" })).toThrow(/^Expected "tavily" \| .*\n  at \["kind"\]$/);
   });
 });

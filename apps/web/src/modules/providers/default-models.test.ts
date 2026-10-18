@@ -24,13 +24,16 @@ describe("default model policy", () => {
     );
   });
 
-  it.each([
-    ["a", "a"],
-    [""],
-    [42],
-    ["a".repeat(101)],
-    Array.from({ length: MAX_DEFAULT_MODELS + 1 }, (_, i) => `m${i}`),
-  ])("rejects invalid model order %#", (...input) => {
-    expect(() => Schema.decodeUnknownSync(DefaultModelIds)(input)).toThrow();
+  it.each<[unknown[], string]>([
+    [["a", "a"], "Expected an array with unique items"],
+    [[""], "Expected a value with a length of at least 1\n  at [0]"],
+    [[42], "Expected string\n  at [0]"],
+    [["a".repeat(101)], "Expected a value with a length of at most 100\n  at [0]"],
+    [
+      Array.from({ length: MAX_DEFAULT_MODELS + 1 }, (_, i) => `m${i}`),
+      `Expected a value with a length of at most ${MAX_DEFAULT_MODELS}`,
+    ],
+  ])("rejects invalid model order %#", (input, message) => {
+    expect(() => Schema.decodeUnknownSync(DefaultModelIds)(input)).toThrow(message);
   });
 });

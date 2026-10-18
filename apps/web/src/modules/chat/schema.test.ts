@@ -29,8 +29,12 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
     questionResponse: { kind: "skip" },
   };
   expect(decode(input)).toEqual(input);
-  expect(() => decode({ ...input, content: "arbitrary prose" })).toThrow();
-  expect(() => decode({ ...input, questionResponse: { kind: "answers", answers: [] } })).toThrow();
+  expect(() => decode({ ...input, content: "arbitrary prose" })).toThrow(
+    /Expected never\n  at \["content"\]/,
+  );
+  expect(() => decode({ ...input, questionResponse: { kind: "answers", answers: [] } })).toThrow(
+    /Expected a value with a length of at least 1\n  at \["questionResponse"\]\["answers"\]/,
+  );
 });
 
 it("accepts supported reasoning efforts and defaults across submissions", () => {
@@ -68,7 +72,9 @@ it("accepts supported reasoning efforts and defaults across submissions", () => 
     expect(decode(input)).not.toHaveProperty("reasoningEffort");
     expect(decode({ ...input, reasoningEffort: null })).toHaveProperty("reasoningEffort", null);
     expect(decode({ ...input, reasoningEffort: "high" })).toHaveProperty("reasoningEffort", "high");
-    expect(() => decode({ ...input, reasoningEffort: "unsupported" })).toThrow();
+    expect(() => decode({ ...input, reasoningEffort: "unsupported" })).toThrow(
+      /\n  at \["reasoningEffort"\]$/,
+    );
   }
 });
 
@@ -99,8 +105,12 @@ for (const [name, schema, input] of [
     });
 
     it("bounds client metadata and rejects non-string values", () => {
-      expect(() => decode({ ...input, timeZone: "x".repeat(101) })).toThrow();
-      expect(() => decode({ ...input, timeZone: 42 })).toThrow();
+      expect(() => decode({ ...input, timeZone: "x".repeat(101) })).toThrow(
+        'Expected a value with a length of at most 100\n  at ["timeZone"]',
+      );
+      expect(() => decode({ ...input, timeZone: 42 })).toThrow(
+        'Expected string\n  at ["timeZone"]',
+      );
     });
   });
 }

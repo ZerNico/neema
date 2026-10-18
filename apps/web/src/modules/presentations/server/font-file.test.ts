@@ -57,7 +57,7 @@ describe("readFontFile", () => {
     expect(() => readFontFile(withSignature("wOF2"))).toThrow(/Web fonts/);
     expect(() => readFontFile(withSignature("%PDF"))).toThrow(/not a TrueType or OpenType/);
     const truncated = face("Carlito-Regular.ttf").slice(0, 400);
-    expect(() => readFontFile(truncated)).toThrow();
+    expect(() => readFontFile(truncated)).toThrow("The font's tables run past its end.");
   });
 
   describe("outline complexity", () => {

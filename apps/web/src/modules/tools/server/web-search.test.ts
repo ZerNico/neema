@@ -1,5 +1,16 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Queue, Scope, Stream, Semaphore } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Queue,
+  Scope,
+  Stream,
+  Semaphore,
+} from "effect";
 import type { Toolkit } from "effect/unstable/ai";
 import { PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
@@ -362,8 +373,12 @@ describe("single-flight search", () => {
       const second = yield* start(handler({ queries: ["same"] }));
       yield* settleWaiters;
       yield* Deferred.die(request.reply, new Error("broken implementation"));
-      expect(Exit.isFailure(yield* Fiber.await(first))).toBe(true);
-      expect(Exit.isFailure(yield* Fiber.await(second))).toBe(true);
+      for (const fiber of [first, second]) {
+        const exit = yield* Fiber.await(fiber);
+        expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
+          message: "broken implementation",
+        });
+      }
       expect(observed).toEqual([]);
       const retry = yield* start(handler({ queries: ["same"] }));
       yield* Deferred.succeed((yield* Queue.take(requests)).reply, []);
@@ -382,7 +397,7 @@ describe("single-flight search", () => {
         .pipe(Scope.provide(scope));
       yield* Scope.close(scope, Exit.void);
       const outcome = yield* Effect.exit(handler({ queries: ["same"] }));
-      expect(Exit.isFailure(outcome)).toBe(true);
+      expect(Exit.isFailure(outcome) && Cause.hasInterruptsOnly(outcome.cause)).toBe(true);
       expect(calls).toHaveLength(0);
     }),
   );
@@ -464,8 +479,10 @@ describe("single-flight search", () => {
         yield* Scope.close(scope, Exit.void);
         expect(yield* Deferred.isDone(a.interrupted)).toBe(true);
         expect(yield* Deferred.isDone(b.interrupted)).toBe(true);
-        for (const fiber of [first, second, shared])
-          expect(Exit.isFailure(yield* Fiber.await(fiber))).toBe(true);
+        for (const fiber of [first, second, shared]) {
+          const exit = yield* Fiber.await(fiber);
+          expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+        }
         yield* semaphore.withPermits(2)(Effect.void);
         expect(observed).toEqual([]);
       }),

@@ -22,8 +22,12 @@ describe("UpdateProviderInput", () => {
         settings: { reasoning },
       });
     }
-    expect(() => decode({ providerId: "p1", settings: { reasoning: "thinking" } })).toThrow();
-    expect(() => decode({ providerId: "p1", settings: { keyHeader: "x-key\nevil: 1" } })).toThrow();
+    expect(() => decode({ providerId: "p1", settings: { reasoning: "thinking" } })).toThrow(
+      /Expected "none" \| "flat" \| "nested"\n  at \["settings"\]\["reasoning"\]/,
+    );
+    expect(() => decode({ providerId: "p1", settings: { keyHeader: "x-key\nevil: 1" } })).toThrow(
+      /at \["settings"\]\["keyHeader"\]/,
+    );
   });
 });
 
@@ -69,14 +73,14 @@ describe("CreateModelInput", () => {
         ...chat,
         capabilities: { ...chat.capabilities, reasoningEfforts: ["ultra"] },
       }),
-    ).toThrow();
+    ).toThrow(/at \["capabilities"\]\["reasoningEfforts"\]\[0\]/);
   });
 
   it("rejects unsupported model types and cross-type fields", () => {
     expect(() =>
       decodeCreate({
         ...common,
-        type: "image",
+        type: "audio",
         embeddingDimensions: null,
         capabilities: {
           imageOutput: false,
@@ -87,7 +91,7 @@ describe("CreateModelInput", () => {
         },
         pricing: null,
       }),
-    ).toThrow();
+    ).toThrow(/Expected \{ readonly "type": "chat"/);
 
     expect(() =>
       decodeCreate({
@@ -103,7 +107,7 @@ describe("CreateModelInput", () => {
         },
         pricing: { input: 0.02, output: null },
       }),
-    ).toThrow();
+    ).toThrow(/Expected false\n  at \["capabilities"\]\["tools"\]/);
 
     expect(() =>
       decodeCreate({
@@ -119,6 +123,6 @@ describe("CreateModelInput", () => {
         },
         pricing: { input: 1, output: null },
       }),
-    ).toThrow();
+    ).toThrow(/Expected number\n  at \["pricing"\]\["output"\]/);
   });
 });
