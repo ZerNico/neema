@@ -393,7 +393,7 @@ function make(background: boolean) {
             .from(knowledgeSources)
             .where(
               and(
-                lte(knowledgeSources.nextSyncAt, sql`now()`),
+                lte(knowledgeSources.nextSyncAt, sql`clock_timestamp()`),
                 or(
                   isNull(knowledgeSources.leaseUntil),
                   lte(knowledgeSources.leaseUntil, sql`clock_timestamp()`),

@@ -899,7 +899,7 @@ export class IntegrationRepo extends Context.Service<
                   .where(
                     and(
                       eq(integrationConfigs.enabled, true),
-                      lte(integrationToolCatalogs.nextCheckAt, sql`now()`),
+                      lte(integrationToolCatalogs.nextCheckAt, sql`clock_timestamp()`),
                       or(
                         isNull(integrationToolCatalogs.checkLeaseUntil),
                         lte(integrationToolCatalogs.checkLeaseUntil, sql`clock_timestamp()`),
