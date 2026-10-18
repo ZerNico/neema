@@ -54,7 +54,19 @@ const fixture = () => {
     capturePage: vi.fn(async () => ({ isEmpty: (): boolean => true })),
     loadURL: vi.fn(async () => {}),
     reload: vi.fn(),
-    navigationHistory: { goBack: vi.fn(), goForward: vi.fn() },
+    stop: vi.fn(),
+    navigationHistory: {
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+      // Back is a site the drive never allowed; forward is the allowed one.
+      getActiveIndex: () => 1,
+      getEntryAtIndex: (index: number) =>
+        [
+          { url: "https://b.test/earlier" },
+          { url: "https://a.test/" },
+          { url: "https://a.test/next" },
+        ][index],
+    },
     debugger: {
       isAttached: () => true,
       attach: vi.fn(),
@@ -104,6 +116,21 @@ afterEach(() => {
 });
 
 describe("main browser authority", () => {
+  it("keeps a driven tab's history moves to sites the drive allowed", async () => {
+    const { begin, adapter, guest } = fixture();
+    await begin();
+    await adapter.navigate(7, { action: "back" }, "call");
+    expect(guest.navigationHistory.goBack).not.toHaveBeenCalled();
+    await adapter.navigate(7, { action: "forward" }, "call");
+    expect(guest.navigationHistory.goForward).toHaveBeenCalledOnce();
+    // The page's own history.back() starts without will-navigate, and is stopped.
+    guest.emit("did-start-navigation", {}, "https://b.test/earlier", false, true);
+    expect(guest.stop).toHaveBeenCalledOnce();
+    guest.emit("did-start-navigation", {}, "https://a.test/next", false, true);
+    guest.emit("did-start-navigation", {}, "https://b.test/frame", false, false);
+    expect(guest.stop).toHaveBeenCalledOnce();
+  });
+
   it("cancellation prevents a late empty screenshot from dispatching another capture", async () => {
     vi.useFakeTimers();
     const { begin, adapter, guest } = fixture();

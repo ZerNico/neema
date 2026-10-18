@@ -179,8 +179,11 @@ out of its replies too.
 ### Sites
 
 Opening an address is the `"site"` approval kind, decided per call and per registrable domain.
-A navigation without one (back, forward, reload) stays where the tab is, so it is a read;
+A navigation without one (back, forward, reload) asks no approval, so it is a read;
 `approvalKind` takes the call's arguments for this, on the server and in the page alike.
+History can still lead to a site the drive never allowed, so main checks the entry back or
+forward goes to before moving, and stops a page's own history navigation there while driven,
+since that raises no `will-navigate`.
 Domains come from `browser/site-grants.ts` (`tldts` with private suffixes, so
 `alice.github.io` is not `bob.github.io`).
 

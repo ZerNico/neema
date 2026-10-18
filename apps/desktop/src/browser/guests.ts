@@ -357,6 +357,11 @@ export function attachBrowserGuests(
     guest.on("will-redirect", (event, url, _inPlace, isMainFrame) => {
       if (isMainFrame) gate(id, event, url);
     });
+    // A page's own history.back() raises no will-navigate, so it is stopped once started.
+    guest.on("did-start-navigation", (_started, url, inPlace, isMainFrame) => {
+      if (isMainFrame && !inPlace && isSafeExternalUrl(url))
+        gate(id, { preventDefault: () => guest.stop() }, url);
+    });
     // Fetched in the page's own session, so a logged-in or intranet site shows
     // its icon; only the latest request for a page may answer.
     let latest = 0;
@@ -484,9 +489,19 @@ export function attachBrowserGuests(
           call.signal,
         );
         call.check();
-      } else if (target.action === "back") guest.navigationHistory.goBack();
-      else if (target.action === "forward") guest.navigationHistory.goForward();
-      else guest.reload();
+      } else if (target.action === "reload") guest.reload();
+      else {
+        // History goes where it went before, which may be a site this drive never allowed.
+        const history = guest.navigationHistory;
+        const step = target.action === "back" ? -1 : 1;
+        const entry = history.getEntryAtIndex(history.getActiveIndex() + step);
+        if (entry && blockedSite(driven.get(id)!, entry.url, siteAllowed)) {
+          driven.get(id)!.blocked ??= entry.url;
+          return;
+        }
+        if (step < 0) history.goBack();
+        else history.goForward();
+      }
     },
     snapshot: async (
       id: number,
