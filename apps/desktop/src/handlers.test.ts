@@ -393,6 +393,16 @@ describe("once a folder is attached", () => {
       new Promise((done) => setTimeout(() => done("held"), 250)),
     ]);
     expect(early).toBe("held");
+    // Another chat's files are not this command's to swap, so its write goes ahead.
+    const elsewhere = await Effect.runPromise(
+      handlers.writeFile({
+        conversationId: FRESH_CONVERSATION,
+        callId: "w2",
+        path: join(workspaceDir(FRESH_CONVERSATION), "beside.md"),
+        text: "ok",
+      }),
+    );
+    expect(elsewhere.created).toBe(true);
     release.resolve();
     await Promise.all([command, write]);
     expect(await readFile(target, "utf8")).toBe("hi");

@@ -247,13 +247,19 @@ export const makeHandlers = (shell: Shell) =>
     const store = yield* GrantStore;
     const sandbox = yield* Sandbox;
     const workspaces = yield* WorkspaceRegistry;
-    // A round's calls run at once, and an edit reads then writes, so changes
-    // take turns. They also wait out running commands: a change checks a path
-    // and then writes it as the person, and a command could swap in a symlink.
+    // A file tool checks a path, then reads or writes it as the person, and a
+    // command of the same chat could swap in a symlink between. Within a chat,
+    // file tools take turns with each other and with commands; other chats
+    // never wait.
     const ALL_PERMITS = 1024;
-    const filesystem = yield* Semaphore.make(ALL_PERMITS);
-    const oneChangeAtATime = filesystem.withPermits(ALL_PERMITS);
-    const besideOtherCommands = filesystem.withPermits(1);
+    const chatLocks = new Map<string, Semaphore.Semaphore>();
+    const lockOf = (conversationId: string) => {
+      let lock = chatLocks.get(conversationId);
+      if (!lock) chatLocks.set(conversationId, (lock = Semaphore.makeUnsafe(ALL_PERMITS)));
+      return lock;
+    };
+    const fileAccess = (conversationId: string) => lockOf(conversationId).withPermits(ALL_PERMITS);
+    const besideOtherCommands = (conversationId: string) => lockOf(conversationId).withPermits(1);
     // Every grant is looked up under the origin the shell is connected to, so
     // the handlers cannot forget to scope one.
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- key reads shell from the enclosing handler set
@@ -503,8 +509,12 @@ export const makeHandlers = (shell: Shell) =>
           [
             sandbox.forgetChat(key(conversationId)),
             store.forgetAll(key(conversationId)),
-            Effect.promise(() => shell.forgetChatSites(conversationId)),
+            // A failed write of the sites file must not leave the chat's files behind.
+            Effect.tryPromise(() => shell.forgetChatSites(conversationId)).pipe(
+              Effect.catch((error) => Effect.logWarning("forgetting a chat's sites failed", error)),
+            ),
             workspaces.discard(conversationId),
+            Effect.sync(() => chatLocks.delete(conversationId)),
           ],
           { discard: true },
         ),
@@ -534,145 +544,155 @@ export const makeHandlers = (shell: Shell) =>
       },
 
       listDirectory: ({ conversationId, path }) =>
-        Effect.gen(function* () {
-          if (path === "." || path === "") {
-            // The root of the model's world is the list of roots it may
-            // address, by their real paths.
-            const roots = yield* rootsFor(conversationId);
-            return {
-              path: ".",
-              entries: roots.map(({ root }) => ({
-                name: root,
-                kind: "directory" as const,
-              })),
-              truncated: false,
-            };
-          }
-          const target = yield* locate(conversationId, path);
-          const found = yield* Effect.tryPromise({
-            try: () => readdir(target.absolute, { withFileTypes: true }),
-            catch: () =>
-              new DesktopError({
-                reason: "not-a-directory",
-                message: `${target.relative} is not a directory.`,
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            if (path === "." || path === "") {
+              // The root of the model's world is the list of roots it may
+              // address, by their real paths.
+              const roots = yield* rootsFor(conversationId);
+              return {
+                path: ".",
+                entries: roots.map(({ root }) => ({
+                  name: root,
+                  kind: "directory" as const,
+                })),
+                truncated: false,
+              };
+            }
+            const target = yield* locate(conversationId, path);
+            const found = yield* Effect.tryPromise({
+              try: () => readdir(target.absolute, { withFileTypes: true }),
+              catch: () =>
+                new DesktopError({
+                  reason: "not-a-directory",
+                  message: `${target.relative} is not a directory.`,
+                }),
+            });
+            const kept = found.slice(0, LIMITS.entries);
+            // A size beside every plain file is what lets the model tell an
+            // empty file from a folder without a second call to find out.
+            const entries: DirectoryEntry[] = yield* Effect.forEach(kept, (entry) =>
+              Effect.gen(function* () {
+                const kind = entry.isDirectory()
+                  ? ("directory" as const)
+                  : entry.isSymbolicLink()
+                    ? ("symlink" as const)
+                    : entry.isFile()
+                      ? ("file" as const)
+                      : ("other" as const);
+                if (kind !== "file") return { name: entry.name, kind };
+                const size = yield* Effect.promise(() =>
+                  stat(join(target.absolute, entry.name)).then(
+                    (info) => info.size,
+                    () => null,
+                  ),
+                );
+                return size === null
+                  ? { name: entry.name, kind }
+                  : { name: entry.name, kind, size };
               }),
-          });
-          const kept = found.slice(0, LIMITS.entries);
-          // A size beside every plain file is what lets the model tell an
-          // empty file from a folder without a second call to find out.
-          const entries: DirectoryEntry[] = yield* Effect.forEach(kept, (entry) =>
-            Effect.gen(function* () {
-              const kind = entry.isDirectory()
-                ? ("directory" as const)
-                : entry.isSymbolicLink()
-                  ? ("symlink" as const)
-                  : entry.isFile()
-                    ? ("file" as const)
-                    : ("other" as const);
-              if (kind !== "file") return { name: entry.name, kind };
-              const size = yield* Effect.promise(() =>
-                stat(join(target.absolute, entry.name)).then(
-                  (info) => info.size,
-                  () => null,
-                ),
-              );
-              return size === null ? { name: entry.name, kind } : { name: entry.name, kind, size };
-            }),
-          );
-          return {
-            path: target.relative,
-            entries,
-            truncated: found.length > kept.length,
-          };
-        }),
+            );
+            return {
+              path: target.relative,
+              entries,
+              truncated: found.length > kept.length,
+            };
+          }),
+        ),
 
       fileInfo: ({ conversationId, path }) =>
-        Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
-          const info = yield* statFile(target);
-          return { path: target.relative, bytes: info.size };
-        }),
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            const target = yield* locate(conversationId, path);
+            const info = yield* statFile(target);
+            return { path: target.relative, bytes: info.size };
+          }),
+        ),
 
       readFile: ({ conversationId, path, offset, limit }) =>
-        Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
-          yield* statFile(target);
-          // A NUL in the first few kilobytes is what `file` and git use to
-          // call something binary. Decoding it anyway would hand the model
-          // noise and the server a string Postgres refuses.
-          if (isBinary(yield* readPrefix(target.absolute, 8_000, target.relative))) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-text",
-                message: `${target.relative} is not a text file.`,
-              }),
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            const target = yield* locate(conversationId, path);
+            yield* statFile(target);
+            // A NUL in the first few kilobytes is what `file` and git use to
+            // call something binary. Decoding it anyway would hand the model
+            // noise and the server a string Postgres refuses.
+            if (isBinary(yield* readPrefix(target.absolute, 8_000, target.relative))) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "not-text",
+                  message: `${target.relative} is not a text file.`,
+                }),
+              );
+            }
+            // Capped here rather than at the caller: an uncapped read would go
+            // into the transcript and, on models without native tool calling,
+            // into the prompt as prose.
+            const startLine = Math.max(1, offset ?? 1);
+            const read = yield* readLines(
+              target.absolute,
+              target.relative,
+              startLine,
+              limit ?? Number.POSITIVE_INFINITY,
+              LIMITS.readChars,
             );
-          }
-          // Capped here rather than at the caller: an uncapped read would go
-          // into the transcript and, on models without native tool calling,
-          // into the prompt as prose.
-          const startLine = Math.max(1, offset ?? 1);
-          const read = yield* readLines(
-            target.absolute,
-            target.relative,
-            startLine,
-            limit ?? Number.POSITIVE_INFINITY,
-            LIMITS.readChars,
-          );
-          return {
-            path: target.relative,
-            text: read.text,
-            truncated: read.nextLine !== null,
-            startLine,
-            ...(read.nextLine !== null ? { nextLine: read.nextLine } : {}),
-            ...(read.lineCount !== null ? { lineCount: read.lineCount } : {}),
-          };
-        }),
+            return {
+              path: target.relative,
+              text: read.text,
+              truncated: read.nextLine !== null,
+              startLine,
+              ...(read.nextLine !== null ? { nextLine: read.nextLine } : {}),
+              ...(read.lineCount !== null ? { lineCount: read.lineCount } : {}),
+            };
+          }),
+        ),
 
       readBinary: ({ conversationId, path, purpose }) =>
-        Effect.gen(function* () {
-          const target = yield* locate(conversationId, path);
-          const importing = purpose === "import";
-          const mediaType = (importing ? IMPORT_MEDIA_TYPES : BINARY_MEDIA_TYPES)[
-            extname(target.relative).toLowerCase()
-          ];
-          if (!mediaType) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "not-binary",
-                message: importing
-                  ? `${target.relative} is not a PNG, JPEG, PowerPoint (.pptx), Excel (.xlsx) or Word (.docx) file.`
-                  : `${target.relative} is not an image or a PDF.`,
-              }),
-            );
-          }
-          const info = yield* statFile(target);
-          if (info.size > LIMITS.binaryBytes) {
-            return yield* Effect.fail(
-              new DesktopError({
-                reason: "too-large",
-                message: `${target.relative} is larger than ${LIMITS.binaryBytes / 1024 / 1024} MB.`,
-              }),
-            );
-          }
-          const bytes = yield* Effect.tryPromise({
-            try: () => readFile(target.absolute),
-            catch: () =>
-              new DesktopError({
-                reason: "failed",
-                message: `Could not read ${target.relative}.`,
-              }),
-          });
-          return {
-            path: target.relative,
-            mediaType,
-            base64: bytes.toString("base64"),
-            bytes: bytes.length,
-          };
-        }),
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            const target = yield* locate(conversationId, path);
+            const importing = purpose === "import";
+            const mediaType = (importing ? IMPORT_MEDIA_TYPES : BINARY_MEDIA_TYPES)[
+              extname(target.relative).toLowerCase()
+            ];
+            if (!mediaType) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "not-binary",
+                  message: importing
+                    ? `${target.relative} is not a PNG, JPEG, PowerPoint (.pptx), Excel (.xlsx) or Word (.docx) file.`
+                    : `${target.relative} is not an image or a PDF.`,
+                }),
+              );
+            }
+            const info = yield* statFile(target);
+            if (info.size > LIMITS.binaryBytes) {
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "too-large",
+                  message: `${target.relative} is larger than ${LIMITS.binaryBytes / 1024 / 1024} MB.`,
+                }),
+              );
+            }
+            const bytes = yield* Effect.tryPromise({
+              try: () => readFile(target.absolute),
+              catch: () =>
+                new DesktopError({
+                  reason: "failed",
+                  message: `Could not read ${target.relative}.`,
+                }),
+            });
+            return {
+              path: target.relative,
+              mediaType,
+              base64: bytes.toString("base64"),
+              bytes: bytes.length,
+            };
+          }),
+        ),
 
       editFile: ({ conversationId, path, old, new: replacement, all }) =>
-        oneChangeAtATime(
+        fileAccess(conversationId)(
           Effect.gen(function* () {
             const target = yield* locateForWrite(conversationId, path);
             const info = yield* statFile(target);
@@ -773,7 +793,7 @@ export const makeHandlers = (shell: Shell) =>
         ),
 
       movePath: ({ conversationId, from, to }) =>
-        oneChangeAtATime(
+        fileAccess(conversationId)(
           Effect.gen(function* () {
             // Both ends are contained: a move is a read of one path and a write
             // of another, and either could be the one that escapes.
@@ -821,7 +841,7 @@ export const makeHandlers = (shell: Shell) =>
         ),
 
       deletePath: ({ conversationId, paths }) =>
-        oneChangeAtATime(
+        fileAccess(conversationId)(
           Effect.gen(function* () {
             // Per-path misses stay in the receipt so one missing file does not
             // abort the rest.
@@ -843,135 +863,144 @@ export const makeHandlers = (shell: Shell) =>
         ),
 
       findFiles: ({ conversationId, pattern }) =>
-        Effect.gen(function* () {
-          const roots = yield* rootsFor(conversationId);
-          // Each root answers for itself; the cap applies to the union so a
-          // big first folder cannot hide the second entirely.
-          const perRoot = Math.max(1, Math.floor(LIMITS.foundPaths / roots.length));
-          let paths: string[] = [];
-          let truncated = false;
-          for (const { root, pinned } of roots) {
-            const matcher = yield* Effect.try({
-              try: () => globToRegExp(pattern),
-              catch: () =>
-                new DesktopError({ reason: "bad-pattern", message: `Could not read ${pattern}.` }),
-            });
-            const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
-            if (resolved._tag === "Failure") continue;
-            // Walker, not rg: `--files` never names a directory, so a glob like
-            // `**/*extracted*` would miss `DVR/extracted_images/` and every file
-            // inside it whose own name does not match.
-            const walked = yield* Effect.promise(() =>
-              walkFiles(
-                resolved.success.absolute,
-                WALK_LIMIT,
-                (rel) => globMatches(matcher, rel),
-                (rel) => matcher.test(rel),
-              ),
-            );
-            // Newest first: the file just changed is the one being asked about.
-            const sorted = walked.files.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
-            // The absolute path is the address the model sends back, so the
-            // result lists those, not the display form. A directory's relative
-            // ends in `/`; keep the mark on the absolute form too.
-            paths.push(
-              ...sorted
-                .slice(0, perRoot)
-                .map((file) => (file.relative.endsWith("/") ? `${file.absolute}/` : file.absolute)),
-            );
-            truncated ||= walked.truncated || sorted.length > perRoot;
-          }
-          if (paths.length > LIMITS.foundPaths) {
-            paths = paths.slice(0, LIMITS.foundPaths);
-            truncated = true;
-          }
-          return { pattern, paths, truncated };
-        }),
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            const roots = yield* rootsFor(conversationId);
+            // Each root answers for itself; the cap applies to the union so a
+            // big first folder cannot hide the second entirely.
+            const perRoot = Math.max(1, Math.floor(LIMITS.foundPaths / roots.length));
+            let paths: string[] = [];
+            let truncated = false;
+            for (const { root, pinned } of roots) {
+              const matcher = yield* Effect.try({
+                try: () => globToRegExp(pattern),
+                catch: () =>
+                  new DesktopError({
+                    reason: "bad-pattern",
+                    message: `Could not read ${pattern}.`,
+                  }),
+              });
+              const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
+              if (resolved._tag === "Failure") continue;
+              // Walker, not rg: `--files` never names a directory, so a glob like
+              // `**/*extracted*` would miss `DVR/extracted_images/` and every file
+              // inside it whose own name does not match.
+              const walked = yield* Effect.promise(() =>
+                walkFiles(
+                  resolved.success.absolute,
+                  WALK_LIMIT,
+                  (rel) => globMatches(matcher, rel),
+                  (rel) => matcher.test(rel),
+                ),
+              );
+              // Newest first: the file just changed is the one being asked about.
+              const sorted = walked.files.toSorted((a, b) => b.mtimeMs - a.mtimeMs);
+              // The absolute path is the address the model sends back, so the
+              // result lists those, not the display form. A directory's relative
+              // ends in `/`; keep the mark on the absolute form too.
+              paths.push(
+                ...sorted
+                  .slice(0, perRoot)
+                  .map((file) =>
+                    file.relative.endsWith("/") ? `${file.absolute}/` : file.absolute,
+                  ),
+              );
+              truncated ||= walked.truncated || sorted.length > perRoot;
+            }
+            if (paths.length > LIMITS.foundPaths) {
+              paths = paths.slice(0, LIMITS.foundPaths);
+              truncated = true;
+            }
+            return { pattern, paths, truncated };
+          }),
+        ),
 
       searchFiles: ({ conversationId, pattern, glob }) =>
-        Effect.gen(function* () {
-          const roots = yield* rootsFor(conversationId);
-          const fastBackend = yield* Effect.promise(ripgrepAvailable);
-          if (fastBackend) {
-            yield* Effect.try({
-              try: () => new RegExp(pattern),
-              catch: () =>
-                new DesktopError({
-                  reason: "bad-pattern",
-                  message: `${pattern} is not a valid regular expression.`,
-                }),
-            });
-          }
-          const search = (match: RegexMatcher | null) =>
-            Effect.gen(function* () {
-              const matches: SearchMatch[] = [];
-              let filesSearched = 0;
-              let truncated = false;
-              for (const { root, pinned } of roots) {
-                if (matches.length >= LIMITS.matches) {
-                  truncated = true;
-                  break;
-                }
-                const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
-                if (resolved._tag === "Failure") continue;
-                if (!match) {
-                  const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
-                  for (const hit of fast.matches) {
-                    if (matches.length >= LIMITS.matches) {
-                      truncated = true;
-                      break;
-                    }
-                    // rg reports root-relative paths; the model's address is the
-                    // absolute one.
-                    matches.push({ ...hit, path: join(resolved.success.absolute, hit.path) });
-                  }
-                  filesSearched += fast.filesSearched;
-                  truncated ||= fast.truncated;
-                  continue;
-                }
-                const matcher = glob
-                  ? yield* Effect.try({
-                      try: () => globToRegExp(glob),
-                      catch: () =>
-                        new DesktopError({
-                          reason: "bad-pattern",
-                          message: `Could not read ${glob}.`,
-                        }),
-                    })
-                  : null;
-                const walked = yield* Effect.promise(() =>
-                  walkFiles(resolved.success.absolute, WALK_LIMIT, (rel) =>
-                    matcher ? matcher.test(rel) : true,
-                  ),
-                );
-                truncated ||= walked.truncated;
-                for (const file of walked.files) {
+        fileAccess(conversationId)(
+          Effect.gen(function* () {
+            const roots = yield* rootsFor(conversationId);
+            const fastBackend = yield* Effect.promise(ripgrepAvailable);
+            if (fastBackend) {
+              yield* Effect.try({
+                try: () => new RegExp(pattern),
+                catch: () =>
+                  new DesktopError({
+                    reason: "bad-pattern",
+                    message: `${pattern} is not a valid regular expression.`,
+                  }),
+              });
+            }
+            const search = (match: RegexMatcher | null) =>
+              Effect.gen(function* () {
+                const matches: SearchMatch[] = [];
+                let filesSearched = 0;
+                let truncated = false;
+                for (const { root, pinned } of roots) {
                   if (matches.length >= LIMITS.matches) {
                     truncated = true;
                     break;
                   }
-                  const loaded = yield* readPrefix(
-                    file.absolute,
-                    LIMITS.readBytes,
-                    file.relative,
-                  ).pipe(Effect.result);
-                  if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
-                  filesSearched += 1;
-                  const found = yield* match(
-                    loaded.success.toString("utf8"),
-                    LIMITS.matches - matches.length,
+                  const resolved = yield* resolveInFolder(root, ".", pinned).pipe(Effect.result);
+                  if (resolved._tag === "Failure") continue;
+                  if (!match) {
+                    const fast = yield* searchWithRipgrep(resolved.success.absolute, pattern, glob);
+                    for (const hit of fast.matches) {
+                      if (matches.length >= LIMITS.matches) {
+                        truncated = true;
+                        break;
+                      }
+                      // rg reports root-relative paths; the model's address is the
+                      // absolute one.
+                      matches.push({ ...hit, path: join(resolved.success.absolute, hit.path) });
+                    }
+                    filesSearched += fast.filesSearched;
+                    truncated ||= fast.truncated;
+                    continue;
+                  }
+                  const matcher = glob
+                    ? yield* Effect.try({
+                        try: () => globToRegExp(glob),
+                        catch: () =>
+                          new DesktopError({
+                            reason: "bad-pattern",
+                            message: `Could not read ${glob}.`,
+                          }),
+                      })
+                    : null;
+                  const walked = yield* Effect.promise(() =>
+                    walkFiles(resolved.success.absolute, WALK_LIMIT, (rel) =>
+                      matcher ? matcher.test(rel) : true,
+                    ),
                   );
-                  matches.push(...found.matches.map((hit) => ({ ...hit, path: file.absolute })));
-                  truncated ||= found.truncated;
+                  truncated ||= walked.truncated;
+                  for (const file of walked.files) {
+                    if (matches.length >= LIMITS.matches) {
+                      truncated = true;
+                      break;
+                    }
+                    const loaded = yield* readPrefix(
+                      file.absolute,
+                      LIMITS.readBytes,
+                      file.relative,
+                    ).pipe(Effect.result);
+                    if (loaded._tag === "Failure" || isBinary(loaded.success)) continue;
+                    filesSearched += 1;
+                    const found = yield* match(
+                      loaded.success.toString("utf8"),
+                      LIMITS.matches - matches.length,
+                    );
+                    matches.push(...found.matches.map((hit) => ({ ...hit, path: file.absolute })));
+                    truncated ||= found.truncated;
+                  }
                 }
-              }
-              return { pattern, matches, filesSearched, truncated };
-            });
-          return yield* fastBackend ? search(null) : withRegexMatcher(pattern, search);
-        }),
+                return { pattern, matches, filesSearched, truncated };
+              });
+            return yield* fastBackend ? search(null) : withRegexMatcher(pattern, search);
+          }),
+        ),
 
       writeFile: ({ conversationId, path, text }) =>
-        oneChangeAtATime(
+        fileAccess(conversationId)(
           Effect.gen(function* () {
             const bytes = Buffer.byteLength(text, "utf8");
             if (bytes > LIMITS.writeBytes) {
@@ -1000,7 +1029,7 @@ export const makeHandlers = (shell: Shell) =>
         ),
 
       saveToWorkspace: ({ conversationId, fileName, base64, path }) =>
-        oneChangeAtATime(
+        fileAccess(conversationId)(
           Effect.gen(function* () {
             // Same ceiling as a composer import, refused while it is still text.
             if (base64.length > Math.ceil(LIMITS.importBytes / 3) * 4 + 4) {
@@ -1052,7 +1081,7 @@ export const makeHandlers = (shell: Shell) =>
               resolved._tag === "Success" ? resolved.success.absolute : null,
             ),
           );
-          return yield* besideOtherCommands(
+          return yield* besideOtherCommands(conversationId)(
             sandbox.run({
               callId,
               command,

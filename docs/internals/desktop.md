@@ -434,8 +434,8 @@ inside a neighbouring root still fails. Refusals name the path the caller
 supplied, never a host absolute the caller did not already know. Only
 `ENOENT` allows walking to a parent. Moves check both ends. A check and its
 write are not atomic, and the one party able to race them is a sandboxed
-command, so a file change waits until no command is running and commands wait
-for a change. Other processes of the person's own, and hard-link aliases, are
+command, so within a chat a file tool, read or write, waits until no command of
+that chat is running, and commands wait for it. Other chats never wait. Other processes of the person's own, and hard-link aliases, are
 outside that claim.
 
 Inside an attached folder, commands and file tools may change anything, `.git`
