@@ -108,6 +108,12 @@ const fixture = async () => {
   return { userId, identity, fence, save, fenced, list };
 };
 
+/** A lost research fence dies with its own message rather than a typed failure. */
+const expectResearchLoss = (exit: Exit.Exit<unknown, unknown>) =>
+  expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
+    message: "Research ownership lost or cancelled",
+  });
+
 /** A lost fence interrupts; it is never a recoverable failure the model hears about. */
 const expectFenceLoss = (exit: Exit.Exit<unknown, unknown>) => {
   expect(Exit.isFailure(exit)).toBe(true);
@@ -270,7 +276,7 @@ describe("the research run's own fence", () => {
     "refuses a mismatched %s",
     async (field) => {
       const { fence } = await fixture();
-      expect(Exit.isFailure(await write({ ...fence, [field]: uuidv7() }))).toBe(true);
+      expectResearchLoss(await write({ ...fence, [field]: uuidv7() }));
     },
   );
 
@@ -301,7 +307,7 @@ describe("the research run's own fence", () => {
           }).pipe(Effect.orDie),
         ),
       );
-      expect(Exit.isFailure(await write(fence))).toBe(true);
+      expectResearchLoss(await write(fence));
     },
   );
 });

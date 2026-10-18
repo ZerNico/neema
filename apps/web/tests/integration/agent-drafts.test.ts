@@ -477,9 +477,9 @@ describe("tool-created agent drafts", () => {
       ),
     );
     const fence = await ordinary(owner);
-    for (const [userId, target] of [
-      [owner, agentId],
-      [stranger, undefined],
+    for (const [userId, target, refusal] of [
+      [owner, agentId, { _tag: "AgentNotAvailable", agentId }],
+      [stranger, undefined, { _tag: "DraftNotAvailable", conversationId: fence.conversationId }],
     ] as const) {
       await expect(
         run(
@@ -495,7 +495,7 @@ describe("tool-created agent drafts", () => {
             ),
           ),
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(refusal);
     }
     expect(await run(draftOf(owner, fence.conversationId))).toBeNull();
   });
@@ -645,13 +645,18 @@ describe("persistent agent drafts", () => {
     );
     const draft = await initialize(owner, agentId);
     expect(await get(stranger, draft)).toBeNull();
-    await expect(initialize(stranger, agentId)).rejects.toThrow();
+    await expect(initialize(stranger, agentId)).rejects.toBe("not owned");
     await Promise.all(
       [
         patch(stranger, draft, { name: "Wrong owner" }),
         save(stranger, draft),
         reload(stranger, draft),
-      ].map((action) => expect(action).rejects.toThrow()),
+      ].map((action) =>
+        expect(action).rejects.toMatchObject({
+          _tag: "DraftNotAvailable",
+          conversationId: draft.conversationId,
+        }),
+      ),
     );
     expect((await get(owner, draft))!.settings.instructions).toBe("Original instructions");
     expect((await loadAgent(owner, agentId))!.row.configRevision).toBe(1);
@@ -1103,7 +1108,9 @@ describe("draft transaction write fences", () => {
       ),
     );
     const expired = await runtime.runPromiseExit(write);
-    expect(Exit.isFailure(expired)).toBe(true);
+    expect(Exit.isFailure(expired) && Cause.squash(expired.cause)).toMatchObject({
+      message: "Research ownership lost or cancelled",
+    });
     await run(
       Effect.flatMap(Db, (db) =>
         db
@@ -1113,7 +1120,9 @@ describe("draft transaction write fences", () => {
       ),
     );
     const cancelled = await runtime.runPromiseExit(write);
-    expect(Exit.isFailure(cancelled)).toBe(true);
+    expect(Exit.isFailure(cancelled) && Cause.squash(cancelled.cause)).toMatchObject({
+      message: "Research ownership lost or cancelled",
+    });
     expect((await get(owner, draft))!.revision).toBe(1);
   });
 });
