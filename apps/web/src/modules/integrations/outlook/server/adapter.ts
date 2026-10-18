@@ -12,12 +12,12 @@ import {
 import { OUTLOOK_TOOLS } from "../tools.ts";
 import {
   graphCall,
-  graphPath,
   type GraphDateTime,
   type GraphEvent,
   type GraphMessage,
   type GraphRecipient,
 } from "./client.ts";
+import { queryPath } from "../../server/rest-call.ts";
 
 const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
 const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
@@ -176,12 +176,12 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
         Effect.gen(function* () {
           const query = text(args.query);
           const path = query
-            ? graphPath("/me/messages", {
+            ? queryPath("/me/messages", {
                 $search: `"${query.replace(/"/g, '\\"')}"`,
                 $top: INTEGRATION_LIMITS.searchResults,
                 $select: MESSAGE_LIST_FIELDS,
               })
-            : graphPath("/me/mailFolders/inbox/messages", {
+            : queryPath("/me/mailFolders/inbox/messages", {
                 $top: INTEGRATION_LIMITS.searchResults,
                 $orderby: "receivedDateTime desc",
                 $select: MESSAGE_LIST_FIELDS,
@@ -207,7 +207,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
           const message = yield* graphCall<GraphMessage>(
             session,
             "GET",
-            graphPath(`/me/messages/${encodeURIComponent(id)}`, {
+            queryPath(`/me/messages/${encodeURIComponent(id)}`, {
               $select:
                 "id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,bodyPreview,webLink,conversationId,isDraft,hasAttachments",
             }),
@@ -220,7 +220,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
               ? (yield* graphCall<{ value: GraphMessage[] }>(
                   session,
                   "GET",
-                  graphPath("/me/messages", {
+                  queryPath("/me/messages", {
                     $filter: `conversationId eq '${message.conversationId.replace(/'/g, "''")}'`,
                     $top: 25,
                     $select: MESSAGE_LIST_FIELDS,
@@ -264,7 +264,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
           const { value } = yield* graphCall<{ value: GraphEvent[] }>(
             session,
             "GET",
-            graphPath("/me/calendarView", {
+            queryPath("/me/calendarView", {
               startDateTime: from.toISOString(),
               endDateTime: to.toISOString(),
               $top: INTEGRATION_LIMITS.listResults,
@@ -430,7 +430,7 @@ const handlers = integrationHandlers(OUTLOOK_TOOLS)({
         const draft = yield* graphCall<GraphMessage>(
           session,
           "GET",
-          graphPath(`/me/messages/${encodeURIComponent(draftId)}`, {
+          queryPath(`/me/messages/${encodeURIComponent(draftId)}`, {
             $select: "id,subject,isDraft,toRecipients,ccRecipients,bccRecipients,webLink",
           }),
         );

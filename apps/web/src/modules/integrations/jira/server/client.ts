@@ -1,11 +1,10 @@
-import { Duration, Effect } from "effect";
+import { restCall } from "../../server/rest-call.ts";
+import { Effect } from "effect";
 import { IntegrationAuthFailed, IntegrationRequestFailed } from "../../errors.ts";
 import type { Credential, IntegrationSession } from "../../server/adapter.ts";
 
 const GATEWAY = "https://api.atlassian.com";
 const TIMEOUT_MS = 20_000;
-/** The longest `Retry-After` honoured before giving up on a throttled call. */
-const MAX_RETRY_WAIT_MS = 10_000;
 
 export interface JiraUser {
   accountId: string;
@@ -157,15 +156,9 @@ const reason = (status: number, body: unknown) => {
   return message ? `Jira: ${message}` : `Jira answered ${status}.`;
 };
 
-const retryAfter = (response: Response) => {
-  const seconds = Number(response.headers.get("retry-after"));
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000;
-};
-
 /**
  * One Jira REST v3 request. Both origins are fixed (Atlassian's gateway, or
- * the admin's `*.atlassian.net` site), and a redirect is refused rather than
- * followed with credentials attached. A 429 was not processed, so it is
+ * the admin's `*.atlassian.net` site). A 429 was not processed, so it is
  * retried once whatever the method.
  */
 export const jiraCall = <A>(
@@ -177,59 +170,15 @@ export const jiraCall = <A>(
   Effect.gen(function* () {
     const credential = yield* session.credential;
     const { base, authorization } = yield* route(siteOf(session.config), credential);
-    const once = fetchJson(`${base}${path}`, {
+    return yield* restCall<A>({
+      service: "Jira",
+      integrationId: "jira",
+      credential,
+      url: `${base}${path}`,
       method,
-      headers: {
-        accept: "application/json",
-        authorization,
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      authorization,
+      ...(body !== undefined ? { body } : {}),
+      retry: (status) => status === 429,
+      reason,
     });
-    let response = yield* once;
-    const wait = retryAfter(response);
-    if (response.status === 429 && wait <= MAX_RETRY_WAIT_MS) {
-      yield* Effect.sleep(Duration.millis(wait));
-      response = yield* once;
-    }
-    if (response.status === 401)
-      return yield* new IntegrationAuthFailed({
-        integrationId: "jira",
-        ...(credential.identity ? { credential: credential.identity } : {}),
-      });
-    // Updates, assignments and transitions answer 204 with no body.
-    const raw = yield* Effect.tryPromise({
-      try: () => response.text(),
-      catch: () =>
-        new IntegrationRequestFailed({
-          status: response.status,
-          message: `Jira answered ${response.status} without a body.`,
-        }),
-    });
-    let json: unknown = null;
-    if (raw) {
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        if (response.ok)
-          return yield* new IntegrationRequestFailed({
-            status: response.status,
-            message: `Jira answered ${response.status} without JSON.`,
-          });
-      }
-    }
-    if (!response.ok)
-      return yield* new IntegrationRequestFailed({
-        status: response.status,
-        message: reason(response.status, json),
-      });
-    return json as A;
   });
-
-/** A path with its query string, each value encoded once. */
-export const jiraPath = (path: string, query: Record<string, string | number | undefined>) => {
-  const params = Object.entries(query)
-    .filter((entry): entry is [string, string | number] => entry[1] !== undefined)
-    .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`);
-  return params.length ? `${path}?${params.join("&")}` : path;
-};

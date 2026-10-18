@@ -13,7 +13,6 @@ import { adfToMarkdown, markdownToAdf } from "./adf.ts";
 import {
   issueUrl,
   jiraCall,
-  jiraPath,
   siteOf,
   type JiraComment,
   type JiraIssue,
@@ -21,6 +20,7 @@ import {
   type JiraLinkedIssue,
   type JiraUser,
 } from "./client.ts";
+import { queryPath } from "../../server/rest-call.ts";
 
 const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
 const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
@@ -151,7 +151,7 @@ const loadIssue = (session: IntegrationSession, key: string) =>
   jiraCall<JiraIssue>(
     session,
     "GET",
-    jiraPath(`/issue/${encodeURIComponent(key)}`, { fields: "summary,status,assignee,project" }),
+    queryPath(`/issue/${encodeURIComponent(key)}`, { fields: "summary,status,assignee,project" }),
   );
 
 /**
@@ -173,7 +173,7 @@ const assignee = (
     const found = yield* jiraCall<JiraUser[]>(
       session,
       "GET",
-      jiraPath("/user/assignable/search", { query, maxResults: 20, ...scope }),
+      queryPath("/user/assignable/search", { query, maxResults: 20, ...scope }),
     );
     const people = found.filter((user) => user.active !== false);
     const exact = people.filter(
@@ -255,7 +255,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
       const issue = yield* jiraCall<JiraIssue>(
         session,
         "GET",
-        jiraPath(path, {
+        queryPath(path, {
           fields:
             "summary,description,status,issuetype,priority,assignee,reporter,labels,created,updated,duedate,resolution,project,parent,subtasks,issuelinks",
         }),
@@ -273,7 +273,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
               jiraCall<{ comments: JiraComment[]; total: number }>(
                 session,
                 "GET",
-                jiraPath(`${path}/comment`, {
+                queryPath(`${path}/comment`, {
                   startAt: commentsFrom,
                   maxResults: COMMENTS_PER_READ,
                   orderBy: "created",
@@ -350,7 +350,7 @@ const handlers = integrationHandlers(JIRA_TOOLS)({
           }>(
             session,
             "GET",
-            jiraPath("/project/search", {
+            queryPath("/project/search", {
               query: text(args.query) ?? undefined,
               startAt,
               maxResults: INTEGRATION_LIMITS.listResults,
@@ -650,7 +650,7 @@ export const jiraAdapter: IntegrationAdapter = {
         }>(
           session,
           "GET",
-          jiraPath("/project/search", {
+          queryPath("/project/search", {
             startAt: projects.length,
             maxResults: 50,
             orderBy: "name",

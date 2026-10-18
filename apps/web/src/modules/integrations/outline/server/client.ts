@@ -1,8 +1,6 @@
+import { restCall } from "../../server/rest-call.ts";
 import { Effect } from "effect";
-import { IntegrationAuthFailed, IntegrationRequestFailed } from "../../errors.ts";
 import type { IntegrationSession } from "../../server/adapter.ts";
-
-const TIMEOUT_MS = 20_000;
 
 export interface OutlineDocument {
   id: string;
@@ -52,8 +50,8 @@ const reason = (status: number, body: unknown) => {
 
 /**
  * One RPC-style call (`POST /api/<method>`). The base URL is the admin's, so it
- * is exempt from the public-address check like SearXNG, but a redirect off
- * that origin is refused rather than followed with the bearer attached.
+ * is exempt from the public-address check like SearXNG. A throttled call was
+ * not processed, so it is retried once.
  */
 export const outlineCall = <A>(
   session: IntegrationSession,
@@ -69,41 +67,17 @@ export const outlineCall = <A>(
         : credential.kind === "api_key"
           ? credential.values.key
           : "";
-    const response = yield* Effect.tryPromise({
-      try: (signal) =>
-        fetch(`${outlineBase(session.config)}/api/${method}`, {
-          method: "POST",
-          redirect: "manual",
-          signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
-          headers: {
-            "content-type": "application/json",
-            accept: "application/json",
-            authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-        }),
-      catch: () =>
-        new IntegrationRequestFailed({ status: null, message: "Outline could not be reached." }),
+    return yield* restCall<{ data: A; pagination?: { offset: number; limit: number } }>({
+      service: "Outline",
+      integrationId: "outline",
+      credential,
+      url: `${outlineBase(session.config)}/api/${method}`,
+      method: "POST",
+      authorization: `Bearer ${token}`,
+      body,
+      retry: (status) => status === 429,
+      reason,
     });
-    if (response.status === 401)
-      return yield* new IntegrationAuthFailed({
-        integrationId: "outline",
-        ...(credential.identity ? { credential: credential.identity } : {}),
-      });
-    const json: unknown = yield* Effect.tryPromise({
-      try: () => response.json(),
-      catch: () =>
-        new IntegrationRequestFailed({
-          status: response.status,
-          message: `Outline answered ${response.status} without JSON.`,
-        }),
-    });
-    if (!response.ok)
-      return yield* new IntegrationRequestFailed({
-        status: response.status,
-        message: reason(response.status, json),
-      });
-    return json as { data: A; pagination?: { offset: number; limit: number } };
   });
 
 /**
