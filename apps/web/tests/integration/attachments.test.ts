@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
-import { eq } from "drizzle-orm";
+import { eq, getColumnTable, getTableName, sql, type AnyColumn } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted, Duration } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -26,7 +26,8 @@ import {
   userBlobPrefix,
 } from "~/modules/attachments/server/blob-store.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { ATTACHMENT_OWNERS, AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import { BLOB_OWNERS } from "~/modules/attachments/server/blob-references.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { acceptGeneratedImage } from "~/modules/chat/server/generated-files.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
@@ -1346,5 +1347,29 @@ describe("queued message files", () => {
 
     expect(result.keys).toEqual([result.key]);
     expect(result.left).toBe(0);
+  });
+});
+
+describe("owners of stored files", () => {
+  it("lists every foreign key to attachments and to blobs as an owner", async () => {
+    const referencing = (table: string) =>
+      run(
+        Effect.flatMap(Db, (db) =>
+          db.execute(
+            sql`select c.conrelid::regclass::text as "table", a.attname as "column"
+                from pg_constraint c
+                join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
+                where c.contype = 'f' and c.confrelid = ${table}::regclass`,
+          ),
+        ),
+      ).then((result) =>
+        (result as { rows: Array<{ table: string; column: string }> }).rows
+          .map((row) => `${row.table}.${row.column}`)
+          .toSorted(),
+      );
+    const named = (columns: ReadonlyArray<AnyColumn>) =>
+      columns.map((column) => `${getTableName(getColumnTable(column))}.${column.name}`).toSorted();
+    expect(await referencing("attachments")).toEqual(named(ATTACHMENT_OWNERS));
+    expect(await referencing("attachment_blobs")).toEqual(named(BLOB_OWNERS));
   });
 });

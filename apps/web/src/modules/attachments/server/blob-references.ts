@@ -1,4 +1,4 @@
-import { and, asc, inArray, sql } from "drizzle-orm";
+import { and, asc, getColumnTable, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   attachmentBlobs,
@@ -26,6 +26,18 @@ export const lockBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
         .for("update");
 
 /**
+ * Every column whose row owns stored bytes. A table that comes to reference
+ * blobs must be listed, or its bytes are deleted under it; a test holds this
+ * to the schema's foreign keys.
+ */
+export const BLOB_OWNERS = [
+  attachments.blobId,
+  knowledgeDocumentVersions.blobId,
+  skillFiles.blobId,
+  projectFileVersions.blobId,
+] as const;
+
+/**
  * Call with locked blob rows, after removing references; delete bytes after
  * commit.
  *
@@ -42,10 +54,10 @@ export const collectOrphanedBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
         .where(
           and(
             inArray(attachmentBlobs.id, [...ids]),
-            sql`not exists (select 1 from ${attachments} where ${attachments.blobId} = ${attachmentBlobs.id})`,
-            sql`not exists (select 1 from ${knowledgeDocumentVersions} where ${knowledgeDocumentVersions.blobId} = ${attachmentBlobs.id})`,
-            sql`not exists (select 1 from ${skillFiles} where ${skillFiles.blobId} = ${attachmentBlobs.id})`,
-            sql`not exists (select 1 from ${projectFileVersions} where ${projectFileVersions.blobId} = ${attachmentBlobs.id})`,
+            ...BLOB_OWNERS.map(
+              (column) =>
+                sql`not exists (select 1 from ${getColumnTable(column)} where ${column} = ${attachmentBlobs.id})`,
+            ),
           ),
         )
         .returning({ storageKey: attachmentBlobs.storageKey })

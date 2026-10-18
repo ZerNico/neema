@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, getColumnTable, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Duration, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -73,9 +73,23 @@ const withBlobColumns = {
   parsedWith: attachmentBlobs.parsedWith,
 };
 
-// Postgres unique_violation, wherever the driver buried it in the cause
-// chain. Anything else raised during the claim insert is a real fault and
-// must not be dressed up as a user-level conflict.
+/** A time `span` before (-1) or after (1) the database's now. */
+const sinceNow = (span: Duration.Duration, direction: 1 | -1) =>
+  sql`now() + make_interval(secs => ${(direction * Duration.toMillis(span)) / 1000})`;
+const UNCLAIMED_BATCH = 100;
+const UNCLAIMED_BATCHES = 10;
+
+/**
+ * Every column whose row owns an attachment. A table that comes to reference
+ * attachments must be listed, or its files are swept from under it; a test
+ * holds this to the schema's foreign keys.
+ */
+export const ATTACHMENT_OWNERS = [
+  messageAttachments.attachmentId,
+  conversationQueueEntryAttachments.attachmentId,
+  conversationWorkingFiles.attachmentId,
+  documentImages.attachmentId,
+] as const;
 
 /**
  * No owner of any kind: not a transcript message's file, a queued message's,
@@ -84,13 +98,13 @@ const withBlobColumns = {
  * abandoned, or claimed a second time. Once an owner row cascades away with
  * its chat, answer or document, the sweep takes the attachment and its bytes.
  */
-/** A time `span` before (-1) or after (1) the database's now. */
-const sinceNow = (span: Duration.Duration, direction: 1 | -1) =>
-  sql`now() + make_interval(secs => ${(direction * Duration.toMillis(span)) / 1000})`;
-const UNCLAIMED_BATCH = 100;
-const UNCLAIMED_BATCHES = 10;
-
-const unclaimed = sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationQueueEntryAttachments} where ${conversationQueueEntryAttachments.attachmentId} = ${attachments.id}) and not exists (select 1 from ${conversationWorkingFiles} where ${conversationWorkingFiles.attachmentId} = ${attachments.id}) and not exists (select 1 from ${documentImages} where ${documentImages.attachmentId} = ${attachments.id})`;
+const unclaimed = sql.join(
+  ATTACHMENT_OWNERS.map(
+    (column) =>
+      sql`not exists (select 1 from ${getColumnTable(column)} where ${column} = ${attachments.id})`,
+  ),
+  sql` and `,
+);
 
 /** Whose files these are: a transcript message, or a queued message. */
 type AttachmentOwner = { kind: "message"; id: string } | { kind: "queue"; id: string };
