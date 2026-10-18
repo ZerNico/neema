@@ -4,7 +4,7 @@ import { NOT_APPROVED_BODY } from "../signup.ts";
 import { sessionFromHeaders } from "./auth.ts";
 
 // The Start client drops the status of a non-OK response and keeps only its
-// text, so the body is what `isUnauthenticatedError` matches on.
+// text, so the body is what `isUnauthenticatedError` and `isNotApprovedError` match on.
 const unauthenticated = () => new Response(UNAUTHENTICATED_BODY, { status: 401 });
 const notApproved = () => new Response(NOT_APPROVED_BODY, { status: 403 });
 

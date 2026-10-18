@@ -41,3 +41,5 @@ export const DecideApprovalInput = Schema.Struct({
  * keeps only a failed response's text, so the body is what the client matches.
  */
 export const NOT_APPROVED_BODY = "Account not approved";
+export const isNotApprovedError = (error: unknown): boolean =>
+  error instanceof Error && error.message === NOT_APPROVED_BODY;

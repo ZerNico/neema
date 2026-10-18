@@ -3,6 +3,7 @@ import { Activity, useCallback, useEffect, useMemo, useRef, useState, type React
 import { flushSync } from "react-dom";
 import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { authClient } from "./client.ts";
+import { isNotApprovedError } from "./signup.ts";
 import { getSessionIdentity } from "./server/functions.ts";
 import {
   cacheOwnerOf,
@@ -140,10 +141,13 @@ export function IdentityBoundary({
     [replace],
   );
 
-  // Layer 1: any request the server refuses ends the session immediately.
+  // Layer 1: any request the server refuses ends the session immediately, and
+  // one refused for an account turned down or waiting again shows the wait.
   useEffect(() => {
     const onError = (error: unknown) => {
-      if (isUnauthenticatedError(error) && !state.current.mutating) replace("/login", false);
+      if (state.current.mutating) return;
+      if (isUnauthenticatedError(error)) replace("/login", false);
+      else if (isNotApprovedError(error)) replace("/pending", false);
     };
     const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
       if (event.type === "updated" && event.action.type === "error") onError(event.action.error);

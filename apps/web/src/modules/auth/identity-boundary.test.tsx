@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NOT_APPROVED_BODY } from "./signup.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createPortal } from "react-dom";
@@ -330,6 +331,21 @@ describe("authenticated identity boundary", () => {
       expect(client.getQueryCache().getAll()).toEqual([]);
     },
   );
+
+  it("shows the wait when a request is refused for an account no longer approved", async () => {
+    const { client } = mount();
+    await act(async () => {});
+    await act(async () => {
+      await client
+        .fetchQuery({
+          queryKey: ["refused"],
+          queryFn: () => Promise.reject(new Error(NOT_APPROVED_BODY)),
+          retry: false,
+        })
+        .catch(() => {});
+    });
+    expect(identityNavigation.replace).toHaveBeenCalledWith("/pending");
+  });
 
   it("leaves ordinary request failures to their callers", async () => {
     const { client } = mount();
