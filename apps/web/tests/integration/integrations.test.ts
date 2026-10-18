@@ -85,6 +85,8 @@ const created: Record<string, unknown>[] = [];
 let beforeApiResponse: ((request: IncomingMessage) => Promise<void>) | null = null;
 /** Runs while a code is being exchanged, before the token endpoint answers. */
 let duringCodeExchange: (() => Promise<void>) | null = null;
+/** Runs while a refresh token is being spent, before the token endpoint answers. */
+let duringRefresh: (() => Promise<void>) | null = null;
 
 const readBody = (request: IncomingMessage) =>
   new Promise<string>((resolve) => {
@@ -111,6 +113,7 @@ const startOutline = () =>
           validTokens.add("a-code");
           return json(200, { access_token: "a-code", refresh_token: "r-code", expires_in: 3600 });
         }
+        if (duringRefresh) await duringRefresh();
         // One use per refresh token, as a rotating provider would allow.
         const next = refreshTokens.get(form.get("refresh_token") ?? "");
         // What Outline really answers for a spent or unknown refresh token:
@@ -591,6 +594,48 @@ describe("connections", () => {
       })),
     );
     expect(tokenCalls.slice(before)).toEqual(["refresh_token"]);
+  });
+
+  it("holds no lock while the token endpoint answers, and keeps a reconnect made meanwhile", async () => {
+    const userId = await newUser();
+    const refreshToken = uuidv7();
+    refreshTokens.set(refreshToken, { access: `late-${userId}`, refresh: uuidv7() });
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        saveAtCurrent(repo, {
+          userId,
+          integrationId: "outline",
+          authKind: "oauth",
+          credentials: { kind: "oauth", accessToken: "expired", refreshToken, expiresAt: 0 },
+          accountLabel: "ada",
+          fingerprint: baseUrl,
+        }),
+      ),
+    );
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const reached = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    duringRefresh = async () => {
+      reached.resolve();
+      await answer.promise;
+    };
+    try {
+      const credential = runtime.runPromiseExit(session.credential);
+      await reached.promise;
+      // Would wait on the connection's row lock if the refresh still held it.
+      await connectKey(userId);
+      answer.resolve();
+      expect(Exit.isFailure(await credential)).toBe(true);
+      const after = await run(
+        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      );
+      expect(await run(after.credential)).toMatchObject({ kind: "api_key" });
+    } finally {
+      duringRefresh = null;
+      answer.resolve();
+    }
   });
 
   it("validates reconnect identity after waiting for the refresh lock before contacting OAuth", async () => {

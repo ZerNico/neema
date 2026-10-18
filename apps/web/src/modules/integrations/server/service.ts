@@ -1,10 +1,11 @@
 import { isIP } from "node:net";
 import { and, eq, gt } from "drizzle-orm";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Semaphore } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections, verification } from "~/db/schema/index.ts";
 import { eligibleAdmin } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { findIntegrationType, INTEGRATION_TYPES } from "../catalog.ts";
@@ -306,6 +307,63 @@ const verified = (
     }),
   );
 
+/**
+ * Locks the config, then the connection, and checks both still describe
+ * the setup this session was made for. No token touches a captured
+ * endpoint until both locked identities still agree.
+ */
+const lockForRefresh = (
+  tx: DbTx,
+  connection: IntegrationConnectionRow,
+  row: IntegrationConfigRow,
+  adapter: IntegrationAdapter,
+  setup: Setup,
+) =>
+  Effect.gen(function* () {
+    // Config before connection, matching admin saves.
+    const [config] = yield* tx
+      .select()
+      .from(integrationConfigs)
+      .where(
+        and(
+          eq(integrationConfigs.id, row.id),
+          eq(integrationConfigs.enabled, true),
+          integrationUsableBy(connection.userId),
+        ),
+      )
+      .for("share");
+    if (
+      !config ||
+      configIdentity(config, adapter) !== configIdentity(row, adapter) ||
+      config.revision !== setup.revision
+    )
+      return { kind: "failed", message: UNAVAILABLE } satisfies RefreshResult;
+    const [locked] = yield* tx
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connection.id))
+      .for("update");
+    // A reconnect after a move must not hand this session the new server's token.
+    if (
+      !locked ||
+      locked.status !== "active" ||
+      locked.accountEpoch !== connection.accountEpoch ||
+      locked.configFingerprint !== connection.configFingerprint ||
+      locked.configFingerprint !== setup.fingerprint
+    )
+      return {
+        kind: "failed",
+        message: "This integration is no longer connected.",
+      } satisfies RefreshResult;
+    return { config, locked };
+  });
+
+const needsReauth = (tx: DbTx, connectionId: string) =>
+  tx
+    .update(integrationConnections)
+    .set({ status: "needs_reauth", updatedAt: new Date() })
+    .where(eq(integrationConnections.id, connectionId));
+
 export class IntegrationService extends Context.Service<
   IntegrationService,
   {
@@ -496,6 +554,17 @@ export class IntegrationService extends Context.Service<
         return { manifest, adapter, row, ...normalized };
       });
 
+      // Concurrent callers (a chat and a sync, say) take turns per connection:
+      // the first rotates the refresh token, the rest find a fresh access token
+      // instead of spending one already used. In process, so no pooled
+      // connection or row lock is held while a token endpoint answers.
+      const refreshTurns = new Map<string, Semaphore.Semaphore>();
+      const refreshTurn = (connectionId: string) => {
+        let turn = refreshTurns.get(connectionId);
+        if (!turn) refreshTurns.set(connectionId, (turn = Semaphore.makeUnsafe(1)));
+        return turn.withPermits(1);
+      };
+
       const refresh = (
         connection: IntegrationConnectionRow,
         row: IntegrationConfigRow,
@@ -505,48 +574,13 @@ export class IntegrationService extends Context.Service<
         Effect.gen(function* () {
           const connectionId = connection.id;
           const oauth = adapter.oauth;
-          // The lock makes concurrent callers (a chat and a sync, say) take
-          // turns: the first rotates the refresh token, the rest find a fresh
-          // access token instead of spending a refresh token already used.
-          const result = yield* db
+          // What to send, read under the locks; the request itself runs after commit.
+          const plan = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                // Config before connection, matching admin saves. No token touches
-                // a captured endpoint until both locked identities still agree.
-                const [config] = yield* tx
-                  .select()
-                  .from(integrationConfigs)
-                  .where(
-                    and(
-                      eq(integrationConfigs.id, row.id),
-                      eq(integrationConfigs.enabled, true),
-                      integrationUsableBy(connection.userId),
-                    ),
-                  )
-                  .for("share");
-                if (
-                  !config ||
-                  configIdentity(config, adapter) !== configIdentity(row, adapter) ||
-                  config.revision !== setup.revision
-                )
-                  return { kind: "failed", message: UNAVAILABLE } satisfies RefreshResult;
-                const [locked] = yield* tx
-                  .select()
-                  .from(integrationConnections)
-                  .where(eq(integrationConnections.id, connectionId))
-                  .for("update");
-                // A reconnect after a move must not hand this session the new server's token.
-                if (
-                  !locked ||
-                  locked.status !== "active" ||
-                  locked.accountEpoch !== connection.accountEpoch ||
-                  locked.configFingerprint !== connection.configFingerprint ||
-                  locked.configFingerprint !== setup.fingerprint
-                )
-                  return {
-                    kind: "failed",
-                    message: "This integration is no longer connected.",
-                  } satisfies RefreshResult;
+                const held = yield* lockForRefresh(tx, connection, row, adapter, setup);
+                if ("kind" in held) return held;
+                const { config, locked } = held;
                 const stored = yield* repo.decrypt(locked);
                 if (stored?.kind === "api_key")
                   return {
@@ -576,48 +610,66 @@ export class IntegrationService extends Context.Service<
                   } satisfies RefreshResult;
                 const discovered = stored?.server && adapter.discoveredOAuth ? stored.server : null;
                 if (!stored?.refreshToken || (!discovered && (!oauth || !row.oauthClientId))) {
-                  yield* tx
-                    .update(integrationConnections)
-                    .set({ status: "needs_reauth", updatedAt: new Date() })
-                    .where(eq(integrationConnections.id, connectionId));
+                  yield* needsReauth(tx, connectionId);
                   return { kind: "revoked" } satisfies RefreshResult;
                 }
                 // Secrets come from the locked row: an issuer pinned meanwhile still holds.
-                const outcome = discovered
-                  ? yield* adapter.discoveredOAuth!.refresh({
-                      server: discovered,
-                      clientSecret: yield* discoveredSecret(config, discovered),
-                      refreshToken: stored.refreshToken,
-                    })
-                  : yield* requestTokens({
-                      endpoint: oauth!.tokenUrl(row.config),
-                      clientId: row.oauthClientId!,
-                      clientSecret: yield* repo.clientSecret(config),
-                      params: { grant_type: "refresh_token", refresh_token: stored.refreshToken },
-                    }).pipe(
-                      Effect.catchTag("IntegrationRequestFailed", () =>
-                        Effect.succeed({ ok: false as const, revoked: false }),
-                      ),
-                    );
+                return {
+                  kind: "request",
+                  stored,
+                  refreshToken: stored.refreshToken,
+                  discovered,
+                  credentialRevision: locked.credentialRevision,
+                  clientSecret: discovered
+                    ? yield* discoveredSecret(config, discovered)
+                    : yield* repo.clientSecret(config),
+                } as const;
+              }),
+            )
+            .pipe(Effect.orDie);
+          if (plan.kind !== "request") return plan as RefreshResult;
+
+          const outcome = plan.discovered
+            ? yield* adapter.discoveredOAuth!.refresh({
+                server: plan.discovered,
+                clientSecret: plan.clientSecret,
+                refreshToken: plan.refreshToken,
+              })
+            : yield* requestTokens({
+                endpoint: oauth!.tokenUrl(row.config),
+                clientId: row.oauthClientId!,
+                clientSecret: plan.clientSecret,
+                params: { grant_type: "refresh_token", refresh_token: plan.refreshToken },
+              }).pipe(
+                Effect.catchTag("IntegrationRequestFailed", () =>
+                  Effect.succeed({ ok: false as const, revoked: false }),
+                ),
+              );
+          if (!outcome.ok && !outcome.revoked)
+            return { kind: "failed", message: "Could not refresh the sign-in." } as RefreshResult;
+
+          // Stored only if nothing replaced the credential while the endpoint answered.
+          const result = yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                const held = yield* lockForRefresh(tx, connection, row, adapter, setup);
+                if ("kind" in held) return held;
+                if (held.locked.credentialRevision !== plan.credentialRevision)
+                  return {
+                    kind: "failed",
+                    message: "The sign-in changed while it was refreshed.",
+                  } satisfies RefreshResult;
                 if (!outcome.ok) {
-                  if (!outcome.revoked)
-                    return {
-                      kind: "failed",
-                      message: "Could not refresh the sign-in.",
-                    } satisfies RefreshResult;
-                  yield* tx
-                    .update(integrationConnections)
-                    .set({ status: "needs_reauth", updatedAt: new Date() })
-                    .where(eq(integrationConnections.id, connectionId));
+                  yield* needsReauth(tx, connectionId);
                   return { kind: "revoked" } satisfies RefreshResult;
                 }
                 const next: StoredCredentials = {
                   kind: "oauth",
                   accessToken: outcome.tokens.accessToken,
                   // Services that do not rotate send no new refresh token.
-                  refreshToken: outcome.tokens.refreshToken ?? stored.refreshToken,
+                  refreshToken: outcome.tokens.refreshToken ?? plan.refreshToken,
                   expiresAt: outcome.tokens.expiresAt,
-                  ...(discovered ? { server: discovered } : {}),
+                  ...(plan.discovered ? { server: plan.discovered } : {}),
                 };
                 const credentialRevision = uuidv7();
                 yield* tx
@@ -633,14 +685,14 @@ export class IntegrationService extends Context.Service<
                   credential: {
                     kind: "oauth",
                     accessToken: next.accessToken,
-                    identity: { ...credentialIdentity(locked), credentialRevision },
+                    identity: { ...credentialIdentity(held.locked), credentialRevision },
                   },
                 } satisfies RefreshResult;
               }),
             )
             .pipe(Effect.orDie);
           return result as RefreshResult;
-        });
+        }).pipe(refreshTurn(connection.id));
 
       /**
        * The connection's credential for the setup a session was made for. A
