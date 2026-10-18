@@ -177,10 +177,12 @@ export function useSync(
             void queryClient.invalidateQueries({
               queryKey: ["documents", "list", event.conversationId],
             });
-            // Creation, rename and deletion change the loader's summary list.
-            void queryClient.invalidateQueries({
-              queryKey: ["conversation", event.conversationId],
-            });
+            // Creation, rename and deletion change the loader's summary list;
+            // typing does not, and would otherwise reload the chat once a second.
+            if (!event.textOnly)
+              void queryClient.invalidateQueries({
+                queryKey: ["conversation", event.conversationId],
+              });
           }
           if (event.projectId)
             void queryClient.invalidateQueries({

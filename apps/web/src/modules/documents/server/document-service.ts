@@ -593,11 +593,15 @@ export class DocumentService extends Context.Service<
             Effect.andThen(
               Effect.suspend(() => {
                 entry.changedPending = false;
-                return documentChanged(userId, {
-                  id: documentId,
-                  conversationId: entry.conversationId,
-                  projectId: entry.projectId,
-                });
+                return documentChanged(
+                  userId,
+                  {
+                    id: documentId,
+                    conversationId: entry.conversationId,
+                    projectId: entry.projectId,
+                  },
+                  true,
+                );
               }),
             ),
             Effect.forkIn(scope),

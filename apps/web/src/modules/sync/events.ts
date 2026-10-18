@@ -32,6 +32,8 @@ export const SyncEvent = Schema.Union([
     conversationId: Schema.optionalKey(Schema.String),
     projectId: Schema.optionalKey(Schema.String),
     documentId: Schema.String,
+    /** Only its text changed: nothing listed about it, so a chat's detail stands. */
+    textOnly: Schema.optionalKey(Schema.Literal(true)),
   }),
   // Settings, members, memory or the set of chats moved in or out.
   Schema.Struct({ type: Schema.Literal("project.changed"), projectId: Schema.String }),

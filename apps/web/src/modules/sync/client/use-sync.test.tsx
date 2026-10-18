@@ -190,6 +190,20 @@ describe("useSync", () => {
     ]);
   });
 
+  it("leaves the chat's detail alone when only a document's text changed", () => {
+    const { invalidate, source } = renderSync();
+    source.emit("sync", {
+      type: "document.changed",
+      conversationId: "c1",
+      documentId: "doc1",
+      textOnly: true,
+    });
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ["documents", "doc1"] }],
+      [{ queryKey: ["documents", "list", "c1"] }],
+    ]);
+  });
+
   it("coalesces indexing bursts into knowledge-only invalidation without starving refresh", async () => {
     vi.useFakeTimers();
     const { invalidate, source } = renderSync();
