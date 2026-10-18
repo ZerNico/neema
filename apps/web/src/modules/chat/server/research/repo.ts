@@ -273,8 +273,8 @@ export const createResearchStore = (db: Db["Service"]) => {
     });
     return true;
   });
-  const get = (runId: string) =>
-    db
+  const get = (runId: string, client: Db["Service"] | DbTx = db) =>
+    client
       .select()
       .from(researchRuns)
       .where(eq(researchRuns.id, runId))
@@ -286,7 +286,7 @@ export const createResearchStore = (db: Db["Service"]) => {
     db
       .transaction((tx) =>
         Effect.gen(function* () {
-          const candidate = yield* get(runId);
+          const candidate = yield* get(runId, tx);
           if (!candidate) return false;
           yield* tx
             .select({ id: conversations.id })

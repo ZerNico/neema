@@ -165,6 +165,7 @@ export class DraftService extends Context.Service<
                     userId,
                     input.conversationId,
                     config.kind,
+                    tx,
                   )) as ConversationDraft<S>[];
                   const targetId = input.targetId ?? null;
                   const reusable = siblings.find((draft) =>

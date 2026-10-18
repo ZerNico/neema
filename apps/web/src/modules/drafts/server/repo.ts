@@ -40,10 +40,12 @@ export class DraftRepo extends Context.Service<
     ): Effect.Effect<ConversationDraft, DraftNotAvailable>;
     get(userId: string, draftId: string, kind: DraftKind): Effect.Effect<ConversationDraft | null>;
     /** Oldest first, so a chat's drafts keep the order they were started in. */
+    /** Pass the transaction when one is open: a second pool connection could starve. */
     listForConversation(
       userId: string,
       conversationId: string,
       kind: DraftKind,
+      tx?: DbTx,
     ): Effect.Effect<ConversationDraft[]>;
     /** Always conversation → draft; a model fence runs before this acquires either lock. */
     lock(
@@ -126,8 +128,8 @@ export class DraftRepo extends Context.Service<
           return row ? toDraft(row.draft) : null;
         }),
         listForConversation: Effect.fn("DraftRepo.listForConversation")(
-          function* (userId, conversationId, kind) {
-            const rows = yield* db
+          function* (userId, conversationId, kind, tx) {
+            const rows = yield* (tx ?? db)
               .select({ draft: conversationDrafts })
               .from(conversationDrafts)
               .innerJoin(conversations, eq(conversations.id, conversationDrafts.conversationId))
