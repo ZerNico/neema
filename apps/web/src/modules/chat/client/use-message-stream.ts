@@ -434,39 +434,40 @@ export function applyCompactionChunk(
 /** Every chunk kind the server writes; see `ChunkKind` in the chat repo. */
 type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
 
+/*
+ * Every reducer below hands back the array it was given when a chunk changes
+ * nothing, so a replayed or ignored chunk re-renders nothing downstream.
+ */
+
 /** Adds a steer from its envelope; a replayed or malformed one changes nothing. */
-export const applySteerChunk = (
-  steers: ReadonlyArray<AssistantSteer>,
-  delta: string,
-): AssistantSteer[] => {
+export const applySteerChunk = (steers: AssistantSteer[], delta: string): AssistantSteer[] => {
   try {
     const { v: _version, ...steer } = Schema.decodeUnknownSync(SteerChunkEnvelope)(
       JSON.parse(delta),
     );
-    if (steers.some((item) => item.id === steer.id)) return [...steers];
+    if (steers.some((item) => item.id === steer.id)) return steers;
     return [...steers, steer];
   } catch {
-    return [...steers];
+    return steers;
   }
 };
 
-export const applyFileChunk = (
-  files: ReadonlyArray<AssistantFile>,
-  delta: string,
-): AssistantFile[] => {
+export const applyFileChunk = (files: AssistantFile[], delta: string): AssistantFile[] => {
   try {
     const file = Schema.decodeUnknownSync(AssistantFile)(JSON.parse(delta));
     // Limits are the server's: what it stored is what a reload shows.
-    if (files.some((item) => item.attachment.id === file.attachment.id)) return [...files];
+    if (files.some((item) => item.attachment.id === file.attachment.id)) return files;
     return [...files, file];
   } catch {
-    return [...files];
+    return files;
   }
 };
 
+const isWriting = (tool: ToolActivity) => "writing" in tool && tool.writing === true;
+
 /** A call still being written leaves once any call starts or the answer ends. */
-const withoutWriting = (tools: ReadonlyArray<ToolActivity>) =>
-  tools.filter((tool) => !("writing" in tool && tool.writing));
+const withoutWriting = (tools: ToolActivity[]) =>
+  tools.some(isWriting) ? tools.filter((tool) => !isWriting(tool)) : tools;
 
 /**
  * A writing marker from an earlier attempt of a resumed answer. That attempt
@@ -482,7 +483,7 @@ export const isStaleWriting = (delta: string, runId: string | null) => {
 };
 
 /** An Office edit the model has begun writing, shown as a running step until it starts. */
-export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: string) => {
+export const applyWritingChunk = (tools: ToolActivity[], delta: string): ToolActivity[] => {
   try {
     const writing = JSON.parse(delta) as {
       v?: unknown;
@@ -498,7 +499,7 @@ export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: str
       typeof writing.textOffset !== "number" ||
       typeof writing.turnIndex !== "number"
     )
-      return [...tools];
+      return tools;
     // A long call the model spends a while writing: an Office edit, or a
     // research brief, which otherwise shows nothing until the run starts.
     const position = {
@@ -517,9 +518,9 @@ export const applyWritingChunk = (tools: ReadonlyArray<ToolActivity>, delta: str
     // A document being written shows as running while its text streams into the panel.
     if (isDocumentWrite(writing.name))
       return [...withoutWriting(tools), { ...position, family: "document" as const }];
-    return [...tools];
+    return tools;
   } catch {
-    return [...tools];
+    return tools;
   }
 };
 
@@ -554,6 +555,7 @@ export const stampToolTimes = (
   after: ToolActivity[],
   now: number,
 ): ToolActivity[] => {
+  if (after === before) return after;
   const previous = new Map(before.map((activity) => [activity.callId, activity]));
   return after.map((activity) => {
     const prior = previous.get(activity.callId);
@@ -573,7 +575,7 @@ export const stampToolTimes = (
 
 /** Tool and writing chunks in stream order, for the live reducer and a reload's replay alike. */
 export const applyToolActivityChunk = (
-  tools: ReadonlyArray<ToolActivity>,
+  tools: ToolActivity[],
   kind: "tool" | "writing",
   delta: string,
   at = serverNow(),
@@ -582,7 +584,7 @@ export const applyToolActivityChunk = (
     ? applyWritingChunk(tools, delta)
     : stampToolTimes(
         tools,
-        applyToolChunk(startsCall(delta) ? withoutWriting(tools) : [...tools], delta),
+        applyToolChunk(startsCall(delta) ? withoutWriting(tools) : tools, delta),
         at,
       );
 
@@ -595,15 +597,22 @@ function applyChunk(
   at?: number,
 ): StreamState {
   switch (kind) {
-    case "file":
-      return { ...state, files: applyFileChunk(state.files, delta) };
-    case "compaction":
-      return { ...state, compactions: applyCompactionChunk(state.compactions, delta) };
-    case "steer":
-      return { ...state, steers: applySteerChunk(state.steers, delta) };
+    case "file": {
+      const files = applyFileChunk(state.files, delta);
+      return files === state.files ? state : { ...state, files };
+    }
+    case "compaction": {
+      const compactions = applyCompactionChunk(state.compactions, delta);
+      return compactions === state.compactions ? state : { ...state, compactions };
+    }
+    case "steer": {
+      const steers = applySteerChunk(state.steers, delta);
+      return steers === state.steers ? state : { ...state, steers };
+    }
     case "writing":
     case "tool": {
       const tools = applyToolActivityChunk(state.tools, kind, delta, at);
+      if (tools === state.tools) return state;
       return { ...state, tools, previews: runningPreviews(state.previews, tools) };
     }
   }

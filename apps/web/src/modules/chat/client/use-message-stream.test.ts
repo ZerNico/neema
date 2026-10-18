@@ -688,6 +688,43 @@ describe("a replayed call's timing", () => {
   });
 });
 
+describe("a chunk that changes nothing", () => {
+  const base = {
+    files: [],
+    tools: [],
+    compactions: [],
+    steers: [],
+    status: "streaming" as const,
+    reading: null,
+    lookups: NO_LOOKUPS,
+    previews: {},
+  };
+  const chunk = (chunkKind: "tool" | "writing" | "steer", delta: string) =>
+    ({ kind: "chunk", chunkKind, delta }) as const;
+
+  it("leaves the state as it was, so nothing downstream re-renders", () => {
+    const started = streamReducer(base, chunk("tool", start));
+    const steered = streamReducer(started, chunk("steer", steerEnvelope("a")));
+    expect(steered).not.toBe(started);
+    for (const ignored of [
+      chunk("tool", start),
+      chunk("tool", "{not json"),
+      chunk("steer", steerEnvelope("a")),
+      chunk(
+        "writing",
+        JSON.stringify({ v: 1, id: "x", name: "web_search", textOffset: 0, turnIndex: 0 }),
+      ),
+    ])
+      expect(streamReducer(steered, ignored)).toBe(steered);
+  });
+
+  it("keeps the array when a call starts with nothing being written", () => {
+    const tools = applyToolActivityChunk([], "tool", start);
+    const replayed = applyToolActivityChunk(tools, "tool", start);
+    expect(replayed).toBe(tools);
+  });
+});
+
 describe("the server's clock", () => {
   it("reads elapsed time against the server, whatever the browser's clock says", () => {
     const local = Date.now();
