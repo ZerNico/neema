@@ -1131,7 +1131,6 @@ describe("ChatView inline question answers", () => {
     expect(resetUploads).not.toHaveBeenCalled();
     expect(sendMock).not.toHaveBeenCalled();
     expect(answerMock).not.toHaveBeenCalled();
-    expect(streamProbe.mock.calls.at(-1)?.[3]).toBe(1);
   });
 
   it("keeps answer edits local while typing and changing composer settings", () => {
@@ -1397,7 +1396,6 @@ describe("ChatView question handoff", () => {
         ],
       }),
       "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-      0,
       null,
       "streaming",
     );
@@ -1477,7 +1475,6 @@ describe("ChatView question handoff", () => {
         "next",
         expect.any(Object),
         "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-        0,
         null,
         "streaming",
       ),

@@ -361,9 +361,6 @@ export function ChatView({
     editingMessageId === null
       ? null
       : (data.messages.find((message) => message.id === editingMessageId) ?? null);
-  // Bumped on retry/edit: the assistant id usually stays the same, so the
-  // stream hook needs a separate signal to resubscribe from seq 0.
-  const [retryEpoch, setRetryEpoch] = useState(0);
   // One folder state for the strip and the send, so attaching in the strip is
   // what the very next message reports. A plain chat never offers the tools.
   const work = useWorkGate(conversationId, data.conversation.mode === "work");
@@ -404,10 +401,11 @@ export function ChatView({
   if (streamingMessage && streamingMessage.id !== overlayId) {
     setOverlayId(streamingMessage.id);
   }
-  // The stream starts from the chunks there were when its generation (or a retry) began, a
-  // snapshot taken once: chunks arriving later reach it live, not by seeding it again.
+  // The stream starts from the chunks there were when its generation began, a snapshot
+  // taken once: chunks arriving later reach it live, not by seeding it again. Retry, edit
+  // and resume each start a new generation, so the key alone tells them apart.
   const streamKey = streamingMessage
-    ? `${streamingMessage.id}\n${streamingMessage.generationId ?? ""}\n${retryEpoch}`
+    ? `${streamingMessage.id}\n${streamingMessage.generationId ?? ""}`
     : null;
   const [seeded, setSeeded] = useState<{
     key: string;
@@ -434,7 +432,6 @@ export function ChatView({
     subscribedMessage?.id ?? null,
     initialStream,
     conversationId,
-    retryEpoch,
     subscribedMessage?.generationId ?? null,
     subscribedMessage?.status,
   );
@@ -768,11 +765,7 @@ export function ChatView({
       }),
     onSuccess: async (_result, input) => {
       if (input.modelId !== undefined) changeModel(input.modelId);
-      // Refetch BEFORE bumping the epoch: the retried generation restarts at
-      // seq 1, so the new subscription must be seeded from the wiped message
-      // (after=0), not from the previous generation's chunk cursor.
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-      setRetryEpoch((e) => e + 1);
     },
   });
 
@@ -803,7 +796,6 @@ export function ChatView({
     onSuccess: async (_result, input) => {
       if (input.modelId !== undefined) changeModel(input.modelId);
       await queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
-      setRetryEpoch((e) => e + 1);
     },
   });
 
@@ -891,7 +883,6 @@ export function ChatView({
         resetSearchEnabled();
       }
       setEditingMessageId(null);
-      setRetryEpoch((e) => e + 1);
     },
     onError: async (_error, input) => {
       cancelAnchor();

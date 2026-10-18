@@ -688,11 +688,7 @@ export function useMessageStream(
   messageId: string | null,
   initial: InitialStream | null,
   conversationId: string | null,
-  /**
-   * Bump to force a fresh subscription for the SAME message id, since retry reuses
-   * the row, so the id alone can't signal "this is a new generation".
-   */
-  epoch = 0,
+  /** The attempt's generation: retry, edit and resume reuse the row but not this. */
   runId: string | null = null,
   canonicalStatus?: "streaming" | "complete" | "error" | "aborted",
 ) {
@@ -710,7 +706,7 @@ export function useMessageStream(
   const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
   // retry of the same message).
-  const generationKey = `${messageId}:${runId ?? "chat"}:${epoch}`;
+  const generationKey = `${messageId}:${runId ?? "chat"}`;
   const [stateGeneration, setStateGeneration] = useState(generationKey);
   // Reset before commit: a same-message retry must never paint the prior files.
   if (messageId && stateGeneration !== generationKey) {
@@ -857,7 +853,7 @@ export function useMessageStream(
     };
     // initial is intentionally captured only when the generation changes
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the resume point is read once, when this generation subscribes
-  }, [messageId, epoch, runId, terminalFailure, conversationId, queryClient, generationKey, live]);
+  }, [messageId, runId, terminalFailure, conversationId, queryClient, generationKey, live]);
 
   // Completion is only reported once the words are all on screen; the pacer
   // keeps advancing regardless of status, so this converges within ticks of

@@ -34,7 +34,7 @@ describe("presentation writing events", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      ({ runId }) => useMessageStream("m1", null, "c1", runId),
       { wrapper, initialProps: { runId: "generation-1" } },
     );
     const old = FakeEventSource.instances.at(-1)!;
@@ -224,7 +224,7 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      ({ runId }) => useMessageStream("m1", null, "c1", runId),
       { wrapper, initialProps: { runId: "run-1" } },
     );
     const delta = JSON.stringify({
@@ -262,7 +262,7 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      ({ runId }) => useMessageStream("m1", null, "c1", runId),
       {
         wrapper,
         initialProps: { runId: "run-1" },
@@ -295,7 +295,7 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ status, runId }) => useMessageStream("m1", null, "c1", 0, runId, status),
+      ({ status, runId }) => useMessageStream("m1", null, "c1", runId, status),
       {
         wrapper,
         initialProps: {
@@ -318,7 +318,7 @@ describe("research attempt identity", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    const { result } = renderHook(() => useMessageStream("m1", null, "c1", 0, "run-1"), {
+    const { result } = renderHook(() => useMessageStream("m1", null, "c1", "run-1"), {
       wrapper,
     });
     const source = FakeEventSource.instances.at(-1)!;
@@ -345,7 +345,7 @@ describe("resumed answer", () => {
       compactions: [],
       lastSeq: 3,
     };
-    const { result } = renderHook(() => useMessageStream("m1", kept, "c1", 1, "run-2"), {
+    const { result } = renderHook(() => useMessageStream("m1", kept, "c1", "run-2"), {
       wrapper,
     });
     const source = FakeEventSource.instances.at(-1)!;
@@ -474,7 +474,7 @@ describe("ordinary image attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", 0, runId),
+      ({ runId }) => useMessageStream("m1", null, "c1", runId),
       { wrapper, initialProps: { runId: "generation-1" } },
     );
     const old = FakeEventSource.instances.at(-1)!;
