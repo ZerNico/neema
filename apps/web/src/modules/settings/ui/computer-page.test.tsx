@@ -102,6 +102,10 @@ describe("ComputerPage", () => {
     });
     await waitFor(() => expect(toggle).toBeEnabled());
     await user.click(toggle);
+    // Allowing says what it opens first; turning it off does not ask.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(network.allowLocal).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Allow" }));
     await waitFor(() => expect(network.allowLocal).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(toggle).toBeChecked());
     await user.click(toggle);

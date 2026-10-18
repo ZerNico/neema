@@ -30,7 +30,7 @@ const QUERY_KEY = ["desktop-ssh-agent"] as const;
 /**
  * Settings › This computer: the SSH agent commands sign in with. The app reads no ssh config to
  * find it, so an agent set only there (1Password, Secretive) is chosen here once. The desktop app
- * checks the socket answers as an agent and asks the person itself.
+ * checks the socket answers as an agent.
  */
 export function SshAgentSetting({ network }: { network: DesktopNetwork }) {
   const { agent, chooseAgent, forgetKeys } = network;

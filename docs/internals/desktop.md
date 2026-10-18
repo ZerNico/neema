@@ -162,9 +162,10 @@ unrelated call ID. A second device can observe progress but cannot claim work
 started by the first. A server restart loses authority and fails closed.
 
 The initiating session is a binding mechanism, not cryptographic attestation.
-`fromDesktop` is caller-supplied policy information. The origin-authorized page
-already has bridge authority; page approval is not a hardened boundary against
-a compromised authorized page.
+`fromDesktop` is caller-supplied policy information. The connected server is
+trusted: its page has the bridge, and consent given in that page is the consent.
+Grants scope what a chat or an answer may do; they are not a defence against the
+server itself, so main does not ask a second time what the page already asked.
 
 ## Bounded waits and cancellation
 
@@ -597,8 +598,8 @@ forget a chat when its workspace is discarded, which happens once the chat is
 purged and Undo is gone.
 
 Loopback is a grant of its own, services on this computer, in the same three
-scopes. Settings can also turn it on for every chat, confirmed in the app's own
-dialog like an agent choice, since the page asking is the server's. Seatbelt has no private loopback: a command talking to itself, as Gradle
+scopes. Settings can also turn it on for every chat, after saying what it opens.
+Seatbelt has no private loopback: a command talking to itself, as Gradle
 does with its daemon and file-lock socket, needs the host's, and the inbound
 half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
 from the network. Without the grant a command can bind nothing. On Linux every
@@ -652,16 +653,12 @@ each command. No ssh config is read to find it: finding the agent there meant ru
 config commands might redirect (`Include`s, links, `Match exec`), and every guard on that was
 another place to get wrong. An agent set only in the config (1Password, Secretive) is chosen
 once in Settings instead: the app offers the known ones whose socket it finds at its usual place,
-a fixed list it only looks at, or takes a path. The page that asks is the server's, so the app takes a socket only
-when it answers an identities request as an agent would (Docker's does not) and the person
-confirms in the app's own dialog; going back to the default, which may hold other keys, is
-confirmed too. The socket is kept by its real path, since a link a command made could later
+a fixed list it only looks at, or takes a path. The app takes a socket only when it answers an identities request as an
+agent would (Docker's does not). The socket is kept by its real path, since a link a command made could later
 point elsewhere, and is denied to commands once it has answered. A choice is refused while any
 command runs, or a stopped one's launch is still pending: its policy was made without the socket,
 so it could replace the socket before it is used. A real path too long for a socket address
-(1Password's, for a long user name) is refused rather than kept. Every refusal reads the same,
-so the page cannot learn which paths exist; a socket that accepts and never answers is refused
-only after the check's two seconds, which the page could time (accepted). One choice is made at a
+(1Password's, for a long user name) is refused rather than kept. Every refusal reads the same. One choice is made at a
 time, from the request to its end. A change cuts off running commands that relay any agent but
 the one now in effect, also SSH_AUTH_SOCK's on a first choice. Every agent found stays denied, by its name and wherever its
 link led, so a changed choice or a retargeted link does not open the old one. A chosen socket

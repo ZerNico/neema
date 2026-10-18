@@ -76,7 +76,7 @@ import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
 import { networkGrantsDirectory } from "./egress-grants.ts";
 import { pageHandler } from "./page-ipc.ts";
-import { Sandbox, type AgentChange } from "./sandbox.ts";
+import { Sandbox } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import {
   SIGN_IN_SCHEME,
@@ -154,32 +154,6 @@ let tray: Tray | undefined;
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
-/** The app's own question before the SSH agent changes: the page asking is the server's. */
-const confirmAgent = async (change: AgentChange) => {
-  const { response } = await dialog.showMessageBox({
-    type: "question",
-    buttons: ["Cancel", change.kind === "use" ? "Use this agent" : "Use the default"],
-    defaultId: 0,
-    cancelId: 0,
-    title: "Change the SSH agent?",
-    message:
-      change.kind === "use"
-        ? `Sign in with the keys in ${change.name ?? change.socket}?`
-        : change.fallback
-          ? `Sign in with the keys in ${change.name ?? "your system’s SSH agent"}?`
-          : "Stop signing in with a chosen agent?",
-    detail:
-      change.kind === "use"
-        ? change.name
-          ? "Work chats you allow to sign in with SSH will use it."
-          : "Work chats you allow to sign in with SSH will use this agent. Only choose a socket your own agent made."
-        : change.fallback
-          ? "Work chats you allow to sign in with SSH will use it."
-          : "No other agent was found, so commands won’t sign in with SSH.",
-  });
-  return response === 1;
-};
-
 /** Asked once, before the person's key files first go into their SSH agent. */
 const confirmKeys = async (keys: readonly string[]) => {
   const names = keys.map((key) => basename(key)).join(", ");
@@ -681,19 +655,8 @@ void app.whenReady().then(async () => {
     if (process.platform === "linux") return "unavailable";
     return (await permissions()).capabilities.includes("local-services") ? "allowed" : "asked";
   });
-  // Opens what a server a command starts could be reached on, so the app asks itself.
+  // The person allowing it in Settings is the consent: the connected server is trusted.
   onPage(LOCAL_ALLOW, NoPayload, async () => {
-    const { response } = await dialog.showMessageBox({
-      type: "question",
-      buttons: ["Cancel", "Allow"],
-      defaultId: 0,
-      cancelId: 0,
-      title: "Allow services on this computer?",
-      message: "Let commands in every Work chat use services on this computer?",
-      detail:
-        "Some build tools like Gradle need this. A server a command starts could be reached from your network.",
-    });
-    if (response !== 1) return false;
     await runtime.runPromise(
       Effect.flatMap(Sandbox, (sandbox) => sandbox.approveCapability(always, "local-services")),
     );
@@ -707,16 +670,13 @@ void app.whenReady().then(async () => {
   onPage(AGENT_GET, NoPayload, () =>
     runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.agentSetting())),
   );
-  // The page only asks: a socket must answer as an agent, and the person confirms here, also
-  // before going back to the default, which may hold other keys.
+  // A socket must answer as an agent; the person choosing it in Settings is the consent.
   onPage(
     AGENT_CHOOSE,
     AgentChoicePayload,
     async ({ socket }): Promise<AgentChoiceReply> => {
       const outcome = await runtime.runPromise(
-        Effect.result(
-          Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket, confirmAgent)),
-        ),
+        Effect.result(Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket))),
       );
       return Result.isSuccess(outcome)
         ? { ok: true, changed: outcome.success }

@@ -37,7 +37,6 @@ import {
   filesystemPolicy,
   makeSandbox,
   networkPolicy,
-  type AgentChange,
   type LaunchedProcess,
   type SandboxDependencies,
   type SandboxRun,
@@ -917,10 +916,20 @@ describe("run", () => {
         return path;
       };
       const agentChoice = await loadAgentChoice(folder);
+      // Runs while a choice is being stored, the moment a command may start mid-change.
+      const storing: { hook?: (() => Promise<void>) | undefined } = {};
       // SSH_AUTH_SOCK as the app reads it; none unless a test sets it.
       const env: { SSH_AUTH_SOCK?: string } = {};
       const harnessed = await harness(launch, "darwin", () => proxyCapable, {
-        agentChoice,
+        agentChoice: {
+          current: () => agentChoice.current(),
+          set: async (socket) => {
+            const hook = storing.hook;
+            storing.hook = undefined;
+            await hook?.();
+            await agentChoice.set(socket);
+          },
+        },
         // Where 1Password would put its socket; nothing is there until a test listens.
         knownAgents: () => [{ name: "1Password", socket: join(folder, "1password.sock") }],
         ...(keys ? { keys } : {}),
@@ -930,26 +939,20 @@ describe("run", () => {
             findAgent({ os: "darwin", env, chosen: agentChoice.current(), exists: pathExists }),
           ),
       });
-      const asked: AgentChange[] = [];
-      const choose = (socket: string | null, answer = true) =>
-        Effect.runPromiseExit(
-          harnessed.sandbox.chooseAgent(socket, async (change) => {
-            asked.push(change);
-            return answer;
-          }),
-        );
+      const choose = (socket: string | null) =>
+        Effect.runPromiseExit(harnessed.sandbox.chooseAgent(socket));
       const done = async () => {
         for (const server of servers) server.close();
         await harnessed.close();
       };
-      return { ...harnessed, folder, env, listen, agentChoice, asked, choose, done };
+      return { ...harnessed, folder, env, listen, agentChoice, storing, choose, done };
     };
 
-    it("takes only a socket that answers as an agent, once the person confirms", async () => {
+    it("takes only a socket that answers as an agent", async () => {
       const child = fakeProcess();
       child.finish(0);
       const { launch, launched } = launcher(child.process);
-      const { listen, folder, agentChoice, asked, choose, sandbox, done } = await setUp(launch);
+      const { listen, folder, agentChoice, choose, sandbox, done } = await setUp(launch);
       const agent = await listen("agent.sock", AGENT_REPLY);
       const docker = await listen("docker.sock", Buffer.from("HTTP/1.1 400 Bad Request\r\n\r\n"));
       // Nothing chosen yet: going back to the default asks nothing.
@@ -960,20 +963,13 @@ describe("run", () => {
       await mkdir(long);
       for (const path of [docker, folder, join(folder, "missing.sock"), long])
         expect(JSON.stringify(await choose(path))).toContain("isn’t a running SSH agent’s socket");
-      expect(asked).toEqual([]);
-      expect(await Effect.runPromise(sandbox.chooseAgent(agent, async () => false))).toBe(false);
       expect(agentChoice.current()).toBeNull();
       expect(await choose(agent)).toMatchObject({ _tag: "Success", value: true });
-      expect(asked).toEqual([{ kind: "use", socket: agent, name: null }]);
       expect(await Effect.runPromise(sandbox.agentSetting())).toMatchObject({
         current: { socket: agent, name: null, source: "chosen", running: true },
         found: [],
       });
-      // Going back to the default is confirmed too: it may hold other keys.
-      expect(await choose(null, false)).toMatchObject({ _tag: "Success", value: false });
-      expect(agentChoice.current()).toBe(agent);
       expect(await choose(null)).toMatchObject({ _tag: "Success", value: true });
-      expect(asked.at(-1)).toMatchObject({ kind: "default" });
       expect(agentChoice.current()).toBeNull();
       await Effect.runPromise(sandbox.run(run()));
       // Refused paths are not denied to commands.
@@ -1112,13 +1108,12 @@ describe("run", () => {
     });
 
     it("offers a known agent running here by name, and names a chosen one that has stopped", async () => {
-      const { listen, folder, asked, choose, sandbox, done } = await setUp();
+      const { listen, folder, choose, sandbox, done } = await setUp();
       const setting = () => Effect.runPromise(sandbox.agentSetting());
       expect(await setting()).toMatchObject({ found: [] });
       const onePassword = await listen("1password.sock", AGENT_REPLY);
       expect((await setting()).found).toEqual([{ name: "1Password", socket: onePassword }]);
       expect(await choose(onePassword)).toMatchObject({ _tag: "Success", value: true });
-      expect(asked).toEqual([{ kind: "use", socket: onePassword, name: "1Password" }]);
       await rm(join(folder, "1password.sock"));
       expect(await setting()).toMatchObject({
         current: { socket: onePassword, name: "1Password", source: "chosen", running: false },
@@ -1151,38 +1146,35 @@ describe("run", () => {
       await done();
     });
 
-    it("asks one question at a time, from the request on", async () => {
+    it("makes one choice at a time, from the request on", async () => {
       const { promise: answering, resolve: answer } = Promise.withResolvers<void>();
       const { listen, agentChoice, choose, done } = await setUp();
       const slow = await listen("slow.sock", AGENT_REPLY, answering);
       const other = await listen("other.sock", AGENT_REPLY);
       const first = choose(slow);
-      // Still checking the first socket, no dialog yet: a second request is refused all the same.
-      expect(JSON.stringify(await choose(other))).toContain("Answer the open question first");
+      // Still checking the first socket: a second request is refused.
+      expect(JSON.stringify(await choose(other))).toContain("Another choice is still being made");
       answer();
       expect(await first).toMatchObject({ _tag: "Success", value: true });
       expect(agentChoice.current()).toBe(slow);
       await done();
     });
 
-    it("cuts off SSH_AUTH_SOCK's agent from a command started while the first choice was asked", async () => {
+    it("cuts off SSH_AUTH_SOCK's agent from a command started while the first choice is stored", async () => {
       const child = fakeProcess();
       const { launch, launched } = launcher(child.process);
-      const { listen, env, sandbox, done } = await setUp(launch);
+      const { listen, env, storing, sandbox, done } = await setUp(launch);
       env.SSH_AUTH_SOCK = await listen("env-agent.sock", AGENT_REPLY);
       const chosen = await listen("agent.sock", AGENT_REPLY);
       const chat = { origin: "https://chat.example", conversationId: "chat-a" };
       await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
       let result: Promise<unknown> = Promise.resolve();
-      const changed = await Effect.runPromise(
-        sandbox.chooseAgent(chosen, async () => {
-          // The dialog is open; a command starts, relaying the agent in effect until now.
-          result = Effect.runPromise(sandbox.run(run()));
-          await launched;
-          return true;
-        }),
-      );
-      expect(changed).toBe(true);
+      storing.hook = async () => {
+        // A command starts, relaying the agent in effect until now.
+        result = Effect.runPromise(sandbox.run(run()));
+        await launched;
+      };
+      expect(await Effect.runPromise(sandbox.chooseAgent(chosen))).toBe(true);
       const proxyUrl = (await launched).network?.runtimeConfig?.networkProxy ?? "";
       expect(await connectThrough(proxyUrl, "ssh-agent.invalid:1")).toMatch(/^HTTP\/1\.1 403/);
       child.finish(0);
@@ -1196,7 +1188,7 @@ describe("run", () => {
       let hold = false;
       const { promise: held, resolve: holding } = Promise.withResolvers<void>();
       const { promise: gate, resolve: release } = Promise.withResolvers<void>();
-      const { folder, env, sandbox, done } = await setUp(launch, async (found) => {
+      const { folder, env, storing, sandbox, done } = await setUp(launch, async (found) => {
         if (!hold) return found;
         hold = false;
         const answer = await found;
@@ -1223,15 +1215,13 @@ describe("run", () => {
       const chat = { origin: "https://chat.example", conversationId: "chat-a" };
       await Effect.runPromise(sandbox.approveCapability({ scope: "chat", chat }, "ssh-agent"));
       let result: Promise<unknown> = Promise.resolve();
-      await Effect.runPromise(
-        sandbox.chooseAgent(chosen.path, async () => {
-          // A command starts and finds SSH_AUTH_SOCK's agent, but is held before it relays it.
-          hold = true;
-          result = Effect.runPromise(sandbox.run(run()));
-          await held;
-          return true;
-        }),
-      );
+      storing.hook = async () => {
+        // A command starts and finds SSH_AUTH_SOCK's agent, but is held before it relays it.
+        hold = true;
+        result = Effect.runPromise(sandbox.run(run()));
+        await held;
+      };
+      await Effect.runPromise(sandbox.chooseAgent(chosen.path));
       armed = true;
       release();
       const proxyUrl = (await launched).network?.runtimeConfig?.networkProxy ?? "";

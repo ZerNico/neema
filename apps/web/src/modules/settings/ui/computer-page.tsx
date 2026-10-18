@@ -187,12 +187,13 @@ export function ComputerPage() {
 const LOCAL_KEY = ["desktop-local-grant"] as const;
 
 /**
- * Services on this computer for every chat, as a switch. Turning it on is confirmed in the app's
- * own dialog, since a server a command starts could then be reached from the network. Linux
- * commands have their own, so there is nothing to allow there.
+ * Services on this computer for every chat, as a switch. Turning it on is confirmed here, since
+ * a server a command starts could then be reached from the network. Linux commands have their
+ * own, so there is nothing to allow there.
  */
 function LocalServicesSetting({ network }: { network: DesktopNetwork }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const state = useQuery({
     queryKey: LOCAL_KEY,
     queryFn: () => network.localServices(),
@@ -222,7 +223,19 @@ function LocalServicesSetting({ network }: { network: DesktopNetwork }) {
             aria-label="Allow services on this computer in every chat"
             checked={state.data === "allowed"}
             disabled={!state.data || change.isPending}
-            onCheckedChange={(checked) => change.mutate(checked)}
+            onCheckedChange={async (checked) => {
+              if (
+                checked &&
+                !(await confirm({
+                  title: "Allow services on this computer?",
+                  description:
+                    "Commands in every Work chat could use them, and a server a command starts could be reached from your network.",
+                  confirmLabel: "Allow",
+                }))
+              )
+                return;
+              change.mutate(checked);
+            }}
           />
         </ListRow>
       </ListCard>

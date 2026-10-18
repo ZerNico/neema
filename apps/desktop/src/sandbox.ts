@@ -83,10 +83,6 @@ import {
 } from "./ssh-agent.ts";
 import { addKeysToAgent, defaultKeyFiles, loadKeyConsent, type KeyConsent } from "./ssh-keys.ts";
 
-/** What the person is asked to confirm: a socket to use, or going back to the default. */
-export type AgentChange =
-  | { readonly kind: "use"; readonly socket: string; readonly name: string | null }
-  | { readonly kind: "default"; readonly fallback: string | null; readonly name: string | null };
 import { appBundle, findSsh, writeSshSetup, type SshSetup } from "./ssh-setup.ts";
 
 const home = homedir();
@@ -599,14 +595,11 @@ export class Sandbox extends Context.Service<
     /** Stops adding the person's key files to an empty agent. */
     forgetKeys(): Effect.Effect<void>;
     /**
-     * Chooses the agent socket, or clears the choice with null; false when the person declined.
-     * A socket must answer as an agent, and `confirm` (the app's own dialog) must agree, since
-     * the page asking is the server's.
+     * Chooses the agent socket, or clears the choice with null; false when nothing changed.
+     * A socket must answer as an agent. The person choosing in Settings is the consent: the
+     * connected server is trusted (desktop.md).
      */
-    chooseAgent(
-      socket: string | null,
-      confirm: (change: AgentChange) => Promise<boolean>,
-    ): Effect.Effect<boolean, DesktopError>;
+    chooseAgent(socket: string | null): Effect.Effect<boolean, DesktopError>;
   }
 >()("desktop/Sandbox") {
   static readonly layerAt = (
@@ -1103,11 +1096,7 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           ?.name ?? null
       );
     };
-    const choose = async (
-      choice: AgentChoice,
-      socket: string | null,
-      confirm: (change: AgentChange) => Promise<boolean>,
-    ) => {
+    const choose = async (choice: AgentChoice, socket: string | null) => {
       // Commands relaying any agent but the one now in effect stop at once, rather than when they
       // end, also on a first choice, when theirs was SSH_AUTH_SOCK's.
       const settle = async (next: string | null) => {
@@ -1121,14 +1110,6 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       };
       if (socket === null) {
         if (choice.current() === null) return false;
-        const fallback = await findAgent({
-          os,
-          env: process.env,
-          chosen: null,
-          exists: agentExists,
-        });
-        const name = fallback && (await agentName(fallback, await foundAgents()));
-        if (!(await confirm({ kind: "default", fallback, name }))) return false;
         await settle(null);
         return true;
       }
@@ -1156,8 +1137,6 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
       if (!valid || real === null) throw new Error(`${socket} isn’t a running SSH agent’s socket.`);
       // Denied from now on, chosen or not.
       seenAgents.add(real);
-      const name = await agentName(real, await foundAgents());
-      if (!(await confirm({ kind: "use", socket: real, name }))) return false;
       await settle(real);
       return true;
     };
@@ -1697,17 +1676,16 @@ export const makeSandbox = (dependencies: SandboxDependencies) =>
           } satisfies AgentSetting;
         }),
       forgetKeys: () => Effect.promise(async () => dependencies.keys?.consent.set([])),
-      chooseAgent: (socket, confirm) =>
+      chooseAgent: (socket) =>
         Effect.tryPromise({
           try: async (): Promise<boolean> => {
             const choice = dependencies.agentChoice;
             if (!choice) throw new Error("No settings store is available.");
-            // One choice at a time, claimed before anything is awaited: the page asking is the
-            // server's, and may ask again and again.
-            if (choosing) throw new Error("Answer the open question first.");
+            // One choice at a time, claimed before anything is awaited.
+            if (choosing) throw new Error("Another choice is still being made.");
             choosing = true;
             try {
-              return await choose(choice, socket, confirm);
+              return await choose(choice, socket);
             } finally {
               choosing = false;
             }

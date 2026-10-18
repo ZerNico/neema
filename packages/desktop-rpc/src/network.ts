@@ -53,7 +53,7 @@ export interface AgentSetting {
   readonly added: readonly string[];
 }
 
-/** The outcome of choosing: changed, declined in the app's dialog, or refused with a reason. */
+/** The outcome of choosing: whether anything changed, or refused with a reason. */
 export type AgentChoiceReply =
   | { readonly ok: true; readonly changed: boolean }
   | { readonly ok: false; readonly message: string };
@@ -68,12 +68,12 @@ export interface DesktopNetwork {
    * commands have their own).
    */
   localServices(): Promise<"allowed" | "asked" | "unavailable">;
-  /** Allows them for every chat once the person confirms in the app's own dialog; false if not. */
+  /** Allows them for every chat; the page confirms first. False from builds that asked themselves. */
   allowLocal(): Promise<boolean>;
   revokeLocal(): Promise<void>;
   /** Absent in desktop builds that predate choosing an agent. */
   agent?(): Promise<AgentSetting>;
-  /** Asks the app to use this socket (it confirms with its own dialog), or clears the choice. */
+  /** Uses this socket once it answers as an agent, or clears the choice. */
   chooseAgent?(socket: string | null): Promise<AgentChoiceReply>;
   /** Stops adding the person's key files to the agent; the ones in it stay until it restarts. */
   forgetKeys?(): Promise<void>;
