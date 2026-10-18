@@ -1126,6 +1126,7 @@ export function ChatView({
       searchPreference,
       setSearchEnabled,
       resetSearchEnabled,
+      collectionIds: context.sendFields.collectionIds,
       seedCollections: context.seed,
       settleCollections: context.settle,
     },

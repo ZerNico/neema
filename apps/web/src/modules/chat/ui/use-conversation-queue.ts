@@ -92,6 +92,8 @@ export function useConversationQueue(input: {
     searchPreference: boolean | null;
     setSearchEnabled: (enabled: boolean | null) => void;
     resetSearchEnabled: () => void;
+    /** The composer's own collection picks, apart from the agent's. */
+    collectionIds: ReadonlyArray<string>;
     seedCollections: (ids: ReadonlyArray<string>) => void;
     settleCollections: () => void;
   };
@@ -169,6 +171,7 @@ export function useConversationQueue(input: {
     imageModelId: string | null;
     reasoningEffort: ReasoningEffort | null;
     searchPreference: boolean | null;
+    collectionIds: ReadonlyArray<string>;
   } | null>(null);
 
   return {
@@ -214,6 +217,7 @@ export function useConversationQueue(input: {
           imageModelId: settings.imageModelId,
           reasoningEffort: settings.reasoningEffort ?? null,
           searchPreference: settings.searchPreference,
+          collectionIds: settings.collectionIds,
         };
         const row = input.rows.find((item) => item.id === entry.id);
         if (!row) return;
@@ -229,9 +233,9 @@ export function useConversationQueue(input: {
           settings.setImageModelId(borrowed.current.imageModelId);
           settings.setReasoningEffort?.(borrowed.current.reasoningEffort, borrowed.current.modelId);
           settings.setSearchEnabled(borrowed.current.searchPreference);
-        }
+          settings.seedCollections(borrowed.current.collectionIds);
+        } else settings.settleCollections();
         borrowed.current = null;
-        settings.settleCollections();
       },
     },
   };

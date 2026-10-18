@@ -39,6 +39,7 @@ const settings = () => ({
   searchPreference: false as boolean | null,
   setSearchEnabled: vi.fn(),
   resetSearchEnabled: vi.fn(),
+  collectionIds: ["handbook"] as ReadonlyArray<string>,
   seedCollections: vi.fn(),
   settleCollections: vi.fn(),
 });
@@ -175,7 +176,9 @@ describe("useConversationQueue", () => {
     expect(props.settings.setImageModelId).toHaveBeenLastCalledWith("composer-image");
     expect(props.settings.setSearchEnabled).toHaveBeenLastCalledWith(false);
     expect(props.settings.resetSearchEnabled).not.toHaveBeenCalled();
-    expect(props.settings.settleCollections).toHaveBeenCalledOnce();
+    // The composer's own collections come back too, not an empty selection.
+    expect(props.settings.seedCollections).toHaveBeenLastCalledWith(["handbook"]);
+    expect(props.settings.settleCollections).not.toHaveBeenCalled();
   });
 
   it("restores a default-following search preference after queued editing", () => {
