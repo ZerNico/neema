@@ -10,7 +10,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createReadStream } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, extname, join } from "node:path";
 import { conflictsWithNetworkGrants, normalizeEgressGrant } from "./egress-grants.ts";
 import { Effect, Semaphore } from "effect";
 import {
@@ -159,6 +160,39 @@ const readPrefix = (absolute: string, maxBytes: number, relative: string) =>
         message: `Could not read ${relative}.`,
       }),
   });
+
+/**
+ * A whole file to rewrite, or null when it is larger than `maxBytes` now: it
+ * may have grown since it was measured, and a prefix written back loses the rest.
+ */
+const readWhole = (absolute: string, maxBytes: number, relative: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const handle = await open(absolute, "r");
+      try {
+        const { size, mode } = await handle.stat();
+        if (size > maxBytes) return null;
+        const buffer = Buffer.alloc(size);
+        const { bytesRead } = await handle.read(buffer, 0, size, 0);
+        return bytesRead === size ? { bytes: buffer, mode } : null;
+      } finally {
+        await handle.close();
+      }
+    },
+    catch: () => new DesktopError({ reason: "failed", message: `Could not read ${relative}.` }),
+  });
+
+/** Replaces a file through a sibling and a rename, so a crash leaves the old one whole. */
+const replaceFile = async (absolute: string, text: string, mode: number) => {
+  const temporary = join(dirname(absolute), `.${basename(absolute)}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, text, { encoding: "utf8", mode: mode & 0o7777, flag: "wx" });
+    await rename(temporary, absolute);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+};
 
 /**
  * The desktop side of the contract. Every procedure that touches disk goes
@@ -704,7 +738,15 @@ export const makeHandlers = (shell: Shell) =>
                 }),
               );
             }
-            const bytes = yield* readPrefix(target.absolute, LIMITS.writeBytes, target.relative);
+            const read = yield* readWhole(target.absolute, LIMITS.writeBytes, target.relative);
+            if (!read)
+              return yield* Effect.fail(
+                new DesktopError({
+                  reason: "too-large",
+                  message: `${target.relative} is too large to edit.`,
+                }),
+              );
+            const bytes = read.bytes;
             if (isBinary(bytes)) {
               return yield* Effect.fail(
                 new DesktopError({
@@ -773,7 +815,7 @@ export const makeHandlers = (shell: Shell) =>
               : text.replace(before, () => after);
             const replacements = projected.replacements;
             yield* Effect.tryPromise({
-              try: () => writeFile(target.absolute, next, "utf8"),
+              try: () => replaceFile(target.absolute, next, read.mode),
               catch: () =>
                 new DesktopError({
                   reason: "failed",

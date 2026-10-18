@@ -1,4 +1,14 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { vi } from "vitest";
 
 // Whether `rg` answers is decided per test, so both backends are proven
@@ -621,6 +631,29 @@ describe("once a folder is attached", () => {
     );
     expect(every.replacements).toBe(2);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "replaces an edited file whole, keeping its mode and leaving nothing beside it",
+    async () => {
+      const path = join(root, "src", "run.sh");
+      await writeFile(path, "echo one\n", { mode: 0o755 });
+      await Effect.runPromise(
+        handlers.editFile({
+          conversationId: CONVERSATION,
+          callId: "t",
+          path,
+          old: "one",
+          new: "two",
+          all: false,
+        }),
+      );
+      expect(await readFile(path, "utf8")).toBe("echo two\n");
+      expect((await stat(path)).mode & 0o777).toBe(0o755);
+      expect((await readdir(join(root, "src"))).filter((name) => name.endsWith(".tmp"))).toEqual(
+        [],
+      );
+    },
+  );
 
   it("refuses to edit a file that is not UTF-8 rather than damage it", async () => {
     const path = join(root, "src", "latin1.txt");
