@@ -398,5 +398,3 @@ export const mcpAdapter: IntegrationAdapter = {
       ),
   },
 };
-
-export const MCP_RECHECK_MS = RECHECK_MS.default;

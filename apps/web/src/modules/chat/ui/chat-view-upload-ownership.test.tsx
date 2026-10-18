@@ -66,7 +66,6 @@ vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
 vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
-  listDocuments: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: vi.fn(),

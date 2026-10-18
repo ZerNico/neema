@@ -54,7 +54,6 @@ export class GroupRepo extends Context.Service<
     ): Effect.Effect<void, GroupMemberNotFound>;
     /** Cascades memberships and model-access links. */
     deleteGroup(groupId: string): Effect.Effect<void>;
-    getGroup(groupId: string): Effect.Effect<GroupRow, GroupNotFound>;
     listMembers(groupId: string): Effect.Effect<GroupMember[]>;
     /** Every membership with its group name, for the users page's badges. */
     listMemberships(): Effect.Effect<Membership[]>;
@@ -190,17 +189,6 @@ export class GroupRepo extends Context.Service<
 
         deleteGroup: Effect.fn("GroupRepo.deleteGroup")(function* (groupId) {
           yield* db.delete(groups).where(eq(groups.id, groupId)).pipe(Effect.orDie);
-        }),
-
-        getGroup: Effect.fn("GroupRepo.getGroup")(function* (groupId) {
-          const rows = yield* db
-            .select()
-            .from(groups)
-            .where(eq(groups.id, groupId))
-            .pipe(Effect.orDie);
-          const row = rows[0];
-          if (!row) return yield* new GroupNotFound({ groupId });
-          return row;
         }),
 
         listMembers: Effect.fn("GroupRepo.listMembers")(function* (groupId) {

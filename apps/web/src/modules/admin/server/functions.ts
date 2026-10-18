@@ -291,17 +291,6 @@ export const deleteGroup = createServerFn({ method: "POST" })
     runtime.runPromise(groupChanged(GroupRepo.use((repo) => repo.deleteGroup(data.groupId)))),
   );
 
-export const getGroup = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .validator(standard(GroupIdInput))
-  .handler(({ data }) =>
-    runtime.runPromise(
-      GroupRepo.use((repo) => repo.getGroup(data.groupId)).pipe(
-        Effect.catchTag("GroupNotFound", groupGone),
-      ),
-    ),
-  );
-
 export const getGroupCapabilities = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .validator(standard(GroupIdInput))

@@ -18,7 +18,6 @@ import { AppMotionProvider } from "~/ui/motion";
 vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
-  listDocuments: vi.fn(),
   renameDocument: vi.fn(),
 }));
 vi.mock("./rich-editor/document-editor.tsx", async () => ({

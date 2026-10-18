@@ -75,7 +75,6 @@ vi.mock("~/modules/agents/server/draft-functions.ts", () => ({
 vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
-  listDocuments: vi.fn(),
 }));
 vi.mock("~/modules/documents/ui/rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,

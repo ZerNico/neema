@@ -4,7 +4,6 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { runtime } from "~/server/runtime.ts";
 import {
   CommentInput,
-  ConversationIdInput,
   CreateProjectDocumentInput,
   DOCUMENT_LIMITS,
   DeleteCommentInput,
@@ -67,18 +66,6 @@ export const getDocumentVersion = createServerFn({ method: "GET" })
       publicResult(
         Effect.flatMap(DocumentService, (service) =>
           service.versionAt(context.session.user.id, data.documentId, data.revision),
-        ),
-      ),
-    ),
-  );
-export const listDocuments = createServerFn({ method: "GET" })
-  .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(ConversationIdInput))
-  .handler(({ context, data }) =>
-    runtime.runPromise(
-      publicResult(
-        Effect.flatMap(DocumentService, (service) =>
-          service.list(context.session.user.id, { conversationId: data.conversationId }),
         ),
       ),
     ),

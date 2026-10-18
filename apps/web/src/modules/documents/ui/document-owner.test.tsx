@@ -24,7 +24,6 @@ const blocker = vi.hoisted(() => ({
 vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
-  listDocuments: vi.fn(),
 }));
 vi.mock("./rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,
