@@ -1,83 +1,57 @@
-import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
-
-import { AgentDraftOwner } from "~/modules/agents/ui/agent-draft-owner.tsx";
-import { ScheduleDraftOwner } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
-import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
-import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
-
-import { ConversationCrumbs } from "./conversation-crumbs.tsx";
-
-import { learnServerClock } from "../client/use-message-stream.ts";
-import { lookupsOf, mergeLookups, NO_LOOKUPS } from "../assistant-output.ts";
-import { collectSources } from "./citations.ts";
-import { inheritSources } from "./inherited-sources.ts";
-
 import {
   useInfiniteQuery,
   useMutation,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
-import { withHistory } from "./conversation-window.ts";
-
-import { placeStranded, placed, shownIds } from "./stranded-cards.ts";
-import { useChatArtifacts } from "./use-chat-artifacts.ts";
-import { useLiveAnswer } from "./use-live-answer.ts";
-import { useMessageEdit } from "./use-message-edit.ts";
-import { useAttemptMutations } from "./use-attempt-mutations.ts";
-import { browserTimeZone } from "../client/time-zone.ts";
-import { type ToolActivity } from "../client/use-message-stream.ts";
-import { lookupUiMap, saveUiState, updateWorkSettings } from "../server/functions.ts";
-import type { PermissionLevel } from "../schema.ts";
-
-import { Composer, type ComposerHandle } from "./composer.tsx";
+import { AgentDraftOwner } from "~/modules/agents/ui/agent-draft-owner.tsx";
+import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
+import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
 import { useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
-import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
+import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
 import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
-import { useConversationQueue } from "./use-conversation-queue.ts";
-import { createsDocument } from "./assistant-body.ts";
-import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
-import { FileReferenceContext } from "./file-reference-context.ts";
-import type { Attachment } from "~/modules/attachments/schema.ts";
-import { useWorkApprovals } from "~/modules/desktop/client/work-context.ts";
-import { type ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
-
-import { associateQuestionResponses } from "./question-responses.ts";
-import { buildMessageStamps } from "./timestamps.ts";
-import { useMessageRows } from "./use-message-rows.ts";
-import { ownsDocument } from "./use-discovered-artifacts.ts";
-import { useSearchMode } from "./use-search-mode.ts";
-import { useReasoningEffort } from "./use-reasoning-effort.ts";
-
-import { useContextSelection } from "./use-context-selection.ts";
-import type { DisplayMessage } from "./message-list.tsx";
-
-import { VirtualMessageList } from "./virtual-message-list.tsx";
-import { projectCan } from "~/modules/projects/schema.ts";
-import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
-import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
-import { ResearchPanelOwner } from "./research-panel-owner.tsx";
-import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
-import { useMarkRead } from "./use-mark-read.ts";
-import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
-
-import { PendingButton } from "~/ui/pending-button.tsx";
-
-import { useIsMobile } from "~/ui/use-mobile.ts";
-import { useDocumentTitle } from "~/ui/use-document-title.ts";
-
-import { toastError } from "~/ui/error-toast.ts";
+import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
+import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import {
   GenuiActionsContext,
   type UiMapLookup,
   type UiStateSave,
 } from "~/modules/genui/ui/context.ts";
+import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import { projectCan } from "~/modules/projects/schema.ts";
+import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
+import { ScheduleDraftOwner } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
+import { toastError } from "~/ui/error-toast.ts";
+import { PendingButton } from "~/ui/pending-button.tsx";
+import { useDocumentTitle } from "~/ui/use-document-title.ts";
+import { useIsMobile } from "~/ui/use-mobile.ts";
+import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
+import { browserTimeZone } from "../client/time-zone.ts";
+import { learnServerClock } from "../client/use-message-stream.ts";
+import type { PermissionLevel } from "../schema.ts";
+import { lookupUiMap, saveUiState, updateWorkSettings } from "../server/functions.ts";
+import { Composer, type ComposerHandle } from "./composer.tsx";
+import { ConversationCrumbs } from "./conversation-crumbs.tsx";
+import { withHistory } from "./conversation-window.ts";
+import { FileReferenceContext } from "./file-reference-context.ts";
+import { associateQuestionResponses } from "./question-responses.ts";
+import { ResearchPanelOwner } from "./research-panel-owner.tsx";
+import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
+import { useAttemptMutations } from "./use-attempt-mutations.ts";
+import { useChatArtifacts } from "./use-chat-artifacts.ts";
+import { useChatDisplay } from "./use-chat-display.ts";
+import { useContextSelection } from "./use-context-selection.ts";
+import { useConversationQueue } from "./use-conversation-queue.ts";
+import { useLiveAnswer } from "./use-live-answer.ts";
+import { useMarkRead } from "./use-mark-read.ts";
+import { useMessageEdit } from "./use-message-edit.ts";
+import { useMessageRows } from "./use-message-rows.ts";
+import { useReasoningEffort } from "./use-reasoning-effort.ts";
+import { useSearchMode } from "./use-search-mode.ts";
+import { VirtualMessageList } from "./virtual-message-list.tsx";
 
 export function ChatView({
   conversationId,
@@ -151,7 +125,7 @@ export function ChatView({
       : null;
 
   const liveAnswer = useLiveAnswer({ data, conversationId, anchorFirstTurn });
-  const { streamingMessage, stream, liveId, anchorId, releaseAnchor } = liveAnswer;
+  const { streamingMessage, stream, anchorId, releaseAnchor } = liveAnswer;
   const {
     agentDraft,
     scheduleDraft,
@@ -173,29 +147,12 @@ export function ChatView({
     isMobile,
   });
 
-  const desktopApprovals = useWorkApprovals(conversationId);
   const workSettingsMutation = useMutation({
     mutationFn: (permissionLevel: PermissionLevel) =>
       updateWorkSettings({ data: { conversationId, permissionLevel } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
     onError: (error) => toastError("Could not change the approval level.", error),
   });
-  // Handed to every message; the card is found by call id, so only the message
-  // holding that call renders one.
-  const desktopApprovalRequests = useMemo(
-    () =>
-      new Map(
-        [...desktopApprovals.pending].map(([callId, kind]) => [
-          callId,
-          {
-            kind,
-            args: desktopApprovals.args(callId),
-            decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice),
-          },
-        ]),
-      ),
-    [desktopApprovals],
-  );
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
     [data.messages, data.toolCalls, data.attachments],
@@ -218,62 +175,15 @@ export function ChatView({
   } = useSearchMode(data.agent?.searchEnabled ?? true);
   const context = useContextSelection({ mode: "installed", agent: data.agent });
   const integrations = useChatIntegrations(conversationId);
-  const {
-    machinesByMessage,
-    attachmentsByMessage,
-    steersByAnswer,
-    uiStatesByMessage,
-    toolCallsByMessage,
-    compactionsByMessage,
-    nextAssistantAfter,
-    modelByMessage,
-    collectionsByUserMessage,
-    skillsByUserMessage,
-    workspaceFilesByUserMessage,
-  } = useMessageRows(data);
+  const rows = useMessageRows(data);
   const messageEdit = useMessageEdit({
     data,
     questionResponses,
-    attachmentsByMessage,
-    skillsByUserMessage,
-    collectionsByUserMessage,
+    attachmentsByMessage: rows.attachmentsByMessage,
+    skillsByUserMessage: rows.skillsByUserMessage,
+    collectionsByUserMessage: rows.collectionsByUserMessage,
   });
-  const {
-    activeEditingMessage,
-    editResearchEnabled,
-    setEditResearchEnabled,
-    editUploads,
-    editSkillIds,
-    setEditSkillIds,
-    editContext,
-    editableSkills,
-    closeEdit,
-    openEdit,
-  } = messageEdit;
-  const {
-    checkWorkReady,
-    flushPending,
-    sendMutation,
-    stopMutation,
-    retryMutation,
-    resumeMutation,
-    editMutation,
-    branchMutation,
-    refreshQuestionMutation,
-    questionNeedsRefresh,
-    generating,
-    mutationPending,
-    actionsDisabled,
-    generationDisabled,
-    editPending,
-    mutateResume,
-    respondToQuestion,
-    tailMessageId,
-    retry,
-    branchAt,
-    saveEdit,
-    saveQuestionEdit,
-  } = useAttemptMutations({
+  const attempts = useAttemptMutations({
     conversationId,
     data,
     dataUpdatedAt,
@@ -291,6 +201,23 @@ export function ChatView({
     changeModel,
     context,
   });
+  const {
+    checkWorkReady,
+    flushPending,
+    sendMutation,
+    stopMutation,
+    retryMutation,
+    resumeMutation,
+    editMutation,
+    branchMutation,
+    refreshQuestionMutation,
+    questionNeedsRefresh,
+    generating,
+    mutationPending,
+    generationDisabled,
+    editPending,
+    tailMessageId,
+  } = attempts;
 
   const sendAsk = sendMutation.mutateAsync;
   const focusComposer = useCallback(() => composer.current?.focus(), []);
@@ -390,382 +317,26 @@ export function ChatView({
     },
   });
 
-  // Associate in raw order, then filter display rows before computing day headings.
-  // Raw messages remain authoritative for retry, edit, branching and history.
-  const visibleMessages = useMemo(
-    () =>
-      data.messages.filter(
-        (message) =>
-          message.role !== "system" &&
-          !message.steeredIntoMessageId &&
-          !questionResponses.hiddenMessageIds.has(message.id),
-      ),
-    [data.messages, questionResponses],
-  );
-  const stamps = useMemo(() => buildMessageStamps(visibleMessages), [visibleMessages]);
-  const answerStamps = useMemo(
-    () =>
-      buildMessageStamps(
-        data.messages.filter((message) => questionResponses.hiddenMessageIds.has(message.id)),
-      ),
-    [data.messages, questionResponses],
-  );
-
-  // Durable rows change only with query data or global action availability. Live
-  // stream and edit state are layered below so every unrelated row keeps its
-  // object identity across stream chunks and local editor updates.
-
-  // The server keeps root names only, so display resolves them against this
-  // machine's live workspace and grants. Unresolved names drop out; grouping
-  // then falls back to the path's first segment.
-  const desktopRootsByMessage = useMemo(() => {
-    if (data.conversation.mode !== "work") return new Map<string, never>();
-    const workspacePath =
-      folder?.readiness === "ready" ? (folder.status.workspace?.path ?? null) : null;
-    const grants =
-      folder?.readiness === "ready" ? folder.status.folders.filter((item) => item.alive) : [];
-    const result = new Map<string, ReadonlyArray<{ name: string; path: string }>>();
-    for (const row of data.generations ?? []) {
-      const names = row.desktopRoots ?? [];
-      const roots = names.flatMap((name) => {
-        if (name === WORKSPACE_FOLDER_NAME)
-          return workspacePath ? [{ name, path: workspacePath }] : [];
-        const grant = grants.find((item) => item.name === name);
-        return grant ? [{ name, path: grant.path }] : [];
-      });
-      if (roots.length > 0) result.set(row.messageId, roots);
-    }
-    return result;
-  }, [data.generations, data.conversation.mode, folder]);
-  const baseDisplay = useMemo(() => {
-    const inherited = inheritSources(
-      visibleMessages.map((message) => collectSources(toolCallsByMessage.get(message.id) ?? [])),
-      data.priorSources,
-    );
-
-    return visibleMessages.map((message, position): DisplayMessage => {
-      const reasoning = message.reasoning ?? "";
-      const toolActivities = toolCallsByMessage.get(message.id) ?? [];
-      const compactionActivities = compactionsByMessage.get(message.id) ?? [];
-      const retryTarget =
-        message.role === "assistant" ? message.id : nextAssistantAfter.get(message.id);
-      const inheritedSources = inherited[position]!;
-      const stamp = stamps.get(message.id);
-      const resolution = questionResponses.byAssistant.get(message.id);
-      const answerTime = resolution ? answerStamps.get(resolution.messageId) : undefined;
-      const canRespond =
-        message.role === "assistant" &&
-        message.status === "complete" &&
-        message.id === tailMessageId;
-
-      return {
-        ...message,
-        error: message.error?.message ?? null,
-        ...(stamp
-          ? {
-              dayLabel: stamp.dayLabel,
-              time: { iso: stamp.iso, clock: stamp.clock, absolute: stamp.absolute },
-            }
-          : {}),
-        reasoning,
-        files: message.assistantOutput?.files ?? [],
-        uiLookups: lookupsOf(message.assistantOutput),
-        temporary: data.conversation.temporary,
-        ...(uiStatesByMessage.has(message.id)
-          ? { uiStates: uiStatesByMessage.get(message.id)! }
-          : {}),
-        desktopMachineId: machinesByMessage.get(message.id) ?? null,
-        reasoningSeen: reasoning.length > 0,
-        toolActivities,
-        inheritedSources,
-        compactionActivities,
-        ...(steersByAnswer.has(message.id) ? { steers: steersByAnswer.get(message.id)! } : {}),
-        ...(canRespond || resolution
-          ? {
-              questionActions: {
-                ...(canRespond ? { onRespond: respondToQuestion } : {}),
-                disabled: generationDisabled || !effectiveModelId,
-                ...(resolution
-                  ? {
-                      resolved: {
-                        ...resolution,
-                        ...(answerTime ? { time: answerTime } : {}),
-                        onEdit: () => openEdit(resolution.messageId),
-                        editDisabled: generationDisabled,
-                      },
-                    }
-                  : {}),
-              },
-            }
-          : {}),
-        ...(desktopApprovalRequests.size > 0 ? { desktopApprovals: desktopApprovalRequests } : {}),
-        ...(desktopRootsByMessage.has(message.id)
-          ? { desktopRoots: desktopRootsByMessage.get(message.id)! }
-          : {}),
-        ...(attachmentsByMessage.has(message.id)
-          ? { attachments: attachmentsByMessage.get(message.id)! }
-          : {}),
-        ...(skillsByUserMessage.has(message.id)
-          ? { skills: skillsByUserMessage.get(message.id)! }
-          : {}),
-        ...(collectionsByUserMessage.has(message.id)
-          ? { collectionIds: collectionsByUserMessage.get(message.id)! }
-          : {}),
-        ...(workspaceFilesByUserMessage.has(message.id)
-          ? { workspaceFiles: workspaceFilesByUserMessage.get(message.id)! }
-          : {}),
-        ...(message.role === "user" && message.status === "complete"
-          ? {
-              onEdit: () => openEdit(message.id),
-              editDisabled: generationDisabled,
-            }
-          : {}),
-        // Only the answer itself can be forked, and only once it is finished.
-        // The server insists on the same, this just keeps the row honest.
-        ...(message.role === "assistant" && message.status !== "streaming"
-          ? {
-              onBranch: () => branchAt(message.id),
-              branchDisabled: actionsDisabled,
-            }
-          : {}),
-        // Only the last answer can continue: a later turn was already
-        // answered without whatever it would go on to say.
-        ...(message.role === "assistant" &&
-        (message.status === "error" || message.status === "aborted") &&
-        message.id === tailMessageId
-          ? {
-              onResume: () => mutateResume({ messageId: message.id }),
-              onResumeWith: (pickedModelId: string) =>
-                mutateResume({ messageId: message.id, modelId: pickedModelId }),
-            }
-          : {}),
-        ...(retryTarget !== undefined
-          ? {
-              onRetry: () => void retry(retryTarget),
-              onRetryWith: (pickedModelId: string) => void retry(retryTarget, pickedModelId),
-              retryModelId: modelByMessage.get(retryTarget) ?? null,
-              retryDisabled: generationDisabled,
-            }
-          : {}),
-      };
-    });
-  }, [
-    actionsDisabled,
-    collectionsByUserMessage,
-    skillsByUserMessage,
-    workspaceFilesByUserMessage,
-    desktopRootsByMessage,
-    machinesByMessage,
-    answerStamps,
+  const { display, withPlacedCards, fileReferences } = useChatDisplay({
+    conversationId,
+    data,
+    rows,
     questionResponses,
-    attachmentsByMessage,
-    branchAt,
-    compactionsByMessage,
-    desktopApprovalRequests,
-    generationDisabled,
+    liveAnswer,
+    messageEdit,
+    attempts,
+    work,
+    localMachineId,
     effectiveModelId,
-    respondToQuestion,
-    tailMessageId,
-    modelByMessage,
-    mutateResume,
-    nextAssistantAfter,
-    openEdit,
-    retry,
-    stamps,
-    steersByAnswer,
-    toolCallsByMessage,
-    uiStatesByMessage,
-    data.conversation.temporary,
-    visibleMessages,
-    data.priorSources,
-  ]);
-
-  const display = useMemo(() => {
-    const edit: RowEdit | null = activeEditingMessage
-      ? {
-          messageId: activeEditingMessage.id,
-          question: {
-            onSave: saveQuestionEdit,
-            onCancel: closeEdit,
-            disabled: generationDisabled || !effectiveModelId,
-          },
-          message: {
-            initialDraft: activeEditingMessage.content,
-            researchEnabled: editResearchEnabled,
-            onResearchEnabledChange: setEditResearchEnabled,
-            onSave: (draft) => void saveEdit(draft),
-            onCancel: closeEdit,
-            saveDisabled: editPending || work.readOnly,
-            controlsDisabled: editPending,
-            modelId: effectiveModelId,
-            onModelChange: changeModel,
-            searchEnabled,
-            onSearchEnabledChange: setSearchEnabled,
-            reasoningEffort,
-            onReasoningEffortChange: setReasoningEffort,
-            attachments: editUploads,
-            skills: {
-              items: editableSkills.data ?? [],
-              selectedIds: editSkillIds,
-              onChange: setEditSkillIds,
-            },
-            context: editContext,
-          },
-        }
-      : null;
-    const live: LiveRow | null = liveId
-      ? {
-          messageId: liveId,
-          files: stream.files,
-          tools: stream.tools,
-          compactions: stream.compactions,
-          steers: stream.steers,
-          text: stream.live,
-          status: stream.status,
-          reading: stream.reading,
-          lookups: stream.lookups,
-          previews: stream.previews,
-        }
-      : null;
-    return baseDisplay.map((base) => projectRow(base, edit, live));
-  }, [
-    activeEditingMessage,
-    baseDisplay,
     changeModel,
-    closeEdit,
-    editPending,
-    editUploads,
-    effectiveModelId,
-    liveId,
-    generationDisabled,
-    work.readOnly,
-    saveQuestionEdit,
-    saveEdit,
-    editSkillIds,
-    editContext,
-    editableSkills.data,
     searchEnabled,
     setSearchEnabled,
     reasoningEffort,
     setReasoningEffort,
-    editResearchEnabled,
-    setEditResearchEnabled,
-    setEditSkillIds,
-    stream.compactions,
-    stream.files,
-    stream.lookups,
-    stream.live,
-    stream.previews,
-    stream.reading,
-    stream.status,
-    stream.steers,
-    stream.tools,
-  ]);
-
-  // A card lives on the tool row that made it. Only what no row names yet is
-  // placed by hand, in its own answer.
-  const mine = (id: string | undefined, owner: string | undefined) =>
-    id && owner === conversationId ? id : undefined;
-  const shownAgentDrafts = shownIds(display, (activity) =>
-    activity.family === "agent-draft"
-      ? mine(activity.result?.draftId, activity.result?.draftConversationId)
-      : undefined,
-  );
-  const shownScheduleDrafts = shownIds(display, (activity) =>
-    activity.family === "schedule-draft"
-      ? mine(activity.result?.draftId, activity.result?.draftConversationId)
-      : undefined,
-  );
-  const shownDocuments = shownIds(display, (activity) =>
-    activity.family === "document" &&
-    createsDocument(activity.name) &&
-    activity.result &&
-    ownsDocument(activity.result, conversationId, data.project?.role ? data.project.id : null)
-      ? activity.result.documentId
-      : undefined,
-  );
-  const origin = new Map(
-    [...data.agentDrafts, ...(data.scheduleDrafts ?? []), ...(data.documents ?? [])].map((item) => [
-      item.id,
-      item,
-    ]),
-  );
-  const withPlacedCards = placeStranded(
-    display,
-    [
-      ...draftIds
-        .filter((draftId) => !shownAgentDrafts.has(draftId))
-        .map((draftId) => ({
-          key: `agent:${draftId}`,
-          messageId: origin.get(draftId)?.messageId,
-          activity: (message: DisplayMessage, index: number): ToolActivity => ({
-            ...placed(message, index, draftId),
-            family: "agent-draft",
-            name: "draft_agent",
-            result: { outcome: "drafted", draftId, draftConversationId: conversationId },
-          }),
-        })),
-      ...scheduleDraftIds
-        .filter((draftId) => !shownScheduleDrafts.has(draftId))
-        .map((draftId) => ({
-          key: `schedule:${draftId}`,
-          messageId: origin.get(draftId)?.messageId,
-          activity: (message: DisplayMessage, index: number): ToolActivity => ({
-            ...placed(message, index, draftId),
-            family: "schedule-draft",
-            name: "draft_schedule",
-            result: { outcome: "drafted", draftId, draftConversationId: conversationId },
-          }),
-        })),
-      ...documentIds
-        .filter((documentId) => !shownDocuments.has(documentId))
-        .map((documentId) => {
-          const title = (origin.get(documentId) as { title?: string } | undefined)?.title;
-          return {
-            key: `document:${documentId}:${title ?? ""}`,
-            messageId: origin.get(documentId)?.messageId,
-            activity: (message: DisplayMessage, index: number): ToolActivity => ({
-              ...placed(message, index, documentId),
-              family: "document",
-              name: "create_document",
-              result: {
-                outcome: "created",
-                documentId,
-                documentConversationId: conversationId,
-                ...(title ? { title } : {}),
-              },
-            }),
-          };
-        }),
-    ],
-    data.hasOlder,
-  );
-
-  const fileReferences = useMemo(() => {
-    const attachments = new Map<string, Attachment>(
-      (data.referenceAttachments ?? data.attachments).map((file) => [file.id, file]),
-    );
-    // The stored rows and the live answer's own, rather than the display, which
-    // changes on every live chunk while these rarely do.
-    const files = [...baseDisplay.flatMap((message) => message.files ?? []), ...stream.files];
-    const steers = [...baseDisplay.flatMap((message) => message.steers ?? []), ...stream.steers];
-    for (const file of files) attachments.set(file.attachment.id, file.attachment);
-    for (const steer of steers)
-      for (const file of steer.attachments) attachments.set(file.id, file);
-    return {
-      attachments,
-      aliases: data.conversation.fileReferenceAliases ?? null,
-      machineId: localMachineId,
-    };
-  }, [
-    data.referenceAttachments,
-    data.attachments,
-    data.conversation.fileReferenceAliases,
-    baseDisplay,
-    stream.files,
-    stream.steers,
-    localMachineId,
-  ]);
+    draftIds,
+    scheduleDraftIds,
+    documentIds,
+  });
 
   return (
     <DocumentOwner
@@ -926,68 +497,4 @@ export function ChatView({
       </AgentDraftOwner>
     </DocumentOwner>
   );
-}
-
-/** The edit in progress, drawn on the row it edits. */
-interface RowEdit {
-  readonly messageId: string;
-  /** For a structured answer being edited, on the question row it answered. */
-  readonly question: NonNullable<
-    NonNullable<NonNullable<DisplayMessage["questionActions"]>["resolved"]>["editState"]
-  >;
-  readonly message: NonNullable<DisplayMessage["editState"]>;
-}
-/** What the answer being written shows from its stream until its rows arrive. */
-interface LiveRow {
-  readonly messageId: string;
-  readonly files: NonNullable<DisplayMessage["files"]>;
-  readonly tools: NonNullable<DisplayMessage["toolActivities"]>;
-  readonly compactions: NonNullable<DisplayMessage["compactionActivities"]>;
-  readonly steers: NonNullable<DisplayMessage["steers"]>;
-  readonly text: NonNullable<DisplayMessage["liveStream"]>["text"];
-  readonly status: NonNullable<DisplayMessage["liveStream"]>["status"];
-  readonly reading: Exclude<DisplayMessage["reading"], undefined>;
-  readonly lookups: Parameters<typeof mergeLookups>[1];
-  readonly previews: NonNullable<DisplayMessage["imagePreviews"]>;
-}
-
-/**
- * A row as shown: the edit in progress over the row it edits, and the live stream over the
- * answer being written. Any other row is the very row given, so it does not draw again.
- */
-function projectRow(
-  base: DisplayMessage,
-  edit: RowEdit | null,
-  live: LiveRow | null,
-): DisplayMessage {
-  let projected = base;
-  const resolved = base.questionActions?.resolved;
-  if (resolved && edit?.messageId === resolved.messageId)
-    projected = {
-      ...projected,
-      questionActions: {
-        ...base.questionActions,
-        resolved: { ...resolved, editState: edit.question },
-      },
-    };
-  if (edit?.messageId === base.id) projected = { ...projected, editState: edit.message };
-  if (base.id !== live?.messageId) return projected;
-  // Overlay live stream state onto only the active assistant row. Its text is read by the row
-  // itself (`liveStream`), so pacing ticks never rebuild this list.
-  return {
-    ...projected,
-    files: live.files,
-    toolActivities: live.tools.length > 0 ? live.tools : base.toolActivities,
-    compactionActivities: live.compactions,
-    // The stream has them the moment they are taken in; the rows arrive with the next
-    // refetch. Same ids, so each is drawn once.
-    steers: [
-      ...(projected.steers ?? []),
-      ...live.steers.filter((steer) => !projected.steers?.some((known) => known.id === steer.id)),
-    ],
-    liveStream: { text: live.text, status: live.status },
-    reading: live.reading,
-    uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, live.lookups),
-    imagePreviews: live.previews,
-  };
 }
