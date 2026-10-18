@@ -88,6 +88,13 @@ const cases: Record<string, Case[]> = {
   ],
   // MODE and MODE.MULT examples.
   MODE: [{ formula: "MODE(A1:A6)", cells: column("A", [5.6, 4, 4, 3, 2, 4]), expected: 4 }],
+  "MODE.MULT": [
+    {
+      formula: "MODE.MULT(A1:A12)",
+      cells: column("A", [1, 2, 3, 4, 3, 2, 1, 2, 3, 5, 6, 1]),
+      expected: [[1], [2], [3]],
+    },
+  ],
   // HARMEAN example.
   HARMEAN: [
     {

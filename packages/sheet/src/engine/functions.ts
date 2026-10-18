@@ -181,6 +181,19 @@ const stdev = (values: number[], sample: boolean) => {
   return typeof result === "number" ? Math.sqrt(result) : result;
 };
 
+/** Every most frequent number, in the order each first appears, down one column. */
+function modes(values: number[]): Value {
+  const counts = new Map<number, number>();
+  let most = 0;
+  for (const value of values) {
+    const count = (counts.get(value) ?? 0) + 1;
+    counts.set(value, count);
+    most = Math.max(most, count);
+  }
+  if (most < 2) return NA;
+  return new Grid([...counts].flatMap(([value, count]) => (count === most ? [[value]] : [])));
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -822,7 +835,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   },
   MODE: { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
-  "MODE.MULT": { kinds: "|r", run: libraryStat("MODE.MULT") },
+  "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },
   HARMEAN: { kinds: "|r", run: libraryStat("HARMEAN") },
   AVEDEV: { kinds: "|r", run: libraryStat("AVEDEV") },
