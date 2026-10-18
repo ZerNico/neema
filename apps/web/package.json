@@ -111,7 +111,7 @@
     "rolldown": "1.2.11",
     "semver": "7.8.5",
     "sonner": "^2.0.8",
-    "streamdown": "^2.6.0",
+    "streamdown": "2.6.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "unpdf": "1.8.1",

@@ -11,7 +11,7 @@ plugin config because highlighting, math, mermaid and CJK handling are opt-in an
 - The model writes markers only. We synthesize the `[^N]: url` definitions from the tool's own source list
   (`prepareCitedMarkdown`, `src/modules/chat/ui/citations.ts`) — without them GFM leaves `[^1]` as raw text
   until the definitions arrive, i.e. never mid-stream.
-- Two streamdown 2.5.0 output details are load-bearing: the `#user-content-fn-N` href on a footnote ref, and
+- Two streamdown 2.6.0 output details are load-bearing: the `#user-content-fn-N` href on a footnote ref, and
   the `data-footnotes` attribute on the appended section. hast gives that attribute the _empty string_, so
   suppress on `!== undefined` — a truthiness check silently renders the list. Pinned by `message-list.test.tsx`.
 - A citation chip is a link to its source showing favicon and site (a document or service source shows its

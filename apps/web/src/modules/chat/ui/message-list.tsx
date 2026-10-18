@@ -138,7 +138,7 @@ const CitationSources = createContext<ReadonlyMap<number, ToolSource>>(new Map()
 // and hides the footnote list streamdown would otherwise append (the detail
 // panel is our sources UI).
 // Both hooks into streamdown's output, the `#user-content-fn-N` href shape and
-// `data-footnotes` section, are verified against 2.5.0 by render tests;
+// `data-footnotes` section, are verified against 2.6.0 by render tests;
 // re-check on upgrade.
 const citationComponents: MarkdownComponents = {
   span: function CitationLink({ node, children, ...props }) {
