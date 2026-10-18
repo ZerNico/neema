@@ -203,8 +203,184 @@ import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
 import { isBrowserTool, shownBrowserArgs } from "~/modules/browser/tool-schema.ts";
 import { debugArguments, storedArguments } from "./stored-arguments.ts";
 
-// Families whose content lives in its own deletable row; their calls keep no arguments.
-const OWNED_CONTENT = new Set(["memory", "agent-draft", "schedule-draft", "document"]);
+type ToolFamily = ToolChunkEnvelope["family"];
+/**
+ * What a call's row keeps of its arguments. Content in its own deletable row
+ * (memory, drafts, documents) leaves nothing; tools that write content keep a
+ * trimmed copy, since it lives in what they made; the rest keep what is shown.
+ * Every family names one, so a new one cannot fall through to the wrong one.
+ */
+const STORED_ARGUMENTS = {
+  memory: "none",
+  "agent-draft": "none",
+  "schedule-draft": "none",
+  document: "none",
+  skill: "trimmed",
+  "project-file": "trimmed",
+  "tool-file": "trimmed",
+  presentation: "trimmed",
+  spreadsheet: "trimmed",
+  word: "trimmed",
+  research: "trimmed",
+  integration: "trimmed",
+  image: "trimmed",
+  ask: "ask",
+  web: "shown",
+  knowledge: "shown",
+  desktop: "shown",
+  plan: "shown",
+  notify: "shown",
+  map: "shown",
+  attachment: "shown",
+  "tool-load": "shown",
+  custom: "shown",
+} as const satisfies Record<ToolFamily, "none" | "trimmed" | "ask" | "shown">;
+
+/** A memory save's or a plan's arguments live in their own rows and reminders, not in history. */
+const redactOwnedArguments = (part: Response.AnyPart): Response.AnyPart =>
+  part.type === "tool-call" && (part.name === "save_memory" || part.name === "update_plan")
+    ? { ...part, params: {} }
+    : part;
+/** An updated plan is read from the trailing reminder, so its result only points there. */
+const redactPlanResult = (part: Response.AnyPart): Response.AnyPart =>
+  part.type === "tool-result" &&
+  part.name === "update_plan" &&
+  (part.result as PlanToolResult).outcome === "updated"
+    ? {
+        ...part,
+        encodedResult: {
+          outcome: "updated",
+          message: "The current checklist is in the trailing reminder.",
+        },
+      }
+    : part;
+/**
+ * What the next round's history keeps of a part: content with a home of its
+ * own (memory, a plan, drafts, documents) travels there, never twice. Each step
+ * leaves other tools' parts as they are.
+ */
+const forTheModel = (part: Response.AnyPart) =>
+  [
+    redactOwnedArguments,
+    redactPlanResult,
+    redactScheduleDraftPart,
+    redactAgentDraftPart,
+    redactDocumentPart,
+  ].reduce((current, redact) => redact(current), part);
+
+type StartEnvelope = Extract<ToolChunkEnvelope, { phase: "start" }>;
+/** A start envelope without the fields every one of them shares. */
+type StartFields = StartEnvelope extends infer E
+  ? E extends unknown
+    ? Omit<E, "v" | "phase" | "callId" | "turnIndex" | "callIndex" | "textOffset">
+    : never
+  : never;
+
+/**
+ * A family whose result is its projected activity, the handler's own reason
+ * when it did not do its job, and a row marked by whether it did. One shape
+ * for the row and the envelope, so the four such families settle the same way.
+ */
+const settledBy =
+  <N extends string, A extends object>(family: {
+    isName: (name: unknown) => name is N;
+    project: (raw: unknown) => A;
+    reason: (raw: unknown) => string | undefined;
+    ok: (activity: A) => boolean;
+    /** The row's error code when it did not do its job. */
+    code: string;
+    /** The reason for a call whose part failed: its output is the driver's, not the handler's. */
+    failed: string;
+    envelope: (input: {
+      callId: string;
+      name: N;
+      activity: A;
+      reason: string | undefined;
+    }) => ToolChunkEnvelope;
+  }) =>
+  (part: { name: string; result: unknown; isFailure: boolean }, callId: string) => {
+    if (!family.isName(part.name)) return null;
+    const activity = family.project(part.isFailure ? null : part.result);
+    const reason = part.isFailure ? family.failed : family.reason(part.result);
+    return {
+      result: activity,
+      ok: family.ok(activity),
+      error: reason ? { code: family.code, message: reason } : null,
+      envelope: family.envelope({ callId, name: part.name, activity, reason }),
+    };
+  };
+
+const SETTLED_FAMILIES = [
+  settledBy<AgentDraftToolName, ReturnType<typeof projectAgentDraftResult>>({
+    isName: Schema.is(AgentDraftToolName),
+    project: projectAgentDraftResult,
+    reason: agentDraftFailureReason,
+    ok: agentDraftResultOk,
+    code: "AgentDraftNotUpdated",
+    failed: "The draft tool failed before it could respond.",
+    envelope: ({ callId, name, activity, reason }) => ({
+      v: 1,
+      family: "agent-draft",
+      phase: "result",
+      callId,
+      name,
+      ...activity,
+      ...(reason ? { reason } : {}),
+    }),
+  }),
+  settledBy<ScheduleDraftToolName, ReturnType<typeof projectScheduleDraftResult>>({
+    isName: Schema.is(ScheduleDraftToolName),
+    project: projectScheduleDraftResult,
+    reason: scheduleDraftFailureReason,
+    ok: scheduleDraftResultOk,
+    code: "ScheduleDraftNotUpdated",
+    failed: "The draft tool failed before it could respond.",
+    envelope: ({ callId, name, activity, reason }) => ({
+      v: 1,
+      family: "schedule-draft",
+      phase: "result",
+      callId,
+      name,
+      ...activity,
+      ...(reason ? { reason } : {}),
+    }),
+  }),
+  settledBy<DocumentToolName, ReturnType<typeof projectDocumentResult>>({
+    isName: Schema.is(DocumentToolName),
+    project: projectDocumentResult,
+    reason: documentFailureReason,
+    ok: documentResultOk,
+    code: "DocumentNotUpdated",
+    failed: "The document tool failed before it could respond.",
+    envelope: ({ callId, name, activity, reason }) => ({
+      v: 1,
+      family: "document",
+      phase: "result",
+      callId,
+      name,
+      ...activity,
+      ...(reason ? { reason } : {}),
+    }),
+  }),
+  // File text the model read stays in this answer's rounds; the row keeps which file and version.
+  settledBy<ProjectFileToolName, ReturnType<typeof projectProjectFileResult>>({
+    isName: Schema.is(ProjectFileToolName),
+    project: projectProjectFileResult,
+    reason: projectFileFailureReason,
+    ok: projectFileResultOk,
+    code: "ProjectFileNotUsed",
+    failed: "The project file tool failed before it could respond.",
+    envelope: ({ callId, name, activity, reason }) => ({
+      v: 1,
+      family: "project-file",
+      phase: "result",
+      callId,
+      name,
+      ...activity,
+      ...(reason ? { reason } : {}),
+    }),
+  }),
+];
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { supportsImageOutput } from "~/modules/providers/provider-presets.ts";
 import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
@@ -2779,26 +2955,7 @@ export class StreamEngine extends Context.Service<
                         providerOutputStarted = true;
                       }
                       if (!isPreliminary && part.type !== "error") {
-                        turnParts.push(
-                          part.type === "tool-call" &&
-                            (part.name === "save_memory" || part.name === "update_plan")
-                            ? { ...part, params: {} }
-                            : part.type === "tool-result" && part.name === "update_plan"
-                              ? {
-                                  ...part,
-                                  encodedResult:
-                                    (part.result as PlanToolResult).outcome === "updated"
-                                      ? {
-                                          outcome: "updated",
-                                          message:
-                                            "The current checklist is in the trailing reminder.",
-                                        }
-                                      : part.encodedResult,
-                                }
-                              : redactDocumentPart(
-                                  redactAgentDraftPart(redactScheduleDraftPart(part)),
-                                ),
-                        );
+                        turnParts.push(forTheModel(part));
                       }
                       switch (part.type) {
                         case "file": {
@@ -2956,29 +3113,30 @@ export class StreamEngine extends Context.Service<
                                   ),
                                 }
                               : {}),
-                            // Memory, drafts and documents own their content in a
-                            // row that can be deleted, so the call keeps nothing of
-                            // it. Other tools that write content keep a trimmed
-                            // copy: the content lives in what they produced.
-                            arguments: OWNED_CONTENT.has(family)
-                              ? {}
-                              : family === "skill" ||
-                                  family === "project-file" ||
-                                  family === "tool-file" ||
-                                  isOfficeFamily(family) ||
-                                  family === "research" ||
-                                  family === "integration" ||
-                                  family === "image"
-                                ? storedArguments(args)
-                                : family === "ask"
-                                  ? askArgs && Option.isSome(askArgs)
-                                    ? json(askArgs.value)
-                                    : {}
-                                  : (shownArgs as JsonValue),
+                            arguments:
+                              STORED_ARGUMENTS[family] === "none"
+                                ? {}
+                                : STORED_ARGUMENTS[family] === "trimmed"
+                                  ? storedArguments(args)
+                                  : STORED_ARGUMENTS[family] === "ask"
+                                    ? askArgs && Option.isSome(askArgs)
+                                      ? json(askArgs.value)
+                                      : {}
+                                    : (shownArgs as JsonValue),
                           });
                           // Typed browser text may be a password; owned content has its own row.
-                          if (!OWNED_CONTENT.has(family))
+                          if (STORED_ARGUMENTS[family] !== "none")
                             debugArgs.set(rowId, debugArguments(shownArgs));
+                          const start = (fields: StartFields) =>
+                            pushToolChunk({
+                              v: 1,
+                              phase: "start",
+                              callId: rowId,
+                              turnIndex: turn,
+                              callIndex: callIndex - 1,
+                              textOffset,
+                              ...fields,
+                            });
                           if (family === "research") {
                             // The handler cannot learn its own row id: the
                             // toolkit hands it the provider's call id, and this
@@ -2994,55 +3152,22 @@ export class StreamEngine extends Context.Service<
                           }
                           const office = officeFamilyOf(part.name);
                           if (office) {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family: office.family,
-                              phase: "start",
-                              callId: rowId,
-                              name: part.name,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            } as ToolChunkEnvelope);
+                            yield* start({ family: office.family, name: part.name });
                             return;
                           }
                           if (family === "tool-file") {
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family: "tool-file",
-                              phase: "start",
-                              callId: rowId,
                               name: part.name === "create_file" ? "create_file" : "publish_file",
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                             });
                             return;
                           }
                           if (family === "attachment") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: "read_attachment",
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: "read_attachment" });
                             return;
                           }
                           if (family === "tool-load") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: "load_tools",
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: "load_tools" });
                             return;
                           }
                           if (
@@ -3052,28 +3177,10 @@ export class StreamEngine extends Context.Service<
                             family === "notify" ||
                             family === "map"
                           ) {
-                            yield* pushToolChunk(
+                            yield* start(
                               family === "plan"
-                                ? {
-                                    v: 1,
-                                    family,
-                                    phase: "start",
-                                    callId: rowId,
-                                    name: "update_plan",
-                                    turnIndex: turn,
-                                    callIndex: callIndex - 1,
-                                    textOffset,
-                                  }
-                                : {
-                                    v: 1,
-                                    family,
-                                    phase: "start",
-                                    callId: rowId,
-                                    name: part.name,
-                                    turnIndex: turn,
-                                    callIndex: callIndex - 1,
-                                    textOffset,
-                                  },
+                                ? { family, name: "update_plan" }
+                                : { family, name: part.name },
                             );
                             return;
                           }
@@ -3113,69 +3220,27 @@ export class StreamEngine extends Context.Service<
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                             });
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family,
-                              phase: "start",
-                              callId: rowId,
                               name: part.name as DesktopToolName,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               args: shownArgs,
                             });
                             return;
                           }
                           if (family === "agent-draft") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: part.name as AgentDraftToolName,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: part.name as AgentDraftToolName });
                             return;
                           }
                           if (family === "schedule-draft") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: part.name as ScheduleDraftToolName,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: part.name as ScheduleDraftToolName });
                             return;
                           }
                           if (family === "document") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: part.name as DocumentToolName,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: part.name as DocumentToolName });
                             return;
                           }
                           if (family === "project-file") {
-                            yield* pushToolChunk({
-                              v: 1,
-                              family,
-                              phase: "start",
-                              callId: rowId,
-                              name: part.name as ProjectFileToolName,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
-                            });
+                            yield* start({ family, name: part.name as ProjectFileToolName });
                             return;
                           }
                           if (family === "integration") {
@@ -3189,15 +3254,9 @@ export class StreamEngine extends Context.Service<
                               turnIndex: turn,
                               callIndex: callIndex - 1,
                             });
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family,
-                              phase: "start",
-                              callId: rowId,
                               name: part.name,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               integrationId: entry.integrationId,
                               tool: entry.tool.name,
                               label: entry.tool.label,
@@ -3217,15 +3276,9 @@ export class StreamEngine extends Context.Service<
                               callIndex: callIndex - 1,
                               textOffset,
                             });
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family: "image",
-                              phase: "start",
-                              callId: rowId,
                               name: IMAGE_TOOL,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               model: shape.model,
                               editing: shape.editing,
                               ...(shape.aspectRatio ? { aspectRatio: shape.aspectRatio } : {}),
@@ -3234,15 +3287,9 @@ export class StreamEngine extends Context.Service<
                             return;
                           }
                           if (family === "custom") {
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family,
-                              phase: "start",
-                              callId: rowId,
                               name: part.name,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               displayName: customToolDisplayName(part.name),
                             });
                             return;
@@ -3251,15 +3298,9 @@ export class StreamEngine extends Context.Service<
                             const entry = config.skills?.find(
                               (skill) => skill.skillId === args["skillId"],
                             );
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family: "skill",
-                              phase: "start",
-                              callId: rowId,
                               name: part.name as typeof SkillToolName.Type,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               skillId: entry?.skillId ?? "",
                               skillName: entry?.name ?? "Skill",
                               path:
@@ -3275,15 +3316,9 @@ export class StreamEngine extends Context.Service<
                             const queries = Array.isArray(args["queries"])
                               ? args["queries"].map(String)
                               : [];
-                            yield* pushToolChunk({
-                              v: 1,
+                            yield* start({
                               family,
-                              phase: "start",
-                              callId: rowId,
                               name: part.name as typeof KnowledgeToolName.Type,
-                              turnIndex: turn,
-                              callIndex: callIndex - 1,
-                              textOffset,
                               ...(queries.length > 0 ? { targets: queries } : {}),
                             });
                             return;
@@ -3294,17 +3329,7 @@ export class StreamEngine extends Context.Service<
                             : Array.isArray(args["urls"])
                               ? args["urls"].map(String)
                               : [];
-                          yield* pushToolChunk({
-                            v: 1,
-                            family,
-                            phase: "start",
-                            callId: rowId,
-                            name: part.name,
-                            turnIndex: turn,
-                            callIndex: callIndex - 1,
-                            textOffset,
-                            args: { targets },
-                          });
+                          yield* start({ family, name: part.name, args: { targets } });
                           return;
                         }
                         case "tool-result": {
@@ -3356,122 +3381,17 @@ export class StreamEngine extends Context.Service<
                               });
                             return;
                           }
-                          // This branch and the document one below it are the same
-                          // eight steps with different words. They stay apart on
-                          // purpose: the envelope union correlates `family` with
-                          // the activity shape, and one parameterised path can
-                          // only satisfy it through a cast.
-                          if (Schema.is(AgentDraftToolName)(part.name)) {
+                          for (const settle of SETTLED_FAMILIES) {
+                            const outcome = settle(part, rowId);
+                            if (!outcome) continue;
                             if (isPreliminary) return;
-                            const activity = projectAgentDraftResult(
-                              part.isFailure ? null : part.result,
-                            );
-                            // The reason is the handler's own sentence, kept so a
-                            // "not updated" row can be explained later. A failed
-                            // part carries driver output and gets a fixed message.
-                            const reason = part.isFailure
-                              ? "The draft tool failed before it could respond."
-                              : agentDraftFailureReason(part.result);
                             yield* repo.completeToolCall({
                               id: rowId,
-                              result: json(activity),
-                              status: agentDraftResultOk(activity) ? "complete" : "error",
-                              ...(reason
-                                ? { error: { code: "AgentDraftNotUpdated", message: reason } }
-                                : {}),
+                              result: json(outcome.result),
+                              status: outcome.ok ? "complete" : "error",
+                              ...(outcome.error ? { error: outcome.error } : {}),
                             });
-                            yield* pushToolChunk({
-                              v: 1,
-                              family: "agent-draft",
-                              phase: "result",
-                              callId: rowId,
-                              name: part.name,
-                              ...activity,
-                              ...(reason ? { reason } : {}),
-                            });
-                            return;
-                          }
-                          if (Schema.is(ScheduleDraftToolName)(part.name)) {
-                            if (isPreliminary) return;
-                            const activity = projectScheduleDraftResult(
-                              part.isFailure ? null : part.result,
-                            );
-                            const reason = part.isFailure
-                              ? "The draft tool failed before it could respond."
-                              : scheduleDraftFailureReason(part.result);
-                            yield* repo.completeToolCall({
-                              id: rowId,
-                              result: json(activity),
-                              status: scheduleDraftResultOk(activity) ? "complete" : "error",
-                              ...(reason
-                                ? { error: { code: "ScheduleDraftNotUpdated", message: reason } }
-                                : {}),
-                            });
-                            yield* pushToolChunk({
-                              v: 1,
-                              family: "schedule-draft",
-                              phase: "result",
-                              callId: rowId,
-                              name: part.name,
-                              ...activity,
-                              ...(reason ? { reason } : {}),
-                            });
-                            return;
-                          }
-                          if (Schema.is(DocumentToolName)(part.name)) {
-                            if (isPreliminary) return;
-                            const activity = projectDocumentResult(
-                              part.isFailure ? null : part.result,
-                            );
-                            const reason = part.isFailure
-                              ? "The document tool failed before it could respond."
-                              : documentFailureReason(part.result);
-                            yield* repo.completeToolCall({
-                              id: rowId,
-                              result: json(activity),
-                              status: documentResultOk(activity) ? "complete" : "error",
-                              ...(reason
-                                ? { error: { code: "DocumentNotUpdated", message: reason } }
-                                : {}),
-                            });
-                            yield* pushToolChunk({
-                              v: 1,
-                              family: "document",
-                              phase: "result",
-                              callId: rowId,
-                              name: part.name,
-                              ...activity,
-                              ...(reason ? { reason } : {}),
-                            });
-                            return;
-                          }
-                          if (Schema.is(ProjectFileToolName)(part.name)) {
-                            if (isPreliminary) return;
-                            // File text the model read stays in this answer's
-                            // rounds; the row keeps which file and version.
-                            const activity = projectProjectFileResult(
-                              part.isFailure ? null : part.result,
-                            );
-                            const reason = part.isFailure
-                              ? "The project file tool failed before it could respond."
-                              : projectFileFailureReason(part.result);
-                            yield* repo.completeToolCall({
-                              id: rowId,
-                              result: json(activity),
-                              status: projectFileResultOk(activity) ? "complete" : "error",
-                              ...(reason
-                                ? { error: { code: "ProjectFileNotUsed", message: reason } }
-                                : {}),
-                            });
-                            yield* pushToolChunk({
-                              v: 1,
-                              family: "project-file",
-                              phase: "result",
-                              callId: rowId,
-                              name: part.name,
-                              ...activity,
-                              ...(reason ? { reason } : {}),
-                            });
+                            yield* pushToolChunk(outcome.envelope);
                             return;
                           }
                           if (Schema.is(DesktopToolName)(part.name)) {
