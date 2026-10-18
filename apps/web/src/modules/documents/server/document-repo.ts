@@ -68,6 +68,7 @@ export interface StoredStep {
   revision: number;
   step: Record<string, unknown>;
   clientId: string;
+  userId: string | null;
   generationId: string | null;
   createdAt: Date;
 }
@@ -304,6 +305,7 @@ export class DocumentRepo extends Context.Service<
                     revision: documentSteps.revision,
                     step: documentSteps.step,
                     clientId: documentSteps.clientId,
+                    userId: documentSteps.userId,
                     generationId: documentSteps.generationId,
                     createdAt: documentSteps.createdAt,
                   })

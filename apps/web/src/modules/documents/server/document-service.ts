@@ -97,6 +97,9 @@ const CHANGED_THROTTLE = Duration.seconds(1);
 /** The collab client id of every model write, and of the server's own repairs. */
 const MODEL_CLIENT = "model";
 const SERVER_CLIENT = "server";
+/** Ids the server writes under; a connected app's are `app:<client>`. Never a person's. */
+const reservedClient = (clientId: string) =>
+  clientId === MODEL_CLIENT || clientId === SERVER_CLIENT || clientId.startsWith("app:");
 
 interface KeptStep {
   readonly json: Record<string, unknown>;
@@ -112,6 +115,11 @@ interface Entry {
   steps: KeptStep[];
   revision: number;
   readonly presence: Map<string, DocumentPresence>;
+  /**
+   * Who each collab client id belongs to. An editor counts steps under its own
+   * id as its confirmations, so a step under another person's id would desync them.
+   */
+  readonly clients: Map<string, string>;
   comments: DocumentComment[];
   readonly frames: PubSub.PubSub<DocumentFrame>;
   readonly conversationId: string | null;
@@ -120,6 +128,14 @@ interface Entry {
   touched: number;
   changedPending: boolean;
 }
+/** Binds a client id to the person using it first; false when it is not theirs. */
+const claimClient = (entry: Entry, clientId: string, userId: string) => {
+  if (reservedClient(clientId)) return false;
+  const owner = entry.clients.get(clientId);
+  if (owner === undefined) entry.clients.set(clientId, userId);
+  return owner === undefined || owner === userId;
+};
+
 interface Author {
   origin: "user" | "model";
   userId: string;
@@ -548,6 +564,13 @@ export class DocumentService extends Context.Service<
             })),
             revision: state.document.revision,
             presence: new Map(),
+            clients: new Map(
+              state.steps.flatMap((row) =>
+                row.userId === null || reservedClient(row.clientId)
+                  ? []
+                  : [[row.clientId, row.userId] as const],
+              ),
+            ),
             comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
             conversationId: state.document.conversationId,
@@ -1018,6 +1041,8 @@ export class DocumentService extends Context.Service<
           Effect.gen(function* () {
             yield* requireDocuments(userId);
             const { entry, document } = yield* load(userId, parsed.documentId);
+            if (!claimClient(entry, parsed.clientId, userId))
+              return yield* new DocumentRejected({ reason: "that editor belongs to someone else" });
             // Refused before the steps touch anything: a reader's cursor may move, their text may not.
             if (parsed.steps && !document.canEdit)
               return yield* new DocumentRejected({ reason: "this document is read-only for you" });
@@ -1089,13 +1114,18 @@ export class DocumentService extends Context.Service<
           .pipe(Effect.orDie);
         if (!(yield* canSubscribe)) return null;
         const gone: Stream.Stream<DocumentFrame> = Stream.make({ type: "gone" });
-        const ownPresence = (frame: DocumentFrame) =>
-          frame.type === "presence" && frame.clientId === options.clientId;
         return Stream.unwrap(
           exclusive(documentId)(
             Effect.gen(function* () {
               if (!(yield* canSubscribe)) return gone;
               const { entry } = yield* load(userId, documentId);
+              // Another person's id would hide their caret here and remove it on close.
+              const clientId =
+                options.clientId !== null && claimClient(entry, options.clientId, userId)
+                  ? options.clientId
+                  : null;
+              const ownPresence = (frame: DocumentFrame) =>
+                frame.type === "presence" && frame.clientId === clientId;
               // Subscribed before the catch-up is taken, and under the lock, so
               // no step falls between the two.
               const subscription = yield* PubSub.subscribe(entry.frames);
@@ -1104,10 +1134,10 @@ export class DocumentService extends Context.Service<
                 Effect.gen(function* () {
                   entry.subscribers--;
                   entry.touched = yield* Clock.currentTimeMillis;
-                  if (options.clientId === null || !entry.presence.delete(options.clientId)) return;
+                  if (clientId === null || !entry.presence.delete(clientId)) return;
                   yield* PubSub.publish(entry.frames, {
                     type: "presence",
-                    clientId: options.clientId,
+                    clientId,
                     presence: null,
                   });
                 }),
@@ -1129,8 +1159,8 @@ export class DocumentService extends Context.Service<
                       revision: entry.revision,
                     };
               const others: DocumentFrame[] = [...entry.presence]
-                .filter(([clientId]) => clientId !== options.clientId)
-                .map(([clientId, presence]) => ({ type: "presence", clientId, presence }));
+                .filter(([other]) => other !== clientId)
+                .map(([other, presence]) => ({ type: "presence", clientId: other, presence }));
               // Session, account, feature and resource revocation end the feed on recheck.
               // Only that ending says gone: a feed ended because the entry was
               // dropped and rebuilt is reconnected and caught up, never discarded.

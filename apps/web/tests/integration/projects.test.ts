@@ -335,6 +335,45 @@ describe("chats in a project", () => {
 });
 
 describe("project documents", () => {
+  it("keeps each editor's collab id theirs, and the server's ids its own", async () => {
+    const owner = await createUser();
+    const editor = await createUser();
+    const project = await newProject(owner);
+    await projects((s) =>
+      s.changeMembers(owner, project.id, {
+        action: "addUser",
+        email: email(editor),
+        role: "editor",
+      }),
+    );
+    const { document } = await docs((s) =>
+      s.create(owner, { projectId: project.id, title: "Plan", content: "- [ ] ship", by: "user" }),
+    );
+    const ownerEditor = (await openEditor(owner, document.id))!;
+    await ownerEditor.type((markdown) => `${markdown}\n- [ ] announce`);
+    const current = (await docs((s) => s.get(editor, document.id)))!.revision;
+    const pushAs = (clientId: string) =>
+      docs((s) =>
+        s.push(editor, {
+          documentId: document.id,
+          clientId,
+          revision: current,
+          presence: {
+            anchor: 1,
+            head: 1,
+            revision: current,
+            user: { name: "Editor", color: "red", colorLight: "red" },
+          },
+        }),
+      );
+    for (const taken of [ownerEditor.clientId, "model", "server", "app:claude"])
+      await expect(pushAs(taken)).rejects.toMatchObject({
+        _tag: "DocumentRejected",
+        reason: "that editor belongs to someone else",
+      });
+    await expect(pushAs("editor-own")).resolves.toMatchObject({ conflict: false });
+  });
+
   it("lets editors write together and viewers read, move a cursor, but never change the text", async () => {
     const owner = await createUser();
     const editor = await createUser();
