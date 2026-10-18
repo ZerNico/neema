@@ -204,12 +204,22 @@ const versionsOf = (table: string) => {
 const { latest: latestVersionId, displayed: displayedVersionId } =
   versionsOf("knowledge_documents");
 
+/** A collection its owner may still change: theirs, while they may create knowledge. */
+const ownedCollectionOf = (userId: string) =>
+  and(eq(knowledgeCollections.userId, userId), capabilityAllowedSql(userId, "knowledgeCreate"));
+
 const ownedCollection = (userId: string, collectionId: string) =>
-  and(
-    eq(knowledgeCollections.id, collectionId),
-    eq(knowledgeCollections.userId, userId),
-    capabilityAllowedSql(userId, "knowledgeCreate"),
-  );
+  and(eq(knowledgeCollections.id, collectionId), ownedCollectionOf(userId));
+
+/** Locks the collection a document is in, when its owner may still change it. */
+const lockCollectionOfDocument = (tx: DbTx, userId: string, documentId: string) =>
+  tx
+    .select({ id: knowledgeCollections.id })
+    .from(knowledgeCollections)
+    .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.collectionId, knowledgeCollections.id))
+    .where(and(eq(knowledgeDocuments.id, documentId), ownedCollectionOf(userId)))
+    .for("update", { of: knowledgeCollections })
+    .pipe(Effect.map(([collection]) => collection));
 
 const readableCollection = (userId: string, collectionId: string) =>
   and(eq(knowledgeCollections.id, collectionId), collectionReadable(userId));
@@ -2230,21 +2240,7 @@ export class KnowledgeRepo extends Context.Service<
           db
             .transaction((tx) =>
               Effect.gen(function* () {
-                const [collection] = yield* tx
-                  .select({ id: knowledgeCollections.id })
-                  .from(knowledgeCollections)
-                  .innerJoin(
-                    knowledgeDocuments,
-                    eq(knowledgeDocuments.collectionId, knowledgeCollections.id),
-                  )
-                  .where(
-                    and(
-                      eq(knowledgeDocuments.id, documentId),
-                      eq(knowledgeCollections.userId, userId),
-                      capabilityAllowedSql(userId, "knowledgeCreate"),
-                    ),
-                  )
-                  .for("update", { of: knowledgeCollections });
+                const collection = yield* lockCollectionOfDocument(tx, userId, documentId);
                 if (!collection) return false;
                 yield* tx
                   .select({ id: knowledgeDocuments.id })
@@ -2290,21 +2286,7 @@ export class KnowledgeRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                const [collection] = yield* tx
-                  .select({ id: knowledgeCollections.id })
-                  .from(knowledgeCollections)
-                  .innerJoin(
-                    knowledgeDocuments,
-                    eq(knowledgeDocuments.collectionId, knowledgeCollections.id),
-                  )
-                  .where(
-                    and(
-                      eq(knowledgeDocuments.id, documentId),
-                      eq(knowledgeCollections.userId, userId),
-                      capabilityAllowedSql(userId, "knowledgeCreate"),
-                    ),
-                  )
-                  .for("update", { of: knowledgeCollections });
+                const collection = yield* lockCollectionOfDocument(tx, userId, documentId);
                 if (!collection) return [] as string[];
                 const owned = yield* tx
                   .select({
