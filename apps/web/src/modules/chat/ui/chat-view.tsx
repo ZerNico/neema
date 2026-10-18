@@ -1822,9 +1822,6 @@ export function ChatView({
   );
 }
 
-// How long the composer takes to travel from the middle of the column down to
-// the bottom. Navigation waits this out, so a fast first response cannot swap
-// the route in mid-slide, which would read as a jump rather than a move.
 /** The edit in progress, drawn on the row it edits. */
 interface RowEdit {
   readonly messageId: string;
@@ -1889,6 +1886,11 @@ function projectRow(
   };
 }
 
+/**
+ * How long the composer takes to travel from the middle of the column down to
+ * the bottom. Navigation waits this out, so a fast first response cannot swap
+ * the route in mid-slide, which would read as a jump rather than a move.
+ */
 const SLIDE_MS = 380;
 
 export function NewChatView({

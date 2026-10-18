@@ -30,8 +30,9 @@ function SourcesTabOwner({ id, message }: { id: string; message: DisplayMessage 
         message.inheritedSources ?? NO_INHERITED_SOURCES,
       )
     : null;
-  // The list is recomputed on every streamed token; the panel only changes
-  // when the sources themselves do.
+  // Read from the row's stored content, not the live text, so for an answer
+  // still streaming the panel catches up on the next refetch. It only
+  // changes when the sources themselves do.
   const key = sources?.map((source) => source.index).join(",") ?? null;
   const [held, setHeld] = useState({ key, sources });
   if (held.key !== key) setHeld({ key, sources });
