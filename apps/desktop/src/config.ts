@@ -47,6 +47,23 @@ export const toOrigin = (input: string): string | null => {
   }
 };
 
+/**
+ * Whether the bridge may be handed to this origin: https, or http on this
+ * machine. Anyone on the network path of a plain-http server could inject the
+ * script that drives commands and files.
+ */
+export const bridgeableOrigin = (origin: string): boolean => {
+  const url = new URL(origin);
+  if (url.protocol === "https:") return true;
+  const host = url.hostname;
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "[::1]" ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
+};
+
 export const readConfig = async (file: string): Promise<DesktopConfig | null> => {
   try {
     const parsed: unknown = JSON.parse(await readFile(file, "utf8"));

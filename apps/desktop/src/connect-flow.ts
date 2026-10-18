@@ -1,4 +1,4 @@
-import { toOrigin } from "./config.ts";
+import { bridgeableOrigin, toOrigin } from "./config.ts";
 
 /**
  * `declined` is the person keeping their current server when asked; the
@@ -49,6 +49,11 @@ export const makeConnectFlow = (host: ConnectHost) => {
     const origin = typeof candidate === "string" ? toOrigin(candidate) : null;
     if (origin === null)
       return Promise.resolve({ ok: false, message: "That does not look like a server address." });
+    if (!bridgeableOrigin(origin))
+      return Promise.resolve({
+        ok: false,
+        message: "Use an https address. Plain http works only for a server on this computer.",
+      });
     connecting = (async (): Promise<ConnectOutcome> => {
       if (host.fixedServer())
         return { ok: false, message: "The server is fixed by CHAT_DESKTOP_SERVER." };

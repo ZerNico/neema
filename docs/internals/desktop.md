@@ -53,7 +53,9 @@ switch at all, the menu item is absent, and the IPC still refuses as a backstop.
 `connect-flow.ts` holds this logic electron-free. During dev reload,
 `CHAT_DESKTOP_PROFILE` selects userData before services or sessions open; the root
 dev runner supplies a checkout-local directory. The installed profile is unchanged.
-See [development isolation](development.md).
+See [development isolation](development.md). An address must be https, or plain http
+on this machine: whoever sits on the network path of a plain-http server could inject
+the script that drives commands and files.
 
 ## Sign-in happens in the browser
 

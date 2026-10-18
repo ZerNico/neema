@@ -6,6 +6,7 @@ import {
   isConfiguredOriginUrl,
   isSafeExternalUrl,
   readConfig,
+  bridgeableOrigin,
   toOrigin,
   writeConfig,
 } from "./config.ts";
@@ -118,5 +119,20 @@ describe("the stored server", () => {
 
     await writeFile(file, JSON.stringify({ serverUrl: "file:///etc" }));
     expect(await readConfig(file)).toBeNull();
+  });
+});
+
+describe("bridgeableOrigin", () => {
+  it("hands the bridge to https, and to http only on this machine", () => {
+    expect(bridgeableOrigin("https://chat.example.com")).toBe(true);
+    for (const origin of [
+      "http://localhost:3000",
+      "http://chat.localhost",
+      "http://127.0.0.1:8080",
+      "http://[::1]:3000",
+    ])
+      expect(bridgeableOrigin(origin)).toBe(true);
+    for (const origin of ["http://chat.lan", "http://192.168.1.10", "http://localhost.evil.com"])
+      expect(bridgeableOrigin(origin)).toBe(false);
   });
 });
