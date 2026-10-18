@@ -75,7 +75,7 @@ import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
-import { settled, errorMessage } from "../client/settled.ts";
+import { errorMessage } from "../client/settled.ts";
 import { customToolQuery } from "../client/queries.ts";
 
 // Same surface as the skill editor: app tokens, a bounded pane that scrolls
@@ -324,15 +324,13 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       dependencies: CustomToolDependency[];
       revision: number;
     }) =>
-      settled(
-        checkCustomTool({
-          data: {
-            slug: submitted.slug,
-            source: submitted.source,
-            dependencies: submitted.dependencies,
-          },
-        }),
-      ),
+      checkCustomTool({
+        data: {
+          slug: submitted.slug,
+          source: submitted.source,
+          dependencies: submitted.dependencies,
+        },
+      }),
     onSuccess: (result, submitted) => {
       if (submitted.revision !== buildRevision.current) return;
       setPreview(result);
@@ -349,11 +347,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     mutationFn: (submitted: typeof saved & { revision: number }) => {
       setSlugTaken(null);
       const { version, revision: _revision, ...input } = submitted;
-      return settled(
-        saveCustomTool({
-          data: tool ? { toolId: tool.id, expectedVersion: version!, ...input } : input,
-        }),
-      );
+      return saveCustomTool({
+        data: tool ? { toolId: tool.id, expectedVersion: version!, ...input } : input,
+      });
     },
     onSuccess: async (accepted, submitted) => {
       const { revision: _revision, ...baseline } = submitted;
@@ -384,8 +380,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     },
   });
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) =>
-      settled(setCustomToolEnabled({ data: { toolId: tool!.id, enabled } })),
+    mutationFn: (enabled: boolean) => setCustomToolEnabled({ data: { toolId: tool!.id, enabled } }),
     onSuccess: async () => {
       await invalidateLists(queryClient);
       await queryClient.invalidateQueries({ queryKey: ["admin", "custom-tools", tool!.id] });
@@ -393,7 +388,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     onError: (error) => toastError("Could not update the module.", error),
   });
   const remove = useMutation({
-    mutationFn: () => settled(deleteCustomTool({ data: { toolId: tool!.id } })),
+    mutationFn: () => deleteCustomTool({ data: { toolId: tool!.id } }),
     onSuccess: async () => {
       await invalidateLists(queryClient);
       await navigate({ to: "/admin/custom-tools", ignoreBlocker: true });
@@ -403,27 +398,25 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   const test = useMutation({
     mutationFn: async (): Promise<CustomToolTestResult> => {
       try {
-        return await settled(
-          testCustomTool({
-            data: {
-              slug,
-              source,
-              dependencies,
-              functionKey,
-              argumentsJson: argumentsText,
-              ...(testFiles.length
-                ? {
-                    files: await Promise.all(
-                      testFiles.map(async (file) => ({
-                        name: file.name,
-                        base64: await readBase64(file),
-                      })),
-                    ),
-                  }
-                : {}),
-            },
-          }),
-        );
+        return await testCustomTool({
+          data: {
+            slug,
+            source,
+            dependencies,
+            functionKey,
+            argumentsJson: argumentsText,
+            ...(testFiles.length
+              ? {
+                  files: await Promise.all(
+                    testFiles.map(async (file) => ({
+                      name: file.name,
+                      base64: await readBase64(file),
+                    })),
+                  ),
+                }
+              : {}),
+          },
+        });
       } catch (error) {
         return {
           ok: false,

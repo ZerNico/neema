@@ -1,6 +1,6 @@
 /**
- * The body contract between `reportUnexpectedFailures` and the client. The
- * Start client keeps only a failed response's text (see `identity.ts`), so an
+ * The body contract between `reportUnexpectedFailures` and the client. A
+ * refused call keeps only its response's text (`refusals.ts`), so an
  * unexpected failure is recognised by this exact shape: a fixed friendly line,
  * then the reference the server logged it under.
  */
@@ -30,7 +30,7 @@ export function readServerError(error: unknown): ServerError {
   const [first = "", second = ""] = raw.split("\n");
   if (first === UNEXPECTED_FAILURE && second.startsWith(REFERENCE_PREFIX))
     return { reason: null, reference: second.slice(REFERENCE_PREFIX.length).trim(), raw };
-  // The Start client rebuilds a failed response as a plain Error; a TypeError
+  // A refused call arrives as a plain Error (`refusals.ts`); a TypeError
   // or any other subclass is the network or a bug in this page, not a reason.
   const fromServer =
     typeof error === "string" || (error instanceof Error && error.name === "Error");

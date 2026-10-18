@@ -211,17 +211,15 @@ describe("CustomToolEditorPage", () => {
 
   it("lists a refused Check as problems, with type errors as line links", async () => {
     const user = userEvent.setup();
-    // The Start client hands a thrown Response back as the resolved value.
-    vi.mocked(checkCustomTool).mockResolvedValueOnce(
-      new Response(
+    // A refusal reaches the page as an Error carrying the response body.
+    vi.mocked(checkCustomTool).mockRejectedValueOnce(
+      new Error(
         JSON.stringify([{ path: ["dependencies", 0, "name"], message: "Expected a package name" }]),
-        { status: 400 },
-      ) as never,
+      ),
     );
     vi.mocked(checkCustomTool).mockRejectedValueOnce(
-      new Response(
+      new Error(
         "TypeScript check failed:\ntool.ts(4,3): error TS2322: Type 'A' is not assignable.\n  Detail line.\ntool.ts(9,1): error TS2304: Cannot find name 'x'.",
-        { status: 400 },
       ),
     );
     renderEditor();
@@ -243,9 +241,7 @@ describe("CustomToolEditorPage", () => {
 
   it("puts a taken identifier on the field and clears it when the identifier changes", async () => {
     const user = userEvent.setup();
-    vi.mocked(saveCustomTool).mockRejectedValueOnce(
-      new Response("The slug echo is already in use.", { status: 409 }),
-    );
+    vi.mocked(saveCustomTool).mockRejectedValueOnce(new Error("The slug echo is already in use."));
     renderEditor();
     await user.type(screen.getByLabelText("Name"), "Echo");
     await user.click(screen.getByRole("button", { name: "Create module" }));
@@ -297,7 +293,7 @@ describe("CustomToolEditorPage", () => {
   it("puts a taken identifier on the field when a rename collides", async () => {
     const user = userEvent.setup();
     vi.mocked(saveCustomTool).mockRejectedValueOnce(
-      new Response("The slug taken_name is already in use.", { status: 409 }),
+      new Error("The slug taken_name is already in use."),
     );
     renderEditor(detail());
     const slug = screen.getByLabelText("Identifier");
@@ -489,19 +485,14 @@ describe("CustomToolEditorPage", () => {
     },
   );
 
-  it("rechecks Verify ownership after asynchronous error decoding", async () => {
+  it("ignores a Verify failure that arrives after the source changed", async () => {
     const pending = deferred<never>();
-    const body = deferred<string>();
-    const response = new Response("", { status: 400 });
-    const text = vi.spyOn(response, "text").mockReturnValue(body.promise);
     vi.mocked(checkCustomTool).mockReturnValueOnce(pending.promise as never);
     renderEditor(detail());
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await waitFor(() => expect(checkCustomTool).toHaveBeenCalledOnce());
-    await act(async () => pending.reject(response));
-    await waitFor(() => expect(text).toHaveBeenCalled());
     fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Later B" } });
-    await act(async () => body.resolve("Old build problem"));
+    await act(async () => pending.reject(new Error("Old build problem")));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Verify" })).not.toHaveAttribute("aria-busy"),
     );

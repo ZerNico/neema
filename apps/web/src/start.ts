@@ -1,6 +1,7 @@
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { reportUnexpectedFailures } from "~/server/unexpected-failure.ts";
 import { oversizedBody } from "~/server/body-limit.ts";
+import { refusalsReject } from "~/refusals.ts";
 
 // Server functions are same-origin RPC: a request must say it came from this
 // origin (Sec-Fetch-Site, else Origin or Referer), and one saying nothing is
@@ -23,5 +24,5 @@ const bodyLimitMiddleware = createMiddleware().server(({ next, request, handlerT
 
 export const startInstance = createStart(() => ({
   requestMiddleware: [csrfMiddleware, bodyLimitMiddleware, cspNonceMiddleware],
-  functionMiddleware: [reportUnexpectedFailures],
+  functionMiddleware: [reportUnexpectedFailures, refusalsReject],
 }));

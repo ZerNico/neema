@@ -13,21 +13,6 @@ const validationMessages = (body: string): string | null => {
 };
 
 export const errorMessage = async (error: unknown): Promise<string> => {
-  if (error instanceof Response) {
-    const body = await error.text();
-    return validationMessages(body) ?? (body || `${error.status}`);
-  }
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return validationMessages(error.message) ?? error.message;
   return "Something went wrong.";
-};
-
-/**
- * A refused server function can arrive as the Response it threw rather than
- * as a rejection (see skill-import-page.tsx), so the value is not a result
- * until it is one.
- */
-export const settled = async <T>(call: Promise<T>): Promise<T> => {
-  const result = await call;
-  if (result instanceof Response) throw new Error(await errorMessage(result));
-  return result;
 };

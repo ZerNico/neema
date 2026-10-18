@@ -145,8 +145,8 @@ describe("GroupsPage", () => {
     );
   });
 
-  it("does not navigate when group creation returns no group", async () => {
-    createMock.mockResolvedValue(undefined as never);
+  it("does not navigate when group creation is refused", async () => {
+    createMock.mockRejectedValue(new Error("Something went wrong on our side."));
     renderPage([group("g1", "Existing", 0)]);
     fireEvent.click(await screen.findByRole("button", { name: "New group" }));
     const field = await screen.findByLabelText("Name");

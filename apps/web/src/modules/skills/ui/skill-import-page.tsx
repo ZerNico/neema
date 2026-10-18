@@ -52,15 +52,9 @@ const isSkillLink = (value: string) =>
 const message = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 
-/**
- * A refused server function can arrive as the Response it threw rather than as
- * a rejection, and navigating to whatever came back put `[object Response]` in
- * the URL. Nothing is trusted as an id until it is one.
- */
+/** Nothing is trusted as an id to navigate to until it is one. */
 const importedId = async (result: unknown): Promise<string> => {
   if (typeof result === "string" && result.length > 0) return result;
-  if (result instanceof Response)
-    throw new Error((await result.text().catch(() => "")) || "This import could not be completed.");
   throw new Error("The server did not return the imported skill.");
 };
 

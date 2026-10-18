@@ -178,7 +178,7 @@ describe("SkillImportPage", () => {
       },
     });
   });
-  it("does not navigate to a refusal that came back in place of an id", async () => {
+  it("does not navigate when the import is refused", async () => {
     reviewRemoteSkill.mockResolvedValue({
       token: "t1",
       repository: "owner/repo",
@@ -193,9 +193,8 @@ describe("SkillImportPage", () => {
         },
       },
     });
-    // A refused server function can resolve with the Response it threw.
-    importReviewedSkill.mockResolvedValue(
-      new Response("Import review expired. Review the package again.", { status: 409 }),
+    importReviewedSkill.mockRejectedValue(
+      new Error("Import review expired. Review the package again."),
     );
     renderPage({ source: "https://skills.sh/owner/repo/review" });
     fireEvent.click(await screen.findByRole("button", { name: "Import skill" }));

@@ -28,9 +28,8 @@ export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | nul
  * Whether a failed request means the session is gone, as opposed to the
  * network or the server being unwell.
  *
- * The Start client turns a non-OK server-function response into
- * `new Error(await response.text())`, so the status is lost and the body is
- * all that survives. `requireSession` therefore writes a fixed body and this
+ * A refused server function rejects with `new Error(await response.text())`
+ * (`refusals.ts`), so the status is lost and the body is all that survives. `requireSession` therefore writes a fixed body and this
  * matches on it: the two are one contract. Raw `Response` objects are
  * matched too for callers that fetch API routes directly.
  */

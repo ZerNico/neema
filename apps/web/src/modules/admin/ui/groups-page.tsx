@@ -375,9 +375,7 @@ function AddGroupDialog({
 
   const save = useMutation({
     mutationFn: async () => {
-      const group = await createGroup({ data: { name: name.trim() } });
-      if (!group?.id) throw new Error("Group creation did not return an ID");
-      return group;
+      return createGroup({ data: { name: name.trim() } });
     },
     onSuccess: async (group) => {
       await queryClient.invalidateQueries({ queryKey: ["admin"] });
