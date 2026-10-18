@@ -1,6 +1,7 @@
 import { isFormulaValue, makeFormula, type Cell, type CellValue } from "@office-kit/xlsx/cell";
 import { fromArrayBuffer, loadWorkbook } from "@office-kit/xlsx/io";
 import { getSheet } from "@office-kit/xlsx/workbook";
+import { unzipSync } from "fflate";
 import { getCell, type Worksheet } from "@office-kit/xlsx/worksheet";
 import { columnLetters } from "@chat/sheet/a1";
 import { recalculate } from "../calc.ts";
@@ -72,7 +73,7 @@ export const showOutcome = (outcome: Outcome) =>
 /** An Excel-saved parity workbook, with its dynamic formulas known. */
 export async function openParityWorkbook(bytes: Uint8Array) {
   const workbook = await loadWorkbook(fromArrayBuffer(bytes.slice().buffer));
-  readDynamicCells(workbook, bytes);
+  readDynamicCells(workbook, unzipSync(bytes));
   const dynamic = getSheet(workbook, "Dynamic")!;
   const probe = outcomeOf(getCell(getSheet(workbook, "Other")!, 1, 4)?.value);
   return {

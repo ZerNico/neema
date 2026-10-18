@@ -1,4 +1,5 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8 } from "fflate";
+import type { PackageParts } from "../../office/server/package.ts";
 import { isFormulaValue, type Cell } from "@office-kit/xlsx/cell";
 import { listChartsOnSheet } from "@office-kit/xlsx/drawing";
 import { getCellDisplayText } from "@office-kit/xlsx/styles";
@@ -98,8 +99,7 @@ const unescapeXml = (text: string) =>
  * name alone, and drops the text a name read from a cell keeps beside its
  * reference, which every reader but Excel shows.
  */
-export function finishSeriesNames(workbook: Workbook, bytes: Uint8Array): Uint8Array {
-  const files = unzipSync(bytes);
+export function finishSeriesNames(workbook: Workbook, files: PackageParts): boolean {
   let changed = false;
   for (const name of Object.keys(files)) {
     if (!/^xl\/charts\/chart\d+\.xml$/.test(name)) continue;
@@ -120,7 +120,7 @@ export function finishSeriesNames(workbook: Workbook, bytes: Uint8Array): Uint8A
     files[name] = strToU8(fixed);
     changed = true;
   }
-  return changed ? zipSync(files, { level: 6 }) : bytes;
+  return changed;
 }
 
 /**
@@ -128,12 +128,10 @@ export function finishSeriesNames(workbook: Workbook, bytes: Uint8Array): Uint8A
  * every legend name on save. They are read from the file's own chart parts,
  * matched to the loaded charts in drawing order and by series index.
  */
-export function restoreSeriesNames(workbook: Workbook, bytes: Uint8Array) {
-  let files: ReturnType<typeof unzipSync> | null = null;
+export function restoreSeriesNames(workbook: Workbook, files: PackageParts) {
   for (const sheet of iterWorksheets(workbook)) {
     const loaded = listChartsOnSheet(sheet);
     if (!loaded.length) continue;
-    files ??= unzipSync(bytes);
     const stored = chartAnchors(files, sheet.title);
     // Only a one-to-one match is trusted; anything else keeps the library's reading.
     if (stored.length !== loaded.length) continue;

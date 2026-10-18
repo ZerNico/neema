@@ -1,4 +1,5 @@
-import { strFromU8, unzipSync, type Unzipped } from "fflate";
+import { strFromU8 } from "fflate";
+import type { PackageParts } from "../../office/server/package.ts";
 import { getColumnDimension, getRowDimension, type Worksheet } from "@office-kit/xlsx/worksheet";
 import { SpreadsheetError } from "../errors.ts";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
@@ -42,7 +43,7 @@ const inside = (xml: string, name: string) =>
 const attribute = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
 
 /** A relationship part's targets by id, resolved against the part that owns it. */
-function relations(files: Unzipped, part: string) {
+function relations(files: PackageParts, part: string) {
   const slash = part.lastIndexOf("/");
   const directory = part.slice(0, slash);
   const xml = files[`${directory}/_rels/${part.slice(slash + 1)}.rels`];
@@ -116,7 +117,7 @@ function sizeOf(sheet: Worksheet, anchor: string) {
  * Every chart anchored on a sheet, in drawing order: its anchor element and,
  * for a classic chart, its part's bytes. Newer chart kinds (chartex) have none.
  */
-export function chartAnchors(files: Unzipped, title: string) {
+export function chartAnchors(files: PackageParts, title: string) {
   const part = sheetParts(files).get(title);
   if (!part) return [];
   const drawing = [...relations(files, part).values()].find((each) =>
@@ -138,8 +139,7 @@ export function chartAnchors(files: Unzipped, title: string) {
 }
 
 /** The charts of `sheet`, in drawing order, and how many more it holds than are drawn. */
-export function sheetCharts(bytes: Uint8Array, sheet: Worksheet) {
-  const files = unzipSync(bytes);
+export function sheetCharts(files: PackageParts, sheet: Worksheet) {
   const workbookRels = relations(files, "xl/workbook.xml");
   const themePart = [...workbookRels.values()].find((each) => each.type.endsWith("/theme"))?.target;
   // A workbook without a theme reads as Excel's default one.
@@ -169,9 +169,9 @@ export function sheetCharts(bytes: Uint8Array, sheet: Worksheet) {
 }
 
 /** One chart of a sheet for a preview, by its position among the drawn ones. */
-export function sheetChart(bytes: Uint8Array, sheet: Worksheet, index: number) {
+export function sheetChart(files: PackageParts, sheet: Worksheet, index: number) {
   return (
-    sheetCharts(bytes, sheet).charts[index] ??
+    sheetCharts(files, sheet).charts[index] ??
     (() => {
       throw new SpreadsheetError("not_found", `Chart ${index + 1} does not exist on this sheet.`);
     })()

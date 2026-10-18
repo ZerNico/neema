@@ -1,4 +1,5 @@
-import { strFromU8, strToU8, unzipSync, zipSync, type Unzipped } from "fflate";
+import { strFromU8, strToU8 } from "fflate";
+import type { PackageParts } from "../../office/server/package.ts";
 import { isFormulaValue, type Cell } from "@office-kit/xlsx/cell";
 import { iterWorksheets, type Workbook } from "@office-kit/xlsx/workbook";
 import { getCell, type Worksheet } from "@office-kit/xlsx/worksheet";
@@ -56,7 +57,7 @@ const unescapeXml = (text: string) =>
   });
 
 /** Worksheet part paths by sheet name, from the workbook part and its relationships. */
-export function sheetParts(files: Unzipped) {
+export function sheetParts(files: PackageParts) {
   const workbook = files["xl/workbook.xml"];
   const rels = files["xl/_rels/workbook.xml.rels"];
   const parts = new Map<string, string>();
@@ -80,8 +81,8 @@ export function sheetParts(files: Unzipped) {
   return parts;
 }
 
-/** Reads which array formulas of a just-opened file are dynamic. */
-export function readDynamicCells(workbook: Workbook, bytes: Uint8Array) {
+/** Reads which array formulas of a just-opened file are dynamic, from its parts. */
+export function readDynamicCells(workbook: Workbook, files: PackageParts) {
   const metadata = workbook.passthrough?.get(METADATA);
   if (!metadata) return;
   const text = strFromU8(metadata);
@@ -93,12 +94,6 @@ export function readDynamicCells(workbook: Workbook, bytes: Uint8Array) {
     if (type && types[Number(type) - 1] === "XLDAPR") dynamic.add(String(index + 1));
   });
   if (!dynamic.size) return;
-  const files = unzipSync(bytes, {
-    filter: (file) =>
-      file.name === "xl/workbook.xml" ||
-      file.name === "xl/_rels/workbook.xml.rels" ||
-      (file.name.startsWith("xl/worksheets/") && file.name.endsWith(".xml")),
-  });
   const parts = sheetParts(files);
   for (const sheet of iterWorksheets(workbook)) {
     const part = parts.get(sheet.title);
@@ -153,11 +148,10 @@ export function prepareDynamicArrays(workbook: Workbook) {
     ];
 }
 
-/** After saving: marks each dynamic formula's cell, pointing at the metadata part. */
-export function markDynamicArrays(workbook: Workbook, bytes: Uint8Array): Uint8Array {
+/** After saving: marks each dynamic formula's cell in the saved parts; true if any changed. */
+export function markDynamicArrays(workbook: Workbook, files: PackageParts): boolean {
   const marked = standing(workbook);
-  if (!marked.size) return bytes;
-  const files = unzipSync(bytes);
+  if (!marked.size) return false;
   const parts = sheetParts(files);
   for (const [sheet, addresses] of marked) {
     const part = parts.get(sheet.title);
@@ -172,5 +166,5 @@ export function markDynamicArrays(workbook: Workbook, bytes: Uint8Array): Uint8A
       }),
     );
   }
-  return zipSync(files, { level: 6 });
+  return true;
 }

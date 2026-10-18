@@ -14,6 +14,9 @@ export const unsafePartName = (name: string) =>
   [...name].some((character) => character.charCodeAt(0) < 32) ||
   name.split("/").some((segment) => segment === "." || segment === ".." || segment.length === 0);
 
+/** An Office package's parts by name, inflated once and read by every later pass. */
+export type PackageParts = Record<string, Uint8Array>;
+
 /**
  * Reads an Office package through the one bounded ZIP reader, so every format
  * gets the same checks: real inflated sizes, expansion ratio, checksums,

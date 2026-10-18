@@ -25,7 +25,7 @@ import { SPREADSHEET_LIMITS } from "../limits.ts";
 import type { PreviewCell, PreviewValue, SpreadsheetPreview } from "../preview.ts";
 import {
   calculateMissing,
-  openWorkbook,
+  openWorkbookParts,
   sheetOf,
   unshareFormulas,
   workbookBytes,
@@ -34,6 +34,7 @@ import { scalarOf } from "./calc.ts";
 import { sheetChart, sheetCharts } from "./chart-parts.ts";
 import { fileColors } from "./file-colors.ts";
 import { fileHighlightStyles, readConditional } from "./file-conditional.ts";
+import { unzipSync } from "fflate";
 import { readImage } from "./file-images.ts";
 import { toEngineFormula } from "./formulas.ts";
 
@@ -140,7 +141,7 @@ export async function previewSpreadsheet(
   bytes: Uint8Array,
   sheetName?: string,
 ): Promise<SpreadsheetPreview> {
-  const workbook = await openWorkbook(bytes);
+  const { workbook, parts } = await openWorkbookParts(bytes);
   unshareFormulas(workbook);
   // Results a file was saved without are calculated for showing; stored ones are kept.
   calculateMissing(workbook);
@@ -221,7 +222,7 @@ export async function previewSpreadsheet(
     if (dimension?.height !== undefined) heights.push([row, dimension.height]);
     if (dimension?.hidden) hiddenRows.push(row);
   }
-  const highlights = fileHighlightStyles(bytes);
+  const highlights = fileHighlightStyles(parts);
   const conditional = sheet.conditionalFormatting
     .flatMap((format) =>
       format.rules.flatMap((rule) => {
@@ -243,7 +244,7 @@ export async function previewSpreadsheet(
     .toSorted((a, b) => a.priority - b.priority)
     .slice(0, SPREADSHEET_LIMITS.previewRules)
     .map(({ ref, rule }) => ({ ref, rule }));
-  const drawn = sheetCharts(bytes, sheet);
+  const drawn = sheetCharts(parts, sheet);
   // Pictures in drawing order, until the preview's count or size is spent.
   const images: SpreadsheetPreview["images"][number][] = [];
   let imageChars = 0;
@@ -299,15 +300,15 @@ export async function previewChart(
   sheetName: string | undefined,
   index: number,
 ) {
-  const workbook = await openWorkbook(bytes);
+  const { workbook, parts } = await openWorkbookParts(bytes);
   const sheet = sheetName ? sheetOf(workbook, sheetName) : [...iterWorksheets(workbook)][0];
   if (!sheet) return fail("not_found", "The workbook has no sheets.");
-  const stored = sheetChart(bytes, sheet, index);
+  const stored = sheetChart(parts, sheet, index);
   // A data reference with no copy of its values, under any namespace prefix: nothing to draw from.
   const bare = /<([\w.-]+:)?(num|str)Ref>\s*<\1f>[^<]+<\/\1f>\s*<\/\1\2Ref>/.test(stored.chart);
   if (!bare) return stored;
   // Saved without the values it plots (by an older version of this app, or
   // another writer): drawn from the cells as they are, the file untouched.
   calculateMissing(workbook);
-  return sheetChart(await workbookBytes(workbook), sheet, index);
+  return sheetChart(unzipSync(await workbookBytes(workbook)), sheet, index);
 }

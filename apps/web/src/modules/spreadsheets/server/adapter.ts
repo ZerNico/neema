@@ -80,8 +80,8 @@ import { quoteSheet, renameSheetInFormula, shiftFormula, toFileFormula } from ".
 import { finishSeriesNames, refreshChartData, restoreSeriesNames } from "./chart-data.ts";
 import { chartReference, type FileChart } from "./file-charts.ts";
 import { OFFICE_THEME_XML } from "./office-theme.ts";
-import { strToU8 } from "fflate";
-import { readOfficePackage } from "../../office/server/package.ts";
+import { strToU8, unzipSync, zipSync } from "fflate";
+import { readOfficePackage, type PackageParts } from "../../office/server/package.ts";
 
 const fail = (code: string, message: string): never => {
   throw new SpreadsheetError(code, message);
@@ -95,15 +95,23 @@ const CELL_TEXT = 300;
 /**
  * Opens a workbook within the bounds, refusing what the app will not carry:
  * macros and embedded objects are active content, never run or passed on.
+ * The parts the size check inflates are kept for every later read of the
+ * file, so it is inflated once by the checks and once by the library.
  */
-export async function openWorkbook(bytes: Uint8Array): Promise<Workbook> {
+export async function openWorkbookParts(
+  bytes: Uint8Array,
+): Promise<{ workbook: Workbook; parts: PackageParts }> {
   if (bytes.length > SPREADSHEET_LIMITS.compressedBytes)
     fail(
       "limit",
       `A workbook can be at most ${SPREADSHEET_LIMITS.compressedBytes / 1024 / 1024} MiB.`,
     );
   // The shared package checks first; the library then parses what passed them.
+  const parts: PackageParts = {};
   readOfficePackage(bytes, {
+    accept: (name, data) => {
+      parts[name] = data;
+    },
     limits: {
       archiveBytes: SPREADSHEET_LIMITS.compressedBytes,
       entries: SPREADSHEET_LIMITS.parts,
@@ -136,13 +144,13 @@ export async function openWorkbook(bytes: Uint8Array): Promise<Workbook> {
       );
     throw error;
   }
-  restoreSeriesNames(workbook, bytes);
+  restoreSeriesNames(workbook, parts);
   if (workbook.vbaProject)
     fail(
       "unsupported_content",
       "Macro-enabled workbooks aren't supported; save it as .xlsx without macros.",
     );
-  readDynamicCells(workbook, bytes);
+  readDynamicCells(workbook, parts);
   const worksheets = [...iterWorksheets(workbook)];
   if (worksheets.length > SPREADSHEET_LIMITS.sheets)
     fail("limit", `A workbook can have at most ${SPREADSHEET_LIMITS.sheets} sheets.`);
@@ -152,8 +160,10 @@ export async function openWorkbook(bytes: Uint8Array): Promise<Workbook> {
         "unsupported_content",
         `Sheet "${worksheet.title}" contains embedded objects or form controls, which aren't supported.`,
       );
-  return workbook;
+  return { workbook, parts };
 }
+
+export const openWorkbook = async (bytes: Uint8Array) => (await openWorkbookParts(bytes)).workbook;
 
 /** Error codes a cell can store as plain text; Excel keeps newer ones (#SPILL!, #CALC!) as rich values. */
 const STORABLE_ERRORS = new Set([
@@ -209,7 +219,12 @@ export async function workbookBytes(workbook: Workbook) {
     );
   prepareDynamicArrays(workbook);
   refreshChartData(workbook);
-  return finishSeriesNames(workbook, markDynamicArrays(workbook, await workbookToBytes(workbook)));
+  const bytes = await workbookToBytes(workbook);
+  // Both fix-ups rewrite saved parts, so the file is unzipped and zipped once for them.
+  const files = unzipSync(bytes);
+  const marked = markDynamicArrays(workbook, files);
+  const named = finishSeriesNames(workbook, files);
+  return marked || named ? zipSync(files, { level: 6 }) : bytes;
 }
 
 const save = async (workbook: Workbook) => {

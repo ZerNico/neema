@@ -1,4 +1,5 @@
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8 } from "fflate";
+import type { PackageParts } from "../../office/server/package.ts";
 import type { ConditionalRule, ConditionalStyle, Threshold } from "@chat/sheet/conditional";
 import type { ConditionalFormattingRule } from "@office-kit/xlsx/worksheet";
 
@@ -30,10 +31,8 @@ const rgb = (part: string, tag: string) =>
   new RegExp(`<${tag}\\b[^>]*\\brgb="([0-9A-Fa-f]{8})"`).exec(part)?.[1];
 
 /** The workbook's differential formats, read from its stylesheet as highlight styles. */
-export function fileHighlightStyles(bytes: Uint8Array): ConditionalStyle[] {
-  const xml = unzipSync(bytes, { filter: (file) => file.name === "xl/styles.xml" })[
-    "xl/styles.xml"
-  ];
+export function fileHighlightStyles(files: PackageParts): ConditionalStyle[] {
+  const xml = files["xl/styles.xml"];
   if (!xml) return [];
   const dxfs = /<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/.exec(strFromU8(xml))?.[1] ?? "";
   return [...dxfs.matchAll(/<dxf>([\s\S]*?)<\/dxf>/g)].map(([, body = ""]) => {
