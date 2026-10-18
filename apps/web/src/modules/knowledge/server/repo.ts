@@ -2207,9 +2207,7 @@ export class KnowledgeRepo extends Context.Service<
                     knowledgeSources,
                     eq(knowledgeSources.collectionId, knowledgeCollections.id),
                   )
-                  .where(
-                    and(eq(knowledgeSources.id, sourceId), eq(knowledgeCollections.userId, userId)),
-                  )
+                  .where(and(eq(knowledgeSources.id, sourceId), ownedCollectionOf(userId)))
                   .for("update", { of: knowledgeCollections });
                 if (!collection) return false;
                 const [source] = yield* tx

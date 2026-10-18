@@ -24,6 +24,7 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { SharingService } from "~/modules/sharing/server/service.ts";
 import type { SharedResource } from "~/modules/sharing/schema.ts";
+import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
@@ -412,6 +413,35 @@ describe("knowledge access", () => {
       Effect.flatMap(SharingService, (service) => service.detail(member, resource)),
     );
     expect(forAdmin.eligibleGroups.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("removes a mirrored source only while its owner may still change the collection", async () => {
+    const owner = await createUser();
+    const collectionId = await run(
+      Effect.flatMap(KnowledgeRepo, (repo) =>
+        repo.createCollection(owner, { name: "Mirrored", description: "" }),
+      ),
+    );
+    const integrationId = uuidv7();
+    const sourceId = uuidv7();
+    await exec(
+      `insert into integration_configs (id, kind, name) values ('${integrationId}', 'outline', 'Wiki')`,
+    );
+    await exec(
+      `insert into knowledge_sources (id, collection_id, integration_id, root) values ('${sourceId}', '${collectionId}', '${integrationId}', '{}')`,
+    );
+    const remove = () =>
+      run(Effect.flatMap(KnowledgeRepo, (repo) => repo.removeSource(owner, sourceId)));
+    const group = await run(GroupRepo.use((repo) => repo.createGroup(`Readers-${uuidv7()}`)));
+    await run(
+      GroupRepo.use((repo) =>
+        repo.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, knowledgeCreate: false }),
+      ),
+    );
+    await run(GroupRepo.use((repo) => repo.addMember(group.id, owner)));
+    expect(await remove()).toBe(false);
+    await run(GroupRepo.use((repo) => repo.removeMember(group.id, owner)));
+    expect(await remove()).toBe(true);
   });
 
   it("resolves a manifest only from collections the caller may use", async () => {
