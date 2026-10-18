@@ -90,5 +90,17 @@ export function memoryStore(
     const box = read(row, column)?.area;
     return box ? boxRef(box) : null;
   };
-  return { store, at, set, area };
+  /** The values a formula filled, row by row; a single result is a one-cell grid. */
+  const spilled = (address: string): Scalar[][] => {
+    const { row, column } = parseCell(address)!;
+    const box = read(row, column)?.area ?? { top: row, left: column, bottom: row, right: column };
+    const rows: Scalar[][] = [];
+    for (let r = box.top; r <= box.bottom; r++) {
+      const line: Scalar[] = [];
+      for (let c = box.left; c <= box.right; c++) line.push(read(r, c)?.value ?? null);
+      rows.push(line);
+    }
+    return rows;
+  };
+  return { store, at, set, area, spilled };
 }
