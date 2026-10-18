@@ -31,8 +31,8 @@ export const attachmentBlobs = pgTable(
     size: integer().notNull(),
     // First writer's validated type. Resource rows keep their own classification.
     mediaType: text("media_type").notNull(),
-    // Lazy cache of a PDF's text as a chat prompt inlines it, so a long
-    // conversation does not re-read the same document on every generation.
+    // Lazy cache of a PDF's or an Office file's text as a chat prompt inlines
+    // it, so a long conversation does not re-read the same file on every generation.
     // `parsedWith` records what produced it; changing the limits does not invalidate it.
     parsedText: text("parsed_text"),
     parsedWith: text("parsed_with"),

@@ -225,6 +225,13 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     return parsed.success.text;
   });
 
+  const fileTextCache = (row: AttachmentWithBlob) => ({
+    parsedText: row.parsedText,
+    parsedWith: row.parsedWith,
+    save: (text: string, parsedWith: string) =>
+      deps.attachments.cacheParsedText({ blobId: row.blobId, text, parsedWith }),
+  });
+
   const userMessage = Effect.fn("chat.historyUserMessage")(function* (message: HistoryMessage) {
     const attached = byMessage.get(message.id);
     if (!attached || attached.length === 0) return withWorkspaceFiles(message);
@@ -242,6 +249,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
             row,
             () => loadBytes(row),
             (text) => fitFileText(text, inlineLimit, row),
+            fileTextCache(row),
           ),
         });
         continue;
@@ -313,6 +321,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
                     row,
                     () => loadBytes(row),
                     (text) => fitFileText(text, inlineLimit, row),
+                    fileTextCache(row),
                   ),
             };
             return part;

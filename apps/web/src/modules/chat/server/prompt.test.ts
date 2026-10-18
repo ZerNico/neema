@@ -309,6 +309,56 @@ describe("buildHistoryMessages with attachments", () => {
     expect(get.mock.calls).toEqual([["blobs/doc"]]);
   });
 
+  it("reads a Word file's text once and answers later turns from the cache", async () => {
+    const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const brief = zipSync({
+      "[Content_Types].xml": strToU8("<Types/>"),
+      "word/document.xml": strToU8("<w:p><w:r><w:t>Launch in May</w:t></w:r></w:p>"),
+    });
+    const first = harness({
+      rows: [row({ messageId: "m1", mediaType: docx, fileName: "brief.docx", blobId: "b" })],
+    });
+    const get = vi.fn(() => Effect.succeed(brief));
+    await build({ ...first.deps, store: { get } }, [user("m1", "thoughts?")]);
+    const saved = first.cacheParsedText.mock.calls[0]?.[0] as
+      | { blobId: string; text: string; parsedWith: string }
+      | undefined;
+    expect(saved).toMatchObject({ blobId: "b", text: "Launch in May" });
+
+    const later = harness({
+      rows: [
+        row({
+          messageId: "m1",
+          mediaType: docx,
+          fileName: "brief.docx",
+          blobId: "b",
+          parsedText: saved!.text,
+          parsedWith: saved!.parsedWith,
+        }),
+      ],
+    });
+    const [message] = await build(later.deps, [user("m1", "thoughts?")]);
+    expect(JSON.stringify(message)).toContain("Launch in May");
+    expect(later.get).not.toHaveBeenCalled();
+    expect(later.cacheParsedText).not.toHaveBeenCalled();
+  });
+
+  it("reads a blob again under a name another reader handles", async () => {
+    const { deps, get } = harness({
+      rows: [
+        row({
+          messageId: "m1",
+          mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          fileName: "deck.pptx",
+          parsedText: "Text a Word reader produced",
+          parsedWith: "file-text-1:docx",
+        }),
+      ],
+    });
+    await build(deps, [user("m1", "thoughts?")]);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
   it("omits the trailing text part for an attachment-only turn", async () => {
     const { deps } = harness({
       rows: [row({ messageId: "m1", mediaType: "image/png", fileName: "a.png" })],

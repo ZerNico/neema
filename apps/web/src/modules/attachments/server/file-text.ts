@@ -152,20 +152,46 @@ export function fileText(fileName: string, bytes: Uint8Array, maxChars = FILE_TE
   return text === null ? null : text.slice(0, maxChars);
 }
 
+/** Bump when a reader changes what it returns, so cached text is read again. */
+const FILE_TEXT_REVISION = "file-text-1";
+/**
+ * Names the reader a blob's cached text came from. The reader follows the
+ * file's extension and one blob can be attached under several names, so the
+ * extension is part of it.
+ */
+const fileTextFingerprint = (fileName: string, readable: boolean) =>
+  `${FILE_TEXT_REVISION}:${fileExtension(fileName)}${readable ? "" : ":unreadable"}`;
+
+/** A blob's stored text, and how to store it once read. */
+export interface FileTextCache<R> {
+  readonly parsedText: string | null;
+  readonly parsedWith: string | null;
+  readonly save: (text: string, parsedWith: string) => Effect.Effect<void, never, R>;
+}
+
 /**
  * An opaque file in a prompt: its text when there is a reader for it, and
  * otherwise a line naming it, so the model knows it is there and says what it
- * cannot do instead of guessing. Bytes are only loaded when they can be read.
+ * cannot do instead of guessing. Bytes are only loaded when they can be read,
+ * and with a cache only the first time: unzipping on every turn stalls the server.
  */
-export const opaqueFileText = <E, R>(
+export const opaqueFileText = <E, R, C = never>(
   file: { id?: string; fileName: string; size: number },
   bytes: () => Effect.Effect<Uint8Array, E, R>,
   /** Shortens long text for the prompt; the whole file stays readable by tool. */
   fit: (text: string) => string = (text) => text,
+  cache?: FileTextCache<C>,
 ) =>
   Effect.gen(function* () {
     if (!hasFileText(file.fileName)) return describeFile(file);
-    const text = fileText(file.fileName, yield* bytes());
+    let text: string | null;
+    if (cache?.parsedWith === fileTextFingerprint(file.fileName, true))
+      text = cache.parsedText ?? "";
+    else if (cache?.parsedWith === fileTextFingerprint(file.fileName, false)) text = null;
+    else {
+      text = fileText(file.fileName, yield* bytes());
+      if (cache) yield* cache.save(text ?? "", fileTextFingerprint(file.fileName, text !== null));
+    }
     return text === null
       ? describeFile(file)
       : buildTextFence({
