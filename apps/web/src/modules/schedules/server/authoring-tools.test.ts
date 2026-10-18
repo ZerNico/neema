@@ -85,6 +85,20 @@ async function setup() {
   return { update, patch };
 }
 
+describe("schedule draft id aliases", () => {
+  it.each(["draft_id", "draft", "id"])("reads a top-level %s as the draftId", async (key) => {
+    const { update, patch } = await setup();
+    await Effect.runPromise(
+      update({ [key]: "draft-one", expectedRevision: 1, changes: { name: "Renamed" } }),
+    );
+    expect(patch).toHaveBeenCalledExactlyOnceWith(
+      "user-one",
+      { draftId: "draft-one", expectedRevision: 1, changes: { name: "Renamed" } },
+      writeGuard,
+    );
+  });
+});
+
 describe("schedule draft authority", () => {
   it("refuses integration grants from the model and leaves the draft alone", async () => {
     const { update, patch } = await setup();

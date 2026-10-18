@@ -32,10 +32,12 @@ const OptionKind = Schema.Literals(["agents", "models", "skills", "collections"]
 // Names a model reaches for when it has read the field list once and then
 // paraphrases it. The advertised schema is the source of truth; these only
 // spare a correction round trip for the common near misses.
-const DRAFT_FIELD_ALIASES: Record<string, string> = {
+const DRAFT_ID_ALIASES: Record<string, string> = {
   draft: "draftId",
   draft_id: "draftId",
   id: "draftId",
+};
+const DRAFT_FIELD_ALIASES: Record<string, string> = {
   conversationStarters: "starters",
   conversation_starters: "starters",
   starterPrompts: "starters",
@@ -117,7 +119,7 @@ const lenient = (raw: unknown, changes = false): unknown => {
   const input = raw as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(input)) {
-    const key = changes ? (DRAFT_FIELD_ALIASES[rawKey] ?? rawKey) : rawKey;
+    const key = (changes ? DRAFT_FIELD_ALIASES : DRAFT_ID_ALIASES)[rawKey] ?? rawKey;
     if (value === null || value === undefined) {
       if (key === "modelId" || key === "imageModelId") out[key] = null;
       continue;
