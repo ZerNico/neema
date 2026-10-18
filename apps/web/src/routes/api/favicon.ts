@@ -10,8 +10,9 @@ const UPSTREAM = (domain: string) =>
 
 // Registrable hostnames only. This is an outbound fetch keyed by a
 // client-supplied string, so the accepted shape is deliberately narrow.
+// A label is at most 63 characters.
 const HOSTNAME =
-  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$/i;
+  /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
 const FETCH_TIMEOUT_MS = 5_000;
 

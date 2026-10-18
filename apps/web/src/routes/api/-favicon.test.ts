@@ -35,6 +35,10 @@ afterEach(() => {
 });
 
 describe("favicon proxy", () => {
+  it("takes a label of the longest a hostname allows", async () => {
+    expect((await get(`${"a".repeat(63)}.example`)).status).toBe(200);
+  });
+
   it("asks the one upstream for a hostname and keeps the icon in the browser only", async () => {
     const response = await get("Example.COM");
     expect(mocks.fetch).toHaveBeenCalledWith(
@@ -52,6 +56,7 @@ describe("favicon proxy", () => {
     "example.com:8080",
     "user@example.com",
     "-bad.example",
+    `${"a".repeat(64)}.example`,
     "",
   ])("refuses %j before any fetch", async (domain) => {
     expect((await get(domain)).status).toBe(400);
