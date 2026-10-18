@@ -85,11 +85,11 @@ it("admits attachment associations before candidate writes and repeats the guard
     bytes: new TextEncoder().encode("report"),
     association,
   };
-  await expect(run(writer.upload(input))).rejects.toThrow();
+  await expect(run(writer.upload(input))).rejects.toThrow("All fibers interrupted without error");
   expect(stored.size).toBe(0);
   expect(await db((d) => d.select().from(blobCleanupIntents))).toEqual([]);
   admitted = true;
-  await expect(run(writer.upload(input))).rejects.toThrow();
+  await expect(run(writer.upload(input))).rejects.toThrow("All fibers interrupted without error");
   expect(stored.size).toBe(1);
   expect(
     await db((d) => d.select().from(attachments).where(eq(attachments.userId, userId))),

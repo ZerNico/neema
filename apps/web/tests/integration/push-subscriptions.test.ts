@@ -79,8 +79,15 @@ const owners = () =>
   );
 
 it("refuses endpoints the server must not post to, and malformed keys", async () => {
-  for (const bad of ["http://8.8.8.8/push", "https://127.0.0.1/push", "https://localhost/push"])
-    await expect(push((p) => p.subscribe(a, { endpoint: bad, ...keys }))).rejects.toThrow();
+  for (const [bad, reason] of [
+    ["http://8.8.8.8/push", "push addresses must use https"],
+    ["https://127.0.0.1/push", "this push address is not allowed"],
+    ["https://localhost/push", "this push address is not allowed"],
+  ] as const)
+    await expect(push((p) => p.subscribe(a, { endpoint: bad, ...keys }))).rejects.toMatchObject({
+      _tag: "PushRejected",
+      reason,
+    });
   await expect(
     push((p) => p.subscribe(a, { endpoint, p256dh: keys.auth, auth: keys.auth })),
   ).rejects.toMatchObject({ _tag: "PushRejected", reason: "the subscription keys are malformed" });
