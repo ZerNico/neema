@@ -5,7 +5,7 @@ import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import {
   OpenScheduleDraftInput,
-  ScheduleDraftPatch,
+  ScheduleModelPatch,
   ScheduleDraftSettings,
   type ScheduleDraft,
 } from "../draft-schema.ts";
@@ -76,12 +76,12 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
 };
 const OpenParams = Schema.Struct({
   scheduleId: OpenScheduleDraftInput.fields.scheduleId,
-  changes: OpenScheduleDraftInput.fields.changes,
+  changes: Schema.optionalKey(ScheduleModelPatch),
 });
 const UpdateParams = Schema.Struct({
   draftId: Schema.optionalKey(DraftId),
   expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-  changes: ScheduleDraftPatch,
+  changes: ScheduleModelPatch,
 });
 const ReadParams = Schema.Struct({ draftId: Schema.optionalKey(DraftId) });
 const Result = Schema.Struct({
@@ -152,7 +152,7 @@ const draftTool = Tool.make("draft_schedule", {
     "Start one editable draft for a recurring or one-time scheduled task, reminder, or automation, and show its widget in this chat. Omit scheduleId for a new schedule, or pass an owned schedule's ID to edit that schedule. Optional changes populate the draft as it is created. Call this once per schedule you are preparing, then use the returned draftId with update_schedule_draft; calling it again for the same schedule, or while an empty unedited draft exists, returns that draft instead of making another. Never creates or starts a live schedule.",
   parameters: Schema.Struct({
     scheduleId: Schema.optionalKey(transport(OpenParams.fields.scheduleId)),
-    changes: Schema.optionalKey(transport(ScheduleDraftPatch)),
+    changes: Schema.optionalKey(transport(ScheduleModelPatch)),
   }),
   success: Result,
 });
@@ -168,7 +168,7 @@ const updateTool = Tool.make("update_schedule_draft", {
   parameters: Schema.Struct({
     draftId: Schema.optionalKey(transport(DraftId)),
     expectedRevision: Schema.optionalKey(transport(UpdateParams.fields.expectedRevision)),
-    changes: Schema.optionalKey(transport(ScheduleDraftPatch)),
+    changes: Schema.optionalKey(transport(ScheduleModelPatch)),
   }),
   success: Result,
 });

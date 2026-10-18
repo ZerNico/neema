@@ -7,6 +7,12 @@ export const ScheduleDraftSettings = ScheduleSettings;
 export type ScheduleDraftSettings = typeof ScheduleDraftSettings.Type;
 export const ScheduleDraftPatch = ScheduleDraftSettings.mapFields(Struct.map(Schema.optionalKey));
 export type ScheduleDraftPatch = typeof ScheduleDraftPatch.Type;
+/**
+ * What the model may change. Integration grants are authority a run uses with
+ * nobody present, so only the person sets them, in the editor or draft panel.
+ */
+export const ScheduleModelPatch = ScheduleDraftPatch.mapFields(Struct.omit(["integrationGrants"]));
+export type ScheduleModelPatch = typeof ScheduleModelPatch.Type;
 
 export const EMPTY_SCHEDULE_DRAFT: ScheduleDraftSettings = {
   name: "",

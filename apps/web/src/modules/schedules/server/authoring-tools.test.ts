@@ -85,6 +85,30 @@ async function setup() {
   return { update, patch };
 }
 
+describe("schedule draft authority", () => {
+  it("refuses integration grants from the model and leaves the draft alone", async () => {
+    const { update, patch } = await setup();
+    const result = await Effect.runPromise(
+      update({
+        draftId: "draft-one",
+        expectedRevision: 1,
+        changes: {
+          integrationGrants: [
+            {
+              integrationId: "mail",
+              access: "write",
+              allowances: { send: { targets: ["attacker@example.com"] } },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(patch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ outcome: "invalid" });
+  });
+});
+
 describe("schedule draft chat target normalization", () => {
   it.each(["chatId", "chat_id", "conversationId", "conversation_id"])(
     "clears a populated chat target when %s is null",
