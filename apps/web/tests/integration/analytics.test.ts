@@ -1,58 +1,25 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Client } from "pg";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, ManagedRuntime, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { models, usageEvents, userApprovals } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
-import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
-import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import {
-  FakeBlobStore,
-  FakeDocumentParser,
-  FakeWebSearch,
-  FakeUrlReader,
-  FakeCustomToolRuntime,
-  NoIntegrations,
-} from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { purgeConversation } from "./purge.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { engineLayer } from "./engine-harness.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-
-// Knowledge-backed generations are exercised in knowledge.test.ts; here no
-// message carries a manifest, so the session is never opened.
-const FakeKnowledge = Layer.mergeAll(
-  Layer.succeed(KnowledgeSearch, {
-    search: () => Effect.die("knowledge search is not part of this suite"),
-    session: () => Effect.die("knowledge session is not part of this suite"),
-  } as never),
-  Layer.succeed(KnowledgeService, {} as never),
-);
 
 let database: TestDatabase;
 type Services =
@@ -94,13 +61,7 @@ const makeUsage = (input: {
   },
 });
 
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   generateText: () =>
     Effect.succeed({
       text: "A generated title",
@@ -126,54 +87,13 @@ const FakeGateway = Layer.succeed(AiGateway, {
         }),
       );
     }),
-});
+} satisfies Partial<AiGateway["Service"]>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
 
-  const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 5 });
-  const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, FakeBlobStore).pipe(
-    Layer.provideMerge(PgLive),
-  );
-  const ReposLayer = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    IntegrationRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    KnowledgeRepo.layer,
-    ProviderRepo.layer,
-    ScheduleRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer, FeaturePolicy.layer)),
-    Layer.provideMerge(InfraLayer),
-  );
-  const EngineLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        FakeKnowledge,
-        FakeWebSearch,
-        FakeUrlReader,
-        FakeBlobStore,
-        FakeDocumentParser,
-        FakeCustomToolRuntime,
-        NoIntegrations,
-        FakeMemoryService,
-        ExternalCompletion.layer,
-        SyncBus.layer,
-        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-          Layer.provideMerge(SyncBus.layer),
-        ),
-      ).pipe(Layer.provideMerge(ReposLayer)),
-    ),
-  );
-  runtime = ManagedRuntime.make(
-    ChatService.layer.pipe(
-      Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineLayer))),
-    ),
-  );
+  runtime = ManagedRuntime.make(engineLayer(url, { gateway }));
 
   providerId = uuidv7();
   await runtime.runPromise(
