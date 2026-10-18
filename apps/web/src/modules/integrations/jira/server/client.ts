@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { restCall } from "../../server/rest-call.ts";
 import { Effect } from "effect";
 import { IntegrationAuthFailed, IntegrationRequestFailed } from "../../errors.ts";
@@ -61,11 +62,15 @@ export const issueUrl = (config: Readonly<Record<string, string>>, key: string) 
   `${siteOf(config)}/browse/${encodeURIComponent(key)}`;
 
 /**
- * A site's cloud id never changes, and OAuth calls need it in the path. Kept
- * per site for the process; the first lookup also proves the sign-in covers
- * that site rather than another the person can reach.
+ * A site's cloud id never changes, and OAuth calls need it in the path. The
+ * lookup also proves this sign-in covers that site rather than another the
+ * person can reach, so it is kept per site and token, never per site alone:
+ * one person's proof says nothing of another's grant.
  */
 const cloudIds = new Map<string, string>();
+const CLOUD_IDS_KEPT = 500;
+const cloudIdKey = (site: string, accessToken: string) =>
+  `${site}\n${createHash("sha256").update(accessToken).digest("hex")}`;
 
 const fetchJson = (url: string, init: RequestInit) =>
   Effect.tryPromise({
@@ -81,7 +86,8 @@ const fetchJson = (url: string, init: RequestInit) =>
 
 const cloudIdFor = (site: string, credential: Extract<Credential, { kind: "oauth" }>) =>
   Effect.gen(function* () {
-    const cached = cloudIds.get(site);
+    const key = cloudIdKey(site, credential.accessToken);
+    const cached = cloudIds.get(key);
     if (cached) return cached;
     const response = yield* fetchJson(`${GATEWAY}/oauth/token/accessible-resources`, {
       headers: { accept: "application/json", authorization: `Bearer ${credential.accessToken}` },
@@ -107,7 +113,9 @@ const cloudIdFor = (site: string, credential: Extract<Credential, { kind: "oauth
         status: 403,
         message: `This Atlassian account has not granted access to ${site}. Reconnect and choose that site.`,
       });
-    cloudIds.set(site, match.id);
+    // Tokens rotate, so old keys are only ever dropped, never read again.
+    if (cloudIds.size >= CLOUD_IDS_KEPT) cloudIds.clear();
+    cloudIds.set(key, match.id);
     return match.id;
   });
 

@@ -53,7 +53,10 @@ const jira = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.toString() === "https://api.atlassian.com/oauth/token/accessible-resources")
     return json(200, [
       { id: "cloud-other", url: "https://other.atlassian.net" },
-      { id: "cloud-1", url: SITE },
+      // A second person whose grant left this site out.
+      ...(headers.get("authorization") === "Bearer elsewhere"
+        ? []
+        : [{ id: "cloud-1", url: SITE }]),
     ]);
   const path = url.pathname.replace(/^.*\/rest\/api\/3/, "");
   if (throttleOnce) {
@@ -211,6 +214,14 @@ describe("jira adapter", () => {
     // The cloud id is the configured site's, not the first one the account can reach.
     expect(requests.map((request) => request.url)).toContain(`${GATEWAY}/myself`);
     expect(requests.every((request) => request.authorization === "Bearer a1")).toBe(true);
+  });
+
+  it("checks each sign-in covers the site, not only the first one seen", async () => {
+    await run(jiraAdapter.verify(sessionWith({ kind: "oauth", accessToken: "a1" })));
+    const refused = await run(
+      Effect.flip(jiraAdapter.verify(sessionWith({ kind: "oauth", accessToken: "elsewhere" }))),
+    );
+    expect(refused).toMatchObject({ message: expect.stringContaining("has not granted access") });
   });
 
   it("searches by words as quoted JQL and cites what it found", async () => {
