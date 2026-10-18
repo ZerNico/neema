@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { Effect, Schema } from "effect";
+import { Duration, Effect, Schema } from "effect";
 import { AUTH_SETTINGS_ID, session, user, userApprovals } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -106,4 +106,26 @@ export const originatingSessionEligible = Effect.fn("auth.originatingSessionElig
     )
     .pipe(Effect.orDie);
   return Boolean(found);
+});
+
+const SESSION_RECHECK = Duration.seconds(30);
+
+/**
+ * Completes once a long-lived feed's session, or its account, no longer holds.
+ * A feed checks at connect only; sign-out, revocation and bans end it here.
+ */
+export const sessionEnded = Effect.fn("auth.sessionEnded")(function* (
+  sessionId: string,
+  userId: string,
+) {
+  const db = yield* Db;
+  return Effect.gen(function* () {
+    while (true) {
+      yield* Effect.sleep(SESSION_RECHECK);
+      const holds = yield* db
+        .transaction((tx) => originatingSessionEligible(tx, sessionId, userId))
+        .pipe(Effect.orDie);
+      if (!holds) return;
+    }
+  });
 });

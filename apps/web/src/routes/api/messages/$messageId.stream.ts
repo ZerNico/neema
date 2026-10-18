@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
+import { sessionEnded } from "~/modules/auth/server/account-eligibility.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
@@ -30,11 +31,10 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
             // Ownership check: the conversation must belong to the caller.
             yield* repo.getConversation(session.user.id, message.conversationId);
 
-            return engine.subscribe(
-              params.messageId,
-              afterSeq,
-              url.searchParams.get("runId") ?? undefined,
-            );
+            const ended = yield* sessionEnded(session.session.id, session.user.id);
+            return engine
+              .subscribe(params.messageId, afterSeq, url.searchParams.get("runId") ?? undefined)
+              .pipe(Stream.interruptWhen(ended));
           }).pipe(Effect.catchTag("ConversationNotFound", () => Effect.succeed(null))),
         );
 

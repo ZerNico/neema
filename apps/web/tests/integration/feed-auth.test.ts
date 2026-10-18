@@ -16,6 +16,7 @@ import {
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
+import { sessionEnded } from "~/modules/auth/server/account-eligibility.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
@@ -262,5 +263,27 @@ describe("document feed authorization", () => {
         expect(frames.map((frame) => frame.type)).toEqual(["gone"]);
       }),
     );
+  });
+});
+
+describe("live feed session bound", () => {
+  it("ends a sync or message feed once its session is gone, and not before", async () => {
+    const f = await fixture();
+    // The fixture also opens a document feed; settle it so disposal cannot reject it later.
+    await f.subscribe;
+    const outcome = await run(
+      Effect.gen(function* () {
+        const ended = yield* sessionEnded(f.reader, f.reader);
+        const watch = yield* Effect.forkChild(ended);
+        yield* TestClock.adjust("30 seconds");
+        const whileValid = watch.pollUnsafe();
+        const db = yield* Db;
+        yield* db.delete(session).where(eq(session.id, f.reader));
+        yield* TestClock.adjust("30 seconds");
+        yield* Fiber.join(watch);
+        return whileValid;
+      }),
+    );
+    expect(outcome).toBeUndefined();
   });
 });

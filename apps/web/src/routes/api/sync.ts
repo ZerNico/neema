@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
+import { sessionEnded } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { sseFrame, sseResponse } from "~/modules/sync/server/sse.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -16,7 +17,11 @@ export const Route = createFileRoute("/api/sync")({
         const session = await approvedSession(request);
         if (!session) return unauthorized();
         const stream = await runtime.runPromise(
-          Effect.map(SyncBus, (bus) => bus.subscribe(session.user.id)),
+          Effect.gen(function* () {
+            const bus = yield* SyncBus;
+            const ended = yield* sessionEnded(session.session.id, session.user.id);
+            return bus.subscribe(session.user.id).pipe(Stream.interruptWhen(ended));
+          }),
         );
 
         return sseResponse(stream, (event) => sseFrame("sync", event));
