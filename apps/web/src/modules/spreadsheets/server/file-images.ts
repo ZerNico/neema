@@ -1,11 +1,10 @@
 import type { DrawingItem } from "@office-kit/xlsx/drawing";
 import type { Worksheet } from "@office-kit/xlsx/worksheet";
+import { acceptableImageSize, imageHeader } from "../../attachments/image-header.ts";
 import { SPREADSHEET_LIMITS } from "../limits.ts";
 import type { SpreadsheetPreview } from "../preview.ts";
 import { anchorSize, EMU_PER_PIXEL } from "./file-anchors.ts";
 
-/** Picture formats a browser draws; others are left out of a preview. */
-const KINDS = new Set(["png", "jpeg", "gif", "webp"]);
 /** How far into its cell a picture's corner may sit, and how large it may draw, in pixels. */
 const OFFSET = 2_000;
 const SIZE = { min: 16, max: 2_000 };
@@ -25,9 +24,14 @@ export function readImage(
   if (item.content.kind !== "picture") return null;
   const picture = item.content.picture;
   const image = picture.image;
-  if (!image || !KINDS.has(image.format) || item.anchor.kind === "absolute") return null;
-  const src = `data:image/${image.format};base64,${Buffer.from(image.bytes).toString("base64")}`;
-  if (src.length > SPREADSHEET_LIMITS.previewImageChars) return null;
+  if (!image || item.anchor.kind === "absolute") return null;
+  // A kind a browser draws, as its bytes say, within a pixel bound and sized before encoding.
+  const header = imageHeader(image.bytes);
+  if (!acceptableImageSize(header)) return null;
+  const prefix = `data:${header.mediaType};base64,`;
+  if (prefix.length + Math.ceil(image.bytes.length / 3) * 4 > SPREADSHEET_LIMITS.previewImageChars)
+    return null;
+  const src = prefix + Buffer.from(image.bytes).toString("base64");
   const { anchor } = item;
   const [width, height] = anchorSize(sheet, anchor);
   return {

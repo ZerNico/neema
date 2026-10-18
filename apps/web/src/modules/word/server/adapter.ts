@@ -59,6 +59,7 @@ import {
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { readOfficePackage } from "../../office/server/package.ts";
 import { WordError } from "../errors.ts";
+import { acceptableImageSize } from "../../attachments/image-header.ts";
 import { pictureOf } from "./picture.ts";
 import { WORD_LIMITS } from "../limits.ts";
 import {
@@ -696,9 +697,11 @@ export function previewWordFile(bytes: Uint8Array) {
     const part = parts.get((blip && attributeOf(blip, "embed")) ?? "");
     const imageBytes = part ? data.get(part) : undefined;
     const kind = imageBytes ? pictureOf(imageBytes) : null;
+    // Bounded by pixels too: a small file can declare a size that would exhaust the browser.
     const fits =
       imageBytes &&
       kind &&
+      acceptableImageSize(kind) &&
       imageBytes.length <= WORD_LIMITS.previewPictureBytes &&
       pictureBytes + imageBytes.length <= WORD_LIMITS.previewPicturesBytes;
     if (!fits) return { width, height, alt: clip(alt, 300) };

@@ -422,6 +422,16 @@ describe("Word adapter", () => {
       ],
     });
     expect(caption).toMatchObject({ runs: [{ text: "Figure 1" }] });
+    // The same file whose picture declares far more pixels than a browser should decode.
+    const parts = unzipSync(edited.bytes);
+    const media = Object.keys(parts).find((name) => name.startsWith("word/media/"))!;
+    const huge = parts[media]!.slice();
+    new DataView(huge.buffer).setUint32(16, 50_000);
+    new DataView(huge.buffer).setUint32(20, 50_000);
+    parts[media] = huge;
+    const [bomb] = previewWordFile(zipSync(parts)).blocks;
+    expect(bomb).toMatchObject({ pictures: [{ alt: "A chart" }] });
+    expect(JSON.stringify(bomb)).not.toContain("data:image");
     expect(() =>
       editWordFile(createWordFile(), [
         { kind: "insertImage", at: "end", imageRef: new TextEncoder().encode("<svg/>") },
