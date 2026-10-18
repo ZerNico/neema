@@ -1,7 +1,8 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createMiddleware, createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { runtime } from "~/server/runtime.ts";
 import { withoutBytes } from "../package.ts";
 import { changesWithoutBytes, compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
@@ -21,6 +22,21 @@ const reviewedSource = Schema.Struct({
   path: Schema.String.check(Schema.isMaxLength(240)),
   contentHash: Schema.String.check(Schema.isMaxLength(140)),
 });
+
+/**
+ * Remote reads cost the instance's upstream rate limits and fetch packages
+ * through the server, so they need skill authoring, not only a session.
+ */
+const requireSkillAuthoring = createMiddleware()
+  .middleware([requireSession])
+  .server(async ({ context, next }) => {
+    const userId = context.session.user.id;
+    if (
+      !(await runtime.runPromise(FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate"))))
+    )
+      throw new Response("Skill authoring is unavailable", { status: 403 });
+    return next();
+  });
 
 const reReview = async (
   userId: string,
@@ -46,7 +62,7 @@ const reReview = async (
 };
 
 export const searchDiscoverableSkills = createServerFn({ method: "GET" })
-  .middleware([requireSession])
+  .middleware([requireSkillAuthoring])
   .validator(
     Schema.toStandardSchemaV1(
       Schema.Struct({
@@ -59,7 +75,7 @@ export const searchDiscoverableSkills = createServerFn({ method: "GET" })
     discoverSkills(context.session.user.id, data.query, data.limit, getRequest().signal),
   );
 export const reviewRemoteSkill = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireSkillAuthoring])
   .validator(
     Schema.toStandardSchemaV1(
       Schema.Struct({
@@ -90,7 +106,7 @@ export const reviewRemoteSkill = createServerFn({ method: "POST" })
       : review;
   });
 export const importReviewedSkill = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireSkillAuthoring])
   .validator(Schema.toStandardSchemaV1(reviewedSource))
   .handler(async ({ context, data }) => {
     const selected = await reReview(context.session.user.id, data);
@@ -106,7 +122,7 @@ export const importReviewedSkill = createServerFn({ method: "POST" })
     );
   });
 export const reviewSkillUpdate = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireSkillAuthoring])
   .validator(
     Schema.toStandardSchemaV1(
       Schema.Struct({ skillId: Schema.String.check(Schema.isMaxLength(100)) }),
@@ -140,7 +156,7 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
     };
   });
 export const applySkillUpdate = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireSkillAuthoring])
   .validator(
     Schema.toStandardSchemaV1(
       Schema.Struct({
