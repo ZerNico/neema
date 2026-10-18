@@ -80,6 +80,8 @@ export function useConversationQueue(input: {
   attemptFields: () => Promise<AttemptFields>;
   /** Throws, having said why, when Work cannot act yet. */
   checkWork: () => void;
+  /** What starting an answer here runs first, like the view's own starts. */
+  prepare: () => Promise<void>;
   /** The composer settings an edit of a queued message borrows and hands back. */
   settings: {
     modelId: string | null;
@@ -144,6 +146,7 @@ export function useConversationQueue(input: {
     onError: failed("Could not send that into the response."),
   });
   const sendNow = useMutation({
+    onMutate: () => input.prepare(),
     // One request stops a running answer, waits for it to settle and starts
     // this entry, so nothing here has to sequence a stop and a send.
     mutationFn: async (entryId: string) =>
@@ -152,6 +155,7 @@ export function useConversationQueue(input: {
     onError: failed("Could not send the queued message."),
   });
   const dispatch = useMutation({
+    onMutate: () => input.prepare(),
     // A person asking may start after a stop. A Work chat's entry takes this
     // app's executor and folders as they are now, never the queued ones.
     mutationFn: async () =>

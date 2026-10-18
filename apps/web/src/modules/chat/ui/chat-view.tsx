@@ -1116,6 +1116,10 @@ export function ChatView({
     }),
     attemptFields: () => work.attemptFields(),
     checkWork: checkWorkReady,
+    prepare: async () => {
+      checkWorkReady();
+      await flushPending();
+    },
     settings: {
       modelId,
       setModelId,

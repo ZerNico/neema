@@ -61,6 +61,7 @@ function render(
     submission: async () => ({ modelId: "m1", searchEnabled: true, timeZone: "UTC" }),
     attemptFields: async () => ({}),
     checkWork: vi.fn(),
+    prepare: vi.fn(async () => {}),
     settings: settings(),
     ...overrides,
   };
@@ -203,5 +204,19 @@ describe("useConversationQueue", () => {
     expect(dispatchQueuedMessage).toHaveBeenCalledWith({
       data: { conversationId: "c1", force: true, ...fields },
     });
+  });
+
+  it("saves open drafts before Send now or Send next starts an answer, and starts none if that fails", async () => {
+    vi.mocked(sendQueuedNow).mockClear().mockResolvedValue({ started: true });
+    vi.mocked(dispatchQueuedMessage).mockClear().mockResolvedValue({ started: true });
+    const prepare = vi.fn(async () => {
+      throw new Error("draft has unresolved changes");
+    });
+    const { result } = render({ prepare });
+    act(() => result.current.queue.onSendNow("a"));
+    act(() => result.current.queue.onDispatch());
+    await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
+    expect(sendQueuedNow).not.toHaveBeenCalled();
+    expect(dispatchQueuedMessage).not.toHaveBeenCalled();
   });
 });
