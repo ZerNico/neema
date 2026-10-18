@@ -504,3 +504,16 @@ test("initial address filtering does linear normalization work in candidates plu
   expect(large).toBeLessThanOrEqual(4 * 128);
   expect(large / small).toBeLessThan(2.2);
 });
+
+test("refuses benchmarking networks, the 192.0.0/24 block and Teredo-carried private clients", () => {
+  // Liftable like any private network: labs run on these.
+  expect(addressRefusal("198.18.0.1", [], false)).toBe("private network");
+  expect(addressRefusal("198.19.255.255", [], false)).toBe("private network");
+  expect(addressRefusal("198.18.0.1", [], true)).toBeNull();
+  expect(addressRefusal("192.0.0.8", [], true)).toBe("reserved");
+  // The rest of 192.0/16 is public (WordPress.com serves from it).
+  expect(addressRefusal("192.0.78.9", [], false)).toBeNull();
+  // Teredo inverts its client: 3f57:fffe is 192.168.0.1, 5d7f:ff00 is 162.128.0.255.
+  expect(addressRefusal("2001:0:4136:e378:8000:63bf:3f57:fffe", [], false)).toBe("private network");
+  expect(addressRefusal("2001:0:4136:e378:8000:63bf:5d7f:ff00", [], false)).toBeNull();
+});
