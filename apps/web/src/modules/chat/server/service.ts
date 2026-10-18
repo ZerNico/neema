@@ -514,6 +514,18 @@ function makeChatService() {
     const webSearch = yield* WebSearchExecutor;
     const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
     const policy = yield* FeaturePolicy;
+    // A new answer is a new message that is streaming: lists move the chat up
+    // and mark it generating from these two, without re-reading every page.
+    const announceStarted = (userId: string, conversationId: string, messageId: string) =>
+      Effect.andThen(
+        sync.publish(userId, { type: "message.created", conversationId, messageId }),
+        sync.publish(userId, {
+          type: "message.status",
+          conversationId,
+          messageId,
+          status: "streaming",
+        }),
+      );
 
     // Recovers queues a restart or a reaped generation left waiting: the
     // in-process completion hook is gone with the fiber that owned it, and the
@@ -1088,11 +1100,7 @@ function makeChatService() {
         });
         // A replacement or reordered head needs fresh validation on the next dispatch.
         if (!outcome.promoted) return { started: false };
-        yield* sync.publish(input.userId, {
-          type: "message.created",
-          conversationId: input.conversationId,
-          messageId: outcome.assistant.id,
-        });
+        yield* announceStarted(input.userId, input.conversationId, outcome.assistant.id);
         yield* queueChanged(input.userId, input.conversationId);
         yield* engine.startGeneration({
           userId: input.userId,
@@ -1309,11 +1317,7 @@ function makeChatService() {
       }
 
       if (turn.activatedNow)
-        yield* sync.publish(input.userId, {
-          type: "message.created",
-          conversationId: turn.conversation.id,
-          messageId: turn.assistant.id,
-        });
+        yield* announceStarted(input.userId, turn.conversation.id, turn.assistant.id);
 
       if (turn.activatedNow)
         yield* engine.startGeneration({

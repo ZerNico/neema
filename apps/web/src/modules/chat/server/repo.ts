@@ -1694,9 +1694,8 @@ export class ChatRepo extends Context.Service<
             .select({
               ...getTableColumns(conversations),
               // Live per-row state for the list UIs: an answer is being
-              // generated iff a message row is still streaming. The sync bus
-              // invalidates the list on every message.status flip, so the
-              // flag turns on and off without polling.
+              // generated iff a message row is still streaming. Each
+              // message.status flip patches the cached flag, without polling.
               generating: sql<boolean>`exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.status} = 'streaming')`,
               scheduled: sql<boolean>`(${conversations.scheduleId} is not null or exists (select 1 from ${schedules} where ${schedules.chatId} = ${conversations.id}))`,
             })

@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { bringToTop, markGenerating } from "~/modules/chat/client/conversation-list-cache.ts";
 import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
@@ -232,7 +233,9 @@ export function useSync(
           void queryClient.invalidateQueries({
             queryKey: ["conversation", event.conversationId],
           });
-          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          // The event carries what the lists show, so they are patched, not re-paged.
+          if (event.type === "message.created") bringToTop(queryClient, event.conversationId);
+          else markGenerating(queryClient, event.conversationId, event.status === "streaming");
           // Edits are announced as message events; provenance derives whether
           // the saved source content still matches the current message.
           void queryClient.invalidateQueries({ queryKey: ["memory"] });

@@ -367,8 +367,9 @@ describe("useSync", () => {
     });
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+    // The lists are patched from the event, never re-paged.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["conversations"] });
   });
 
   it.each([

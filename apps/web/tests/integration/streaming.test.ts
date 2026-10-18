@@ -11990,3 +11990,51 @@ describe("the live tail", () => {
     expect([...result].at(-1)).toMatchObject({ kind: "done", status: "complete" });
   });
 });
+
+describe("list hints", () => {
+  it("announces a new answer as created and then streaming, before it starts", async () => {
+    const { events, conversationId, assistantMessageId } = await runtime.runPromise(
+      Effect.gen(function* () {
+        const seed = yield* setupConversation;
+        const conversation = yield* (yield* ChatRepo).createConversation({
+          userId: seed.userId,
+          modelId: textModelId,
+        });
+        const bus = yield* SyncBus;
+        const ready = yield* Deferred.make<void>();
+        const heard = yield* bus.subscribe(seed.userId, true).pipe(
+          Stream.tap((event) =>
+            event.type === "sync.ready" ? Deferred.succeed(ready, undefined) : Effect.void,
+          ),
+          Stream.filter(
+            (event) => event.type === "message.created" || event.type === "message.status",
+          ),
+          Stream.take(3),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(ready);
+        const sent = yield* (yield* ChatService).sendMessage({
+          userId: seed.userId,
+          conversation: { kind: "existing", id: conversation.id },
+          modelId: textModelId,
+          content: "Hello.",
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        });
+        return {
+          events: [...(yield* Fiber.join(heard))],
+          conversationId: conversation.id,
+          assistantMessageId: sent.assistantMessageId,
+        };
+      }),
+    );
+    const about = { conversationId, messageId: assistantMessageId };
+    expect(events).toEqual([
+      { type: "message.created", ...about },
+      { type: "message.status", ...about, status: "streaming" },
+      { type: "message.status", ...about, status: "complete" },
+    ]);
+  });
+});
