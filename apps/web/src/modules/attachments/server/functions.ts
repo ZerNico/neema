@@ -21,8 +21,8 @@ export const readUpload = (data: FormData) => {
   if (!(file instanceof File)) {
     throw new Response("Expected a file", { status: 400 });
   }
-  // The body is already buffered by the time we see it; this cap only stops
-  // us from hashing and storing something oversized.
+  // Bodies past every family's limit are refused before parsing (body-limit.ts);
+  // this is the attachment's own, smaller one.
   if (file.size > MAX_ATTACHMENT_BYTES) {
     throw new Response("File is too large", { status: 413 });
   }
