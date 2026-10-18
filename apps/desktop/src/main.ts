@@ -244,6 +244,9 @@ const desktopShell: Shell = {
   cancelCall: (callId) => executions.cancelCall(callId),
   forgetChatSites: async (conversationId) => {
     if (serverOrigin !== null) await siteGrants?.forgetChat(serverOrigin, conversationId);
+    // A temporary chat's in-memory browser profile would otherwise live as long as the app.
+    const browser = mainWindow && windowBrowsers.get(mainWindow);
+    await browser?.releaseChat(conversationId);
   },
   setWorkState: (state) => {
     workState = state;

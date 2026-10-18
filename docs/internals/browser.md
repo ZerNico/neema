@@ -44,7 +44,9 @@ Node and `webSecurity`, whatever the markup asked for. Guests may only navigate 
 Logins live in the partition. Each connected server gets `persist:browser-<hash of
 origin>`, shared by its chats, so a site is logged in once. A page from one server never
 browses with cookies another server's chats collected. Temporary chats get
-`browser-temp-<hash>-<conversation>`, which Chromium keeps in memory only.
+`browser-temp-<hash>-<conversation>`, which Chromium keeps in memory only. Electron never
+frees a session, so when such a chat is purged main clears the partition's storage and
+drops its download listener.
 
 Main names the profile in a preload argument, as it does the pinned server. The sandboxed
 preload cannot load Node, so the hash is computed in main (`browser/profile.ts`) and the

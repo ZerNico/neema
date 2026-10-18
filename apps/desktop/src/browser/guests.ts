@@ -29,7 +29,7 @@ import { perform, type Cdp } from "./perform.ts";
 import { isSafeExternalUrl } from "../config.ts";
 import { FAVICON_MAX_BYTES, faviconDataUrl, inlineFavicon } from "./favicon.ts";
 import { admitWebview } from "./guest-policy.ts";
-import { isBrowserPartition } from "./partitions.ts";
+import { isBrowserPartition, sharedPartition, temporaryPartition } from "./partitions.ts";
 import { blockedSite, type Driving } from "./gate.ts";
 import { siteOf } from "./site-grants.ts";
 import { saveFiles } from "./save.ts";
@@ -209,6 +209,8 @@ export function attachBrowserGuests(
   // moment later, a script after it returned. Until the person uses the tab.
   const lingering = new Map<number, { conversationId: string; callId: string; until: number }>();
   const downloadSessions = new WeakSet<Session>();
+  // Temporary chats' in-memory partitions this window opened, by name, to release on purge.
+  const temporarySessions = new Map<string, Session>();
   const frozen = new Set<number>();
   // Tabs the model is acting through right now, and the first address it was stopped at.
   const driven = new Map<
@@ -299,6 +301,7 @@ export function attachBrowserGuests(
     }
     // Before the guest exists, so even its first request goes out prepared.
     const profileSession = session.fromPartition(partition);
+    if (partition !== sharedPartition(profile)) temporarySessions.set(partition, profileSession);
     prepareSession(profileSession);
     if (!downloadSessions.has(profileSession)) {
       downloadSessions.add(profileSession);
@@ -460,6 +463,19 @@ export function attachBrowserGuests(
   };
 
   return {
+    /**
+     * A purged temporary chat's in-memory partition: its storage cleared and
+     * its download listener gone. Electron never frees the session itself.
+     */
+    releaseChat: async (conversationId: string) => {
+      const name = temporaryPartition(profile, conversationId);
+      const partition = temporarySessions.get(name);
+      if (!partition) return;
+      temporarySessions.delete(name);
+      partition.removeListener("will-download", onDownload);
+      downloadSessions.delete(partition);
+      await partition.clearStorageData().catch(() => {});
+    },
     begin: calls.begin,
     end: (callId: string) => {
       calls.end(callId);

@@ -38,6 +38,7 @@ const fixture = () => {
     ),
     setPermissionRequestHandler: vi.fn(),
     setPermissionCheckHandler: vi.fn(),
+    clearStorageData: vi.fn(async () => {}),
   });
   // Only the Electron boundary is faked. The adapter and its event handlers are real.
   const sessionBoundary: unknown = profile;
@@ -116,6 +117,23 @@ afterEach(() => {
 });
 
 describe("main browser authority", () => {
+  it("releases a purged temporary chat's partition, and only one it opened", async () => {
+    const { adapter, host, profile } = fixture();
+    host.emit(
+      "will-attach-webview",
+      { preventDefault: vi.fn() },
+      {},
+      { partition: "browser-temp-0123456789abcdef-chat-1", src: "about:blank" },
+    );
+    await adapter.releaseChat("never-opened");
+    expect(profile.clearStorageData).not.toHaveBeenCalled();
+    await adapter.releaseChat("chat-1");
+    expect(profile.clearStorageData).toHaveBeenCalledOnce();
+    expect(profile.listenerCount("will-download")).toBe(0);
+    await adapter.releaseChat("chat-1");
+    expect(profile.clearStorageData).toHaveBeenCalledOnce();
+  });
+
   it("keeps a driven tab's history moves to sites the drive allowed", async () => {
     const { begin, adapter, guest } = fixture();
     await begin();
