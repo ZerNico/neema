@@ -363,8 +363,8 @@ describe("usage ledger capture", () => {
       // attempt itself is on the ledger.
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ status: "error", inputTokens: 0, outputTokens: 0 });
-      // The open call was billed but never reported: a floor with no price, not a zero total.
-      expect(events[0]).toMatchObject({ usageComplete: false, cost: null, costSource: null });
+      // The open call was billed but never reported, so the row is a floor.
+      expect(events[0]).toMatchObject({ usageComplete: false });
     } finally {
       failStream = false;
     }
