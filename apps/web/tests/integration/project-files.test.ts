@@ -272,6 +272,30 @@ describe("project files", () => {
     },
   );
 
+  it("keeps a file's name across its versions, never renaming it or clashing", async () => {
+    const { owner, projectId } = await setup();
+    const plan = await files((s) =>
+      s.write(person(owner), { projectId, name: "plan.md", bytes: text("# One") }),
+    );
+    await files((s) => s.write(person(owner), { projectId, name: "notes.md", bytes: text("x") }));
+    for (const renamed of ["notes.md", "renamed.md"])
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each must leave the file as it was.
+      await expect(
+        files((s) =>
+          s.write(person(owner), {
+            projectId,
+            fileId: plan.id,
+            name: renamed,
+            bytes: text("# Two"),
+            basedOnVersion: 1,
+          }),
+        ),
+      ).rejects.toMatchObject({ _tag: "ProjectRejected" });
+    const listed = await files((s) => s.list(owner, projectId));
+    expect(JSON.stringify(listed)).toContain("plan.md");
+    expect((await files((s) => s.versions(owner, plan.id))).length).toBe(1);
+  });
+
   it("refuses a write based on an older version or a duplicate name, and keeps any type", async () => {
     const { owner, editor, projectId } = await setup();
     const file = await files((s) =>
@@ -842,6 +866,27 @@ describe("project files", () => {
       s.saveAttachment(person(owner), { projectId, attachment: { id: attachment.id } }),
     );
     expect(saved).toMatchObject({ name: "brief.txt", version: 1 });
+    // Another attachment saved over it is a new version of brief.txt, whatever it was called.
+    const draft = await run(
+      Effect.flatMap(AttachmentService, (s) =>
+        s.upload({
+          userId: owner,
+          fileName: "draft-2.txt",
+          declaredMediaType: "text/plain",
+          bytes: text("brief, again"),
+        }),
+      ),
+    );
+    expect(
+      await files((s) =>
+        s.saveAttachment(person(owner), {
+          projectId,
+          attachment: { id: draft.id },
+          fileId: saved.id,
+          basedOnVersion: 1,
+        }),
+      ),
+    ).toMatchObject({ name: "brief.txt", version: 2 });
     const chat = uuidv7();
     await db((d) => d.insert(conversations).values({ id: chat, userId: owner }));
     await expect(

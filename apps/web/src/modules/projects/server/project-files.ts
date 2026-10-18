@@ -407,7 +407,7 @@ export class ProjectFileService extends Context.Service<
             let fileId = input.fileId;
             if (fileId) {
               const [file] = yield* tx
-                .select({ id: projectFiles.id })
+                .select({ id: projectFiles.id, name: projectFiles.name })
                 .from(projectFiles)
                 .where(
                   and(eq(projectFiles.id, fileId), eq(projectFiles.projectId, input.projectId)),
@@ -415,6 +415,12 @@ export class ProjectFileService extends Context.Service<
                 .for("update")
                 .pipe(Effect.orDie);
               if (!file) return yield* new ProjectRejected({ reason: "that file is gone" });
+              // A version is classified by its name, so a new name is a new file:
+              // taken, it would break the unique name; free, it would rename silently.
+              if (file.name !== name)
+                return yield* new ProjectRejected({
+                  reason: `a new version of ${file.name} keeps its name; save ${name} as its own file`,
+                });
             } else {
               const [existing] = yield* tx
                 .select({ id: projectFiles.id })
@@ -664,10 +670,23 @@ export class ProjectFileService extends Context.Service<
           const bytes = yield* blobBytes(attachment.blobId);
           if (!bytes)
             return yield* new ProjectRejected({ reason: "that attachment is not available" });
+          // A new version keeps its file's name unless one is given, as an upload does.
+          const [target] = input.fileId
+            ? yield* db
+                .select({ name: projectFiles.name })
+                .from(projectFiles)
+                .where(
+                  and(
+                    eq(projectFiles.id, input.fileId),
+                    eq(projectFiles.projectId, input.projectId),
+                  ),
+                )
+                .pipe(Effect.orDie)
+            : [];
           return yield* writeVersion(writer, {
             projectId: input.projectId,
             fileId: input.fileId,
-            name: input.name ?? attachment.fileName,
+            name: input.name ?? target?.name ?? attachment.fileName,
             bytes,
             basedOnVersion: input.basedOnVersion,
           });
