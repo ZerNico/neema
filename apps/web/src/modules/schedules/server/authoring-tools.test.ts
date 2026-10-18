@@ -10,7 +10,7 @@ import { prepareScheduleDraftTools, type ScheduleAuthoringServices } from "./aut
 const unexpected = () => Effect.die(new Error("Unexpected service call"));
 const writeGuard = () => Effect.void;
 
-async function setup() {
+async function setup(timeZone?: string) {
   let draft: ScheduleDraft = {
     id: "draft-one",
     conversationId: "authoring-chat",
@@ -38,12 +38,13 @@ async function setup() {
       return { outcome: "updated" as const, draft };
     }),
   );
+  const open = vi.fn(() => Effect.succeed({ outcome: "drafted" as const, draft }));
   const services: ScheduleAuthoringServices = {
     drafts: {
       list: () => Effect.succeed([draft]),
       patch,
       get: unexpected,
-      open: unexpected,
+      open,
       save: unexpected,
       reload: unexpected,
       discard: unexpected,
@@ -76,13 +77,17 @@ async function setup() {
       userId: "user-one",
       conversationId: draft.conversationId,
       messageId: "answer-one",
+      timeZone,
       writeGuard,
     }),
   );
   const update = prepared.group.handlers.update_schedule_draft as (
     raw: unknown,
   ) => Effect.Effect<unknown>;
-  return { update, patch };
+  const draftSchedule = prepared.group.handlers.draft_schedule as (
+    raw: unknown,
+  ) => Effect.Effect<unknown>;
+  return { update, patch, open, draftSchedule };
 }
 
 describe("schedule draft id aliases", () => {
@@ -201,5 +206,29 @@ describe("schedule draft image model", () => {
       { draftId: "draft-one", expectedRevision: 1, changes: { imageModelId: null } },
       writeGuard,
     );
+  });
+});
+
+describe("a new schedule draft's time zone", () => {
+  const openedWith = (open: { mock: { calls: unknown[][] } }) => {
+    const input = open.mock.calls[0]?.[1];
+    return input && typeof input === "object" && "changes" in input
+      ? (input.changes as { timezone?: string } | undefined)?.timezone
+      : undefined;
+  };
+
+  it("is the person's unless the model names one", async () => {
+    const own = await setup("Europe/Berlin");
+    await Effect.runPromise(own.draftSchedule({ changes: { name: "Standup" } }));
+    expect(openedWith(own.open)).toBe("Europe/Berlin");
+    const named = await setup("Europe/Berlin");
+    await Effect.runPromise(named.draftSchedule({ changes: { timezone: "Asia/Tokyo" } }));
+    expect(openedWith(named.open)).toBe("Asia/Tokyo");
+  });
+
+  it("is left to the saved schedule when the draft edits one", async () => {
+    const existing = await setup("Europe/Berlin");
+    await Effect.runPromise(existing.draftSchedule({ scheduleId: "schedule-one" }));
+    expect(openedWith(existing.open)).toBeUndefined();
   });
 });

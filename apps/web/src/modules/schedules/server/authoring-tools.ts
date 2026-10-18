@@ -142,6 +142,8 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     messageId: string;
     /** The model answering this attempt, so "same as this chat" is resolvable. */
     currentModelId?: string | undefined;
+    /** The person's time zone, which a new draft keeps unless the model names another. */
+    timeZone?: string | undefined;
     writeGuard: (tx: DbTx) => Effect.Effect<unknown>;
   }) {
     const { drafts, providers } = input.services;
@@ -186,8 +188,18 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
         "Provide an optional owned schedule ID and valid draft settings.",
       );
       if (!decoded.ok) return decoded.result;
-      const cronIssue = decoded.value.changes?.cron
-        ? validateCron(decoded.value.changes.cron, decoded.value.changes.timezone ?? "UTC")
+      // "Every weekday at 7" means the person's 7, not UTC's, unless the model says otherwise.
+      const opened =
+        decoded.value.scheduleId === undefined &&
+        decoded.value.changes?.timezone === undefined &&
+        input.timeZone
+          ? {
+              ...decoded.value,
+              changes: { ...decoded.value.changes, timezone: input.timeZone },
+            }
+          : decoded.value;
+      const cronIssue = opened.changes?.cron
+        ? validateCron(opened.changes.cron, opened.changes.timezone ?? "UTC")
         : null;
       if (cronIssue)
         return {
@@ -200,7 +212,7 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
           {
             conversationId: input.conversationId,
             createdByMessageId: input.messageId,
-            ...decoded.value,
+            ...opened,
           },
           input.writeGuard,
         )

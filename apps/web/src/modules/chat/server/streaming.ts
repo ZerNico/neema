@@ -1033,6 +1033,7 @@ export class StreamEngine extends Context.Service<
             conversationId: input.conversationId,
             messageId: input.messageId,
             currentModelId: input.modelId,
+            timeZone: input.timeZone,
             writeGuard,
           });
           // Set once the attempt's file resolver exists, below; a call reads it when it runs.
