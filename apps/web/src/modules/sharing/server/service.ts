@@ -1,3 +1,4 @@
+import { activeAccountSql } from "~/modules/auth/server/account-eligibility.ts";
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { groups, groupMembers, user } from "~/db/schema/index.ts";
@@ -146,6 +147,7 @@ export class SharingService extends Context.Service<
             .where(
               and(
                 ne(user.id, userId),
+                activeAccountSql,
                 needle
                   ? or(ilike(user.name, `%${needle}%`), ilike(user.email, `%${needle}%`))
                   : undefined,
@@ -196,7 +198,7 @@ export class SharingService extends Context.Service<
                     const [recipient] = yield* tx
                       .select({ id: user.id })
                       .from(user)
-                      .where(eq(user.email, email))
+                      .where(and(eq(user.email, email), activeAccountSql))
                       .for("key share");
                     if (!recipient || recipient.id === userId)
                       return yield* new SharingNotAllowed({

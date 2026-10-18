@@ -18,6 +18,7 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { Route } from "~/routes/api/documents/$documentId.images.$attachmentId.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -79,6 +80,7 @@ const createUser = async () => {
   await run(
     Effect.flatMap(Db, (db) => db.insert(user).values({ id, name: "Member", email: `${id}@t.io` })),
   );
+  await run(seedEligibleSession(id));
   return id;
 };
 const upload = (userId: string, bytes: Uint8Array, fileName = "photo.png") =>

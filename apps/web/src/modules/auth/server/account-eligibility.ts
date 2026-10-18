@@ -35,6 +35,18 @@ export const reconcileApproval = (tx: DbClient, userId: string) =>
   `)
     .pipe(Effect.orDie);
 
+/**
+ * SQL over `user`: the account may act now, so others may find it and share
+ * with it. Approved or the bootstrap owner, and not banned; a sign-up still
+ * waiting or turned down is nobody's recipient.
+ */
+export const activeAccountSql = sql<boolean>`(
+  (exists (select 1 from user_approvals a where a.user_id = ${user.id} and a.status = 'approved')
+    or exists (select 1 from signup_bootstrap b
+      where b.id = ${AUTH_SETTINGS_ID} and b.owner_id = ${user.id}))
+  and not (${user.banned} and (${user.banExpires} is null or ${user.banExpires} > clock_timestamp()))
+)`;
+
 /** Hold the user's row through acceptance. Approval writers take the same lock,
  * and native ban, update and delete already lock it. No session or role bypass.
  * Returns whether the account holds the admin role, read with the rest. */

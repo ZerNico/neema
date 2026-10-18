@@ -94,6 +94,9 @@ const makeUser = Effect.fn("test.makeUser")(function* (role: "user" | "admin" = 
     `insert into "user" (id, name, email, role)
      values ('${userId}', 'Test', '${userId}@t.io', '${role}')` as never,
   );
+  yield* db.execute(
+    `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
+  );
   return userId;
 });
 

@@ -31,6 +31,7 @@ import { validateSkillPackage, type SkillFile } from "~/modules/skills/package.t
 import { makeToolFileResolver } from "~/modules/chat/server/tool-files.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { Option } from "effect";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 // The preview routes run on the app's runtime; here that is this file's own.
@@ -88,6 +89,7 @@ const newUser = async () => {
       db.insert(user).values({ id, name: "Skill test", email: `${id}@test.invalid` }),
     ),
   );
+  await run(seedEligibleSession(id));
   return id;
 };
 const files = (body: string): SkillFile[] => [

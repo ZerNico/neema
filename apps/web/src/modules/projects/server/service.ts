@@ -1,3 +1,4 @@
+import { activeAccountSql } from "~/modules/auth/server/account-eligibility.ts";
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -376,7 +377,7 @@ export class ProjectService extends Context.Service<
                 const [recipient] = yield* tx
                   .select({ id: user.id })
                   .from(user)
-                  .where(eq(user.email, email))
+                  .where(and(eq(user.email, email), activeAccountSql))
                   .for("key share")
                   .pipe(Effect.orDie);
                 if (!recipient || recipient.id === userId)

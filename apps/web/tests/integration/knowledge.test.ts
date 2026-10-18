@@ -180,6 +180,7 @@ const createUser = async (role: "user" | "admin" = "user") => {
   await exec(
     `insert into "user" (id, name, email, role) values ('${id}', 'U', '${id}@t.io', '${role}')`,
   );
+  await exec(`insert into user_approvals (user_id, status) values ('${id}', 'approved')`);
   return id;
 };
 
@@ -4132,6 +4133,10 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
         await exec(
           `insert into "user" (id, name, email, role) select '${prefix}-' || n, 'Grantee', '${prefix}-' || n || '@t.io', 'user' from generate_series(1, 101) n`,
         );
+      if (grantKind === "user")
+        await exec(
+          `insert into user_approvals (user_id, status) select '${prefix}-' || n, 'approved' from generate_series(1, 101) n`,
+        );
       else
         await exec(
           `insert into groups (id, name) select '${prefix}-' || n, '${prefix}-group-' || n from generate_series(1, 101) n`,
@@ -4169,6 +4174,10 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
     );
     const recipients = (q: string) =>
       run(Effect.flatMap(SharingService, (service) => service.recipients(actor, q)));
+    // A sign-up still waiting is nobody's recipient.
+    await exec(`insert into user_approvals (user_id, status) values ('${id}', 'pending')`);
+    expect(await recipients(`Marnie ${id}`)).toEqual([]);
+    await exec(`update user_approvals set status = 'approved' where user_id = '${id}'`);
     expect(await recipients(`Marnie ${id}`)).toEqual([{ userId: id, name: `Marnie ${id}`, email }]);
     expect(await recipients(email.toUpperCase())).toHaveLength(1);
     expect(await recipients(`no-such-person-${id}`)).toEqual([]);

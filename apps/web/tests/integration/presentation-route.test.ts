@@ -21,6 +21,7 @@ import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { Route } from "~/routes/api/presentations/$kind.$fileId.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { FakeDocumentParser } from "./unused-services.ts";
@@ -102,6 +103,7 @@ const createUser = async () => {
   await run(
     Effect.flatMap(Db, (db) => db.insert(user).values({ id, name: "Member", email: `${id}@t.io` })),
   );
+  await run(seedEligibleSession(id));
   return id;
 };
 const get = (kind: string, fileId: string, userId?: string, slide?: string, approved = true) => {

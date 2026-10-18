@@ -31,6 +31,7 @@ import { ProjectFileService, type FileWriter } from "~/modules/projects/server/p
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { FakeDocumentParser } from "./unused-services.ts";
 
@@ -97,6 +98,7 @@ const db = <A>(body: (db: Db["Service"]) => Effect.Effect<A, unknown>) =>
 const createUser = async () => {
   const id = uuidv7();
   await db((d) => d.insert(user).values({ id, name: `User ${id.slice(-4)}`, email: `${id}@t.io` }));
+  await run(seedEligibleSession(id));
   return id;
 };
 const files = <A, E>(body: (service: ProjectFileService["Service"]) => Effect.Effect<A, E>) =>
