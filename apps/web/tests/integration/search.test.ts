@@ -8,7 +8,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import type { Snippet } from "~/modules/search/text.ts";
 import { Db } from "~/server/db.ts";
-import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { constraintViolation, createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | Db, unknown>;
@@ -332,6 +332,6 @@ describe("archived chats", () => {
             .where(eq(conversations.id, ids[0]!)),
         ),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(constraintViolation("conversations_archived_not_temporary"));
   });
 });

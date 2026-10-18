@@ -44,7 +44,7 @@ import {
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { FakeMemoryService } from "./fake-memory.ts";
-import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { constraintViolation, createTestDatabase, type TestDatabase } from "./database.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
@@ -404,7 +404,7 @@ describe("model visibility", () => {
           }),
         ),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(constraintViolation("model_group_access_group_id_groups_id_fkey"));
 
     const rows = await run(
       Db.use((db) =>

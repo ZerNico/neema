@@ -45,3 +45,11 @@ export const createTestDatabase = async ({ migrated = true } = {}): Promise<Test
       ),
   };
 };
+
+/** What a Drizzle write refused by the named Postgres constraint rejects with. */
+export const constraintViolation = (constraint: string) => ({
+  _tag: "EffectDrizzleQueryError",
+  cause: {
+    reasons: [{ error: { reason: { _tag: "ConstraintError", cause: { constraint } } } }],
+  },
+});
