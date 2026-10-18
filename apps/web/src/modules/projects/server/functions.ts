@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
-import { runtime } from "~/server/runtime.ts";
+import { refusal } from "~/server/refusal.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   AddProjectGroupInput,
@@ -30,18 +31,11 @@ import { ProjectMemoryService } from "./project-memory.ts";
 import { ProjectService } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
-const projectErrors = <A, R>(effect: Effect.Effect<A, ProjectNotAvailable | ProjectRejected, R>) =>
-  effect.pipe(
-    Effect.catchTags({
-      ProjectNotAvailable: () => Effect.die(new Response("Not found", { status: 404 })),
-      ProjectRejected: (error) => Effect.die(new Response(error.reason, { status: 400 })),
-    }),
-  );
 const run = <A>(
   body: (
     service: ProjectService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) => runtime.runPromise(Effect.flatMap(ProjectService, body).pipe(projectErrors));
+) => runServerFn(Effect.flatMap(ProjectService, body));
 
 export const listProjects = createServerFn({ method: "GET" })
   .middleware([requireSession])
@@ -147,7 +141,7 @@ const runMemory = <A>(
   body: (
     service: ProjectMemoryService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) => runtime.runPromise(Effect.flatMap(ProjectMemoryService, body).pipe(projectErrors));
+) => runServerFn(Effect.flatMap(ProjectMemoryService, body));
 export const listProjectMemories = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(ProjectIdInput))
@@ -179,7 +173,7 @@ const runFiles = <A>(
   body: (
     service: ProjectFileService["Service"],
   ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
-) => runtime.runPromise(Effect.flatMap(ProjectFileService, body).pipe(projectErrors));
+) => runServerFn(Effect.flatMap(ProjectFileService, body));
 /** FormData at the root, so the client sends multipart; fields are checked here. */
 const readFileUpload = (data: FormData) => {
   const file = data.get("file");
@@ -187,9 +181,9 @@ const readFileUpload = (data: FormData) => {
   const fileId = data.get("fileId");
   const basedOn = data.get("basedOnVersion");
   if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
-    throw new Response("Expected a file", { status: 400 });
+    throw refusal(400, "Expected a file");
   if (file.size > PROJECT_FILE_LIMITS.fileBytes)
-    throw new Response("The file is larger than 50 MB", { status: 413 });
+    throw refusal(413, "The file is larger than 50 MB");
   return {
     file,
     projectId,

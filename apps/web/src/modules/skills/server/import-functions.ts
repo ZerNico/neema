@@ -3,7 +3,8 @@ import { getRequest } from "@tanstack/react-start/server";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { runtime } from "~/server/runtime.ts";
+import { refusal } from "~/server/refusal.ts";
+import { runServerFn } from "~/server/run-server-fn.ts";
 import { withoutBytes } from "../package.ts";
 import { changesWithoutBytes, compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
 import { SkillService } from "./service.ts";
@@ -31,10 +32,8 @@ const requireSkillAuthoring = createMiddleware()
   .middleware([requireSession])
   .server(async ({ context, next }) => {
     const userId = context.session.user.id;
-    if (
-      !(await runtime.runPromise(FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate"))))
-    )
-      throw new Response("Skill authoring is unavailable", { status: 403 });
+    if (!(await runServerFn(FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate")))))
+      throw refusal(403, "Skill authoring is unavailable");
     return next();
   });
 
@@ -49,15 +48,13 @@ const reReview = async (
     getRequest().signal,
   );
   if (!review.selected)
-    throw new Response("The package is no longer available at its reviewed path.", { status: 409 });
+    throw refusal(409, "The package is no longer available at its reviewed path.");
   // The commit is immutable, so a different hash means a different package.
   if (
     review.selected.source.contentHash !== source.contentHash ||
     review.selected.source.commit !== source.commit
   )
-    throw new Response("The package changed since you reviewed it. Review it again.", {
-      status: 409,
-    });
+    throw refusal(409, "The package changed since you reviewed it. Review it again.");
   return review.selected;
 };
 
@@ -110,7 +107,7 @@ export const importReviewedSkill = createServerFn({ method: "POST" })
   .validator(Schema.toStandardSchemaV1(reviewedSource))
   .handler(async ({ context, data }) => {
     const selected = await reReview(context.session.user.id, data);
-    return runtime.runPromise(
+    return runServerFn(
       Effect.flatMap(SkillService, (service) =>
         service
           .save(context.session.user.id, {
@@ -130,11 +127,11 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     const userId = context.session.user.id;
-    const local = await runtime.runPromise(
+    const local = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.detail(userId, data.skillId)),
     );
-    if (!local.source) throw new Response("This skill has no upstream source.", { status: 400 });
-    const baseline = await runtime.runPromise(
+    if (!local.source) throw refusal(400, "This skill has no upstream source.");
+    const baseline = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.baseline(userId, data.skillId)),
     );
     const remote = await reviewGitHubSkill(
@@ -144,9 +141,7 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
       getRequest().signal,
     );
     if (!remote.selected)
-      throw new Response("The upstream package is no longer available at its original path.", {
-        status: 409,
-      });
+      throw refusal(409, "The upstream package is no longer available at its original path.");
     return {
       changes: changesWithoutBytes(
         compareSkillUpdate(baseline, local.files, remote.selected.package.files),
@@ -175,15 +170,13 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const userId = context.session.user.id;
     const selected = await reReview(userId, data.source);
-    const local = await runtime.runPromise(
+    const local = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.detail(userId, data.skillId)),
     );
     // The draft the choices were made against, not whatever it is now.
     if (local.revision !== data.expectedRevision)
-      throw new Response("This skill changed while you were reviewing. Check for updates again.", {
-        status: 409,
-      });
-    const baseline = await runtime.runPromise(
+      throw refusal(409, "This skill changed while you were reviewing. Check for updates again.");
+    const baseline = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.baseline(userId, data.skillId)),
     );
     const changes = compareSkillUpdate(baseline, local.files, selected.package.files);
@@ -192,14 +185,14 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
       data.choices.length !== changes.length ||
       data.choices.some((choice) => !changes.some((change) => change.path === choice.path))
     )
-      throw new Response("Invalid file choices.", { status: 400 });
+      throw refusal(400, "Invalid file choices.");
     const files = resolveSkillUpdate(
       changes.map((change) => ({
         ...change,
         selected: data.choices.find((choice) => choice.path === change.path)!.selected,
       })),
     );
-    const saved = await runtime.runPromise(
+    const saved = await runServerFn(
       Effect.flatMap(SkillService, (service) =>
         service.save(userId, {
           skillId: data.skillId,

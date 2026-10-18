@@ -229,10 +229,14 @@ export const refusalOf = <E extends Refusable>(error: E, overrides?: RefusalOver
 const responseOf = ({ body, ...init }: Refusal) => new Response(body, init);
 
 /**
- * A refusal the function decides itself, with no failure behind it. Start
- * answers a thrown Response as it is, and `reportUnexpectedFailures` lets it pass.
+ * A refusal the function decides itself, with no failure behind it, to throw
+ * from plain code. Start answers a thrown Response as it is, and
+ * `reportUnexpectedFailures` lets it pass.
  */
-export const refuse = (status: number, body: string) => Effect.die(responseOf({ status, body }));
+export const refusal = (status: number, body: string) => responseOf({ status, body });
+
+/** The same refusal inside an effect. */
+export const refuse = (status: number, body: string) => Effect.die(refusal(status, body));
 
 /** An error channel typed `any` meets every constraint, so it is refused outright. */
 export type TypedErrors<E> = 0 extends 1 & E ? "the error channel is any" : unknown;
