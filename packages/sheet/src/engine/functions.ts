@@ -271,6 +271,30 @@ function tTest(args: Value[]): Value {
   return typeof tail === "number" ? t * tail : tail;
 }
 
+/** Pearson's chi-squared test; formula.js rounds its result to six decimals. */
+function chiSquareTest(args: Value[]): Value {
+  const actual = gridOf(args[0] ?? null);
+  if (actual instanceof XError) return actual;
+  const expected = gridOf(args[1] ?? null);
+  if (expected instanceof XError) return expected;
+  const [rows, columns] = [actual.height, actual.width];
+  if (rows !== expected.height || columns !== expected.width) return NA;
+  const df = rows === 1 || columns === 1 ? rows * columns - 1 : (rows - 1) * (columns - 1);
+  if (df < 1) return NA;
+  let statistic = 0;
+  for (const [r, row] of actual.rows.entries())
+    for (const [c, seen] of row.entries()) {
+      const wanted = expected.rows[r]![c] ?? null;
+      if (seen instanceof XError) return seen;
+      if (wanted instanceof XError) return wanted;
+      if (typeof seen !== "number" || typeof wanted !== "number") continue;
+      if (wanted === 0) return DIV0;
+      statistic += (seen - wanted) ** 2 / wanted;
+    }
+  const below = fromLibrary(libraryFunction("CHISQ.DIST")!(statistic, df, true));
+  return typeof below === "number" ? 1 - below : below;
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -808,7 +832,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   PERCENTRANK: "rss",
   PROB: "rrss",
   TRIMMEAN: "rs",
-  "CHISQ.TEST": "rr",
   "Z.TEST": "rss",
   SERIESSUM: "sssr",
 };
@@ -948,6 +971,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
   "F.TEST": { kinds: "rr", run: fTest },
+  "CHISQ.TEST": { kinds: "rr", run: chiSquareTest },
   "T.TEST": { kinds: "rrss", run: tTest },
   FREQUENCY: { kinds: "rr", run: frequency },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },

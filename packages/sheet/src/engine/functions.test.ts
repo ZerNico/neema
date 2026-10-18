@@ -371,6 +371,20 @@ const cases: Record<string, Case[]> = {
       digits: 12,
     },
   ],
+  // CHISQ.TEST example.
+  "CHISQ.TEST": [
+    {
+      formula: "CHISQ.TEST(A1:B3,C1:D3)",
+      cells: {
+        ...column("A", [58, 11, 10]),
+        ...column("B", [35, 25, 23]),
+        ...column("C", [45.35, 17.56, 16.09]),
+        ...column("D", [47.65, 18.44, 16.91]),
+      },
+      expected: 0.0003082,
+      digits: 7,
+    },
+  ],
   // T.TEST example: paired, two-tailed.
   "T.TEST": [
     {
