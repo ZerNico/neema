@@ -1,13 +1,11 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Layer } from "effect";
 import {
-  createJobRuntime,
-  workerCount,
+  jobFamily,
   workerEntry,
   type JobRequest,
   type JobRunOptions,
   type JobRuntime,
 } from "~/server/jobs.ts";
-import type { PoolWorker } from "~/server/worker-pool.ts";
 import { PresentationError } from "../errors.ts";
 import { PRESENTATION_LIMITS, PRESENTATION_WORKERS } from "../limits.ts";
 import { parsePresentationOperations } from "../operations.ts";
@@ -22,12 +20,6 @@ export interface PresentationRunOptions extends JobRunOptions {
   readonly faces?: readonly FontFace[];
 }
 export type PresentationRuntime = JobRuntime<PresentationJobs, PresentationRunOptions>;
-
-export const presentationWorkerUrl = workerEntry(
-  import.meta.url,
-  "./runtime-worker.ts",
-  "presentation-worker.mjs",
-);
 
 /** Checks what the parent can before any worker is involved; failures reject like any other. */
 function admit(request: PresentationWork) {
@@ -60,22 +52,17 @@ function admit(request: PresentationWork) {
  * Decks are parsed, edited and rendered in killable worker processes; no parser
  * or renderer runs on the server's own thread.
  */
-export const createPresentationRuntime = (
-  entry: URL | (() => URL),
-  options: { readonly workers?: number; readonly spawn?: (url: URL) => PoolWorker } = {},
-): PresentationRuntime =>
-  createJobRuntime<PresentationJobs>({
-    entry,
-    label: "PowerPoint processing",
-    workers: options.workers ?? PRESENTATION_WORKERS.defaultWorkers,
-    queue: PRESENTATION_WORKERS.queue,
-    timeoutMs: PRESENTATION_WORKERS.timeoutMs,
-    heapMb: PRESENTATION_WORKERS.heapMb,
-    perOwner: PRESENTATION_WORKERS.perOwner,
-    errorOf: (code, message) => new PresentationError(code, message),
-    admit,
-    ...(options.spawn ? { spawn: options.spawn } : {}),
-  });
+const presentationFamily = jobFamily<PresentationJobs>({
+  entry: workerEntry(import.meta.url, "./runtime-worker.ts", "presentation-worker.mjs"),
+  env: "PRESENTATION_WORKERS",
+  label: "PowerPoint processing",
+  settings: PRESENTATION_WORKERS,
+  errorOf: (code, message) => new PresentationError(code, message),
+  admit,
+});
+export const createPresentationRuntime: (
+  ...args: Parameters<typeof presentationFamily.create>
+) => PresentationRuntime = presentationFamily.create;
 
 /**
  * The process's presentation workers, shared by font checks and the processor.
@@ -85,18 +72,5 @@ export class PresentationWorkers extends Context.Service<
   PresentationWorkers,
   PresentationRuntime
 >()("chat/presentations/PresentationWorkers") {
-  static readonly layer = Layer.effect(
-    PresentationWorkers,
-    Effect.gen(function* () {
-      const workers = yield* workerCount(
-        "PRESENTATION_WORKERS",
-        PRESENTATION_WORKERS.defaultWorkers,
-        PRESENTATION_WORKERS.maxWorkers,
-      );
-      return yield* Effect.acquireRelease(
-        Effect.sync(() => createPresentationRuntime(presentationWorkerUrl, { workers })),
-        (runtime) => Effect.promise(() => runtime.close()),
-      );
-    }),
-  );
+  static readonly layer = Layer.effect(PresentationWorkers, presentationFamily.runtime);
 }

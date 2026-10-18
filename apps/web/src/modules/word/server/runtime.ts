@@ -1,12 +1,5 @@
-import { Context, Effect, Layer } from "effect";
-import {
-  createJobRuntime,
-  workerCount,
-  workerEntry,
-  type JobRequest,
-  type JobRuntime,
-} from "~/server/jobs.ts";
-import type { PoolWorker } from "~/server/worker-pool.ts";
+import { Context, Layer } from "effect";
+import { jobFamily, workerEntry, type JobRequest, type JobRuntime } from "~/server/jobs.ts";
 import { WordError } from "../errors.ts";
 import { WORD_LIMITS, WORD_WORKERS } from "../limits.ts";
 import { parseWordOperations } from "../operations.ts";
@@ -15,8 +8,6 @@ import type { wordJobs } from "./runtime-worker.ts";
 export type WordJobs = typeof wordJobs;
 export type WordWork = JobRequest<WordJobs>;
 export type WordRuntime = JobRuntime<WordJobs>;
-
-export const wordWorkerUrl = workerEntry(import.meta.url, "./runtime-worker.ts", "word-worker.mjs");
 
 /** Checks what the parent can before any worker is involved. */
 function admit(request: WordWork) {
@@ -35,39 +26,19 @@ function admit(request: WordWork) {
  * bounds of its own, so the package is measured first and the timeout ends
  * whatever still runs too long.
  */
-export const createWordRuntime = (
-  entry: URL | (() => URL),
-  options: { readonly workers?: number; readonly spawn?: (url: URL) => PoolWorker } = {},
-): WordRuntime =>
-  createJobRuntime<WordJobs>({
-    entry,
-    label: "Word processing",
-    workers: options.workers ?? WORD_WORKERS.defaultWorkers,
-    queue: WORD_WORKERS.queue,
-    timeoutMs: WORD_WORKERS.timeoutMs,
-    heapMb: WORD_WORKERS.heapMb,
-    perOwner: WORD_WORKERS.perOwner,
-    errorOf: (code, message) => new WordError(code, message),
-    admit,
-    ...(options.spawn ? { spawn: options.spawn } : {}),
-  });
+const wordFamily = jobFamily<WordJobs>({
+  entry: workerEntry(import.meta.url, "./runtime-worker.ts", "word-worker.mjs"),
+  env: "WORD_WORKERS",
+  label: "Word processing",
+  settings: WORD_WORKERS,
+  errorOf: (code, message) => new WordError(code, message),
+  admit,
+});
+export const createWordRuntime = wordFamily.create;
 
 /** The process's Word workers, shared by chat tools and previews. */
 export class WordProcessor extends Context.Service<WordProcessor, WordRuntime>()(
   "chat/word/WordProcessor",
 ) {
-  static readonly layer = Layer.effect(
-    WordProcessor,
-    Effect.gen(function* () {
-      const workers = yield* workerCount(
-        "WORD_WORKERS",
-        WORD_WORKERS.defaultWorkers,
-        WORD_WORKERS.maxWorkers,
-      );
-      return yield* Effect.acquireRelease(
-        Effect.sync(() => createWordRuntime(wordWorkerUrl, { workers })),
-        (runtime) => Effect.promise(() => runtime.close()),
-      );
-    }),
-  );
+  static readonly layer = Layer.effect(WordProcessor, wordFamily.runtime);
 }

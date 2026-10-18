@@ -1,12 +1,5 @@
-import { Context, Effect, Layer } from "effect";
-import {
-  createJobRuntime,
-  workerCount,
-  workerEntry,
-  type JobRequest,
-  type JobRuntime,
-} from "~/server/jobs.ts";
-import type { PoolWorker } from "~/server/worker-pool.ts";
+import { Context, Layer } from "effect";
+import { jobFamily, workerEntry, type JobRequest, type JobRuntime } from "~/server/jobs.ts";
 import { SpreadsheetError } from "../errors.ts";
 import { SPREADSHEET_LIMITS, SPREADSHEET_WORKERS } from "../limits.ts";
 import { parseSpreadsheetOperations } from "../operations.ts";
@@ -15,12 +8,6 @@ import type { spreadsheetJobs } from "./runtime-worker.ts";
 export type SpreadsheetJobs = typeof spreadsheetJobs;
 export type SpreadsheetWork = JobRequest<SpreadsheetJobs>;
 export type SpreadsheetRuntime = JobRuntime<SpreadsheetJobs>;
-
-export const spreadsheetWorkerUrl = workerEntry(
-  import.meta.url,
-  "./runtime-worker.ts",
-  "spreadsheet-worker.mjs",
-);
 
 /** Checks what the parent can before any worker is involved. */
 function admit(request: SpreadsheetWork) {
@@ -37,40 +24,20 @@ function admit(request: SpreadsheetWork) {
  * Workbooks are parsed and calculated in killable worker processes, since a
  * workbook's formulas can be made arbitrarily expensive; the timeout ends them.
  */
-export const createSpreadsheetRuntime = (
-  entry: URL | (() => URL),
-  options: { readonly workers?: number; readonly spawn?: (url: URL) => PoolWorker } = {},
-): SpreadsheetRuntime =>
-  createJobRuntime<SpreadsheetJobs>({
-    entry,
-    label: "Spreadsheet processing",
-    workers: options.workers ?? SPREADSHEET_WORKERS.defaultWorkers,
-    queue: SPREADSHEET_WORKERS.queue,
-    timeoutMs: SPREADSHEET_WORKERS.timeoutMs,
-    heapMb: SPREADSHEET_WORKERS.heapMb,
-    perOwner: SPREADSHEET_WORKERS.perOwner,
-    errorOf: (code, message) => new SpreadsheetError(code, message),
-    admit,
-    ...(options.spawn ? { spawn: options.spawn } : {}),
-  });
+const spreadsheetFamily = jobFamily<SpreadsheetJobs>({
+  entry: workerEntry(import.meta.url, "./runtime-worker.ts", "spreadsheet-worker.mjs"),
+  env: "SPREADSHEET_WORKERS",
+  label: "Spreadsheet processing",
+  settings: SPREADSHEET_WORKERS,
+  errorOf: (code, message) => new SpreadsheetError(code, message),
+  admit,
+});
+export const createSpreadsheetRuntime = spreadsheetFamily.create;
 
 /** The process's spreadsheet workers, shared by chat tools and previews. */
 export class SpreadsheetProcessor extends Context.Service<
   SpreadsheetProcessor,
   SpreadsheetRuntime
 >()("chat/spreadsheets/SpreadsheetProcessor") {
-  static readonly layer = Layer.effect(
-    SpreadsheetProcessor,
-    Effect.gen(function* () {
-      const workers = yield* workerCount(
-        "SPREADSHEET_WORKERS",
-        SPREADSHEET_WORKERS.defaultWorkers,
-        SPREADSHEET_WORKERS.maxWorkers,
-      );
-      return yield* Effect.acquireRelease(
-        Effect.sync(() => createSpreadsheetRuntime(spreadsheetWorkerUrl, { workers })),
-        (runtime) => Effect.promise(() => runtime.close()),
-      );
-    }),
-  );
+  static readonly layer = Layer.effect(SpreadsheetProcessor, spreadsheetFamily.runtime);
 }

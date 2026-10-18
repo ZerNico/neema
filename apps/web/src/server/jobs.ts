@@ -150,12 +150,62 @@ export function createJobRuntime<H extends JobHandlers>(options: {
 }
 
 /** The worker count from its environment variable, bounded. */
-export const workerCount = (name: string, fallback: number, max: number) =>
+const workerCount = (name: string, fallback: number, max: number) =>
   Config.Int(name).pipe(
     Config.withDefault(fallback),
     Effect.orDie,
     Effect.map((count) => Math.max(1, Math.min(max, count))),
   );
+
+/** A worker family's pool, as its limits declare it. */
+export interface WorkerSettings {
+  readonly defaultWorkers: number;
+  readonly maxWorkers: number;
+  readonly queue: number;
+  readonly timeoutMs: number;
+  readonly heapMb: number;
+  readonly perOwner: number;
+}
+
+/**
+ * One family of jobs: `create` builds a runtime (tests pass fewer workers, or
+ * threads), and `runtime` is the process's own, sized by the `env` setting and
+ * closed with the layer that holds it.
+ */
+export function jobFamily<H extends JobHandlers>(family: {
+  readonly entry: () => URL;
+  readonly env: string;
+  readonly label: string;
+  readonly settings: WorkerSettings;
+  readonly errorOf: (code: string, message: string) => JobError;
+  readonly admit?: (request: JobRequest<H>) => void;
+}) {
+  const { settings } = family;
+  const create = (
+    entry: URL | (() => URL),
+    options: { readonly workers?: number; readonly spawn?: (url: URL) => PoolWorker } = {},
+  ): JobRuntime<H> =>
+    createJobRuntime<H>({
+      entry,
+      label: family.label,
+      workers: options.workers ?? settings.defaultWorkers,
+      queue: settings.queue,
+      timeoutMs: settings.timeoutMs,
+      heapMb: settings.heapMb,
+      perOwner: settings.perOwner,
+      errorOf: family.errorOf,
+      ...(family.admit ? { admit: family.admit } : {}),
+      ...(options.spawn ? { spawn: options.spawn } : {}),
+    });
+  const runtime = Effect.gen(function* () {
+    const workers = yield* workerCount(family.env, settings.defaultWorkers, settings.maxWorkers);
+    return yield* Effect.acquireRelease(
+      Effect.sync(() => create(family.entry, { workers })),
+      (opened) => Effect.promise(() => opened.close()),
+    );
+  });
+  return { create, runtime };
+}
 
 /**
  * The same runtime with options every call gets, such as whose job it is;
