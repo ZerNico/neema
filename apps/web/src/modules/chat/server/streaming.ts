@@ -107,6 +107,7 @@ import {
   Layer,
   Option,
   PubSub,
+  Schedule,
   Schema,
   Stream,
   Semaphore,
@@ -329,6 +330,8 @@ export type StreamEvent =
 // ceiling for every chat: a runaway loop, not a budget. Per-tool budgets and
 // the tools-off final pass still apply.
 const MAX_TOOL_ROUNDS = 128;
+/** How often a live tail checks whether its answer settled without it hearing. */
+const SETTLED_CHECK = Duration.seconds(15);
 /** A file name inside a policy or reminder block is data: quoted, and unable to close the block. */
 const quotedName = (name: string) => JSON.stringify(name.replace(/[<>]/g, ""));
 /** Slide images one answer may put in front of the model, which it pays for per round. */
@@ -4907,8 +4910,64 @@ export class StreamEngine extends Context.Service<
             }
 
             const status = statuses.get(messageId);
+            const toChunk = (c: (typeof persisted)[number]): StreamEvent => ({
+              kind: "chunk",
+              ...(runId ? { runId } : {}),
+              messageId,
+              seq: c.seq,
+              chunkKind: c.kind,
+              delta: c.delta,
+              at: c.createdAt.getTime(),
+            });
+            // The PubSub slides, so a slow reader can miss events. Chunks are
+            // stored before they are published, so what it missed is read back.
+            const missed = (before: number) =>
+              repo
+                .chunksAfter(messageId, lastSeq)
+                .pipe(Effect.map((rows) => rows.filter((c) => c.seq < before).map(toChunk)));
+            const inOrder = (event: StreamEvent): Stream.Stream<StreamEvent> =>
+              event.kind === "chunk" && event.seq > lastSeq + 1
+                ? Stream.unwrap(
+                    Effect.map(missed(event.seq), (rows) => Stream.fromIterable([...rows, event])),
+                  )
+                : Stream.make(event);
             const live: Stream.Stream<StreamEvent> = Stream.fromSubscription(subscription).pipe(
               Stream.filter((event) => event.messageId === messageId && event.runId === runId),
+              Stream.filter((event) => event.kind !== "chunk" || event.seq > lastSeq),
+              Stream.flatMap(inOrder),
+            );
+            // A missed `done` would hold the request open, so the row is checked
+            // now and then; once settled, the rest is read back and the stream ends.
+            const settled: Stream.Stream<StreamEvent> = Stream.fromEffectSchedule(
+              repo.getMessage(messageId).pipe(Effect.orDie),
+              Schedule.spaced(SETTLED_CHECK),
+            ).pipe(
+              Stream.filter(
+                (row) => row?.status !== "streaming" || (row.generationId ?? undefined) !== runId,
+              ),
+              Stream.take(1),
+              Stream.flatMap((row) =>
+                Stream.unwrap(
+                  Effect.map(missed(Number.POSITIVE_INFINITY), (rows) =>
+                    Stream.fromIterable<StreamEvent>([
+                      ...rows,
+                      {
+                        kind: "done",
+                        messageId,
+                        ...(runId ? { runId } : {}),
+                        status:
+                          row &&
+                          (row.generationId ?? undefined) === runId &&
+                          row.status !== "streaming"
+                            ? row.status
+                            : "error",
+                      },
+                    ]),
+                  ),
+                ),
+              ),
+            );
+            const tail = Stream.merge(live, settled, { haltStrategy: "either" }).pipe(
               Stream.filter((event) => event.kind !== "chunk" || event.seq > lastSeq),
               Stream.tap((event) =>
                 Effect.sync(() => {
@@ -4942,7 +5001,7 @@ export class StreamEngine extends Context.Service<
               Stream.concat(reading),
               Stream.concat(imageSnapshot),
               Stream.concat(drawing),
-              Stream.concat(live),
+              Stream.concat(tail),
             );
           }),
         );
