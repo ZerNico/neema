@@ -10,9 +10,10 @@ const changes = { readOnlyHint: false, destructiveHint: false, openWorldHint: fa
  * The app's manual writes check the person but not the instance's switch,
  * resting on the settings page being shown only when it is on.
  */
+const unavailable = () => refused("Memory isn't available to this account.");
 const memoryOn = Effect.fn("mcp.memoryOn")(function* (userId: string) {
   const settings = yield* MemoryService.use((memory) => memory.getSettings(userId));
-  if (!settings.globalEnabled) return yield* refused("Memory isn't available to this account.");
+  if (!settings.globalEnabled) return yield* unavailable();
 });
 
 const REJECTIONS = {
@@ -76,7 +77,12 @@ export const saveMemory = defineTool({
     Effect.gen(function* () {
       yield* memoryOn(principal.userId);
       const outcome = explainWrite(
-        yield* MemoryService.use((memory) => memory.createManual(principal.userId, args.content)),
+        yield* MemoryService.use((memory) =>
+          memory.createManual(principal.userId, args.content),
+        ).pipe(
+          // Taken away between the check above and the write.
+          Effect.catchTag("CapabilityDenied", unavailable),
+        ),
       );
       if (!outcome.ok) return yield* refused(outcome.text);
       return result(outcome.text, { id: outcome.id });
@@ -96,7 +102,7 @@ export const updateMemory = defineTool({
       const outcome = explainWrite(
         yield* MemoryService.use((memory) =>
           memory.updateManual(principal.userId, { memoryId: args.memoryId, content: args.content }),
-        ),
+        ).pipe(Effect.catchTag("CapabilityDenied", unavailable)),
       );
       if (!outcome.ok) return yield* refused(outcome.text);
       return result(outcome.text, { id: outcome.id });
@@ -120,7 +126,7 @@ export const deleteMemory = defineTool({
       yield* memoryOn(principal.userId);
       const outcome = yield* MemoryService.use((memory) =>
         memory.delete(principal.userId, args.memoryId),
-      );
+      ).pipe(Effect.catchTag("CapabilityDenied", unavailable));
       if (outcome.outcome === "not_found")
         return yield* refused("There is no memory with that id. Call list_memories.");
       return result("Forgotten.", { deleted: true });

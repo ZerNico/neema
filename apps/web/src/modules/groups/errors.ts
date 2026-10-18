@@ -15,3 +15,14 @@ export class GroupMemberNotFound extends Schema.TaggedError<GroupMemberNotFound>
     userId: Schema.String,
   },
 ) {}
+
+/** A feature the person's groups do not grant. */
+export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()("CapabilityDenied", {
+  capability: Schema.String,
+}) {}
+
+/** A capability set that cannot hold, such as Create without Use. */
+export class CapabilitiesRejected extends Schema.TaggedError<CapabilitiesRejected>()(
+  "CapabilitiesRejected",
+  { reason: Schema.String },
+) {}

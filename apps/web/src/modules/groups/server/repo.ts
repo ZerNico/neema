@@ -1,7 +1,12 @@
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { GroupMemberNotFound, GroupNameTaken, GroupNotFound } from "../errors.ts";
+import {
+  CapabilitiesRejected,
+  GroupMemberNotFound,
+  GroupNameTaken,
+  GroupNotFound,
+} from "../errors.ts";
 import { Db } from "~/server/db.ts";
 import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
 import { validCapabilities, type Capabilities } from "../policy.ts";
@@ -43,9 +48,11 @@ export class GroupRepo extends Context.Service<
     updateGroupCapabilities(
       groupId: string,
       capabilities: Capabilities,
-    ): Effect.Effect<void, GroupNotFound>;
+    ): Effect.Effect<void, GroupNotFound | CapabilitiesRejected>;
     getDefaultCapabilities(): Effect.Effect<Capabilities>;
-    updateDefaultCapabilities(capabilities: Capabilities): Effect.Effect<void>;
+    updateDefaultCapabilities(
+      capabilities: Capabilities,
+    ): Effect.Effect<void, CapabilitiesRejected>;
     renameGroup(groupId: string, name: string): Effect.Effect<void, GroupNotFound | GroupNameTaken>;
     setMemberSharing(
       groupId: string,
@@ -121,7 +128,7 @@ export class GroupRepo extends Context.Service<
         updateGroupCapabilities: Effect.fn("GroupRepo.updateGroupCapabilities")(
           function* (groupId, capabilities) {
             if (!validCapabilities(capabilities))
-              return yield* Effect.die(new Response("Create requires Use", { status: 400 }));
+              return yield* new CapabilitiesRejected({ reason: "Create requires Use" });
             const rows = yield* db
               .update(groups)
               .set({ capabilities, updatedAt: new Date() })
@@ -145,7 +152,7 @@ export class GroupRepo extends Context.Service<
         updateDefaultCapabilities: Effect.fn("GroupRepo.updateDefaultCapabilities")(
           function* (capabilities) {
             if (!validCapabilities(capabilities))
-              return yield* Effect.die(new Response("Create requires Use", { status: 400 }));
+              return yield* new CapabilitiesRejected({ reason: "Create requires Use" });
             const rows = yield* db
               .update(defaultCapabilities)
               .set({ capabilities })

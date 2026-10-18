@@ -33,6 +33,8 @@ import type {
 import type { DocumentNotAvailable, DocumentRejected } from "~/modules/documents/schema.ts";
 import type { DraftNotAvailable, DraftRejected } from "~/modules/drafts/draft-schema.ts";
 import type {
+  CapabilitiesRejected,
+  CapabilityDenied,
   GroupMemberNotFound,
   GroupNameTaken,
   GroupNotFound,
@@ -81,6 +83,8 @@ export type Refusable =
   | AttachmentRejected
   | AttachmentUnsupported
   | BranchNotAllowed
+  | CapabilitiesRejected
+  | CapabilityDenied
   | ConversationBusy
   | ConversationNotFound
   | CustomToolCompileFailed
@@ -152,6 +156,8 @@ const refusals: RefusalTable = {
   }),
   AttachmentUnsupported: (error) => ({ status: 400, body: `${error.fileName}: ${error.reason}` }),
   BranchNotAllowed: because(409),
+  CapabilitiesRejected: because(400),
+  CapabilityDenied: () => ({ status: 403, body: "Forbidden" }),
   ConversationBusy: () => ({ status: 409, body: "A response is still generating" }),
   ConversationNotFound: notFound,
   CustomToolCompileFailed: (error) => ({ status: 400, body: error.message }),

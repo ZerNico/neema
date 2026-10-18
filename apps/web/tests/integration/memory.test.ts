@@ -768,7 +768,9 @@ describe("saved memory repository", () => {
   it("emits changes only when settings or stored rows actually change", async () => {
     published.length = 0;
     const userId = await createUser();
-    const service = (effect: (memory: MemoryService["Service"]) => Effect.Effect<unknown>) =>
+    const service = (
+      effect: (memory: MemoryService["Service"]) => Effect.Effect<unknown, unknown>,
+    ) =>
       runtime.runPromise(
         Effect.gen(function* () {
           const memory = yield* MemoryService;

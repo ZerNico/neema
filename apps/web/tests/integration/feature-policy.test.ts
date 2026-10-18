@@ -219,7 +219,7 @@ describe("feature policy", () => {
           }),
         ),
       ),
-    ).rejects.toSatisfy((refusal) => refusal instanceof Response && refusal.status === 400);
+    ).rejects.toMatchObject({ _tag: "CapabilitiesRejected" });
     await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
     const [allowed] = await run(
       Db.use((db) =>

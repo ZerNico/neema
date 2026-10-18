@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
+import { CapabilityDenied } from "~/modules/groups/errors.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   MAX_MEMORY_CONTENT_LENGTH,
@@ -165,17 +166,23 @@ export class MemoryService extends Context.Service<
     updateSettings(
       userId: string,
       input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
-    ): Effect.Effect<MemorySettings>;
+    ): Effect.Effect<MemorySettings, CapabilityDenied>;
     list(userId: string): Effect.Effect<ReadonlyArray<Memory>>;
     listReferenceable(userId: string): Effect.Effect<ReadonlyArray<Memory>>;
-    createManual(userId: string, content: string): Effect.Effect<CreateMemoryOutcome>;
+    createManual(
+      userId: string,
+      content: string,
+    ): Effect.Effect<CreateMemoryOutcome, CapabilityDenied>;
     updateManual(
       userId: string,
       input: { memoryId: string; content: string },
-    ): Effect.Effect<UpdateMemoryOutcome>;
-    delete(userId: string, memoryId: string): Effect.Effect<DeleteMemoryOutcome>;
-    clear(userId: string): Effect.Effect<number>;
-    saveModel(userId: string, input: SaveModelMemoryInput): Effect.Effect<SaveModelMemoryOutcome>;
+    ): Effect.Effect<UpdateMemoryOutcome, CapabilityDenied>;
+    delete(userId: string, memoryId: string): Effect.Effect<DeleteMemoryOutcome, CapabilityDenied>;
+    clear(userId: string): Effect.Effect<number, CapabilityDenied>;
+    saveModel(
+      userId: string,
+      input: SaveModelMemoryInput,
+    ): Effect.Effect<SaveModelMemoryOutcome, CapabilityDenied>;
   }
 >()("chat/memory/MemoryService") {
   static readonly layer = Layer.effect(
@@ -196,7 +203,7 @@ export class MemoryService extends Context.Service<
           );
       const requireMemory = Effect.fn("MemoryService.requireMemory")(function* (userId: string) {
         if (!(yield* policy.can(userId, "memory")))
-          return yield* Effect.die(new Response("Forbidden", { status: 403 }));
+          return yield* new CapabilityDenied({ capability: "memory" });
       });
       const withAvailability = Effect.fn("MemoryService.withAvailability")(function* (
         userId: string,
