@@ -351,7 +351,7 @@ describe("buildHistoryMessages with attachments", () => {
           mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           fileName: "deck.pptx",
           parsedText: "Text a Word reader produced",
-          parsedWith: "file-text-1:docx",
+          parsedWith: "file-text-2:docx",
         }),
       ],
     });

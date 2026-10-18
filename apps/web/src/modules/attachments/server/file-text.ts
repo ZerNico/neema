@@ -78,6 +78,16 @@ function documentText(bytes: Uint8Array) {
   return paragraphs(utf8(entries.get("word/document.xml")), "w:p", "w:t").join("\n");
 }
 
+/** How many empty columns a row keeps between two cells before it stops lining them up. */
+const SPARSE_GAP = 64;
+/** A cell's zero-based column from its `r="B7"` reference, or null without one. */
+const columnOf = (attributes: string) => {
+  const letters = /\br="([A-Z]{1,3})\d+"/.exec(attributes)?.[1];
+  return letters
+    ? [...letters].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
+    : null;
+};
+
 function workbookText(bytes: Uint8Array) {
   const sheet = /^xl\/worksheets\/sheet(\d+)\.xml$/;
   const entries = readEntries(
@@ -99,18 +109,26 @@ function workbookText(bytes: Uint8Array) {
     .toSorted((a, b) => numbered(a, sheet) - numbered(b, sheet))
     .map((name) => {
       const index = numbered(name, sheet);
-      const rows = [...utf8(entries.get(name)).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)].map(
-        (row) =>
-          [...row[1]!.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)]
-            .map((cell) => {
-              const value = /<v>([^<]*)<\/v>/.exec(cell[2] ?? "")?.[1];
-              const inline = /<t(?:\s[^>]*)?>([^<]*)<\/t>/.exec(cell[2] ?? "")?.[1];
-              if (/\bt="s"/.test(cell[1]!) && value !== undefined)
-                return shared[Number(value)] ?? "";
-              return decodeXmlText(value ?? inline ?? "");
-            })
-            .join("\t"),
-      );
+      // An empty row with a height is self-closing; a lazy match would take the next row's cells.
+      const rows = [
+        ...utf8(entries.get(name)).matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g),
+      ].map((row) => {
+        const cells: string[] = [];
+        for (const cell of (row[1] ?? "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+          const value = /<v>([^<]*)<\/v>/.exec(cell[2] ?? "")?.[1];
+          const inline = /<t(?:\s[^>]*)?>([^<]*)<\/t>/.exec(cell[2] ?? "")?.[1];
+          const text =
+            /\bt="s"/.test(cell[1]!) && value !== undefined
+              ? (shared[Number(value)] ?? "")
+              : decodeXmlText(value ?? inline ?? "");
+          // In its own column, so a sparse row does not shift left; a far one is only appended.
+          const column = columnOf(cell[1]!);
+          if (column !== null && column >= cells.length && column - cells.length <= SPARSE_GAP)
+            cells.length = column;
+          cells.push(text);
+        }
+        return Array.from(cells, (text) => text ?? "").join("\t");
+      });
       return `## ${names[index - 1] ?? `Sheet ${index}`}\n${rows.join("\n")}`;
     })
     .join("\n\n");
@@ -153,7 +171,7 @@ export function fileText(fileName: string, bytes: Uint8Array, maxChars = FILE_TE
 }
 
 /** Bump when a reader changes what it returns, so cached text is read again. */
-const FILE_TEXT_REVISION = "file-text-1";
+const FILE_TEXT_REVISION = "file-text-2";
 /**
  * Names the reader a blob's cached text came from. The reader follows the
  * file's extension and one blob can be attached under several names, so the

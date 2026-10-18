@@ -37,6 +37,18 @@ describe("fileText", () => {
     expect(fileText("budget.xlsx", workbook)).toBe("## Budget\nItem\tCost\nVenue\t1200");
   });
 
+  it("keeps a workbook's rows apart past an empty one, and its cells in their columns", () => {
+    const workbook = office({
+      ...types,
+      "xl/workbook.xml": '<sheets><sheet name="Plan" sheetId="1"/></sheets>',
+      "xl/worksheets/sheet1.xml":
+        '<row r="1"><c r="A1"><v>1</v></c></row><row r="2" ht="20" customHeight="1"/>' +
+        '<row r="3"><c r="A3"><v>3</v></c><c r="C3"><v>4</v></c></row>' +
+        '<row r="4"><c r="XFD4"><v>far</v></c></row>',
+    });
+    expect(fileText("plan.xlsx", workbook)).toBe("## Plan\n1\n\n3\t\t4\nfar");
+  });
+
   it("gives up on an entry that expands far beyond its compressed size", () => {
     const bomb = office({ ...types, "word/document.xml": "a".repeat(20_000_000) });
     expect(fileText("bomb.docx", bomb)).toBeNull();
