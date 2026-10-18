@@ -124,7 +124,17 @@ export async function openWorkbookParts(
         ? fail("limit", `A workbook can have at most ${SPREADSHEET_LIMITS.parts} parts.`)
         : kind === "size"
           ? fail("limit", "This workbook expands past the size the app can open.")
-          : fail("invalid_file", "This is not a workbook the app can open."),
+          : kind === "macros"
+            ? fail(
+                "unsupported_content",
+                "Macro-enabled workbooks aren't supported; save it as .xlsx without macros.",
+              )
+            : kind === "objects"
+              ? fail(
+                  "unsupported_content",
+                  "Workbooks with embedded objects or form controls aren't supported.",
+                )
+              : fail("invalid_file", "This is not a workbook the app can open."),
   });
   let workbook: Workbook;
   try {
@@ -145,15 +155,11 @@ export async function openWorkbookParts(
     throw error;
   }
   restoreSeriesNames(workbook, parts);
-  if (workbook.vbaProject)
-    fail(
-      "unsupported_content",
-      "Macro-enabled workbooks aren't supported; save it as .xlsx without macros.",
-    );
   readDynamicCells(workbook, parts);
   const worksheets = [...iterWorksheets(workbook)];
   if (worksheets.length > SPREADSHEET_LIMITS.sheets)
     fail("limit", `A workbook can have at most ${SPREADSHEET_LIMITS.sheets} sheets.`);
+  // Form controls with no ActiveX part are known only to the library.
   for (const worksheet of worksheets)
     if (worksheet.oleObjects.length || worksheet.controls.length)
       fail(

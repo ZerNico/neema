@@ -65,8 +65,10 @@ pictures as bounded `data:` URLs of those two types, and the client draws nothin
 byte, every part is inflated once from its local header and measured, since a zip's declared
 sizes can lie; parts, total and per-part size are bounded. The parser itself reads the
 central directory and allocates the sizes declared there, so that listing must name the same
-parts and declare sizes within the same bounds, or the file is refused. Macro projects, ActiveX controls and embedded objects
-are refused, as for decks. Parsing and editing run in killable worker processes of their own,
+parts and declare sizes within the same bounds, or the file is refused. Macro projects,
+ActiveX controls and OLE objects are refused by the package reader every Office format shares,
+by part name and declared content type, before any parser runs; a document's other embedded
+files are refused too. Parsing and editing run in killable worker processes of their own,
 as [jobs](presentations.md#jobs), so what remains of a hostile file ends at the timeout. A
 document's import opens the file the same way. Its export reads nothing untrusted, but builds
 in a worker too, so a long document with its pictures never holds the server's event loop.

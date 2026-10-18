@@ -43,8 +43,8 @@ export interface Package {
 }
 
 const imageType = /\/image$/;
-// A deck's embedded objects live in oleObjects/; its charts' workbooks in embeddings/ are data.
-const activePart = /(^|\/)(?:activex|oleobjects)\/|vbaproject|\.(?:exe|dll|js|html?|mht|swf)$/i;
+// Macros and objects are refused by the package reader; these are files a deck has no use for.
+const activePart = /\.(?:exe|dll|js|html?|mht|swf)$/i;
 const svgPart = /^ppt\/media\/[^/]+\.svg$/i;
 const svgOwner =
   /^ppt\/(?:slides\/slide|slideLayouts\/slideLayout|slideMasters\/slideMaster)\d+\.xml$/;
@@ -90,12 +90,6 @@ function contentTypes(read: Reader) {
     else if (localName(item) === "Override")
       overrides.set(toPart(item.getAttribute("PartName") ?? ""), type);
   }
-  if (
-    [...defaults.values(), ...overrides.values()].some((type) =>
-      /macroenabled|vba|activex|oleobject/i.test(type),
-    )
-  )
-    fail("unsupported_content", "Macro-enabled or active presentations are unsupported.");
   return (part: string) =>
     overrides.get(part) ?? defaults.get(part.split(".").at(-1)?.toLowerCase() ?? "");
 }

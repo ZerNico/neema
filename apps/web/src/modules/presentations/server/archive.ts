@@ -13,7 +13,12 @@ export function readPresentationArchive(bytes: Uint8Array): Map<string, Uint8Arr
       expandedBytes: PRESENTATION_LIMITS.expandedBytes,
       expansionRatio: PRESENTATION_LIMITS.expansionRatio,
     },
-    fail: (_kind, message) => {
+    fail: (kind, message) => {
+      if (kind === "macros" || kind === "objects")
+        throw new PresentationError(
+          "unsupported_content",
+          "Macro-enabled or active presentations are unsupported.",
+        );
       throw new PresentationError("invalid_package", message);
     },
     accept: (name, data) => parts.set(name, data),

@@ -93,17 +93,22 @@ function checkPackage(bytes: Uint8Array) {
         ? fail("limit", `A Word file can have at most ${WORD_LIMITS.parts} parts.`)
         : kind === "size"
           ? fail("limit", "This Word file expands past the size the app can open.")
-          : fail("invalid_file", "This is not a Word file the app can open."),
+          : kind === "macros"
+            ? fail(
+                "unsupported_content",
+                "Macro-enabled documents aren't supported; save it as .docx without macros.",
+              )
+            : kind === "objects"
+              ? fail(
+                  "unsupported_content",
+                  "Documents with embedded objects or controls aren't supported.",
+                )
+              : fail("invalid_file", "This is not a Word file the app can open."),
   });
   if (!names.includes("[Content_Types].xml"))
     fail("invalid_file", "This is not a Word file the app can open.");
-  const lower = names.map((name) => name.toLowerCase());
-  if (lower.some((name) => name.endsWith("vbaproject.bin")))
-    fail(
-      "unsupported_content",
-      "Macro-enabled documents aren't supported; save it as .docx without macros.",
-    );
-  if (lower.some((name) => name.startsWith("word/activex/") || name.startsWith("word/embeddings/")))
+  // A document's embedded files are objects too; a deck's or workbook's embeddings hold chart data.
+  if (names.some((name) => name.toLowerCase().startsWith("word/embeddings/")))
     fail("unsupported_content", "Documents with embedded objects or controls aren't supported.");
 }
 
