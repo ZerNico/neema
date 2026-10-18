@@ -1,8 +1,7 @@
-import { FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
+import { EmptyWebSearch } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Prompt, Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import {
@@ -15,15 +14,9 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
-import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { BlobStoreError, DocumentParseError } from "~/modules/attachments/errors.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import {
   estimatePromptTokens,
   latestValidCheckpoint,
@@ -31,38 +24,21 @@ import {
   type CompactionDeps,
 } from "~/modules/chat/server/compaction.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import {
   AiGateway,
   ProviderContextOverflow,
   ProviderUnreachable,
   type ChatStreamPart,
 } from "~/modules/providers/server/gateway.ts";
-import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { engineLayer } from "./engine-harness.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-
-// Knowledge-backed generations are exercised in knowledge.test.ts; here no
-// message carries a manifest, so the session is never opened.
-const FakeKnowledge = Layer.mergeAll(
-  Layer.succeed(KnowledgeSearch, {
-    search: () => Effect.die("knowledge search is not part of this suite"),
-    session: () => Effect.die("knowledge session is not part of this suite"),
-  } as never),
-  Layer.succeed(KnowledgeService, {} as never),
-);
 
 let database: TestDatabase;
 /** No declared window: the estimator falls back to its default. */
@@ -105,13 +81,7 @@ const gateway = {
 
 const TOOL_SOURCE_URL = "https://example.com/current-source";
 
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
+const provider = {
   generateText: (input) =>
     Effect.suspend(() => {
       gateway.summaryPrompts.push(JSON.stringify(input.prompt));
@@ -201,7 +171,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
         }),
       );
     }),
-});
+} satisfies Partial<AiGateway["Service"]>;
 
 const getBlob = vi.fn<BlobStore["Service"]["get"]>((key) =>
   Effect.fail(new BlobStoreError({ operation: "get", key, message: "missing blob" })),
@@ -225,23 +195,6 @@ const FakeDocumentParser = Layer.succeed(DocumentParser, {
 });
 const unavailable = (tool: "web_search" | "read_url") => () =>
   Effect.fail(new ToolUnavailable({ tool, reason: "disabled" }));
-const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
-  researchSearchLimit: () => Effect.die("no research in these tests"),
-  images: () => Effect.succeed([]),
-  handler: () =>
-    Effect.succeed((params: { readonly queries: ReadonlyArray<string> }) =>
-      Effect.succeed({
-        ok: true as const,
-        targets: params.queries,
-        resultCount: 0,
-        pagesFetched: 0,
-        results: [],
-        failures: [],
-        sources: [],
-      }),
-    ),
-  availability: () => Effect.succeed({ configured: true, enabled: true }),
-});
 const readerHandler = vi.fn<UrlReaderExecutor["Service"]["handler"]>(unavailable("read_url"));
 const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
   handler: readerHandler,
@@ -252,42 +205,12 @@ beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
 
-  const InfraLayer = Db.layer.pipe(
-    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
+  runtime = ManagedRuntime.make(
+    engineLayer(url, {
+      gateway: provider,
+      services: Layer.mergeAll(FakeBlobStore, FakeDocumentParser, EmptyWebSearch, FakeUrlReader),
+    }),
   );
-  const ReposLayer = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    CustomToolRepo.layer,
-    ProviderRepo.layer,
-    ScheduleRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(InfraLayer),
-  );
-  const AppLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        FakeKnowledge,
-        FakeWebSearch,
-        FakeUrlReader,
-        FakeBlobStore,
-        FakeDocumentParser,
-        FakeCustomToolRuntime,
-        NoIntegrations,
-        FakeMemoryService,
-        ExternalCompletion.layer,
-        SyncBus.layer,
-        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-          Layer.provideMerge(SyncBus.layer),
-        ),
-      ).pipe(Layer.provideMerge(ReposLayer)),
-    ),
-  );
-  runtime = ManagedRuntime.make(AppLayer);
 
   modelId = uuidv7();
   smallModelId = uuidv7();

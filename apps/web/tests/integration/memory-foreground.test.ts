@@ -1,7 +1,6 @@
-import { FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
-import { PgClient } from "@effect/sql-pg";
+import { EmptyWebSearch } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { eq } from "drizzle-orm";
@@ -15,16 +14,8 @@ import {
   skills,
   usageEvents,
 } from "~/db/schema/index.ts";
-import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
-import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
-import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { type DbTx } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
-import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { resolveAttemptSkills } from "~/modules/chat/server/effective-config.ts";
 import { StreamEngine, type StreamEvent } from "~/modules/chat/server/streaming.ts";
@@ -34,19 +25,11 @@ import type {
   SaveModelMemoryOutcome,
 } from "~/modules/memory/schema.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
-import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { Db } from "~/server/db.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { engineLayer } from "./engine-harness.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
@@ -233,21 +216,16 @@ const questionRound = (input: GatewayInput, id: string): Stream.Stream<ChatStrea
   return Stream.make(call).pipe(Stream.concat(results));
 };
 
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   generateText: () => Effect.die("no side generation in foreground memory tests"),
   streamChat: (input) =>
     Stream.suspend(() => {
       gatewayState.calls.push({
         prompt: JSON.stringify(input.prompt),
-        // Draft tools, load_tools and read_attachment are always in the toolkit, and the bundled
-        // authoring skills always appear in the ambient catalogue; these suites
-        // assert the memory and question toolkit, so filter those constants out.
+        // Draft tools, load_tools, create_file and read_attachment are always in
+        // the toolkit, and the bundled authoring skills always appear in the
+        // ambient catalogue; these suites assert the memory and question
+        // toolkit, so filter those constants out.
         tools: Object.keys(input.toolkit?.tools ?? {}).filter(
           (name) =>
             !name.endsWith("agent_draft") &&
@@ -257,6 +235,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
             name !== "list_agent_options" &&
             name !== "load_skill" &&
             name !== "load_tools" &&
+            name !== "create_file" &&
             name !== "read_attachment" &&
             name !== "read_skill_file",
         ),
@@ -312,7 +291,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
         return memoryToolRound(input);
       return finalAnswer();
     }),
-});
+} satisfies Partial<AiGateway["Service"]>;
 
 const FakeMemoryService = Layer.succeed(MemoryService, {
   getSettings: () =>
@@ -349,29 +328,6 @@ const FakeMemoryService = Layer.succeed(MemoryService, {
     }),
 });
 
-const FakeWebSearch = Layer.succeed(WebSearchExecutor, {
-  researchSearchLimit: () => Effect.die("no research in these tests"),
-  images: () => Effect.succeed([]),
-  handler: () =>
-    Effect.succeed((params: { readonly queries: ReadonlyArray<string> }) =>
-      Effect.succeed({
-        ok: true as const,
-        targets: params.queries,
-        resultCount: 0,
-        pagesFetched: 0,
-        results: [],
-        failures: [],
-        sources: [],
-      }),
-    ),
-  availability: () => Effect.succeed({ configured: true, enabled: true }),
-});
-
-const FakeUrlReader = Layer.succeed(UrlReaderExecutor, {
-  handler: () => Effect.fail(new ToolUnavailable({ tool: "read_url", reason: "disabled in test" })),
-  availability: () => Effect.succeed({ configured: false, enabled: false }),
-});
-
 const FakeBlobStore = Layer.succeed(BlobStore, {
   put: () => Effect.die("no blob writes in foreground memory tests"),
   get: () => Effect.succeed(new TextEncoder().encode("Attachment content")),
@@ -379,21 +335,6 @@ const FakeBlobStore = Layer.succeed(BlobStore, {
   exists: () => Effect.succeed(false),
   deletePrefix: () => Effect.void,
 });
-
-const FakeDocumentParser = Layer.succeed(DocumentParser, {
-  parsePdf: () => Effect.die("no documents in foreground memory tests"),
-  availability: () => Effect.succeed({ configured: false, enabled: false, scanEngine: null }),
-});
-
-// Knowledge-backed generations are exercised in knowledge.test.ts; here no
-// message carries a manifest, so the session is never opened.
-const FakeKnowledge = Layer.mergeAll(
-  Layer.succeed(KnowledgeSearch, {
-    search: () => Effect.die("knowledge search is not part of this suite"),
-    session: () => Effect.die("knowledge session is not part of this suite"),
-  } as never),
-  Layer.succeed(KnowledgeService, {} as never),
-);
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<ChatRepo | StreamEngine | Db, unknown>;
@@ -403,43 +344,12 @@ beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
 
-  const InfraLayer = Db.layer.pipe(
-    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
+  runtime = ManagedRuntime.make(
+    engineLayer(url, {
+      gateway,
+      services: Layer.mergeAll(FakeMemoryService, EmptyWebSearch, FakeBlobStore),
+    }),
   );
-  const ReposLayer = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    KnowledgeRepo.layer,
-    ProviderRepo.layer,
-    ScheduleRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(InfraLayer),
-  );
-  const AppLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        FakeKnowledge,
-        FakeMemoryService,
-        FakeWebSearch,
-        FakeUrlReader,
-        FakeBlobStore,
-        FakeDocumentParser,
-        FakeCustomToolRuntime,
-        NoIntegrations,
-        ExternalCompletion.layer,
-        SyncBus.layer,
-        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-          Layer.provideMerge(SyncBus.layer),
-        ),
-      ).pipe(Layer.provideMerge(ReposLayer)),
-    ),
-  );
-  runtime = ManagedRuntime.make(AppLayer);
 
   modelId = uuidv7();
   const providerId = uuidv7();
