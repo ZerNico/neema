@@ -40,9 +40,9 @@ export const Route = createFileRoute("/api/favicon")({
         return new Response(upstream.body, {
           headers: {
             "Content-Type": contentType,
-            // Icons change rarely; a day of shared caching keeps repeat
-            // renders (and the upstream) quiet.
-            "Cache-Control": "public, max-age=86400",
+            // Icons change rarely; a day in the browser's cache keeps repeat renders
+            // (and the upstream) quiet. Private, as the route needs a session.
+            "Cache-Control": "private, max-age=86400",
             "X-Content-Type-Options": "nosniff",
           },
         });
