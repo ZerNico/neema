@@ -186,7 +186,6 @@ export function ChatView({
   const attempts = useAttemptMutations({
     conversationId,
     data,
-    dataUpdatedAt,
     live: liveAnswer,
     edit: messageEdit,
     work,

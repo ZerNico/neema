@@ -41,7 +41,6 @@ import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 export function useAttemptMutations({
   conversationId,
   data,
-  dataUpdatedAt,
   live,
   edit,
   work,
@@ -59,7 +58,6 @@ export function useAttemptMutations({
   conversationId: string;
   data: ConversationData;
   /** When the loaded conversation was last read. */
-  dataUpdatedAt: number;
   live: ReturnType<typeof useLiveAnswer>;
   edit: ReturnType<typeof useMessageEdit>;
   work: ReturnType<typeof useWorkGate>;
@@ -77,7 +75,7 @@ export function useAttemptMutations({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const { streamingMessage, stream, requestAnchor, cancelAnchor, releaseAnchor } = live;
+  const { stream, requestAnchor, cancelAnchor, releaseAnchor } = live;
   const {
     activeEditingMessage,
     editResearchEnabled,
@@ -376,27 +374,6 @@ export function useAttemptMutations({
   const lastAssistantId = [...data.messages].toReversed().find((m) => m.role === "assistant")?.id;
   const generating =
     sendMutation.isPending || answerMutation.isPending || stream.status === "streaming";
-  // What may still be writing to a document: a row the server says is streaming,
-  // or a generation this client just started. Deliberately not `generating`,
-  // whose stream status stays "streaming" while the smoothed text drains long
-  // after the answer is complete.
-  const generationRequested =
-    sendMutation.isPending ||
-    answerMutation.isPending ||
-    retryMutation.isPending ||
-    resumeMutation.isPending ||
-    editMutation.isPending;
-  // The request settles before the refetch that reports the row it started, and
-  // an unlocked frame in that gap flickers the panel. Hold from the request
-  // until either the row appears or a later read proves there is none.
-  const [awaitingGeneration, setAwaitingGeneration] = useState<number | null>(null);
-  if (generationRequested && awaitingGeneration === null) setAwaitingGeneration(dataUpdatedAt);
-  else if (
-    !generationRequested &&
-    awaitingGeneration !== null &&
-    (streamingMessage !== undefined || dataUpdatedAt > awaitingGeneration)
-  )
-    setAwaitingGeneration(null);
   const mutationPending =
     answerMutation.isPending ||
     questionNeedsRefresh ||
