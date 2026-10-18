@@ -4,7 +4,7 @@ import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import type { UnattendedGrant } from "../../consent.ts";
 import type { AdapterFailure } from "../../server/adapter.ts";
 import type { IntegrationApprovals } from "../../server/approvals.ts";
-import type { ConnectedSession } from "../../server/service.ts";
+import type { ConnectedSession } from "../../server/credentials.ts";
 import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
 import { outlookManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";

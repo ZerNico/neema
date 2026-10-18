@@ -32,7 +32,7 @@ import type {
   PreparedCall,
 } from "./adapter.ts";
 import type { IntegrationApprovals } from "./approvals.ts";
-import type { ConnectedSession } from "./service.ts";
+import type { ConnectedSession } from "./credentials.ts";
 import type { IntegrationAuthFailed } from "../errors.ts";
 
 export interface OfferedIntegration {
