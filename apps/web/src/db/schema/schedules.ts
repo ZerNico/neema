@@ -122,5 +122,6 @@ export const scheduleRuns = pgTable(
       .on(t.firedAt)
       .where(sql`${t.settledAt} is null`),
     index("schedule_runs_message_idx").on(t.messageId),
+    index("schedule_runs_conversation_idx").on(t.conversationId),
   ],
 );

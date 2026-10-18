@@ -69,7 +69,10 @@ export const skillRevisions = pgTable(
     ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("skill_revisions_number_idx").on(t.skillId, t.revision)],
+  (t) => [
+    uniqueIndex("skill_revisions_number_idx").on(t.skillId, t.revision),
+    index("skill_revisions_baseline_idx").on(t.baselineRevisionId),
+  ],
 );
 
 export const skillFiles = pgTable(
