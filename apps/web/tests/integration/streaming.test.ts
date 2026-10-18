@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { PgClient } from "@effect/sql-pg";
 import {
   Deferred,
   Duration,
@@ -10,7 +9,6 @@ import {
   Layer,
   ManagedRuntime,
   Option,
-  Redacted,
   Schema,
   Stream,
 } from "effect";
@@ -48,12 +46,10 @@ import {
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
-import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import {
   CustomToolRuntime,
   type CustomToolRunResult,
@@ -61,9 +57,6 @@ import {
 import { toMarkdown } from "~/modules/documents/editor/markdown.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
-import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
-import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -82,10 +75,8 @@ import {
 import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { GenerationFence, QueueSweepInterval } from "~/modules/chat/server/generation-fence.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { SCHEDULE_AUTHORING_SKILL } from "~/modules/skills/bundled/index.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { hermesToolCalls } from "~/modules/providers/server/hermes-tools.ts";
@@ -97,12 +88,7 @@ import {
 import { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
-import {
-  FakeDocumentParser,
-  FakeWebSearch,
-  FakeUrlReader,
-  NoIntegrations,
-} from "./unused-services.ts";
+import { FakeWebSearch } from "./unused-services.ts";
 import { Db } from "~/server/db.ts";
 import { outlastGrace } from "./purge.ts";
 import { ImageFetcher, ImageFetchFailed } from "~/modules/genui/server/image-fetcher.ts";
@@ -110,23 +96,12 @@ import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-s
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
 import { routeKey } from "~/modules/genui/extract.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
-import { FakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { engineLayer } from "./engine-harness.ts";
 
 // ProviderRepo decrypts stored keys through KeyCipher, which reads this.
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-
-// Knowledge-backed generations are exercised in knowledge.test.ts; here no
-// message carries a manifest, so the session is never opened.
-const FakeKnowledge = Layer.mergeAll(
-  Layer.succeed(KnowledgeSearch, {
-    search: () => Effect.die("knowledge search is not part of this suite"),
-    session: () => Effect.die("knowledge session is not part of this suite"),
-  } as never),
-  Layer.succeed(KnowledgeService, {} as never),
-);
 
 /** Image search for ```ui blocks; unset means web search is unavailable. */
 let imageSearch: ((query: string) => ReadonlyArray<string>) | undefined;
@@ -313,13 +288,7 @@ const authoringTool = (
 };
 
 // Deterministic fake AI provider: streams 5 words with a small delay.
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   // Titles are not exercised here; the stream engine never calls this.
   generateText: () => Effect.die("no title generation in these tests"),
   streamChat: (input) =>
@@ -387,33 +356,13 @@ const FakeGateway = Layer.succeed(AiGateway, {
         ),
       );
     }),
-});
+} satisfies Partial<AiGateway["Service"]>;
 
 beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
 
-  const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 5 });
-  const InfraLayer = Db.layer.pipe(Layer.provideMerge(PgLive));
-  // ChatRepo reconciles attachment claims, so AttachmentRepo sits under it.
-  const ReposLayer = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    IntegrationRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    KnowledgeRepo.layer,
-    ProviderRepo.layer,
-    ScheduleRepo.layer,
-    ToolsRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(InfraLayer),
-  );
-  const EngineCore = Layer.mergeAll(
-    FakeGateway,
-    FakeKnowledge,
+  const services = Layer.mergeAll(
     ImageSearchingWebSearch,
     Layer.succeed(MapLookups, {
       geocode: (_services, query) =>
@@ -448,33 +397,16 @@ beforeAll(async () => {
               });
         }),
     }),
-    FakeUrlReader,
     ImageBlobStore,
-    FakeDocumentParser,
     Layer.succeed(CustomToolRuntime, {
       inspect: () => Effect.die("no custom tool builds in these tests"),
       run: (input) =>
         customToolRun ? customToolRun(input) : Effect.die("no custom tool calls in these tests"),
     }),
-    FakeMemoryService,
-    NoIntegrations,
-    ExternalCompletion.layer,
-    SyncBus.layer,
-    Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-      Layer.provideMerge(SyncBus.layer),
-    ),
-  ).pipe(Layer.provideMerge(ReposLayer));
-  const EngineLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      KeptWorkingFiles.layer.pipe(
-        Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineCore))),
-      ),
-    ),
   );
   // No background sweep: tests that assert queue state would otherwise race a
   // start nobody asked for. Settled hooks and explicit dispatch still run.
-  const AppLayer = ChatService.layer.pipe(
-    Layer.provideMerge(EngineLayer),
+  const AppLayer = engineLayer(url, { gateway, services }).pipe(
     Layer.provide(Layer.succeed(QueueSweepInterval, null)),
   );
   runtime = ManagedRuntime.make(AppLayer);
