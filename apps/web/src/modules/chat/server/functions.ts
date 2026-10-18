@@ -265,6 +265,8 @@ const desktopDispatch = (
     desktopCommands?: boolean;
     desktopBrowser?: boolean;
     desktopExecutorId?: string;
+    desktopMachineId?: string;
+    desktopMachineName?: string;
   },
   deviceSessionId: string,
 ) =>
@@ -275,6 +277,8 @@ const desktopDispatch = (
         desktopCommands: data.desktopCommands,
         desktopBrowser: data.desktopBrowser,
         desktopExecutorId: data.desktopExecutorId,
+        desktopMachineId: data.desktopMachineId,
+        desktopMachineName: data.desktopMachineName,
         deviceSessionId,
       }
     : undefined;

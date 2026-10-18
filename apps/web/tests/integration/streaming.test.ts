@@ -5188,12 +5188,25 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: chosen.id,
-          desktop: { fromDesktop: true, desktopExecutorId: "executor-now" },
+          desktop: {
+            fromDesktop: true,
+            desktopExecutorId: "executor-now",
+            desktopMachineId: "machine-b",
+            desktopMachineName: "Second Mac",
+          },
         });
         const next = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
         yield* waitForAnswer(next.id);
+        const [stamp] = yield* (yield* Db)
+          .select({
+            id: messageGenerationConfig.desktopMachineId,
+            name: messageGenerationConfig.desktopMachineName,
+          })
+          .from(messageGenerationConfig)
+          .where(eq(messageGenerationConfig.messageId, next.id));
         return {
           sent,
+          stamp,
           stopped: yield* repo.getMessage(seed.assistant.id),
           transcript: (yield* repo.listMessages(seed.conversation.id)).map(
             (message) => `${message.role}:${message.status}:${message.content.slice(0, 17)}`,
@@ -5204,6 +5217,8 @@ describe("queued turns", () => {
     );
 
     expect(result.sent).toEqual({ started: true });
+    // The attempt names the machine that ran it, as every other Work start does.
+    expect(result.stamp).toEqual({ id: "machine-b", name: "Second Mac" });
     // Stopped, keeping what it had written.
     expect(result.stopped?.status).toBe("aborted");
     // The gate holds the second word, so only the first was written.

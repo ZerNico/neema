@@ -142,6 +142,9 @@ export type DesktopDispatch = {
   desktopCommands?: boolean | undefined;
   desktopBrowser?: boolean | undefined;
   desktopExecutorId: string;
+  /** Which machine runs it, so the chat names where its files are. */
+  desktopMachineId?: string | undefined;
+  desktopMachineName?: string | undefined;
   deviceSessionId?: string | undefined;
 };
 
@@ -1079,6 +1082,8 @@ function makeChatService() {
               desktopBrowser: input.desktop?.desktopBrowser,
               fromDesktop: input.desktop?.fromDesktop,
               desktopExecutorId: input.desktop?.desktopExecutorId,
+              desktopMachineId: input.desktop?.desktopMachineId,
+              desktopMachineName: input.desktop?.desktopMachineName,
             }),
         });
         // A replacement or reordered head needs fresh validation on the next dispatch.

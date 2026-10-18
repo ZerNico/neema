@@ -112,6 +112,8 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     staleTime: Infinity,
   });
   const executorId = session.data?.id;
+  const machineId = session.data?.machineId;
+  const machineName = session.data?.machineName;
   const work = useQuery({
     queryKey: ["desktop-work", executorId],
     enabled: !!client && !!executorId,
@@ -293,13 +295,21 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       void Effect.runPromise(client.folderStatus({ conversationId }))
         .then((status) =>
           dispatchQueuedMessage({
-            data: { conversationId, ...sendFieldsFor(status), desktopExecutorId: executorId },
+            data: {
+              conversationId,
+              ...sendFieldsFor(status),
+              desktopExecutorId: executorId,
+              // Which machine runs the answer, as every other Work start says.
+              ...(machineId && machineName
+                ? { desktopMachineId: machineId, desktopMachineName: machineName }
+                : {}),
+            },
           }),
         )
         .catch((error: unknown) => console.error("Could not start queued work", error))
         .finally(() => starting.current.delete(conversationId));
     }
-  }, [client, executorId, reconciled, work.data]);
+  }, [client, executorId, machineId, machineName, reconciled, work.data]);
 
   useEffect(() => {
     if (!client) return;
