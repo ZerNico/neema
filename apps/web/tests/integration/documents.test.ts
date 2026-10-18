@@ -168,6 +168,21 @@ const seenNow = (userId: string, document: Pick<EditableDocument, "id">) =>
       ),
   );
 /** A person's editor on the document, opened from its live feed like the panel's. */
+/** An editor's live feed, open until the returned fiber is interrupted, as a tab's is. */
+const openFeed = async (userId: string, documentId: string, clientId: string) => {
+  const feed = await service((s) =>
+    s.subscribe(userId, documentId, { sessionId: userId, revision: 0, clientId }),
+  );
+  const ready = Deferred.makeUnsafe<void>();
+  const fiber = Effect.runFork(
+    Stream.runForEach(feed!, (frame) =>
+      frame.type === "comments" ? Deferred.succeed(ready, undefined) : Effect.void,
+    ),
+  );
+  await Effect.runPromise(Deferred.await(ready));
+  return fiber;
+};
+
 const openEditor = async (userId: string, document: Pick<EditableDocument, "id">) => {
   const editor = await collabEditor(run, userId, document.id);
   if (!editor) throw new Error("expected a feed");
@@ -443,6 +458,7 @@ describe("person and model writing together", () => {
       revision: 0,
       user: { name: "Ada", color: "#2563eb", colorLight: "#2563eb33" },
     };
+    const firstFeed = await openFeed(owner, created.id, first.clientId);
     await service((s) =>
       s.push(owner, { documentId: created.id, clientId: first.clientId, revision: 0, presence }),
     );
@@ -462,6 +478,24 @@ describe("person and model writing together", () => {
       clientId: first.clientId,
       presence: relayed,
     });
+    // Once its tab's feed closes, a late cursor from it is not kept.
+    await Effect.runPromise(Fiber.interrupt(firstFeed));
+    await service((s) =>
+      s.push(owner, { documentId: created.id, clientId: first.clientId, revision: 0, presence }),
+    );
+    // A cursor kept for it would be the third frame a new feed opens with;
+    // a live editor's cursor is what comes third instead.
+    await openFeed(owner, created.id, "probe");
+    await service((s) =>
+      s.push(owner, { documentId: created.id, clientId: "probe", revision: 0, presence }),
+    );
+    const afterClose = await service((s) =>
+      s.subscribe(owner, created.id, { sessionId: owner, revision: 0, clientId: null }),
+    );
+    const reopened = [
+      ...(await Effect.runPromise(afterClose!.pipe(Stream.take(3), Stream.runCollect))),
+    ] as DocumentFrame[];
+    expect(reopened[2]).toMatchObject({ type: "presence", clientId: "probe" });
   });
 
   it("refuses a resent batch instead of storing it twice", async () => {
@@ -752,6 +786,7 @@ describe("ownership, limits and sync", () => {
       }),
     );
     const received = Effect.runFork(feed!.pipe(Stream.take(3), Stream.runCollect));
+    await openFeed(owner, created.id, "forger");
     await service((s) =>
       s.push(owner, {
         documentId: created.id,

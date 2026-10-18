@@ -120,6 +120,11 @@ interface Entry {
    * id as its confirmations, so a step under another person's id would desync them.
    */
   readonly clients: Map<string, string>;
+  /**
+   * Open feeds per client id. A caret is kept only while its feed is open, so
+   * a push landing after its tab left cannot leave one behind for good.
+   */
+  readonly feeds: Map<string, number>;
   comments: DocumentComment[];
   readonly frames: PubSub.PubSub<DocumentFrame>;
   readonly conversationId: string | null;
@@ -564,6 +569,7 @@ export class DocumentService extends Context.Service<
             })),
             revision: state.document.revision,
             presence: new Map(),
+            feeds: new Map(),
             clients: new Map(
               state.steps.flatMap((row) =>
                 row.userId === null || reservedClient(row.clientId)
@@ -1050,7 +1056,7 @@ export class DocumentService extends Context.Service<
             // Refused before the steps touch anything: a reader's cursor may move, their text may not.
             if (parsed.steps && !document.canEdit)
               return yield* new DocumentRejected({ reason: "this document is read-only for you" });
-            if (parsed.presence) {
+            if (parsed.presence && entry.feeds.has(parsed.clientId)) {
               // Labelled by who is signed in, never by what the client says.
               const presence = {
                 ...parsed.presence,
@@ -1134,11 +1140,17 @@ export class DocumentService extends Context.Service<
               // no step falls between the two.
               const subscription = yield* PubSub.subscribe(entry.frames);
               entry.subscribers++;
+              if (clientId !== null)
+                entry.feeds.set(clientId, (entry.feeds.get(clientId) ?? 0) + 1);
               yield* Effect.addFinalizer(() =>
                 Effect.gen(function* () {
                   entry.subscribers--;
                   entry.touched = yield* Clock.currentTimeMillis;
-                  if (clientId === null || !entry.presence.delete(clientId)) return;
+                  if (clientId === null) return;
+                  const open = (entry.feeds.get(clientId) ?? 1) - 1;
+                  if (open > 0) return void entry.feeds.set(clientId, open);
+                  entry.feeds.delete(clientId);
+                  if (!entry.presence.delete(clientId)) return;
                   yield* PubSub.publish(entry.frames, {
                     type: "presence",
                     clientId,
