@@ -58,6 +58,16 @@ export const decideAccount = createServerFn({ method: "POST" })
           status: data.status,
           decidedBy: context.session.user.id,
         }),
+      ).pipe(
+        Effect.flatMap((decided) =>
+          decided
+            ? Effect.void
+            : Effect.die(
+                new Response("You can’t decide on your own account or the owner’s", {
+                  status: 409,
+                }),
+              ),
+        ),
       ),
     ),
   );

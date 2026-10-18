@@ -38,11 +38,15 @@ export class SignupRepo extends Context.Service<
     statusOf(userId: string): Effect.Effect<ApprovalStatus | null>;
     record(input: { userId: string; status: ApprovalStatus }): Effect.Effect<void>;
     listPending(): Effect.Effect<PendingAccount[]>;
+    /**
+     * False when refused: nobody decides on their own account, and the
+     * bootstrap owner cannot be rejected, since either could leave no admin.
+     */
     decide(input: {
       userId: string;
       status: "approved" | "rejected";
       decidedBy: string;
-    }): Effect.Effect<void>;
+    }): Effect.Effect<boolean>;
   }
 >()("chat/auth/SignupRepo") {
   static readonly layer = Layer.effect(
@@ -160,10 +164,18 @@ export class SignupRepo extends Context.Service<
         }),
 
         decide: Effect.fn("SignupRepo.decide")(function* ({ userId, status, decidedBy }) {
-          yield* db
+          if (userId === decidedBy) return false;
+          return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                if (!(yield* lockAccount(tx, userId)).length) return;
+                if (!(yield* lockAccount(tx, userId)).length) return true;
+                if (status === "rejected") {
+                  const [claim] = yield* tx
+                    .select({ ownerId: signupBootstrap.ownerId })
+                    .from(signupBootstrap)
+                    .where(eq(signupBootstrap.id, AUTH_SETTINGS_ID));
+                  if (claim?.ownerId === userId) return false;
+                }
                 yield* reconcileApproval(tx, userId);
                 const changed = yield* tx
                   .update(userApprovals)
@@ -176,6 +188,7 @@ export class SignupRepo extends Context.Service<
                     userId,
                     event: { type: "account.approval.changed" },
                   });
+                return true;
               }),
             )
             .pipe(Effect.orDie);

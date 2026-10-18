@@ -507,9 +507,10 @@ describe("session-free account eligibility", () => {
       .set({ banExpires: new Date(0) })
       .where(eq(user.id, id));
     expect(await eligible(id)).toBe(true);
-    await signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: id }));
+    const admin = await insertUser("background-admin");
+    await signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: admin }));
     expect(await eligible(id)).toBe(false);
-    await signups((repo) => repo.decide({ userId: id, status: "approved", decidedBy: id }));
+    await signups((repo) => repo.decide({ userId: id, status: "approved", decidedBy: admin }));
     expect(await eligible(id)).toBe(true);
   });
 
@@ -550,6 +551,7 @@ describe("session-free account eligibility", () => {
     "orders acceptance before an overlapping %s",
     async (mutation) => {
       const id = await insertUser(`ordered-${mutation}`);
+      const admin = await insertUser(`ordered-${mutation}-admin`);
       await signups((repo) => repo.record({ userId: id, status: "approved" }));
       const entered = Effect.runSync(Deferred.make<void>());
       const release = Effect.runSync(Deferred.make<void>());
@@ -567,7 +569,7 @@ describe("session-free account eligibility", () => {
       await runtime.runPromise(Deferred.await(entered));
       const changed =
         mutation === "rejection"
-          ? signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: id }))
+          ? signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: admin }))
           : db.update(user).set({ banned: true }).where(eq(user.id, id)).execute();
       try {
         await runtime.runPromise(
@@ -617,6 +619,22 @@ describe("an admin deciding on a waiting account", () => {
     expect(await statusOf("wanted")).toBe("approved");
     // Kept, so the same person cannot sign up again and reappear in the queue.
     expect(await statusOf("unwanted")).toBe("rejected");
+  });
+
+  it("refuses a decision on the decider's own account, and rejecting the owner", async () => {
+    const ownerId = (await signUp("founder")).body.user.id as string;
+    const other = await insertUser("second-admin");
+    await signups((repo) => repo.record({ userId: other, status: "approved" }));
+    expect(
+      await signups((repo) => repo.decide({ userId: other, status: "rejected", decidedBy: other })),
+    ).toBe(false);
+    expect(
+      await signups((repo) =>
+        repo.decide({ userId: ownerId, status: "rejected", decidedBy: other }),
+      ),
+    ).toBe(false);
+    expect(await statusOf("founder")).toBe("approved");
+    expect(await runtime.runPromise(accountEligible(other))).toBe(true);
   });
 
   it("drops the approval row with the account it belongs to", async () => {
