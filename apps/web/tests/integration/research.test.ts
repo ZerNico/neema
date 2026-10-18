@@ -1,6 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
-import { PgClient } from "@effect/sql-pg";
-import { Deferred, Duration, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Deferred, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
@@ -15,67 +14,38 @@ import {
   usageEvents,
 } from "~/db/schema/index.ts";
 import { RESEARCH_LIMITS, researchOutputCaps } from "~/modules/chat/server/research/budget.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { computeBudget, estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import {
   projectResearchProgress,
   type ResearchPhase,
   type ResearchTaskProgress,
 } from "~/modules/chat/research-schema.ts";
-import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
-import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
-import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import {
   AiGateway,
   ProviderContextOverflow,
   ProviderUnreachable,
   type ChatStreamPart,
 } from "~/modules/providers/server/gateway.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchFailed, SearchProviders } from "~/modules/tools/server/search-providers/chain.ts";
 import { fakeSearchProviders } from "../fixtures/search-providers.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import {
-  FakeBlobStore,
-  FakeDocumentParser,
-  FakeCustomToolRuntime,
-  NoIntegrations,
-} from "./unused-services.ts";
-import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { Db } from "~/server/db.ts";
 import { purgeConversation } from "./purge.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { engineLayer } from "./engine-harness.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-// Knowledge-backed generations are exercised in knowledge.test.ts; here no
-// message carries a manifest, so the session is never opened.
-const FakeKnowledge = Layer.mergeAll(
-  Layer.succeed(KnowledgeSearch, {
-    search: () => Effect.die("knowledge search is not part of this suite"),
-    session: () => Effect.die("knowledge session is not part of this suite"),
-  } as never),
-  Layer.succeed(KnowledgeService, {} as never),
-);
-
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
   | ChatRepo
@@ -402,13 +372,7 @@ const streamChat: AiGateway["Service"]["streamChat"] = (input) =>
       finish(reportFinishReason),
     );
   });
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  // These suites never embed; a call here means the code under test grew a
-  // provider dependency the fake was not asked to model.
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   // The real gateway folds its own stream, so a side generation goes through
   // exactly the same scripted turn as everything else here.
   generateText: (input) =>
@@ -423,7 +387,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
             : state,
     ).pipe(Effect.map((state) => ({ ...state, finishMetadata: {} }))),
   streamChat,
-});
+} satisfies Partial<AiGateway["Service"]>;
 // Exercise the real config, handler and budget admission; only upstream search is fake.
 const FakeSearchBackend = Layer.succeed(
   SearchProviders,
@@ -467,48 +431,15 @@ const FakeReader = Layer.succeed(UrlReaderExecutor, {
 beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
-  const infra = Db.layer.pipe(
-    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
-  );
-  const repos = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    IntegrationRepo.layer,
-    AgentRepo.layer,
-    ScheduleRepo.layer,
-    ChatRepo.layer,
-    KnowledgeRepo.layer,
-    MemoryRepo.layer,
-    ProviderRepo.layer,
-    ToolsRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer)),
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(infra),
-  );
-  const engine = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        FakeKnowledge,
-        WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
-        FakeReader,
-        FakeBlobStore,
-        FakeDocumentParser,
-        FakeCustomToolRuntime,
-        NoIntegrations,
-        MemoryService.layer.pipe(Layer.provide(SyncBus.layer)),
-        ExternalCompletion.layer,
-        SyncBus.layer,
-        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-          Layer.provideMerge(SyncBus.layer),
-        ),
-      ).pipe(Layer.provideMerge(repos)),
+  const app = engineLayer(url, {
+    maxConnections: 8,
+    gateway,
+    services: Layer.mergeAll(
+      WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
+      FakeReader,
+      MemoryService.layer,
     ),
-  );
-  const app = ChatService.layer.pipe(
-    Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(engine))),
-  );
+  });
   runtime = ManagedRuntime.make(app);
   remote = ManagedRuntime.make(app);
   modelId = uuidv7();
