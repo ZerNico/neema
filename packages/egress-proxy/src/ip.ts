@@ -32,4 +32,6 @@ export function carriedIPv4(words: Words): string | undefined {
     return dotted(words[6], words[7]);
   }
   if (words[0] === 0x2002) return dotted(words[1], words[2]);
+  // Teredo 2001::/32 carries its client's address inverted in the last 32 bits.
+  if (words[0] === 0x2001 && words[1] === 0) return dotted(words[6] ^ 0xffff, words[7] ^ 0xffff);
 }

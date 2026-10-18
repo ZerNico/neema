@@ -206,6 +206,9 @@ importers:
       '@chat/desktop-rpc':
         specifier: workspace:*
         version: link:../../packages/desktop-rpc
+      '@chat/egress-proxy':
+        specifier: workspace:*
+        version: link:../../packages/egress-proxy
       '@chat/model-client':
         specifier: workspace:*
         version: link:../../packages/model-client

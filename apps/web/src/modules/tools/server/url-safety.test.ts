@@ -49,6 +49,13 @@ describe("assertPublicHttpUrl", () => {
   );
   it.effect("rejects nat64 ipv6 private", () => rejects("http://[64:ff9b::192.168.0.1]/"));
   it.effect("rejects 6to4 ipv6 private", () => rejects("http://[2002:c0a8:1::1]/"));
+  it.effect("rejects Azure's platform endpoint", () => rejects("http://168.63.129.16/"));
+  it.effect("rejects benchmarking networks", () => rejects("http://198.18.0.1/"));
+  it.effect("rejects local-use nat64", () => rejects("http://[64:ff9b:1::8.8.8.8]/"));
+  it.effect("rejects teredo carrying a private client", () =>
+    // 192.168.0.1 inverted: 3f57:fffe.
+    rejects("http://[2001:0:4136:e378:8000:63bf:3f57:fffe]/"),
+  );
   it.effect("rejects single-label hostnames", () => rejects("http://intranet/"));
   it.effect("rejects invalid urls", () => rejects("not a url"));
 

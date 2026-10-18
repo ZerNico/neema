@@ -55,8 +55,9 @@ knows nothing about chats, sandboxes or Electron: the desktop gives it a token p
 Loopback, link-local, multicast, cloud metadata endpoints and the machine's own interface
 addresses are refused for every name and literal, whatever the grant. Private networks are refused
 unless the grant is a private-network grant for that `host:port`. IPv4 carried inside IPv6
-(mapped, NAT64, 6to4) is judged as IPv4. If the machine's addresses cannot be listed, the
-connection fails closed.
+(mapped, NAT64, 6to4, Teredo) is judged as IPv4. If the machine's addresses cannot be listed, the
+connection fails closed. The server's own fetches (`url-safety.ts`) judge addresses with this
+same guard, with no grant and no interfaces, so the two ways out cannot disagree.
 
 ## What it does not do
 

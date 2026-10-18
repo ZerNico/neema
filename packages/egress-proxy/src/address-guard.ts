@@ -28,8 +28,8 @@ function identities(address: string): string[] {
 }
 
 function ipv4Refusal(address: string, privateNetwork: boolean): string | null {
-  const [a, b] = address.split(".").map(Number);
-  if (a === undefined || b === undefined) return "invalid address";
+  const [a, b, c] = address.split(".").map(Number);
+  if (a === undefined || b === undefined || c === undefined) return "invalid address";
   if (a === 127) return "loopback";
   if (a === 0) return "unspecified / this-network";
   if (a === 169 && b === 254) return "link-local";
@@ -37,12 +37,16 @@ function ipv4Refusal(address: string, privateNetwork: boolean): string | null {
   if (address === "255.255.255.255") return "broadcast";
   if (a >= 240) return "reserved";
   if (metadata4.has(address)) return "cloud metadata / platform endpoint";
+  // Only the /24 is special; the rest of 192.0/16 is public (WordPress.com serves from it).
+  if (a === 192 && b === 0 && c === 0) return "reserved";
   if (
     !privateNetwork &&
     (a === 10 ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127))
+      (a === 100 && b >= 64 && b <= 127) ||
+      // Benchmarking networks, which labs and some appliances use privately.
+      (a === 198 && (b === 18 || b === 19)))
   )
     return PRIVATE_NETWORK;
   return null;
