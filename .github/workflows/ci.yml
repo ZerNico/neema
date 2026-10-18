@@ -63,8 +63,8 @@ jobs:
         run: pnpm --filter @chat/web exec vitest run --project unit --project ui
       - name: Model client tests
         run: pnpm --filter @chat/model-client test
-      - name: Desktop and RPC tests
-        run: pnpm --filter @chat/desktop --filter @chat/desktop-rpc test
+      - name: Desktop, RPC and egress proxy tests
+        run: pnpm --filter @chat/desktop --filter @chat/desktop-rpc --filter @chat/egress-proxy test
       - name: Sheet package tests
         run: pnpm --filter @chat/sheet test
 
