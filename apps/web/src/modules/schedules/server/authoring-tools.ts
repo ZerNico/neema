@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { makeDraftSession } from "~/modules/drafts/server/authoring-tools.ts";
 import { EntityId } from "~/entity-id.ts";
@@ -15,6 +14,7 @@ import { ScheduleDraftActivityResult } from "../tool-schema.ts";
 import { SCHEDULE_AUTHORING_POLICY } from "./authoring-prompt.ts";
 import { validateCron } from "./cron.ts";
 import type { ScheduleDraftService } from "./draft-service.ts";
+import type { DbTx } from "~/server/db.ts";
 
 const DraftSummary = Schema.Struct({
   draftId: EntityId,

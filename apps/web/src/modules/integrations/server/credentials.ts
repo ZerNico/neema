@@ -2,8 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { Effect, Semaphore } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
 import {
   IntegrationAuthFailed,

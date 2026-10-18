@@ -1,6 +1,5 @@
 import { leaseFor } from "~/server/sql.ts";
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -26,7 +25,7 @@ import { ownedConversationById } from "~/modules/chat/server/owned-conversation.
 import type { ToolPermission } from "../consent.ts";
 import type { McpToolEntry } from "../mcp/catalog.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 
 export type IntegrationConfigRow = typeof integrationConfigs.$inferSelect;
 export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;

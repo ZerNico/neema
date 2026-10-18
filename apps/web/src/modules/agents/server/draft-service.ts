@@ -6,8 +6,7 @@ import {
   type DraftKindConfig,
 } from "~/modules/drafts/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import {
   EMPTY_AGENT_DRAFT,

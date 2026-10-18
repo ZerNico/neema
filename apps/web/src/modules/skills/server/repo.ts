@@ -11,8 +11,7 @@ import {
 } from "~/db/schema/index.ts";
 import type { SkillSource } from "~/db/schema/skills.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";

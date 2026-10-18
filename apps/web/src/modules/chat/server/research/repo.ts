@@ -14,8 +14,7 @@ import {
   researchCalls,
   usageEvents,
 } from "~/db/schema/index.ts";
-import type { Db } from "~/server/db.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import type { Db, DbTx } from "~/server/db.ts";
 import { InvalidMessage } from "../../errors.ts";
 import { projectResearchProgress, type ResearchProgress } from "../../research-schema.ts";
 import {

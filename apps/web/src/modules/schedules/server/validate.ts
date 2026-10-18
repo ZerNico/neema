@@ -14,12 +14,12 @@ import { parseMailbox } from "~/modules/integrations/mailbox.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { skillReadable } from "~/modules/skills/server/access.ts";
 import { ScheduleRejected, ScheduleSettings, type ScheduleNotify } from "../schema.ts";
 import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
+import type { DbTx } from "~/server/db.ts";
 
 export type ValidatedSchedule = Omit<
   ScheduleSettings,

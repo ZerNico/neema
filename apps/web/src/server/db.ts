@@ -20,3 +20,6 @@ const makeDb = makeWithDefaults({ relations });
 export class Db extends Context.Service<Db, Effect.Success<typeof makeDb>>()("chat/server/Db") {
   static readonly layer: Layer.Layer<Db, never, PgClient.PgClient> = Layer.effect(Db, makeDb);
 }
+
+/** The transaction handle `Db.transaction` hands its callback. */
+export type DbTx = Parameters<Parameters<Db["Service"]["transaction"]>[0]>[0];

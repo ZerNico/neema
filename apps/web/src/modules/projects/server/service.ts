@@ -18,10 +18,9 @@ import {
   ownedConversationById,
 } from "~/modules/chat/server/owned-conversation.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   PROJECT_LIMITS,

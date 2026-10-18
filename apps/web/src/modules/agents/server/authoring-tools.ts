@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { SkillRepo } from "~/modules/skills/server/repo.ts";
@@ -17,6 +16,7 @@ import { AgentDraftActivityResult } from "../tool-schema.ts";
 import { AGENT_AUTHORING_POLICY } from "./authoring-prompt.ts";
 import type { AgentDraftService } from "./draft-service.ts";
 import type { AgentRepo } from "./repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 const DraftSummary = Schema.Struct({
   draftId: EntityId,

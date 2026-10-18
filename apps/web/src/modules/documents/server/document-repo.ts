@@ -13,10 +13,9 @@ import {
   ownedConversation,
   ownedConversationById,
 } from "~/modules/chat/server/owned-conversation.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import {
   DocumentNotAvailable,
   DocumentRejected,

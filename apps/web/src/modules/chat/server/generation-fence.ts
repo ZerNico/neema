@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { Context, Duration, Effect } from "effect";
 import { conversations, messages } from "~/db/schema/chat.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 export interface GenerationIdentity {
   userId: string;

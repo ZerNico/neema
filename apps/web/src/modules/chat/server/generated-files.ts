@@ -24,7 +24,7 @@ import {
   lockGenerationOutput,
   type GenerationIdentity,
 } from "./generation-fence.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /**
  * The next free position among everything the message holds. Answer files and

@@ -1,7 +1,6 @@
 import { Context, Effect, Layer, Schema, type SchemaAST } from "effect";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import {
   DraftNotAvailable,
   DraftRejected,

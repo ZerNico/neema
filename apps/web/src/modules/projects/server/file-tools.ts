@@ -1,12 +1,12 @@
 import { Effect, Option, Schema } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { advertisedAs, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ProjectFileActivityResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import type { ProjectFileService } from "./project-files.ts";
 import { EntityId } from "~/entity-id.ts";
+import type { DbTx } from "~/server/db.ts";
 
 const Name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 const Version = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));

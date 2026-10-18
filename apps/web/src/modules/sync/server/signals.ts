@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncEnvelope } from "../events.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /**
  * Internal wakeups share the transport, never the browser event contract.

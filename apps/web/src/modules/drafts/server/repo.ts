@@ -6,8 +6,7 @@ import {
   ownedConversation,
   ownedConversationById,
 } from "~/modules/chat/server/owned-conversation.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { DraftNotAvailable, type ConversationDraft, type DraftKind } from "../draft-schema.ts";
 
 export type DraftRow = typeof conversationDrafts.$inferSelect;

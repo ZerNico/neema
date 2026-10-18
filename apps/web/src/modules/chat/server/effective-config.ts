@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import { resolveSkillManifest } from "~/modules/skills/server/repo.ts";
@@ -11,6 +10,7 @@ import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { COMPACTION_CONFIG, computeBudget } from "./compaction.ts";
 import type { GenerationConfig } from "./repo.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
+import type { DbTx } from "~/server/db.ts";
 
 export type KnowledgeMode = "none" | "context" | "retrieval";
 

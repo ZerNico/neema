@@ -10,9 +10,9 @@ import {
 import { extractUserUrls } from "~/modules/tools/server/user-urls.ts";
 import { messages, messageToolCalls } from "~/db/schema/index.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { InvalidMessage } from "../../errors.ts";
 import type { MessageRow } from "../repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 // Callers hold the conversation lock. Only one successful immutable batch can
 // own the immediately following structured user response.

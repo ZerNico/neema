@@ -10,7 +10,6 @@ import {
   messageKnowledgeVersions,
 } from "~/db/schema/index.ts";
 import { readKeptWorkingFiles } from "../kept-working-files.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import type {
   GenerationConfig,
   DraftSummary,
@@ -18,6 +17,7 @@ import type {
   ResolveError,
   ResolveGeneration,
 } from "../repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 const draftSummary = (draft: {
   id: string;

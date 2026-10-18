@@ -8,12 +8,12 @@ import {
   messages,
 } from "~/db/schema/index.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
-import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import type { AttachmentRejected } from "~/modules/attachments/errors.ts";
 import type { OfficeFamily } from "~/modules/office/names.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
 import {
   KEPT_WORKING_FILES_OFFERED,

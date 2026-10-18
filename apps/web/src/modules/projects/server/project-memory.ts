@@ -2,12 +2,11 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { projectMemories, user } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { hashMemoryContent } from "~/modules/memory/server/content-hash.ts";
 import { containsObviousSensitiveValue } from "~/modules/memory/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   PROJECT_MEMORY_LIMITS,

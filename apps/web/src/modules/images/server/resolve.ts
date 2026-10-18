@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
 import { agents, conversations } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { ProviderRepo, type ImageModelRow } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { IMAGE_GENERATION_TOOL, imageGenerationEnabled } from "../settings.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /** The image models this person may use now, in the admin's order; none while switched off. */
 export const availableImageModels = Effect.fn("images.availableImageModels")(function* (

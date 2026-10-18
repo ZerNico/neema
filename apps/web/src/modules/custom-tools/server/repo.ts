@@ -8,8 +8,7 @@ import {
   groupMembers,
   user,
 } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 import type {

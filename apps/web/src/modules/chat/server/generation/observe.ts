@@ -47,7 +47,6 @@ import { uuidv7 } from "uuidv7";
 import { addFinishUsage, providerCostOf } from "~/modules/analytics/server/usage.ts";
 import { formatFileRef, parseFileRef } from "../file-ref.ts";
 import { ToolFileActivity } from "../../tool-file-schema.ts";
-import { type DbTx } from "~/modules/attachments/server/repo.ts";
 import { SaveMemoryResult } from "~/modules/memory/server/memory-tool.ts";
 import { KnowledgeToolName, projectKnowledgeToolResult } from "~/modules/knowledge/tool-schema.ts";
 import { imageCallShape } from "~/modules/images/server/image-tool.ts";
@@ -76,6 +75,7 @@ import type { JsonValue } from "~/db/schema/providers.ts";
 import { json } from "./json.ts";
 import type { RoundEnv } from "./round.ts";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
+import type { DbTx } from "~/server/db.ts";
 
 type ToolFamily = ToolChunkEnvelope["family"];
 /**

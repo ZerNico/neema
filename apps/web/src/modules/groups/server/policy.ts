@@ -9,9 +9,8 @@ import {
 } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { activeAccountOf } from "~/modules/auth/server/account-eligibility.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import {
   ALL_CAPABILITIES,
   CAPABILITY_KEYS,

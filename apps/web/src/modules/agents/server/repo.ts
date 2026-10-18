@@ -13,10 +13,9 @@ import {
   user,
   agentIntegrations,
 } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
 import { skillReadable } from "~/modules/skills/server/access.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { AgentNotAvailable, AgentRejected } from "../errors.ts";

@@ -1,8 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { Duration, Effect, Schema } from "effect";
 import { AUTH_SETTINGS_ID, session, user, userApprovals } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 
 type DbClient = Db["Service"] | DbTx;
 

@@ -9,7 +9,6 @@ import {
   workTurnReservations,
 } from "~/db/schema/index.ts";
 import { ownedConversationById } from "../owned-conversation.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import {
   ConversationNotFound,
   NoActiveGeneration,
@@ -20,6 +19,7 @@ import { requireEligibleAccount } from "~/modules/auth/server/account-eligibilit
 import { turnMessagesOf, questionForMessage } from "./questions.ts";
 import type { RepoContext } from "./context.ts";
 import type { SteeredMessage, ChatRepo } from "../repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /** How many messages may wait behind one answer. */
 export const QUEUE_LIMIT = 10;

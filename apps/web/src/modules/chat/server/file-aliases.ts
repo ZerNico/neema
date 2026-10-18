@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import { conversations } from "~/db/schema/index.ts";
 import { ownedConversationById } from "./owned-conversation.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import type { Db } from "~/server/db.ts";
+import type { Db, DbTx } from "~/server/db.ts";
 
 /**
  * The attachment id a reference means in this chat. A branch maps its

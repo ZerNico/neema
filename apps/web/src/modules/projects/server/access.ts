@@ -1,10 +1,10 @@
 import { eq, sql, type SQL } from "drizzle-orm";
 import { Effect } from "effect";
 import { groupMembers, projectGroupGrants, projectMembers, projects } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { ProjectNotAvailable } from "../errors.ts";
 import type { ProjectRole, ResolvedProject } from "../schema.ts";
+import type { DbTx } from "~/server/db.ts";
 
 type Reader = Pick<DbTx, "select">;
 

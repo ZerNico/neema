@@ -2,14 +2,14 @@ import { Clock, Context, Duration, Effect, Layer, PubSub, Schedule, Schema, Stre
 import { Fragment, Node } from "@tiptap/pm/model";
 import { Step, Transform } from "@tiptap/pm/transform";
 import { uuidv7 } from "uuidv7";
-import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
+import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { attachmentWriter } from "~/modules/attachments/server/service.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import {
   adoptIds,
   blockIdOf,

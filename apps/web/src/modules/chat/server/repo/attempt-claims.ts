@@ -23,7 +23,6 @@ import {
 } from "~/db/schema/index.ts";
 import { ownedConversationById } from "../owned-conversation.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import {
   ConversationBusy,
   ConversationNotFound,
@@ -47,6 +46,7 @@ import type {
   HistorySnapshot,
   ChatRepo,
 } from "../repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boolean =>
   actual.length === expected.length &&

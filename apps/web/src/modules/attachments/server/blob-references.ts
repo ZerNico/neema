@@ -8,7 +8,7 @@ import {
   projectFileVersions,
   skillFiles,
 } from "~/db/schema/index.ts";
-import type { DbTx } from "./repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /**
  * Every reference writer/remover takes these locks before changing references.

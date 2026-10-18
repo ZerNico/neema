@@ -3,8 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { conversations, messages, scheduleRuns, schedules } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { answered, type SettledRun } from "../settled-run.ts";

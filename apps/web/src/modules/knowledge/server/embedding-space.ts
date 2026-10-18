@@ -3,9 +3,8 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
 import { tools, user } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { KnowledgeRejected } from "../errors.ts";
 import {
   DisableEmbeddingInput,

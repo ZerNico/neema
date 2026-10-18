@@ -15,8 +15,7 @@ import {
   knowledgeSources,
 } from "~/db/schema/index.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import type { CollectionSummary, KnowledgeDocument, KnowledgePassage } from "../schema.ts";
 import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";

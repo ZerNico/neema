@@ -49,7 +49,6 @@ import { makeToolFileResolver } from "../tool-files.ts";
 import { createWorkingFiles, type WorkingFiles } from "../working-files.ts";
 import { formatFileRef } from "../file-ref.ts";
 import { preparePublishFileTool } from "../publish-file.ts";
-import { type DbTx } from "~/modules/attachments/server/repo.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { prepareKnowledgeTools } from "~/modules/knowledge/server/tools.ts";
 import { KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
@@ -91,6 +90,7 @@ import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schem
 import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
 import type { GenerationDeps } from "./deps.ts";
 import type { GenerationSink } from "./sink.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /** Faces one answer's loaded skills may add to its previews. */
 const SKILL_FONT_FACES = 24;

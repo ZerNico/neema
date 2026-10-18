@@ -2,7 +2,7 @@ import { and, asc, eq, getColumnTable, inArray, lt, lte, or, sql } from "drizzle
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Duration, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import {
   attachmentBlobs,
   attachments,
@@ -29,9 +29,6 @@ export interface AttachmentAssociation {
 }
 
 export type AttachmentBlobRow = typeof attachmentBlobs.$inferSelect;
-
-/** The transaction handle `Db.transaction` hands its callback. */
-export type DbTx = Parameters<Parameters<Db["Service"]["transaction"]>[0]>[0];
 
 /** Attachment joined with its blob, everything the prompt builder needs. */
 export interface AttachmentWithBlob {

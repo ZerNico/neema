@@ -58,7 +58,6 @@ import type { ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { escapeLike } from "~/server/sql.ts";
 import { hashSource, MAX_UI_BLOCKS, scanUiFences } from "~/modules/genui/fences.ts";
 import {
@@ -96,6 +95,7 @@ import { branchMethods } from "./repo/branch.ts";
 import { freshLease, generationWriteMethods } from "./repo/generation-writes.ts";
 import { queueMethods, type QueueGate } from "./repo/queue.ts";
 import { workTurnMethods } from "./repo/work-turns.ts";
+import type { DbTx } from "~/server/db.ts";
 export { PLAIN_GENERATION } from "./repo/generation-config.ts";
 export { QUEUE_LIMIT, type QueueGate } from "./repo/queue.ts";
 export { INTERRUPTED_MESSAGE, joinChunks } from "./repo/generation-writes.ts";

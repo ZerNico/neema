@@ -1,8 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import { models, providers, tools } from "~/db/schema/index.ts";
-import type { Db } from "~/server/db.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import type { Db, DbTx } from "~/server/db.ts";
 import { KnowledgeSearchConfig, type EmbeddingConnection } from "../schema.ts";
 
 export const EMBEDDING_PREPROCESSING_REVISION = 1;

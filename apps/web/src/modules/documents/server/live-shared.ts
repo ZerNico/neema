@@ -1,11 +1,10 @@
 import { Effect, Semaphore } from "effect";
 import { eq } from "drizzle-orm";
 import { projects } from "~/db/schema/index.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { projectAudience, projectRole } from "~/modules/projects/server/access.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
-import type { Db } from "~/server/db.ts";
+import type { Db, DbTx } from "~/server/db.ts";
 import { uuidv7 } from "uuidv7";
 import {
   DOCUMENT_LIMITS,

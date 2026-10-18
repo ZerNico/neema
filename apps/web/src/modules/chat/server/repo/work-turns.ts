@@ -2,10 +2,10 @@ import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { conversations, messages, workTurnReservations } from "~/db/schema/index.ts";
 import { ownedConversationById } from "../owned-conversation.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { ConversationBusy, ConversationNotFound, InvalidMessage } from "../../errors.ts";
 import type { RepoContext } from "./context.ts";
 import type { ChatRepo } from "../repo.ts";
+import type { DbTx } from "~/server/db.ts";
 
 export const lockWorkTurn = (tx: DbTx, conversationId: string) =>
   tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${conversationId}, 94731))`);

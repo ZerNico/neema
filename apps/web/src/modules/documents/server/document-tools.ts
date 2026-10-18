@@ -1,7 +1,6 @@
 import type { Node } from "@tiptap/pm/model";
 import { Cause, Duration, Effect, Fiber, Result as EffectResult, Schema, Semaphore } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { advertisedAs, decodeToolInput, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { blockIdOf, plannedIds } from "../editor/block-ids.ts";
 import { placement, type TreeEdit } from "../editor/tree-edit.ts";
@@ -18,6 +17,7 @@ import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./documen
 import { readPartialObject, type PartialField } from "./partial-json.ts";
 import { titleFromFile, type ImportedText } from "./word-import.ts";
 import { EntityId } from "~/entity-id.ts";
+import type { DbTx } from "~/server/db.ts";
 
 /** A Word file read for a document to start from, its pictures already stored. */
 export interface WordDocumentFile {

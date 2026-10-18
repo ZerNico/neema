@@ -14,7 +14,6 @@ import {
   skills,
   usageEvents,
 } from "~/db/schema/index.ts";
-import { type DbTx } from "~/modules/attachments/server/repo.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
 import { resolveAttemptSkills } from "~/modules/chat/server/effective-config.ts";
@@ -27,7 +26,7 @@ import type {
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { engineLayer } from "./engine-harness.ts";
 

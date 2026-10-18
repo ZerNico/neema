@@ -16,11 +16,10 @@ import {
 import { classifyFile, sanitizeFileName } from "~/modules/attachments/server/validation.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
-import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { Db } from "~/server/db.ts";
+import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   PROJECT_FILE_LIMITS,
