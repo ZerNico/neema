@@ -240,8 +240,11 @@ export const messages = pgTable(
     // compaction boundaries are positions in exactly this sequence.
     index("messages_conversation_order_idx").on(t.conversationId, t.createdAt, t.id),
     index("messages_steered_into_idx").on(t.steeredIntoMessageId),
-    index("messages_streaming_lease_idx")
-      .on(t.generationLeaseUntil)
+    // Streaming rows are few, so this finds them for the reaper and the
+    // sidebar's "generating". It leaves the lease out on purpose: a renewal
+    // then changes no indexed column, and Postgres updates the row in place.
+    index("messages_streaming_idx")
+      .on(t.conversationId)
       .where(sql`${t.status} = 'streaming'`),
   ],
 );
