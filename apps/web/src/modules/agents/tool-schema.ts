@@ -1,5 +1,6 @@
-import { Option, Schema } from "effect";
+import { Option, Schema, Struct } from "effect";
 import type { Response } from "effect/unstable/ai";
+import { DraftSettings } from "./draft-schema.ts";
 
 export function redactAgentDraftPart(part: Response.AnyPart): Response.AnyPart {
   if (part.type !== "tool-call" && part.type !== "tool-result") return part;
@@ -30,19 +31,9 @@ export const AgentDraftToolOutcome = Schema.Literals([
   "unavailable",
 ]);
 const ActivityId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-const DraftField = Schema.Literals([
-  "name",
-  "description",
-  "icon",
-  "instructions",
-  "modelId",
-  "imageModelId",
-  "searchEnabled",
-  "planEnabled",
-  "starters",
-  "skillIds",
-  "collectionIds",
-]);
+/** Derived from the settings, so a new field cannot fail the result after the patch commits. */
+const DRAFT_FIELDS = Struct.keys(DraftSettings.fields);
+const DraftField = Schema.Literals(DRAFT_FIELDS);
 /**
  * Why a call did not update the draft. Handler-authored text only (schema
  * paths and fixed sentences); never provider or driver output, which goes to
@@ -55,7 +46,9 @@ export const AgentDraftActivityResult = Schema.Struct({
   draftId: Schema.optionalKey(ActivityId),
   draftConversationId: Schema.optionalKey(ActivityId),
   revision: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  changedFields: Schema.optionalKey(Schema.Array(DraftField).check(Schema.isMaxLength(10))),
+  changedFields: Schema.optionalKey(
+    Schema.Array(DraftField).check(Schema.isMaxLength(DRAFT_FIELDS.length)),
+  ),
 });
 export type AgentDraftActivityResult = typeof AgentDraftActivityResult.Type;
 

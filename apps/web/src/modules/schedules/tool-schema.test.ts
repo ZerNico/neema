@@ -1,7 +1,9 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
+import { ScheduleDraftSettings } from "./draft-schema.ts";
 import { Response } from "effect/unstable/ai";
 import { describe, expect, it } from "vitest";
 import {
+  ScheduleDraftActivityResult,
   ScheduleDraftToolEnvelope,
   projectScheduleDraftResult,
   redactScheduleDraftPart,
@@ -20,6 +22,13 @@ const privateResult = {
 };
 
 describe("schedule authoring projections", () => {
+  it("accepts a result naming every draft setting as changed", () => {
+    const changedFields = Struct.keys(ScheduleDraftSettings.fields);
+    expect(() =>
+      Schema.encodeUnknownSync(ScheduleDraftActivityResult)({ outcome: "updated", changedFields }),
+    ).not.toThrow();
+  });
+
   it("reconstructs only bounded activity metadata", () => {
     expect(projectScheduleDraftResult(privateResult)).toEqual({
       outcome: "updated",

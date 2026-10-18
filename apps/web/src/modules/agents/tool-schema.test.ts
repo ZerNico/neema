@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Response } from "effect/unstable/ai";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
+import { DraftSettings } from "./draft-schema.ts";
 import {
+  AgentDraftActivityResult,
   AgentDraftToolEnvelope,
   agentDraftFailureReason,
   agentDraftResultOk,
@@ -20,6 +22,13 @@ const privateResult = {
 };
 
 describe("agent authoring projections", () => {
+  it("accepts a result naming every draft setting as changed", () => {
+    const changedFields = Struct.keys(DraftSettings.fields);
+    expect(() =>
+      Schema.encodeUnknownSync(AgentDraftActivityResult)({ outcome: "updated", changedFields }),
+    ).not.toThrow();
+  });
+
   it("reconstructs only bounded activity metadata", () => {
     expect(projectAgentDraftResult(privateResult)).toEqual({
       outcome: "updated",
