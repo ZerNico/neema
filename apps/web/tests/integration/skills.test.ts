@@ -156,7 +156,10 @@ describe("portable skill storage and ACLs", () => {
     const owner = await newUser(),
       recipient = await newUser();
     const id = await save(owner, "Owner guidance");
-    await expect(manifest(recipient, [id])).rejects.toThrow();
+    await expect(manifest(recipient, [id])).rejects.toMatchObject({
+      _tag: "SkillNotAvailable",
+      skillId: id,
+    });
     await run(
       Effect.flatMap(SharingService, (sharing) =>
         sharing.change(
@@ -174,8 +177,11 @@ describe("portable skill storage and ACLs", () => {
     ).toMatchObject({ kind: "text", content: expect.stringContaining("Owner guidance") });
     await expect(
       run(Effect.flatMap(SkillService, (service) => service.detail(recipient, id))),
-    ).rejects.toThrow();
-    await expect(save(recipient, "Hijack", id, 1)).rejects.toThrow();
+    ).rejects.toMatchObject({ _tag: "SkillNotAvailable", skillId: id });
+    await expect(save(recipient, "Hijack", id, 1)).rejects.toMatchObject({
+      _tag: "SkillNotAvailable",
+      skillId: id,
+    });
     await run(
       Effect.flatMap(SharingService, (sharing) =>
         sharing.change(owner, { kind: "skill", id }, { action: "revokeUser", userId: recipient }),
@@ -185,7 +191,7 @@ describe("portable skill storage and ACLs", () => {
       run(
         Effect.flatMap(SkillReader, (reader) => reader.readPinned(recipient, pinned!, "SKILL.md")),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ _tag: "SkillNotAvailable", skillId: id });
   });
   it("resolves current revisions but keeps an active attempt pinned and preserves explicit overlap", async () => {
     const owner = await newUser();
@@ -227,7 +233,10 @@ describe("portable skill storage and ACLs", () => {
         Effect.flatMap(SkillReader, (reader) => reader.readPinned(owner, next!, "SKILL.md")),
       ),
     ).toMatchObject({ kind: "text", content: expect.stringContaining("Version two") });
-    await expect(save(owner, "Stale editor", id, 1)).rejects.toThrow();
+    await expect(save(owner, "Stale editor", id, 1)).rejects.toMatchObject({
+      _tag: "SkillConflict",
+      skillId: id,
+    });
     expect(
       (await run(Effect.flatMap(SkillService, (service) => service.detail(owner, id)))).files,
     ).toEqual(files("Version two"));
@@ -280,7 +289,10 @@ describe("portable skill storage and ACLs", () => {
     const afterValid = blobs.size;
     // A conflicting expected revision and an exhausted account quota must both
     // fail admission, which happens before candidate bytes reach the store.
-    await expect(save(owner, "Rejected by conflict", id, 1)).rejects.toThrow();
+    await expect(save(owner, "Rejected by conflict", id, 1)).rejects.toMatchObject({
+      _tag: "SkillConflict",
+      skillId: id,
+    });
     expect(blobs.size).toBe(afterValid);
     expect(afterValid).toBeGreaterThan(stored - 1);
     // Quota counts stored bytes once, however many revisions share them. A
@@ -365,7 +377,10 @@ describe("portable skill storage and ACLs", () => {
     );
     await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
     // The skill is gone for new attempts, but the answer's evidence is intact.
-    await expect(manifest(owner, [id])).rejects.toThrow();
+    await expect(manifest(owner, [id])).rejects.toMatchObject({
+      _tag: "SkillNotAvailable",
+      skillId: id,
+    });
     const rows = await run(
       Effect.flatMap(Db, (db) =>
         db.select().from(skillFiles).where(eq(skillFiles.revisionId, pinned!.revisionId)),
@@ -828,7 +843,10 @@ describe("portable skill storage and ACLs", () => {
       ),
     );
     await run(Effect.flatMap(SkillService, (service) => service.remove(owner, id)));
-    await expect(manifest(owner, [id])).rejects.toThrow();
+    await expect(manifest(owner, [id])).rejects.toMatchObject({
+      _tag: "SkillNotAvailable",
+      skillId: id,
+    });
     expect(
       await run(
         Effect.flatMap(Db, (db) =>
@@ -1018,7 +1036,7 @@ describe("binary files in skills", () => {
         });
       }),
     );
-    await expect(run(theirs.resolve(ref))).rejects.toThrow();
+    await expect(run(theirs.resolve(ref))).rejects.toThrow("No file at that path in the skill.");
     expect(await run(theirs.authorize(ref))).toBe(false);
     // A draft opened from it stays usable while the skill is readable.
     expect(await run(resolver.authorize(ref))).toBe(true);

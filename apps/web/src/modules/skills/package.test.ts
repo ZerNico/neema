@@ -61,7 +61,7 @@ describe("portable skill packages", () => {
     expect(() => validateSkillPackage(root(yaml))).toThrow(SkillPackageError),
   );
   it("rejects missing root, duplicate and file/folder collisions", () => {
-    expect(() => validateSkillPackage([])).toThrow();
+    expect(() => validateSkillPackage([])).toThrow("SKILL.md: A package must contain 1–100 files.");
     expect(() =>
       validateSkillPackage([...NEW_SKILL_FILES, { path: "skill.md", content: "duplicate" }]),
     ).toThrow(/colliding/);

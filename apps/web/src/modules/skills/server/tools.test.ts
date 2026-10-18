@@ -76,6 +76,8 @@ function setup(manifest: SkillManifestEntry[] = [entry], rootChars = 10000) {
     },
   };
 }
+const unavailable = { _tag: "SkillNotAvailable", skillId: "one" };
+
 describe("private skill execution", () => {
   it("preloads explicit instructions once and never repeats them in tool output", async () => {
     const session = await setup().prepare;
@@ -121,7 +123,10 @@ describe("private skill execution", () => {
     ).toMatchObject({ ok: true });
   });
   it("rejects explicit roots rather than truncating required guidance", async () => {
-    await expect(setup([entry], 2).prepare).rejects.toThrow();
+    await expect(setup([entry], 2).prepare).rejects.toMatchObject({
+      _tag: "SkillRejected",
+      reason: "Required instructions do not fit the reserved model context; nothing was truncated.",
+    });
   });
   it("returns exact UTF-16 continuation boundaries", async () => {
     const session = await setup().prepare;
@@ -149,9 +154,9 @@ describe("private skill execution", () => {
       ),
     ).toMatchObject({ ok: false });
     control.revoke();
-    await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+    await expect(Effect.runPromise(session.authorize())).rejects.toMatchObject(unavailable);
     control.restore();
-    await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+    await expect(Effect.runPromise(session.authorize())).rejects.toMatchObject(unavailable);
   });
   it("charges repeated and refused calls against a single operation budget", async () => {
     const session = await setup().prepare;
@@ -225,9 +230,9 @@ describe("private skill execution", () => {
     control.denyReads();
     await expect(
       Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" })),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(unavailable);
     control.restore();
-    await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+    await expect(Effect.runPromise(session.authorize())).rejects.toMatchObject(unavailable);
   });
   it.each(["explicit", "agent"] as const)(
     "keeps %s supporting-file authorization failures sticky",
@@ -246,9 +251,9 @@ describe("private skill execution", () => {
             offset: 0,
           }),
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(unavailable);
       control.restore();
-      await expect(Effect.runPromise(session.authorize())).rejects.toThrow();
+      await expect(Effect.runPromise(session.authorize())).rejects.toMatchObject(unavailable);
     },
   );
   it("distinguishes a missing ambient root from unavailability", async () => {

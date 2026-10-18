@@ -6,6 +6,7 @@ import {
   parseDiscoveryResponse,
   parseSkillUrl,
   reviewGitHubSkill,
+  SkillRemoteError,
 } from "./remote.ts";
 vi.mock("~/modules/tools/server/url-safety.ts", () => ({
   resolvePublicHttpUrl: (url: string) =>
@@ -61,7 +62,9 @@ describe("bounded portable skill remote adapter", () => {
         ],
       }).skills.map((skill) => skill.skillId),
     ).toEqual(["pdf-merge-&-split"]);
-    expect(() => parseDiscoveryResponse({ skills: "not-a-list" })).toThrow();
+    expect(() => parseDiscoveryResponse({ skills: "not-a-list" })).toThrow(
+      new SkillRemoteError("Discovery returned an unsupported response."),
+    );
     // A full page survives: the old cap of 50 refused one outright.
     expect(
       parseDiscoveryResponse({
@@ -74,17 +77,22 @@ describe("bounded portable skill remote adapter", () => {
       }).skills,
     ).toHaveLength(100);
   });
+  const notCanonical = "Use a canonical HTTPS URL without credentials, query or fragment.";
+  const dotSegments = "Use a canonical URL without dot segments or encoded path separators.";
   it.each([
-    "http://github.com/a/b",
-    "https://user:pass@github.com/a/b",
-    "https://github.com/a/b?token=private",
-    "https://evil.invalid/a/b",
-    "https://github.com/a/b/tree/main/../SKILL.md",
-    "https://github.com/a/b/tree/main/%2e%2e/SKILL.md",
-    "https://github.com/a/b/tree/main/a%2fb",
-    "https://github.com/a/b/tree/main/a%5cb",
-  ])("rejects unsupported URL %s", (url) => {
-    expect(() => parseSkillUrl(url)).toThrow();
+    ["http://github.com/a/b", notCanonical],
+    ["https://user:pass@github.com/a/b", notCanonical],
+    ["https://github.com/a/b?token=private", notCanonical],
+    [
+      "https://evil.invalid/a/b",
+      "Only GitHub repositories and GitHub-backed skills.sh listings are supported.",
+    ],
+    ["https://github.com/a/b/tree/main/../SKILL.md", dotSegments],
+    ["https://github.com/a/b/tree/main/%2e%2e/SKILL.md", dotSegments],
+    ["https://github.com/a/b/tree/main/a%2fb", dotSegments],
+    ["https://github.com/a/b/tree/main/a%5cb", dotSegments],
+  ])("rejects unsupported URL %s", (url, message) => {
+    expect(() => parseSkillUrl(url)).toThrow(new SkillRemoteError(message));
   });
   it("refuses redirected hosts before making another request and never sends credentials", async () => {
     const fetch = vi
@@ -104,7 +112,7 @@ describe("bounded portable skill remote adapter", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(
       fetchSkillBytes("https://skills.sh/api/search", 1024, AbortSignal.abort()),
-    ).rejects.toThrow();
+    ).rejects.toThrow(expect.objectContaining({ name: "AbortError" }));
     expect(fetch).not.toHaveBeenCalled();
   });
   it("keeps binary supporting files, hashed over the fetched bytes", async () => {
