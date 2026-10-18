@@ -186,6 +186,8 @@ const requestHeaders = (init?: RequestInit): Record<string, string> => {
   return out;
 };
 
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+
 /**
  * Fetches `target.url` by connecting to `target.addresses` only. `fetch` would
  * resolve DNS again and reopen the rebinding window `resolvePublicHttpUrl` closed.
@@ -207,13 +209,22 @@ export const fetchPinned = (target: PublicHttpTarget, init: RequestInit = {}): P
           if (!value) continue;
           for (const item of value) headers.append(key, item);
         }
-        resolve(
-          new Response(Readable.toWeb(incoming) as ReadableStream<Uint8Array>, {
-            status: incoming.statusCode ?? 0,
-            statusText: incoming.statusMessage ?? "",
-            headers,
-          }),
-        );
+        const status = incoming.statusCode ?? 0;
+        // These answers carry no body, and `Response` throws if given one. A
+        // throw here escapes the promise and takes the process down.
+        const bodyless = NULL_BODY_STATUSES.has(status);
+        if (bodyless) incoming.resume();
+        try {
+          resolve(
+            new Response(
+              bodyless ? null : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>),
+              { status, statusText: incoming.statusMessage ?? "", headers },
+            ),
+          );
+        } catch (error) {
+          incoming.destroy();
+          reject(error);
+        }
       },
     );
     req.on("error", reject);

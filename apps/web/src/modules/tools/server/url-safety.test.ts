@@ -1,7 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vitest";
 import { Effect } from "effect";
-import { assertPublicHttpUrl, lookupPinned, resolvePublicHttpUrl } from "./url-safety.ts";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  assertPublicHttpUrl,
+  fetchPinned,
+  lookupPinned,
+  resolvePublicHttpUrl,
+} from "./url-safety.ts";
 
 // Hostname resolution is stubbed so those cases are deterministic and offline;
 // IP-literal cases never hit DNS.
@@ -115,5 +122,39 @@ describe("lookupPinned", () => {
       expect(address).toBe("1.1.1.1");
       expect(family).toBe(4);
     });
+  });
+});
+
+describe("fetchPinned", () => {
+  const serve = (status: number) =>
+    new Promise<Server>((resolve) => {
+      const server = createServer((_req, res) => {
+        res.writeHead(status, { etag: '"v1"' });
+        res.end();
+      });
+      server.listen(0, "127.0.0.1", () => resolve(server));
+    });
+  const pinned = (server: Server) => {
+    const { port } = server.address() as AddressInfo;
+    return {
+      url: new URL(`http://pinned.test:${port}/doc`),
+      addresses: [{ address: "127.0.0.1", family: 4 }],
+    };
+  };
+
+  it("answers a bodyless status, as a conditional request gets, without throwing", async () => {
+    for (const status of [204, 304]) {
+      const server = await serve(status);
+      const response = await fetchPinned(pinned(server), { headers: { "if-none-match": '"v1"' } });
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+      server.close();
+    }
+  });
+
+  it("rejects a status a Response cannot hold instead of crashing", async () => {
+    const server = await serve(600);
+    await expect(fetchPinned(pinned(server))).rejects.toThrow();
+    server.close();
   });
 });
