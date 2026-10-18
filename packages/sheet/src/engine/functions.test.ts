@@ -371,6 +371,15 @@ const cases: Record<string, Case[]> = {
       digits: 12,
     },
   ],
+  // F.TEST example.
+  "F.TEST": [
+    {
+      formula: "F.TEST(A1:A5,B1:B5)",
+      cells: { ...column("A", [6, 7, 9, 15, 21]), ...column("B", [20, 28, 31, 38, 40]) },
+      expected: 0.64831785,
+      digits: 8,
+    },
+  ],
   // Z.TEST example.
   "Z.TEST": [
     {

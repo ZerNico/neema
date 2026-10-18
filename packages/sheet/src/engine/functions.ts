@@ -209,6 +209,22 @@ function frequency(args: Value[], call: Call): Value {
   return new Grid(counts.map((count) => [count]));
 }
 
+/** Two-tailed chance two samples' variances differ this much; formula.js returns their ratio. */
+function fTest(args: Value[], call: Call): Value {
+  const first = numbersOf([args[0] ?? null], call);
+  if (first instanceof XError) return first;
+  const second = numbersOf([args[1] ?? null], call);
+  if (second instanceof XError) return second;
+  const [a, b] = [variance(first, true), variance(second, true)];
+  if (a instanceof XError) return a;
+  if (b instanceof XError) return b;
+  if (a === 0 || b === 0) return DIV0;
+  const below = fromLibrary(
+    libraryFunction("F.DIST")!(a / b, first.length - 1, second.length - 1, true),
+  );
+  return typeof below === "number" ? 2 * Math.min(below, 1 - below) : below;
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -748,7 +764,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   TRIMMEAN: "rs",
   "CHISQ.TEST": "rr",
   "T.TEST": "rrss",
-  "F.TEST": "rr",
   "Z.TEST": "rss",
   SERIESSUM: "sssr",
 };
@@ -887,6 +902,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   MODE: { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
+  "F.TEST": { kinds: "rr", run: fTest },
   FREQUENCY: { kinds: "rr", run: frequency },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },
   HARMEAN: { kinds: "|r", run: libraryStat("HARMEAN") },
