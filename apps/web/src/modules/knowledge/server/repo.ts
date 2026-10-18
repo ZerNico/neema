@@ -194,13 +194,14 @@ const toDocument = (
 });
 
 const latestVersion = alias(knowledgeDocumentVersions, "latest_version");
-const latestVersionId = sql`(select v.id from knowledge_document_versions v where v.document_id = ${knowledgeDocuments.id} order by v.revision desc limit 1)`;
-const displayedVersionId = sql`coalesce(${knowledgeDocuments.currentVersionId}, ${latestVersionId})`;
-/** `displayedVersionId` for a documents row under another alias. */
-const displayedVersionOf = (table: string) =>
-  sql.raw(
-    `coalesce(${table}.current_version_id, (select lv.id from knowledge_document_versions lv where lv.document_id = ${table}.id order by lv.revision desc limit 1))`,
-  );
+/** A documents row's newest version, and the one it shows: current, else newest. */
+const versionsOf = (table: string) => {
+  const column = (name: string) => sql`${sql.identifier(table)}.${sql.identifier(name)}`;
+  const latest = sql`(select lv.id from knowledge_document_versions lv where lv.document_id = ${column("id")} order by lv.revision desc limit 1)`;
+  return { latest, displayed: sql`coalesce(${column("current_version_id")}, ${latest})` };
+};
+const { latest: latestVersionId, displayed: displayedVersionId } =
+  versionsOf("knowledge_documents");
 
 const ownedCollection = (userId: string, collectionId: string) =>
   and(
@@ -517,12 +518,12 @@ export class KnowledgeRepo extends Context.Service<
             // one, else its latest, so a first upload that failed counts as failed.
             ready: sql<number>`(
               select count(*) from ${knowledgeDocuments} d
-              join ${knowledgeDocumentVersions} v on v.id = ${displayedVersionOf("d")}
+              join ${knowledgeDocumentVersions} v on v.id = ${versionsOf("d").displayed}
               where d.collection_id = ${knowledgeCollections.id} and v.status = 'ready'
             )`,
             failed: sql<number>`(
               select count(*) from ${knowledgeDocuments} d
-              join ${knowledgeDocumentVersions} v on v.id = ${displayedVersionOf("d")}
+              join ${knowledgeDocumentVersions} v on v.id = ${versionsOf("d").displayed}
               where d.collection_id = ${knowledgeCollections.id} and v.status = 'failed'
             )`,
           })
