@@ -95,11 +95,11 @@ Signing in does not carry the signature at all. Every way of signing in, social 
 included, already returns to a `redirect` path, so the person goes through `/login` and back,
 and the page asks the authorization server again with a session: what the app asked for in the
 first place. The provider sends someone already signed in there only when the app asked for a
-newer sign-in (`prompt=login`, an expired `max_age`), so that browser session ends first.
-Asking again with it would satisfy a request it was too old for. Only a query the provider
-signed ends it: the page is a plain GET, so an unsigned link from any site could sign the
-person out. Consent posts the exact
-signed query back, and the provider checks it.
+newer sign-in (`prompt=login`, an expired `max_age`), and asking again with that session would
+satisfy a request it was too old for. The route only marks such a request, and the page asks
+the person to sign in again; their click signs out. A signature would not make a GET safe to
+end a session on: anyone can register a client and have the provider sign a query for them.
+Consent posts the exact signed query back, and the provider checks it.
 
 ## Scopes
 

@@ -319,27 +319,21 @@ describe("MCP authorization", () => {
     ).toEqual([]);
   });
 
-  it("signs the person out only for a fresh sign-in the server asked for", async () => {
+  it("never signs anyone out from a link, and marks a fresh sign-in for the page to ask", async () => {
     const provider = await connectApp();
     const signedIn = async () =>
       (await browser.request("/api/auth/get-session").then((r) => r.json())) !== null;
-    const visit = async (path: string) => {
-      const response = await signInRedirect(
-        new Request(new URL(path, origin), {
-          headers: {
-            cookie: [...browser.cookies].map(([key, value]) => `${key}=${value}`).join("; "),
-          },
-        }),
-        auth,
-      );
+    const visit = (path: string) => {
+      const response = signInRedirect(new Request(new URL(path, origin)));
       expect(response.status).toBe(302);
-      return response.headers.getSetCookie();
+      expect(response.headers.getSetCookie()).toEqual([]);
+      return new URL(response.headers.get("location")!, origin);
     };
-    // Another site's link, asking for a sign-in nobody signed.
-    expect(
-      await visit(`/oauth/sign-in?prompt=login&client_id=${provider.info!.client_id}`),
-    ).toEqual([]);
+    // Another site's link, asking for a sign-in nobody signed: marked, and nothing ends.
+    const forged = visit(`/oauth/sign-in?prompt=login&client_id=${provider.info!.client_id}`);
+    expect(forged.searchParams.get("fresh")).toBe("1");
     expect(await signedIn()).toBe(true);
+    // The provider's own request for a newer sign-in reaches the page the same way.
     const again = new Provider();
     again.info = provider.info;
     expect(await authorize(again, { serverUrl: resource, fetchFn: route })).toBe("REDIRECT");
@@ -348,9 +342,12 @@ describe("MCP authorization", () => {
     const authorized = await browser.request(url.pathname + url.search);
     const page = new URL(authorized.headers.get("location")!, origin);
     expect(page.pathname).toBe("/oauth/sign-in");
-    expect(await visit(page.pathname + page.search)).not.toEqual([]);
-    const [left] = await db.select({ id: session.id }).from(session);
-    expect(left).toBeUndefined();
+    const continued = visit(page.pathname + page.search);
+    expect(continued.pathname).toBe("/oauth/continue");
+    expect(continued.searchParams.get("fresh")).toBe("1");
+    expect(await signedIn()).toBe(true);
+    // Without prompt=login there is nothing to ask.
+    expect(visit(`/oauth/sign-in?client_id=x`).searchParams.has("fresh")).toBe(false);
   });
 
   it("grants only the scopes the person kept at consent", async () => {
