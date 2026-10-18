@@ -41,7 +41,8 @@ import { resolvePageLookups } from "~/modules/genui/server/page-lookups.ts";
 import { MAPS_TOOL, readMaps } from "~/modules/genui/settings.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
-import { ChatService, type DesktopFolderRef } from "./service.ts";
+import { ChatService } from "./service.ts";
+import type { DesktopFolderRef } from "./attempt-options.ts";
 
 const standard = Schema.toStandardSchemaV1;
 

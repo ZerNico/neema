@@ -1,10 +1,7 @@
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
-import { requireEligibleAccount } from "~/modules/auth/server/account-eligibility.ts";
 import type { DesktopSubmission, OpenDocument } from "../schema.ts";
-import type { QueuedTurnInput } from "../queued-turn.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
-import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
-import { sendsReasoningEffort } from "~/modules/providers/provider-presets.ts";
+import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   BranchNotAllowed,
@@ -23,38 +20,24 @@ import {
   WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
-import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
-import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
+import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
-import { resolveProject } from "~/modules/projects/server/access.ts";
-import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { resolveImageModel } from "~/modules/images/server/resolve.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { Db } from "~/server/db.ts";
 import { agents as savedAgents } from "~/db/schema/index.ts";
 import { eq } from "drizzle-orm";
 import {
-  resolveAgentSelection,
-  resolveEffectiveGeneration,
-  resolveAttemptSkills,
-} from "./effective-config.ts";
-import {
   ChatRepo,
-  type ConversationDefaults,
   type EditContent,
   type HistorySnapshot,
-  type ResolveGeneration,
   type TurnContent,
   type TurnFields,
   type ResolveError,
@@ -66,17 +49,14 @@ import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { ConversationSweepInterval, QueueSweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
-
-/**
- * One folder the sending machine named, by its real path. The path is the
- * model's address for everything inside; it flows through attempt-scoped
- * prompt text and tool traffic only, and is never written to a row.
- */
-export type DesktopFolderRef = DesktopSubmission["desktopFolders"] extends
-  | ReadonlyArray<infer F>
-  | undefined
-  ? F
-  : never;
+import { makeAttemptOptions, type DesktopFolderRef } from "./attempt-options.ts";
+import { makeConversationLifecycle } from "./conversation-lifecycle.ts";
+import {
+  makeQueueService,
+  type DesktopDispatch,
+  type QueueSubmission,
+  type QueueSubmissionError,
+} from "./queue-service.ts";
 
 // Omit on the whole input would flatten the content/question-response union;
 // keep the discriminant intact by omitting from the plain fields only.
@@ -112,42 +92,6 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveInte
     imageModelId?: string | null | undefined;
   };
 
-/** A text-and-files submission held for later, with the settings it was made under. */
-type QueueSubmission = {
-  userId: string;
-  conversationId: string;
-  content: string;
-  attachmentIds: ReadonlyArray<string>;
-  input: QueuedTurnInput;
-  /** Present when queued from the desktop app; a Work chat requires it. */
-  desktop?: DesktopDispatch | undefined;
-};
-
-type QueueSubmissionError =
-  | ModelNotFound
-  | ToolUnavailable
-  | InvalidMessage
-  | WorkDesktopRequired
-  | AttachmentUnsupported
-  | AttachmentNotAvailable;
-
-/**
- * What the desktop app reports when it queues or starts Work: which folders it
- * has attached, whether it can sandbox, and which running app it is. The
- * device session comes from the authenticated request, never the body.
- */
-export type DesktopDispatch = {
-  fromDesktop: boolean;
-  desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-  desktopCommands?: boolean | undefined;
-  desktopBrowser?: boolean | undefined;
-  desktopExecutorId: string;
-  /** Which machine runs it, so the chat names where its files are. */
-  desktopMachineId?: string | undefined;
-  desktopMachineName?: string | undefined;
-  deviceSessionId?: string | undefined;
-};
-
 /** What the page learns of a Work turn reservation. */
 const reservationView = (row: WorkTurnReservationRow) => ({
   reservationId: row.id,
@@ -156,21 +100,6 @@ const reservationView = (row: WorkTurnReservationRow) => ({
   assistantMessageId: row.assistantMessageId,
 });
 type WorkTurnReservationView = ReturnType<typeof reservationView>;
-
-/** What the queue strip says when a queued message could not start. */
-const queueFailure = (error: { readonly _tag: string }) => {
-  switch (error._tag) {
-    case "AttachmentUnsupported":
-    case "AttachmentNotAvailable":
-      return "A file in this message can’t be read by its model anymore. Edit it or remove it.";
-    case "AccountIneligible":
-      return "This account can’t start messages. Try Send now after access is restored.";
-    case "ModelNotFound":
-      return "This message’s model is no longer available. Edit it to pick another.";
-    default:
-      return "This message could not be started. Its model or collections may no longer be available.";
-  }
-};
 
 /** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
 export class ChatService extends Context.Service<
@@ -511,8 +440,6 @@ function makeChatService() {
     const providers = yield* ProviderRepo;
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
-    const webSearch = yield* WebSearchExecutor;
-    const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
     const policy = yield* FeaturePolicy;
     // A new answer is a new message that is streaming: lists move the chat up
     // and mark it generating from these two, without re-reading every page.
@@ -526,386 +453,22 @@ function makeChatService() {
           status: "streaming",
         }),
       );
-
-    // Recovers queues a restart or a reaped generation left waiting: the
-    // in-process completion hook is gone with the fiber that owned it, and the
-    // promotion transaction refuses anything the hook would have refused. Work
-    // chats are not swept; only a desktop app can start them.
-    const startQueueSweeper = (
-      drain: (userId: string, conversationId: string) => Effect.Effect<void>,
-      interval: Duration.Duration,
-    ) =>
-      Effect.forkScoped(
-        Effect.gen(function* () {
-          const pending = yield* repo.listQueuedConversations({ limit: 20, mode: "chat" });
-          yield* Effect.forEach(pending, (row) => drain(row.userId, row.conversationId), {
-            discard: true,
-          });
-        }).pipe(
-          Effect.catchCause((cause) => Effect.logError("queue sweep failed", cause)),
-          Effect.delay(interval),
-          Effect.forever,
-        ),
-      );
-
-    // The composer's toggle gates web_search only; read_url is gated by user URLs.
-    const searchToolEnabled = Effect.gen(function* () {
-      const search = yield* webSearch.availability();
-      return search.configured && search.enabled;
-    });
     const attachmentRepo = yield* AttachmentRepo;
     const attachmentService = yield* AttachmentService;
-    const agents = yield* AgentRepo;
-    const knowledge = yield* KnowledgeRepo;
     const integrations = yield* IntegrationRepo;
-    const documentParser = yield* DocumentParser;
     const gateway = yield* AiGateway;
     const analytics = yield* AnalyticsRepo;
     const titleDeps: TitleDeps = { gateway, repo, sync, providers, analytics };
 
-    const supportsReasoningEffort = Effect.fn("ChatService.supportsReasoningEffort")(function* (
-      model: {
-        providerId: string;
-        modelKey: string;
-        capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
-      },
-      effort: ReasoningEffort,
-    ) {
-      if (!model.capabilities.reasoningEfforts?.includes(effort)) return false;
-      const provider = (yield* providers.listProviders()).find(
-        (row) => row.id === model.providerId,
-      );
-      return !!provider && sendsReasoningEffort(provider, model.modelKey);
+    const options = yield* makeAttemptOptions;
+    const { searchToolEnabled, validateGenerationOptions, validateAttachments, resolver } = options;
+    const lifecycle = yield* makeConversationLifecycle;
+    const queue = yield* makeQueueService({
+      options,
+      stopGeneration: lifecycle.stopGeneration,
+      announceStarted,
     });
-
-    const validateGenerationOptions = Effect.fn("ChatService.validateGenerationOptions")(
-      function* (input: {
-        userId: string;
-        modelId: string;
-        searchEnabled: boolean;
-        attachmentIds: ReadonlyArray<string>;
-        researchEnabled?: boolean | undefined;
-        reasoningEffort?: ReasoningEffort | null | undefined;
-      }) {
-        if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-          return yield* new InvalidMessage({
-            reason: `at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`,
-          });
-        }
-
-        const model = yield* providers.getModel(input.modelId);
-        if (!model || !model.enabled || model.type !== "chat") {
-          return yield* new ModelNotFound({ modelId: input.modelId });
-        }
-        // Group-restricted models answer exactly like nonexistent ones, so a
-        // denied id discloses nothing.
-        if (!(yield* providers.isModelAccessible(input.userId, input.modelId))) {
-          return yield* new ModelNotFound({ modelId: input.modelId });
-        }
-        if (
-          input.reasoningEffort != null &&
-          !(yield* supportsReasoningEffort(model, input.reasoningEffort))
-        )
-          return yield* new InvalidMessage({
-            reason: "This model does not support the selected reasoning effort.",
-          });
-
-        if (input.searchEnabled && !(yield* policy.can(input.userId, "webSearch")))
-          return yield* new ToolUnavailable({ tool: "web_search", reason: "not permitted" });
-        if (input.researchEnabled && !(yield* policy.can(input.userId, "deepResearch")))
-          return yield* new ToolUnavailable({ tool: "deep_research", reason: "not permitted" });
-        if (input.researchEnabled && !(yield* policy.can(input.userId, "webSearch")))
-          return yield* new ToolUnavailable({
-            tool: "deep_research",
-            reason: "web search is not permitted",
-          });
-        if (input.attachmentIds.length && !(yield* policy.can(input.userId, "attachments")))
-          return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentIds[0]! });
-
-        // The research toggle only offers the tool, so an instance without
-        // search or a reader degrades to not offering it. Refusing the whole
-        // message would make an unrelated admin setting reject ordinary chat.
-        const reader =
-          input.researchEnabled && Option.isSome(urlReaderOption)
-            ? yield* urlReaderOption.value.availability()
-            : null;
-        const researchEnabled =
-          !!input.researchEnabled &&
-          !!reader?.configured &&
-          reader.enabled &&
-          (yield* searchToolEnabled);
-        if (input.searchEnabled && !(yield* searchToolEnabled)) {
-          return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
-        }
-
-        const attachmentFileNames = yield* validateAttachments(
-          input.userId,
-          model.capabilities,
-          input.attachmentIds,
-        );
-
-        return { model, attachmentFileNames, researchEnabled };
-      },
-    );
-
-    // Rejects attachments the model cannot read before anything is written, so
-    // the user gets a 400 instead of a generation that fails halfway through.
-    // Returns their file names in the caller's order, since the title generator
-    // needs them and the rows are already loaded here.
-    const validateAttachments = Effect.fn("ChatService.validateAttachments")(function* (
-      userId: string,
-      capabilities: { vision: boolean; files: boolean },
-      attachmentIds: ReadonlyArray<string>,
-    ) {
-      if (attachmentIds.length === 0) return [] as ReadonlyArray<string>;
-
-      const rows = yield* attachmentRepo.listWithBlobsByIds(userId, attachmentIds);
-      const byId = new Map(rows.map((row) => [row.id, row]));
-      // Parsing availability is only consulted once, and only if a PDF meets a
-      // model that cannot read files natively.
-      let parsing: { configured: boolean; enabled: boolean } | null = null;
-      const fileNames: string[] = [];
-
-      for (const attachmentId of attachmentIds) {
-        const row = byId.get(attachmentId);
-        if (!row) return yield* new AttachmentNotAvailable({ attachmentId });
-
-        fileNames.push(row.fileName);
-
-        const kind = attachmentKind(row.mediaType);
-        if (kind === "image" && !capabilities.vision) {
-          return yield* new AttachmentUnsupported({
-            fileName: row.fileName,
-            reason: "this model cannot read images",
-          });
-        }
-        if (kind === "pdf" && !capabilities.files) {
-          parsing ??= yield* documentParser.availability();
-          if (!parsing.configured || !parsing.enabled) {
-            return yield* new AttachmentUnsupported({
-              fileName: row.fileName,
-              reason:
-                "this model cannot read PDFs and document parsing is disabled. Enable it in admin settings or pick a model that accepts files",
-            });
-          }
-        }
-      }
-
-      return fileNames;
-    });
-
-    // Sends a user message (creates the conversation on first message).
-    // Returns ids the client needs to subscribe to the assistant stream.
-    // Effective configuration resolves inside the turn's transaction against
-    // conversation defaults, so what is stored is what was read; access
-    // failures fail the turn before any row is written.
-    const resolver =
-      (
-        input: {
-          userId: string;
-          model: {
-            providerId: string;
-            modelKey: string;
-            contextLength: number | null | undefined;
-            capabilities: { reasoningEfforts?: ReadonlyArray<ReasoningEffort> };
-          };
-          searchAvailable: boolean;
-          collectionIds?: ReadonlyArray<string> | undefined;
-          skillIds?: ReadonlyArray<string> | undefined;
-          /** Folders the sending machine reported; retry has no submission. */
-          desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-          desktopCommands?: boolean | undefined;
-          desktopBrowser?: boolean | undefined;
-          fromDesktop?: boolean | undefined;
-          desktopExecutorId?: string | undefined;
-          /** Which machine this attempt is sent from; a retry re-stamps it. */
-          desktopMachineId?: string | undefined;
-          desktopMachineName?: string | undefined;
-          /** Files this send copied into the workspace; only a send carries them. */
-          workspaceFiles?: ReadonlyArray<string> | undefined;
-          /** A queued choice was valid when submitted, but policy may have changed. */
-          allowStaleReasoningEffort?: boolean;
-          /**
-           * A schedule fire's up-front consent. Every other attempt, a retry of
-           * a fired answer included, has a person present and passes none.
-           */
-          integrationGrants?: ReadonlyArray<IntegrationGrant>;
-          /** The image model this submission picked; absent keeps the chat's own. */
-          imageModelId?: string | null | undefined;
-          /** Continues the same answer, so it keeps the image model it drew with. */
-          resume?: boolean;
-        } & (
-          | {
-              attempt: "retry";
-              searchEnabled?: never;
-              researchEnabled?: never;
-              reasoningEffort?: never;
-            }
-          | {
-              attempt: "send" | "edit";
-              searchEnabled: boolean;
-              researchEnabled: boolean;
-              reasoningEffort?: ReasoningEffort | null | undefined;
-            }
-        ),
-      ): ResolveGeneration =>
-      (tx, defaults: ConversationDefaults, continuation) =>
-        Effect.gen(function* () {
-          yield* requireEligibleAccount(tx, input.userId);
-          const imageModel = yield* resolveImageModel(tx, {
-            userId: input.userId,
-            conversationId: defaults.conversationId,
-            lockId: defaults.imageModelId,
-            explicitId: input.imageModelId,
-            agentId: defaults.agent?.agentId,
-            ...(input.resume ? { resumedId: continuation?.imageModel?.id ?? null } : {}),
-          });
-          // Read here like an agent, so retry and edit meet the project as it is
-          // now, and a person who lost access cannot keep working in it.
-          const resolvedProject = defaults.projectId
-            ? yield* resolveProject(tx, input.userId, defaults.projectId).pipe(
-                Effect.catchTag("ProjectNotAvailable", () =>
-                  Effect.fail(
-                    new InvalidMessage({
-                      reason:
-                        "This chat’s project is no longer available to you. Remove the chat from the project to continue.",
-                    }),
-                  ),
-                ),
-              )
-            : null;
-          const allowedSearch = yield* policy.can(input.userId, "webSearch", tx);
-          const allowedResearch = yield* policy.can(input.userId, "deepResearch", tx);
-          const searchEnabled =
-            input.attempt === "retry"
-              ? continuation
-                ? continuation.searchEnabled && input.searchAvailable
-                : yield* Effect.die("Retry requires a saved generation configuration")
-              : input.attempt === "edit"
-                ? input.searchEnabled && input.searchAvailable
-                : (continuation?.searchEnabled ?? input.searchEnabled);
-          // Same three cases as search. The third matters most here: the tool
-          // cannot ask anything itself, so a clarification round would
-          // otherwise answer into a turn that can no longer research.
-          const researchEnabled =
-            input.attempt === "retry"
-              ? (continuation?.researchEnabled ?? false)
-              : input.attempt === "edit"
-                ? input.researchEnabled
-                : (continuation?.researchEnabled ?? input.researchEnabled);
-          const savedEffort = continuation?.reasoningEffort ?? null;
-          const submittedEffort = input.attempt === "retry" ? undefined : input.reasoningEffort;
-          const chosenEffort = submittedEffort !== undefined ? submittedEffort : savedEffort;
-          const supportedEffort =
-            chosenEffort === null || (yield* supportsReasoningEffort(input.model, chosenEffort));
-          if (!supportedEffort && submittedEffort != null && !input.allowStaleReasoningEffort)
-            return yield* new InvalidMessage({
-              reason: "This model does not support the selected reasoning effort.",
-            });
-          const reasoningEffort = supportedEffort ? chosenEffort : null;
-          if (searchEnabled && !allowedSearch)
-            return yield* new InvalidMessage({ reason: "web search is not permitted" });
-          if (researchEnabled && (!allowedResearch || !allowedSearch))
-            return yield* new InvalidMessage({ reason: "deep research is not permitted" });
-          if (defaults.mode === "work" && !(yield* policy.can(input.userId, "work", tx)))
-            return yield* new InvalidMessage({ reason: "Work is not permitted" });
-          if ((input.workspaceFiles?.length ?? 0) > 0 && defaults.mode !== "work")
-            return yield* new InvalidMessage({ reason: "workspace files require Work" });
-          const desktopFolderEntries =
-            defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
-              ? input.desktopFolders
-              : null;
-          // What the sending app could do, kept for Work alone: these flags are
-          // the one place the stream learns whether a machine tool is offered.
-          const desktopCommands = defaults.mode === "work" && !!input.desktopCommands;
-          const desktopBrowser = defaults.mode === "work" && !!input.desktopBrowser;
-          if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
-            return yield* new WorkDesktopRequired();
-          // Re-stamped on every attempt, retry included: the banner must
-          // name the machine the chat actually last worked on.
-          const desktopMachineId =
-            defaults.mode === "work" ? (input.desktopMachineId ?? null) : null;
-          const desktopMachineName =
-            defaults.mode === "work" ? (input.desktopMachineName ?? null) : null;
-          // An edit that submits a selection is changing it, so it cannot take the
-          // replay shortcut below: new collections need a rebuilt manifest.
-          const editing = input.attempt === "edit";
-          const editedCollections = editing ? input.collectionIds : undefined;
-          const editedSkills = editing ? input.skillIds : undefined;
-          if (!defaults.agent && continuation && editedCollections === undefined) {
-            yield* knowledge.authorizeManifest(
-              input.userId,
-              continuation.collectionIds,
-              continuation.manifest,
-              tx,
-            );
-            return {
-              ...continuation,
-              // Plain knowledge retains its old manifest semantics; skills deliberately do not.
-              skills: yield* resolveAttemptSkills(
-                tx,
-                input.userId,
-                editedSkills ?? continuation.standaloneSkillIds ?? [],
-                [],
-              ),
-              searchEnabled,
-              researchEnabled,
-              reasoningEffort,
-              desktopFolders: desktopFolderEntries?.map((folder) => folder.name) ?? null,
-              desktopCommands,
-              desktopBrowser,
-              desktopMachineId,
-              desktopMachineName,
-              // Only a fresh send adds files; retry and edit replay the list.
-              workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
-              integrationGrants: input.integrationGrants ?? null,
-              resolvedProject,
-              imageModel,
-            };
-          }
-          const agent = defaults.agent
-            ? defaults.agent.agentId
-              ? yield* resolveAgentSelection({
-                  tx,
-                  userId: input.userId,
-                  agentId: defaults.agent.agentId,
-                })
-              : yield* new AgentNotAvailable({ agentId: "deleted" })
-            : null;
-          const resolved = yield* resolveEffectiveGeneration({
-            tx,
-            userId: input.userId,
-            agent,
-            // Omitted still keeps the saved selection; only a submitted one wins.
-            collectionIds: editing
-              ? (editedCollections ?? continuation?.standaloneCollectionIds)
-              : (continuation?.standaloneCollectionIds ?? input.collectionIds),
-            skillIds: editing
-              ? (editedSkills ?? continuation?.standaloneSkillIds)
-              : (continuation?.standaloneSkillIds ?? input.skillIds),
-            searchEnabled,
-            researchEnabled,
-            reasoningEffort,
-            desktopFolders: desktopFolderEntries,
-            desktopCommands,
-            desktopBrowser,
-            desktopMachineId,
-            desktopMachineName,
-            workspaceFiles: input.workspaceFiles ?? continuation?.workspaceFiles ?? [],
-            model: input.model,
-            searchAvailable: input.searchAvailable,
-          });
-          return {
-            ...resolved,
-            integrationGrants: input.integrationGrants ?? null,
-            resolvedProject,
-            imageModel,
-          };
-        }).pipe(
-          Effect.provideService(KnowledgeRepo, knowledge),
-          Effect.provideService(AgentRepo, agents),
-          Effect.provideService(ProviderRepo, providers),
-        );
+    const { drainQueue } = queue;
 
     const reserveWorkTurn = Effect.fn("ChatService.reserveWorkTurn")(function* (input: {
       id: string;
@@ -932,252 +495,6 @@ function makeChatService() {
     }) {
       return reservationView(yield* repo.abortWorkTurn(input.userId, input.reservationId));
     });
-
-    /**
-     * Everything a send would check, run now while the person is still looking
-     * at the composer. Dispatch checks again, since a model or a collection can
-     * go away while the message waits.
-     */
-    const validateQueueSubmission = Effect.fn("ChatService.validateQueueSubmission")(function* (
-      input: QueueSubmission,
-    ) {
-      if (input.content.trim() === "" && input.attachmentIds.length === 0)
-        return yield* new InvalidMessage({ reason: "message is empty" });
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      if (conversation.mode === "work" && !(yield* policy.can(input.userId, "work")))
-        return yield* new InvalidMessage({ reason: "Work is not permitted" });
-      // Queued Work runs on a machine, so it can only be handed over from one.
-      if (conversation.mode === "work" && !input.desktop?.fromDesktop)
-        return yield* new WorkDesktopRequired();
-      yield* validateGenerationOptions({
-        userId: input.userId,
-        modelId: input.input.modelId,
-        searchEnabled: input.input.searchEnabled,
-        researchEnabled: input.input.researchEnabled,
-        reasoningEffort: input.input.reasoningEffort,
-        attachmentIds: input.attachmentIds,
-      });
-    });
-
-    const queueChanged = (userId: string, conversationId: string) =>
-      sync.publish(userId, { type: "conversation.queue.changed", conversationId });
-
-    const queueMessage = Effect.fn("ChatService.queueMessage")(function* (input: QueueSubmission) {
-      yield* validateQueueSubmission(input);
-      const entry = yield* repo.enqueue({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        content: input.content.trim(),
-        attachmentIds: input.attachmentIds,
-        input: input.input,
-      });
-      yield* queueChanged(input.userId, input.conversationId);
-      // The answer it was queued behind may have finished while this request
-      // was in flight; waiting for the sweep would stall it for no reason.
-      yield* drainQueue(input.userId, input.conversationId);
-      return { entryId: entry.id };
-    });
-
-    const replaceQueuedMessage = Effect.fn("ChatService.replaceQueuedMessage")(function* (
-      input: QueueSubmission & { entryId: string },
-    ) {
-      yield* validateQueueSubmission(input);
-      const orphaned = yield* repo.replaceQueueEntry({
-        userId: input.userId,
-        conversationId: input.conversationId,
-        entryId: input.entryId,
-        content: input.content.trim(),
-        attachmentIds: input.attachmentIds,
-        input: input.input,
-      });
-      yield* attachmentService.deleteBlobs(orphaned);
-      yield* queueChanged(input.userId, input.conversationId);
-      // Editing is how a person fixes an entry that could not start; with its
-      // error cleared it may start now rather than at the next sweep.
-      yield* drainQueue(input.userId, input.conversationId);
-    });
-
-    const removeQueuedMessage = Effect.fn("ChatService.removeQueuedMessage")(function* (input: {
-      userId: string;
-      conversationId: string;
-      entryId: string;
-    }) {
-      const orphaned = yield* repo.removeQueueEntry(input);
-      yield* attachmentService.deleteBlobs(orphaned);
-      yield* queueChanged(input.userId, input.conversationId);
-    });
-
-    const steerQueuedMessage = Effect.fn("ChatService.steerQueuedMessage")(function* (input: {
-      userId: string;
-      conversationId: string;
-      entryId: string;
-      messageId: string;
-      generationId: string;
-    }) {
-      yield* repo.getConversation(input.userId, input.conversationId);
-      // A steer joins an answer already running on its own model, which may
-      // not be the one the entry was queued with. Its files have to be
-      // readable by that model, or the continuation would fail mid-answer.
-      const running = yield* repo.getMessage(input.messageId);
-      const entry = (yield* repo.listQueue(input.conversationId)).find(
-        (item) => item.id === input.entryId,
-      );
-      if (!entry) return yield* new QueueEntryNotFound({ entryId: input.entryId });
-      const model = running?.modelId ? yield* providers.getModel(running.modelId) : null;
-      if (model && entry.attachments.length > 0)
-        yield* validateAttachments(
-          input.userId,
-          model.capabilities,
-          entry.attachments.map((file) => file.id),
-        ).pipe(
-          Effect.catchTag("AttachmentNotAvailable", () =>
-            Effect.fail(new QueueEntryNotFound({ entryId: input.entryId })),
-          ),
-        );
-      yield* repo.steerQueueEntry({ ...input, expectedRevision: entry.revision });
-      yield* queueChanged(input.userId, input.conversationId);
-    });
-
-    const startNextQueued = Effect.fn("ChatService.startNextQueued")(function* (input: {
-      userId: string;
-      conversationId: string;
-      force?: boolean | undefined;
-      entryId?: string | undefined;
-      desktop?: DesktopDispatch | undefined;
-    }): Effect.fn.Return<
-      { started: boolean },
-      | ConversationNotFound
-      | ModelNotFound
-      | ToolUnavailable
-      | AttachmentNotAvailable
-      | AttachmentUnsupported
-      | ResolveError
-    > {
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      // Not an error: the entry simply waits for a desktop app to pick it up.
-      if (conversation.mode === "work" && !input.desktop) return { started: false };
-      const queue = yield* repo.listQueue(input.conversationId);
-      const head = input.entryId ? queue.find((entry) => entry.id === input.entryId) : queue[0];
-      if (!head || (head.lastError && !(input.force && input.entryId))) return { started: false };
-      return yield* Effect.gen(function* () {
-        const { model, researchEnabled } = yield* validateGenerationOptions({
-          userId: input.userId,
-          modelId: head.input.modelId,
-          searchEnabled: head.input.searchEnabled,
-          researchEnabled: head.input.researchEnabled,
-          attachmentIds: head.attachments.map((file) => file.id),
-        });
-        const searchAvailable = yield* searchToolEnabled;
-        const outcome = yield* repo.promoteNextQueuedTurn({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          expectedEntryId: head.id,
-          expectedRevision: head.revision,
-          ...(input.entryId ? { jumpQueue: true } : {}),
-          ...(input.force ? { force: true } : {}),
-          resolve: (entry) =>
-            resolver({
-              attempt: "send",
-              userId: input.userId,
-              model,
-              searchAvailable,
-              imageModelId: entry.input.imageModelId,
-              searchEnabled: entry.input.searchEnabled,
-              researchEnabled,
-              reasoningEffort: entry.input.reasoningEffort,
-              allowStaleReasoningEffort: true,
-              collectionIds: entry.input.collectionIds,
-              skillIds: entry.input.skillIds,
-              // Taken from the dispatching app now, never from queue time.
-              desktopFolders: input.desktop?.desktopFolders,
-              desktopCommands: input.desktop?.desktopCommands,
-              desktopBrowser: input.desktop?.desktopBrowser,
-              fromDesktop: input.desktop?.fromDesktop,
-              desktopExecutorId: input.desktop?.desktopExecutorId,
-              desktopMachineId: input.desktop?.desktopMachineId,
-              desktopMachineName: input.desktop?.desktopMachineName,
-            }),
-        });
-        // A replacement or reordered head needs fresh validation on the next dispatch.
-        if (!outcome.promoted) return { started: false };
-        yield* announceStarted(input.userId, input.conversationId, outcome.assistant.id);
-        yield* queueChanged(input.userId, input.conversationId);
-        yield* engine.startGeneration({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          messageId: outcome.assistant.id,
-          generationId: outcome.assistant.generationId ?? undefined,
-          modelId: outcome.entry.input.modelId,
-          searchEnabled: outcome.config.searchEnabled,
-          timeZone: outcome.entry.input.timeZone,
-          openDocument: outcome.entry.input.openDocument,
-          desktopExecutorId: input.desktop?.desktopExecutorId,
-          ...(input.desktop?.desktopFolders !== undefined
-            ? { desktopFolders: input.desktop.desktopFolders }
-            : {}),
-          deviceSessionId: input.desktop?.deviceSessionId,
-          onSettled: ({ status }) =>
-            status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
-        });
-        return { started: true };
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.gen(function* () {
-            yield* repo.setQueueEntryError(head.id, head.revision, queueFailure(error));
-            yield* queueChanged(input.userId, input.conversationId);
-          }),
-        ),
-      );
-    });
-
-    /**
-     * Every path that starts a queued message goes through here, so a head
-     * whose model, files or collections went away is annotated whoever tried:
-     * the server's own drain, a desktop app, or a person pressing the button.
-     * The entry is kept, never dropped.
-     */
-    const dispatchQueuedMessage = (input: Parameters<typeof startNextQueued>[0]) =>
-      startNextQueued(input);
-
-    const sendQueuedNow = Effect.fn("ChatService.sendQueuedNow")(function* (input: {
-      userId: string;
-      conversationId: string;
-      entryId: string;
-      desktop?: DesktopDispatch | undefined;
-    }) {
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      // Only a desktop app can start Work. Without one, stopping the answer
-      // would leave nothing running and the message still waiting.
-      if (conversation.mode === "work" && !input.desktop) return { started: false };
-      const live = (yield* repo.listMessages(input.conversationId)).find(
-        (message) => message.status === "streaming",
-      );
-      if (live) {
-        const generationId = live.generationId ?? undefined;
-        yield* stopGeneration({
-          userId: input.userId,
-          conversationId: input.conversationId,
-          messageId: live.id,
-          generationId,
-        });
-        // Finalize is quick, but the promotion must see the stopped row. A
-        // stall leaves the entry queued for Send next rather than hanging.
-        yield* engine
-          .awaitSettled(live.id, generationId)
-          .pipe(Effect.timeout(Duration.seconds(10)), Effect.ignore);
-      }
-      // A person asked for this one, so it may start after the stop.
-      return yield* dispatchQueuedMessage({ ...input, force: true });
-    });
-
-    /** Dispatch that never fails its caller; the reason is already on the entry. */
-    const drainQueue = (userId: string, conversationId: string): Effect.Effect<void> =>
-      Effect.suspend(() => dispatchQueuedMessage({ userId, conversationId })).pipe(
-        Effect.asVoid,
-        Effect.catch((error) =>
-          Effect.logError("queued message dispatch failed", { conversationId, error }),
-        ),
-      );
 
     const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
       // Dropped files count as content on their own: an import-only send is a
@@ -2118,250 +1435,37 @@ function makeChatService() {
       return { assistantMessageId: created.message.id };
     });
 
-    const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
-      generationId?: string | undefined;
-      userId: string;
-      conversationId: string;
-      messageId: string;
-    }) {
-      yield* repo.research?.reap() ?? Effect.void;
-      // ownership check
-      yield* repo.getConversation(input.userId, input.conversationId);
-      // A Stop on a generation nobody is running is the user telling us the
-      // process died. If the lease has lapsed, settle it now instead of waiting
-      // for the timer; if it is still live elsewhere, the fence protects it.
-      yield* engine.reapOrphans;
-      const message = yield* repo.getMessage(input.messageId);
-      if (!message || message.conversationId !== input.conversationId) {
-        return yield* new MessageNotFound({ messageId: input.messageId });
-      }
-      // Already finished (or generating on another instance). The client
-      // learns the real state from the `done` event either way.
-      if (message.status !== "streaming") return { stopped: false };
-      if (message.generationId && input.generationId !== message.generationId)
-        return { stopped: false };
-      // Stop ends the attempt; any run it started is cancelled with it.
-      const durable =
-        message.generationId && repo.research
-          ? yield* repo.research.cancelForGeneration(message.id, message.generationId)
-          : false;
-      const stopped =
-        (yield* engine.stopGeneration(input.messageId, input.generationId)) || durable;
-      return { stopped };
-    });
-
-    const deleteConversation = Effect.fn("ChatService.deleteConversation")(function* (input: {
-      userId: string;
-      conversationId: string;
-    }) {
-      // Marked first: every way an answer starts locks the chat as owned and
-      // not deleted, so nothing new begins once this commits, and the list
-      // below is complete. A repeated delete returns the same mark and stops
-      // again, so a retry finishes what a failed one left.
-      const mark = yield* repo.trashConversation(input.userId, input.conversationId);
-      if (mark === null) return null;
-      yield* sync.publish(input.userId, {
-        type: "conversation.deleted",
-        conversationId: input.conversationId,
-      });
-      // Stopped the way Stop stops one, then awaited, so the answer has settled
-      // as stopped before the client offers an Undo that brings it back. One
-      // not started yet stops as it starts (`StreamEngine.stopGeneration`). A
-      // failure here still leaves the chat deleted, so its Undo stays offered.
-      yield* repo.listLiveAnswers(input.conversationId).pipe(
-        Effect.flatMap((live) =>
-          Effect.forEach(
-            live,
-            (answer) =>
-              Effect.gen(function* () {
-                const runId = answer.generationId ?? undefined;
-                if (answer.generationId && repo.research)
-                  yield* repo.research.cancelForGeneration(answer.messageId, answer.generationId);
-                yield* engine.stopGeneration(answer.messageId, runId);
-                // Awaited even when another Stop got there first and is still settling.
-                yield* engine
-                  .awaitSettled(answer.messageId, runId)
-                  .pipe(Effect.timeoutOption(Duration.seconds(10)));
-              }),
-            { discard: true },
-          ),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.logError("stopping a deleted chat's answers failed", cause),
-        ),
-      );
-      return mark;
-    });
-
-    const restoreConversation = Effect.fn("ChatService.restoreConversation")(function* (input: {
-      userId: string;
-      conversationId: string;
-      mark: string;
-    }) {
-      const restored = yield* repo.restoreConversation(
-        input.userId,
-        input.conversationId,
-        input.mark,
-      );
-      if (restored)
-        yield* sync.publish(input.userId, {
-          type: "conversation.updated",
-          conversationId: input.conversationId,
-        });
-      return restored;
-    });
-
-    const updateWorkSettings = Effect.fn("ChatService.updateWorkSettings")(function* (input: {
-      userId: string;
-      conversationId: string;
-      permissionLevel: "manual" | "auto" | "skip";
-    }) {
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      if (conversation.mode !== "work")
-        return yield* new InvalidMessage({ reason: "only a work chat has work settings" });
-      yield* repo.updateConversation(input.conversationId, {
-        permissionLevel: input.permissionLevel,
-      });
-      yield* sync.publish(input.userId, {
-        type: "conversation.updated",
-        conversationId: input.conversationId,
-      });
-    });
-
-    const renameConversation = Effect.fn("ChatService.renameConversation")(function* (input: {
-      userId: string;
-      conversationId: string;
-      title: string;
-    }) {
-      yield* repo.research?.reap() ?? Effect.void;
-      // ownership check
-      yield* repo.getConversation(input.userId, input.conversationId);
-      yield* repo.updateConversation(input.conversationId, { title: input.title });
-      yield* sync.publish(input.userId, {
-        type: "conversation.updated",
-        conversationId: input.conversationId,
-      });
-    });
-
-    const markRead = Effect.fn("ChatService.markRead")(function* (input: {
-      userId: string;
-      conversationId: string;
-    }) {
-      if (yield* repo.markRead(input.userId, input.conversationId))
-        yield* sync.publish(input.userId, {
-          type: "conversation.updated",
-          conversationId: input.conversationId,
-        });
-    });
-
-    const keepConversation = Effect.fn("ChatService.keepConversation")(function* (input: {
-      userId: string;
-      conversationId: string;
-    }) {
-      yield* repo.getConversation(input.userId, input.conversationId);
-      if (yield* repo.keepConversation(input.userId, input.conversationId))
-        yield* sync.publish(input.userId, {
-          type: "conversation.updated",
-          conversationId: input.conversationId,
-        });
-    });
-
-    const setArchived = Effect.fn("ChatService.setArchived")(function* (input: {
-      userId: string;
-      conversationId: string;
-      archived: boolean;
-    }) {
-      yield* repo.getConversation(input.userId, input.conversationId);
-      if (yield* repo.setArchived(input.userId, input.conversationId, input.archived))
-        yield* sync.publish(input.userId, {
-          type: "conversation.updated",
-          conversationId: input.conversationId,
-        });
-    });
-
-    const archiveAll = Effect.fn("ChatService.archiveAll")(function* (input: { userId: string }) {
-      const ids = yield* repo.archiveAll(input.userId);
-      // One event is enough: every tab refreshes its chat lists and details by
-      // key prefix, whichever chat an update names.
-      if (ids.length > 0)
-        yield* sync.publish(input.userId, {
-          type: "conversation.updated",
-          conversationId: ids[0]!,
-        });
-      return ids.length;
-    });
-
-    const listArchived = Effect.fn("ChatService.listArchived")(function* (input: {
-      userId: string;
-    }) {
-      return yield* repo.listArchived(input.userId);
-    });
-
-    // Purges deleted chats past their grace period and expired temporary
-    // ones, so research, attachments and every open tab settle one way.
-    const sweepExpired = Effect.fn("ChatService.sweepExpired")(function* () {
-      const expired = yield* repo.listExpired(100);
-      for (const { id } of expired) {
-        const purged = yield* repo.purgeExpired(id);
-        if (!purged) continue;
-        yield* attachmentService.deleteBlobs(purged.keys);
-        yield* sync.publish(purged.userId, { type: "conversation.purged", conversationId: id });
-      }
-    });
-
     const sweepInterval = yield* QueueSweepInterval;
-    if (sweepInterval) yield* startQueueSweeper(drainQueue, sweepInterval);
+    if (sweepInterval) yield* queue.startQueueSweeper(sweepInterval);
     const conversationSweepInterval = yield* ConversationSweepInterval;
-    if (conversationSweepInterval)
-      yield* sweepExpired().pipe(
-        Effect.catchCause((cause) => Effect.logError("expired chat sweep failed", cause)),
-        // Failed calls' full arguments are kept a week, then go the same way.
-        Effect.andThen(
-          repo
-            .sweepFailedCallArguments()
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logError("failed call arguments sweep failed", cause),
-              ),
-            ),
-        ),
-        // A settled answer is read from its row, so its chunks only serve a
-        // late reconnect, and an hour covers that.
-        Effect.andThen(
-          repo
-            .sweepCompletedChunks()
-            .pipe(Effect.catchCause((cause) => Effect.logError("chunk sweep failed", cause))),
-        ),
-        Effect.repeat(Schedule.spaced(conversationSweepInterval)),
-        Effect.forkScoped,
-      );
+    if (conversationSweepInterval) yield* lifecycle.startSweeper(conversationSweepInterval);
 
     return ChatService.of({
       reserveWorkTurn,
       getWorkTurnReservation,
       abortWorkTurn,
       sendMessage,
-      queueMessage,
-      replaceQueuedMessage,
-      removeQueuedMessage,
-      steerQueuedMessage,
-      dispatchQueuedMessage,
-      sendQueuedNow,
+      queueMessage: queue.queueMessage,
+      replaceQueuedMessage: queue.replaceQueuedMessage,
+      removeQueuedMessage: queue.removeQueuedMessage,
+      steerQueuedMessage: queue.steerQueuedMessage,
+      dispatchQueuedMessage: queue.dispatchQueuedMessage,
+      sendQueuedNow: queue.sendQueuedNow,
       retryMessage,
       resumeMessage,
       branchConversation,
       editMessage,
-      stopGeneration,
-      deleteConversation,
-      restoreConversation,
-      updateWorkSettings,
-      renameConversation,
-      keepConversation,
-      markRead,
-      setArchived,
-      archiveAll,
-      listArchived,
-      sweepExpired,
+      stopGeneration: lifecycle.stopGeneration,
+      deleteConversation: lifecycle.deleteConversation,
+      restoreConversation: lifecycle.restoreConversation,
+      updateWorkSettings: lifecycle.updateWorkSettings,
+      renameConversation: lifecycle.renameConversation,
+      keepConversation: lifecycle.keepConversation,
+      markRead: lifecycle.markRead,
+      setArchived: lifecycle.setArchived,
+      archiveAll: lifecycle.archiveAll,
+      listArchived: lifecycle.listArchived,
+      sweepExpired: lifecycle.sweepExpired,
       runScheduledTurn,
     });
   });
