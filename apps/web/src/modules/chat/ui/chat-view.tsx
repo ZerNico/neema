@@ -623,12 +623,16 @@ export function ChatView({
     }
   };
   const checkWorkReady = () => work.check();
-  const prepareGeneration = async () => {
-    checkWorkReady();
+  /** What every way of starting an answer saves first, so it reads current drafts. */
+  const flushPending = async () => {
     await flushBlockSaves();
     await flushAgentDraft();
     await flushScheduleDraft();
     await flushDocuments();
+  };
+  const prepareGeneration = async () => {
+    checkWorkReady();
+    await flushPending();
     closeEdit();
   };
   const beforeGeneration = async () => {
@@ -807,9 +811,7 @@ export function ChatView({
   // only cache work here is making the new chat show up in the lists.
   const branchMutation = useMutation({
     onMutate: async () => {
-      await flushBlockSaves();
-      await flushAgentDraft();
-      await flushDocuments();
+      await flushPending();
       closeEdit();
     },
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
@@ -843,9 +845,7 @@ export function ChatView({
   const editMutation = useMutation({
     onMutate: async () => {
       checkWorkReady();
-      await flushBlockSaves();
-      await flushAgentDraft();
-      await flushDocuments();
+      await flushPending();
       setAnchorRequested(true);
     },
     mutationFn: async (
