@@ -104,8 +104,8 @@ still does, beside the tool.
 
 ## Display
 
-- A call is one part of the answer, drawn where it was made: a frame in the shape the model will
-  actually make (`imageFrame` fits the request the way the handler does), the newest draft in it
+- A call is one part of the answer, drawn where it was made: a frame in the aspect ratio the
+  call's activity records, the newest draft in it
   when there is one, then its images in their place, claimed by origin from the answer's files.
   Live stream, reload and branch project the same rows. A branch maps the call's attachment ids
   to its copies and points each file's origin at the copied row.

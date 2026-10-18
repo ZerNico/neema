@@ -7,7 +7,10 @@ published to an in-process PubSub. A client reads them over SSE at
 first, then replays the persisted chunks after `seq` from Postgres, then switches to
 the live tail, dropping anything it already sent, and ends with a terminal `done`
 event. Subscribing before replaying is what closes the gap a chunk could otherwise
-fall into.
+fall into. Chunks are stored before they are published, and the PubSub slides, so a
+reader that fell behind and sees a later `seq` reads the gap back from storage; a
+periodic look at the row ends the stream with its stored status should `done` itself
+be missed.
 
 So a reload, a second tab or another browser joins a running answer where it is. The
 conversation loader ships the chunks persisted so far inline, so the first paint is

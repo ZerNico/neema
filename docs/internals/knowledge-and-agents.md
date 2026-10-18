@@ -18,9 +18,7 @@ whatever agent the conversation is associated with.
   that private `resolvedAgent` provenance plus original `standaloneCollectionIds` separately;
   future attempts reuse those inputs, never prior dependencies, and branches copy them as
   history, not future defaults.
-- `AgentBar` refreshes safe live identity/dependencies on resource change without clobbering
-  standalone drafts already made. Recipient projections never expose instructions or private
-  execution records.
+- Recipient projections never expose instructions or private execution records.
 - `update_plan` is an agent preference (`planEnabled`), tool-capable models only. Each call
   replaces the whole checklist, never a revision history, and a completed step is only the
   model's own claim, not verified coverage. Research keeps a separate internal plan.
