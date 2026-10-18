@@ -2183,6 +2183,13 @@ describe("knowledge ingestion", () => {
     expect(byTitle.get("Diagram")!.error).toContain("image/png");
     // With no embedding model configured the documents are still usable.
     expect(byTitle.get("Terms")!.semanticStatus).toBe("disabled");
+    // The collection list counts the failure too, as the collection page does.
+    const listed = await run(Effect.flatMap(KnowledgeRepo, (repo) => repo.listCollections(owner)));
+    expect(listed.find((collection) => collection.id === collectionId)).toMatchObject({
+      readyCount: 1,
+      failedCount: 1,
+      pendingCount: 0,
+    });
   });
 
   it("keeps a collection's bytes when the same upload is deleted from a chat", async () => {

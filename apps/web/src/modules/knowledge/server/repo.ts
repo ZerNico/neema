@@ -196,6 +196,11 @@ const toDocument = (
 const latestVersion = alias(knowledgeDocumentVersions, "latest_version");
 const latestVersionId = sql`(select v.id from knowledge_document_versions v where v.document_id = ${knowledgeDocuments.id} order by v.revision desc limit 1)`;
 const displayedVersionId = sql`coalesce(${knowledgeDocuments.currentVersionId}, ${latestVersionId})`;
+/** `displayedVersionId` for a documents row under another alias. */
+const displayedVersionOf = (table: string) =>
+  sql.raw(
+    `coalesce(${table}.current_version_id, (select lv.id from knowledge_document_versions lv where lv.document_id = ${table}.id order by lv.revision desc limit 1))`,
+  );
 
 const ownedCollection = (userId: string, collectionId: string) =>
   and(
@@ -508,14 +513,16 @@ export class KnowledgeRepo extends Context.Service<
               select count(*) from ${knowledgeDocuments}
               where ${knowledgeDocuments.collectionId} = ${knowledgeCollections.id}
             )`,
+            // Each document by the version the collection page shows: the current
+            // one, else its latest, so a first upload that failed counts as failed.
             ready: sql<number>`(
               select count(*) from ${knowledgeDocuments} d
-              join ${knowledgeDocumentVersions} v on v.id = d.current_version_id
+              join ${knowledgeDocumentVersions} v on v.id = ${displayedVersionOf("d")}
               where d.collection_id = ${knowledgeCollections.id} and v.status = 'ready'
             )`,
             failed: sql<number>`(
               select count(*) from ${knowledgeDocuments} d
-              join ${knowledgeDocumentVersions} v on v.id = d.current_version_id
+              join ${knowledgeDocumentVersions} v on v.id = ${displayedVersionOf("d")}
               where d.collection_id = ${knowledgeCollections.id} and v.status = 'failed'
             )`,
           })
