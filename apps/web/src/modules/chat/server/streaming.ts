@@ -1862,6 +1862,34 @@ export class StreamEngine extends Context.Service<
                 })
               : message;
           });
+          // Answers that expand into several prompt messages are built one by
+          // one below; their attachments and tool rows are read once here
+          // instead of twice per answer per pass.
+          const expandable = historySuffix.filter(
+            (message) =>
+              message.assistantOutput?.files.length ||
+              message.providerReplay?.turns.length ||
+              steersByAnswer.has(message.id),
+          );
+          const expandedRows = yield* promptDeps.attachments.listWithBlobsForMessages([
+            ...expandable.map((message) => message.id),
+            ...expandable.flatMap((message) =>
+              (steersByAnswer.get(message.id) ?? []).map((steer) => steer.id),
+            ),
+          ]);
+          const callsByMessage = Map.groupBy(priorToolCalls, (call) => call.messageId);
+          const expandedDeps: PromptDeps = {
+            ...promptDeps,
+            attachments: {
+              ...promptDeps.attachments,
+              listWithBlobsForMessages: (ids) =>
+                Effect.succeed(expandedRows.filter((row) => ids.includes(row.messageId))),
+            },
+            chat: {
+              listToolCalls: (ids) =>
+                Effect.succeed(ids.flatMap((id) => callsByMessage.get(id) ?? [])),
+            },
+          };
           // What the previous request advertised: families its retained history
           // (everything after the last checkpoint) had loaded. The summary
           // repeats that list so it reads the cached prefix; the budget above
@@ -1948,25 +1976,22 @@ export class StreamEngine extends Context.Service<
               ...(message.assistantOutput?.files.length ||
               message.providerReplay?.turns.length ||
               steersByAnswer.has(message.id)
-                ? yield* buildHistoryMessages(
-                    { ...promptDeps, chat: repo },
-                    {
-                      messages: [message],
-                      steers: steersByAnswer,
-                      deferAssistantBytes: true,
-                      expandAssistantTurns: true,
-                      modelSupportsFiles: model?.capabilities.files ?? false,
-                      inlineTextChars: inlineTextCharsFor(model?.contextLength),
-                      ...(model
-                        ? {
-                            modelIdentity: {
-                              providerId: model.providerId,
-                              modelKey: model.modelKey,
-                            },
-                          }
-                        : {}),
-                    },
-                  )
+                ? yield* buildHistoryMessages(expandedDeps, {
+                    messages: [message],
+                    steers: steersByAnswer,
+                    deferAssistantBytes: true,
+                    expandAssistantTurns: true,
+                    modelSupportsFiles: model?.capabilities.files ?? false,
+                    inlineTextChars: inlineTextCharsFor(model?.contextLength),
+                    ...(model
+                      ? {
+                          modelIdentity: {
+                            providerId: model.providerId,
+                            modelKey: model.modelKey,
+                          },
+                        }
+                      : {}),
+                  })
                 : [plainById.get(message.id)!]),
             ]);
           }
@@ -2378,26 +2403,23 @@ export class StreamEngine extends Context.Service<
               ...(message.assistantOutput?.files.length ||
               message.providerReplay?.turns.length ||
               steersByAnswer.has(message.id)
-                ? yield* buildHistoryMessages(
-                    { ...promptDeps, chat: repo },
-                    {
-                      messages: [message],
-                      steers: steersByAnswer,
-                      loadedBytes,
-                      modelSupportsFiles: model?.capabilities.files ?? false,
-                      inlineTextChars: inlineTextCharsFor(model?.contextLength),
-                      modelSupportsVision: model?.capabilities.vision ?? false,
-                      ...(model
-                        ? {
-                            modelIdentity: {
-                              providerId: model.providerId,
-                              modelKey: model.modelKey,
-                            },
-                          }
-                        : {}),
-                      expandAssistantTurns: true,
-                    },
-                  )
+                ? yield* buildHistoryMessages(expandedDeps, {
+                    messages: [message],
+                    steers: steersByAnswer,
+                    loadedBytes,
+                    modelSupportsFiles: model?.capabilities.files ?? false,
+                    inlineTextChars: inlineTextCharsFor(model?.contextLength),
+                    modelSupportsVision: model?.capabilities.vision ?? false,
+                    ...(model
+                      ? {
+                          modelIdentity: {
+                            providerId: model.providerId,
+                            modelKey: model.modelKey,
+                          },
+                        }
+                      : {}),
+                    expandAssistantTurns: true,
+                  })
                 : [plainById.get(message.id)!]),
             ]);
           }
