@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFootnoteFromMarkdown } from "mdast-util-gfm-footnote";
 import { gfmFootnote } from "micromark-extension-gfm-footnote";
@@ -115,4 +116,16 @@ export function collectSources(activities: ReadonlyArray<ToolActivity>): ToolSou
         : [],
     ),
   );
+}
+
+/**
+ * The same array while the sources read the same. A live answer re-selects them
+ * on every pacing tick, and a new array would re-prepare every finished segment
+ * and re-render each citation chip. (Guarded render-time adjust.)
+ */
+export function useHeldSources(sources: ToolSource[]) {
+  const key = JSON.stringify(sources);
+  const [held, setHeld] = useState({ key, sources });
+  if (held.key !== key) setHeld({ key, sources });
+  return held.key === key ? held.sources : sources;
 }

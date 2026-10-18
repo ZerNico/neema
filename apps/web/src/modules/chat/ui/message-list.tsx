@@ -57,6 +57,7 @@ import {
   collectSources,
   prepareCitedMarkdown,
   selectAnswerSources,
+  useHeldSources,
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { type ResearchStepActivity } from "./research-panel.tsx";
@@ -1183,14 +1184,16 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
     ) : null;
 
   // Search hits remain in activity; the answer lists cited or extracted evidence.
-  const sources = useMemo(
-    () =>
-      selectAnswerSources(
-        message.content,
-        collectSources(message.toolActivities),
-        message.inheritedSources ?? NO_INHERITED_SOURCES,
-      ),
-    [message.content, message.inheritedSources, message.toolActivities],
+  const sources = useHeldSources(
+    useMemo(
+      () =>
+        selectAnswerSources(
+          message.content,
+          collectSources(message.toolActivities),
+          message.inheritedSources ?? NO_INHERITED_SOURCES,
+        ),
+      [message.content, message.inheritedSources, message.toolActivities],
+    ),
   );
 
   return (
