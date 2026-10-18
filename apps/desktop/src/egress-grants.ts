@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import {
   addressRefusal,
@@ -6,7 +5,15 @@ import {
   type CommandContext,
   type GrantDecision,
 } from "@chat/egress-proxy";
-import { serialWrites, writeJsonAtomic } from "./json-file.ts";
+import {
+  answerKey,
+  chatKey,
+  loadScopedGrants,
+  type AnswerKey,
+  type ChatKey,
+  type DroppedGrant,
+  type GrantTarget,
+} from "./scoped-grants.ts";
 
 /**
  * Where a sandboxed command may connect, decided per connection by the egress
@@ -27,28 +34,12 @@ const inside = (parent: string, child: string) => {
 export const conflictsWithNetworkGrants = (directory: string, path: string) =>
   inside(directory, path) || inside(path, directory);
 
-export type GrantScope = "always" | "chat" | "answer";
-
 export interface EgressGrant {
   readonly host: string;
   readonly port: number;
   /** Opts this exact host:port into private-network addresses. */
   readonly privateNetwork: boolean;
 }
-
-export interface ChatKey {
-  readonly origin: string;
-  readonly conversationId: string;
-}
-
-export interface AnswerKey extends ChatKey {
-  readonly attempt: string;
-}
-
-export type GrantTarget =
-  | { readonly scope: "always" }
-  | { readonly scope: "chat"; readonly chat: ChatKey }
-  | { readonly scope: "answer"; readonly answer: AnswerKey };
 
 const BUILT_IN: ReadonlyArray<string> = [
   "registry.npmjs.org",
@@ -109,10 +100,31 @@ export const normalizeEgressGrant = (
   return { host: canonical.host, port, privateNetwork };
 };
 
-const chatKey = ({ origin, conversationId }: ChatKey) => `${origin} ${conversationId}`;
-const answerKey = (answer: AnswerKey) => `${chatKey(answer)} ${answer.attempt}`;
 const entryKey = ({ host, port, privateNetwork }: EgressGrant) =>
   `${privateNetwork ? "private" : "public"} ${host}:${port}`;
+
+/** A grant only if already canonical: a file rewritten by hand cannot widen one. */
+const canonical = (host: unknown, port: unknown, privateNetwork: boolean) => {
+  const grant = normalizeEgressGrant(host, port, privateNetwork);
+  return grant && grant.host === host ? grant : null;
+};
+
+const parseEntry = (entry: string): EgressGrant | null => {
+  const match = /^(private|public) (.+):(\d+)$/.exec(entry);
+  if (!match) return null;
+  const [, kind, host, port] = match;
+  const grant = canonical(host, Number(port), kind === "private");
+  return grant && entryKey(grant) === entry ? grant : null;
+};
+
+// Earlier versions stored each grant as a {host, port, privateNetwork} object.
+const upgradeEntry = (item: unknown) => {
+  if (typeof item !== "object" || item === null) return null;
+  const { host, port, privateNetwork } = item as Record<string, unknown>;
+  if (typeof privateNetwork !== "boolean") return null;
+  const grant = canonical(host, port, privateNetwork);
+  return grant && entryKey(grant);
+};
 
 /** Stable for one grant in one place, so revoking it can find the tunnels it allowed. */
 export const grantId = (target: GrantTarget, grant: EgressGrant) => {
@@ -125,6 +137,12 @@ export const grantId = (target: GrantTarget, grant: EgressGrant) => {
   return `${owner} ${entryKey(grant)}`;
 };
 
+const droppedIds = (dropped: readonly DroppedGrant[]) =>
+  dropped.flatMap(({ target, entry }) => {
+    const grant = parseEntry(entry);
+    return grant ? [grantId(target, grant)] : [];
+  });
+
 export interface EgressGrants {
   readonly directory: string;
   /** The proxy's callback: synchronous, never prompts. */
@@ -134,8 +152,6 @@ export interface EgressGrants {
   add(target: GrantTarget, grant: EgressGrant): Promise<string>;
   /** Resolves to the removed grant's id, for the proxy to close what it allowed. */
   remove(target: GrantTarget, grant: EgressGrant): Promise<string>;
-  /** Drops an answer's grants when the answer ends; returns their ids. */
-  endAnswer(answer: AnswerKey): readonly string[];
   /**
    * Ends every answer of this server that is not listed as still running;
    * returns the ended grants' ids.
@@ -145,103 +161,22 @@ export interface EgressGrants {
   forgetChat(chat: ChatKey): Promise<readonly string[]>;
 }
 
-interface Stored {
-  always: EgressGrant[];
-  chats: Record<string, EgressGrant[]>;
-}
-
-const parseEntries = (value: unknown): EgressGrant[] => {
-  if (!Array.isArray(value)) return [];
-  const entries = new Map<string, EgressGrant>();
-  for (const entry of value) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const { host, port, privateNetwork } = entry as Record<string, unknown>;
-    if (typeof privateNetwork !== "boolean") continue;
-    const grant = normalizeEgressGrant(host, port, privateNetwork);
-    // Only entries already in canonical form: a file rewritten by hand cannot widen a grant.
-    if (grant && grant.host === host) entries.set(entryKey(grant), grant);
-  }
-  return [...entries.values()];
-};
-
-const parseStored = (value: unknown): Stored => {
-  if (typeof value !== "object" || value === null) return { always: [], chats: {} };
-  const { always, chats } = value as Record<string, unknown>;
-  const parsed: Stored = { always: parseEntries(always), chats: {} };
-  if (typeof chats === "object" && chats !== null) {
-    for (const [key, entries] of Object.entries(chats)) {
-      const grants = parseEntries(entries);
-      if (grants.length > 0) parsed.chats[key] = grants;
-    }
-  }
-  return parsed;
-};
-
-const sameGrant = (a: EgressGrant, b: EgressGrant) => entryKey(a) === entryKey(b);
-
 export const loadEgressGrants = async (directory: string): Promise<EgressGrants> => {
-  const file = join(directory, "egress-grants.json");
-  let stored: Stored = { always: [], chats: {} };
-  try {
-    stored = parseStored(JSON.parse(await readFile(file, "utf8")));
-  } catch {
-    // A lost or invalid file leaves only the built-in list, never a broader one.
-  }
-  const answers = new Map<string, EgressGrant[]>();
-  const queue = serialWrites();
-  // The next state is built inside the queue, so overlapping changes never drop each other.
-  const persist = (update: (current: Stored) => Stored) =>
-    queue(async () => {
-      const next = update(stored);
-      await writeJsonAtomic(file, next);
-      stored = next;
-    });
-
-  const entries = (target: GrantTarget): readonly EgressGrant[] =>
-    target.scope === "always"
-      ? stored.always
-      : target.scope === "chat"
-        ? (stored.chats[chatKey(target.chat)] ?? [])
-        : (answers.get(answerKey(target.answer)) ?? []);
-
-  const checked = (grant: EgressGrant) => {
-    const valid = normalizeEgressGrant(grant.host, grant.port, grant.privateNetwork);
-    if (!valid || valid.host !== grant.host) throw new Error("Invalid network permission.");
-    return valid;
-  };
+  // A lost or invalid file leaves only the built-in list, never a broader one.
+  const scoped = await loadScopedGrants(
+    directory,
+    "egress-grants.json",
+    (entry) => parseEntry(entry) !== null,
+    upgradeEntry,
+  );
 
   const change = async (target: GrantTarget, grant: EgressGrant, add: boolean) => {
-    const valid = checked(grant);
-    const id = grantId(target, valid);
-    const edit = (current: readonly EgressGrant[]) => {
-      const without = current.filter((entry) => !sameGrant(entry, valid));
-      return add ? [...without, valid] : without;
-    };
-    if (target.scope === "answer") {
-      const key = answerKey(target.answer);
-      const next = edit(answers.get(key) ?? []);
-      if (next.length > 0) answers.set(key, next);
-      else answers.delete(key);
-    } else if (target.scope === "always") {
-      await persist((current) => ({ ...current, always: edit(current.always) }));
-    } else {
-      const key = chatKey(target.chat);
-      await persist((current) => {
-        const chats = { ...current.chats };
-        const next = edit(chats[key] ?? []);
-        if (next.length > 0) chats[key] = next;
-        else delete chats[key];
-        return { ...current, chats };
-      });
-    }
-    return id;
+    const valid = canonical(grant.host, grant.port, grant.privateNetwork);
+    if (!valid) throw new Error("Invalid network permission.");
+    if (add) await scoped.add(target, entryKey(valid));
+    else await scoped.remove(target, entryKey(valid));
+    return grantId(target, valid);
   };
-
-  const find = (target: GrantTarget, host: string, port: number, privateOnly: boolean) =>
-    entries(target).find(
-      (entry) =>
-        entry.host === host && entry.port === port && (!privateOnly || entry.privateNetwork),
-    );
 
   return {
     directory,
@@ -253,14 +188,14 @@ export const loadEgressGrants = async (directory: string): Promise<EgressGrants>
         { scope: "answer", answer: { ...chat, attempt: context.attempt } },
       ];
       // A private-network grant is the stronger permission, so it wins when both exist.
-      for (const privateOnly of [true, false]) {
+      for (const privateNetwork of [true, false]) {
+        const entry = entryKey({ host, port, privateNetwork });
         for (const target of targets) {
-          const entry = find(target, host, port, privateOnly);
-          if (entry)
+          if (scoped.list(target).includes(entry))
             return {
               allowed: true,
-              grantId: grantId(target, entry),
-              privateNetwork: entry.privateNetwork,
+              grantId: grantId(target, { host, port, privateNetwork }),
+              privateNetwork,
             };
         }
       }
@@ -270,47 +205,14 @@ export const loadEgressGrants = async (directory: string): Promise<EgressGrants>
       }
       return { allowed: false, reason: `No permission for ${host}:${port}` };
     },
-    list: (target) => [...entries(target)],
+    list: (target) =>
+      scoped.list(target).flatMap((entry) => {
+        const grant = parseEntry(entry);
+        return grant ? [grant] : [];
+      }),
     add: (target, grant) => change(target, grant, true),
     remove: (target, grant) => change(target, grant, false),
-    endAnswer: (answer) => {
-      const key = answerKey(answer);
-      const ended = answers.get(key) ?? [];
-      answers.delete(key);
-      return ended.map((grant) => grantId({ scope: "answer", answer }, grant));
-    },
-    keepAnswers: (origin, live) => {
-      const kept = new Set(live.map(answerKey));
-      const ids: string[] = [];
-      for (const [key, grants] of answers) {
-        if (!key.startsWith(`${origin} `) || kept.has(key)) continue;
-        // The answer key is origin, conversation and attempt; none of them contains a space.
-        const [, conversationId = "", attempt = ""] = key.split(" ");
-        const answer = { origin, conversationId, attempt };
-        for (const grant of grants) ids.push(grantId({ scope: "answer", answer }, grant));
-        answers.delete(key);
-      }
-      return ids;
-    },
-    forgetChat: async (chat) => {
-      const prefix = `${chatKey(chat)} `;
-      const ids: string[] = [];
-      for (const [key, grants] of answers) {
-        if (!key.startsWith(prefix)) continue;
-        const attempt = key.slice(prefix.length);
-        for (const grant of grants)
-          ids.push(grantId({ scope: "answer", answer: { ...chat, attempt } }, grant));
-        answers.delete(key);
-      }
-      await persist((current) => {
-        const key = chatKey(chat);
-        for (const grant of current.chats[key] ?? [])
-          ids.push(grantId({ scope: "chat", chat }, grant));
-        const chats = { ...current.chats };
-        delete chats[key];
-        return { ...current, chats };
-      });
-      return ids;
-    },
+    keepAnswers: (origin, live) => droppedIds(scoped.keepAnswers(origin, live)),
+    forgetChat: async (chat) => droppedIds(await scoped.forgetChat(chat)),
   };
 };

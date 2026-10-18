@@ -36,7 +36,8 @@ import { GrantStore } from "./grants.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import * as diff from "./diff.ts";
-import type { AnswerKey, ChatKey, EgressGrant, GrantTarget } from "./egress-grants.ts";
+import type { EgressGrant } from "./egress-grants.ts";
+import type { AnswerKey, ChatKey, GrantTarget } from "./scoped-grants.ts";
 import { Sandbox } from "./sandbox.ts";
 
 /**

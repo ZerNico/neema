@@ -585,7 +585,8 @@ grant that also opts into private-network addresses would do, which the site tur
 into an offer to request access; any other refusal (plain HTTP, loopback, a limit,
 the agent) comes back as a `refused` line with its reason, which no grant would
 change. Either kind fails the command's result, whatever its exit code. Grants are exact `host:port` pairs kept by `egress-grants.ts`, never
-by the proxy, for the asking answer, the chat, or every chat. Chat and always
+by the proxy, for the asking answer, the chat, or every chat, on the same
+`scoped-grants.ts` store as path and capability grants. Chat and always
 grants live in the profile; answer grants live in memory and end when the page's
 work state stops listing that answer, so a closed page ends them all. A
 private-network grant is its own kind and is the only way a name may reach a

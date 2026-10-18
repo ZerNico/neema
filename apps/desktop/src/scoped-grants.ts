@@ -1,7 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { serialWrites, writeJsonAtomic } from "./json-file.ts";
-import type { AnswerKey, ChatKey, GrantTarget } from "./egress-grants.ts";
+
+export interface ChatKey {
+  readonly origin: string;
+  readonly conversationId: string;
+}
+
+export interface AnswerKey extends ChatKey {
+  readonly attempt: string;
+}
+
+export type GrantTarget =
+  | { readonly scope: "always" }
+  | { readonly scope: "chat"; readonly chat: ChatKey }
+  | { readonly scope: "answer"; readonly answer: AnswerKey };
+
+/** One entry a scope change took away, so the caller can close what it allowed. */
+export interface DroppedGrant {
+  readonly target: GrantTarget;
+  readonly entry: string;
+}
 
 /**
  * Grants of one kind in the three scopes a person picks from: the answer that
@@ -14,30 +33,38 @@ export interface ScopedGrants {
   list(target: GrantTarget): readonly string[];
   add(target: GrantTarget, entry: string): Promise<void>;
   remove(target: GrantTarget, entry: string): Promise<void>;
-  keepAnswers(origin: string, live: readonly AnswerKey[]): void;
-  forgetChat(chat: ChatKey): Promise<void>;
+  /** Ends every answer of this server that is not listed as still running. */
+  keepAnswers(origin: string, live: readonly AnswerKey[]): readonly DroppedGrant[];
+  /** Drops a deleted chat's grants, its answers' included. */
+  forgetChat(chat: ChatKey): Promise<readonly DroppedGrant[]>;
 }
 
-const chatKey = ({ origin, conversationId }: ChatKey) => `${origin} ${conversationId}`;
-const answerKey = (answer: AnswerKey) => `${chatKey(answer)} ${answer.attempt}`;
+export const chatKey = ({ origin, conversationId }: ChatKey) => `${origin} ${conversationId}`;
+export const answerKey = (answer: AnswerKey) => `${chatKey(answer)} ${answer.attempt}`;
 
 interface Stored {
   always: string[];
   chats: Record<string, string[]>;
 }
 
-/** `valid` holds a hand-edited file to the same rules as a fresh request. */
+/**
+ * `valid` holds a hand-edited file to the same rules as a fresh request. `upgrade`
+ * rewrites an entry an earlier version stored in another shape, or drops it.
+ */
 export const loadScopedGrants = async (
   directory: string,
   fileName: string,
   valid: (entry: string) => boolean,
+  upgrade?: (item: unknown) => string | null,
 ): Promise<ScopedGrants> => {
   const file = join(directory, fileName);
   const entries = (value: unknown) =>
     Array.isArray(value)
       ? [
           ...new Set(
-            value.filter((item): item is string => typeof item === "string" && valid(item)),
+            value
+              .map((item: unknown) => (typeof item === "string" ? item : (upgrade?.(item) ?? null)))
+              .filter((item): item is string => item !== null && valid(item)),
           ),
         ]
       : [];
@@ -56,7 +83,8 @@ export const loadScopedGrants = async (
   } catch {
     // A lost or invalid file grants nothing.
   }
-  const answers = new Map<string, string[]>();
+  // Keyed by answerKey; the answer itself is kept so nothing has to split the key apart.
+  const answers = new Map<string, { answer: AnswerKey; entries: string[] }>();
   const queue = serialWrites();
   // The next state is built inside the queue, so overlapping changes never drop each other.
   const persist = (update: (current: Stored) => Stored) =>
@@ -73,8 +101,8 @@ export const loadScopedGrants = async (
     };
     if (target.scope === "answer") {
       const key = answerKey(target.answer);
-      const next = edit(answers.get(key) ?? []);
-      if (next.length > 0) answers.set(key, next);
+      const next = edit(answers.get(key)?.entries ?? []);
+      if (next.length > 0) answers.set(key, { answer: target.answer, entries: next });
       else answers.delete(key);
     } else if (target.scope === "always") {
       await persist((current) => ({ ...current, always: edit(current.always) }));
@@ -90,12 +118,22 @@ export const loadScopedGrants = async (
     }
   };
 
+  const dropAnswers = (ends: (answer: AnswerKey) => boolean) => {
+    const dropped: DroppedGrant[] = [];
+    for (const [key, { answer, entries: granted }] of answers) {
+      if (!ends(answer)) continue;
+      for (const entry of granted) dropped.push({ target: { scope: "answer", answer }, entry });
+      answers.delete(key);
+    }
+    return dropped;
+  };
+
   return {
     applying: (answer) => [
       ...new Set([
         ...stored.always,
         ...(stored.chats[chatKey(answer)] ?? []),
-        ...(answers.get(answerKey(answer)) ?? []),
+        ...(answers.get(answerKey(answer))?.entries ?? []),
       ]),
     ],
     list: (target) =>
@@ -103,22 +141,24 @@ export const loadScopedGrants = async (
         ? [...stored.always]
         : target.scope === "chat"
           ? [...(stored.chats[chatKey(target.chat)] ?? [])]
-          : [...(answers.get(answerKey(target.answer)) ?? [])],
+          : [...(answers.get(answerKey(target.answer))?.entries ?? [])],
     add: (target, entry) => change(target, entry, true),
     remove: (target, entry) => change(target, entry, false),
     keepAnswers: (origin, live) => {
       const kept = new Set(live.map(answerKey));
-      for (const key of answers.keys())
-        if (key.startsWith(`${origin} `) && !kept.has(key)) answers.delete(key);
+      return dropAnswers((answer) => answer.origin === origin && !kept.has(answerKey(answer)));
     },
     forgetChat: async (chat) => {
-      for (const key of answers.keys())
-        if (key.startsWith(`${chatKey(chat)} `)) answers.delete(key);
+      const key = chatKey(chat);
+      const dropped = dropAnswers((answer) => chatKey(answer) === key);
       await persist((current) => {
+        for (const entry of current.chats[key] ?? [])
+          dropped.push({ target: { scope: "chat", chat }, entry });
         const chats = { ...current.chats };
-        delete chats[chatKey(chat)];
+        delete chats[key];
         return { ...current, chats };
       });
+      return dropped;
     },
   };
 };

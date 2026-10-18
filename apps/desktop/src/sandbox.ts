@@ -39,11 +39,8 @@ import {
 import {
   loadEgressGrants,
   normalizeEgressGrant,
-  type AnswerKey,
-  type ChatKey,
   type EgressGrant,
   type EgressGrants,
-  type GrantTarget,
 } from "./egress-grants.ts";
 import { makeCommandRoot, type CommandRoot } from "./command-root.ts";
 import {
@@ -58,7 +55,13 @@ import {
   type PathGrants,
   type PathRules,
 } from "./path-grants.ts";
-import { loadScopedGrants, type ScopedGrants } from "./scoped-grants.ts";
+import {
+  loadScopedGrants,
+  type AnswerKey,
+  type ChatKey,
+  type GrantTarget,
+  type ScopedGrants,
+} from "./scoped-grants.ts";
 import {
   commandEnvironment,
   jvmEnvironment,

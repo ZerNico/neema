@@ -205,15 +205,6 @@ describe("changes", () => {
     expect(reloaded.decide(context(chat), "answer.example.org", 443).allowed).toBe(false);
   });
 
-  it("ends an answer's grants and reports their ids", async () => {
-    const grants = await loadEgressGrants(await directory());
-    const target = { scope: "answer", answer } as const;
-    const id = await grants.add(target, site("example.com"));
-    expect(grants.endAnswer(answer)).toEqual([id]);
-    expect(grants.decide(context(chat), "example.com", 443).allowed).toBe(false);
-    expect(grants.endAnswer(answer)).toEqual([]);
-  });
-
   it("ends the answers no longer running, on this server only", async () => {
     const grants = await loadEgressGrants(await directory());
     const live = { ...chat, attempt: "attempt-live" };
@@ -259,7 +250,7 @@ describe("the stored file", () => {
     expect(grants.decide(context(chat), "github.com", 443).allowed).toBe(true);
   });
 
-  it("drops entries that are not canonical or carry the wrong shape", async () => {
+  it("reads entries an earlier version stored as objects, still canonical only", async () => {
     const root = await directory();
     await writeFile(
       join(root, "egress-grants.json"),
@@ -284,13 +275,55 @@ describe("the stored file", () => {
     expect(grants.list({ scope: "chat", chat })).toEqual([]);
   });
 
+  it("drops entries that are not canonical", async () => {
+    const root = await directory();
+    await writeFile(
+      join(root, "egress-grants.json"),
+      JSON.stringify({
+        always: [
+          "public ok.example.com:443",
+          "public Upper.example.com:443",
+          "public ok.example.com:0443",
+          "public 10.0.0.1:443",
+          "private 10.0.0.1:443",
+          "private 2a01:4f8::1:22",
+          "shared ok.example.com:443",
+          "bare.example.com",
+        ],
+        chats: { "https://chat.example chat-a": ["public chat.example.org:0"] },
+      }),
+    );
+    const grants = await loadEgressGrants(root);
+    expect(grants.list({ scope: "always" })).toEqual([
+      site("ok.example.com"),
+      { host: "10.0.0.1", port: 443, privateNetwork: true },
+      { host: "2a01:4f8::1", port: 22, privateNetwork: true },
+    ]);
+    expect(grants.list({ scope: "chat", chat })).toEqual([]);
+  });
+
+  it("rewrites an upgraded file in the current shape on the next change", async () => {
+    const root = await directory();
+    await writeFile(
+      join(root, "egress-grants.json"),
+      JSON.stringify({ always: [site("old.example.com")], chats: {} }),
+    );
+    const grants = await loadEgressGrants(root);
+    expect(grants.decide(context(chat), "old.example.com", 443).allowed).toBe(true);
+    await grants.add({ scope: "always" }, site("new.example.com"));
+    expect(JSON.parse(await readFile(join(root, "egress-grants.json"), "utf8"))).toEqual({
+      always: ["public old.example.com:443", "public new.example.com:443"],
+      chats: {},
+    });
+  });
+
   it("writes the file in the protected directory", async () => {
     const root = await directory();
     const grants = await loadEgressGrants(root);
     await grants.add({ scope: "chat", chat }, site("example.com"));
     expect(JSON.parse(await readFile(join(root, "egress-grants.json"), "utf8"))).toEqual({
       always: [],
-      chats: { "https://chat.example chat-a": [site("example.com")] },
+      chats: { "https://chat.example chat-a": ["public example.com:443"] },
     });
   });
 });
