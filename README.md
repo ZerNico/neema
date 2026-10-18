@@ -115,6 +115,13 @@ Optional
 | ---------------------- | ---------------------------- |
 | `MIGRATE_ON_START`     | `true`                       |
 | `CUSTOM_TOOL_REGISTRY` | `https://registry.npmjs.org` |
+| `TRUSTED_PROXIES`      | none                         |
+| `CLIENT_IP_HEADER`     | `x-forwarded-for`            |
+
+Sign-in rate limits count each client by the address your proxy forwards. Behind a single
+proxy that needs nothing. When another proxy or a CDN sits in front of it, list that one’s
+ranges in `TRUSTED_PROXIES`. Set `CLIENT_IP_HEADER` when the proxy names the client another
+way, such as `cf-connecting-ip` behind Cloudflare.
 
 Everything else, from model providers to sign-in methods, is configured in the admin area.
 

@@ -155,6 +155,7 @@ export function createAppAuth({
   mcp,
   // Better Auth's own default; named so a test can turn the limiter on.
   rateLimit = process.env.NODE_ENV === "production",
+  clientIp,
   log = (event) => Effect.runPromise(Effect.logInfo("auth impersonation", event)),
 }: {
   db: Db;
@@ -167,6 +168,8 @@ export function createAppAuth({
   onDesktopRedeemed?: (userId: string, ticketId: string) => Promise<void>;
   mcp?: McpAuthorization | undefined;
   rateLimit?: boolean;
+  /** Who a request came from, for rate limits: the proxies to see through, and the header. */
+  clientIp?: { trustedProxies: readonly string[]; header: string };
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
   return betterAuth({
@@ -176,7 +179,17 @@ export function createAppAuth({
     emailAndPassword: { enabled: true },
     account: { encryptOAuthTokens: true },
     socialProviders: socialProvidersFrom(oauthProviders),
-    advanced: { database: { generateId: () => uuidv7() } },
+    advanced: {
+      database: { generateId: () => uuidv7() },
+      ...(clientIp
+        ? {
+            ipAddress: {
+              ipAddressHeaders: [clientIp.header],
+              trustedProxies: [...clientIp.trustedProxies],
+            },
+          }
+        : {}),
+    },
     rateLimit: { enabled: rateLimit },
     databaseHooks: {
       user: {

@@ -57,6 +57,25 @@ const mcpAuthorization = () => {
   return resource ? { resource, allowed: mayConnectApps, fetchClientMetadata } : undefined;
 };
 
+/**
+ * The nearest proxy names the client it saw and never itself, so the default
+ * trusts no hop. `TRUSTED_PROXIES` lists only proxies in front of that one,
+ * such as a CDN, whose entries Better Auth then skips from the right.
+ */
+const clientIpSettings = () => {
+  const header = (process.env.CLIENT_IP_HEADER?.trim() || "x-forwarded-for").toLowerCase();
+  // An invalid name would make every session creation throw in `Headers.get`.
+  if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(header))
+    throw new Error(`CLIENT_IP_HEADER is not a header name: ${header}`);
+  return {
+    trustedProxies: (process.env.TRUSTED_PROXIES ?? "")
+      .split(",")
+      .map((proxy) => proxy.trim())
+      .filter(Boolean),
+    header,
+  };
+};
+
 const build = async (): Promise<Auth> =>
   createAppAuth({
     // The Better Auth pool is memoized, so a rebuild costs one provider query
@@ -68,6 +87,7 @@ const build = async (): Promise<Auth> =>
     signup,
     onDesktopRedeemed,
     mcp: mcpAuthorization(),
+    clientIp: clientIpSettings(),
     oauthProviders: await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) => repo.listForAuth()),
     ),

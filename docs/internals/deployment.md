@@ -27,6 +27,17 @@ database requires both original keys. Changing `AUTH_SECRET` without re-encrypti
 its tokens requires fresh OAuth authorization. Better Auth’s token-encryption option
 does not encrypt the stored OIDC ID token.
 
+## Client addresses
+
+Sign-in and desktop-ticket rate limits count requests per client, and the app sees only its
+proxy. Better Auth reads the client from `CLIENT_IP_HEADER` and walks an `X-Forwarded-For`
+chain from the right past `TRUSTED_PROXIES`. The nearest proxy appends the address it saw,
+never its own, so trusting it would let a client in its range pick its own key: the list
+names only hops in front of it, and is empty by default. Without it a chain of more than one
+entry yields no client, and those requests share one bucket. It judges the header alone, never the
+connection's own address, so that only holds while the app port is reachable through the
+proxy and nothing else, as the compose file's loopback-only port arranges.
+
 ## Releases
 
 Push a tag such as `v1.2.3`, or `v1.2.3-rc.1` for a prerelease. `release.yml` then:
