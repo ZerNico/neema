@@ -492,6 +492,9 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
       yield* db.execute(
         `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
       );
+      yield* db.execute(
+        `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
+      );
       // Rows rather than SkillService: this suite only needs a resolvable
       // revision so the attempt carries a real skill selection.
       const skillId = uuidv7();
@@ -1048,6 +1051,9 @@ describe("StreamEngine temporary chats", () => {
         const userId = uuidv7();
         yield* db.execute(
           `insert into "user" (id, name, email) values ('${userId}', 'Test', '${userId}@t.io')` as never,
+        );
+        yield* db.execute(
+          `insert into user_approvals (user_id, status) values ('${userId}', 'approved')` as never,
         );
         const answer = Effect.fn("test.answer")(function* (
           conversation: Parameters<typeof repo.createTurn>[0]["conversation"],

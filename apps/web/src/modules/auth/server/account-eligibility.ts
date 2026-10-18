@@ -62,17 +62,24 @@ export const requireEligibleAccount = Effect.fn("auth.requireEligibleAccount")(f
 });
 
 /**
- * SQL over `user`: the account may act now, so others may find it and share
- * with it. Approved or the bootstrap owner, and not banned; a sign-up still
- * waiting or turned down is nobody's recipient.
+ * SQL over an alias of `user`: the account may act now, so others may find it
+ * and share with it, and its shared work stays live. Approved or the bootstrap
+ * owner, and not banned; a sign-up still waiting or turned down is nobody's
+ * recipient.
  */
-export const activeAccountSql = sql<boolean>`(
-  (exists (select 1 from user_approvals a where a.user_id = ${user.id} and a.status = 'approved')
+export const activeAccountOf = (alias: string) => {
+  const column = (name: string) => sql`${sql.identifier(alias)}.${sql.identifier(name)}`;
+  const id = column("id");
+  return sql<boolean>`(
+  (exists (select 1 from user_approvals a where a.user_id = ${id} and a.status = 'approved')
     or (exists (select 1 from signup_bootstrap b
-          where b.id = ${AUTH_SETTINGS_ID} and b.owner_id = ${user.id})
-        and not exists (select 1 from user_approvals a where a.user_id = ${user.id})))
-  and not (${user.banned} and (${user.banExpires} is null or ${user.banExpires} > clock_timestamp()))
+          where b.id = ${AUTH_SETTINGS_ID} and b.owner_id = ${id})
+        and not exists (select 1 from user_approvals a where a.user_id = ${id})))
+  and not (${column("banned")} and (${column("ban_expires")} is null or ${column("ban_expires")} > clock_timestamp()))
 )`;
+};
+
+export const activeAccountSql = activeAccountOf("user");
 
 /**
  * A short preflight, not a substitute for the check in the acceptance

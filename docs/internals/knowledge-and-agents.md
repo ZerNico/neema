@@ -90,7 +90,7 @@ whatever agent the conversation is associated with.
 
 - Feature access is additive across groups, separate from the ACL on each resource. The
   recipient needs Use and the creator still needs Create, even for an instance-wide grant;
-  losing Create suspends all of that person's resources without deleting them. See
+  losing Create, or a ban, suspends all of that person's resources without deleting them. See
   [feature access](feature-policy.md). An agent is never itself a permission.
 - Group sharing is per kind: `group_members.share_agents`, `share_knowledge` and
   `share_skills` all default to false, and an owner needs the one matching the resource to

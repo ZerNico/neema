@@ -11,7 +11,7 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   roles add up, the highest winning. `projectRoleSql` in `projects/server/access.ts` is the
   one place that decides it, embedded in every read that needs it.
 - A reader needs the Use grant and the owner still needs Create
-  ([feature access](feature-policy.md)): losing Create suspends the project for everyone,
+  ([feature access](feature-policy.md)): losing Create, or a ban, suspends the project for everyone,
   the owner included, without deleting it.
 - Only the owner manages members. Granting to a group needs that group's `share_projects`
   right on the owner's own membership, taken `FOR SHARE` through the insert like the other

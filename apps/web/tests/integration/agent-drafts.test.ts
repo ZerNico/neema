@@ -15,6 +15,7 @@ import {
   researchRuns,
   skills,
   user,
+  userApprovals,
 } from "~/db/schema/index.ts";
 import {
   EMPTY_AGENT_DRAFT,
@@ -96,6 +97,7 @@ const createUser = () =>
     Effect.gen(function* () {
       const id = uuidv7();
       yield* (yield* Db).insert(user).values({ id, name: "Draft owner", email: `${id}@t.io` });
+      yield* (yield* Db).insert(userApprovals).values({ userId: id, status: "approved" });
       return id;
     }),
   );

@@ -10,6 +10,7 @@ import {
 import { Context, Effect, Layer } from "effect";
 import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
+import { activeAccountOf } from "~/modules/auth/server/account-eligibility.ts";
 import { Db } from "~/server/db.ts";
 import {
   ALL_CAPABILITIES,
@@ -24,7 +25,10 @@ const NO_CAPABILITIES = Object.fromEntries(
   CAPABILITY_KEYS.map((key) => [key, false]),
 ) as Capabilities;
 
-/** SQL condition for resource owners and other correlated access checks. */
+/**
+ * SQL condition for resource owners and other correlated access checks. Given
+ * the owner as a column, it also requires the owner's account to be active.
+ */
 export function capabilityAllowedSql(
   userId: string | SQL | AnyColumn,
   key: Capability,
@@ -49,9 +53,13 @@ export function capabilityAllowedSql(
     sql`(${column} ->> ${keys[0]})::boolean${
       keys[1] ? sql` or (${column} ->> ${keys[1]})::boolean` : sql``
     }`;
+  // An owner's shared work stays usable only while they could use the app
+  // themselves: a ban or a reversed approval suspends it, as losing Create does.
+  const ownerActive =
+    userId instanceof Column ? sql` and ${activeAccountOf("policy_actor")}` : sql``;
   return sql<boolean>`exists (
     select 1 from "user" as policy_actor
-    where policy_actor.id = ${actorId}
+    where policy_actor.id = ${actorId}${ownerActive}
       and (
         policy_actor.role = 'admin'
         or exists (

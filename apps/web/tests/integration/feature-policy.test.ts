@@ -3,7 +3,15 @@ import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { uuidv7 } from "uuidv7";
-import { agents, knowledgeCollections, skills, user } from "~/db/schema/index.ts";
+import {
+  AUTH_SETTINGS_ID,
+  agents,
+  knowledgeCollections,
+  signupBootstrap,
+  skills,
+  user,
+  userApprovals,
+} from "~/db/schema/index.ts";
 import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
 import { skillReadable } from "~/modules/skills/server/access.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
@@ -46,6 +54,7 @@ const makeUser = (role: "user" | "admin" = "user") =>
         role,
       })
       .returning({ id: user.id });
+    yield* db.insert(userApprovals).values({ userId: row!.id, status: "approved" });
     return row!.id;
   });
 
@@ -147,6 +156,41 @@ describe("feature policy", () => {
     await run(GroupRepo.use((repo) => repo.addMember(group.id, creator)));
     expect(await readable()).toEqual([false, false, false]);
     await run(GroupRepo.use((repo) => repo.removeMember(group.id, creator)));
+    expect(await readable()).toEqual([true, true, true]);
+    // A ban suspends them the same way, and lifting it brings them back.
+    const ban = (banned: boolean) =>
+      run(Effect.flatMap(Db, (db) => db.update(user).set({ banned }).where(eq(user.id, creator))));
+    await ban(true);
+    expect(await readable()).toEqual([false, false, false]);
+    await ban(false);
+    expect(await readable()).toEqual([true, true, true]);
+    const write = <A>(effect: (db: Effect.Success<typeof Db>) => Effect.Effect<A, unknown>) =>
+      run(Effect.flatMap(Db, effect).pipe(Effect.orDie));
+    // A ban that has run out suspends nothing.
+    await write((db) =>
+      db
+        .update(user)
+        .set({ banned: true, banExpires: sql`now() - interval '1 minute'` })
+        .where(eq(user.id, creator)),
+    );
+    expect(await readable()).toEqual([true, true, true]);
+    await write((db) =>
+      db.update(user).set({ banned: false, banExpires: null }).where(eq(user.id, creator)),
+    );
+    // A turned-down approval suspends them, and so does a missing row, unless
+    // the account is the bootstrap owner's.
+    await write((db) =>
+      db.update(userApprovals).set({ status: "rejected" }).where(eq(userApprovals.userId, creator)),
+    );
+    expect(await readable()).toEqual([false, false, false]);
+    await write((db) => db.delete(userApprovals).where(eq(userApprovals.userId, creator)));
+    expect(await readable()).toEqual([false, false, false]);
+    await write((db) =>
+      db
+        .insert(signupBootstrap)
+        .values({ id: AUTH_SETTINGS_ID, ownerId: creator })
+        .onConflictDoUpdate({ target: signupBootstrap.id, set: { ownerId: creator } }),
+    );
     expect(await readable()).toEqual([true, true, true]);
   });
 
