@@ -245,6 +245,14 @@ const cases: Record<string, Case[]> = {
   XNPV: [{ formula: "XNPV(0.09,A1:A5,B1:B5)", cells: schedule, expected: 2086.6476, digits: 4 }],
   // XIRR example.
   XIRR: [{ formula: "XIRR(A1:A5,B1:B5,0.1)", cells: schedule, expected: 0.373362535, digits: 8 }],
+  // FREQUENCY example: scores counted into bins up to 70, 79, 89 and above.
+  FREQUENCY: [
+    {
+      formula: "FREQUENCY(A1:A9,B1:B3)",
+      cells: { ...column("A", [79, 85, 78, 85, 50, 81, 95, 88, 97]), ...column("B", [70, 79, 89]) },
+      expected: [[1], [2], [4], [2]],
+    },
+  ],
   // MMULT example.
   MMULT: [
     {

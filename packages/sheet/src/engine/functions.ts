@@ -194,6 +194,21 @@ function modes(values: number[]): Value {
   return new Grid([...counts].flatMap(([value, count]) => (count === most ? [[value]] : [])));
 }
 
+/** How many numbers each bin takes, smallest bin first, then those above every bin, down one column. */
+function frequency(args: Value[], call: Call): Value {
+  const data = numbersOf([args[0] ?? null], call);
+  if (data instanceof XError) return data;
+  const bins = numbersOf([args[1] ?? null], call);
+  if (bins instanceof XError) return bins;
+  const order = bins.map((_, index) => index).toSorted((a, b) => bins[a]! - bins[b]!);
+  const counts = bins.map(() => 0).concat(0);
+  for (const value of data) {
+    const at = order.find((index) => value <= bins[index]!) ?? bins.length;
+    counts[at] = counts[at]! + 1;
+  }
+  return new Grid(counts.map((count) => [count]));
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -714,7 +729,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   MIRR: "rss",
   XNPV: "srr",
   XIRR: "rrs",
-  FREQUENCY: "rr",
   MMULT: "rr",
   MDETERM: "r",
   MINVERSE: "r",
@@ -836,6 +850,7 @@ export const FUNCTIONS: Record<string, Fn> = {
   MODE: { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.SNGL": { kinds: "|r", run: libraryStat("MODE.SNGL") },
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
+  FREQUENCY: { kinds: "rr", run: frequency },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },
   HARMEAN: { kinds: "|r", run: libraryStat("HARMEAN") },
   AVEDEV: { kinds: "|r", run: libraryStat("AVEDEV") },
