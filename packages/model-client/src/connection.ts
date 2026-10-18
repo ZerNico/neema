@@ -1,6 +1,6 @@
 import { Clock, Effect, Redacted, Stream } from "effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
-import { configurationError, httpError, networkError } from "./errors.ts";
+import { configurationError, httpError, invalidOutput, networkError } from "./errors.ts";
 import {
   effectiveSettings,
   getPreset,
@@ -12,6 +12,7 @@ import {
 } from "./preset.ts";
 import type { ReplayIdentity } from "./replay.ts";
 import { amzDate, authorization, bedrockScope, sha256Hex } from "./sigv4.ts";
+import { sseEvents } from "./sse.ts";
 
 type Secret = Redacted.Redacted<string> | string;
 
@@ -174,4 +175,24 @@ export const postJson = (
 export const responseBytes = (response: HttpClientResponse.HttpClientResponse) =>
   response.stream.pipe(
     Stream.mapError(() => networkError("The connection to the provider was interrupted")),
+  );
+
+/**
+ * A wire format's stream: each event through its decoder, then the decoder's
+ * end, stopping at the one `finish`. A stream that ends without one fails in `end`.
+ */
+export const decodeEvents = <A extends { readonly type: string }, E, R>(
+  response: HttpClientResponse.HttpClientResponse,
+  decoder: {
+    readonly event: (data: string) => Effect.Effect<Iterable<A>, E, R>;
+    readonly end: Effect.Effect<Iterable<A>, E, R>;
+  },
+) =>
+  sseEvents(responseBytes(response), () =>
+    invalidOutput("The provider sent an event larger than allowed"),
+  ).pipe(
+    Stream.mapEffect((event) => decoder.event(event.data)),
+    Stream.concat(Stream.fromEffect(decoder.end)),
+    Stream.flattenIterable,
+    Stream.takeUntil((part) => part.type === "finish"),
   );

@@ -19,14 +19,13 @@ import {
 import {
   identityOf,
   postJson,
-  responseBytes,
+  decodeEvents,
   type Connection,
   type ModelCall,
 } from "./connection.ts";
 import { configurationError, invalidOutput, networkError } from "./errors.ts";
 import { checkCall } from "./policy.ts";
 import { sameIdentity, unitsOfMessage, type ReplayUnit } from "./replay.ts";
-import { sseEvents } from "./sse.ts";
 import { normalizeUsage, unknownUsage } from "./usage.ts";
 
 type Json = Record<string, unknown>;
@@ -289,14 +288,7 @@ export const streamMessages = (
       };
       const response = yield* postJson(keyed, url, body, { "anthropic-version": "2023-06-01" });
       const decoder = makeMessagesDecoder(connection, call, yield* IdGenerator.IdGenerator);
-      return sseEvents(responseBytes(response), () =>
-        invalidOutput("The provider sent an event larger than allowed"),
-      ).pipe(
-        Stream.mapEffect((event) => decoder.event(event.data)),
-        Stream.concat(Stream.fromEffect(decoder.end)),
-        Stream.flattenIterable,
-        Stream.takeUntil((part) => part.type === "finish"),
-      );
+      return decodeEvents(response, decoder);
     }),
   );
 
