@@ -119,59 +119,65 @@ export const getConversationHistory = createServerFn({ method: "GET" })
     ),
   );
 
+/** A new turn, sent from the composer or activated from a desktop reservation. */
+const startTurn = (
+  data: typeof SendMessageInput.Type & { reservationId?: string },
+  session: { user: { id: string }; session: { id: string } },
+) =>
+  runtime.runPromise(
+    Effect.flatMap(ChatService, (chat) =>
+      chat.sendMessage({
+        userId: session.user.id,
+        ...(data.reservationId === undefined ? {} : { reservationId: data.reservationId }),
+        conversation: data.conversation,
+        modelId: data.modelId,
+        imageModelId: data.imageModelId,
+        reasoningEffort: data.reasoningEffort,
+        content: data.content,
+        researchEnabled: data.researchEnabled,
+        searchEnabled: data.searchEnabled,
+        desktopFolders: data.desktopFolders,
+        desktopCommands: data.desktopCommands,
+        desktopBrowser: data.desktopBrowser,
+        fromDesktop: data.fromDesktop,
+        desktopExecutorId: data.desktopExecutorId,
+        desktopMachineId: data.desktopMachineId,
+        desktopMachineName: data.desktopMachineName,
+        workspaceFiles: data.workspaceFiles,
+        deviceSessionId: session.session.id,
+        timeZone: data.timeZone,
+        openDocument: data.openDocument,
+        attachmentIds: data.attachmentIds,
+        agentId: data.agentId,
+        collectionIds: data.collectionIds,
+        skillIds: data.skillIds,
+        integrationChoices: data.integrationChoices,
+      }),
+    ).pipe(
+      Effect.catchTags({
+        AccountIneligible: accountIneligible,
+        IntegrationNotAvailable: selectedIntegrationGone,
+        AgentNotAvailable: selectedAgentGone,
+        WorkDesktopRequired: workChat,
+        KnowledgeNotAvailable: selectedKnowledgeGone,
+        SkillNotAvailable: selectedSkillGone,
+        SkillRejected: rejected,
+        KnowledgeRejected: rejected,
+        ModelNotFound: unknownModel,
+        ConversationNotFound: missing,
+        ConversationBusy: busy,
+        ToolUnavailable: searchUnavailable,
+        InvalidMessage: rejected,
+        AttachmentUnsupported: unreadable,
+        AttachmentNotAvailable: attachmentGone,
+      }),
+    ),
+  );
+
 export const sendMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SendMessageInput))
-  .handler(({ data, context }) =>
-    runtime.runPromise(
-      ChatService.use((chat) =>
-        chat.sendMessage({
-          userId: context.session.user.id,
-          conversation: data.conversation,
-          modelId: data.modelId,
-          imageModelId: data.imageModelId,
-          reasoningEffort: data.reasoningEffort,
-          content: data.content,
-          researchEnabled: data.researchEnabled,
-          searchEnabled: data.searchEnabled,
-          desktopFolders: data.desktopFolders,
-          desktopCommands: data.desktopCommands,
-          desktopBrowser: data.desktopBrowser,
-          fromDesktop: data.fromDesktop,
-          desktopExecutorId: data.desktopExecutorId,
-          desktopMachineId: data.desktopMachineId,
-          desktopMachineName: data.desktopMachineName,
-          workspaceFiles: data.workspaceFiles,
-          deviceSessionId: context.session.session.id,
-          timeZone: data.timeZone,
-          openDocument: data.openDocument,
-          attachmentIds: data.attachmentIds,
-          agentId: data.agentId,
-          collectionIds: data.collectionIds,
-          skillIds: data.skillIds,
-          integrationChoices: data.integrationChoices,
-        }),
-      ).pipe(
-        Effect.catchTags({
-          AccountIneligible: accountIneligible,
-          IntegrationNotAvailable: selectedIntegrationGone,
-          AgentNotAvailable: selectedAgentGone,
-          WorkDesktopRequired: workChat,
-          KnowledgeNotAvailable: selectedKnowledgeGone,
-          SkillNotAvailable: selectedSkillGone,
-          SkillRejected: rejected,
-          KnowledgeRejected: rejected,
-          ModelNotFound: unknownModel,
-          ConversationNotFound: missing,
-          ConversationBusy: busy,
-          ToolUnavailable: searchUnavailable,
-          InvalidMessage: rejected,
-          AttachmentUnsupported: unreadable,
-          AttachmentNotAvailable: attachmentGone,
-        }),
-      ),
-    ),
-  );
+  .handler(({ data, context }) => startTurn(data, context.session));
 
 export const reserveWorkTurn = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -198,57 +204,7 @@ export const reserveWorkTurn = createServerFn({ method: "POST" })
 export const activateWorkTurn = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(ActivateWorkTurnInput))
-  .handler(({ data, context }) =>
-    runtime.runPromise(
-      ChatService.use((chat) =>
-        chat.sendMessage({
-          userId: context.session.user.id,
-          reservationId: data.reservationId,
-          conversation: data.conversation,
-          modelId: data.modelId,
-          imageModelId: data.imageModelId,
-          reasoningEffort: data.reasoningEffort,
-          content: data.content,
-          researchEnabled: data.researchEnabled,
-          searchEnabled: data.searchEnabled,
-          desktopFolders: data.desktopFolders,
-          desktopCommands: data.desktopCommands,
-          desktopBrowser: data.desktopBrowser,
-          fromDesktop: data.fromDesktop,
-          desktopExecutorId: data.desktopExecutorId,
-          desktopMachineId: data.desktopMachineId,
-          desktopMachineName: data.desktopMachineName,
-          workspaceFiles: data.workspaceFiles,
-          deviceSessionId: context.session.session.id,
-          timeZone: data.timeZone,
-          openDocument: data.openDocument,
-          attachmentIds: data.attachmentIds,
-          agentId: data.agentId,
-          collectionIds: data.collectionIds,
-          skillIds: data.skillIds,
-          integrationChoices: data.integrationChoices,
-        }),
-      ).pipe(
-        Effect.catchTags({
-          AccountIneligible: accountIneligible,
-          IntegrationNotAvailable: selectedIntegrationGone,
-          AgentNotAvailable: selectedAgentGone,
-          WorkDesktopRequired: workChat,
-          KnowledgeNotAvailable: selectedKnowledgeGone,
-          SkillNotAvailable: selectedSkillGone,
-          SkillRejected: rejected,
-          KnowledgeRejected: rejected,
-          ModelNotFound: unknownModel,
-          ConversationNotFound: missing,
-          ConversationBusy: busy,
-          ToolUnavailable: searchUnavailable,
-          InvalidMessage: rejected,
-          AttachmentUnsupported: unreadable,
-          AttachmentNotAvailable: attachmentGone,
-        }),
-      ),
-    ),
-  );
+  .handler(({ data, context }) => startTurn(data, context.session));
 
 export const getWorkTurnReservation = createServerFn({ method: "POST" })
   .middleware([requireSession])
