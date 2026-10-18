@@ -1,3 +1,4 @@
+import { leaseFor } from "~/server/sql.ts";
 import { alias } from "drizzle-orm/pg-core";
 import { and, count, eq, inArray, isNull, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Schedule as EffectSchedule, Semaphore } from "effect";
@@ -30,7 +31,7 @@ const TICK_INTERVAL = Duration.minutes(1);
 /** How often a source is pulled again; Sync now skips the wait. */
 const SYNC_EVERY = "1 hour";
 /** Long enough for a large tree; a crashed sync is picked up again after it. */
-const LEASE = "30 minutes";
+const LEASE_SECONDS = 30 * 60;
 const BATCH = 5;
 /**
  * Overlap on the cursor: a page saved while the last listing ran can carry a
@@ -474,7 +475,7 @@ function make(background: boolean) {
               .set({
                 status: "syncing",
                 leaseToken: uuidv7(),
-                leaseUntil: sql`clock_timestamp() + ${LEASE}::interval`,
+                leaseUntil: leaseFor(LEASE_SECONDS),
                 nextSyncAt: sql`clock_timestamp() + ${SYNC_EVERY}::interval`,
               })
               .where(eq(knowledgeSources.id, current.id))

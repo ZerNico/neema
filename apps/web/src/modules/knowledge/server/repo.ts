@@ -1,3 +1,4 @@
+import { leaseFor } from "~/server/sql.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { and, asc, count, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -1008,7 +1009,7 @@ export class KnowledgeRepo extends Context.Service<
               update knowledge_document_versions
               set status = 'extracting',
                   lease_token = ${leaseToken},
-                  lease_until = clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
+                  lease_until = ${leaseFor(LEASE_SECONDS)},
                   attempts = attempts + 1
               where id = (
                 select id from knowledge_document_versions
@@ -1190,7 +1191,7 @@ export class KnowledgeRepo extends Context.Service<
           const renewed = yield* db
             .update(knowledgeDocumentVersions)
             .set({
-              leaseUntil: sql`clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'`,
+              leaseUntil: leaseFor(LEASE_SECONDS),
             })
             .where(
               and(
@@ -1290,7 +1291,7 @@ export class KnowledgeRepo extends Context.Service<
               update knowledge_embedding_jobs
               set status = 'running',
                   lease_token = ${leaseToken},
-                  lease_until = clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
+                  lease_until = ${leaseFor(LEASE_SECONDS)},
                   attempts = attempts + 1,
                   updated_at = now()
               where version_id = (
@@ -1346,7 +1347,7 @@ export class KnowledgeRepo extends Context.Service<
         const rows = yield* db
           .update(knowledgeEmbeddingJobs)
           .set({
-            leaseUntil: sql`clock_timestamp() + interval '${sql.raw(String(LEASE_SECONDS))} seconds'`,
+            leaseUntil: leaseFor(LEASE_SECONDS),
           })
           .where(
             and(

@@ -1,3 +1,4 @@
+import { leaseFor } from "~/server/sql.ts";
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
@@ -917,7 +918,7 @@ export class IntegrationRepo extends Context.Service<
                 return yield* tx
                   .update(integrationToolCatalogs)
                   .set({
-                    checkLeaseUntil: sql`clock_timestamp() + ${`${input.leaseMs} milliseconds`}::interval`,
+                    checkLeaseUntil: leaseFor(input.leaseMs / 1000),
                   })
                   .where(
                     sql`${integrationToolCatalogs.integrationId} in (${sql.join(

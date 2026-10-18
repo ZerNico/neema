@@ -92,7 +92,7 @@ import { ToolFileActivity } from "../tool-file-schema.ts";
 import type { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AttachmentRepo, type DbTx } from "~/modules/attachments/server/repo.ts";
-import { escapeLike } from "~/server/sql.ts";
+import { escapeLike, leaseFor } from "~/server/sql.ts";
 import { hashSource, MAX_UI_BLOCKS, scanUiFences } from "~/modules/genui/fences.ts";
 import {
   HIGHLIGHT_END,
@@ -418,10 +418,11 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
 // How long a streaming row may go without a heartbeat before it is treated as
 // abandoned. Flushes run every 250ms, so this survives a slow provider call
 // and a busy event loop but not a dead process.
-const GENERATION_LEASE = sql`interval '45 seconds'`;
+const GENERATION_LEASE_SECONDS = 45;
+const GENERATION_LEASE = sql`make_interval(secs => ${GENERATION_LEASE_SECONDS})`;
 // Granted whenever a row enters "streaming", so a retry of an old row is not
 // judged by its original creation time. Renewed by every flush afterwards.
-const freshLease = () => sql`clock_timestamp() + ${GENERATION_LEASE}`;
+const freshLease = () => leaseFor(GENERATION_LEASE_SECONDS);
 export const INTERRUPTED_MESSAGE = "The response was interrupted before it finished.";
 
 export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
@@ -3563,7 +3564,7 @@ export class ChatRepo extends Context.Service<
               // chunks. The fence above makes a late renewal impossible.
               yield* tx
                 .update(messages)
-                .set({ generationLeaseUntil: sql`clock_timestamp() + ${GENERATION_LEASE}` })
+                .set({ generationLeaseUntil: freshLease() })
                 .where(eq(messages.id, messageId))
                 .pipe(Effect.orDie);
               if (chunks.length === 0) return;
@@ -3581,7 +3582,7 @@ export class ChatRepo extends Context.Service<
           function* (messageId, generationId) {
             yield* db
               .update(messages)
-              .set({ generationLeaseUntil: sql`clock_timestamp() + ${GENERATION_LEASE}` })
+              .set({ generationLeaseUntil: freshLease() })
               .where(
                 and(
                   eq(messages.id, messageId),

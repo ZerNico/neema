@@ -1,3 +1,4 @@
+import { leaseFor } from "~/server/sql.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { liveModelId } from "~/modules/analytics/server/repo.ts";
 import { and, eq, inArray, isNotNull, max, ne, sql } from "drizzle-orm";
@@ -22,6 +23,9 @@ import {
   mergeUsageTotals,
   resolveCost,
 } from "~/modules/analytics/server/usage.ts";
+
+/** How long a research run is held between its heartbeats. */
+const RESEARCH_LEASE_SECONDS = 60;
 
 export type ResearchFence = {
   runId: string;
@@ -427,7 +431,7 @@ export const createResearchStore = (db: Db["Service"]) => {
               .set({
                 status: "running",
                 owner,
-                leaseUntil: sql`clock_timestamp() + interval '60 seconds'`,
+                leaseUntil: leaseFor(RESEARCH_LEASE_SECONDS),
               })
               .where(
                 and(
@@ -461,7 +465,7 @@ export const createResearchStore = (db: Db["Service"]) => {
       locked(fence, (tx) =>
         tx
           .update(researchRuns)
-          .set({ leaseUntil: sql`clock_timestamp() + interval '60 seconds'` })
+          .set({ leaseUntil: leaseFor(RESEARCH_LEASE_SECONDS) })
           .where(eq(researchRuns.id, fence.runId))
           .pipe(Effect.orDie, Effect.asVoid),
       ),

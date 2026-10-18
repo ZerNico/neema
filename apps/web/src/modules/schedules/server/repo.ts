@@ -1,3 +1,4 @@
+import { leaseFor } from "~/server/sql.ts";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -7,6 +8,9 @@ import { Db } from "~/server/db.ts";
 import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { answered, type SettledRun } from "../settled-run.ts";
+
+/** How long a scheduled run is held between its renewals. */
+const RUN_LEASE_SECONDS = 60;
 
 export type ScheduleRow = typeof schedules.$inferSelect;
 type RunRow = typeof scheduleRuns.$inferSelect;
@@ -274,7 +278,7 @@ export class ScheduleRepo extends Context.Service<
         renewRun: Effect.fn("ScheduleRepo.renewRun")(function* (runId) {
           yield* db
             .update(scheduleRuns)
-            .set({ leaseUntil: sql`clock_timestamp() + interval '60 seconds'` })
+            .set({ leaseUntil: leaseFor(RUN_LEASE_SECONDS) })
             .where(and(eq(scheduleRuns.id, runId), eq(scheduleRuns.status, "pending")))
             .pipe(Effect.orDie, Effect.asVoid);
         }),

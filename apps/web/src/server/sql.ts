@@ -1,4 +1,13 @@
+import { sql } from "drizzle-orm";
 import { Cause } from "effect";
+
+/**
+ * When a lease taken now ends, by the database's wall clock: `clock_timestamp()`,
+ * not `now()`, which is the transaction's start and lags after a lock wait.
+ * Every lease is written through this, so a length is one number per owner.
+ */
+export const leaseFor = (seconds: number) =>
+  sql`clock_timestamp() + make_interval(secs => ${seconds})`;
 
 /** `%` and `_` are wildcards in LIKE, so a user's literal text must escape them. */
 export const escapeLike = (text: string): string => text.replaceAll(/[\\%_]/g, "\\$&");
