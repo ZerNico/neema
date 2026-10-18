@@ -145,6 +145,8 @@ function lossSentence(items: ReadonlyArray<{ noun: string; name: string }>) {
 
 /** Something the transcript should show a card for, but no tool row names yet. */
 interface Stranded {
+  /** Names what the card shows, so an unchanged host row keeps its placed copy. */
+  key: string;
   /** The answer that created it, when known. */
   messageId: string | null | undefined;
   activity: (message: DisplayMessage, index: number) => ToolActivity;
@@ -181,15 +183,26 @@ function placeStranded(
   return messages.map((message) => {
     const items = byMessage.get(message.id);
     if (!items) return message;
-    return {
+    const key = items.map((item) => item.key).join("\n");
+    const cached = placedRows.get(message);
+    if (cached?.key === key) return cached.row;
+    const row = {
       ...message,
       toolActivities: [
         ...message.toolActivities,
         ...items.map((item, index) => item.activity(message, index)),
       ],
     };
+    placedRows.set(message, { key, row });
+    return row;
   });
 }
+
+/**
+ * A host row with its placed cards, kept while neither changes: the display is
+ * rebuilt on every live chunk, and a new copy would re-render a settled answer.
+ */
+const placedRows = new WeakMap<DisplayMessage, { key: string; row: DisplayMessage }>();
 
 /** The person's own message an answer replies to: the nearest one before it that is not a steer. */
 const questionBefore = (
@@ -1588,6 +1601,7 @@ export function ChatView({
       ...draftIds
         .filter((draftId) => !shownAgentDrafts.has(draftId))
         .map((draftId) => ({
+          key: `agent:${draftId}`,
           messageId: origin.get(draftId)?.messageId,
           activity: (message: DisplayMessage, index: number): ToolActivity => ({
             ...placed(message, index, draftId),
@@ -1599,6 +1613,7 @@ export function ChatView({
       ...scheduleDraftIds
         .filter((draftId) => !shownScheduleDrafts.has(draftId))
         .map((draftId) => ({
+          key: `schedule:${draftId}`,
           messageId: origin.get(draftId)?.messageId,
           activity: (message: DisplayMessage, index: number): ToolActivity => ({
             ...placed(message, index, draftId),
@@ -1612,6 +1627,7 @@ export function ChatView({
         .map((documentId) => {
           const title = (origin.get(documentId) as { title?: string } | undefined)?.title;
           return {
+            key: `document:${documentId}:${title ?? ""}`,
             messageId: origin.get(documentId)?.messageId,
             activity: (message: DisplayMessage, index: number): ToolActivity => ({
               ...placed(message, index, documentId),
@@ -1634,11 +1650,13 @@ export function ChatView({
     const attachments = new Map<string, Attachment>(
       (data.referenceAttachments ?? data.attachments).map((file) => [file.id, file]),
     );
-    for (const message of display) {
-      for (const file of message.files ?? []) attachments.set(file.attachment.id, file.attachment);
-      for (const steer of message.steers ?? [])
-        for (const file of steer.attachments) attachments.set(file.id, file);
-    }
+    // The stored rows and the live answer's own, rather than the display, which
+    // changes on every live chunk while these rarely do.
+    const files = [...baseDisplay.flatMap((message) => message.files ?? []), ...stream.files];
+    const steers = [...baseDisplay.flatMap((message) => message.steers ?? []), ...stream.steers];
+    for (const file of files) attachments.set(file.attachment.id, file.attachment);
+    for (const steer of steers)
+      for (const file of steer.attachments) attachments.set(file.id, file);
     return {
       attachments,
       aliases: data.conversation.fileReferenceAliases ?? null,
@@ -1648,7 +1666,9 @@ export function ChatView({
     data.referenceAttachments,
     data.attachments,
     data.conversation.fileReferenceAliases,
-    display,
+    baseDisplay,
+    stream.files,
+    stream.steers,
     localMachineId,
   ]);
 

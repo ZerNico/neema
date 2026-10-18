@@ -54,13 +54,15 @@ import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
 
-const { navigate, markClaimed, resetUploads, seedUploads, streamProbe } = vi.hoisted(() => ({
-  navigate: vi.fn(),
-  markClaimed: vi.fn(),
-  resetUploads: vi.fn(),
-  seedUploads: vi.fn(),
-  streamProbe: vi.fn(),
-}));
+const { navigate, markClaimed, resetUploads, seedUploads, streamProbe, transcriptProbe } =
+  vi.hoisted(() => ({
+    navigate: vi.fn(),
+    markClaimed: vi.fn(),
+    resetUploads: vi.fn(),
+    seedUploads: vi.fn(),
+    streamProbe: vi.fn(),
+    transcriptProbe: vi.fn<(messages: ReadonlyArray<Record<string, unknown>>) => void>(),
+  }));
 
 const liveDraft = vi.hoisted(() => ({
   tools: [] as ToolActivity[],
@@ -179,7 +181,11 @@ vi.mock("./virtual-message-list.tsx", () => ({
     onReachStart?: () => void;
     anchorId?: string | null;
   }) => (
-    <div data-testid="transcript" data-anchor-id={anchorId ?? ""}>
+    <div
+      data-testid="transcript"
+      data-anchor-id={anchorId ?? ""}
+      ref={() => transcriptProbe(messages)}
+    >
       <button type="button" onClick={onReachStart}>
         Reach start
       </button>
@@ -2097,6 +2103,18 @@ describe("ChatView agent drafts", () => {
     const widget = await screen.findByRole("button", { name: "Open agent draft: Writer" });
     expect(container.querySelector('[data-message-id="m-answer"]')).toContainElement(widget);
     expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an answer's placed card row while the rest of the view changes", async () => {
+    renderView(null, { agentDrafts: [{ id: "d1", name: "Writer", messageId: "m-answer" }] });
+    await screen.findByRole("button", { name: "Open agent draft: Writer" });
+    const host = () => transcriptProbe.mock.calls.at(-1)![0].find((row) => row.id === "m-answer");
+    const before = host();
+    const renders = transcriptProbe.mock.calls.length;
+    // Rebuilds every row's display, as each live chunk does.
+    fireEvent.click(screen.getByRole("button", { name: "Disable search" }));
+    await waitFor(() => expect(transcriptProbe.mock.calls.length).toBeGreaterThan(renders));
+    expect(host()).toBe(before);
   });
 
   it("names the draft a retry deletes and drops its editor once it is gone", async () => {
