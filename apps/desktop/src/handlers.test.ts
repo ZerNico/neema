@@ -60,6 +60,19 @@ let revealed: { absolute: string; mode: string }[];
 let revealComplaint: string | null;
 /** When set, a command signals it started and then runs until released. */
 let heldCommand: { started: () => void; release: Promise<void> } | null = null;
+// Sees a chat's folders being looked up, which a file tool does inside its lock.
+let onLookup: ((conversationId: string) => void) | null = null;
+const observedGrants = Layer.effect(
+  GrantStore,
+  Effect.gen(function* () {
+    const store = yield* GrantStore;
+    return GrantStore.of({
+      ...store,
+      lookup: (key) =>
+        Effect.sync(() => onLookup?.(key.conversationId)).pipe(Effect.andThen(store.lookup(key))),
+    });
+  }),
+).pipe(Layer.provide(GrantStore.layerEphemeral));
 const ORIGIN = "https://chat.test";
 let approvedNetwork: Array<{ target: GrantTarget; grant: EgressGrant }> = [];
 let keptAnswers: Array<{ origin: string; live: AnswerKey[] }> = [];
@@ -168,7 +181,7 @@ beforeAll(async () => {
     makeHandlers(shell).pipe(
       Effect.provide(
         Layer.mergeAll(
-          GrantStore.layerEphemeral,
+          observedGrants,
           WorkspaceRegistry.layerEphemeral(workspaceRoot),
           stubSandbox,
         ),
@@ -383,16 +396,13 @@ describe("once a folder is attached", () => {
     await started.promise;
     heldCommand = null;
     const target = join(root, "src", "after-command.md");
+    const order: string[] = [];
+    onLookup = (conversationId) => {
+      if (conversationId === CONVERSATION) order.push("write began");
+    };
     const write = Effect.runPromise(
       handlers.writeFile({ conversationId: CONVERSATION, callId: "w", path: target, text: "hi" }),
     );
-    // Proves absence, so it can only pass wrongly, never fail wrongly: an
-    // unheld write of two bytes lands long before this.
-    const early = await Promise.race([
-      write.then(() => "written"),
-      new Promise((done) => setTimeout(() => done("held"), 250)),
-    ]);
-    expect(early).toBe("held");
     // Another chat's files are not this command's to swap, so its write goes ahead.
     const elsewhere = await Effect.runPromise(
       handlers.writeFile({
@@ -403,8 +413,11 @@ describe("once a folder is attached", () => {
       }),
     );
     expect(elsewhere.created).toBe(true);
+    order.push("command released");
     release.resolve();
     await Promise.all([command, write]);
+    onLookup = null;
+    expect(order).toEqual(["command released", "write began"]);
     expect(await readFile(target, "utf8")).toBe("hi");
   });
 
