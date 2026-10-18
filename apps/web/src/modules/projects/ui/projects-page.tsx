@@ -1,8 +1,10 @@
+import { NameDialog } from "~/ui/name-dialog.tsx";
+import { ProjectDescriptionField } from "./project-description-field.tsx";
 import { ArrowRight01Icon, Folder01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import {
@@ -14,21 +16,8 @@ import {
   Page,
   Section,
 } from "~/ui/page-shell.tsx";
-import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
-import { Textarea } from "~/ui/primitives/textarea";
 import { projectsQuery } from "../client/queries.ts";
 import { PROJECT_LIMITS, type ProjectSummary } from "../schema.ts";
 import { createProject } from "../server/functions.ts";
@@ -131,87 +120,38 @@ function NewProjectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const id = useId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const reset = () => {
-    setName("");
-    setDescription("");
-  };
-  const save = useMutation({
-    mutationFn: () =>
-      createProject({ data: { name: name.trim(), description: description.trim() } }),
-    onSuccess: async (project) => {
-      await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      onOpenChange(false);
-      reset();
-      await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
-    },
-  });
   return (
-    <Dialog
+    <NameDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) {
-          if (save.isPending) return;
-          reset();
-        }
+        if (!next) setDescription("");
         onOpenChange(next);
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
-          <DialogDescription>
-            Name the work. You can add instructions, documents and people next.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (name.trim()) save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-              <Input
-                id={`${id}-name`}
-                value={name}
-                maxLength={PROJECT_LIMITS.name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Website relaunch"
-                disabled={save.isPending}
-                autoFocus
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-description`}>Description</FieldLabel>
-              <Textarea
-                id={`${id}-description`}
-                value={description}
-                maxLength={PROJECT_LIMITS.description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="What it is for, in a sentence"
-                disabled={save.isPending}
-              />
-              <FieldDescription>Optional. Shown to everyone in the project.</FieldDescription>
-            </Field>
-          </FieldGroup>
-          {save.isError ? <FieldError>Could not create the project.</FieldError> : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
-              Create project
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      title="New project"
+      description="Name the work. You can add instructions, documents and people next."
+      maxLength={PROJECT_LIMITS.name}
+      placeholder="Website relaunch"
+      submitLabel="Create project"
+      failure="Could not create the project."
+      onSubmit={async (name) => {
+        const project = await createProject({
+          data: { name, description: description.trim() },
+        });
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
+        await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
+      }}
+      renderExtra={(pending) => (
+        <ProjectDescriptionField
+          value={description}
+          onChange={setDescription}
+          pending={pending}
+          placeholder="What it is for, in a sentence"
+          hint="Optional. Shown to everyone in the project."
+        />
+      )}
+    />
   );
 }

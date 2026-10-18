@@ -1,3 +1,4 @@
+import { NameDialog } from "~/ui/name-dialog.tsx";
 import { ArrowRight01Icon, PlusSignIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -8,7 +9,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   createGroup,
   getDefaultCapabilities,
@@ -22,7 +23,6 @@ import { EmptyState, ErrorState, ListCard, ListRow, Page, Section } from "~/ui/p
 import { toastError } from "~/ui/error-toast.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
-import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
@@ -33,11 +33,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
 import { GROUP_NAME_MAX } from "../schema.ts";
 import { groupsQuery } from "../client/queries.ts";
-import { isConflict } from "./group-conflict.ts";
 
 export function GroupsPage() {
   const { data: groups } = useSuspenseQuery(groupsQuery);
@@ -367,87 +364,23 @@ function AddGroupDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const id = useId();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const tooLong = name.trim().length > GROUP_NAME_MAX;
-
-  const save = useMutation({
-    mutationFn: async () => {
-      return createGroup({ data: { name: name.trim() } });
-    },
-    onSuccess: async (group) => {
-      await queryClient.invalidateQueries({ queryKey: ["admin"] });
-      onOpenChange(false);
-      setName("");
-      await navigate({ to: "/admin/groups/$groupId", params: { groupId: group.id } });
-    },
-  });
-
   return (
-    <Dialog
+    <NameDialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          if (save.isPending) return;
-          save.reset();
-          setName("");
-        }
-        onOpenChange(next);
+      onOpenChange={onOpenChange}
+      title="New group"
+      description="Name it after the people it collects."
+      maxLength={GROUP_NAME_MAX}
+      placeholder="Engineering"
+      submitLabel="Create group"
+      failure="Could not create the group."
+      onSubmit={async (name) => {
+        const group = await createGroup({ data: { name } });
+        await queryClient.invalidateQueries({ queryKey: ["admin"] });
+        await navigate({ to: "/admin/groups/$groupId", params: { groupId: group.id } });
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New group</DialogTitle>
-          <DialogDescription>Name it after the people it collects.</DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (name.trim() && !tooLong) save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-              <Input
-                id={`${id}-name`}
-                value={name}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (save.isError) save.reset();
-                }}
-                placeholder="Engineering"
-                disabled={save.isPending}
-                autoFocus
-              />
-            </Field>
-          </FieldGroup>
-          {tooLong ? (
-            <FieldError>Group names can’t exceed {GROUP_NAME_MAX} characters.</FieldError>
-          ) : save.isError ? (
-            <FieldError>
-              {isConflict(save.error)
-                ? "A group with this name already exists."
-                : "Could not create the group."}
-            </FieldError>
-          ) : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton
-              type="submit"
-              pending={save.isPending}
-              disabled={!name.trim() || tooLong}
-            >
-              Create group
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    />
   );
 }

@@ -1,3 +1,5 @@
+import { NameDialog } from "~/ui/name-dialog.tsx";
+import { ProjectDescriptionField } from "./project-description-field.tsx";
 import {
   BubbleChatIcon,
   Delete02Icon,
@@ -639,79 +641,36 @@ function RenameDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const id = useId();
   const queryClient = useQueryClient();
-  const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description);
-  const save = useMutation({
-    mutationFn: () =>
-      updateProject({
-        data: { projectId: project.id, name: name.trim(), description: description.trim() },
-      }),
-    onSuccess: async (updated) => {
-      queryClient.setQueryData(projectQuery(project.id).queryKey, updated);
-      await queryClient.invalidateQueries({ queryKey: ["projects", "list"] });
-      onOpenChange(false);
-    },
-  });
   return (
-    <Dialog
+    <NameDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && save.isPending) return;
-        if (next) {
-          setName(project.name);
-          setDescription(project.description);
-        }
+        if (next) setDescription(project.description);
         onOpenChange(next);
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename project</DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (name.trim()) save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-              <Input
-                id={`${id}-name`}
-                value={name}
-                maxLength={PROJECT_LIMITS.name}
-                onChange={(event) => setName(event.target.value)}
-                disabled={save.isPending}
-                autoFocus
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-description`}>Description</FieldLabel>
-              <Textarea
-                id={`${id}-description`}
-                value={description}
-                maxLength={PROJECT_LIMITS.description}
-                onChange={(event) => setDescription(event.target.value)}
-                disabled={save.isPending}
-              />
-              <FieldDescription>Shown to everyone in the project.</FieldDescription>
-            </Field>
-          </FieldGroup>
-          {save.isError ? <FieldError>Could not save the project.</FieldError> : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
-              Save
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      title="Rename project"
+      initial={project.name}
+      maxLength={PROJECT_LIMITS.name}
+      submitLabel="Save"
+      failure="Could not save the project."
+      changed={description.trim() !== project.description}
+      onSubmit={async (name) => {
+        const updated = await updateProject({
+          data: { projectId: project.id, name, description: description.trim() },
+        });
+        queryClient.setQueryData(projectQuery(project.id).queryKey, updated);
+        await queryClient.invalidateQueries({ queryKey: ["projects", "list"] });
+      }}
+      renderExtra={(pending) => (
+        <ProjectDescriptionField
+          value={description}
+          onChange={setDescription}
+          pending={pending}
+          hint="Shown to everyone in the project."
+        />
+      )}
+    />
   );
 }

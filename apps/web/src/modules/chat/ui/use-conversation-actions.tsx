@@ -1,20 +1,11 @@
+import { MAX_SEARCH_LENGTH } from "~/modules/search/text.ts";
+import { NameDialog } from "~/ui/name-dialog.tsx";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { toastError } from "~/ui/error-toast.ts";
-import { PendingButton } from "~/ui/pending-button.tsx";
-import { Button } from "~/ui/primitives/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
-import { Input } from "~/ui/primitives/input";
 import {
   deleteConversation,
   renameConversation,
@@ -135,18 +126,6 @@ export function useConversationActions(): ConversationActions {
     },
   });
 
-  const renameMutation = useMutation({
-    mutationFn: (input: { conversationId: string; title: string }) =>
-      renameConversation({ data: input }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      setRenaming(null);
-    },
-    onError: (error) => toastError("Could not rename the chat.", error),
-  });
-
-  const title = renaming?.title.trim() ?? "";
-
   return {
     setArchived: (conversation, archived) => {
       if (!archived) return unarchiveMutation.mutate(conversation.id);
@@ -180,44 +159,23 @@ export function useConversationActions(): ConversationActions {
       });
     },
     renameDialog: (
-      <Dialog
+      // Keyed by the chat, so one rename's typing never shows in the next.
+      <NameDialog
+        key={renaming?.id}
         open={renaming !== null}
-        onOpenChange={(open) => !open && !renameMutation.isPending && setRenaming(null)}
-      >
-        <DialogContent>
-          {/* A form so Enter in the field saves, like any rename prompt. */}
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (renaming && title) {
-                renameMutation.mutate({ conversationId: renaming.id, title });
-              }
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Rename chat</DialogTitle>
-            </DialogHeader>
-            <Input
-              value={renaming?.title ?? ""}
-              onChange={(e) => setRenaming((r) => (r ? { ...r, title: e.target.value } : r))}
-              aria-label="Chat title"
-              disabled={renameMutation.isPending}
-              autoFocus
-            />
-            <DialogFooter>
-              <DialogClose
-                render={<Button variant="outline" disabled={renameMutation.isPending} />}
-              >
-                Cancel
-              </DialogClose>
-              <PendingButton type="submit" pending={renameMutation.isPending} disabled={!title}>
-                Save
-              </PendingButton>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={(open) => !open && setRenaming(null)}
+        title="Rename chat"
+        label="Title"
+        initial={renaming?.title ?? ""}
+        maxLength={MAX_SEARCH_LENGTH}
+        submitLabel="Rename"
+        failure="Could not rename the chat."
+        onSubmit={async (title) => {
+          if (!renaming) return;
+          await renameConversation({ data: { conversationId: renaming.id, title } });
+          await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }}
+      />
     ),
   };
 }

@@ -1,3 +1,4 @@
+import { NameDialog } from "~/ui/name-dialog.tsx";
 import {
   Delete02Icon,
   MoreHorizontalIcon,
@@ -7,7 +8,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   addGroupMember,
   deleteGroup,
@@ -16,7 +17,6 @@ import {
   updateGroupMemberSharing,
 } from "../server/functions.ts";
 import { CapabilitySettings } from "./groups-page.tsx";
-import { isConflict } from "./group-conflict.ts";
 import { groupsQuery, usersQuery, membersQuery } from "../client/queries.ts";
 import type { GroupMember, MemberSharing } from "~/modules/groups/server/repo.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -58,8 +58,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
 import { GROUP_NAME_MAX } from "../schema.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
@@ -425,82 +423,21 @@ function RenameGroupDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const id = useId();
   const queryClient = useQueryClient();
-  const [name, setName] = useState(currentName);
-  const tooLong = name.trim().length > GROUP_NAME_MAX;
-
-  const save = useMutation({
-    mutationFn: () => renameGroup({ data: { groupId, name: name.trim() } }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["admin"] });
-      setName(name.trim());
-      onOpenChange(false);
-    },
-  });
-
   return (
-    <Dialog
+    <NameDialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          if (save.isPending) return;
-          save.reset();
-          setName(currentName);
-        }
-        onOpenChange(next);
+      onOpenChange={onOpenChange}
+      title="Rename group"
+      description="Model access and members stay as they are."
+      initial={currentName}
+      maxLength={GROUP_NAME_MAX}
+      submitLabel="Rename"
+      failure="Could not rename the group."
+      onSubmit={async (name) => {
+        await renameGroup({ data: { groupId, name } });
+        await queryClient.invalidateQueries({ queryKey: ["admin"] });
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename group</DialogTitle>
-          <DialogDescription>Model access and members stay as they are.</DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (name.trim() && !tooLong) save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-              <Input
-                id={`${id}-name`}
-                value={name}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (save.isError) save.reset();
-                }}
-                disabled={save.isPending}
-                autoFocus
-              />
-            </Field>
-          </FieldGroup>
-          {tooLong ? (
-            <FieldError>Group names can’t exceed {GROUP_NAME_MAX} characters.</FieldError>
-          ) : save.isError ? (
-            <FieldError>
-              {isConflict(save.error)
-                ? "A group with this name already exists."
-                : "Could not rename the group."}
-            </FieldError>
-          ) : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton
-              type="submit"
-              pending={save.isPending}
-              disabled={!name.trim() || tooLong}
-            >
-              Rename
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    />
   );
 }

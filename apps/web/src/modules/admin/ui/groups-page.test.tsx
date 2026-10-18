@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { unexpectedFailureBody } from "~/server-error.ts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -146,14 +147,14 @@ describe("GroupsPage", () => {
   });
 
   it("does not navigate when group creation is refused", async () => {
-    createMock.mockRejectedValue(new Error("Something went wrong on our side."));
+    createMock.mockRejectedValue(new Error(unexpectedFailureBody("ABC234")));
     renderPage([group("g1", "Existing", 0)]);
     fireEvent.click(await screen.findByRole("button", { name: "New group" }));
     const field = await screen.findByLabelText("Name");
     fireEvent.change(field, { target: { value: "A".repeat(101) } });
     fireEvent.submit(field.closest("form")!);
     expect(createMock).not.toHaveBeenCalled();
-    expect(screen.getByText("Group names can’t exceed 100 characters.")).toBeVisible();
+    expect(screen.getByText("Keep it to 100 characters.")).toBeVisible();
 
     fireEvent.change(field, { target: { value: "Engineering" } });
     fireEvent.submit(field.closest("form")!);
