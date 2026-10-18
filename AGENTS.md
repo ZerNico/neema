@@ -403,9 +403,9 @@ Differs from most Effect 3 material online.
 ## Tool calling
 
 - `LanguageModel.streamText` is one model turn. The multi-turn loop is ours
-  (`src/modules/chat/server/streaming.ts`): re-run while `finish.reason` is
-  `"tool-calls"`, feeding each round back with `roundPrompt`, which keeps the round's
-  replay unit and its files' places.
+  (`src/modules/chat/server/generation/round.ts`, one round per call): re-run while
+  `finish.reason` is `"tool-calls"`, feeding each round back with `roundPrompt`, which
+  keeps the round's replay unit and its files' places.
 - The model client emits exactly one `finish` per call, at `[DONE]` or a Responses
   terminal event, and fails a stream that ends with neither. Calls come only with it,
   never from a round cut off by its limit. See [providers](docs/internals/providers.md).

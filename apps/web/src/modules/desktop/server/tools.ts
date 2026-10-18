@@ -16,7 +16,7 @@ import {
  *
  * The handler does not do the work: it waits for the loop's registration, then
  * blocks on `ExternalCompletion` until the page reports back. That keeps the whole
- * agentic loop where it already is. `streaming.ts` sees an ordinary
+ * agentic loop where it already is. `generation/round.ts` sees an ordinary
  * `tool-call` and an ordinary `tool-result`, folds them into the transcript
  * with `Prompt.fromResponseParts` like any other pair, and never learns that
  * the work happened somewhere else.

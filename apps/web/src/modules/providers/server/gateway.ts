@@ -117,7 +117,7 @@ export class ProviderUnreachable extends Schema.TaggedError<ProviderUnreachable>
  * The prompt did not fit the model's context window. Split out of
  * `ProviderUnreachable` because it is the one provider rejection the caller
  * can actually do something about: shrink the transcript and try again
- * (see `streaming.ts`). Everything else stays unreachable.
+ * (see `chat/server/generation/round.ts`). Everything else stays unreachable.
  */
 export class ProviderContextOverflow extends Schema.TaggedError<ProviderContextOverflow>()(
   "ProviderContextOverflow",

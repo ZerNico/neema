@@ -31,5 +31,5 @@ Memory saves are model-invoked (`save_memory`), gated separately in ordinary cha
 
 ## Temporal prompt context
 
-- `streaming.ts` samples server time once per generation; `runtime-context.ts` formats it in the browser's submitted timezone (Intl-validated; UTC fallback). Keep this user-role block after retained history, before tool rounds, never in the leading system prompt; its content and position stay fixed through the tool loop to preserve cacheable prefixes. Budget it in history/overflow compaction; active-round compaction already counts the base transcript.
+- `generation/attempt-context.ts` samples server time once per generation; `runtime-context.ts` formats it in the browser's submitted timezone (Intl-validated; UTC fallback). Keep this user-role block after retained history, before tool rounds, never in the leading system prompt; its content and position stay fixed through the tool loop to preserve cacheable prefixes. Budget it in history/overflow compaction; active-round compaction already counts the base transcript.
 - History timestamps are prompt-only UTC metadata, independent of the current browser zone. Assistant timestamps use `completedAt` when available: retry reuses the row and its original `createdAt`. Neither timestamp annotations nor the runtime block are persisted as message text.

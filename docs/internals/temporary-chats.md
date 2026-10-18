@@ -10,7 +10,7 @@ the rest of this page depends on.
 
 - The flag lives on the conversation, not in the attempt's generation config. Every way a
   message gets in (send, retry, edit, structured answer, queue promotion, steer) reads it
-  from the row when the generation starts, in `streaming.ts`. Keep therefore takes effect
+  from the row when the generation starts, in `generation/tools.ts`. Keep therefore takes effect
   on the next attempt, and no path has to carry the flag.
 - Memory is gated where it is offered: `prepareConversationContext` skips both the
   referenceable snapshot and `save_memory`. A write-boundary check is not needed, because a

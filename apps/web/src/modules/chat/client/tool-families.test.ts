@@ -12,7 +12,7 @@ type Body = Record<string, unknown>;
 
 /**
  * One call as the server leaves it twice: the row it writes and the envelopes
- * it streams. Each body mirrors the emitter in `chat/server/streaming.ts`
+ * it streams. Each body mirrors the emitter in `chat/server/generation/observe.ts`
  * (or the research runner), and every envelope must decode as the server's
  * declared `ToolChunkEnvelope`, so a fixture cannot drift from that contract.
  */

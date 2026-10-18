@@ -14,7 +14,7 @@ import {
  *
  * `capabilities.tools` means *native* tool calling. A model without it is
  * wrapped here, inside the provider boundary, so the toolkit loop in
- * `streaming.ts` never learns the difference: the request carries the tool
+ * `chat/server/generation/round.ts` never learns the difference: the request carries the tool
  * signatures as a Hermes-style `<tools>` system block and the history as
  * `<tool_call>` / `<tool_response>` text, and the response's `<tool_call>`
  * blocks come back out as ordinary `tool-call` parts with `finish.reason`

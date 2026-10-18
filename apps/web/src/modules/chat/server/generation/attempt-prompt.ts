@@ -214,8 +214,8 @@ export const prepareAttemptPrompt = (env: {
     };
     // What the previous request advertised: families its retained history
     // (everything after the last checkpoint) had loaded. The summary
-    // repeats that list so it reads the cached prefix; the budget above
-    // keeps the wider set as an upper bound.
+    // repeats that list so it reads the cached prefix; the schema budget in
+    // tools.ts keeps the wider set as an upper bound.
     const priorUnlocked = new Set<LazyToolFamily>();
     if (offeredLazy.length) {
       const suffixIds = new Set(historySuffix.map((message) => message.id));

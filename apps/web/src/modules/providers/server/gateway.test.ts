@@ -918,7 +918,7 @@ describe("prompt-based tool calling for models without native support", () => {
       const text = parts.flatMap((part) => (part.type === "text-delta" ? [part.delta] : []));
       expect(text.join("")).toBe("Let me check. ");
 
-      // Continuation: the loop in streaming.ts feeds the parts back verbatim.
+      // Continuation: the round loop in generation/round.ts feeds the parts back verbatim.
       // The wire then carries the call and its result as Hermes text.
       stubProvider(
         sse([
