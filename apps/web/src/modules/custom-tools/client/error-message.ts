@@ -12,7 +12,7 @@ const validationMessages = (body: string): string | null => {
   }
 };
 
-export const errorMessage = async (error: unknown): Promise<string> => {
+export const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return validationMessages(error.message) ?? error.message;
   return "Something went wrong.";
 };

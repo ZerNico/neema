@@ -75,7 +75,7 @@ import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
-import { errorMessage } from "../client/settled.ts";
+import { errorMessage } from "../client/error-message.ts";
 import { customToolQuery } from "../client/queries.ts";
 
 // Same surface as the skill editor: app tokens, a bounded pane that scrolls
@@ -338,8 +338,8 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       setTestOutcome(null);
       setProblems([]);
     },
-    onError: async (error, submitted) => {
-      const message = await errorMessage(error);
+    onError: (error, submitted) => {
+      const message = errorMessage(error);
       if (submitted.revision === buildRevision.current) setProblems(parseBuildProblems(message));
     },
   });
@@ -365,7 +365,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
         });
     },
     onError: async (error, submitted) => {
-      const message = await errorMessage(error);
+      const message = errorMessage(error);
       if (/changed elsewhere/i.test(message)) {
         if (tool)
           await queryClient.invalidateQueries({
@@ -420,7 +420,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       } catch (error) {
         return {
           ok: false,
-          output: await errorMessage(error),
+          output: errorMessage(error),
           durationMs: 0,
           logs: [],
           files: [],

@@ -29,9 +29,10 @@ export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | nul
  * network or the server being unwell.
  *
  * A refused server function rejects with `new Error(await response.text())`
- * (`refusals.ts`), so the status is lost and the body is all that survives. `requireSession` therefore writes a fixed body and this
- * matches on it: the two are one contract. Raw `Response` objects are
- * matched too for callers that fetch API routes directly.
+ * (`refusals.ts`), so the status is lost and the body is all that survives.
+ * `requireSession` therefore writes a fixed body and this matches on it: the
+ * two are one contract. Raw `Response` objects are matched too for callers
+ * that fetch API routes directly.
  */
 export const UNAUTHENTICATED_BODY = "Unauthorized";
 export function isUnauthenticatedError(error: unknown): boolean {
