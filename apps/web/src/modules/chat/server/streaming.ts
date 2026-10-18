@@ -331,7 +331,10 @@ export type StreamEvent =
 // the tools-off final pass still apply.
 const MAX_TOOL_ROUNDS = 128;
 /** How often a live tail checks whether its answer settled without it hearing. */
-const SETTLED_CHECK = Duration.seconds(15);
+export const SettledCheckInterval = Context.Reference<Duration.Duration>(
+  "chat/SettledCheckInterval",
+  { defaultValue: () => Duration.seconds(15) },
+);
 /** A file name inside a policy or reminder block is data: quoted, and unable to close the block. */
 const quotedName = (name: string) => JSON.stringify(name.replace(/[<>]/g, ""));
 /** Slide images one answer may put in front of the model, which it pays for per round. */
@@ -4909,6 +4912,7 @@ export class StreamEngine extends Context.Service<
                 status: "error" as const,
               });
             let lastSeq = persisted.at(-1)?.seq ?? afterSeq;
+            const settledEvery = yield* SettledCheckInterval;
 
             const replay: Stream.Stream<StreamEvent> = Stream.fromIterable(
               persisted.map((c) => ({
@@ -4963,7 +4967,7 @@ export class StreamEngine extends Context.Service<
             // now and then; once settled, the rest is read back and the stream ends.
             const settled: Stream.Stream<StreamEvent> = Stream.fromEffectSchedule(
               repo.getMessage(messageId).pipe(Effect.orDie),
-              Schedule.spaced(SETTLED_CHECK),
+              Schedule.spaced(settledEvery),
             ).pipe(
               Stream.filter(
                 (row) => row?.status !== "streaming" || (row.generationId ?? undefined) !== runId,

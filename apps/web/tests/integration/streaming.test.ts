@@ -74,7 +74,11 @@ import { hashSource } from "~/modules/genui/fences.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { EditNotAllowed } from "~/modules/chat/errors.ts";
 import { imageStandIn, RESUME_REMINDER } from "~/modules/chat/server/prompt.ts";
-import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import {
+  SettledCheckInterval,
+  StreamEngine,
+  type StreamEvent,
+} from "~/modules/chat/server/streaming.ts";
 import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { GenerationFence, QueueSweepInterval } from "~/modules/chat/server/generation-fence.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
@@ -11878,5 +11882,111 @@ describe("chunk retention", () => {
       }),
     );
     expect(left).toEqual(["failed", "recent", "stopped"]);
+  });
+});
+
+describe("the live tail", () => {
+  const chunkSeqs = (events: Iterable<StreamEvent>) =>
+    [...events].flatMap((event) => (event.kind === "chunk" ? [event.seq] : []));
+
+  it("reads back what a reader too slow for the live events missed, in order", async () => {
+    const deltas = 5000;
+    const go = Effect.runSync(Deferred.make<void>());
+    authoringScript = () =>
+      Stream.make(AiResponse.makePart("text-delta", { id: "t", delta: "start " })).pipe(
+        Stream.concat(
+          Stream.fromEffect(Deferred.await(go)).pipe(
+            Stream.flatMap(() =>
+              Stream.fromIterable(
+                Array.from({ length: deltas }, () =>
+                  AiResponse.makePart("text-delta", { id: "t", delta: "x" }),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Stream.concat(Stream.make(authoringFinish())),
+      ) as Stream.Stream<ChatStreamPart>;
+    try {
+      const events = await runtime.runPromise(
+        Effect.gen(function* () {
+          const seed = yield* setupConversation;
+          const conversation = yield* (yield* ChatRepo).createConversation({
+            userId: seed.userId,
+            modelId: textModelId,
+          });
+          const { assistantMessageId } = yield* (yield* ChatService).sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: conversation.id },
+            modelId: textModelId,
+            content: "Go.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          const engine = yield* StreamEngine;
+          let first = true;
+          // On its first chunk the reader stops until the answer has settled,
+          // while far more events than the live buffer holds go past it.
+          return yield* Stream.runCollect(
+            engine.subscribe(assistantMessageId, 0).pipe(
+              Stream.tap((event) => {
+                if (event.kind !== "chunk" || !first) return Effect.void;
+                first = false;
+                return Deferred.succeed(go, undefined).pipe(
+                  Effect.andThen(engine.awaitSettled(assistantMessageId, event.runId)),
+                );
+              }),
+            ),
+          );
+        }),
+      );
+      const seqs = chunkSeqs(events);
+      expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, index) => index + 1));
+      expect(seqs.length).toBeGreaterThan(deltas);
+      expect([...events].at(-1)).toMatchObject({ kind: "done", status: "complete" });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("ends a tail whose done it never heard once the row has settled", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const engine = yield* StreamEngine;
+        const { assistant } = yield* setupConversation;
+        // Streaming under a live lease, with no generation running here to say it ended.
+        yield* db
+          .update(messages)
+          .set({ generationLeaseUntil: sql`clock_timestamp() + interval '1 minute'` })
+          .where(eq(messages.id, assistant.id));
+        yield* db.insert(messageChunks).values({ messageId: assistant.id, seq: 1, delta: "Hel" });
+        let settledIt = false;
+        return yield* Stream.runCollect(
+          engine.subscribe(assistant.id, 0).pipe(
+            Stream.tap((event) => {
+              if (settledIt || event.kind !== "chunk") return Effect.void;
+              settledIt = true;
+              // Settled behind the tail's back: one more chunk, then complete.
+              return Effect.gen(function* () {
+                yield* db
+                  .insert(messageChunks)
+                  .values({ messageId: assistant.id, seq: 2, delta: "lo" });
+                yield* db
+                  .update(messages)
+                  .set({ status: "complete", content: "Hello", completedAt: new Date() })
+                  .where(eq(messages.id, assistant.id));
+              });
+            }),
+          ),
+        ).pipe(
+          Effect.provideService(SettledCheckInterval, Duration.millis(20)),
+          Effect.timeout(Duration.seconds(10)),
+        );
+      }),
+    );
+    expect(chunkSeqs(result)).toEqual([1, 2]);
+    expect([...result].at(-1)).toMatchObject({ kind: "done", status: "complete" });
   });
 });
