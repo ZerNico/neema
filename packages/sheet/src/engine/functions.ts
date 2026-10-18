@@ -295,6 +295,34 @@ function chiSquareTest(args: Value[]): Value {
   return typeof below === "number" ? 1 - below : below;
 }
 
+/**
+ * TREND and GROWTH in the shape of the x values asked about. formula.js returns a flat row,
+ * and without new x values fits nothing; Excel then fits the known x values, or 1, 2, 3...
+ */
+const fitted = (name: "TREND" | "GROWTH"): Fn => ({
+  kinds: "rrrs",
+  run: (args, call) => {
+    const knownY = args[0] ?? null;
+    const ys = gridOf(knownY);
+    if (ys instanceof XError) return ys;
+    let count = 0;
+    const knownX = call.omitted(1)
+      ? new Grid(ys.rows.map((row) => row.map(() => ++count)))
+      : args[1]!;
+    const newX = call.omitted(2) ? knownX : args[2]!;
+    const shape = gridOf(newX);
+    if (shape instanceof XError) return shape;
+    const constant = name === "GROWTH" && !call.omitted(3) ? [scalar(args[3])] : [];
+    const result = fromLibrary(
+      libraryFunction(name)!(toLibrary(knownY), toLibrary(knownX), toLibrary(newX), ...constant),
+    );
+    if (result instanceof XError) return result;
+    const values = flat(result);
+    if (values.length !== shape.height * shape.width) return VALUE;
+    return new Grid(shape.rows.map((row, r) => row.map((_, c) => values[r * shape.width + c]!)));
+  },
+});
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -823,8 +851,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   SUMX2MY2: "rr",
   SUMX2PY2: "rr",
   SUMXMY2: "rr",
-  TREND: "rrrs",
-  GROWTH: "rrrs",
   LINEST: "rrss",
   LOGEST: "rrss",
   "PERCENTRANK.INC": "rss",
@@ -972,6 +998,8 @@ export const FUNCTIONS: Record<string, Fn> = {
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
   "F.TEST": { kinds: "rr", run: fTest },
   "CHISQ.TEST": { kinds: "rr", run: chiSquareTest },
+  TREND: fitted("TREND"),
+  GROWTH: fitted("GROWTH"),
   "T.TEST": { kinds: "rrss", run: tTest },
   FREQUENCY: { kinds: "rr", run: frequency },
   GEOMEAN: { kinds: "|r", run: libraryStat("GEOMEAN") },

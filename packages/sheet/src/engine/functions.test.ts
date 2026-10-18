@@ -267,6 +267,40 @@ const cases: Record<string, Case[]> = {
   SUMX2MY2: [{ formula: "SUMX2MY2(A1:A7,B1:B7)", cells: sumXY, expected: -55 }],
   SUMX2PY2: [{ formula: "SUMX2PY2(A1:A7,B1:B7)", cells: sumXY, expected: 521 }],
   SUMXMY2: [{ formula: "SUMXMY2(A1:A7,B1:B7)", cells: sumXY, expected: 79 }],
+  // y = 2x + 1 exactly: the fitted values and the next two.
+  TREND: [
+    {
+      formula: "TREND(B1:B4,A1:A4,{5;6})",
+      cells: { ...column("A", [1, 2, 3, 4]), ...column("B", [3, 5, 7, 9]) },
+      expected: [[11], [13]],
+      digits: 10,
+    },
+    {
+      formula: "TREND(B1:B4,A1:A4)",
+      cells: { ...column("A", [1, 2, 3, 4]), ...column("B", [3, 5, 7, 9]) },
+      expected: [[3], [5], [7], [9]],
+      digits: 10,
+    },
+  ],
+  GROWTH: [
+    // y = 2 * 3^x exactly.
+    {
+      formula: "GROWTH(B1:B3,A1:A3,{4;5})",
+      cells: { ...column("A", [1, 2, 3]), ...column("B", [6, 18, 54]) },
+      expected: [[162], [486]],
+      digits: 8,
+    },
+    // GROWTH example, shown there in whole units.
+    {
+      formula: "GROWTH(B1:B6,A1:A6,{17;18})",
+      cells: {
+        ...column("A", [11, 12, 13, 14, 15, 16]),
+        ...column("B", [33100, 47300, 69000, 102000, 150000, 220000]),
+      },
+      expected: [[320197], [468536]],
+      digits: 0,
+    },
+  ],
   // LINEST example 1: slope and intercept.
   LINEST: [
     {
