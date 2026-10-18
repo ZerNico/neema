@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { PgClient } from "@effect/sql-pg";
 import { Client } from "pg";
 import { count, eq, sql } from "drizzle-orm";
-import { Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -52,6 +52,9 @@ type Services =
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
+/** The typed failure a refused call ended with, or the exit itself when it did not fail. */
+const failureOf = (result: Exit.Exit<unknown, unknown>) =>
+  Exit.isFailure(result) ? Cause.squash(result.cause) : result;
 
 /**
  * A stand-in Outline: the RPC methods the adapter calls plus its OAuth token
@@ -346,7 +349,10 @@ describe("connections", () => {
         s.connectApiKey(userId, "outline", { key: "ol_api_bad" }),
       ),
     );
-    expect(Exit.isFailure(refused)).toBe(true);
+    expect(failureOf(refused)).toMatchObject({
+      _tag: "IntegrationRejected",
+      reason: "The service did not accept that credential.",
+    });
     // A missing field is refused by the manifest's form before the service is asked.
     const calls = apiCalls.length;
     const empty = await run(
@@ -389,7 +395,10 @@ describe("connections", () => {
     const session = await runtime.runPromiseExit(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
-    expect(Exit.isFailure(session)).toBe(true);
+    expect(failureOf(session)).toMatchObject({
+      _tag: "IntegrationNotAvailable",
+      integrationId: "outline",
+    });
     await configure();
   });
 
@@ -418,12 +427,20 @@ describe("connections", () => {
         ),
       );
 
-    expect(Exit.isFailure(await complete("another-browser"))).toBe(true);
+    expect(failureOf(await complete("another-browser"))).toMatchObject({
+      _tag: "IntegrationRejected",
+      reason:
+        "This sign-in link expired or was opened in another browser. Start again from Settings.",
+    });
     expect(Exit.isSuccess(await complete(started.state))).toBe(true);
     const mine = await outlineFor(userId);
     expect(mine?.connection).toMatchObject({ authKind: "oauth", status: "active" });
     // The state is spent once used.
-    expect(Exit.isFailure(await complete(started.state))).toBe(true);
+    expect(failureOf(await complete(started.state))).toMatchObject({
+      _tag: "IntegrationRejected",
+      reason:
+        "This sign-in link expired or was opened in another browser. Start again from Settings.",
+    });
   });
 
   it("spends no sign-in code once the admin pointed the integration elsewhere", async () => {
@@ -537,7 +554,10 @@ describe("connections", () => {
       await moveTo(baseUrl);
       await connectKey(userId);
       // Same address as before, but another setup: the old session gets nothing.
-      expect(Exit.isFailure(await runtime.runPromiseExit(before.credential))).toBe(true);
+      expect(failureOf(await runtime.runPromiseExit(before.credential))).toMatchObject({
+        _tag: "IntegrationRequestFailed",
+        message: "This integration is no longer connected.",
+      });
       const after = await run(
         Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
       );
@@ -629,7 +649,10 @@ describe("connections", () => {
       // Would wait on the connection's row lock if the refresh still held it.
       await connectKey(userId);
       answer.resolve();
-      expect(Exit.isFailure(await credential)).toBe(true);
+      expect(failureOf(await credential)).toMatchObject({
+        _tag: "IntegrationRequestFailed",
+        message: "The sign-in changed while it was refreshed.",
+      });
       const after = await run(
         Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
       );
@@ -672,7 +695,10 @@ describe("connections", () => {
       // An admin saving the settings moves the revision this session was made for.
       await configure();
       answer.resolve();
-      expect(Exit.isFailure(await credential)).toBe(true);
+      expect(failureOf(await credential)).toMatchObject({
+        _tag: "IntegrationRequestFailed",
+        message: "This integration is no longer available.",
+      });
     } finally {
       duringRefresh = null;
       answer.resolve();
@@ -749,7 +775,10 @@ describe("connections", () => {
         ),
       );
       await blocker.query("commit");
-      expect(Exit.isFailure(await credential)).toBe(true);
+      expect(failureOf(await credential)).toMatchObject({
+        _tag: "IntegrationRequestFailed",
+        message: "This integration is no longer connected.",
+      });
       expect(tokenCalls.length).toBe(before);
       expect((await outlineFor(userId))?.connection?.status).toBe("active");
     } finally {
@@ -787,7 +816,10 @@ describe("connections", () => {
       );
       expect(replacement.id).toBe(session.connectionId);
       expect(replacement.accountEpoch).not.toBe(session.accountEpoch);
-      expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
+      expect(failureOf(await runtime.runPromiseExit(session.credential))).toMatchObject({
+        _tag: "IntegrationRequestFailed",
+        message: "This integration is no longer connected.",
+      });
       expect(tokenCalls.length).toBe(before);
       expect((await outlineFor(userId))?.connection?.status).toBe("active");
     },
@@ -925,7 +957,10 @@ describe("connections", () => {
     const session = await run(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
-    expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
+    expect(failureOf(await runtime.runPromiseExit(session.credential))).toMatchObject({
+      _tag: "IntegrationAuthFailed",
+      integrationId: "outline",
+    });
     const mine = await outlineFor(userId);
     expect(mine?.connection?.status).toBe("needs_reauth");
   });
@@ -948,7 +983,10 @@ describe("connections", () => {
     const session = await run(
       Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
     );
-    expect(Exit.isFailure(await runtime.runPromiseExit(session.credential))).toBe(true);
+    expect(failureOf(await runtime.runPromiseExit(session.credential))).toMatchObject({
+      _tag: "IntegrationAuthFailed",
+      integrationId: "outline",
+    });
     const mine = await outlineFor(userId);
     expect(mine?.connection?.status).toBe("needs_reauth");
   });

@@ -18,7 +18,7 @@ describe("the fetch one piece of work uses", () => {
   it("counts every response against one budget, so many pages cannot add up past it", async () => {
     const fetch = scopedFetch(base, { sameOriginOnly: true });
     expect((await (await fetch(base)).arrayBuffer()).byteLength).toBe(15 * 1024 * 1024);
-    await expect((await fetch(base)).arrayBuffer()).rejects.toThrow();
+    await expect((await fetch(base)).arrayBuffer()).rejects.toThrow("The response was too large.");
     // Another piece of work starts its own count.
     const next = scopedFetch(base, { sameOriginOnly: true });
     expect((await (await next(base)).arrayBuffer()).byteLength).toBe(15 * 1024 * 1024);

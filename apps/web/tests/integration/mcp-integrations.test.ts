@@ -9,7 +9,7 @@ import {
   McpServer,
 } from "@modelcontextprotocol/server";
 import { eq } from "drizzle-orm";
-import { Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { conversations, user, userApprovals } from "~/db/schema/index.ts";
@@ -440,7 +440,10 @@ describe("an MCP server set up by an admin", () => {
       const swept = await runtime.runPromiseExit(
         Effect.flatMap(IntegrationService, (s) => s.checkCatalog(id, null)),
       );
-      expect(Exit.isFailure(swept)).toBe(true);
+      expect(Exit.isFailure(swept) && Cause.squash(swept.cause)).toMatchObject({
+        _tag: "IntegrationRejected",
+        reason: expect.stringMatching(/^Turn Docs .* on and connect your own account in Settings/),
+      });
       const catalog = await run(Effect.flatMap(IntegrationRepo, (repo) => repo.catalog(id)));
       expect(catalog?.checkError).toMatch(/connect your own account/);
     };
@@ -616,7 +619,10 @@ describe("an MCP server set up by an admin", () => {
     await connect("second");
     // A call prepared before the move still names the old address: it gets nothing.
     const stale = await runtime.runPromiseExit(before.credential);
-    expect(Exit.isFailure(stale)).toBe(true);
+    expect(Exit.isFailure(stale) && Cause.squash(stale.cause)).toMatchObject({
+      _tag: "IntegrationRequestFailed",
+      message: "This integration is no longer connected.",
+    });
     const after = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
     expect(await run(after.credential)).toMatchObject({
       kind: "api_key",

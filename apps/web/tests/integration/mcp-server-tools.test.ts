@@ -732,7 +732,10 @@ describe("delegating to the app", () => {
     const contents = await client.readResource({ uri });
     expect(contents.contents[0]).toMatchObject({ uri, text: "Quarterly numbers." });
     const other = await connect(await makeUser(), ["chats:read"]);
-    await expect(other.readResource({ uri })).rejects.toThrow();
+    await expect(other.readResource({ uri })).rejects.toMatchObject({
+      code: -32602,
+      message: "There is no file at that address.",
+    });
     await other.close();
     await client.close();
   });

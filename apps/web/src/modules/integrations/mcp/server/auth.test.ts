@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Duration, Effect, Exit } from "effect";
+import { Cause, Duration, Effect, Exit } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveredServer, StoredOAuthClient } from "../../server/repo.ts";
 import { mcpOAuth } from "./auth.ts";
@@ -218,8 +218,10 @@ describe("signing in to an MCP server", () => {
         pinned: "https://idp.example.com",
       },
     });
-    expect(Exit.isFailure(moved.exit)).toBe(true);
-    expect(JSON.stringify(moved.exit)).toMatch(/now signs in through/);
+    expect(Exit.isFailure(moved.exit) && Cause.squash(moved.exit.cause)).toMatchObject({
+      _tag: "IntegrationRejected",
+      reason: expect.stringContaining("now signs in through"),
+    });
     const same = await started({
       preregistered: { clientId: "admin-client", clientSecret: "x", pinned: base },
     });
@@ -295,8 +297,11 @@ describe("signing in to an MCP server", () => {
       const { server: found, verifier } = await started();
       const mixedUp = await finish(found, verifier, "https://evil.example.com");
       const silent = await finish(found, verifier, null);
-      expect(Exit.isFailure(mixedUp)).toBe(true);
-      expect(Exit.isFailure(silent)).toBe(true);
+      for (const exit of [mixedUp, silent])
+        expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
+          _tag: "IntegrationRejected",
+          reason: "The sign-in came back from another server than it went to, so it was not used.",
+        });
       expect(log.tokens.filter((entry) => entry.grant_type === "authorization_code")).toEqual([]);
     });
   });

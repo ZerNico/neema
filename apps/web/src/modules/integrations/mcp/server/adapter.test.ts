@@ -364,8 +364,10 @@ describe("an MCP server through the adapter", () => {
     const { entries } = await list(sessionAt("/mcp"));
     seen.length = 0;
     const exit = await run(sessionAt("/mcp"), byName(entries, "search"), { q: 5 });
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(JSON.stringify(exit)).toMatch(/IntegrationRejected/);
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
+      _tag: "IntegrationRejected",
+      reason: "The arguments do not fit Search docs: data/q must be string",
+    });
     expect(seen.filter((line) => line.endsWith("tools/call"))).toEqual([]);
   });
 
@@ -384,8 +386,10 @@ describe("an MCP server through the adapter", () => {
   it("reports a tool's own error as a failure in its words", async () => {
     const { entries } = await list(sessionAt("/mcp"));
     const exit = await run(sessionAt("/mcp"), byName(entries, "broken"), {});
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(JSON.stringify(exit)).toContain("The database is on fire.");
+    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
+      _tag: "IntegrationRequestFailed",
+      message: "The database is on fire.",
+    });
   });
 
   describe("asking the person mid-call", () => {
