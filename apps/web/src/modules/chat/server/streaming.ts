@@ -1964,6 +1964,7 @@ export class StreamEngine extends Context.Service<
             deferAssistantBytes: true,
             messages: plainHistory,
             modelSupportsFiles: model?.capabilities.files ?? false,
+            modelSupportsVision: model?.capabilities.vision ?? false,
             inlineTextChars: inlineTextCharsFor(model?.contextLength),
           });
           const plainById = new Map(
@@ -1982,6 +1983,7 @@ export class StreamEngine extends Context.Service<
                     deferAssistantBytes: true,
                     expandAssistantTurns: true,
                     modelSupportsFiles: model?.capabilities.files ?? false,
+                    modelSupportsVision: model?.capabilities.vision ?? false,
                     inlineTextChars: inlineTextCharsFor(model?.contextLength),
                     ...(model
                       ? {

@@ -6758,6 +6758,44 @@ describe("retry with a different model", () => {
     expect(message).toMatchObject({ status: "complete", modelId: textModelId });
   }, 60_000);
 
+  it("names an earlier image to a model without vision, so a send to it still runs", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const { userId, conversation, userMessage } = yield* seedAnswered(visionModelId);
+        yield* attachImage(userId, userMessage.id);
+        const before = streamPrompts.length;
+        const sent = yield* chat.sendMessage({
+          userId,
+          conversation: { kind: "existing", id: conversation.id },
+          modelId: textModelId,
+          content: "And now?",
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        });
+        yield* engine.subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
+        return {
+          prompts: streamPrompts.slice(before),
+          answer: yield* repo.getMessage(sent.assistantMessageId),
+        };
+      }),
+    );
+
+    expect(result.answer?.status).toBe("complete");
+    const parts = result.prompts.flatMap((prompt) =>
+      prompt.content.flatMap((message) =>
+        typeof message.content === "string"
+          ? []
+          : (message.content as ReadonlyArray<{ type: string }>),
+      ),
+    );
+    expect(parts.some((part) => part.type === "file")).toBe(false);
+    expect(JSON.stringify(result.prompts)).toContain("omitted: this model cannot view images");
+  }, 60_000);
+
   it("refuses a model that cannot read a file already in the conversation", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
