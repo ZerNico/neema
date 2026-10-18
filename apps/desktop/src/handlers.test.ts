@@ -57,6 +57,8 @@ let ran: { command: string; cwd: string; allowWrite: string[] }[];
 let revealed: { absolute: string; mode: string }[];
 /** What the operating system complained about, when the test wants it to. */
 let revealComplaint: string | null;
+/** When set, a command signals it started and then runs until released. */
+let heldCommand: { started: () => void; release: Promise<void> } | null = null;
 const ORIGIN = "https://chat.test";
 let approvedNetwork: Array<{ target: GrantTarget; grant: EgressGrant }> = [];
 let keptAnswers: Array<{ origin: string; live: AnswerKey[] }> = [];
@@ -115,8 +117,12 @@ const stubSandbox = Layer.succeed(
         revokedPaths.push({ target, path });
       }),
     run: ({ command, cwd, allowWrite }) =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         ran.push({ command, cwd, allowWrite: [...allowWrite] });
+        if (heldCommand) {
+          heldCommand.started();
+          await heldCommand.release;
+        }
         return { exitCode: 0, output: "", truncated: false, violations: [] };
       }),
   }),
@@ -354,6 +360,37 @@ describe("once a folder is attached", () => {
     expect(receipt.created).toBe(true);
     expect(receipt.path).toBe("site/src/new/note.md");
     expect(await readFile(join(root, "src", "new", "note.md"), "utf8")).toBe("hello");
+  });
+
+  it("holds a write until a running command has finished", async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    heldCommand = { started: started.resolve, release: release.promise };
+    const command = Effect.runPromise(
+      handlers.runCommand({
+        conversationId: CONVERSATION,
+        callId: "slow",
+        generationId: "generation-1",
+        command: "ln -sfn ~/Library/LaunchAgents out",
+        timeoutMs: 1000,
+      }),
+    );
+    await started.promise;
+    heldCommand = null;
+    const target = join(root, "src", "after-command.md");
+    const write = Effect.runPromise(
+      handlers.writeFile({ conversationId: CONVERSATION, callId: "w", path: target, text: "hi" }),
+    );
+    // Proves absence, so it can only pass wrongly, never fail wrongly: an
+    // unheld write of two bytes lands long before this.
+    const early = await Promise.race([
+      write.then(() => "written"),
+      new Promise((done) => setTimeout(() => done("held"), 250)),
+    ]);
+    expect(early).toBe("held");
+    release.resolve();
+    await Promise.all([command, write]);
+    expect(await readFile(target, "utf8")).toBe("hi");
   });
 
   it("reads a window of lines and says where more follows", async () => {

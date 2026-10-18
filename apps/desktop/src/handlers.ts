@@ -226,10 +226,13 @@ export const makeHandlers = (shell: Shell) =>
     const store = yield* GrantStore;
     const sandbox = yield* Sandbox;
     const workspaces = yield* WorkspaceRegistry;
-    // The page runs a round's calls at once. An edit reads, then writes, so two
-    // edits to one file would each write over the other's; changes take turns.
-    const changes = yield* Semaphore.make(1);
-    const oneChangeAtATime = changes.withPermits(1);
+    // A round's calls run at once, and an edit reads then writes, so changes
+    // take turns. They also wait out running commands: a change checks a path
+    // and then writes it as the person, and a command could swap in a symlink.
+    const ALL_PERMITS = 1024;
+    const filesystem = yield* Semaphore.make(ALL_PERMITS);
+    const oneChangeAtATime = filesystem.withPermits(ALL_PERMITS);
+    const besideOtherCommands = filesystem.withPermits(1);
     // Every grant is looked up under the origin the shell is connected to, so
     // the handlers cannot forget to scope one.
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- key reads shell from the enclosing handler set
@@ -1079,14 +1082,16 @@ export const makeHandlers = (shell: Shell) =>
               resolved._tag === "Success" ? resolved.success.absolute : null,
             ),
           );
-          return yield* sandbox.run({
-            callId,
-            command,
-            context: { ...key(conversationId), attempt: generationId },
-            cwd,
-            allowWrite: allowed.filter((root): root is string => root !== null),
-            timeoutMs,
-          });
+          return yield* besideOtherCommands(
+            sandbox.run({
+              callId,
+              command,
+              context: { ...key(conversationId), attempt: generationId },
+              cwd,
+              allowWrite: allowed.filter((root): root is string => root !== null),
+              timeoutMs,
+            }),
+          );
         }),
 
       requestNetworkAccess: ({ conversationId, generationId, host, port, privateNetwork, scope }) =>

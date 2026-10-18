@@ -431,9 +431,11 @@ when the string did sit inside a root and resolved outside anyway — a
 symlink escape or a `..` walk — that refusal is final, so an escape landing
 inside a neighbouring root still fails. Refusals name the path the caller
 supplied, never a host absolute the caller did not already know. Only
-`ENOENT` allows walking to a parent. Moves check both ends. This does not
-claim protection against every concurrent filesystem replacement or
-hard-link alias.
+`ENOENT` allows walking to a parent. Moves check both ends. A check and its
+write are not atomic, and the one party able to race them is a sandboxed
+command, so a file change waits until no command is running and commands wait
+for a change. Other processes of the person's own, and hard-link aliases, are
+outside that claim.
 
 Inside an attached folder, commands and file tools may change anything, `.git`
 included. A hook or `core.fsmonitor` they plant runs outside the sandbox the next
