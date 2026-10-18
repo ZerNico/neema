@@ -339,6 +339,7 @@ const cases: Record<string, Case[]> = {
   // NETWORKDAYS.INTL example.
   "NETWORKDAYS.INTL": [
     { formula: "NETWORKDAYS.INTL(DATE(2006,1,1),DATE(2006,1,31))", expected: 22 },
+    { formula: "NETWORKDAYS.INTL(DATE(2006,2,28),DATE(2006,1,31))", expected: -21 },
     {
       formula: 'NETWORKDAYS.INTL(DATE(2006,1,1),DATE(2006,2,1),7,{"2006/1/2","2006/1/16"})',
       expected: 22,

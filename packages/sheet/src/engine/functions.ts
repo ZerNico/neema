@@ -834,7 +834,13 @@ const workdays = (name: "NETWORKDAYS" | "WORKDAY", intl: boolean): Fn => ({
     const holidaysAt = intl ? 3 : 2;
     const holidays = holidaysOf(call.omitted(holidaysAt) ? undefined : args[holidaysAt]);
     if (holidays instanceof XError) return holidays;
-    return fromLibrary(libraryFunction(`${name}.INTL`)!(start, second, weekend, holidays));
+    const run = libraryFunction(`${name}.INTL`)!;
+    // formula.js counts a backward span as minus its length plus one; Excel negates the forward count.
+    if (name === "NETWORKDAYS" && second < start) {
+      const forward = fromLibrary(run(second, start, weekend, holidays));
+      return typeof forward === "number" ? -forward : forward;
+    }
+    return fromLibrary(run(start, second, weekend, holidays));
   },
 });
 
