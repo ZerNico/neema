@@ -58,8 +58,12 @@ export function spreadsheetActivitySummary(
   const origin = decoded(fields.origin, result.origin);
   const changes = bounded(decoded(fields.changes, result.changes), 300);
   const cellsWritten = decoded(fields.cellsWritten, result.cellsWritten);
-  const errors = result.formulaErrors as { count?: unknown } | undefined;
-  const formulaErrors = decoded(fields.formulaErrors, errors?.count);
+  // The engine reports `{ count }`; a summary read back from a row already holds the number.
+  const errors = result.formulaErrors as { count?: unknown } | number | undefined;
+  const formulaErrors = decoded(
+    fields.formulaErrors,
+    typeof errors === "number" ? errors : errors?.count,
+  );
   const read = decoded(fields.read, result.read);
   return {
     outcome: failed ? "error" : (bounded(decoded(fields.outcome, result.outcome), 40) ?? "error"),
