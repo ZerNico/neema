@@ -22,17 +22,15 @@ export const FakeBlobStore = Layer.succeed(BlobStore, {
   deletePrefix: () => Effect.void,
 });
 
-/** Keeps what it is given, for suites that store files they never read back from disk. */
-export const MemoryBlobStore = Layer.sync(BlobStore, () => {
-  const blobs = new Map<string, Uint8Array>();
-  return {
+/** Keeps bytes in `blobs`, for suites that store files and read them back. */
+export const memoryBlobStore = (blobs = new Map<string, Uint8Array>()) =>
+  Layer.succeed(BlobStore, {
     put: (key, bytes) => Effect.sync(() => void blobs.set(key, bytes)),
     get: (key) => Effect.succeed(blobs.get(key) ?? new Uint8Array()),
     delete: (key) => Effect.sync(() => void blobs.delete(key)),
     exists: (key) => Effect.succeed(blobs.has(key)),
     deletePrefix: () => Effect.void,
-  };
-});
+  });
 
 export const FakeDocumentParser = Layer.succeed(DocumentParser, {
   parsePdf: () => Effect.die("no documents in these tests"),

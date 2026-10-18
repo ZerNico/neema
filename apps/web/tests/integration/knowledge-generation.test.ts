@@ -1,46 +1,31 @@
-import { PgClient } from "@effect/sql-pg";
-import { Deferred, Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Deferred, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response, type Prompt } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { userApprovals } from "~/db/schema/index.ts";
 import { SkillService } from "~/modules/skills/server/service.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
-import { SkillRepo } from "~/modules/skills/server/repo.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
-import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
-import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
-import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
 import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { SearchProviders } from "~/modules/tools/server/search-providers/chain.ts";
 import { fakeSearchProviders } from "../fixtures/search-providers.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { Db } from "~/server/db.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { makeFakeMemoryService } from "./fake-memory.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
-import { FakeDocumentParser, FakeCustomToolRuntime, NoIntegrations } from "./unused-services.ts";
+import { engineLayer } from "./engine-harness.ts";
+import { memoryBlobStore } from "./unused-services.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 9).toString("base64");
 
@@ -73,11 +58,7 @@ const tool = (input: GatewayInput, name: string, params: unknown) => {
 let script: (input: GatewayInput, calls: number) => Stream.Stream<ChatStreamPart> = () =>
   Stream.make(text("answer"), finish());
 let hold: { reached: Deferred.Deferred<void>; release: Deferred.Deferred<void> } | null = null;
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   generateText: () =>
     Effect.succeed({
       text: "Title",
@@ -99,7 +80,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
           ).pipe(Stream.flatMap(() => parts))
         : parts;
     }),
-} as never);
+} satisfies Partial<AiGateway["Service"]>;
 
 // Research requires enabled search and reader tools; the backend returns one
 // evidence hit so workers have a web source beside the knowledge ones.
@@ -128,13 +109,6 @@ const FakeReader = Layer.succeed(UrlReaderExecutor, {
 });
 
 const blobs = new Map<string, Uint8Array>();
-const MemoryBlobStore = Layer.succeed(BlobStore, {
-  put: (key: string, bytes: Uint8Array) => Effect.sync(() => void blobs.set(key, bytes)),
-  get: (key: string) => Effect.succeed(blobs.get(key) ?? new Uint8Array()),
-  delete: (key: string) => Effect.sync(() => void blobs.delete(key)),
-  exists: (key: string) => Effect.succeed(blobs.has(key)),
-  deletePrefix: () => Effect.void,
-} as never);
 
 let database: TestDatabase;
 type Services =
@@ -280,55 +254,25 @@ const retry = (userId: string, conversationId: string, messageId: string) =>
 beforeAll(async () => {
   database = await createTestDatabase();
   const url = database.url;
-  const PgLive = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 });
-  const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(Layer.provideMerge(PgLive));
-  const ReposLayer = Layer.mergeAll(
-    SkillRepo.layer,
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    IntegrationRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    GroupRepo.layer,
-    KnowledgeRepo.layer,
-    ProviderRepo.layer,
-    ToolsRepo.layer,
-    ScheduleRepo.layer,
-  ).pipe(
-    Layer.provideMerge(AttachmentRepo.layer),
-    Layer.provideMerge(FeaturePolicy.layer),
-    Layer.provideMerge(InfraLayer),
+  runtime = ManagedRuntime.make(
+    engineLayer(url, {
+      maxConnections: 8,
+      gateway,
+      services: Layer.mergeAll(
+        WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
+        FakeReader,
+        memoryBlobStore(blobs),
+        makeFakeMemoryService({ autoSave: true }),
+      ),
+      knowledge: Layer.mergeAll(
+        SkillService.layer,
+        KnowledgeIndexer.layer,
+        KnowledgeSearch.layer,
+        KnowledgeService.layer,
+        AgentService.layer,
+      ).pipe(Layer.provideMerge(EmbeddingSpace.layer)),
+    }),
   );
-  const CoreLayer = Layer.mergeAll(
-    FakeGateway,
-    ExternalCompletion.layer,
-    Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-      Layer.provideMerge(SyncBus.layer),
-    ),
-    SyncBus.layer,
-    WebSearchExecutor.layer.pipe(Layer.provide(FakeSearchBackend)),
-    FakeReader,
-    MemoryBlobStore,
-    FakeDocumentParser,
-    FakeCustomToolRuntime,
-    NoIntegrations,
-    makeFakeMemoryService({ autoSave: true }),
-  ).pipe(Layer.provideMerge(ReposLayer));
-  const KnowledgeLayer = Layer.mergeAll(
-    SkillService.layer,
-    KnowledgeIndexer.layer,
-    KnowledgeSearch.layer,
-    KnowledgeService.layer,
-    AgentService.layer,
-  ).pipe(
-    Layer.provideMerge(EmbeddingSpace.layer),
-    Layer.provideMerge(AttachmentService.layer),
-    Layer.provideMerge(CoreLayer),
-  );
-  const AppLayer = ChatService.layer.pipe(
-    Layer.provideMerge(StreamEngine.layer.pipe(Layer.provideMerge(KnowledgeLayer))),
-  );
-  runtime = ManagedRuntime.make(AppLayer);
 
   await run(
     ToolsRepo.use((tools) => tools.updateTool("web_search", { enabled: true, config: {} })),

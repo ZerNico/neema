@@ -1,7 +1,6 @@
-import { PgClient } from "@effect/sql-pg";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response as AiResponse } from "effect/unstable/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,27 +15,16 @@ import {
   oauthClient,
   user,
 } from "~/db/schema/index.ts";
-import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
-import { AgentRepo } from "~/modules/agents/server/repo.ts";
-import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
-import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
-import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
-import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { EmbeddingSpace } from "~/modules/knowledge/server/embedding-space.ts";
 import { KnowledgeIndexer } from "~/modules/knowledge/server/indexer.ts";
-import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
-import { ToolsRepo } from "~/modules/tools/server/repo.ts";
-import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SkillService } from "~/modules/skills/server/service.ts";
 import type { McpGrant } from "~/modules/auth/server/mcp-access.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
@@ -48,42 +36,22 @@ import { ConnectedApps } from "~/modules/mcp-server/server/connected-apps.ts";
 import { mcpEndpoint } from "~/modules/mcp-server/server/endpoint.ts";
 import type { McpServices } from "~/modules/mcp-server/server/tools/index.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
-import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import {
   AiGateway,
   ProviderUnreachable,
   type ChatStreamPart,
 } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { Db } from "~/server/db.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
-import {
-  FakeCustomToolRuntime,
-  FakeDocumentParser,
-  FakeUrlReader,
-  FakeWebSearch,
-  NoIntegrations,
-} from "./unused-services.ts";
+import { engineLayer } from "./engine-harness.ts";
+import { memoryBlobStore } from "./unused-services.ts";
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
 const origin = "https://chat.example";
 const resource = `${origin}/api/mcp`;
-
-/** Files sent over MCP are stored, so they need somewhere to go. */
-const blobs = new Map<string, Uint8Array>();
-const MemoryBlobStore = Layer.succeed(BlobStore, {
-  put: (key: string, bytes: Uint8Array) => Effect.sync(() => void blobs.set(key, bytes)),
-  get: (key: string) => Effect.succeed(blobs.get(key) ?? new Uint8Array()),
-  delete: (key: string) => Effect.sync(() => void blobs.delete(key)),
-  exists: (key: string) => Effect.succeed(blobs.has(key)),
-  deletePrefix: () => Effect.void,
-} as never);
 
 type GatewayInput = Parameters<AiGateway["Service"]["streamChat"]>[0];
 const usage = () => new AiResponse.Usage({ inputTokens: {}, outputTokens: {} });
@@ -138,11 +106,7 @@ const askingAnswer = (params: unknown) => (input: GatewayInput) => {
   ).pipe(Stream.concat(results), Stream.concat(Stream.make(finish("tool-calls"))));
 };
 
-const FakeGateway = Layer.succeed(AiGateway, {
-  fetchCatalog: () => Effect.succeed([]),
-  probeEmbeddingDimensions: () => Effect.die("no dimension probes in these tests"),
-  probeChatModel: () => Effect.die("no model probes in these tests"),
-  embed: () => Effect.die("unexpected embed call"),
+const gateway = {
   generateText: () =>
     Effect.succeed({
       text: "A title",
@@ -150,7 +114,7 @@ const FakeGateway = Layer.succeed(AiGateway, {
       finishMetadata: undefined,
     }),
   streamChat: (input: GatewayInput) => Stream.suspend(() => answer(input)),
-} as never);
+} satisfies Partial<AiGateway["Service"]>;
 
 type Services = McpServices | ChatService | StreamEngine | Db | KnowledgeIndexer | SkillService;
 let database: TestDatabase;
@@ -159,61 +123,33 @@ let providerId: string;
 
 beforeAll(async () => {
   database = await createTestDatabase();
-  const PgLive = PgClient.layer({ url: Redacted.make(database.url), maxConnections: 8 });
-  const InfraLayer = Layer.mergeAll(Db.layer, KeyCipher.layer, MemoryBlobStore).pipe(
-    Layer.provideMerge(PgLive),
-  );
-  const ReposLayer = Layer.mergeAll(
-    AnalyticsRepo.layer,
-    CustomToolRepo.layer,
-    IntegrationRepo.layer,
-    AgentRepo.layer,
-    ChatRepo.layer,
-    KnowledgeRepo.layer,
-    ProviderRepo.layer,
-    ScheduleRepo.layer,
-    ToolsRepo.layer,
-  ).pipe(
-    Layer.provideMerge(Layer.mergeAll(AttachmentRepo.layer, KeyCipher.layer, FeaturePolicy.layer)),
-    Layer.provideMerge(InfraLayer),
-  );
-  const EngineLayer = StreamEngine.layer.pipe(
-    Layer.provideMerge(
-      Layer.mergeAll(
-        FakeGateway,
-        // The real library: these tools read it as the app's own pages do.
-        Layer.mergeAll(KnowledgeSearch.layer, KnowledgeService.layer, KnowledgeIndexer.layer).pipe(
-          Layer.provideMerge(EmbeddingSpace.layer),
-          Layer.provideMerge(AttachmentService.layer),
-          Layer.provideMerge(Layer.mergeAll(FakeGateway, FakeDocumentParser, SyncBus.layer)),
-        ),
-        MemoryService.layer.pipe(
-          Layer.provideMerge(Layer.mergeAll(MemoryRepo.layer, SyncBus.layer)),
-        ),
-        FakeWebSearch,
-        FakeUrlReader,
-        MemoryBlobStore,
-        FakeDocumentParser,
-        FakeCustomToolRuntime,
-        NoIntegrations,
-        // The real registry, after the stub: delegated answers park on it.
-        IntegrationApprovals.layer.pipe(Layer.provide(SyncBus.layer)),
-        ExternalCompletion.layer,
-        SyncBus.layer,
-        Layer.mergeAll(ScheduleDraftService.layer, AgentDraftService.layer).pipe(
-          Layer.provideMerge(SyncBus.layer),
-        ),
-      ).pipe(Layer.provideMerge(ReposLayer)),
-    ),
-  );
   runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      ChatService.layer,
       ProjectService.layer,
       ConnectedApps.layer,
       ApiKeys.layer,
-      SkillService.layer.pipe(Layer.provideMerge(SkillRepo.layer)),
-    ).pipe(Layer.provideMerge(AttachmentService.layer.pipe(Layer.provideMerge(EngineLayer)))),
+      SkillService.layer,
+    ).pipe(
+      Layer.provideMerge(
+        engineLayer(database.url, {
+          maxConnections: 8,
+          gateway,
+          services: Layer.mergeAll(
+            // Files sent over MCP are stored, so they need somewhere to go.
+            memoryBlobStore(),
+            MemoryService.layer,
+            // The real registry, over the stub: delegated answers park on it.
+            IntegrationApprovals.layer,
+          ),
+          // The real library: these tools read it as the app's own pages do.
+          knowledge: Layer.mergeAll(
+            KnowledgeSearch.layer,
+            KnowledgeService.layer,
+            KnowledgeIndexer.layer,
+          ).pipe(Layer.provideMerge(EmbeddingSpace.layer)),
+        }),
+      ),
+    ),
   );
   await run(
     Effect.flatMap(Db, (db) =>
