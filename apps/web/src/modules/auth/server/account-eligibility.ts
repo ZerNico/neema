@@ -68,8 +68,9 @@ export const requireEligibleAccount = Effect.fn("auth.requireEligibleAccount")(f
  */
 export const activeAccountSql = sql<boolean>`(
   (exists (select 1 from user_approvals a where a.user_id = ${user.id} and a.status = 'approved')
-    or exists (select 1 from signup_bootstrap b
-      where b.id = ${AUTH_SETTINGS_ID} and b.owner_id = ${user.id}))
+    or (exists (select 1 from signup_bootstrap b
+          where b.id = ${AUTH_SETTINGS_ID} and b.owner_id = ${user.id})
+        and not exists (select 1 from user_approvals a where a.user_id = ${user.id})))
   and not (${user.banned} and (${user.banExpires} is null or ${user.banExpires} > clock_timestamp()))
 )`;
 
@@ -140,19 +141,32 @@ const SESSION_RECHECK = Duration.seconds(30);
 /**
  * Completes once a long-lived feed's session, or its account, no longer holds.
  * A feed checks at connect only; sign-out, revocation and bans end it here.
+ * It reads without locking, as the per-request check does.
  */
 export const sessionEnded = Effect.fn("auth.sessionEnded")(function* (
   sessionId: string,
   userId: string,
 ) {
   const db = yield* Db;
+  const holds = Effect.gen(function* () {
+    if (!(yield* accountEligible(userId).pipe(Effect.provideService(Db, db)))) return false;
+    const [found] = yield* db
+      .select({ id: session.id })
+      .from(session)
+      .where(
+        and(
+          eq(session.id, sessionId),
+          eq(session.userId, userId),
+          sql`${session.expiresAt} > clock_timestamp()`,
+        ),
+      )
+      .pipe(Effect.orDie);
+    return Boolean(found);
+  });
   return Effect.gen(function* () {
     while (true) {
       yield* Effect.sleep(SESSION_RECHECK);
-      const holds = yield* db
-        .transaction((tx) => originatingSessionEligible(tx, sessionId, userId))
-        .pipe(Effect.orDie);
-      if (!holds) return;
+      if (!(yield* holds)) return;
     }
   });
 });
