@@ -141,6 +141,27 @@ describe("worker pool deadlines", () => {
     },
   );
 
+  it("stops a worker left idle, and starts a fresh one for the next job", async () => {
+    vi.useFakeTimers();
+    const { target, workers, submit } = controlledPool();
+    try {
+      const first = submit();
+      workers[0]!.events.emit("message", { id: workers[0]!.posted[0]!.id, value: "done" });
+      await first;
+      vi.advanceTimersByTime(59_999);
+      expect(workers[0]!.terminate).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(workers[0]!.terminate).toHaveBeenCalledTimes(1);
+      const next = submit();
+      expect(workers).toHaveLength(2);
+      workers[1]!.events.emit("message", { id: workers[1]!.posted[0]!.id, value: "again" });
+      await expect(next).resolves.toBe("again");
+    } finally {
+      await target.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("dispatches with only the remaining budget and ignores stale replies", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

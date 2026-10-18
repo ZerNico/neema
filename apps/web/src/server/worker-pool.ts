@@ -14,7 +14,8 @@ export interface PoolWorker {
  * Persistent workers for work that must not run on the server's own thread. A
  * job owns one worker until it settles. A worker that times out, is cancelled
  * mid-job, crashes or exits is replaced rather than reused, since its state is
- * no longer known. Workers start on demand.
+ * no longer known. Workers start on demand and stop after a while idle, giving
+ * back the memory their largest job left them holding.
  */
 export type WorkerFailure =
   | { readonly reason: "closed" }
@@ -54,6 +55,8 @@ export interface WorkerPoolOptions {
   readonly spawn: () => PoolWorker;
   /** The error a job rejects with when the pool, not the worker, ends it. */
   readonly failure: (failure: WorkerFailure) => Error;
+  /** How long a worker may sit without a job before it is stopped. */
+  readonly idleMs?: number;
 }
 
 type Pending = WorkerJob<unknown> & {
@@ -63,7 +66,14 @@ type Pending = WorkerJob<unknown> & {
   timer?: ReturnType<typeof setTimeout>;
   abort?: () => void;
 };
-type Slot = { readonly worker: PoolWorker; job: Pending | null; dead: boolean };
+type Slot = {
+  readonly worker: PoolWorker;
+  job: Pending | null;
+  dead: boolean;
+  idle?: ReturnType<typeof setTimeout>;
+};
+
+const IDLE_MS = 60_000;
 
 const asError = (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause)));
 
@@ -80,9 +90,10 @@ export function createWorkerPool(options: WorkerPoolOptions) {
     if (result.ok) job.resolve(result.value);
     else job.reject(result.error);
   };
-  const retire = (slot: Slot, failure: WorkerFailure) => {
+  const retire = (slot: Slot, failure: WorkerFailure | null) => {
     if (slot.dead) return;
     slot.dead = true;
+    if (slot.idle) clearTimeout(slot.idle);
     slots.splice(slots.indexOf(slot), 1);
     const job = slot.job;
     slot.job = null;
@@ -93,8 +104,17 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       () => retiring.delete(stopped),
       () => retiring.delete(stopped),
     );
-    if (job) settle(job, { ok: false, error: options.failure(failure) });
+    if (job && failure) settle(job, { ok: false, error: options.failure(failure) });
     pump();
+  };
+  /** Stops a worker left without a job once it has waited `idleMs`. */
+  const idleAfterJob = (slot: Slot) => {
+    if (slot.dead || slot.job) return;
+    if (slot.idle) clearTimeout(slot.idle);
+    slot.idle = setTimeout(() => {
+      if (!slot.job) retire(slot, null);
+    }, options.idleMs ?? IDLE_MS);
+    slot.idle.unref?.();
   };
   const spawn = () => {
     const slot: Slot = { worker: options.spawn(), job: null, dead: false };
@@ -118,6 +138,7 @@ export function createWorkerPool(options: WorkerPoolOptions) {
       slot.job = null;
       settle(job, result);
       pump();
+      idleAfterJob(slot);
     });
     slot.worker.on("error", (cause) =>
       retire(slot, {
@@ -164,6 +185,7 @@ export function createWorkerPool(options: WorkerPoolOptions) {
         continue;
       }
       slot.job = job;
+      if (slot.idle) clearTimeout(slot.idle);
       if (job.timer) clearTimeout(job.timer);
       job.timer = setTimeout(
         () => fail(job, { reason: "timeout", timeoutMs: job.timeoutMs }),
