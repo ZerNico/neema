@@ -19,7 +19,11 @@ import {
   assistantFileSource,
   isGeneratedImage,
 } from "../assistant-output.ts";
-import { lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
+import {
+  lockGeneration,
+  lockGenerationOutput,
+  type GenerationIdentity,
+} from "./generation-fence.ts";
 import type { DbTx } from "~/modules/attachments/server/repo.ts";
 
 /**
@@ -118,8 +122,7 @@ export const acceptGeneratedFile = (
       association: {
         before: (tx) =>
           Effect.gen(function* () {
-            const message = yield* lockGeneration(tx, input.fence);
-            output = message.assistantOutput;
+            output = yield* lockGenerationOutput(tx, input.fence);
             previous = output?.files ?? [];
             const image = isGeneratedImage(input.source);
             const sameKind = previous.filter(

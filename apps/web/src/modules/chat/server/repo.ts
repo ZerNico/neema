@@ -1,7 +1,12 @@
 import { liveModelId, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
-import { GenerationFence, lockGeneration, type GenerationIdentity } from "./generation-fence.ts";
+import {
+  GenerationFence,
+  lockGeneration,
+  lockGenerationOutput,
+  type GenerationIdentity,
+} from "./generation-fence.ts";
 import {
   lookupsOf,
   type UiImages,
@@ -3871,8 +3876,7 @@ export class ChatRepo extends Context.Service<
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                const message = yield* lockGeneration(tx, fence);
-                const output = message.assistantOutput;
+                const output = yield* lockGenerationOutput(tx, fence);
                 const next = {
                   ...output,
                   v: 1 as const,

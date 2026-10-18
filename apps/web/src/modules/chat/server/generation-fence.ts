@@ -41,8 +41,9 @@ export const lockGeneration = (tx: DbTx, fence: GenerationIdentity) =>
       .for("update")
       .pipe(Effect.orDie);
     if (!conversation) return yield* Effect.interrupt;
+    // The fence only: this runs on every flush, and the row's JSONB is large.
     const [message] = yield* tx
-      .select()
+      .select({ id: messages.id, role: messages.role })
       .from(messages)
       .where(
         and(
@@ -55,6 +56,18 @@ export const lockGeneration = (tx: DbTx, fence: GenerationIdentity) =>
       .pipe(Effect.orDie);
     if (!message || message.role !== "assistant") return yield* Effect.interrupt;
     return message;
+  });
+
+/** `lockGeneration`, then the answer's stored output, for a write that adds to it. */
+export const lockGenerationOutput = (tx: DbTx, fence: GenerationIdentity) =>
+  Effect.gen(function* () {
+    yield* lockGeneration(tx, fence);
+    const [row] = yield* tx
+      .select({ assistantOutput: messages.assistantOutput })
+      .from(messages)
+      .where(eq(messages.id, fence.messageId))
+      .pipe(Effect.orDie);
+    return row?.assistantOutput ?? null;
   });
 
 /**
