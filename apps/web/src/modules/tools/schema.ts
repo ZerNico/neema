@@ -355,7 +355,13 @@ export const ToolChunkEnvelope = Schema.Union([
   }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["start"]) }),
   Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["progress"]) }),
-  Schema.Struct({ ...researchEnvelopeFields, phase: Schema.Literals(["result"]) }),
+  Schema.Struct({
+    ...researchEnvelopeFields,
+    phase: Schema.Literals(["result"]),
+    // The row's verdict: a run can finish without the evidence that makes it a success.
+    ok: Schema.Boolean,
+    error: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({
     v: Schema.Literals([1]),
     family: Schema.Literals(["ask"]),

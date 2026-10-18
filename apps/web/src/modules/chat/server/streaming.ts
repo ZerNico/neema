@@ -3321,20 +3321,18 @@ export class StreamEngine extends Context.Service<
                             // Only evidence is a usable answer. A run that
                             // produced none has already recorded why.
                             const ok = result.outcome === "evidence";
+                            const failure = ok
+                              ? undefined
+                              : (result.message ?? "Research produced no evidence.");
                             // The run wrote this row's body as it went. Settling
                             // the call must not replace the progress and sources
                             // the panel reads back on reload.
                             yield* repo.settleToolCall({
                               id: rowId,
                               status: ok ? "complete" : "error",
-                              ...(ok
-                                ? {}
-                                : {
-                                    error: {
-                                      code: "ResearchIncomplete",
-                                      message: result.message ?? "Research produced no evidence.",
-                                    },
-                                  }),
+                              ...(failure
+                                ? { error: { code: "ResearchIncomplete", message: failure } }
+                                : {}),
                             });
                             if (run)
                               yield* pushToolChunk({
@@ -3348,6 +3346,8 @@ export class StreamEngine extends Context.Service<
                                 callIndex: callIndex - 1,
                                 textOffset: callTextOffsets.get(part.id) ?? 0,
                                 progress: run.progress,
+                                ok,
+                                ...(failure ? { error: failure } : {}),
                               });
                             return;
                           }
