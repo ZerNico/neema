@@ -668,7 +668,11 @@ describe("manual schedule fires", () => {
           started++;
           if (started === 2) yield* Deferred.succeed(entered, undefined);
           yield* Deferred.await(release);
-          return { conversationId: null, error: "pre-turn check failed" };
+          return {
+            conversationId: null,
+            status: "error" as const,
+            reason: "pre-turn check failed",
+          };
         }),
       ),
     );
@@ -873,7 +877,13 @@ describe("scheduled account eligibility", () => {
         }),
       );
       const published = Effect.runSync(Deferred.make<void>());
-      const fire = vi.fn(() => Effect.succeed({ conversationId: null, error: "unexpected fire" }));
+      const fire = vi.fn(() =>
+        Effect.succeed({
+          conversationId: null,
+          status: "error" as const,
+          reason: "unexpected fire",
+        }),
+      );
       const serviceRuntime = ManagedRuntime.make(
         ScheduleService.layer.pipe(
           Layer.provideMerge(FeaturePolicy.layer),

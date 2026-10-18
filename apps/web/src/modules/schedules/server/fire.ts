@@ -4,10 +4,10 @@ import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
 import { ScheduleSettlement } from "./settle.ts";
 
-export interface FireOutcome {
-  conversationId: string | null;
-  error?: string | undefined;
-}
+/** Started, or why not: skipped for a cause that passes, error for one to fix. */
+export type FireOutcome =
+  | { conversationId: string }
+  | { conversationId: null; status: "error" | "skipped"; reason: string };
 
 /**
  * A chat that is still answering is waited on rather than skipped at once:
@@ -106,40 +106,62 @@ export class ScheduleFire extends Context.Service<
               AccountIneligible: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: "skipped: the account is not permitted to run schedules",
+                  status: "skipped",
+                  reason: "the account is not permitted to run schedules",
                 }),
               ModelNotFound: () =>
-                Effect.succeed<FireOutcome>({ conversationId: null, error: "no available model" }),
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  status: "error",
+                  reason: "no available model",
+                }),
               ToolUnavailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: "web search is unavailable",
+                  status: "error",
+                  reason: "web search is unavailable",
                 }),
               InvalidMessage: (error) =>
-                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  status: "error",
+                  reason: error.reason,
+                }),
               KnowledgeNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: "a selected collection is unavailable",
+                  status: "error",
+                  reason: "a selected collection is unavailable",
                 }),
               KnowledgeRejected: (error) =>
-                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  status: "error",
+                  reason: error.reason,
+                }),
               SkillNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: "a selected skill is unavailable",
+                  status: "error",
+                  reason: "a selected skill is unavailable",
                 }),
               SkillRejected: (error) =>
-                Effect.succeed<FireOutcome>({ conversationId: null, error: error.reason }),
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  status: "error",
+                  reason: error.reason,
+                }),
               ConversationBusy: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: "skipped: the chat was still answering",
+                  status: "skipped",
+                  reason: "the chat was still answering",
                 }),
               GrantUnavailable: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
-                  error: `${error.name} is not connected or needs reconnecting`,
+                  status: "error",
+                  reason: `${error.name} is not connected or needs reconnecting`,
                 }),
             }),
             // The remaining failures are composer-path errors a scheduled turn
@@ -149,7 +171,8 @@ export class ScheduleFire extends Context.Service<
               Effect.logWarning("scheduled turn rejected", { scheduleId: row.id, error }).pipe(
                 Effect.as<FireOutcome>({
                   conversationId: null,
-                  error: "the scheduled message could not be sent",
+                  status: "error",
+                  reason: "the scheduled message could not be sent",
                 }),
               ),
             ),

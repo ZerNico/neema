@@ -109,17 +109,14 @@ export class ScheduleService extends Context.Service<
               Effect.logError("scheduled fire failed", { scheduleId: row.id, error }).pipe(
                 Effect.as({
                   conversationId: null,
-                  error: "the scheduled message could not be sent",
+                  status: "error",
+                  reason: "the scheduled message could not be sent",
                 } satisfies FireOutcome),
               ),
             ),
           );
-          if (!outcome.conversationId) {
-            yield* repo.finishRun(
-              runId,
-              outcome.error?.startsWith("skipped:") ? "skipped" : "error",
-              outcome.error ?? "the scheduled message could not be sent",
-            );
+          if (outcome.conversationId === null) {
+            yield* repo.finishRun(runId, outcome.status, outcome.reason);
             yield* settlement.settle;
           }
           yield* runChanged(row.userId, row.id, runId);
