@@ -27,7 +27,8 @@ vi.mock("../server/functions.ts", () => ({
 }));
 vi.mock("~/modules/agents/server/functions.ts", () => ({ listAgents: async () => [] }));
 // The route uses its actual loader; its component below mounts the real Composer.
-vi.mock("./chat-view.tsx", () => ({ ChatView: () => null, NewChatView: () => null }));
+vi.mock("./chat-view.tsx", () => ({ ChatView: () => null }));
+vi.mock("./new-chat-view.tsx", () => ({ NewChatView: () => null }));
 vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: async () => [] }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
   getWebSearchAvailability: async () => ({ configured: false, enabled: false }),

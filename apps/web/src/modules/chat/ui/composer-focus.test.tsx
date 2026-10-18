@@ -4,7 +4,7 @@ vi.mock("~/modules/skills/server/functions.ts", () => ({
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { NewChatView } from "./chat-view.tsx";
+import { NewChatView } from "./new-chat-view.tsx";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 vi.mock("../server/functions.ts", () => ({

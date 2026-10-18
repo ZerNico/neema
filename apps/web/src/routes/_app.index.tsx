@@ -2,7 +2,7 @@ import { createFileRoute, useLocation, useRouter } from "@tanstack/react-router"
 import { useCallback } from "react";
 import { readChatPrefill } from "~/modules/agents/authoring.ts";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
-import { NewChatView } from "~/modules/chat/ui/chat-view.tsx";
+import { NewChatView } from "~/modules/chat/ui/new-chat-view.tsx";
 import {
   chatModelsQuery,
   researchAvailabilityQuery,

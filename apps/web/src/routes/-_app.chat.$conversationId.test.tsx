@@ -28,8 +28,8 @@ vi.mock("~/modules/chat/ui/chat-view.tsx", () => ({
   ChatView: ({ anchorFirstTurn }: { anchorFirstTurn?: boolean }) => (
     <div data-testid="chat-view" data-anchor-first-turn={String(anchorFirstTurn ?? false)} />
   ),
-  NewChatView: () => <div />,
 }));
+vi.mock("~/modules/chat/ui/new-chat-view.tsx", () => ({ NewChatView: () => <div /> }));
 
 const conversationMock = vi.mocked(getConversationWithMessages);
 const modelsMock = vi.mocked(listChatModels);

@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { getAgentSelection } from "~/modules/agents/server/functions.ts";
 import { describe, expect, it, vi } from "vitest";
-import { NewChatView } from "./chat-view.tsx";
+import { NewChatView } from "./new-chat-view.tsx";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { composerText } from "./composer-test-utils.ts";
 
