@@ -186,7 +186,11 @@ false`), so a page body is written against data already there. This includes loc
   written. `reportUnexpectedFailures` (`src/server/unexpected-failure.ts`, registered for every function in
   `src/start.ts`) lets deliberate `Response`s through and turns anything else into a logged failure under
   a short reference. The client sees `src/server-error.ts`'s fixed body and offers "Copy details" with that
-  reference, so a report can be matched to its log line. Modules therefore map only their own rejections.
+  reference, so a report can be matched to its log line. Expected failures become refusals in one table,
+  `src/server/refusal.ts`, and every function runs through `runServerFn`, whose error channel admits only
+  tags that table knows: a service error left unmapped fails to compile instead of reaching a person as
+  that reference. A caller may reword a tag where its page needs it. Otherwise a miss answers 404 "Not found",
+  which `readServerError` treats as saying nothing, so the page names what is missing.
 - Access is managed through `sharing/ui/access-dialog.tsx`, not link copying. `SharingService.recipients`
   is a deliberate account directory readable by any signed-in user — fits a single-tenant self-hosted
   deployment and exposes nothing else about an account. Every grant is the same permission, so rows carry
